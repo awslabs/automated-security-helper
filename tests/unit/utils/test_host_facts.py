@@ -2081,6 +2081,119 @@ def test_the_version_agrees_with_importlib_metadata_on_every_shape(tmp_path, tex
     assert got == expected
 
 
+class ParserOnly:
+    """A distribution whose METADATA text reads as missing for ``read_text``.
+
+    A reader that looks for a header line in that text finds none and asks the metadata
+    parser, which reads the file itself: the answer the header-line read must equal.
+    """
+
+    def __init__(self, inner: PathDistribution) -> None:
+        self._inner = inner
+
+    def read_text(self, filename: str) -> Optional[str]:
+        return None if filename == "METADATA" else self._inner.read_text(filename)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+#: (id, METADATA text): the shapes of a header block that carries ASH's Requires-Python.
+REQUIRES_SHAPES = [
+    ("plain", "Name: x\nVersion: 3.8.0\nRequires-Python: <3.15,>=3.11\n\nbody\n"),
+    ("a-single-bound", "Requires-Python: >=3.11\n"),
+    ("outside-the-range", "Requires-Python: >=3.13\n"),
+    ("spaces-around-the-pieces", "Requires-Python: >=3.11 , <3.15\n"),
+    ("trailing-spaces", "Requires-Python: >=3.11,<3.15   \n"),
+    ("a-compatible-release", "Requires-Python: ~=3.11\n"),
+    ("not-a-specifier", "Requires-Python: not a specifier\n"),
+    ("no-header", "Name: x\nVersion: 3.8.0\n"),
+    ("an-empty-value", "Requires-Python: \n"),
+    ("blanks-only", "Requires-Python:   \t \n"),
+    ("a-folded-value", "Requires-Python:\n >=3.11,<3.15\n"),
+    ("a-continued-value", "Requires-Python: >=3.11,\n <3.15\n"),
+    ("a-lower-case-name", "requires-python: >=3.11\n"),
+    ("a-repeated-header", "Requires-Python: >=3.11\nRequires-Python: <3.0\n"),
+    ("after-the-blank-line", "Name: x\n\nRequires-Python: <3.0\n"),
+    ("windows-line-ends", "Requires-Python: >=3.11\r\nName: x\r\n"),
+    ("a-line-that-is-no-header", "Name: x\nnot a header\nRequires-Python: <3.0\n"),
+    ("a-space-before-the-colon", "Requires-Python : >=3.11\n"),
+    ("a-byte-order-mark", "\N{BYTE ORDER MARK}Requires-Python: >=3.11\n"),
+    ("an-empty-file", ""),
+]
+
+
+def requires_python_of(distribution: Any) -> Any:
+    """What the reader makes of ASH's Requires-Python from ``distribution``, or how it fails."""
+    sources = planted(distribution=lambda name: distribution)
+    try:
+        return ("reads", HostFactsReader(sources)._requires_python("3.12.15"))
+    except host_facts._SourceFailure as failure:
+        return ("raises", failure.failure.kind)
+
+
+@pytest.mark.parametrize(
+    "text", [pytest.param(text, id=name) for name, text in REQUIRES_SHAPES]
+)
+def test_the_requires_python_agrees_with_the_metadata_parser_on_every_shape(
+    tmp_path, text
+):
+    info = tmp_path / "x-1.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_bytes(text.encode("utf-8"))
+    distribution = PathDistribution(info)
+    assert requires_python_of(distribution) == requires_python_of(
+        ParserOnly(distribution)
+    )
+
+
+def test_the_requires_python_shapes_are_not_all_one_answer(tmp_path):
+    # The control for the table above: its shapes read both ways and fail, so an
+    # agreement between two readers that always said the same thing would show here.
+    outcomes = set()
+    for index, (_name, text) in enumerate(REQUIRES_SHAPES):
+        info = tmp_path / f"x{index}-1.0.dist-info"
+        info.mkdir()
+        (info / "METADATA").write_bytes(text.encode("utf-8"))
+        outcomes.add(repr(requires_python_of(PathDistribution(info))))
+    assert any("'yes'" in outcome for outcome in outcomes)
+    assert any("'no'" in outcome for outcome in outcomes)
+    assert any("raises" in outcome for outcome in outcomes)
+    assert any("unknown" in outcome for outcome in outcomes)
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "expected"),
+    [
+        ("Name: x\nVersion: 1.2\n", "Version", (True, "1.2")),
+        # Only the blanks after the colon are dropped, and the name's case is free.
+        ("Name: x\nversion:  1.2 \t\n", "VERSION", (True, "1.2 \t")),
+        ("Version:1.2", "Version", (True, "1.2")),
+        ("Name: x\n", "Version", (True, None)),
+        ("Name: x\n\nVersion: 1.2\n", "Version", (True, None)),
+        ("A: 1\n b\nVersion: 1.2\n\nbody", "Version", (True, "1.2")),
+        # Anything else is for the parser to read.
+        (None, "Version", (False, None)),
+        ("", "Version", (False, None)),
+        ("\n\nVersion: 1.2\n", "Version", (False, None)),
+        ("\nVersion: 1.2\n", "Version", (False, None)),
+        (" Version: 1.2\n", "Version", (False, None)),
+        ("Version: 1.2\r\n", "Version", (False, None)),
+        ("Version: 1.2\n more\n", "Version", (False, None)),
+        ("Version:\n 1.2\n", "Version", (False, None)),
+        ("Name: x\nnot a header\n", "Version", (False, None)),
+        ("Name x\nVersion: 1.2\n", "Version", (False, None)),
+        (": 1.2\nVersion: 1.2\n", "Version", (False, None)),
+        ("Version : 1.2\n", "Version", (False, None)),
+        ("Vers\N{LATIN SMALL LETTER E WITH ACUTE}on: 1.2\n", "Version", (False, None)),
+    ],
+)
+def test_a_plain_header_block_gives_the_first_header_and_any_other_text_the_parser(
+    text, name, expected
+):
+    assert host_facts._plain_header(text, name) == expected
+
+
 # --------------------------------------------------------------------------------------
 # install_channel
 # --------------------------------------------------------------------------------------

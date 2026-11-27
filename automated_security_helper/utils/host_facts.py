@@ -46,6 +46,11 @@ any other shape (a pre-release, an epoch, a ``v`` prefix) and a ``Requires-Pytho
 is not made of plain bounds go to ``packaging``, whose answer and whose errors are the
 reader's own.
 
+A distribution's version and ASH's ``Requires-Python`` are the header lines of its
+``METADATA`` text, read as text: that takes the metadata parser's milliseconds out of
+the first reading. A text that is not made of plain headers goes to the parser, and the
+runtimes polars would try only after the one that loads are never looked up.
+
 This module is the only reader of ``/proc/cpuinfo``, the macOS translation sysctl and
 the two Windows calls named in ``tests/unit/utils/test_host_facts_single_reader.py``,
 which holds the rest of the package to that. It imports nothing else from ASH and
@@ -790,6 +795,29 @@ def _same_version(first: str, second: str) -> bool:
         return False
 
 
+def _runtime_order(
+    polars_version: Optional[str],
+    *,
+    force: Optional[str],
+    prefer: Optional[str],
+    injected: bool,
+) -> Optional[tuple[str, ...]]:
+    """The selectors polars tries, in its order, or None when that cannot be known.
+
+    polars tries the compatibility runtime, then the 64 one, then the 32 one;
+    ``POLARS_PREFER_PKG`` puts one first, and ``POLARS_FORCE_PKG`` tries that one alone,
+    whether or not it is set to anything. None is polars missing or out of range,
+    something that has put its own core in place, or a variable that names no runtime.
+    """
+    if injected or polars_version is None or not _polars_in_range(polars_version):
+        return None
+    if force is not None:
+        return (force,) if force in RUNTIME_CHOICES else None
+    if prefer is None:
+        return DEFAULT_PREFERENCE
+    return (prefer, *DEFAULT_PREFERENCE) if prefer in RUNTIME_CHOICES else None
+
+
 def choose_runtime(
     polars_version: Optional[str],
     runtimes: Mapping[str, str],
@@ -801,25 +829,16 @@ def choose_runtime(
     """``(token, selector)`` for the runtime polars will load, as polars chooses it.
 
     ``runtimes`` maps each installed selector (``compat``, ``64``, ``32``) to the
-    version of its distribution. polars tries the compatibility runtime, then the 64
-    one, then the 32 one; ``POLARS_PREFER_PKG`` puts one first, and ``POLARS_FORCE_PKG``
-    tries that one alone, whether or not it is set to anything. A runtime of another
-    version than polars is skipped. The token is ``absent`` when none can load, and
-    ``unknown`` when polars is missing or out of range, a variable names no runtime, or
-    something has put its own core in place.
+    version of its distribution. polars tries them in the order of ``_runtime_order``,
+    and a runtime of another version than polars is skipped. The token is ``absent``
+    when none can load, and ``unknown`` when polars is missing or out of range, a
+    variable names no runtime, or something has put its own core in place.
     """
-    if injected or polars_version is None or not _polars_in_range(polars_version):
+    order = _runtime_order(
+        polars_version, force=force, prefer=prefer, injected=injected
+    )
+    if order is None or polars_version is None:
         return (UNKNOWN, None)
-    if force is not None:
-        if force not in RUNTIME_CHOICES:
-            return (UNKNOWN, None)
-        order: tuple[str, ...] = (force,)
-    else:
-        order = DEFAULT_PREFERENCE
-        if prefer is not None:
-            if prefer not in RUNTIME_CHOICES:
-                return (UNKNOWN, None)
-            order = (prefer, *DEFAULT_PREFERENCE)
     for selector in order:
         version = runtimes.get(selector)
         if version is not None and _same_version(version, polars_version):
@@ -966,6 +985,42 @@ def _is_editable(direct_url: Optional[str]) -> bool:
     return isinstance(info, dict) and info.get("editable") is True
 
 
+def _plain_header(text: Optional[str], name: str) -> tuple[bool, Optional[str]]:
+    """``(plain, value)``: the first header ``name`` of a plain ``METADATA`` text.
+
+    ``email`` parses a distribution's metadata, and the first parse costs milliseconds.
+    A text that is only ``Name: value`` lines and indented continuation lines is read
+    here instead, and gives what ``email`` gives: the text after the colon with its
+    leading spaces and tabs dropped and nothing else, from the first header of that
+    name in whatever case it is spelled. ``value`` is None when the block has no such
+    header. ``plain`` is False for every other text, so the caller asks ``email`` and
+    its answer stands: no text, a carriage return, a first line that continues
+    nothing, a line that is neither a header nor a continuation (``email`` ends the
+    headers there), a header name of anything but printable ASCII, and a wanted header
+    whose value goes on over more lines.
+    """
+    if not text or "\r" in text:
+        return (False, None)
+    lines = text.split("\n\n", 1)[0].split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    wanted = name.lower()
+    for index, line in enumerate(lines):
+        if line.startswith((" ", "\t")):
+            if index == 0:
+                return (False, None)
+            continue
+        key, colon, value = line.partition(":")
+        if not colon or not key or not all("!" <= char <= "~" for char in key):
+            return (False, None)
+        if key.lower() == wanted:
+            following = lines[index + 1 : index + 2]
+            if following and following[0].startswith((" ", "\t")):
+                return (False, None)
+            return (True, value.lstrip(" \t"))
+    return (True, None) if lines else (False, None)
+
+
 _PT_INTERP = 3
 #: The file names of the program loaders glibc ships (``ld-linux-x86-64.so.2``,
 #: ``ld64.so.2``, ``ld.so.1``).
@@ -1092,8 +1147,20 @@ class HostFactsReader:
 
     def _version(self, name: str, distribution: Distribution) -> str:
         """The installed version of a distribution, read once per reader."""
-        version: str = self._remember(("version", name), lambda: distribution.version)
+        version: str = self._remember(
+            ("version", name), lambda: self._read_version(distribution)
+        )
         return version
+
+    @staticmethod
+    def _read_version(distribution: Distribution) -> str:
+        # The Version: line of the METADATA text, which is where ``distribution.version``
+        # gets it by parsing the whole text. Any text that is not a plain header block
+        # goes to that parse, and so do its errors.
+        by_line, value = _plain_header(distribution.read_text("METADATA"), "Version")
+        if by_line and value is not None:
+            return value
+        return distribution.version
 
     # ---- the platform ------------------------------------------------------------
 
@@ -1223,16 +1290,28 @@ class HostFactsReader:
         force = self._sources.getenv(_FORCE_VARIABLE)
         prefer = None if force is not None else self._sources.getenv(_PREFER_VARIABLE)
         polars = self._src("distribution", "polars")
+        polars_version = (
+            None if polars is None or injected else self._version("polars", polars)
+        )
         installed: dict[str, Distribution] = {}
         versions: dict[str, str] = {}
-        if polars is not None and not injected:
-            for selector, (_token, distribution_name) in RUNTIME_CHOICES.items():
+        order = _runtime_order(
+            polars_version, force=force, prefer=prefer, injected=injected
+        )
+        # Only the runtimes polars tries before the one it loads are looked up: the
+        # first whose version is polars' is that one, and nothing after it matters.
+        if order is not None and polars_version is not None:
+            for selector in order:
+                distribution_name = RUNTIME_CHOICES[selector][1]
                 distribution = self._src("distribution", distribution_name)
-                if distribution is not None:
-                    installed[selector] = distribution
-                    versions[selector] = self._version(distribution_name, distribution)
+                if distribution is None:
+                    continue
+                installed[selector] = distribution
+                versions[selector] = self._version(distribution_name, distribution)
+                if _same_version(versions[selector], polars_version):
+                    break
         token, chosen = choose_runtime(
-            None if polars is None else self._version("polars", polars),
+            polars_version,
             versions,
             force=force,
             prefer=prefer,
@@ -1334,10 +1413,15 @@ class HostFactsReader:
         ash = self._src("distribution", _ASH_DISTRIBUTION)
         if ash is None:
             return (UNKNOWN, UNKNOWN)
-        metadata = ash.metadata
-        # A missing key is a warned implicit None on some Pythons and a KeyError on
-        # others, so ask whether it is there first.
-        header = metadata["Requires-Python"] if "Requires-Python" in metadata else None
+        by_line, header = _plain_header(ash.read_text("METADATA"), "Requires-Python")
+        if not by_line:
+            # Any text that is not a plain header block is parsed, as it always was.
+            metadata = ash.metadata
+            # A missing key is a warned implicit None on some Pythons and a KeyError on
+            # others, so ask whether it is there first.
+            header = (
+                metadata["Requires-Python"] if "Requires-Python" in metadata else None
+            )
         if not header or not header.strip():
             return (UNKNOWN, UNKNOWN)
         plain = _plain_requires(header, version_text)
