@@ -112,10 +112,11 @@ new ASHScanStep('SecurityScan', {
 `shardCount: 4` produces five actions: four shards that run in parallel, and one
 merge action that runs after them.
 
-Sharding needs `ash scan --shard-index <i> --shard-count <n>` and `ash merge`,
-which no ASH release up to v3.7.1 has. Set `version` to a tag or commit whose ASH
-has both (or, with `PREINSTALLED`, use an image built from one); otherwise every
-shard action fails and the merge never runs.
+Sharding needs the `--shard-index` and `--shard-count` options of `ash scan` and
+`ash results merge` (`ash merge` before ASH 3.9), which no ASH release up to v3.7.1
+has. Set `version` to a tag or commit whose ASH has both (or, with `PREINSTALLED`,
+use an image built from one); otherwise every shard action fails and the merge
+never runs.
 
 A `shardCount` above 5 fails at synthesis. The merge action takes one input
 artifact per shard, and CodePipeline allows a CodeBuild action at most five input
@@ -151,8 +152,9 @@ ignore its exit code, so an ASH exit for an incomplete scanner (which ASH checks
 by default), an invalid configuration or an unknown option fails that shard, and
 the merge action does not run.
 
-Because the merge action's exit code *is* the pipeline's verdict, `ash merge`
-must exit non-zero when the merged findings breach the configured threshold.
+Because the merge action's exit code *is* the pipeline's verdict,
+`ash results merge` (`ash merge` before ASH 3.9) must exit non-zero when the
+merged findings breach the configured threshold.
 
 Each shard also writes to its own output directory (`<outputDirectory>/shard-N`).
 ASH clears its output directory before scanning, so shards sharing a directory
@@ -232,16 +234,16 @@ look like it was set while having no effect on anything.
 
 ### Triaging a failed merge
 
-`ash merge` refuses results whose `metadata.shard` provenance is missing, which is
-how it distinguishes one shard of several from a whole unsharded scan. Provenance
-is recorded only when a scan runs with both `--shard-index` and `--shard-count`,
-and it is skipped when the scan registered no scanners at all. So a merge action
+`ash results merge` (`ash merge` before ASH 3.9) refuses results whose
+`metadata.shard` provenance is missing, which is how it distinguishes one shard of
+several from a whole unsharded scan. Provenance is recorded only when a scan runs
+with both `--shard-index` and `--shard-count`, and it is skipped when the scan registered no scanners at all. So a merge action
 failing with "no shard provenance found" usually means the fault is upstream in a
 shard, not in the merge: either a shard ran `ash scan` without both flags, or a
 shard's container registered zero scanners, for instance because a scanner plugin
 failed to load. The merge action is where it surfaces, not where it broke.
 
-For `ash merge`, a shard count higher than the number of enabled scanners is
+For the merge, a shard count higher than the number of enabled scanners is
 wasteful rather than broken. The surplus shards are assigned no scanners, still
 record provenance and still merge; each costs a CodeBuild start. That was
 measured with `ash merge` at 50 shards over a 5-scanner tree (45 empty

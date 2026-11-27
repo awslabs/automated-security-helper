@@ -49,8 +49,9 @@ variable "shard_count" {
     Contract name: ShardCount.
 
     How many parallel shards the scan is split across. Each shard runs
-    `ash scan --shard-index <i> --shard-count <n>` with a zero-based index, and
-    every index from 0 to shard_count - 1 runs exactly once.
+    `ash scan fs . --shard-index <i> --shard-count <n>` (`ash scan --source-dir .`
+    before ASH 3.9) with a zero-based index, and every index from 0 to
+    shard_count - 1 runs exactly once.
 
     All shards occupy one pipeline stage. CodePipeline permits up to 100 parallel
     actions per stage and that quota is not adjustable, so 100 is the ceiling
@@ -69,7 +70,8 @@ variable "shard_count" {
 variable "min_severity" {
   description = <<-EOT
     Lowest severity that counts as actionable for the pipeline's verdict, passed
-    straight through to `ash merge --min-severity`.
+    straight through to `--min-severity` of `ash results merge` (`ash merge` before
+    ASH 3.9).
 
     This is a FLOOR on what counts as actionable, so a lower value is a stricter
     gate. ASH compares `rank(finding) >= rank(min_severity)`, which makes the
@@ -87,11 +89,11 @@ variable "min_severity" {
     toward passing a build that had findings. Raise it deliberately if that is
     what you want.
 
-    The comparison is made by ASH, never here. `ash merge` routes its exit code
-    through the same _compute_exit_code that `ash scan` uses, so a merged verdict
-    and a scanned verdict cannot disagree about the same findings. Re-deriving the
-    threshold in this module would be a third copy of a severity table that has
-    already drifted once in this codebase.
+    The comparison is made by ASH, never here. `ash results merge` (`ash merge`
+    before ASH 3.9) routes its exit code through the same _compute_exit_code that
+    `ash scan` uses, so a merged verdict and a scanned verdict cannot disagree about
+    the same findings. Re-deriving the threshold in this module would be a third
+    copy of a severity table that has already drifted once in this codebase.
   EOT
   type        = string
   default     = "low"
@@ -124,8 +126,8 @@ variable "min_severity" {
 
 variable "fail_on_findings" {
   description = <<-EOT
-    Pass `--fail-on-findings` to `ash merge`, so actionable findings at or above
-    min_severity fail the pipeline.
+    Pass `--fail-on-findings` to `ash results merge` (`ash merge` before ASH 3.9),
+    so actionable findings at or above min_severity fail the pipeline.
 
     Defaults to true and is passed explicitly rather than left to ASH's own
     default, which falls back to the scan configuration. A base config carrying

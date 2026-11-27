@@ -1891,6 +1891,15 @@ _ASH_SITES = {
         3,
         _WORKSPACE_POINTER,
     ),
+    # The Python CLI checks and extracts a source archive, and this script runs no
+    # Python, so it refuses `scan fs --archive` and names the command that does.
+    "scan-fs-archive": (
+        ["scan", "fs", "--archive", "src.zip"],
+        {},
+        {},
+        3,
+        "Run ash scan fs --archive <file> instead, with --mode container",
+    ),
     # Accepted, for contrast: the guard runner is called, so the exit is its 99.
     "sandbox-off": (["--sandbox", "off"], {}, {}, 99, None),
 }
