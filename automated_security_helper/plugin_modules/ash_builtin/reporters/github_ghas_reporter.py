@@ -77,7 +77,7 @@ from pydantic import Field
 from typing_extensions import Annotated
 
 from automated_security_helper.base.options import ReporterOptionsBase
-from automated_security_helper.core.report_identity import GHAS_DRIVER_NAME
+from automated_security_helper.base.report_identity import GHAS_DRIVER_NAME
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,

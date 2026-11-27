@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
-from automated_security_helper.core.report_identity import SARIF_DRIVER_NAME
+from automated_security_helper.base.report_identity import SARIF_DRIVER_NAME
 from automated_security_helper.utils.secret_masking import (
     mask_secret_in_text,
     _mask_secret_value,

@@ -52,7 +52,7 @@ from typing import Any, Literal, TYPE_CHECKING
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
-from automated_security_helper.core.report_identity import OCSF_PRODUCT_NAME
+from automated_security_helper.base.report_identity import OCSF_PRODUCT_NAME
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,

@@ -22,7 +22,7 @@ from pydantic import (
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
-from automated_security_helper.core.report_identity import (
+from automated_security_helper.base.report_identity import (
     AGGREGATED_REPORT_NAME,
     AGGREGATED_REPORT_POST_PROCESSOR_DESCRIPTION,
     SARIF_DRIVER_NAME,

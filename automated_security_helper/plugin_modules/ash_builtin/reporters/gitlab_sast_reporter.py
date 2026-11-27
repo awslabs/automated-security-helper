@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
-from automated_security_helper.core.report_identity import (
+from automated_security_helper.base.report_identity import (
     GITLAB_ANALYZER_NAME,
     GITLAB_SCANNER_NAME,
 )

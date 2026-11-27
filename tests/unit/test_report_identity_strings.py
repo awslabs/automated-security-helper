@@ -1,12 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Each report identity string is defined once and every site reads it.
+"""Each report identity string is defined once and the nine modules listed here read it.
 
 Readers decide whether a finding is ASH's own by comparing a SARIF driver name
 with the shared constant, so a literal copy that drifts misattributes findings
 without raising an error. These tests pin the values the reports carry today and
-fail when a writer or comparison goes back to a literal.
+fail when one of the nine listed modules goes back to a literal. They read only
+those nine modules; a module not in ``SITES`` is not checked.
 """
 
 import ast
@@ -16,7 +17,9 @@ from typing import Dict, List
 import pytest
 
 import automated_security_helper
-from automated_security_helper.core import report_identity
+from automated_security_helper.base import report_identity
+
+pytestmark = pytest.mark.unit
 
 PACKAGE_ROOT = Path(automated_security_helper.__file__).resolve().parent
 
@@ -84,7 +87,7 @@ def _imported_names(source: str) -> set:
     for node in ast.walk(ast.parse(source)):
         if (
             isinstance(node, ast.ImportFrom)
-            and node.module == "automated_security_helper.core.report_identity"
+            and node.module == "automated_security_helper.base.report_identity"
         ):
             names.update(alias.name for alias in node.names)
     return names
@@ -134,7 +137,7 @@ def test_literal_copy_detector_flags_a_planted_copy_and_passes_a_clean_module():
     values = list(EXPECTED_VALUES.values())
     planted = 'driver = {"name": "AWS Labs - Automated Security Helper"}\n'
     clean = (
-        "from automated_security_helper.core.report_identity import SARIF_DRIVER_NAME\n"
+        "from automated_security_helper.base.report_identity import SARIF_DRIVER_NAME\n"
         'driver = {"name": SARIF_DRIVER_NAME}\n'
     )
     assert _literal_copies(planted, values) == ["AWS Labs - Automated Security Helper"]

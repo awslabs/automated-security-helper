@@ -59,7 +59,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
-from automated_security_helper.core.report_identity import ASFF_PRODUCT_NAME
+from automated_security_helper.base.report_identity import ASFF_PRODUCT_NAME
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import (
     CORRELATION_ID_PROPERTY,

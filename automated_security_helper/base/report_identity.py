@@ -3,15 +3,16 @@
 
 """The strings ASH uses to identify itself inside the reports it writes.
 
-Each value is defined once here and imported by every writer and every
-comparison. Several readers decide whether a finding is ASH's own by comparing
+Each value is defined once here and imported by the writers and comparisons that
+need it. Several readers decide whether a finding is ASH's own by comparing
 a SARIF driver name with ``SARIF_DRIVER_NAME``, so a copy of the literal that
 drifts from this module changes which findings are attributed to ASH without
 raising an error. ``tests/unit/test_report_identity_strings.py`` fails when a
-literal copy returns to a module that should import it.
+literal copy returns to one of the nine modules it lists.
 
-This module imports nothing, so models, utils, reporters and workspace code can
-all import it without creating an import cycle. The values are the exact strings
+This module sits in the contract layer (``base``) and imports nothing, so models,
+utils, reporters and workspace code can all import it without creating an import
+cycle or an edge the layer order forbids. The values are the exact strings
 earlier releases wrote; changing one changes report output.
 """
 
@@ -34,7 +35,7 @@ GITLAB_SCANNER_NAME = "Automated Security Helper"
 #: OCSF product name (``metadata.product.name`` and the matching scan record).
 OCSF_PRODUCT_NAME = "Automated Security Helper"
 
-#: Default ``name`` of the aggregated report model.
+#: Default ``description`` of the aggregated report model.
 AGGREGATED_REPORT_NAME = "Automated Security Helper - Aggregated Report"
 
 #: Description of the aggregated report's SARIF post-processor.
