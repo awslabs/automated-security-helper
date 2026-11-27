@@ -122,7 +122,8 @@ class TestWhatLooksLikeALocalPath:
 
 
 def test_the_reporter_uses_the_same_limit_and_check():
-    """The first-sentence parse of #1195 reads the limit and path check kept here."""
+    """The first-sentence parse the reports used before reasons were recorded reads
+    the limit and path check kept here."""
     from automated_security_helper.plugin_modules.ash_builtin.reporters import (
         report_content_emitter,
     )
