@@ -2199,21 +2199,35 @@ else
       # The container's stdin is kept open (-i) only for a run that reads it. The
       # subcommands that read stdin are ASH_READS_STDIN: mcp, whose default stdio
       # transport is driven by the client over stdin; inspect, the Textual app, which
-      # reads keys; and config, whose init and fix steps prompt for answers. Any
-      # subcommand reads stdin when given `--cli-json-input -`, which takes its
-      # parameters as a JSON document from stdin. Without -i none of them got any
-      # input. No other run reads stdin, and -i on one makes the container consume
-      # the caller's input: `while read d; do ./ash --source-dir "$d"; done
-      # < dirs.txt` ended after one directory, a job script fed to bash on stdin lost
-      # the commands after ./ash, and `./ash scan &` from an interactive shell had the
-      # runner read the terminal and stopped on SIGTTIN. SUBCOMMAND is the first of
-      # ash's words that names a subcommand (detect_subcommand, above). The list
-      # must name the subcommands that read stdin;
+      # reads keys; and config, whose init and fix steps prompt for answers. A command
+      # under a group is named group:command, the command being the word right after
+      # the group, as the CLI reads it (ASH_OPTION_GROUPS): results:inspect is the
+      # same Textual app as inspect, and the other commands of results (report, merge,
+      # diff and trend) read nothing, as `report` and `merge` did not before they
+      # moved under it. Any subcommand reads stdin when given `--cli-json-input -`,
+      # which takes its parameters as a JSON document from stdin. Without -i none of
+      # them got any input. No other run reads stdin, and -i on one makes the
+      # container consume the caller's input: `while read d; do ./ash --source-dir
+      # "$d"; done < dirs.txt` ended after one directory, a job script fed to bash on
+      # stdin lost the commands after ./ash, and `./ash scan &` from an interactive
+      # shell had the runner read the terminal and stopped on SIGTTIN. The list must
+      # name the subcommands, and the commands under a group, that read stdin;
       # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks it against the
       # CLI's own readers.
-      ASH_READS_STDIN="config inspect mcp results"
+      #
+      # SUBCOMMAND is the first of ash's words that names a subcommand
+      # (detect_subcommand). It is read again here rather than reused: the config
+      # handling above may have replaced the words of a --config value, which moves a
+      # subcommand that stood after them, and the command under a group here, like
+      # the splices below, needs the index in the words the scan is given.
+      detect_subcommand
+      ASH_READS_STDIN="config inspect mcp results:inspect"
+      STDIN_COMMAND="${SUBCOMMAND}"
+      if [[ -n "${SUBCOMMAND}" && " ${ASH_OPTION_GROUPS} " == *" ${SUBCOMMAND} "* ]]; then
+        STDIN_COMMAND="${SUBCOMMAND}:${ASH_ARG_WORDS[SUBCOMMAND_AT + 1]:-}"
+      fi
       KEEP_STDIN="NO"
-      if [[ -n "${SUBCOMMAND}" && " ${ASH_READS_STDIN} " == *" ${SUBCOMMAND} "* ]]; then
+      if [[ -n "${STDIN_COMMAND}" && " ${ASH_READS_STDIN} " == *" ${STDIN_COMMAND} "* ]]; then
         KEEP_STDIN="YES"
       fi
       for ((STDIN_WORD_AT = 0; STDIN_WORD_AT < ${#ASH_ARG_WORDS[@]}; STDIN_WORD_AT++)); do
@@ -2258,10 +2272,6 @@ else
       # BEGIN generated: sh-takes-sandbox (scripts/generate_wrapper_tables.py)
       ASH_TAKES_SANDBOX="scan"
       # END generated: sh-takes-sandbox
-      # Run again rather than reused: the config handling above may have replaced
-      # the words of a --config value, which moves a subcommand that stood after
-      # them, and the splice below needs the index in the words the scan is given.
-      detect_subcommand
       # A command under a group (`results report`, `container build`) takes what its
       # table entry takes (ASH_GROUP_LEAF_TAKERS): the command is the word right after
       # the group, as the CLI reads it, and one the table does not name takes nothing.
