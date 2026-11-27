@@ -1418,6 +1418,9 @@ def test_plain_specifiers_read_as_packaging_reads_them(header, python, expected)
         (">=3.11,>=3.11", "3.12.15"),
         ("<3.15,<3.15.0", "3.12.15"),
         (">=3.11,>=3.011", "3.12.15"),
+        # A piece that is not plain after one that already fails: no early answer.
+        ("<3.11,~=3.12", "3.12.15"),
+        (">=3.13,< 3.15", "3.12.15"),
         ("", "3.12.15"),
         (" , ", "3.12.15"),
         ("=>3.11", "3.12.15"),
@@ -1488,6 +1491,10 @@ REQUIRES_HEADERS = [
     ">=3.11,<3.15.dev1",
     ">=3.11.post1",
     ">=3.11.0a1",
+    # Not plain, after a plain piece that already fails for most of the versions.
+    "<3.11,~=3.12",
+    "<3.11,==3.12.*",
+    ">=3.13,< 3.15",
     # Not a specifier at all.
     "=>3.11",
     ">==3.11",
@@ -2169,6 +2176,24 @@ def test_what_a_request_can_change_is_read_on_every_call(tmp_path):
     assert counts[("getenv", "ASH_IN_CONTAINER")] == 2
     # The installed distributions were looked up once, for both readings.
     assert counts[("distribution", "polars-runtime-compat")] == 1
+
+
+def test_the_flags_file_judged_follows_the_runtime_a_request_selects(tmp_path):
+    site = polars_site(
+        tmp_path, runtimes={"compat": COMPAT_FLAGS_TEXT, "32": DEFAULT_FLAGS_TEXT}
+    )
+    environment: dict[str, str] = {}
+    sources = dataclasses.replace(
+        linux_host(tmp_path, site=site), getenv=lambda name: environment.get(name)
+    )
+    reader = HostFactsReader(sources)
+    chosen = reader.read(express_supported=lambda: True)
+    environment["POLARS_FORCE_PKG"] = "32"
+    forced = reader.read(express_supported=lambda: True)
+    # Each runtime is judged against its own file: a file kept from the first reading
+    # would not equal the declared set of the second runtime and read as unknown.
+    assert (chosen.polars_runtime, chosen.cpu_level) == ("compat", "full")
+    assert (forced.polars_runtime, forced.cpu_level) == ("runtime-32", "full")
 
 
 def test_a_failed_read_is_remembered_not_retried(tmp_path):
