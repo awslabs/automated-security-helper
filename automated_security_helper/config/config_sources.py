@@ -4118,34 +4118,66 @@ def _patch_step(
     fold's rules before it applies (_through_the_retired_fold): its value
     loses what the fold drops, and an operation the fold lays nothing of is
     applied to neither view and reported as None, which the reference replay
-    skips. The loader's walk passes ``folds`` and warns of a drop; the
-    restrict-only walk over a delivered file holds no record and stays
-    silent, so the drop is warned of once, by the load.
+    skips. With ``unconfined`` given, the rules are judged where the files as
+    written land the pointer. An ``add`` that lands on a declared option
+    there only through a ``-``/``_`` twin the confine hook left out of
+    ``document`` is taken by both views at that landing, as an operation
+    that does not fit ``document`` is, and reported as a ``_Rewritten``
+    there. Judged where the document lands it, it was dropped as an
+    undeclared option, and a test of the option then refused a file that
+    loads without the trust rules. The loader's walk passes ``folds`` and
+    warns of a drop; the restrict-only walk over a delivered file holds no
+    record and stays silent, so the drop is warned of once, by the load.
     """
-    normalized = _through_the_retired_fold(
-        op,
-        dict(op, path=_normalize_pointer(document, op["path"], owned, folds)),
-        folds,
-        log=folds is not None,
-    )
-    if normalized is None:
-        return document, unconfined, None
-    taken = (
-        _AS_WRITTEN
-        if owned is None or op["op"] == "test"
-        else (op["op"], normalized["path"])
-    )
+    landed = dict(op, path=_normalize_pointer(document, op["path"], owned, folds))
     if unconfined is None:
+        normalized = _through_the_retired_fold(op, landed, folds, log=folds is not None)
+        if normalized is None:
+            return document, None, None
+        taken = (
+            _AS_WRITTEN
+            if owned is None or op["op"] == "test"
+            else (op["op"], normalized["path"])
+        )
         return (
             jsonpatch.apply_patch(document, [normalized], in_place=False),
             None,
             taken,
         )
+    # The files as written decide what the fold lays of the operation, and
+    # its drops are warned of and recorded where they land the pointer, once.
+    # The document's own landing can miss a -/_ twin the confine hook left
+    # out of it.
+    normalized = _through_the_retired_fold(op, landed)
     whole = _through_the_retired_fold(
-        op, dict(op, path=_normalize_pointer(unconfined, op["path"], owned, folds))
+        op,
+        dict(op, path=_normalize_pointer(unconfined, op["path"], owned, folds)),
+        folds,
+        log=folds is not None,
     )
     if whole is None:
         return document, unconfined, None
+    if normalized is None:
+        # The files as written take what the document's landing drops: an add
+        # that lands on a declared option only through a twin the confine
+        # hook left out of the document. Both views take it at the files'
+        # landing, as for an operation that does not fit the document, and
+        # the reference replay reapplies it there.
+        unconfined = jsonpatch.apply_patch(unconfined, [whole], in_place=False)
+        try:
+            patched = jsonpatch.apply_patch(document, [whole], in_place=False)
+        except (
+            jsonpatch.JsonPatchConflict,
+            jsonpatch.JsonPointerException,
+            TypeError,
+        ):
+            return document, unconfined, None
+        return patched, unconfined, (whole["op"], whole["path"])
+    taken = (
+        _AS_WRITTEN
+        if owned is None or op["op"] == "test"
+        else (op["op"], normalized["path"])
+    )
     if op["op"] == "test":
         jsonpatch.apply_patch(unconfined, [whole], in_place=False)
         return document, unconfined, _AS_WRITTEN

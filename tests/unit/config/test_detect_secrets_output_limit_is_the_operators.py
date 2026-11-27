@@ -697,6 +697,49 @@ def test_a_repository_patch_tests_its_own_keys_beside_a_left_out_limit(tmp_path)
     assert config.scanners.detect_secrets.options.skip_generated_lockfiles is False
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    ["max-worker-output-mib", "max_worker_output_mib"],
+    ids=["the-dashed-twin", "the-declared-spelling"],
+)
+def test_a_retired_name_patch_adds_a_left_out_limit_where_the_files_wrote_it(
+    tmp_path, monkeypatch, plant_scanner_alias, spelling
+):
+    """base.yaml in the tree writes the limit, 64, under the retired name, and
+    the checkout's .ash.yaml extends it with a patch that adds the limit
+    under the retired name and then tests it. The base's limit is left out
+    before the patch applies, so the document holds no limit for the add to
+    land on; the files as written do. Spelled with dashes, the add is a -/_
+    twin of the declared option, which lands on the limit as the files wrote
+    them: the test of the declared spelling passes and the file loads, as it
+    does without the trust rules. The limit is then the extending file's own
+    write, which its confine hook leaves out, so the scan keeps the
+    operator's, 256. Judged where the document lands it, the dashed add was
+    dropped as an option detect-secrets does not declare, and the test
+    refused the file. The declared spelling is the control."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    options = f"/scanners/{_RETIRED_NAME}/options"
+    checkout = _checkout(
+        tmp_path,
+        "extends: base.yaml\n"
+        "patch:\n"
+        f"  - op: add\n    path: {options}/{spelling}\n    value: 4096\n"
+        f"  - op: test\n    path: {options}/max_worker_output_mib\n    value: 4096\n",
+    )
+    (checkout / "base.yaml").write_text(_setting(64, _RETIRED_NAME), encoding="utf-8")
+
+    with _warnings() as messages:
+        config = resolve_config(source_dir=checkout)
+
+    assert _limit(config) == 256
+    assert any(
+        f"Ignoring {OPTION}" in message for message in _about_the_limit(messages)
+    ), messages
+
+
 @pytest.mark.parametrize("op", ["replace", "add"])
 def test_an_operator_patch_sets_the_limit_over_a_repository_base(tmp_path, op):
     """The operator's file outside the tree extends the repository's file,
