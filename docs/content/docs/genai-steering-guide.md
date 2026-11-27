@@ -431,6 +431,7 @@ Contains one status record per scanner, keyed by scanner name. A record says how
 - `duration`: seconds the scanner ran
 - `exit_code`: the scanner tool's exit code, or `null` when no tool ran
 - `missing_reason`, `skipped_reason`: why the scanner did not run, set on a `MISSING` and a `SKIPPED` record respectively and `null` otherwise
+- `error_reason`, `error_reason_code`: why the scanner failed, as one short sentence with no path in it and its kind as a short code such as `timed_out` or `exit_code_rejected`; set on an `ERROR` record whose cause was recorded and `null` otherwise
 
 #### sarif
 The findings are in `sarif`, a SARIF 2.1.0 report. Each finding is one entry of `sarif.runs[].results[]`. A file ASH writes has one run that holds every scanner's findings, so loop over all `runs` rather than reading only the first, and use `properties.scanner_name` to tell the scanners apart. The fields to read:

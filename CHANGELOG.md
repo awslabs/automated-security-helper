@@ -148,14 +148,23 @@
 ### Features
 
 - **The reports say why a scanner ended in ERROR.** "Scanners that did not run" in the
-  HTML, Markdown and text reports now lists an ERROR scanner with the first sentence of
-  its recorded failure, for example `checkov (ERROR): its tool exited with code 2, which
-  this scanner does not accept as a completed run, so its results file is not graded`.
-  The paths, stderr and details that follow that sentence are left out; they stay in
-  `ash.log` and in the `errors` of the scanner's entries in `ash_aggregated_results.json`.
-  A failure whose first sentence would show a path or is longer than 200 characters is
-  not listed, and a scanner in ERROR only for a stale content database stays under its
-  own heading. The compact Markdown report lists ERROR scanners too.
+  HTML, Markdown and text reports now lists an ERROR scanner with the reason ASH recorded
+  for it, for example `checkov (ERROR): its tool exited with code 2, which this scanner
+  does not accept as a completed run, so its results file is not graded`. The scan
+  records the reason where the failure happens (a timeout, a tool that could not start,
+  output ASH could not read, an exit code the scanner does not accept, a result it could
+  not grade, a content database that is absent, targets no rule was evaluated against, a
+  scanner that could not be built), and bandit, betterleaks, opengrep, semgrep, trivy and
+  zizmor, with the content database update, name the failures of their own checks, such
+  as a config file that does not exist. Each ERROR row in `ash_aggregated_results.json`
+  and `ash.flat.json` carries it as `error_reason`, one sentence with no path in it, and
+  `error_reason_code`, its kind as a short code. Where none was recorded, the report
+  lists the first sentence of the scanner's recorded failure, as before. The paths,
+  stderr and details that follow that sentence are left out; they stay in `ash.log` and
+  in the `errors` of the scanner's entries in `ash_aggregated_results.json`. A reason or
+  sentence that would show a path or is longer than 200 characters is not listed, and a
+  scanner in ERROR only for a stale content database stays under its own heading. The
+  compact Markdown report lists ERROR scanners too.
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
   A symbol-scoped suppression the lock does not record is refused when the config is
