@@ -124,6 +124,7 @@ from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
     _restore_uv_route,
     guarded_values,
+    is_uv_form,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -1062,7 +1063,10 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # binary the resolver found on PATH has to run that binary. With
         # use_uv_tool left True, every scan then went through uv, whose install
         # had just failed, and refused to start.
-        if resolved[:1] == ["uv"]:
+        # The route is read from the answer's first word's file name
+        # (is_uv_form): uv named by its path, or as uv.exe, is the uv route too.
+        uses_uv = is_uv_form(resolved)
+        if uses_uv:
             _restore_uv_route(self)
         elif self.use_uv_tool:
             # Off uv for the resolver's binary, which runs unverified and with no
@@ -1070,7 +1074,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             # re-validation already on a direct route keeps the record that route
             # made.
             _record_direct_route_version(self, None)
-        self.use_uv_tool = resolved[:1] == ["uv"]
+        self.use_uv_tool = uses_uv
         self.dependencies_satisfied = True
         return True
 
@@ -1090,11 +1094,11 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             verify_pre_installed_tool,
         )
 
-        if resolved[:1] == ["uv"]:
+        if is_uv_form(resolved):
             # Reachable only if the resolver found a uv the availability check did
-            # not; run through it as the final fallback does.
-            _restore_uv_route(self)
-            self.use_uv_tool = True
+            # not, and only while use_uv_tool is True (that check answers True at
+            # once for a scanner off uv): the uv route and the version it recorded
+            # are already in place, and the scan runs through uv.
             self.dependencies_satisfied = True
             return True
         executable = resolved[0]

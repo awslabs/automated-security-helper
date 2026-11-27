@@ -135,7 +135,7 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base import scanner_operational_facets as opsf
-from automated_security_helper.base.uv_tool_mixin import _restore_uv_route
+from automated_security_helper.base.uv_tool_mixin import _restore_uv_route, is_uv_form
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -366,25 +366,23 @@ def _joined_report(reports: List[SarifReport]) -> SarifReport:
     return joined
 
 
-#: How uv's executable is named, in any directory: the resolver returns uv by
-#: the name it found it under, which can be a bare word or a full path.
-_UV_EXECUTABLE_NAMES = frozenset({"uv", "uv.exe"})
-
-
 def _is_a_uv_route(command: Optional[List[str]]) -> bool:
     """Whether *command*, as ``get_uv_tool_command`` returns it, runs the tool
     through ``uv tool run`` rather than naming an executable found on PATH.
 
     The resolver's fallback is a tool found by name, a bare path with no uv in
-    front of it. The uv route is read from the first word's own file name, so
-    uv given by an absolute path, or as ``uv.exe``, is the same route as a bare
-    ``uv``; comparing the argv text with the bare word would have refused those
-    and read a release uv can supply from its cache as missing.
+    front of it. The uv route is read from the first word's own file name
+    (``is_uv_form``), so uv given by an absolute path, or as ``uv.exe``, is the
+    same route as a bare ``uv``; comparing the argv text with the bare word would
+    have refused those and read a release uv can supply from its cache as
+    missing. The two words after it must be ``tool run``: that is the only uv
+    command the resolver answers with.
     """
-    if not command or len(command) < 3:
-        return False
-    executable = command[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
-    return executable in _UV_EXECUTABLE_NAMES and command[1:3] == ["tool", "run"]
+    return (
+        command is not None
+        and is_uv_form(command)
+        and list(command[1:3]) == ["tool", "run"]
+    )
 
 
 # zizmor's own severity words on the left; the ASH side is a ``Severity`` member's

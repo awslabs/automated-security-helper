@@ -45,6 +45,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBas
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
     _restore_uv_route,
+    is_uv_form,
     tool_name,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
@@ -1539,7 +1540,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
         if resolved is None:
             return False
-        if resolved[:1] == ["uv"]:
+        # The route is read from the answer's first word's file name
+        # (is_uv_form): uv named by its path, or as uv.exe, is the uv route too.
+        uses_uv = is_uv_form(resolved)
+        if uses_uv:
             _restore_uv_route(self)
         elif self.use_uv_tool:
             # Off uv for the resolver's binary, which runs unverified and with no
@@ -1547,7 +1551,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # re-validation already on a direct route keeps the record that route
             # made.
             _record_direct_route_version(self, None)
-        self.use_uv_tool = resolved[:1] == ["uv"]
+        self.use_uv_tool = uses_uv
         self.dependencies_satisfied = True
         return True
 
@@ -1564,9 +1568,11 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             verify_pre_installed_tool,
         )
 
-        if resolved[:1] == ["uv"]:
-            _restore_uv_route(self)
-            self.use_uv_tool = True
+        if is_uv_form(resolved):
+            # Called only from validate_plugin_dependencies' uv-absent branch,
+            # entered only while use_uv_tool is True (_validate_uv_tool_availability
+            # answers True at once for a scanner off uv): the uv route and the
+            # version it recorded are already in place.
             self.dependencies_satisfied = True
             return True
         executable = resolved[0]

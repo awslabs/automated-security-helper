@@ -10,7 +10,6 @@ lives in :mod:`_grep_scanner_base`. This module only customises:
 
 import logging
 import platform
-from pathlib import Path
 from typing import Annotated, List, Literal, ClassVar, Optional, Tuple
 
 from pydantic import Field
@@ -29,7 +28,7 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
-    _restore_uv_route,
+    is_uv_form,
     tool_name,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -42,6 +41,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner
     GrepSeverityWord,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.utils.pre_installed_tool import PreInstalledToolVerdict
 from automated_security_helper.utils.process_env import hold_environ, release_environ
 from automated_security_helper.utils.uv_tool_runner import (
     find_executable,
@@ -61,18 +61,6 @@ def _command_words(command) -> List[str]:
     if isinstance(command, str):
         return [command]
     return list(command)
-
-
-def _is_uv_form(command: List[str]) -> bool:
-    """Whether a resolver answer runs the tool through uv.
-
-    Told by the first word's file name, so ``["uv", ...]`` and
-    ``["/usr/local/bin/uv", ...]`` both count; a comparison of the first three
-    words with ``["uv", "tool", "run"]`` read a uv named by its path as a
-    semgrep binary, which is the mistake this reading replaces.
-    """
-    words = _command_words(command)
-    return bool(words) and Path(words[0]).name in ("uv", "uv.exe")
 
 
 class SemgrepScannerConfigOptions(ScannerOptionsBase):
@@ -385,7 +373,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         the tool, and with the path of a semgrep binary on PATH otherwise. Both
         used to be read as "the binary is on PATH", which turned uv off and made
         the scan exec a semgrep that is not there when uv was the only route. The
-        uv form is told by the first word's file name (``_is_uv_form``), so a uv
+        uv form is told by the first word's file name (``is_uv_form``), so a uv
         named by its full path counts as uv too.
 
         With ``direct_only`` the resolver is not consulted at all: after uv's own
@@ -403,7 +391,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         A binary on PATH, however it was found, is verified against the scan's
         requirement before it is taken (``_direct_binary_satisfies``), as
         ``_select_tool_execution`` verifies a pre-installed tool before running it
-        directly.
+        directly. The version that copy answered is recorded here, where the route
+        changes, not by the check.
         """
         if direct_only:
             found = find_executable(tool_name(self))
@@ -415,8 +404,15 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                     level=logging.WARNING,
                 )
                 return False
-            if not self._direct_binary_satisfies(found):
+            answer = self._direct_binary_satisfies(found)
+            if answer is None:
                 return False
+            # The copy that runs is this one, verified or not, so its own answer
+            # is the version the reports name. Read with a default, as the mixin
+            # reads it: a verifier stand-in that carries only a status and a
+            # detail is an answer without a version, and a copy with no version
+            # leaves the record empty rather than the uv probe's value.
+            _record_direct_route_version(self, getattr(answer, "version", None))
             self.use_uv_tool = False
             self.dependencies_satisfied = True
             return True
@@ -430,19 +426,28 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         )
         if command is None:
             return False
-        uses_uv = _is_uv_form(command)
-        if not uses_uv and not self._direct_binary_satisfies(
-            _command_words(command)[0]
-        ):
+        if is_uv_form(command):
+            # Called only from _validate_tool_dependencies' uv-absent branch,
+            # entered only while use_uv_tool is True (_validate_uv_tool_availability
+            # answers True at once for a scanner off uv): the uv route and the
+            # version it recorded are already in place.
+            self.dependencies_satisfied = True
+            return True
+        answer = self._direct_binary_satisfies(_command_words(command)[0])
+        if answer is None:
             return False
-        if uses_uv:
-            _restore_uv_route(self)
-        self.use_uv_tool = uses_uv
+        # The copy that runs is this one, verified or not (see the direct_only
+        # branch above).
+        _record_direct_route_version(self, getattr(answer, "version", None))
+        self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
 
-    def _direct_binary_satisfies(self, executable: str) -> bool:
-        """Whether the semgrep binary the resolver found on PATH may run the scan.
+    def _direct_binary_satisfies(
+        self, executable: str
+    ) -> Optional[PreInstalledToolVerdict]:
+        """The verifier's answer for the semgrep binary on PATH when it may run
+        the scan, or None when it may not.
 
         Verified against the scan's requirement (the package, its extras and the
         version constraint, ``utils/pre_installed_tool.verify_pre_installed_tool``),
@@ -458,6 +463,10 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
         or gave no usable answer) is refused, with the reason recorded: that is
         the plugin's failure, not the host's, and a run shown against nothing is
         worse than a MISSING row.
+
+        It changes no route and no record: the caller that takes the direct route
+        records the answer's version beside its ``use_uv_tool = False``
+        (``_direct_or_uv_command_found``), as checkov and bandit record theirs.
         """
         from automated_security_helper.utils.pre_installed_tool import (
             build_requirement,
@@ -498,7 +507,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 "so the copy on PATH could not be verified and its records could "
                 "not be redacted. Fix the plugin's values hook."
             )
-            return False
+            return None
         values: Tuple[str, ...] = read.values
         answer = verify_pre_installed_tool(
             executable,
@@ -526,12 +535,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 ),
                 level=logging.INFO,
             )
-            # With a default, as the mixin reads it: a verifier stand-in that
-            # carries only a status and a detail is an answer without a version.
-            # A copy with no version leaves the record empty rather than the
-            # uv probe's value, which names another environment.
-            _record_direct_route_version(self, getattr(answer, "version", None))
-            return True
+            return answer
         if answer.status == "unsatisfied":
             # The log gets the full story, the copy's path and the answer's
             # detail, which quotes the tool's own words. The REASON that reaches
@@ -555,7 +559,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             self.dependency_unavailable_reason = _shown(
                 f"{self.command} cannot be used: {summary}. {remedy}"
             )
-            return False
+            return None
         self._plugin_log(
             _shown(
                 f"Using {self.command} at {executable} directly, unverified against "
@@ -563,9 +567,7 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             ),
             level=logging.WARNING,
         )
-        # The copy that runs is this one, whether or not it was verified.
-        _record_direct_route_version(self, getattr(answer, "version", None))
-        return True
+        return answer
 
     def _get_uv_tool_version(
         self, tool_name: str, package_name: Optional[str] = None

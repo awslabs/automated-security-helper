@@ -21,7 +21,7 @@ import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -296,6 +296,48 @@ def tool_name(plugin: Any) -> str:
 def _tool_name(plugin: Any) -> str:
     """Deprecated alias for :func:`tool_name`; use the public name."""
     return tool_name(plugin)
+
+
+#: The file names a uv executable goes by: ``uv``, and on Windows the names a
+#: PATH lookup tries for it (``subprocess_utils``: ``uv.exe``, ``uv.bat``,
+#: ``uv.cmd``), the uv installed with ASH among them (``uv`` plus the platform's
+#: executable suffix, ``uv_tool_runner._bundled_uv_candidates``). Read
+#: case-folded, as Windows reads file names.
+_UV_FILE_NAMES = frozenset({"uv", "uv.exe", "uv.bat", "uv.cmd"})
+
+
+def is_uv_form(command: Any) -> bool:
+    """Whether a ``get_uv_tool_command`` answer runs the tool through uv.
+
+    The resolver answers ``["uv", "tool", "run", ...]`` when uv runs the tool and
+    the path of the binary it found otherwise (``utils/uv_tool_runner.py``). The
+    route is read from the first word's file name, so uv named by its path
+    (``/opt/uv/bin/uv``), as a Windows executable (``uv.exe``, in any letter
+    case) or as a Windows shim (``uv.cmd``, ``uv.bat``) is the uv route as a bare
+    ``uv`` is; comparing the first word with ``"uv"`` read those as a binary on
+    PATH. The name is split on either path separator on every host
+    (``PureWindowsPath``), so a Windows path reads the same wherever this runs.
+    ``uvx``, and a name that only starts or ends with ``uv``, is not uv: the
+    resolver never answers with ``uvx``, and a first word of that kind can only
+    be a binary found by name.
+
+    The one reading of this for the scanners that take their route from the
+    resolver (bandit, checkov, cfn-lint, semgrep, zizmor). A string is one word;
+    None, an empty answer, or a first word that is not text or a path is not
+    the uv form.
+    """
+    if command is None:
+        return False
+    if isinstance(command, (str, os.PathLike)):
+        words = [command]
+    else:
+        words = list(command)
+    if not words or not isinstance(words[0], (str, os.PathLike)):
+        return False
+    name = os.fspath(words[0])
+    if not isinstance(name, str):
+        return False
+    return PureWindowsPath(name).name.lower() in _UV_FILE_NAMES
 
 
 def _record_direct_route_version(plugin: Any, version: Optional[str]) -> None:
