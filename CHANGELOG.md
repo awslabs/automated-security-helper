@@ -413,6 +413,13 @@
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.
+- `ash config validate` and `ash config lint` no longer warn that an absolute `path` in
+  `ignore_paths` or `suppressions` matches nothing when it can name a file outside the
+  scan root, such as a converted file under a container scan's `/out` or a path inside
+  an image; such a file keeps its absolute path, and the pattern is compared with it as
+  written. They still warn about an absolute path under the scan root, one that names
+  something in it, one with a `.` or `..` component, and `/`, and the warning now says
+  the path matches nothing in the scan root.
 
 ## v3.8.0 (2026-11-12)
 
