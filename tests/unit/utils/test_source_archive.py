@@ -1162,10 +1162,12 @@ REFUSED = [
     ),
     # The zip64 end record is the 56 bytes before its locator, and the locator says so.
     # zipfile before the releases that validate the locator reads the record there and
-    # takes no notice of the offset the locator holds; later ones read at that offset
-    # first, and refuse one past where the record lies. Red at the base: each was
-    # admitted, the record found just before the locator as zipfile before those
-    # releases finds it.
+    # takes no notice of the offset the locator holds, so it admits each of these.
+    # Later releases read at that offset first and refuse the archive as they open it:
+    # one that places the record past where it lies in the words of the first three
+    # rows, and one that places it before in "Corrupt zip64 end of central directory
+    # record", which is not the last row's words. open_zip judges the locator before
+    # zipfile opens the archive, so every Python gives the words of the rows.
     pytest.param(
         _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT + 1),
         Kind.NOT_A_ZIP,
@@ -2937,6 +2939,25 @@ def _payload_of(source: Union[bytes, Callable[[], bytes]]) -> bytes:
     return source() if callable(source) else source
 
 
+def _recording_extractions(monkeypatch: pytest.MonkeyPatch) -> List[object]:
+    """Note each call that asks zipfile to extract members, in the list returned, and
+    make the call.
+
+    An archive refused before anything is written is never extracted from. The words of
+    a refusal do not say when it was made: a source that refused an archive only as
+    extraction reached its member gives the same words as one that refused it first.
+    """
+    asked: List[object] = []
+    extract = zipfile.ZipFile.extractall
+
+    def recording(self, *args, **kwargs):
+        asked.append(args)
+        return extract(self, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", recording)
+    return asked
+
+
 #: What zipfile cannot read, or what cannot be read of a member, and the verdict both
 #: entry points reach: the archive (or a function that builds it), the rule, the start
 #: of the words (zipfile's own text follows), whether the refusal is made before
@@ -3007,7 +3028,9 @@ class TestWhatZipfileCannotReadIsRefusedAlikeByBothEntryPoints:
     """``open_zip`` and ``extract_zip_members`` take what zipfile raises through one
     classification, so ``extract_source_archive`` and the finalize refuse each of
     these in the same words, and the finalize removes the upload as it does for every
-    refusal."""
+    refusal. A row that is refused before anything is written is held to that by both:
+    the shared function leaves its destination unmade, and the finalize never asks
+    zipfile to extract."""
 
     @pytest.mark.parametrize("source,kind,start,before_writing,setup", UNREADABLE)
     def test_the_shared_function_refuses_it(
@@ -3029,18 +3052,26 @@ class TestWhatZipfileCannotReadIsRefusedAlikeByBothEntryPoints:
     def test_the_finalize_refuses_it_in_the_same_words(
         self, monkeypatch, tmp_path, source, kind, start, before_writing, setup
     ):
+        """The words do not say when the archive was refused, and the upload is removed
+        either way, so a row that is refused before anything is written also checks
+        that the finalize asked zipfile to extract nothing. A source that refuses a
+        damaged stream only as extraction reaches its member, as it did before rule 9,
+        gives the same verdict and fails there."""
         payload = _payload_of(source)
         if setup is not None:
             setup(monkeypatch)
         shared = _verdict(
             _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "tree")
         )
+        extractions = _recording_extractions(monkeypatch)
 
         delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
 
         assert delivered == shared
         assert delivered[0] is kind
         assert delivered[1].startswith(start)
+        if before_writing:
+            assert extractions == [], "the finalize extracted from a refused archive"
 
 
 class _FailingHandle:
@@ -3227,7 +3258,8 @@ class TestARecordTheArchiveGivesIsNotTrusted:
     takes, or point at nothing. Admission refuses what it cannot find, as not a zip: it
     no longer lets the error of a seek or an unpack out, now that only the read of a
     link's target is classified. Current zipfile releases refuse these archives as they
-    open them, so the cases call the readers of the records."""
+    open them, so the cases call the readers of the records; what ``open_zip`` says of
+    a misplaced locator is the next class's."""
 
     @pytest.mark.parametrize("offset", [2**63, 2**64 - 1, 2**100])
     def test_an_offset_no_seek_takes_reads_nothing(self, offset):
@@ -3326,6 +3358,102 @@ class TestARecordTheArchiveGivesIsNotTrusted:
 
         assert refused.value.kind is Kind.NOT_A_ZIP
         assert str(refused.value) == "4 bytes come before the archive"
+
+
+#: What the zipfile releases that check the zip64 end record say as they open an archive
+#: whose record disagrees with its locator.
+_ZIPFILE_CORRUPT_RECORD = "Corrupt zip64 end of central directory record"
+
+
+def _a_zipfile_that_refuses_the_zip64_record_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Make ``zipfile.ZipFile`` refuse whatever it is given as those releases do."""
+
+    def refusing(*args, **kwargs):
+        raise zipfile.BadZipFile(_ZIPFILE_CORRUPT_RECORD)
+
+    monkeypatch.setattr(zipfile, "ZipFile", refusing)
+
+
+class TestTheZip64LocatorIsJudgedBeforeZipfileOpensTheArchive:
+    """Rule 6 decides from the bytes whether a locator places its zip64 end record where
+    it lies, so the verdict and its words do not depend on the zipfile that opens the
+    file. The releases that check the record as they open an archive refuse a misplaced
+    locator in words of their own, and each row runs under a zipfile that does, whatever
+    this Python's is. Red at the base on every Python: ``open_zip`` gave the refusal
+    zipfile's words."""
+
+    @pytest.mark.parametrize(
+        "payload,words",
+        [
+            pytest.param(
+                _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT + 1),
+                "Corrupt zip64 end of central directory locator",
+                id="a-record-one-byte-late",
+            ),
+            pytest.param(
+                _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_LOCATOR_AT),
+                "Corrupt zip64 end of central directory locator",
+                id="a-record-at-the-locator-itself",
+            ),
+            pytest.param(
+                _with_zip64_record_at(_ZIP64_ARCHIVE, 2**63),
+                "Corrupt zip64 end of central directory locator",
+                id="an-offset-no-seek-takes",
+            ),
+            pytest.param(
+                _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT - 4),
+                "4 bytes come before the archive",
+                id="a-record-before-where-it-lies",
+            ),
+            pytest.param(
+                b"junk" + _ZIP64_ARCHIVE,
+                "4 bytes come before the archive",
+                id="bytes-before-the-archive",
+            ),
+        ],
+    )
+    def test_a_locator_that_misplaces_its_record_is_refused_in_the_rules_words(
+        self, monkeypatch, payload, words
+    ):
+        _a_zipfile_that_refuses_the_zip64_record_itself(monkeypatch)
+
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa.open_zip(io.BytesIO(payload))
+
+        assert refused.value.kind is Kind.NOT_A_ZIP
+        assert str(refused.value) == words
+        assert isinstance(refused.value, zipfile.BadZipFile)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param(_ZIP64_ARCHIVE, id="a-record-where-the-locator-places-it"),
+            pytest.param(_zip({"a.py": b"x"}), id="an-archive-with-no-zip64-record"),
+            pytest.param(
+                b"plain text, not an archive\n", id="a-file-with-no-end-record"
+            ),
+        ],
+    )
+    def test_what_the_rule_does_not_refuse_is_left_to_zipfile(
+        self, monkeypatch, payload
+    ):
+        """Controls for the rows above: the same zipfile is what refuses these, in its
+        own words, so the rule let each of them through to it."""
+        _a_zipfile_that_refuses_the_zip64_record_itself(monkeypatch)
+
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa.open_zip(io.BytesIO(payload))
+
+        assert refused.value.kind is Kind.NOT_A_ZIP
+        assert str(refused.value) == _ZIPFILE_CORRUPT_RECORD
+
+    def test_a_record_where_the_locator_places_it_is_opened(self):
+        """Control: with this Python's own zipfile, the archive the rows above are made
+        from is opened."""
+        with sa.open_zip(io.BytesIO(_ZIP64_ARCHIVE)) as archive:
+            assert archive.namelist() == ["app.py"]
 
 
 class TestTheRefusal:

@@ -89,11 +89,16 @@ refused archive leaves the destination as it was.
    its central directory entry is refused too, since a reader of the local headers
    would extract that member under another name, or find its data, and the next
    member, elsewhere. Each of these is refused as not a zip.
+   The zip64 locator is judged as the file is opened (``open_zip``), before zipfile
+   reads it: some zipfile releases refuse a locator that misplaces the zip64 end record
+   as they open the archive, in words of their own, and others admit it, so the rule is
+   decided first, and its verdict and words are the same on every Python.
 7. Encryption. A member whose data is encrypted is refused, a link included: its data
    cannot be read, so no rule could judge it and no scan read it. The members are
-   checked for it right after they are counted, before any other rule reads the file,
-   so an archive that holds one is refused in the same words by both entry points,
-   whatever else it holds.
+   checked for it right after they are counted, before any other rule but the zip64
+   locator's reads the file, so an archive that holds one is refused in the same words
+   by both entry points, whatever else it holds but a locator that misplaces the zip64
+   end record.
 8. Compression. A member is stored or deflated; one in any other method (bzip2, LZMA,
    Zstandard, and the few others some tools write) is refused whatever size it
    declares, a link included. zipfile gives the decompressor of the first three all the
@@ -667,18 +672,26 @@ def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
     """The zip64 end record, when a locator sits just before the end record.
 
     The record has to be the 56 bytes just before the locator, and the locator has to
-    place it there. Readers differ in where they look: zipfile before the releases that
+    place it there. Readers differ in where they look. zipfile before the releases that
     validate the locator reads the record just before it and takes no notice of the
-    offset it holds, and later ones read at that offset first. Where the two are one
-    place every reader finds the same record, which is where every writer puts it
-    (bytes before the archive and zip64 extensible data are refused by rule 6 in any
-    case), so a locator that places the record anywhere else is refused as not a zip,
-    whatever else the archive says. The record is read where it has to be, never at
-    the offset the locator gives, which the archive chooses.
+    offset it holds. Later ones read at that offset first, look just before the locator
+    when the record is not there, for bytes written before the archive, and refuse the
+    archive as they open it when the record's own directory offset and size do not end
+    at the offset the locator gives. Where the two are one place every reader finds the
+    same record, which is where every writer puts it (bytes before the archive and zip64
+    extensible data are refused by rule 6 in any case), so a locator that places the
+    record anywhere else is refused as not a zip, whatever else the archive says. The
+    record is read where it has to be, never at the offset the locator gives, which the
+    archive chooses.
 
-    A locator with no whole record before it is refused in the words zipfile uses for
-    it; one that places the record past where it lies, in the words of the releases
-    that validate it; one that places it before, as bytes that come before the archive.
+    The words of the refusal: "Zip64 end of central directory record not found" for a
+    locator with no whole record before it, and "Corrupt zip64 end of central directory
+    locator" for one that places the record past where it lies, as the releases that
+    validate the locator say; "N bytes come before the archive" for one that places it
+    before, where those releases say "Corrupt zip64 end of central directory record".
+    ``open_zip`` asks before zipfile opens the archive
+    (:func:`_refuse_a_misplaced_zip64_record`), so these are the words whichever
+    zipfile reads it, and rule 6 asks again, for the record's fields.
     """
     locator_at = end - _ZIP64_LOCATOR.size
     if locator_at < 0:
@@ -704,6 +717,26 @@ def _is_zip64_end_record(record: bytes) -> bool:
     return len(record) == _ZIP64_END_RECORD.size and record.startswith(
         _ZIP64_END_RECORD_SIGNATURE
     )
+
+
+def _refuse_a_misplaced_zip64_record(handle: IO[bytes]) -> None:
+    """Refuse a zip64 end record that its locator does not place where it lies (rule 6).
+
+    Decided from the file's bytes before zipfile opens it (:func:`open_zip`), so the
+    verdict and its words are the rule's on every Python. The zipfile releases that
+    check the zip64 end record as they open an archive refuse a locator that misplaces
+    it themselves, in words of their own: for a locator that places the record before
+    where it lies they say "Corrupt zip64 end of central directory record", and
+    :func:`_zip64_end_record` says "N bytes come before the archive". The releases
+    before them admit such an archive, and rule 6 refuses it with the same call.
+
+    A file with no end record is not judged: zipfile refuses it, in its own words, and
+    this reads no locator for it.
+    """
+    end = _end_record_position(handle, handle.seek(0, io.SEEK_END))
+    record = _read_at(handle, end, _END_RECORD.size)
+    if len(record) == _END_RECORD.size and record.startswith(_END_RECORD_SIGNATURE):
+        _zip64_end_record(handle, end)
 
 
 def _spelled_names(
@@ -1220,12 +1253,21 @@ def open_zip(handle: IO[bytes]) -> zipfile.ZipFile:
     than zipfile implements, is refused as unreadable ("the archive cannot be read:
     ..."). An ``OSError`` and a ``MemoryError`` are raised as they are.
 
+    One rule is decided before zipfile reads the file: that a zip64 end record is where
+    its locator places it (:func:`_refuse_a_misplaced_zip64_record`). Some zipfile
+    releases refuse a locator that misplaces it as they open the archive, in words
+    that are not the rule's, and others admit it, so the rule runs first and gives
+    one verdict, in one set of words, whichever zipfile reads the file.
+
     Raises:
         SourceArchiveRefused: the archive was refused; ``kind`` names the rule.
     """
     try:
+        _refuse_a_misplaced_zip64_record(handle)
         return zipfile.ZipFile(handle)
     except _NOT_THE_ARCHIVES:
+        raise
+    except SourceArchiveRefused:
         raise
     except (zipfile.BadZipFile, EOFError, ValueError) as error:
         raise _not_a_zip(str(error)) from error
