@@ -33,6 +33,7 @@ from automated_security_helper.base.uv_tool_mixin import guarded_values_read
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
+from automated_security_helper.schemas.scanner_output_ingest import ingest_cyclonedx
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
@@ -647,6 +648,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
+        # And this target's own record of what reading the SBOM repaired, so it
+        # never carries the previous target's.
+        self._start_ingest_record()
         # Check if the target directory is empty or doesn't exist
         if self._target_is_empty(target):
             message = (
@@ -791,7 +795,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             with open(results_file, mode="r", encoding="utf-8") as f:
                 syft_results = json.load(f)
             try:
-                sbom_report = CycloneDXReport.model_validate(syft_results)
+                # A part the 1.6 model does not define (a key a newer syft writes,
+                # an external-reference type added after 1.6, a number where it
+                # wants text) is repaired and counted on the record; a component
+                # whose type or name is unreadable still refuses the SBOM.
+                sbom_report = ingest_cyclonedx(syft_results, self._ingest_record)
             except ValidationError as e:
                 # Not returned as it is: the declared result is a CycloneDXReport
                 # or a bool, and a raw dict reaches the executor as a result it
@@ -803,6 +811,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     f"CycloneDX ASH can read ({e.error_count()} validation "
                     "error(s)), so its SBOM could not be recorded"
                 )
+            self._say_what_the_ingest_repaired(target_type)
 
             if target_type == TargetType.CONVERTED:
                 # Components the sdist-lock-harvester materialized carry their
@@ -901,6 +910,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.end_time = None
         self.output = []
         self._reset_errors()
+        # The image's own record of what reading its SBOM repaired.
+        self._start_ingest_record()
         self._nothing_scanned_reason = None
         self._image_ignore_paths = list(global_ignore_paths or [])
 
@@ -1005,13 +1016,14 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             with open(results_file, mode="r", encoding="utf-8") as f:
                 syft_results = json.load(f)
             try:
-                sbom_report = CycloneDXReport.model_validate(syft_results)
+                sbom_report = ingest_cyclonedx(syft_results, self._ingest_record)
             except ValidationError as e:
                 raise ScannerError(
                     f"{self.__class__.__name__} wrote a results file that is not "
                     f"CycloneDX ASH can read ({e.error_count()} validation "
                     "error(s)), so its SBOM could not be recorded"
                 )
+            self._say_what_the_ingest_repaired(image_target_type)
 
             return sbom_report
 
