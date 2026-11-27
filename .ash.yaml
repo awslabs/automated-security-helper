@@ -3777,31 +3777,31 @@ global_settings:
         the severity label "LOW". No value is held.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_diff.py
-      line_start: 254
-      line_end: 278
+      line_start: 350
+      line_end: 350
       reason: >-
         False positive. The schema notes map the dropped _secret_detection
         column name to the sentence saying the pair consumer applies it on the
-        host. The flagged value is that sentence. The range spans the two
-        lines the shipped and in-tree scanners attribute the construct to.
+        host. The flagged value is that sentence. The range is the one line
+        the shipped and in-tree scanners both attribute the construct to.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_diff.py
-      line_start: 260
-      line_end: 284
+      line_start: 356
+      line_end: 356
       reason: >-
         False positive. The schema notes map the dropped is_secret_detection
         column name to the sentence saying the diff never joins on it. The
-        flagged value is that sentence. The range spans the two lines the
-        shipped and in-tree scanners attribute the construct to.
+        flagged value is that sentence. The range is the one line the
+        shipped and in-tree scanners both attribute the construct to.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/utils/finding_identity.py
-      line_start: 741
-      line_end: 765
+      line_start: 780
+      line_end: 780
       reason: >-
         False positive. The SECRET_CORRELATION_PREFIX constant names the
         correlation family's id prefix (secret/<file>:<line>). A label, not a
-        value. The range spans the two lines the shipped and in-tree scanners
-        attribute the constant to.
+        value. The range is the one line the shipped and in-tree scanners
+        both attribute the constant to.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/plugin_conformance/fixture_plugin/transcripts/transcripts.json
       reason: >-
