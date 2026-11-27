@@ -220,8 +220,6 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
     ),
     "container": ("automated_security_helper.cli.container", "container_app"),
     "report": ("automated_security_helper.cli.report", "report_command"),
-    "diff": ("automated_security_helper.cli.diff", "diff_command"),
-    "trend": ("automated_security_helper.cli.trend", "trend_command"),
     "merge": ("automated_security_helper.cli.merge", "merge_command"),
     "results": ("automated_security_helper.cli.results", "results_app"),
     "config": ("automated_security_helper.cli.config", "config_app"),
@@ -240,10 +238,10 @@ _LAZY_SUBCOMMANDS: dict[str, tuple[str, str]] = {
 #: prints one DeprecationWarning on stderr (3.9) and is removed in 4.0. They are
 #: hidden from the root ``--help`` so the listing shows the new tree, but stay in
 #: the command mapping, so the docs generator, the wrapper tables and the help
-#: snapshots still walk them.
-DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset(
-    {"report", "diff", "trend", "merge", "inspect"}
-)
+#: snapshots still walk them. ``ash results diff`` and ``ash results trend`` are not
+#: here: no release had a top-level ``ash diff`` or ``ash trend``, so they have no
+#: old spelling to keep or to remove.
+DEPRECATED_RESULTS_SPELLINGS: frozenset[str] = frozenset({"report", "merge", "inspect"})
 
 #: Every top-level spelling deprecated in 3.9, mapped to the spelling that replaces
 #: it: the results commands that moved under ``ash results``, and ``ash build-image``,
@@ -274,8 +272,6 @@ It takes only the options below. To scan with scan options, run `ash scan --mode
 """,
     },
     "report": {},
-    "diff": {},
-    "trend": {},
     "merge": {"help": MERGE_COMMAND_HELP},
 }
 
@@ -286,8 +282,6 @@ _COMMAND_ORDER: tuple[str, ...] = (
     "scan",
     "build-image",
     "report",
-    "diff",
-    "trend",
     "merge",
     "results",
     "mcp",

@@ -34,8 +34,6 @@ def test_subcommands():
         "scan",
         "build-image",
         "report",
-        "diff",
-        "trend",
         "merge",
         "results",
         "mcp",

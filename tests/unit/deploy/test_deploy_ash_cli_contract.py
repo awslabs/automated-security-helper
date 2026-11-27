@@ -272,7 +272,6 @@ _COMMANDS = frozenset(
         "config",
         "container",
         "dependencies",
-        "diff",
         "express",
         "get-genai-guide",
         "inspect",
@@ -283,7 +282,6 @@ _COMMANDS = frozenset(
         "results",
         "scan",
         "suppress",
-        "trend",
     }
 )
 

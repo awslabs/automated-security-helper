@@ -86,11 +86,8 @@ def _results_argv(verb: str) -> Callable[[Path], List[str]]:
     """
 
     def build(tmp_path: Path) -> List[str]:
-        missing = str(tmp_path / "absent.json")
         return {
             "report": [verb, "--output-dir", str(tmp_path / "no-such-output")],
-            "diff": [verb, missing, missing],
-            "trend": [verb, missing, missing],
             "merge": [verb, "--results", str(tmp_path / "no-such-shard")],
             "inspect": [verb],
         }[verb]
@@ -148,7 +145,7 @@ SPELLINGS = {
             ],
             names=f"ash results {verb}",
         )
-        for verb in ("report", "diff", "trend", "merge", "inspect")
+        for verb in ("report", "merge", "inspect")
     },
     "build-image": Spelling(
         legacy=lambda _: ["build-image", "--no-run"],
@@ -575,7 +572,7 @@ _LEGACY_COMMAND = re.compile(
     r"\b(?:ash|ashv3) scan\b(?! (?:fs|workspace|image|git)\b)"
     r"|(?<![\w./-])(?:\./)?(?:ash|ashv3|automated-security-helper) "
     r"--(?!version\b|help\b|install-completion\b|show-completion\b)"
-    r"|(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|diff|trend|merge|inspect|build-image)\b"
+    r"|(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|merge|inspect|build-image)\b"
 )
 _SCAN_FS = re.compile(r"\b(?:ash|ashv3) scan fs\b")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")

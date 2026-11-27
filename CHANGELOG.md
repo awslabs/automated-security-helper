@@ -55,11 +55,10 @@
   `ash scan --source-dir X` becomes `ash scan fs X` (in a `--cli-json-input`
   document, the `path` key in place of `source_dir`), and `ash --mode container ...`
   becomes `ash scan fs . --mode container ...`. The commands that read saved results
-  move under `ash results`: `ash report`, `ash diff`, `ash trend`, `ash merge` and
-  `ash inspect` become `ash results report`, `ash results diff`, `ash results trend`,
-  `ash results merge` and `ash results inspect`, with the same options. `ash diff` and
-  `ash trend` are new in this release, so use them as `ash results diff` and
-  `ash results trend` from the start. `ash build-image` becomes `ash container build`.
+  move under `ash results`: `ash report`, `ash merge` and `ash inspect` become
+  `ash results report`, `ash results merge` and `ash results inspect`, with the same
+  options. `ash results diff` and `ash results trend` are new in this release and have
+  no top-level spelling. `ash build-image` becomes `ash container build`.
   The moved commands are hidden from the root `--help`. `ASH_SOURCE_DIR` is not
   deprecated, and `ash scan --workspace` and `ash --workspace` have no subject to move
   to yet, so they print nothing. Check `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar
@@ -163,8 +162,7 @@
 
 ### Fixes
 
-- `trend` is now in the express client's list of commands that are not scans, so
-  `ash trend` is no longer sent to an express daemon as a scan.
+- `ash results trend` is no longer sent to an express daemon as a scan.
 - **`./ash --no-color` and `--quiet` now reach the command under `results`.** `./ash
   --no-color results report` dropped `--no-color` while the older `./ash --no-color
   report` kept it, so following the deprecation message lost the option. A command under
@@ -201,8 +199,9 @@
   report`, `diff`, `trend`, `merge` and `inspect` work on results a scan already wrote,
   and none of them runs a scan. `report`, `merge` and `inspect` are the commands that
   were `ash report`, `ash merge` and `ash inspect`, with the same options, output and
-  exit codes; `diff` and `trend` are new in this release. The top-level spellings still
-  run and print one deprecation line on stderr (see Breaking changes).
+  exit codes; `diff` and `trend` are new in this release and have no top-level
+  spelling. The top-level spellings of the other three still run and print one
+  deprecation line on stderr (see Breaking changes).
 - **`ash container build` is the command that builds the ASH container image;
   `ash build-image` is its deprecated spelling, removed in ASH v4.** Both take the
   same options and start the same build. `ash build-image` prints one warning on
@@ -224,7 +223,7 @@
   [Enable tab completion](docs/content/how-to/install.md#enable-tab-completion).
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
   A symbol-scoped suppression the lock does not record is refused when the config is
-  validated (`ash scan`, a workspace scan handing the orchestrator a resolved config,
+  validated (`ash scan fs`, a workspace scan handing the orchestrator a resolved config,
   `ash config validate`, and the MCP `validate_config`, which used to skip the check
   without a source directory), with a message that names the command to run. The lock
   records the reviewed `(rule_id, symbol)` scopes beside each file's hash and both are

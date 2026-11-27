@@ -56,7 +56,7 @@ class TestClassification:
             ["--help"],
             ["scan", "--help"],
             ["scan", "fs", "--help"],
-            ["trend", "a.json", "b.json"],
+            ["results", "trend", "a.json", "b.json"],
             ["--version"],
             ["scan", "--no-express"],
             ["scan", "fs", "--no-express"],
