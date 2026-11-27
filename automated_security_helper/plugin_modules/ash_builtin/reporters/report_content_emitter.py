@@ -16,7 +16,10 @@ from automated_security_helper.models.flat_vulnerability import (
 from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.core.unified_metrics import get_unified_scanner_metrics
+from automated_security_helper.core.unified_metrics import (
+    get_unified_scanner_metrics,
+    recorded_error_sentence,
+)
 from automated_security_helper.core.scanner_statistics_calculator import (
     ScannerStatisticsCalculator,
 )
@@ -41,6 +44,7 @@ from automated_security_helper.utils.policy_origin import is_policy_origin
 from automated_security_helper.utils.short_reason import (
     SHORT_REASON_LIMIT,
     is_short_reason,
+    short_error_reason,  # noqa: F401 -- written here first, so still read from here
 )
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
@@ -601,29 +605,15 @@ class ReportContentEmitter:
     def _first_error_sentence(self, scanner_name: str) -> Optional[str]:
         """The short reason of the first error the scanner's reports record.
 
-        Read in the order ``recorded_error`` reads the errors in: each report's own
-        ``errors``, then the ``errors`` of its ``raw_results``, which is where the
-        executor also leaves the failure it recorded.
+        Read by ``recorded_error_sentence``, the reading the unified metrics decide
+        on: the scanner's own reports in the order ``recorded_error`` reads them,
+        each one's own ``errors`` and then the ``errors`` of its ``raw_results``,
+        which is where the executor also leaves the failure it recorded. The
+        metrics leave an ERROR row's ``error_reason`` empty when this has a
+        sentence, so the counts do not take its place; the report and the row agree
+        on which of the two a scanner has.
         """
-        reports = self.model.additional_reports.get(scanner_name)
-        if not isinstance(reports, dict):
-            return None
-        for report in reports.values():
-            if not isinstance(report, dict):
-                continue
-            raw_results = report.get("raw_results")
-            for errors in (
-                report.get("errors"),
-                raw_results.get("errors") if isinstance(raw_results, dict) else None,
-            ):
-                if not isinstance(errors, list):
-                    continue
-                for error in errors:
-                    if isinstance(error, str):
-                        reason = short_error_reason(error)
-                        if reason:
-                            return reason
-        return None
+        return recorded_error_sentence(self.model, scanner_name)
 
     def get_scan_summary(self) -> Dict[str, Any]:
         """Describe the outcome for people without changing the scan's exit policy.
@@ -1271,51 +1261,9 @@ def _snippet_text(snippet: Any) -> str | None:
     return None
 
 
-#: The prefix the scan phase gives a scanner's failure: ``Failed to execute
-#: <scanner> scanner on <target>: `` and, for a failure of the scan itself,
-#: ``<ScannerClass> scan failed: ``.
-_FAILURE_PREFIX = re.compile(r"\AFailed to execute .+? scanner on [^:]+: ")
-_SCAN_FAILED_PREFIX = re.compile(r"\A[A-Za-z0-9_]+ scan failed: ")
-#: A parenthetical aside, innermost first; asides hold paths, exit-code details
-#: and the launch command.
-_ASIDE = re.compile(r"\s*\([^()]*\)")
-#: Where the first sentence ends: a full stop, a colon or a semicolon before a
-#: space, or the end of the text.
-_SENTENCE_END = re.compile(r"[.:;](?:\s|\Z)|\Z")
 #: The longest reason shown; a longer first sentence is not a short reason. The
-#: limit, and the rest of the check below (one printable line, no local path), are
-#: the ones a scanner's recorded reason is held to (``utils/short_reason.py``).
+#: limit, and the rest of the check ``short_error_reason`` makes (one printable
+#: line, no local path), are the ones a scanner's recorded reason is held to
+#: (``utils/short_reason.py``, where ``short_error_reason`` lives since the unified
+#: metrics read it too; it is imported above and so still comes from this module).
 SHORT_ERROR_REASON_LIMIT = SHORT_REASON_LIMIT
-
-
-def short_error_reason(error: str) -> Optional[str]:
-    """The first sentence of a scanner's recorded failure, for a report, or None.
-
-    ``Failed to execute checkov scanner on source: CheckovScanner scan failed:
-    its tool (launched through ...) exited with code 2, which this scanner does
-    not accept as a completed run, so its results file is not graded (exit code
-    2: ...). Stderr not read: ...`` gives ``its tool exited with code 2, which
-    this scanner does not accept as a completed run, so its results file is not
-    graded``.
-
-    Only a message that opens with the scan phase's prefix is read. The asides in
-    parentheses are removed, and the text is cut at the end of its first
-    sentence, so the stderr, the log paths and validation details that follow are
-    never shown. A result that is not a short reason (:func:`is_short_reason`:
-    empty, longer than :data:`SHORT_ERROR_REASON_LIMIT`, more than one printable
-    line, or something that looks like a local path) or still holds a parenthesis
-    gives None: the report then names the scanner in the table only, as it did
-    before.
-    """
-    match = _FAILURE_PREFIX.match(error)
-    if match is None:
-        return None
-    body = _SCAN_FAILED_PREFIX.sub("", error[match.end() :], count=1)
-    previous = None
-    while previous != body:
-        previous, body = body, _ASIDE.sub("", body)
-    end = _SENTENCE_END.search(body)
-    sentence = body[: end.start() if end else len(body)].strip()
-    if not is_short_reason(sentence) or "(" in sentence or ")" in sentence:
-        return None
-    return sentence

@@ -136,6 +136,21 @@ def test_the_reporter_uses_the_same_limit_and_check():
     )
 
 
+def test_the_first_sentence_reading_is_one_function_whoever_reads_it():
+    """The unified metrics read the first sentence of an error too, to know whether
+    one is there to show, and ``core`` cannot import a report plugin: the reading
+    lives here, the metrics and the reporter both read this one, and the reporter
+    still has it under the name it was written with."""
+    from automated_security_helper.core import unified_metrics
+    from automated_security_helper.plugin_modules.ash_builtin.reporters import (
+        report_content_emitter,
+    )
+    from automated_security_helper.utils import short_reason
+
+    assert report_content_emitter.short_error_reason is short_reason.short_error_reason
+    assert unified_metrics.short_error_reason is short_reason.short_error_reason
+
+
 @pytest.mark.parametrize(
     "sentence, why",
     [

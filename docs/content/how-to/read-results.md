@@ -235,14 +235,16 @@ the configured policy allows, targets no rule was evaluated against, and a scann
 could not be built. Some scanners also name the failures of their own checks, such as a
 config file that does not exist, an ignore file in the scanned tree, an exclusion the
 tool cannot express, or a scan that read none of the files it was given. A sentence built
-from a value says the count or the option name and never the path. When only the counts
-decide the status, the sentence says so, as in `it failed on 2 of its 3 target(s)`.
+from a value says the count or the option name and never the path. When the counts
+decide the status and no recorded error has a sentence to show, the sentence says so, as
+in `it failed on 2 of its 3 target(s)`.
 
 An `ERROR` row has a `null` `error_reason` when nothing recorded a reason, as in a
 results file written before ASH recorded them, or when a scanner's error gave none. The
-report then lists the first sentence of the scanner's recorded failure instead, and a
-scanner with neither is not listed. A reason or sentence that would show a path, or is
-longer than 200 characters, is not listed. A scanner in `ERROR` only because its content
+report then lists the first sentence of the scanner's recorded failure instead, and that
+sentence is listed over one made from the scanner's counts: how many targets failed does
+not say what failed them. A scanner with neither is not listed. A reason or sentence
+that would show a path, or is longer than 200 characters, is not listed. A scanner in `ERROR` only because its content
 database is stale is reported under its own heading.
 
 To read the results from a script:

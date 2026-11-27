@@ -19,6 +19,9 @@ import pytest
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import ScannerStatus
+from automated_security_helper.core.unified_metrics import (
+    populate_metrics_from_unified_source,
+)
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerStatusInfo,
@@ -164,6 +167,31 @@ def _beside_a_recorded_reason(model: AshAggregatedResults) -> AshAggregatedResul
 
 #: What the second scanner of ``_beside_a_recorded_reason`` is listed with.
 BESIDE = ("ERROR", RECORDED_REASON)
+
+#: What a report says for a scanner that failed on 1 of its 3 targets and recorded no
+#: reason, when no error gives a sentence to show.
+COUNTED = "it failed on 1 of its 3 target(s)"
+
+
+def _counted(error: str = CHECKOV_EXIT, home: str = "errors") -> AshAggregatedResults:
+    """A scan in which checkov ended in ERROR with *error*, after it counted 1 of 3
+    targets failed: how a scan() that raised after a failed target leaves its report.
+
+    ``home`` is where the error is recorded: the report's own ``errors`` (the scan
+    phase's, for a scanner it could not build) or the ``errors`` of its
+    ``raw_results``, the failure dict the executor writes for a scan that raised.
+    """
+    model = _model(checkov=[error] if home == "errors" else [])
+    report = model.additional_reports["checkov"]["source"]
+    report.update(targets_attempted=3, targets_failed=1)
+    if home == "raw_results":
+        report["raw_results"] = {
+            "status": "failed",
+            "errors": [error],
+            "exception": "the scan raised",
+        }
+    model._flat_cache = None
+    return model
 
 
 class TestTheShortReason:
@@ -358,6 +386,85 @@ class TestTheEmitterListsTheRecordedReason:
         )
 
         assert _entries(_beside_a_recorded_reason(_recorded())) == {"trivy": BESIDE}
+
+
+class TestASentenceThatSaysWhyOutranksTheCounts:
+    """A scanner that raised after it counted a failed target is listed with its error.
+
+    The counts of a scan that raised read as a partial loss, and the first sentence of
+    its error says what failed. The reports list the sentence, and the row records no
+    reason made from the counts beside it, so the row and the reports agree.
+    """
+
+    @pytest.mark.parametrize("home", ["errors", "raw_results"])
+    def test_the_emitter_lists_the_first_sentence(self, home):
+        assert _entries(_counted(home=home)) == {"checkov": ("ERROR", CHECKOV_REASON)}
+
+    @pytest.mark.parametrize("home", ["errors", "raw_results"])
+    def test_the_row_records_no_reason_beside_it(self, home):
+        rebuilt = populate_metrics_from_unified_source(_counted(home=home))
+
+        row = rebuilt.scanner_results["checkov"]
+
+        assert row.error_reason is None
+        assert row.error_reason_code is None
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param("something the scan phase did not write", id="no prefix"),
+            pytest.param(FAILED + "could not read /etc/hosts", id="a path"),
+        ],
+    )
+    def test_control_an_error_with_no_sentence_to_show_leaves_the_counts_listed(
+        self, error
+    ):
+        assert _entries(_counted(error)) == {"checkov": ("ERROR", COUNTED)}
+
+    def test_the_first_sentence_is_read_from_the_report_read_first(self):
+        """The report with no scan phase decision, then the source tree's, then any
+        other, as the unified metrics read a scanner's reports; not the order a results
+        file happened to write them in."""
+        model = _model(checkov=[])
+        model.additional_reports["checkov"] = {
+            "converted": {
+                "scanner_name": "checkov",
+                "status": "ERROR",
+                "errors": [GITLEAKS_SARIF],
+            },
+            "source": {
+                "scanner_name": "checkov",
+                "status": "ERROR",
+                "errors": [CHECKOV_EXIT],
+            },
+        }
+        model._flat_cache = None
+
+        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+
+    def test_text(self, test_plugin_context):
+        text = TextReporter(context=test_plugin_context).report(_counted())
+
+        assert f"- checkov (ERROR): {CHECKOV_REASON}" in text
+        assert COUNTED not in text
+
+    @pytest.mark.parametrize("compact", [False, True])
+    def test_markdown(self, test_plugin_context, compact):
+        reporter = MarkdownReporter(context=test_plugin_context)
+        reporter.config = MarkdownReporterConfig.model_validate(
+            {"options": {"compact": compact}}
+        )
+
+        markdown = reporter.report(_counted())
+
+        assert f"- checkov (ERROR): {CHECKOV_REASON}" in markdown
+        assert COUNTED not in markdown
+
+    def test_html(self, test_plugin_context):
+        page = HtmlReporter(context=test_plugin_context).report(_counted())
+
+        assert f"<strong>checkov</strong> (ERROR): {CHECKOV_REASON}" in page
+        assert COUNTED not in page
 
 
 class TestTheFirstSentenceIsOneLine:

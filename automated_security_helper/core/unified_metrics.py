@@ -35,7 +35,7 @@ import logging
 import math
 import weakref
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 from pydantic import ConfigDict, Field, computed_field
 
 from automated_security_helper.models.asharp_model import (
@@ -52,6 +52,7 @@ from automated_security_helper.core.exceptions import DEFAULT_SENTENCES, ReasonC
 from automated_security_helper.core.status_order import grade as grade_status
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.short_reason import short_error_reason
 
 
 class ScannerMetrics(ScannerSeverityCount):
@@ -422,12 +423,10 @@ def _trees_missing_while_another_ran(reports: dict[Any, Any]) -> list[str]:
     return missing if 0 < len(missing) < len(trees) else []
 
 
-def recorded_error(
-    asharp_model: AshAggregatedResults,
-    scanner_name: str,
-    values: Iterable[str] = (),
-) -> str | None:
-    """The first error *scanner_name*'s per-target reports recorded, or None.
+def _recorded_error_texts(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> Iterator[str]:
+    """Each error *scanner_name*'s per-target reports recorded, in the order they are read.
 
     An ERROR row has no reason field. The cause is on a report, in one of two
     places: the scan phase passes its errors to the container, so a scanner that
@@ -438,15 +437,8 @@ def recorded_error(
     report's own come first, then ``raw_results``. Only messages are read: the
     ``exception`` and ``stack_trace`` beside them stay in the results file.
     Reports are read in ``_report_order``, the same order ``recorded_reason``
-    reads in.
-
-    The message is returned redacted with *values*, the config's environment
-    values (``utils.error_text.config_environment_values``): it is shown where
-    env values are never written, and a recorded error can name an option the
-    config read from the environment.
+    reads in, and only the scanner's own (``own_target_reports``).
     """
-    from automated_security_helper.utils.error_text import text_without_values
-
     reports = own_target_reports(asharp_model, scanner_name)
     for key in sorted(reports, key=_report_order):
         report = reports[key]
@@ -459,8 +451,51 @@ def recorded_error(
                 continue
             for error in errors:
                 if isinstance(error, str) and error:
-                    return text_without_values(error, values)
-    return None
+                    yield error
+
+
+def recorded_error(
+    asharp_model: AshAggregatedResults,
+    scanner_name: str,
+    values: Iterable[str] = (),
+) -> str | None:
+    """The first error *scanner_name*'s per-target reports recorded, or None.
+
+    Read as ``_recorded_error_texts`` reads them.
+
+    The message is returned redacted with *values*, the config's environment
+    values (``utils.error_text.config_environment_values``): it is shown where
+    env values are never written, and a recorded error can name an option the
+    config read from the environment.
+    """
+    from automated_security_helper.utils.error_text import text_without_values
+
+    error = next(_recorded_error_texts(asharp_model, scanner_name), None)
+    return None if error is None else text_without_values(error, values)
+
+
+def recorded_error_sentence(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> str | None:
+    """The first sentence the reports can show for *scanner_name*'s recorded errors, or None.
+
+    What a report lists for an ERROR scanner whose cause nobody recorded as a
+    reason: the first error, in the order ``_recorded_error_texts`` reads them,
+    that opens with the scan phase's failure prefix and has a first sentence fit to
+    show (``utils.short_reason.short_error_reason``: one short printable line with
+    no path in it, cut where the sentence ends). None when no error has one.
+
+    The row decides on it as well as the report (``get_unified_scanner_metrics``):
+    an ERROR row records no reason made from its counts while an error says why in a
+    sentence, so the row and the report cannot disagree on which of the two a
+    scanner has. The sentence is not redacted with the config's environment
+    values, as the report reads it.
+    """
+    sentences = (
+        short_error_reason(error)
+        for error in _recorded_error_texts(asharp_model, scanner_name)
+    )
+    return next((sentence for sentence in sentences if sentence), None)
 
 
 def _reason_pair(holder: object) -> tuple[str, str] | None:
@@ -533,6 +568,10 @@ def derived_error_reason(
     (nothing says it ran), and one that failed on some of the targets it attempted.
     Only the counts are in the sentence, never the names of the targets, which are
     paths of the scanned tree.
+
+    The caller asks only when no error says why in a sentence a report can show
+    (``recorded_error_sentence``): a count says how many targets failed, and an
+    error says what failed them, which is the cause.
     """
     if unusable_counters:
         return (
@@ -988,21 +1027,30 @@ def get_unified_scanner_metrics(
                     skipped_reason = "skipped; no reason was recorded"
 
         # An ERROR row says why when something recorded it: the row, then the
-        # per-target reports, then what the counts and statuses it was graded from say
-        # (``derived_error_reason``). Every other status has none, so a row that
-        # stops being ERROR drops it when it is rebuilt.
+        # per-target reports. An error nobody gave a reason for that opens with a
+        # sentence the reports can show (``recorded_error_sentence``) records none
+        # here, and the reports list that sentence: what the counts say ("it failed
+        # on 1 of its 3 targets") is only part of a scan that raised, and put in
+        # its place it hid the cause. What the counts and statuses the row was
+        # graded from say (``derived_error_reason``) is the reason of the ERRORs
+        # the statistics alone decide, or whose errors say nothing a report can
+        # show. Every other status has none, so a row that stops being ERROR drops
+        # it when it is rebuilt.
         error_reason = None
         error_reason_code = None
         if status == ScannerStatus.ERROR.value:
-            reason = recorded_error_reason(
-                asharp_model, scanner_name
-            ) or derived_error_reason(
-                asharp_model,
-                scanner_name,
-                unusable_counters=unusable_counters,
-                targets_attempted=scanner_targets_attempted,
-                targets_failed=scanner_targets_failed,
-            )
+            reason = recorded_error_reason(asharp_model, scanner_name)
+            if (
+                reason is None
+                and recorded_error_sentence(asharp_model, scanner_name) is None
+            ):
+                reason = derived_error_reason(
+                    asharp_model,
+                    scanner_name,
+                    unusable_counters=unusable_counters,
+                    targets_attempted=scanner_targets_attempted,
+                    targets_failed=scanner_targets_failed,
+                )
             if reason is not None:
                 error_reason_code, error_reason = reason
 

@@ -43,6 +43,16 @@ AshAggregatedResults.model_rebuild()
 TIMED_OUT = ("timed_out", "it timed out after 300 s and was killed")
 NO_RESULT = ("no_result", "it returned no result")
 
+#: What the scan phase records for a scan() that raised, as the failure handler
+#: writes it: its prefix, then the scanner's own text, asides and all.
+RAISED = (
+    "Failed to execute example-tool scanner on source: ExampleScanner scan failed: "
+    "its output is not JSON (decoder said: Expecting value). Stderr not read: see "
+    "the log for details"
+)
+#: The first sentence of RAISED, which is what the reports show for it.
+RAISED_SENTENCE = "its output is not JSON"
+
 
 def _report(status, reason=None, **extra) -> dict:
     """One per-target report, as ``ScanResultProcessor`` dumps a container."""
@@ -51,6 +61,27 @@ def _report(status, reason=None, **extra) -> dict:
         report["error_reason_code"], report["error_reason"] = reason
     report.update(extra)
     return report
+
+
+def _raised_report(
+    home: str = "raw_results", error: str = RAISED, reason=None, **extra
+) -> dict:
+    """The report of a scan() that raised, with whatever counts it kept first.
+
+    The executor writes the failure into ``raw_results`` (its ``errors`` lead with
+    the scan phase's own message, and the report's own ``errors`` stay unset);
+    ``home="errors"`` puts the message in the report's own, where the scan phase
+    writes the error of a scanner that could not be built.
+    """
+    if home == "raw_results":
+        extra["raw_results"] = {
+            "status": "failed",
+            "errors": [error],
+            "exception": "the scan raised",
+        }
+    else:
+        extra["errors"] = [error]
+    return _report(ScannerStatus.ERROR, reason, **extra)
 
 
 def _model(reports: dict, row: ScannerTargetStatusInfo | dict | None = None):
@@ -271,8 +302,145 @@ class TestTheErrorsOnlyTheStatisticsDecide:
 
         metrics = _metrics(_model({"source": report}))
 
-        assert "secret-name" not in (metrics.error_reason or "")
-        assert "/" not in (metrics.error_reason or "")
+        assert metrics.error_reason == "it failed on 2 of its 2 target(s)"
+        assert "secret-name" not in metrics.error_reason
+        assert "/" not in metrics.error_reason
+
+
+class TestASentenceThatSaysWhyOutranksTheCounts:
+    """What failed the targets is the row's cause; how many failed is not.
+
+    A scan() that raised after it counted a failed target leaves counts that read
+    as a partial loss, and an error that says what went wrong. The reports list the
+    error's first sentence for an ERROR nobody gave a reason, and the row must not
+    record a sentence made from the counts in its place, or the row and the report
+    would disagree and the cause would be hidden. The counts stay the reason of an
+    ERROR the statistics alone decide, and of one whose errors say nothing a report
+    can show.
+    """
+
+    @pytest.mark.parametrize("home", ["raw_results", "errors"])
+    def test_the_counts_do_not_take_the_place_of_the_errors_sentence(self, home):
+        results = _model(
+            {"source": _raised_report(home, targets_attempted=3, targets_failed=1)}
+        )
+
+        metrics = _metrics(results)
+
+        assert metrics.status == "ERROR"
+        assert (metrics.error_reason_code, metrics.error_reason) == (None, None)
+        sentence = unified_metrics.recorded_error_sentence(results, "example-tool")
+        assert sentence == RAISED_SENTENCE
+
+    @pytest.mark.parametrize(
+        "report",
+        [
+            pytest.param(
+                lambda: _raised_report(targets_attempted=3, targets_failed=1),
+                id="it failed on some of its targets",
+            ),
+            pytest.param(
+                lambda: _raised_report(targets_attempted="3", targets_failed=0),
+                id="its counters cannot be read",
+            ),
+            pytest.param(
+                lambda: {"scanner_name": "example-tool", "errors": [RAISED]},
+                id="nothing gives it a status",
+            ),
+        ],
+    )
+    def test_no_reason_made_from_counts_or_statuses_is_recorded_beside_it(self, report):
+        results = _model({"source": report()})
+
+        metrics = _metrics(results)
+
+        assert metrics.status == "ERROR"
+        assert (metrics.error_reason_code, metrics.error_reason) == (None, None)
+
+    def test_the_rebuilt_row_records_none_and_says_so_twice(self):
+        report = _raised_report(targets_attempted=3, targets_failed=1)
+        results = _model({"source": report})
+
+        first = _row(results)
+        first_dump = first.model_dump(exclude_unset=True)
+        second_dump = _row(results).model_dump(exclude_unset=True)
+
+        assert first.status == ScannerStatus.ERROR
+        assert (first.error_reason_code, first.error_reason) == (None, None)
+        assert "error_reason" not in first_dump
+        assert "error_reason_code" not in first_dump
+        assert second_dump == first_dump
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                "templates/x.yaml: could not be read", id="not the scan phase's text"
+            ),
+            pytest.param(
+                "Failed to execute example-tool scanner on source: could not read "
+                "/home/someone/x.yaml",
+                id="a sentence that names a path",
+            ),
+            pytest.param(
+                "Failed to execute example-tool scanner on source: " + "y" * 201,
+                id="a sentence over the limit",
+            ),
+        ],
+    )
+    def test_control_an_error_with_no_sentence_to_show_leaves_the_counts(self, error):
+        """The sentence is held back, not the counts: they stay the cause that is left."""
+        results = _model(
+            {
+                "source": _raised_report(
+                    error=error, targets_attempted=3, targets_failed=1
+                )
+            }
+        )
+
+        metrics = _metrics(results)
+
+        assert metrics.error_reason_code == ReasonCode.TARGETS_FAILED
+        assert metrics.error_reason == "it failed on 1 of its 3 target(s)"
+        assert unified_metrics.recorded_error_sentence(results, "example-tool") is None
+
+    def test_a_recorded_reason_outranks_the_sentence(self):
+        report = _raised_report(reason=TIMED_OUT, targets_attempted=3, targets_failed=1)
+
+        metrics = _metrics(_model({"source": report}))
+
+        assert (metrics.error_reason_code, metrics.error_reason) == TIMED_OUT
+
+    def test_the_sentence_is_read_in_the_order_a_reason_is_looked_up_in(self):
+        second = RAISED.replace(RAISED_SENTENCE, "its report is empty")
+        results = _model(
+            {
+                "converted": _raised_report(error=second),
+                "source": _raised_report(),
+            }
+        )
+
+        sentence = unified_metrics.recorded_error_sentence(results, "example-tool")
+        assert sentence == RAISED_SENTENCE
+
+    def test_a_report_another_scanner_filed_under_it_is_not_read(self):
+        foreign = _raised_report()
+        foreign["scanner_name"] = "another-tool"
+
+        results = _model({"source": foreign})
+
+        assert unified_metrics.recorded_error_sentence(results, "example-tool") is None
+
+    def test_control_without_the_sentence_the_counts_are_the_reason(self, monkeypatch):
+        """The row cases above rest on the sentence: take it away and the counts speak."""
+        monkeypatch.setattr(
+            unified_metrics, "recorded_error_sentence", lambda *args, **kwargs: None
+        )
+        report = _raised_report(targets_attempted=3, targets_failed=1)
+
+        metrics = _metrics(_model({"source": report}))
+
+        assert metrics.error_reason_code == ReasonCode.TARGETS_FAILED
 
 
 class TestTheRebuiltRow:
