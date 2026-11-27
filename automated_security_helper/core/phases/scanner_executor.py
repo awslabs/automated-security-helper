@@ -152,6 +152,12 @@ _TERMINAL_SCANNER_STATUSES = frozenset(
 _COMPLETED_RESULT_STATUSES = frozenset({"passed", "completed", "success", "ok"})
 
 
+#: The codes of a refusal to grade the result a scan returned. A run whose tool was
+#: killed (a recorded timeout) can return such a result, and the timeout, not the
+#: result, is then why the row is ERROR.
+_RESULT_REFUSAL_CODES = frozenset({ReasonCode.RESULT_UNGRADABLE, ReasonCode.RUN_FAILED})
+
+
 def _file_reason(container: ScanResultsContainer, reason: FailureReason) -> None:
     """File *reason* on *container* as why its row is ERROR; the first one filed stays.
 
@@ -2922,6 +2928,13 @@ class ScannerExecutor:
                         )
                         if container.status != ScannerStatus.MISSING:
                             container.status = ScannerStatus.ERROR
+                            if container.error_reason_code in _RESULT_REFUSAL_CODES:
+                                # The refusal to grade was filed first, but it is
+                                # what the kill left behind: a tool that was
+                                # killed has no result that can be graded. The
+                                # timeout is the cause, so it takes the place.
+                                container.error_reason_code = None
+                                container.error_reason = None
                             _file_reason(
                                 container,
                                 _timeout_reason(
