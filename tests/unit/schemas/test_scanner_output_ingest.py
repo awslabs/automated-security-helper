@@ -9,9 +9,12 @@ kind it does not define) is refused with the model's own error, as before.
 
 The cases are the refusals measured against the pinned models, one out-of-spec
 element each, started from a real capture of gitleaks or zizmor (SARIF) and of
-syft (CycloneDX). Each case checks the report validates, every other result is
-equal to a plain validation of the unmutated capture, the repaired result keeps
-what identifies it, and the record names the kind and the place, never a value.
+syft (CycloneDX). Each case says what the repair owes: the nodes it takes out or
+rewrites, by their place in the mutated document. The test makes exactly those
+changes by hand and checks the repaired report equals the report that document
+validates to, so a repair that gives up more than it notes, or writes another
+value, fails. Every other result must equal a plain validation of the unmutated
+capture, and the record must name the kind and the place, never a value.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ import copy
 import json
 import pickle
 from pathlib import Path
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Iterable, NamedTuple
 from unittest import mock
 
 import pytest
@@ -42,7 +45,9 @@ pytestmark = pytest.mark.unit
 
 _DATA = Path(__file__).resolve().parents[2] / "test_data"
 
-#: One seed for every property test of the suite, so a run is the same run.
+#: One seed for the suite's property test, so a run is the same run. An explicit
+#: seed wins over ``derandomize`` and, unlike it, does not move when the test body
+#: is edited.
 SUITE_SEED = 20261126
 
 
@@ -56,10 +61,31 @@ _BASES = {
 }
 _SYFT = _load("snapshot_fixture/scanner_outputs/syft.cdx.json")
 
-_R0 = "runs/0/results/0"
-_REGION = f"{_R0}/locations/0/physicalLocation/region"
-_RULE0 = "runs/0/tool/driver/rules/0"
-_DRIVER = "runs/0/tool/driver"
+
+# --------------------------------------------------------------------------- #
+# Places in a document, and the pointers the record writes for them
+# --------------------------------------------------------------------------- #
+
+
+class Key(str):
+    """A key the tool chose (a property name, a fingerprint name, a base id).
+
+    A pointer writes it ``*``, so a record never holds a name the tool made up.
+    """
+
+    __slots__ = ()
+
+
+def _pointer(path: tuple) -> str:
+    """The pointer the record writes for *path*: list indices and the schema's own
+    names as they are, a key the tool chose as ``*``."""
+    return "/".join("*" if isinstance(token, Key) else str(token) for token in path)
+
+
+_R0 = ("runs", 0, "results", 0)
+_REGION = (*_R0, "locations", 0, "physicalLocation", "region")
+_RULE0 = ("runs", 0, "tool", "driver", "rules", 0)
+_DRIVER = ("runs", 0, "tool", "driver")
 
 
 # --------------------------------------------------------------------------- #
@@ -117,6 +143,60 @@ def _identity(result: Any) -> tuple:
 
 
 # --------------------------------------------------------------------------- #
+# What a repair owes, and the repair made by hand
+# --------------------------------------------------------------------------- #
+
+
+class Change(NamedTuple):
+    """One repair a case owes: take the node at *path* out, or write *text* there."""
+
+    action: str
+    code: str
+    #: Where the node is in the mutated document, as the tool wrote it.
+    path: tuple
+    text: str | None = None
+
+
+def _dropped(code: str, *path: Any) -> Change:
+    return Change("dropped", code, path)
+
+
+def _rewritten(code: str, text: str, *path: Any) -> Change:
+    return Change("rewritten", code, path, text)
+
+
+def _notes_of(changes: Iterable[Change]) -> list[tuple[str, str, str]]:
+    """What the record must name for *changes*, in order."""
+    return sorted((c.action, c.code, _pointer(c.path)) for c in changes)
+
+
+def _order(path: tuple) -> tuple:
+    return tuple((0, token) if isinstance(token, int) else (1, token) for token in path)
+
+
+def repaired_by_hand(doc: Any, changes: Iterable[Change]) -> Any:
+    """*doc* with each change made where it says and nothing else: the repair a case
+    owes, made without the module under test."""
+    out = copy.deepcopy(doc)
+    for change in sorted(changes, key=lambda item: _order(item.path), reverse=True):
+        parent = out
+        for token in change.path[:-1]:
+            parent = parent[token]
+        if change.action == "dropped":
+            del parent[change.path[-1]]
+        else:
+            parent[change.path[-1]] = change.text
+    return out
+
+
+def _errors_of(error: ValidationError) -> list[tuple[tuple, str]]:
+    """Where each error is and what kind it is."""
+    return [
+        (tuple(item["loc"]), item["type"]) for item in error.errors(include_input=False)
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # The repair cases
 # --------------------------------------------------------------------------- #
 
@@ -124,26 +204,14 @@ def _identity(result: Any) -> tuple:
 class Case(NamedTuple):
     base: str
     mutate: Callable[[dict], None]
-    #: (action, code, pointer) for each change the record must name, in any order.
-    notes: tuple
-    #: Results the mutation touched; every other result must equal the capture's.
-    touched: tuple = (0,)
-    #: Whether the repair rewrites a field that is part of the finding's identity
-    #: (a number written as text), so only that result's identity may differ.
-    rewrites_identity: bool = False
+    #: What the repair owes. The results these touch are compared with the repair
+    #: made by hand; every other result must equal the capture's.
+    changes: tuple
     check: Callable[[SarifReport], None] | None = None
 
 
-def _case(id_: str, base: str, mutate: Callable, *notes: tuple, **extra: Any) -> Any:
-    return pytest.param(Case(base, mutate, notes, **extra), id=id_)
-
-
-def _dropped(code: str, pointer: str) -> tuple:
-    return ("dropped", code, pointer)
-
-
-def _rewritten(code: str, pointer: str) -> tuple:
-    return ("rewritten", code, pointer)
+def _case(id_: str, base: str, mutate: Callable, *changes: Change, **extra: Any) -> Any:
+    return pytest.param(Case(base, mutate, changes, **extra), id=id_)
 
 
 def _result_is(
@@ -172,6 +240,18 @@ def _only_the_good_work_item_stays(result: Any) -> None:
     assert [str(u) for u in result.workItemUris] == ["https://ok.example/1"]
 
 
+def _rule_id_is_text(result: Any) -> None:
+    assert result.ruleId == "5"
+
+
+def _message_is_text(result: Any) -> None:
+    assert result.message.root.text == "5"
+
+
+def _uri_is_text(result: Any) -> None:
+    assert result.locations[0].physicalLocation.root.artifactLocation.uri == "123"
+
+
 _REPAIRS = [
     # R: a region or a line out of range. The finding stays, without its lines.
     *[
@@ -179,7 +259,7 @@ _REPAIRS = [
             f"startLine {value!r}",
             "gitleaks",
             _put(_region, "startLine", value),
-            _dropped("region_line_unreadable", _REGION),
+            _dropped("region_line_unreadable", *_REGION),
         )
         for value in (0, -1, "x", 1.5)
     ],
@@ -188,7 +268,7 @@ _REPAIRS = [
             f"region {field} {value!r}",
             "gitleaks",
             _put(_region, field, value),
-            _dropped("region_field_unreadable", f"{_REGION}/{field}"),
+            _dropped("region_field_unreadable", *_REGION, field),
         )
         for field, value in (
             ("startColumn", 0),
@@ -203,13 +283,13 @@ _REPAIRS = [
         "region with a key the spec does not define",
         "gitleaks",
         _put(_region, "foo", 1),
-        _dropped("unknown_key", f"{_REGION}/*"),
+        _dropped("unknown_key", *_REGION, Key("foo")),
     ),
     _case(
         "region that is a list",
         "gitleaks",
         _put(_physical, "region", []),
-        _dropped("region_field_unreadable", _REGION),
+        _dropped("region_field_unreadable", *_REGION),
     ),
     _case(
         "related location with a region at line 0 keeps the related location",
@@ -228,7 +308,11 @@ _REPAIRS = [
         ),
         _dropped(
             "region_line_unreadable",
-            f"{_R0}/relatedLocations/0/physicalLocation/region",
+            *_R0,
+            "relatedLocations",
+            0,
+            "physicalLocation",
+            "region",
         ),
         check=_result_is(0, _has_one_related_location),
     ),
@@ -238,7 +322,16 @@ _REPAIRS = [
         lambda doc: _flow_region(doc).__setitem__("startLine", 0),
         _dropped(
             "region_line_unreadable",
-            f"{_R0}/codeFlows/0/threadFlows/0/locations/0/location/physicalLocation/region",
+            *_R0,
+            "codeFlows",
+            0,
+            "threadFlows",
+            0,
+            "locations",
+            0,
+            "location",
+            "physicalLocation",
+            "region",
         ),
     ),
     _case(
@@ -257,7 +350,7 @@ _REPAIRS = [
                 }
             ],
         ),
-        _dropped("fix_unreadable", f"{_R0}/fixes/0"),
+        _dropped("fix_unreadable", *_R0, "fixes", 0),
         check=_result_is(0, _has_no_fix),
     ),
     # Result fields that are not part of the finding's identity.
@@ -266,7 +359,7 @@ _REPAIRS = [
             f"result {field} {value!r}",
             "gitleaks",
             _put(_result, field, value),
-            _dropped(f"{field}_unreadable", f"{_R0}/{field}"),
+            _dropped(f"{field}_unreadable", *_R0, field),
         )
         for field, value in (
             ("rank", 101),
@@ -282,60 +375,62 @@ _REPAIRS = [
         "one work item uri that is not a URL",
         "gitleaks",
         _put(_result, "workItemUris", ["TICKET-1", "https://ok.example/1"]),
-        _dropped("workItemUris_entry_unreadable", f"{_R0}/workItemUris/0"),
+        _dropped("workItemUris_entry_unreadable", *_R0, "workItemUris", 0),
         check=_result_is(0, _only_the_good_work_item_stays),
     ),
     _case(
         "code flow with no thread flows",
         "zizmor",
         _put(_result, "codeFlows", [{"threadFlows": []}]),
-        _dropped("codeFlows_entry_unreadable", f"{_R0}/codeFlows/0"),
+        _dropped("codeFlows_entry_unreadable", *_R0, "codeFlows", 0),
     ),
     _case(
         "related locations that is not a list",
         "gitleaks",
         _put(_result, "relatedLocations", {}),
-        _dropped("relatedLocations_unreadable", f"{_R0}/relatedLocations"),
+        _dropped("relatedLocations_unreadable", *_R0, "relatedLocations"),
     ),
     # Maps and bags: one entry costs only itself.
     _case(
         "tags that is not a list",
         "gitleaks",
         _put(_result, "properties", {"tags": "a"}),
-        _dropped("property_unreadable", f"{_R0}/properties/tags"),
+        _dropped("property_unreadable", *_R0, "properties", "tags"),
     ),
     _case(
         "tags with a number and a null",
         "gitleaks",
         _put(_result, "properties", {"tags": [1, None, "a"]}),
-        _rewritten("number_as_text", f"{_R0}/properties/tags/0"),
-        _dropped("tag_not_text", f"{_R0}/properties/tags/1"),
+        _rewritten("number_as_text", "1", *_R0, "properties", "tags", 0),
+        _dropped("tag_not_text", *_R0, "properties", "tags", 1),
         check=_result_is(0, _tags_are_text),
     ),
     _case(
         "property key that is not valid Unicode",
         "gitleaks",
         _put(_result, "properties", {chr(0xDCE9): 1, "kept": 2}),
-        _dropped("property_unreadable", f"{_R0}/properties/*"),
+        _dropped("property_unreadable", *_R0, "properties", Key(chr(0xDCE9))),
     ),
     _case(
         "properties that is not an object",
         "gitleaks",
         _put(_result, "properties", "x"),
-        _dropped("property_unreadable", f"{_R0}/properties"),
+        _dropped("property_unreadable", *_R0, "properties"),
     ),
     _case(
         "fingerprint that is a number",
         "gitleaks",
         _put(_result, "partialFingerprints", {"/home/u/x": 1}),
-        _rewritten("number_as_text", f"{_R0}/partialFingerprints/*"),
+        _rewritten(
+            "number_as_text", "1", *_R0, "partialFingerprints", Key("/home/u/x")
+        ),
         check=_result_is(0, _fingerprint_is_text),
     ),
     _case(
         "fingerprint that is a list",
         "gitleaks",
         _put(_result, "fingerprints", {"k": ["x"]}),
-        _dropped("fingerprint_unreadable", f"{_R0}/fingerprints/*"),
+        _dropped("fingerprint_unreadable", *_R0, "fingerprints", Key("k")),
     ),
     # Rule descriptors: the field goes, never the id or the default configuration.
     *[
@@ -343,7 +438,7 @@ _REPAIRS = [
             f"rule {field} {value!r}",
             "gitleaks",
             _put(_rule, field, value),
-            _dropped("rule_field_unreadable", f"{_RULE0}/{field}"),
+            _dropped("rule_field_unreadable", *_RULE0, field),
         )
         for field, value in (
             ("helpUri", "N/A"),
@@ -359,16 +454,14 @@ _REPAIRS = [
         "rule tags with a number and a null",
         "gitleaks",
         _put(_rule, "properties", {"tags": [1, None]}),
-        _rewritten("number_as_text", f"{_RULE0}/properties/tags/0"),
-        _dropped("tag_not_text", f"{_RULE0}/properties/tags/1"),
-        touched=(),
+        _rewritten("number_as_text", "1", *_RULE0, "properties", "tags", 0),
+        _dropped("tag_not_text", *_RULE0, "properties", "tags", 1),
     ),
     _case(
         "rule with a key the spec does not define",
         "gitleaks",
         _put(_rule, "foo", 1),
-        _dropped("unknown_key", f"{_RULE0}/*"),
-        touched=(),
+        _dropped("unknown_key", *_RULE0, Key("foo")),
     ),
     # Tool components.
     *[
@@ -376,8 +469,7 @@ _REPAIRS = [
             f"driver {field} {value!r}",
             "gitleaks",
             _put(_driver, field, value),
-            _dropped("tool_field_unreadable", f"{_DRIVER}/{field}"),
-            touched=(),
+            _dropped("tool_field_unreadable", *_DRIVER, field),
         )
         for field, value in (
             ("informationUri", "github.com/x"),
@@ -396,8 +488,9 @@ _REPAIRS = [
             "invocations",
             [{"executionSuccessful": True, "startTimeUtc": "yesterday"}],
         ),
-        _dropped("invocation_field_unreadable", "runs/0/invocations/0/startTimeUtc"),
-        touched=(),
+        _dropped(
+            "invocation_field_unreadable", "runs", 0, "invocations", 0, "startTimeUtc"
+        ),
     ),
     # Run fields.
     *[
@@ -405,8 +498,7 @@ _REPAIRS = [
             f"run {field} {value!r}",
             "gitleaks",
             _put(_run, field, value),
-            _dropped("run_field_unreadable", f"runs/0/{field}"),
-            touched=(),
+            _dropped("run_field_unreadable", "runs", 0, field),
         )
         for field, value in (
             ("columnKind", "bytes"),
@@ -418,8 +510,7 @@ _REPAIRS = [
         "version control provenance with no repository",
         "gitleaks",
         _put(_run, "versionControlProvenance", [{"branch": "main"}]),
-        _dropped("run_field_unreadable", "runs/0/versionControlProvenance/0"),
-        touched=(),
+        _dropped("run_field_unreadable", "runs", 0, "versionControlProvenance", 0),
     ),
     # Lists other parts refer to by index: never the element, only a field.
     *[
@@ -427,8 +518,7 @@ _REPAIRS = [
             f"artifact {field} {value!r}",
             "gitleaks",
             _put(_run, "artifacts", [{"location": {"uri": "a"}, field: value}]),
-            _dropped("indexed_field_unreadable", f"runs/0/artifacts/0/{field}"),
-            touched=(),
+            _dropped("indexed_field_unreadable", "runs", 0, "artifacts", 0, field),
         )
         for field, value in (
             ("roles", ["unknown"]),
@@ -440,92 +530,106 @@ _REPAIRS = [
         "artifact hash that is a number",
         "gitleaks",
         _put(_run, "artifacts", [{"location": {"uri": "a"}, "hashes": {"sha-256": 5}}]),
-        _rewritten("number_as_text", "runs/0/artifacts/0/hashes/*"),
-        touched=(),
+        _rewritten(
+            "number_as_text",
+            "5",
+            "runs",
+            0,
+            "artifacts",
+            0,
+            "hashes",
+            Key("sha-256"),
+        ),
     ),
     # Unknown keys, wherever the model fixes the keys.
     _case(
         "log with a key the spec does not define",
         "gitleaks",
         lambda doc: doc.__setitem__("foo", 1),
-        _dropped("unknown_key", "*"),
-        touched=(),
+        _dropped("unknown_key", Key("foo")),
     ),
     _case(
         "run with a key the spec does not define",
         "gitleaks",
         _put(_run, "foo", 1),
-        _dropped("unknown_key", "runs/0/*"),
-        touched=(),
+        _dropped("unknown_key", "runs", 0, Key("foo")),
     ),
     _case(
         "result with a key the spec does not define",
         "gitleaks",
         _put(_result, "foo", 1),
-        _dropped("unknown_key", f"{_R0}/*"),
+        _dropped("unknown_key", *_R0, Key("foo")),
     ),
     _case(
         "artifact location with a key the spec does not define",
         "gitleaks",
         lambda doc: _physical(doc)["artifactLocation"].__setitem__("foo", 1),
         _dropped(
-            "unknown_key", f"{_R0}/locations/0/physicalLocation/artifactLocation/*"
+            "unknown_key",
+            *_R0,
+            "locations",
+            0,
+            "physicalLocation",
+            "artifactLocation",
+            Key("foo"),
         ),
     ),
     _case(
         "base id with a key the spec does not define",
         "gitleaks",
         _put(_run, "originalUriBaseIds", {"SRC": {"uri": "a", "foo": 1}}),
-        _dropped("unknown_key", "runs/0/originalUriBaseIds/*/*"),
-        touched=(),
+        _dropped(
+            "unknown_key", "runs", 0, "originalUriBaseIds", Key("SRC"), Key("foo")
+        ),
     ),
     # A number where the spec wants text is written as its decimal text.
     _case(
         "rule id that is a number",
         "gitleaks",
         _put(_result, "ruleId", 5),
-        _rewritten("number_as_text", f"{_R0}/ruleId"),
-        rewrites_identity=True,
-        check=_result_is(0, lambda r: r.ruleId == "5" or pytest.fail(r.ruleId)),
+        _rewritten("number_as_text", "5", *_R0, "ruleId"),
+        check=_result_is(0, _rule_id_is_text),
     ),
     _case(
         "message text that is a number",
         "gitleaks",
         lambda doc: _result(doc)["message"].__setitem__("text", 5),
-        _rewritten("number_as_text", f"{_R0}/message/text"),
-        rewrites_identity=True,
-        check=_result_is(
-            0, lambda r: r.message.root.text == "5" or pytest.fail("text")
-        ),
+        _rewritten("number_as_text", "5", *_R0, "message", "text"),
+        check=_result_is(0, _message_is_text),
     ),
     _case(
         "artifact uri that is a number",
         "gitleaks",
         lambda doc: _physical(doc)["artifactLocation"].__setitem__("uri", 123),
         _rewritten(
-            "number_as_text", f"{_R0}/locations/0/physicalLocation/artifactLocation/uri"
+            "number_as_text",
+            "123",
+            *_R0,
+            "locations",
+            0,
+            "physicalLocation",
+            "artifactLocation",
+            "uri",
         ),
-        rewrites_identity=True,
+        check=_result_is(0, _uri_is_text),
     ),
     _case(
         "driver version that is a number",
         "gitleaks",
         _put(_driver, "version", 8),
-        _rewritten("number_as_text", f"{_DRIVER}/version"),
-        touched=(),
+        _rewritten("number_as_text", "8", *_DRIVER, "version"),
     ),
     _case(
         "rule name that is a number",
         "gitleaks",
         _put(_rule, "name", 1.5),
-        _rewritten("number_as_text", f"{_RULE0}/name"),
-        touched=(),
+        _rewritten("number_as_text", "1.5", *_RULE0, "name"),
     ),
     _case(
         "rule reference whose id is a number",
         "zizmor",
         _put(_result, "rule", {"id": 5}),
-        _rewritten("number_as_text", f"{_R0}/rule/id"),
+        _rewritten("number_as_text", "5", *_R0, "rule", "id"),
     ),
     # Several defects in one document: each repaired, each in its own result.
     _case(
@@ -536,22 +640,32 @@ _REPAIRS = [
             _region(doc, 1).__setitem__("startColumn", 0),
             _result(doc, 2).__setitem__("rank", -2),
         ),
-        _dropped("region_line_unreadable", _REGION),
+        _dropped("region_line_unreadable", *_REGION),
         _dropped(
             "region_field_unreadable",
-            "runs/0/results/1/locations/0/physicalLocation/region/startColumn",
+            "runs",
+            0,
+            "results",
+            1,
+            "locations",
+            0,
+            "physicalLocation",
+            "region",
+            "startColumn",
         ),
-        _dropped("rank_unreadable", "runs/0/results/2/rank"),
-        touched=(0, 1, 2),
+        _dropped("rank_unreadable", "runs", 0, "results", 2, "rank"),
     ),
 ]
 
 
-def check_repair_case(case: Case, ingest: Callable = ingest_sarif) -> IngestRecord:
+def check_repair_case(
+    case: Case, ingest: Callable[[Any, IngestRecord], SarifReport] = ingest_sarif
+) -> IngestRecord:
     """Run one repair case through *ingest* and check what a repair owes."""
     capture = _BASES[case.base]
     doc = copy.deepcopy(capture)
     case.mutate(doc)
+    owed = SarifReport.model_validate(repaired_by_hand(doc, case.changes))
     before = json.dumps(doc, sort_keys=True, default=str)
     record = IngestRecord()
 
@@ -559,45 +673,30 @@ def check_repair_case(case: Case, ingest: Callable = ingest_sarif) -> IngestReco
 
     assert json.dumps(doc, sort_keys=True, default=str) == before, "the input changed"
     summary = record.summary()
-    assert summary is not None
+    assert summary is not None, "the record names nothing"
     got = [(e["action"], e["code"], e["pointer"]) for e in summary["elements"]]
-    assert sorted(got) == sorted(case.notes)
-    assert record.repaired == len(case.notes)
-    assert record.left_out == 0
+    assert sorted(got) == _notes_of(case.changes), (
+        "the record's notes differ from the case's"
+    )
+    assert record.repaired == len(case.changes), "the record's count differs"
+    assert record.left_out == 0, "a result was left out"
     plain = SarifReport.model_validate(capture)
     got_results, want_results = report.runs[0].results, plain.runs[0].results
-    assert len(got_results) == len(want_results)
+    assert len(got_results) == len(want_results), "a result was lost"
+    touched = {c.path[3] for c in case.changes if c.path[:3] == ("runs", 0, "results")}
     for index, (kept, original) in enumerate(zip(got_results, want_results)):
-        if index not in case.touched:
+        if index not in touched:
             assert kept == original, f"result {index} changed"
-        elif not case.rewrites_identity:
-            assert _identity(kept) == _identity(original), (
-                f"result {index} lost its identity"
-            )
+    assert report == owed, "the report differs from the minimal repair"
     if case.check is not None:
         case.check(report)
-    assert record.results_read == len(want_results)
+    assert record.results_read == len(want_results), "the results read differ"
     return record
 
 
 @pytest.mark.parametrize("case", _REPAIRS)
 def test_one_out_of_spec_part_is_repaired_and_every_finding_is_kept(case):
     check_repair_case(case)
-
-
-def test_a_repair_that_gives_up_the_least_is_chosen_where_the_spec_offers_two_shapes():
-    """A physical location is one of two shapes, so the model reports both shapes'
-    errors. The repair that drops only the region wins over the one that would
-    drop the whole related location."""
-    case = next(
-        p.values[0]
-        for p in _REPAIRS
-        if p.id == "related location with a region at line 0 keeps the related location"
-    )
-    record = check_repair_case(case)
-    assert [e["code"] for e in record.summary()["elements"]] == [
-        "region_line_unreadable"
-    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -670,7 +769,7 @@ def test_a_part_the_table_does_not_admit_is_refused_as_before(base, mutate):
         ingest_sarif(doc, record)
 
     assert record.is_empty
-    assert ingested.value.error_count() == plain.value.error_count()
+    assert _errors_of(ingested.value) == _errors_of(plain.value)
 
 
 def test_the_repairs_made_before_a_refusal_are_kept_and_only_the_remaining_errors_are_raised():
@@ -757,12 +856,18 @@ def test_a_valid_report_is_read_as_the_model_reads_it_and_notes_nothing():
     assert record.results_read == 7
 
 
+#: The .sarif files under tests/test_data, and which of them the model refuses. A
+#: fixture added or taken away changes these on purpose, and the test says so.
+_FIXTURES_THE_MODEL_ACCEPTS = 46
+_FIXTURES_THE_MODEL_REFUSES = ["results_sarif.sarif"]
+
+
 def test_every_sarif_file_of_the_test_data_reads_as_before():
-    """The 46 files the model accepts at main give no note and the model's own
-    report; the reduced fixture it refuses is refused here too."""
+    """The files the model accepts at main give no note and the model's own report;
+    the reduced fixture it refuses is refused here too."""
     kept, refused = 0, []
     for path in sorted(_DATA.rglob("*.sarif")):
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = read_json_tolerant(path.read_bytes(), IngestRecord())
         try:
             plain = SarifReport.model_validate(raw)
         except ValidationError:
@@ -774,8 +879,14 @@ def test_every_sarif_file_of_the_test_data_reads_as_before():
         assert ingest_sarif(raw, record) == plain, path.name
         assert record.is_empty, path.name
         kept += 1
-    assert kept >= 40, f"only {kept} files read"
-    assert refused == ["results_sarif.sarif"]
+    assert refused == _FIXTURES_THE_MODEL_REFUSES, (
+        "a fixture the model refuses was added or taken away: name it in "
+        "_FIXTURES_THE_MODEL_REFUSES"
+    )
+    assert kept == _FIXTURES_THE_MODEL_ACCEPTS, (
+        f"{kept} files read, not {_FIXTURES_THE_MODEL_ACCEPTS}: a fixture was added "
+        "or taken away"
+    )
 
 
 def test_the_sentence_names_kinds_and_counts_and_nothing_else():
@@ -847,7 +958,11 @@ def test_a_pointer_never_carries_a_key_the_tool_chose():
     ingest_sarif(doc, record)
 
     pointers = sorted(e["pointer"] for e in record.summary()["elements"])
-    assert pointers == [f"{_R0}/*", f"{_R0}/partialFingerprints/*"]
+    assert pointers == [
+        _pointer((*_R0, Key("secret-key"))),
+        _pointer((*_R0, "partialFingerprints", Key("/home/u/secret-name"))),
+    ]
+    assert pointers == ["runs/0/results/0/*", "runs/0/results/0/partialFingerprints/*"]
 
 
 def test_a_pointer_is_prefixed_with_an_ordinal_scope_and_never_a_name():
@@ -861,7 +976,8 @@ def test_a_pointer_is_prefixed_with_an_ordinal_scope_and_never_a_name():
     ingest_sarif(copy.deepcopy(doc), record)
 
     pointers = [e["pointer"] for e in record.summary()["elements"]]
-    assert pointers == [f"template 3: {_REGION}", f"input: {_REGION}", _REGION]
+    region = _pointer(_REGION)
+    assert pointers == [f"template 3: {region}", f"input: {region}", region]
 
 
 def test_nothing_the_report_held_reaches_the_record_or_the_error():
@@ -1017,7 +1133,7 @@ def test_a_document_takes_at_most_ten_thousand_changes_then_is_refused():
             ingest_sarif(doc, record)
 
     assert record.repaired == 10_000
-    assert validate.call_count <= 9
+    assert 1 <= validate.call_count <= 9
 
 
 # --------------------------------------------------------------------------- #
@@ -1115,45 +1231,55 @@ def _component(doc: dict) -> dict:
     return doc["components"][0]
 
 
+class CdxCase(NamedTuple):
+    mutate: Callable[[dict], None]
+    #: What the repair owes, by place in the mutated document.
+    changes: tuple
+
+
+def _cdx_case(id_: str, mutate: Callable, *changes: Change) -> Any:
+    return pytest.param(CdxCase(mutate, changes), id=id_)
+
+
 _CDX_REPAIRS = [
-    (
+    _cdx_case(
         "component with a key the spec does not define",
         lambda d: _component(d).update(foundBy="x"),
-        [("dropped", "unknown_key", "components/0/*")],
+        _dropped("unknown_key", "components", 0, Key("foundBy")),
     ),
-    (
+    _cdx_case(
         "document with a key the spec does not define",
         lambda d: d.update(foo=1),
-        [("dropped", "unknown_key", "*")],
+        _dropped("unknown_key", Key("foo")),
     ),
-    (
+    _cdx_case(
         "purl that is a number",
         lambda d: _component(d).update(purl=5),
-        [("rewritten", "number_as_text", "components/0/purl")],
+        _rewritten("number_as_text", "5", "components", 0, "purl"),
     ),
-    (
+    _cdx_case(
         "purl that is a list",
         lambda d: _component(d).update(purl=["a"]),
-        [("dropped", "purl_unreadable", "components/0/purl")],
+        _dropped("purl_unreadable", "components", 0, "purl"),
     ),
-    (
+    _cdx_case(
         "version that is a number",
         lambda d: _component(d).update(version=2),
-        [("rewritten", "number_as_text", "components/0/version")],
+        _rewritten("number_as_text", "2", "components", 0, "version"),
     ),
-    (
+    _cdx_case(
         "hash with an algorithm the spec does not define",
         lambda d: _component(d).update(
             hashes=[{"alg": "SHA-999", "content": "a" * 32}]
         ),
-        [("dropped", "hashes_entry_unreadable", "components/0/hashes/0")],
+        _dropped("hashes_entry_unreadable", "components", 0, "hashes", 0),
     ),
-    (
+    _cdx_case(
         "property with no name",
         lambda d: _component(d).update(properties=[{"value": "a"}]),
-        [("dropped", "properties_entry_unreadable", "components/0/properties/0")],
+        _dropped("properties_entry_unreadable", "components", 0, "properties", 0),
     ),
-    (
+    _cdx_case(
         "external reference of a type the spec does not define",
         lambda d: _component(d).update(
             externalReferences=[
@@ -1161,40 +1287,40 @@ _CDX_REPAIRS = [
                 {"type": "website", "url": "https://b"},
             ]
         ),
-        [
-            (
-                "dropped",
-                "externalReferences_entry_unreadable",
-                "components/0/externalReferences/0",
-            )
-        ],
+        _dropped(
+            "externalReferences_entry_unreadable",
+            "components",
+            0,
+            "externalReferences",
+            0,
+        ),
     ),
-    (
+    _cdx_case(
         "supplier whose name is a list",
         lambda d: _component(d).update(supplier={"name": ["x"]}),
-        [("dropped", "supplier_unreadable", "components/0/supplier")],
+        _dropped("supplier_unreadable", "components", 0, "supplier"),
     ),
-    (
+    _cdx_case(
         "serial number that is not a UUID",
         lambda d: d.update(serialNumber="urn:uuid:not-a-uuid"),
-        [("dropped", "document_field_unreadable", "serialNumber")],
+        _dropped("document_field_unreadable", "serialNumber"),
     ),
-    (
+    _cdx_case(
         "timestamp that is not a date",
         lambda d: d["metadata"].update(timestamp="yesterday"),
-        [("dropped", "metadata_field_unreadable", "metadata/timestamp")],
+        _dropped("metadata_field_unreadable", "metadata", "timestamp"),
     ),
-    (
+    _cdx_case(
         "dependency with no ref",
         lambda d: d.update(dependencies=[{"dependsOn": ["a"]}, {"ref": "ok"}]),
-        [("dropped", "dependency_entry_unreadable", "dependencies/0")],
+        _dropped("dependency_entry_unreadable", "dependencies", 0),
     ),
-    (
+    _cdx_case(
         "nested component with a key the spec does not define",
         lambda d: _component(d).update(
             components=[{"type": "library", "name": "n", "foundBy": 1}]
         ),
-        [("dropped", "unknown_key", "components/0/components/0/*")],
+        _dropped("unknown_key", "components", 0, "components", 0, Key("foundBy")),
     ),
 ]
 
@@ -1216,37 +1342,65 @@ _CDX_REFUSED = [
 ]
 
 
-@pytest.mark.parametrize(
-    ("mutate", "notes"),
-    [pytest.param(m, n, id=i) for i, m, n in _CDX_REPAIRS],
-)
-def test_a_component_with_one_out_of_spec_part_keeps_the_sbom(mutate, notes):
+def check_cdx_repair_case(
+    case: CdxCase,
+    ingest: Callable[[Any, IngestRecord], CycloneDXReport] = ingest_cyclonedx,
+) -> IngestRecord:
+    """Run one CycloneDX repair case through *ingest* and check what a repair owes,
+    as ``check_repair_case`` does for SARIF."""
     doc = copy.deepcopy(_SYFT)
-    mutate(doc)
+    case.mutate(doc)
+    owed = CycloneDXReport.model_validate(repaired_by_hand(doc, case.changes))
+    before = json.dumps(doc, sort_keys=True, default=str)
     record = IngestRecord()
 
-    report = ingest_cyclonedx(doc, record)
+    report = ingest(doc, record)
 
-    got = [(e["action"], e["code"], e["pointer"]) for e in record.summary()["elements"]]
-    assert sorted(got) == sorted(notes)
-    assert (
-        len(report.root.components if hasattr(report, "root") else report.components)
-        == 2
+    assert json.dumps(doc, sort_keys=True, default=str) == before, "the input changed"
+    summary = record.summary()
+    assert summary is not None, "the record names nothing"
+    got = [(e["action"], e["code"], e["pointer"]) for e in summary["elements"]]
+    assert sorted(got) == _notes_of(case.changes), (
+        "the record's notes differ from the case's"
     )
-    assert record.results_read == 2 and record.format_name == "CycloneDX"
+    assert record.repaired == len(case.changes), "the record's count differs"
+    assert record.left_out == 0, "a component was left out"
+    plain = CycloneDXReport.model_validate(_SYFT)
+    got_components, want_components = report.components, plain.components
+    assert len(got_components) == len(want_components), "a component was lost"
+    touched = {
+        c.path[1]
+        for c in case.changes
+        if c.path[:1] == ("components",) and len(c.path) > 1
+    }
+    for index, (kept, original) in enumerate(zip(got_components, want_components)):
+        if index not in touched:
+            assert kept == original, f"component {index} changed"
+    assert report == owed, "the report differs from the minimal repair"
+    assert record.results_read == len(want_components), "the components read differ"
+    assert record.format_name == "CycloneDX"
     assert "CycloneDX does not allow" in record.sentence("syft")
+    return record
+
+
+@pytest.mark.parametrize("case", _CDX_REPAIRS)
+def test_a_component_with_one_out_of_spec_part_keeps_the_sbom(case):
+    check_cdx_repair_case(case)
 
 
 @pytest.mark.parametrize("mutate", [pytest.param(m, id=i) for i, m in _CDX_REFUSED])
 def test_a_part_of_the_sbom_the_table_does_not_admit_is_refused(mutate):
     doc = copy.deepcopy(_SYFT)
     mutate(doc)
+    with pytest.raises(ValidationError) as plain:
+        CycloneDXReport.model_validate(copy.deepcopy(doc))
     record = IngestRecord()
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as ingested:
         ingest_cyclonedx(doc, record)
 
     assert record.is_empty
+    assert _errors_of(ingested.value) == _errors_of(plain.value)
 
 
 @pytest.mark.parametrize(
@@ -1276,49 +1430,124 @@ def test_a_valid_sbom_is_read_as_the_model_reads_it():
 
 # --------------------------------------------------------------------------- #
 # The suite can fail (controls)
+#
+# Each control makes the comparison fail in one way and names the check it must
+# reach (``match=``), so a control that fails at some other assertion is a
+# failed control.
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("index", [0, 20, 40])
-def test_control_the_repair_cases_fail_when_the_model_reads_the_report_alone(index):
-    case = _REPAIRS[index].values[0]
+def _case_named(name: str) -> Case:
+    return next(p.values[0] for p in _REPAIRS if p.id == name)
+
+
+@pytest.mark.parametrize("case", _REPAIRS)
+def test_control_the_model_alone_refuses_every_repair_case(case):
+    doc = copy.deepcopy(_BASES[case.base])
+    case.mutate(doc)
 
     with pytest.raises(ValidationError):
-        check_repair_case(
-            case, ingest=lambda raw, record: SarifReport.model_validate(raw)
-        )
+        SarifReport.model_validate(doc)
 
 
-def test_control_a_pointer_that_keeps_the_tools_keys_fails_the_pointer_case(
+@pytest.mark.parametrize("case", _CDX_REPAIRS)
+def test_control_the_model_alone_refuses_every_cyclonedx_repair_case(case):
+    doc = copy.deepcopy(_SYFT)
+    case.mutate(doc)
+
+    with pytest.raises(ValidationError):
+        CycloneDXReport.model_validate(doc)
+
+
+def test_control_a_pointer_that_keeps_the_tools_keys_fails_the_notes_check(
     monkeypatch,
 ):
     def keeps_every_key(self, pointer):
         return "/".join(str(token) for token in pointer) or "(document)"
 
     monkeypatch.setattr(IngestRecord, "_pointer_text", keeps_every_key)
-    case = next(p.values[0] for p in _REPAIRS if p.id == "fingerprint that is a number")
 
-    with pytest.raises(AssertionError):
-        check_repair_case(case)
+    with pytest.raises(AssertionError, match="the record's notes differ"):
+        check_repair_case(_case_named("fingerprint that is a number"))
 
 
-def test_control_a_repair_that_drops_a_second_finding_fails_the_other_results_check():
+def test_control_a_repair_that_drops_a_second_finding_fails_the_count_check():
     def drops_a_result(raw, record):
         report = ingest_sarif(raw, record)
         report.runs[0].results = report.runs[0].results[:-1]
         return report
 
-    case = next(p.values[0] for p in _REPAIRS if p.id == "startLine 0")
+    with pytest.raises(AssertionError, match="a result was lost"):
+        check_repair_case(_case_named("startLine 0"), ingest=drops_a_result)
 
-    with pytest.raises(AssertionError):
-        check_repair_case(case, ingest=drops_a_result)
+
+def test_control_a_repair_that_changes_another_finding_fails_the_other_results_check():
+    def changes_a_result(raw, record):
+        report = ingest_sarif(raw, record)
+        report.runs[0].results[1].ruleId = "changed-by-the-control"
+        return report
+
+    with pytest.raises(AssertionError, match="result 1 changed"):
+        check_repair_case(_case_named("startLine 0"), ingest=changes_a_result)
 
 
 def test_control_a_repair_that_hides_what_it_did_fails_the_notes_check():
-    case = next(p.values[0] for p in _REPAIRS if p.id == "startLine 0")
-
     def silent(raw, record):
         return ingest_sarif(raw, IngestRecord())
 
-    with pytest.raises(AssertionError):
-        check_repair_case(case, ingest=silent)
+    with pytest.raises(AssertionError, match="the record names nothing"):
+        check_repair_case(_case_named("startLine 0"), ingest=silent)
+
+
+def test_control_a_repair_that_gives_up_more_than_it_notes_fails_the_comparison():
+    """A bad start column costs the column; a repair that also threw the region
+    away would lose the line, and the notes alone would not show it."""
+
+    def drops_the_region(raw, record):
+        report = ingest_sarif(raw, record)
+        location = report.runs[0].results[0].locations[0]
+        location.physicalLocation.root.region = None
+        return report
+
+    with pytest.raises(
+        AssertionError, match="the report differs from the minimal repair"
+    ):
+        check_repair_case(_case_named("region startColumn 0"), ingest=drops_the_region)
+
+
+def test_control_a_repair_that_writes_another_value_fails_the_comparison():
+    def writes_another_id(raw, record):
+        report = ingest_sarif(raw, record)
+        report.runs[0].results[0].ruleId = "6"
+        return report
+
+    with pytest.raises(
+        AssertionError, match="the report differs from the minimal repair"
+    ):
+        check_repair_case(
+            _case_named("rule id that is a number"), ingest=writes_another_id
+        )
+
+
+def test_control_a_cyclonedx_repair_that_changes_another_component_fails_that_check():
+    def changes_a_component(raw, record):
+        report = ingest_cyclonedx(raw, record)
+        report.components[1].name = "changed-by-the-control"
+        return report
+
+    case = _CDX_REPAIRS[2].values[0]
+    with pytest.raises(AssertionError, match="component 1 changed"):
+        check_cdx_repair_case(case, ingest=changes_a_component)
+
+
+def test_control_a_cyclonedx_repair_that_drops_the_purl_it_should_rewrite_fails_the_comparison():
+    def drops_the_purl(raw, record):
+        report = ingest_cyclonedx(raw, record)
+        report.components[0].purl = None
+        return report
+
+    case = _CDX_REPAIRS[2].values[0]
+    with pytest.raises(
+        AssertionError, match="the report differs from the minimal repair"
+    ):
+        check_cdx_repair_case(case, ingest=drops_the_purl)
