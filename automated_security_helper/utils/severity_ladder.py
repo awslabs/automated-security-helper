@@ -852,9 +852,21 @@ def result_fails_scanner_threshold(
     exited 0 in ``ash --source-dir P`` and 2 for P inside a workspace while the
     workspace's gate judged severity alone.
 
+    A result whose kind states no finding (``pass``, ``notApplicable``,
+    ``informational``: ``sarif_utils.is_not_a_finding``) fails no gate. SARIF asks
+    for level ``none`` beside those kinds, which grades INFO, and a threshold of
+    ``ALL`` fails INFO. The kind is read before the level, here and not in each
+    caller, so the workspace verdict and the single scan's exit code agree on it.
+
     Suppressions are the caller's to read (``sarif_utils.suppressions_in_effect``;
-    this module cannot import it): a suppressed result never reaches the gate.
+    this module cannot import ``sarif_utils`` at load): a suppressed result never
+    reaches the gate.
     """
+    # Imported here and not at module level: sarif_utils imports this module.
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
+    if is_not_a_finding(result):
+        return False
     return severity_fails_threshold(
         result_severity(result), threshold_for(result_scanner_name(result))
     )
