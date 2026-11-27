@@ -888,9 +888,9 @@ def test_only_sandbox_overrides_are_replayed_onto_the_trusted_defaults(
     replayed = []
     real = module.apply_config_overrides
 
-    def recording(config, overrides):
+    def recording(config, overrides, **kwargs):
         replayed.append(list(overrides))
-        return real(config, overrides)
+        return real(config, overrides, **kwargs)
 
     monkeypatch.setattr(module, "apply_config_overrides", recording)
     resolve_config(
