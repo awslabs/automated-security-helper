@@ -801,6 +801,112 @@ _EXEMPT.update(
     }
 )
 
+_MCP_CONFIG_FIXTURES = (
+    "FIXTURES is the committed tests/test_data/mcp_config tree and the format and "
+    "kind name one of its fixture directories, copied into the test's own plugin "
+    "context; the walk never leaves the committed fixture data."
+)
+_CORPUS_GLOB = (
+    "The pattern is a CorpusSpec.sarif entry: a literal of the module's CORPORA "
+    "table, or a planted control's one file name, none with `**` or `..`, and the "
+    "directory it is joined to is a relative name with no `..`, so the glob lists "
+    "one fixed depth of a committed directory under tests/test_data/scanners (or of "
+    "the control's tmp_path) and never descends. "
+    "test_no_corpus_glob_descends_or_leaves_the_fixtures asserts that."
+)
+
+#: The MCP config converter and scanner tests, the sdist harvester's and the facets
+#: register gate's: committed fixture data under tests/test_data, a corpus glob of
+#: fixed depth, and trees the tests build for themselves. Same rules as _EXEMPT.
+_EXEMPT.update(
+    {
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "stage_fixture",
+            "FIXTURES / fmt / kind",
+        ): _MCP_CONFIG_FIXTURES,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "golden_tree",
+            "root",
+        ): (
+            "GOLDENS / fmt / kind: one fixture's directory of the committed "
+            "tests/test_data/mcp_config_converted goldens, which no test writes into."
+        ),
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "output_tree",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "test_every_script_line_has_a_row_and_the_rows_land_on_the_entry",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "test_a_json_span_encloses_exactly_the_entry_the_script_was_made_from",
+            "root",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py",
+            "test_the_converted_sources_record_names_the_config_each_file_came_from",
+            "Path(converter.results_dir)",
+        ): _CONVERTER_OUTPUT,
+        (
+            "tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py",
+            "stage_tree",
+            "source",
+        ): _MCP_CONFIG_FIXTURES,
+        (
+            "tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py",
+            "test_the_committed_corpus_is_what_the_scanner_writes",
+            "FIXTURES / fmt / 'violating'",
+        ): _MCP_CONFIG_FIXTURES,
+        (
+            "tests/unit/plugin_modules/ash_builtin/converters/test_sdist_lock_harvester.py",
+            "test_tree_shipped_cache_entry_is_never_served",
+            "converter.results_dir",
+        ): (
+            "The harvester's results directory under the output directory the test "
+            "chose inside its own tmp_path (harvest_env's source tree)."
+        ),
+        (
+            "tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py",
+            "_materialized",
+            "template",
+        ): (
+            "The committed fixture_repo of a scanner's directory under "
+            "tests/test_data/scanners, copied into a tempfile.TemporaryDirectory "
+            "the prep made."
+        ),
+        **{
+            (
+                "tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py",
+                function,
+                "_FIXTURES / spec.directory",
+            ): _CORPUS_GLOB
+            for function in (
+                "_prep_betterleaks",
+                "_prep_cfn_guard",
+                "_prep_cfn_lint",
+                "_prep_cfn_nag",
+                "_prep_checkov",
+                "_prep_ferret_scan",
+                "_prep_gitleaks",
+                "_prep_grype",
+                "_prep_snyk_code",
+                "_prep_trivy",
+            )
+        },
+        (
+            "tests/unit/plugin_modules/test_scanner_facets_corpus_consistency.py",
+            "_results_with_runs",
+            "fixtures_root / spec.directory",
+        ): _CORPUS_GLOB,
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def sweep() -> Sweep:
@@ -1171,6 +1277,147 @@ class TestIterRepoFilesPrunesTheScratchTree:
     def test_the_scratch_root_is_inside_the_repository(self):
         """If it were not, pruning it would be a no-op and this is all theatre."""
         assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(REPO_ROOT.resolve())
+
+    # pytest's own temp trees: the base directory a run was given with --basetemp, and
+    # PYTEST_DEBUG_TEMPROOT. A run can keep either inside the repository, where every
+    # worker's tmp_path directories are made and deleted while a walk runs.
+
+    @staticmethod
+    def _planted_tree(tmp_path, monkeypatch):
+        """A root holding a basetemp-shaped directory and an ordinary source file.
+
+        Returns ``(root, basetemp, in_basetemp, beside_it)``: the first file is where
+        a worker's ``tmp_path`` would put one, the second is the same file in the tree
+        proper. The scratch root is moved out of the way first. Under a ``--basetemp``
+        inside tests/pytest-temp this tmp_path is itself under the real one, and the
+        scratch prune would empty every walk of it.
+        """
+        monkeypatch.setattr(
+            "tests.utils.helpers.ASH_TEST_TEMP_ROOT", tmp_path / "scratch"
+        )
+        root = tmp_path / "tree"
+        basetemp = root / "other-basetemp"
+        in_basetemp = basetemp / "popen-gw2" / "test_one_0" / "planted_probe.py"
+        beside_it = root / "unit" / "planted_probe.py"
+        for planted in (in_basetemp, beside_it):
+            planted.parent.mkdir(parents=True)
+            planted.write_text("x = 1\n", encoding="utf-8")
+        return root, basetemp, in_basetemp, beside_it
+
+    @staticmethod
+    def _record_basetemp(monkeypatch, value):
+        """Set what the run's root conftest records, whether or not it exists yet.
+
+        ``raising=False`` so that a tree without the attribute fails these cases on
+        what they assert, a file listed that should not be, and not on this setup.
+        """
+        monkeypatch.setattr("tests.utils.helpers.RUN_BASETEMP", value, raising=False)
+
+    def test_a_basetemp_inside_the_root_is_not_entered(self, tmp_path, monkeypatch):
+        """The configured basetemp is left out of a walk that reaches it."""
+        root, basetemp, in_basetemp, _ = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        assert in_basetemp.exists(), "the test did not write the probe"
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        assert in_basetemp.resolve() not in yielded
+
+    def test_a_file_beside_the_basetemp_is_still_yielded(self, tmp_path, monkeypatch):
+        """The companion: pruning the basetemp must not have emptied the walk."""
+        root, basetemp, _, beside_it = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        assert beside_it.resolve() in yielded
+
+    def test_pytest_debug_temproot_inside_the_root_is_not_entered(
+        self, tmp_path, monkeypatch
+    ):
+        """Where pytest puts its base directory when it is given no ``--basetemp``."""
+        root, basetemp, in_basetemp, beside_it = self._planted_tree(
+            tmp_path, monkeypatch
+        )
+        self._record_basetemp(monkeypatch, None)
+        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(basetemp))
+
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        assert in_basetemp.resolve() not in yielded
+        assert beside_it.resolve() in yielded
+
+    def test_a_root_inside_the_basetemp_is_still_walked(self, tmp_path, monkeypatch):
+        """A walk of a ``tmp_path`` is a walk inside the base temp directory.
+
+        Skipping a root for sitting there would empty every such walk, and an empty
+        walk reads as a clean tree.
+        """
+        _, basetemp, in_basetemp, _ = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        for root in (basetemp, in_basetemp.parent):
+            yielded = {p.resolve() for p in iter_repo_files(root)}
+            assert in_basetemp.resolve() in yielded, root
+
+    def test_prune_scratch_false_does_yield_the_basetemp_files(
+        self, tmp_path, monkeypatch
+    ):
+        """The opt-out sees everything, or the control that uses it proves nothing."""
+        root, basetemp, in_basetemp, _ = self._planted_tree(tmp_path, monkeypatch)
+        self._record_basetemp(monkeypatch, basetemp)
+
+        yielded = {p.resolve() for p in iter_repo_files(root, prune_scratch=False)}
+        assert in_basetemp.resolve() in yielded
+
+    @staticmethod
+    def _config(basetemp, *, worker):
+        """The two things ``run_basetemp_of`` reads from pytest's config."""
+        from types import SimpleNamespace
+
+        config = SimpleNamespace(option=SimpleNamespace(basetemp=basetemp))
+        if worker:
+            # What pytest-xdist sets on a worker's config, and only there.
+            config.workerinput = {"workerid": "gw3"}
+        return config
+
+    def test_a_run_given_a_basetemp_shares_that_one(self, tmp_path):
+        from tests.utils.helpers import run_basetemp_of
+
+        config = self._config(tmp_path / "run", worker=False)
+
+        assert run_basetemp_of(config) == (tmp_path / "run").resolve()
+
+    def test_an_xdist_worker_shares_the_directory_its_own_sits_in(self, tmp_path):
+        """xdist gives a worker ``<basetemp>/popen-gwN``; the others' sit beside it."""
+        from tests.utils.helpers import run_basetemp_of
+
+        config = self._config(tmp_path / "run" / "popen-gw3", worker=True)
+
+        assert run_basetemp_of(config) == (tmp_path / "run").resolve()
+
+    def test_a_run_given_no_basetemp_has_none_to_share(self):
+        from tests.utils.helpers import run_basetemp_of
+
+        assert run_basetemp_of(self._config(None, worker=False)) is None
+
+    def test_the_run_records_its_basetemp_when_pytest_configures(self, monkeypatch):
+        """The root conftest's hook is what fills ``RUN_BASETEMP``.
+
+        Every case above sets the recorded value itself, so none of them would notice
+        the hook no longer recording it, and the prune would quietly do nothing.
+        """
+        from types import SimpleNamespace
+
+        from tests import conftest as root_conftest
+
+        recorded = []
+        monkeypatch.setattr(
+            root_conftest, "record_run_basetemp", recorded.append, raising=False
+        )
+        monkeypatch.setattr(root_conftest.sharding, "configure", lambda config: None)
+        config = SimpleNamespace(addinivalue_line=lambda *args: None)
+
+        root_conftest.pytest_configure(config)
+
+        assert recorded == [config]
 
 
 #: Walkers outside tests/ that tests run against the real checkout. The AST sweep
