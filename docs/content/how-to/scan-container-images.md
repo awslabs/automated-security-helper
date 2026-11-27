@@ -120,8 +120,8 @@ informational SARIF result (`kind=informational`, `level=none`, rule
 it never grades, never fails a threshold and never lands in a SIEM as a vulnerability,
 so an offline CI run stays green by contract and visibly incomplete rather than
 silently clean. The CSV, flat JSON and MCP findings keep it with `result_kind`
-`informational`; the HTML, Markdown and text reports list it under Information; no
-report counts it.
+`informational`; the HTML, Markdown and text reports list it under Information and
+count it in no total.
 
 ## Engine delegation
 
