@@ -17,8 +17,10 @@ The variables that name what a subject scans when no argument does (``ASH_SOURCE
 for ``fs``, ``ASH_WORKSPACE`` and ``ASH_WORKSPACE_CONFIG`` for ``workspace``) are told
 the same way, once for each variable the scan reads. A scan that was given the
 argument prints none, and neither does a form with no subject, whose own line already
-names the subject. ``ash config`` reads ``ASH_SOURCE_DIR`` for its own option and is
-not touched.
+names the subject. ``ASH_SOURCE_DIR`` is not told when a ``--cli-json-input`` document
+is named either: a caller that cannot give a PATH beside a document (the container run
+of ``./ash``) hands the directory over in the variable. ``ash config`` reads
+``ASH_SOURCE_DIR`` for its own option and is not touched.
 
 Kept apart from ``cli.scan`` and ``cli.scan_group`` because both need it and
 neither may import the other's heavy parts; this module imports nothing at module
@@ -63,7 +65,8 @@ WORKSPACE_WITHOUT_SUBJECT_LINE = (
     f"removed in {REMOVAL}. Use `ash scan workspace <file>`."
 )
 #: ``ASH_SOURCE_DIR`` naming the directory of an ``ash scan fs`` that was given no PATH
-#: argument. Scoped to the scan: ``ash config`` keeps reading the variable.
+#: argument and no ``--cli-json-input`` document. Scoped to the scan: ``ash config``
+#: keeps reading the variable.
 SOURCE_DIR_VARIABLE_LINE = (
     "`ASH_SOURCE_DIR` as the directory of a scan is deprecated and will be removed in "
     f"{REMOVAL}. Give the directory as the argument: `ash scan fs <path>`."

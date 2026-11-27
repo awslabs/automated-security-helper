@@ -40,7 +40,10 @@ from typing import Annotated, Any, Callable, Iterable, Optional
 import typer
 from typer.core import TyperGroup
 
-from automated_security_helper.cli.json_input import CliJsonInputCommand
+from automated_security_helper.cli.json_input import (
+    CLI_JSON_INPUT_FLAG,
+    CliJsonInputCommand,
+)
 from automated_security_helper.cli.scan import _fail_state, run_ash_scan_cli_command
 from automated_security_helper.cli.scan_deprecation import (
     SCAN_FORM_META,
@@ -120,6 +123,9 @@ DEPRECATED_KEYS = frozenset({"source_dir", "scanners"})
 #: The name the subject-less form's command is registered under. It is not a subject,
 #: so ``ScanTyperGroup`` takes it out of its commands as the group is built.
 _LEGACY_KEY = "legacy"
+#: The name of the ``--cli-json-input`` parameter. Its source says whether a document
+#: was named on the command line, as the source of ``source_dir`` says what named it.
+_DOCUMENT_PARAMETER = CLI_JSON_INPUT_FLAG.lstrip("-").replace("-", "_")
 
 _PATH_HELP = (
     "The directory to scan. Defaults to the current directory. --source-dir and "
@@ -522,11 +528,23 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
     # default_map (cli/json_input.py), so a document that names the directory with
     # the deprecated option's key reads as DEFAULT_MAP.
     from_document = source_dir_source == "DEFAULT_MAP"
+    # A document is named on this command line, and the parameters it sets can name a
+    # clone or an image as well as the directory. A caller that cannot give a PATH
+    # beside one (the container run of `./ash` or Invoke-ASH, which mounts the
+    # directory and hands it over in the variable) has the variable as the only name of
+    # the directory when the document names none, and the line, which asks for a PATH,
+    # would name a spelling that changes nothing there. So a named document keeps the
+    # variable from reading as given alone.
+    document_named = (
+        getattr(ctx.get_parameter_source(_DOCUMENT_PARAMETER), "name", None)
+        == "COMMANDLINE"
+    )
     # The variable names the directory alone when nothing else in the command does: no
-    # PATH, no archive and no clone replace it, and an image option refuses it with
-    # the engine's own words.
+    # PATH, no archive, no document and no clone replace it, and an image option
+    # refuses it with the engine's own words.
     from_variable_alone = (
         source_dir_source == "ENVIRONMENT"
+        and not document_named
         and path is None
         and archive is None
         and not any(
