@@ -17,20 +17,38 @@ platform.
 from __future__ import annotations
 
 import io
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from rich.console import Console
 
 from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     _run_local_mode,
     build_project_scan_settings,
 )
+from automated_security_helper.utils.console import ash_console
 
 pytestmark = pytest.mark.unit
 
 ESCAPE = "\x1b["
+
+
+def _platform_as_run_ash_scan_sees_it(system: str):
+    """Make ``platform.system()`` read *system* for ``run_ash_scan`` alone.
+
+    Patching ``platform.system`` itself changes the answer for every module in the
+    process while ``_run_local_mode`` runs (the orchestrator, Rich, pathlib). Here
+    only the name ``platform`` in ``run_ash_scan`` is replaced, which is the lookup
+    the old code made. ``create=True`` because the module no longer imports
+    ``platform``: with the fix nothing reads the name, and with the old code, which
+    imported it, the fake is what it read.
+    """
+    return patch(
+        "automated_security_helper.interactions.run_ash_scan.platform",
+        SimpleNamespace(system=lambda: system),
+        create=True,
+    )
 
 
 def _color_system_the_single_scan_hands_the_orchestrator(
@@ -44,7 +62,7 @@ def _color_system_the_single_scan_hands_the_orchestrator(
     orchestrator.config.fail_on_findings = True
 
     with (
-        patch("platform.system", return_value=system),
+        _platform_as_run_ash_scan_sees_it(system),
         patch(
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             return_value=orchestrator,
@@ -64,7 +82,7 @@ def _color_system_the_workspace_builder_records(tmp_path, *, color: bool, system
     root = tmp_path / "work"
     root.mkdir(exist_ok=True)
     opts = ScanOptions(source_dir=root, output_dir=tmp_path / "out", color=color)
-    with patch("platform.system", return_value=system):
+    with _platform_as_run_ash_scan_sees_it(system):
         return build_project_scan_settings(opts).color_system
 
 
@@ -120,7 +138,9 @@ def test_auto_color_writes_escape_codes_to_a_stream_that_is_a_terminal(monkeypat
     monkeypatch.setenv("TERM", "xterm-256color")
     stream = _Terminal()
 
-    Console(file=stream, color_system="auto", width=80).print("[red]refused[/red]")
+    ash_console(file=stream, check_commands=False, color_system="auto", width=80).print(
+        "[red]refused[/red]"
+    )
 
     written = stream.getvalue()
     assert "refused" in written
@@ -133,7 +153,9 @@ def test_auto_color_writes_plain_text_to_a_pipe(monkeypatch):
     monkeypatch.setenv("TERM", "xterm-256color")
     stream = io.StringIO()
 
-    Console(file=stream, color_system="auto", width=80).print("[red]refused[/red]")
+    ash_console(file=stream, check_commands=False, color_system="auto", width=80).print(
+        "[red]refused[/red]"
+    )
 
     assert "refused" in stream.getvalue()
     assert ESCAPE not in stream.getvalue()
