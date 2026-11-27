@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import importlib
+import inspect
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -394,14 +395,6 @@ def _string_constants(path: Path) -> set[str]:
     }
 
 
-def _scanner_module(scanner: str) -> Path:
-    """The file of the module that holds a scanner's class, from its manifest."""
-    manifests = {m.name: m for m in scanner_manifests()}
-    assert scanner in manifests, scanner
-    module = manifests[scanner].entry_points.scanner.split(":")[0]
-    return _ROOT / (module.replace(".", "/") + ".py")
-
-
 def _scanner_class(scanner: str) -> type:
     """The class a scanner's manifest names."""
     manifests = {m.name: m for m in scanner_manifests()}
@@ -411,8 +404,16 @@ def _scanner_class(scanner: str) -> type:
 
 
 def _scanner_modules(scanner: str) -> list[Path]:
-    """The files of the modules that hold a scanner's class."""
-    return [_scanner_module(scanner)]
+    """The files of the plugin modules that hold a scanner's class or a class it
+    inherits from, the scanner's own first. A base that lives outside the plugin
+    modules is not one of them: the engine's base names no scanner's variable."""
+    paths: list[Path] = []
+    for cls in _scanner_class(scanner).__mro__:
+        if cls.__module__.startswith("automated_security_helper.plugin_modules."):
+            path = Path(inspect.getfile(cls))
+            if path not in paths:
+                paths.append(path)
+    return paths
 
 
 def test_the_module_reader_takes_in_the_shared_base_and_not_the_generic_one() -> None:
