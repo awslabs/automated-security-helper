@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What ``ash scan --mode nix`` prints and exits with when Nix really runs.
+"""What ``ash scan fs --mode nix`` prints and exits with when Nix really runs.
 
 Deselected by default (tests/conftest.py). The Nix legs of ash-install-methods.yml
 run it with ``--run-nix-snapshots`` after their own scan, through
@@ -32,23 +32,29 @@ pytestmark = [
     pytest.mark.snapshot_masking(mask_durations=True),
 ]
 
+#: The Nix-mode scan of the fixture, by bandit alone. The snapshot records the whole
+#: of stderr, so the host must print no deprecation line: ``--only-scanners`` states
+#: the selection, where ``--scanners`` prints one. The arguments run in the default
+#: tier in ../test_snapshot_container_runtime_follows_in_process.py, which fails if
+#: they print one.
+NIX_SCAN = [
+    "scan",
+    "fs",
+    "src",
+    "--mode",
+    "nix",
+    "--no-progress",
+    "--output-dir",
+    "out",
+    "--only-scanners",
+    "bandit",
+]
+
 
 def test_nix_scan_of_the_fixture(run_cli, snapshot, fixture_repo, monkeypatch):
     # The summary prints absolute host paths, whose length is the machine's.
     monkeypatch.setenv("COLUMNS", "1000")
     monkeypatch.delenv("ASH_NIX_FLAKE_REF", raising=False)
     monkeypatch.delenv("ASH_IN_NIX", raising=False)
-    args = [
-        "scan",
-        "--mode",
-        "nix",
-        "--no-progress",
-        "--source-dir",
-        "src",
-        "--output-dir",
-        "out",
-        "--scanners",
-        "bandit",
-    ]
-    monkeypatch.setattr(sys, "argv", ["ash", *args])
-    assert run_cli(args) == snapshot
+    monkeypatch.setattr(sys, "argv", ["ash", *NIX_SCAN])
+    assert run_cli(NIX_SCAN) == snapshot

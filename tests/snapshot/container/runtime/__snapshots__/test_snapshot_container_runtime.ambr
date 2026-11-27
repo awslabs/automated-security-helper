@@ -19,8 +19,6 @@
   dict({
     'exit_code': 2,
     'host_output_after_container': '''
-                   ERROR    Container execution failed with code 2
-      
       === ASH Scan Completed in <DURATION>: Next Steps ===
       View detailed findings...
         - SARIF: 'out/reports/ash.sarif'
@@ -33,8 +31,8 @@
           - HTML report of all findings: 'out/reports/ash.html'
           - Markdown summary: 'out/reports/ash.summary.md'
           - Text summary: 'out/reports/ash.summary.txt'
-        2. Use ash report to view a short text summary of the scan in your terminal
-        3. Use ash inspect findings to explore the findings interactively
+        2. Use ash results report to view a short text summary of the scan in your terminal
+        3. Use ash results inspect findings to explore the findings interactively
         4. Review scanner-specific reports and outputs in the 'out/scanners' directory
       
       === ASH Exit Codes ===
