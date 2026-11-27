@@ -3071,7 +3071,9 @@ def validate(
             for i, warning in enumerate(check.warnings, 1):
                 secho(shown_on_one_line(f"  {i}. {warning}"), fg=typer.colors.YELLOW)
         if _lint_fix_removes_something(config_path, check):
-            lint_fix = command_names.render_command(command_names.CONFIG_LINT, "--fix")
+            lint_fix = command_names.render_command(
+                command_names.CONFIG_LINT, flags=("--fix",)
+            )
             secho(
                 f"\n💡 '{lint_fix}' removes internal-only fields and sections.",
                 fg=typer.colors.YELLOW,

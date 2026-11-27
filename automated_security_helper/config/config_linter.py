@@ -2190,7 +2190,7 @@ class ConfigLinter:
         with LEGACY_NAME_CONFLICT. The message names the key only, never the
         entry's values, which can be read from the environment.
         """
-        fix = command_names.render_command(command_names.CONFIG_LINT, "--fix")
+        fix = command_names.render_command(command_names.CONFIG_LINT, flags=("--fix",))
         removal = ""
         if row.removed_in is not None:
             label = spellings.release_label(row.removed_in)
@@ -3113,7 +3113,9 @@ class ConfigLinter:
         named, env_read = cls._named_key(references, site.parts, old)
         path = cls._place((*site.shown, named))
         if row.canonical in site.mapping:
-            fix = command_names.render_command(command_names.CONFIG_LINT, "--fix")
+            fix = command_names.render_command(
+                command_names.CONFIG_LINT, flags=("--fix",)
+            )
             canonical_path = cls._place((*site.shown, row.canonical))
             return LintIssue(
                 severity=LintSeverity.WARNING,
@@ -3331,7 +3333,7 @@ class ConfigLinter:
                 # does not rename the key, since that would drop one of the two.
                 if swapped in segment_data:
                     fix = command_names.render_command(
-                        command_names.CONFIG_LINT, "--fix"
+                        command_names.CONFIG_LINT, flags=("--fix",)
                     )
                     result.issues.append(
                         LintIssue(

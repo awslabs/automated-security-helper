@@ -1,23 +1,22 @@
 """The ``ash`` commands that a hint or a message outside the command line may name.
 
-A message that tells a reader to run a command takes the command from here, so it
-can only name one the program registers (a test walks this list against the real
-command tree) and a rename is one edit. Only registered commands are listed.
+A message that tells a reader to run a command takes the command from here, with
+the options and flags it may carry, so it can only name what the program
+registers (a test walks this list against the real command tree) and a rename is
+one edit. Only registered commands are listed.
 
 This module sits below the command line: the loader, the models and lint read it,
 and the command line imports them, so it imports nothing from the package but
 ``utils/terminal_text.py``, which imports nothing from it.
 
-A command is built by :func:`render_command`, which prints each text argument as
-it is and takes only one that :func:`pasteable` holds for: letters, digits and
-``_ . / : -``, which no shell reads specially. It does not quote. ``shlex.quote``
-quotes for POSIX shells only, and no one quoting of a name reads the same in
-those, in ``cmd.exe`` and in PowerShell, so a name a repository chose is printed
-only when it is made of those characters. Any other is pointed at instead: a
-part that stands for a value the message names elsewhere is a
-:class:`Placeholder`, printed as ``<what it stands for>``, and a command that
-holds one ends in one, which no shell runs. A command that is run and not printed
-is :func:`command_argv`: the same words as a list, each argument exactly as given.
+A command is built by :func:`render_command`. It returns the line only when every
+value the line carries is :func:`pasteable` (ASCII letters, digits and
+``_ . / : -``, which no shell reads specially) and no positional starts with
+``-``, which the command would read as an option. Otherwise it returns nothing.
+It does not quote: no quoting of a name reads the same in POSIX shells,
+``cmd.exe`` and PowerShell, so a caller that gets nothing says what to do without
+a command. A command that is run and not printed is :func:`command_argv`: the same
+words as a list, each value exactly as given.
 
 A call site that shows a whole one-line message itself, with a name a repository
 chose in it, passes the message through :func:`terminal_text`, the package's one
@@ -27,38 +26,47 @@ once, and a part shown here first would be shown twice.
 
 Callers read the registry through the module when they run, as in
 ``command_names.render_command(command_names.CONFIG_LINT, ...)``, and never import
-either name from it: a test that replaces one then sees it everywhere.
+a name from it: a test that replaces one then sees it everywhere.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
+
+@dataclass(frozen=True)
+class Command:
+    """A command a message may name, and the words it may be printed with.
+
+    ``text`` is the command as it is typed. ``options`` are the names of the
+    options that take a value, and ``flags`` the names of those that take none: a
+    test walks each against the command the program registers. There is no
+    ``__str__``: a command is named through ``text``, so a ``Command`` is never
+    taken for the text it prints.
+    """
+
+    text: str
+    options: frozenset[str] = frozenset()
+    flags: frozenset[str] = frozenset()
+
+
 #: The command that reads a config file and reports what is wrong with it.
-CONFIG_LINT = "ash config lint"
+CONFIG_LINT = Command(
+    text="ash config lint",
+    options=frozenset({"--config", "--source-dir"}),
+    flags=frozenset({"--fix"}),
+)
 
 #: Every command named above, for the test that walks each one against the
 #: command tree. A command added above is added here.
 REGISTERED = (CONFIG_LINT,)
 
 
-@dataclass(frozen=True)
-class Placeholder:
-    """A part of a command that stands for a value the message names elsewhere.
-
-    Printed as ``<text>`` and never quoted: it is not something to paste.
-    """
-
-    text: str
-
-    def __str__(self) -> str:
-        return f"<{self.text}>"
-
-
-# The characters an argument of a printed command may hold: ASCII letters and
+# The characters a value of a printed command may hold: ASCII letters and
 # digits, `_ . / : -`. No shell (POSIX shells, cmd.exe, PowerShell) reads any of
 # them specially. The set is deliberately narrow: a character outside it is not
 # necessarily special, but a space, `&`, `;`, a quote, `~`, `+`, `@`, a comma or
@@ -70,67 +78,91 @@ def pasteable(text: str) -> bool:
     """Whether ``text`` is one bare word in every shell, so a command may print it.
 
     True for a non-empty ``text`` made only of ASCII letters and digits and
-    ``_ . / : -``. Any other text is a name this module points at and never prints.
+    ``_ . / : -``. Any other text is a name this module never prints.
     """
     return bool(_PASTEABLE.fullmatch(text))
 
 
-def render_command(name: str, *arguments: str | Placeholder) -> str:
-    """``name`` and each argument, joined by single spaces, as one printed line.
+def _words(
+    command: Command,
+    positionals: Sequence[str],
+    options: Sequence[tuple[str, str]],
+    flags: Sequence[str],
+) -> list[str]:
+    """The words a call carries after the command's text, in print order: the
+    positionals, then each option's name and value, then the flags.
 
-    A ``str`` argument is printed as it is and must be :func:`pasteable`, so it
-    is one bare word in POSIX shells, ``cmd.exe`` and PowerShell alike. It is not
-    quoted: ``shlex.quote`` quotes for POSIX shells only (``cmd.exe`` reads a
-    single quote as a plain character), so no quoting of another name is safe in
-    every shell. A ``str`` argument that is not pasteable is a ``ValueError``
-    whose text names no argument, because the argument is a name a repository
-    chose; the caller passes a :class:`Placeholder` for it, which is printed as
-    itself.
-
-    A line that holds a :class:`Placeholder` ends in one, so it ends in ``>``, a
-    redirection with no target, which no shell runs. A ``str`` argument after the
-    last :class:`Placeholder` would end the line in text instead, so it is a
-    ``ValueError`` too.
+    The checks, in this order. A group given as text is a ``TypeError``: text
+    iterates as its characters, so ``"--fix"`` given as the flags would be four
+    flags of one character. An option or a flag the command does not list is a
+    ``ValueError``: the names are code, never a repository's text, so one that is
+    not listed is a coding error and not a line to leave unprinted. A value (a
+    positional, or an option's value) that is not text is a ``TypeError``.
     """
-    words = [name]
-    last_placeholder = -1
-    for position, argument in enumerate(arguments):
-        if isinstance(argument, Placeholder):
-            words.append(str(argument))
-            last_placeholder = position
-        elif pasteable(argument):
-            words.append(argument)
-        else:
-            raise ValueError(
-                "a command argument is empty or holds a character some shell "
-                "reads specially; pass a Placeholder for it"
-            )
-    if 0 <= last_placeholder < len(arguments) - 1:
-        raise ValueError(
-            "a command that holds a Placeholder must end in one, so that no shell "
-            "runs it"
-        )
-    return " ".join(words)
+    if any(isinstance(group, str) for group in (positionals, options, flags)):
+        raise TypeError("positionals, options and flags are sequences, not text")
+    for name, _ in options:
+        if name not in command.options:
+            raise ValueError(f"{name!r} is not an option of {command.text!r}")
+    for flag in flags:
+        if flag not in command.flags:
+            raise ValueError(f"{flag!r} is not a flag of {command.text!r}")
+    values = [*positionals, *(given for _, given in options)]
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError(f"a command's values are text, not {type(value).__name__}")
+    return [*positionals, *(word for pair in options for word in pair), *flags]
 
 
-def command_argv(name: str, *arguments: str | Placeholder) -> list[str]:
-    """The words of ``name`` and each argument, as the list a program is run with.
+def render_command(
+    command: Command,
+    *,
+    positionals: Sequence[str] = (),
+    options: Sequence[tuple[str, str]] = (),
+    flags: Sequence[str] = (),
+) -> str | None:
+    """``command`` and its words, joined by single spaces, as one printed line, or
+    None when some value cannot be printed.
 
-    The command :func:`render_command` prints, for a caller that runs it instead.
-    A list is run and never printed, so each argument is any text, exactly as it
-    was given, and is not held to :func:`pasteable`: for arguments that are
-    pasteable, ``shlex.split(render_command(name, *arguments))`` is this list. A
-    :class:`Placeholder` stands for a value the message names elsewhere, so there
-    is nothing to run: it is a ``TypeError``.
+    The words are the ``positionals``, then each of the ``options`` (its name and
+    its value), then the ``flags``, each group given by keyword. A value is
+    printed as it is, so every one must be :func:`pasteable`: one bare word in
+    POSIX shells, ``cmd.exe`` and PowerShell alike. No positional may start with
+    ``-``, which the command would read as an option; an option's value may, since
+    the option takes the next word whatever it is. When a value fails either rule
+    the result is None, so a line is never printed that runs something other than
+    what it says. A call with no value always prints.
+
+    The checks of :func:`command_argv` come first, and a call that fails one
+    raises instead of returning None.
     """
-    words = name.split()
-    for argument in arguments:
-        if not isinstance(argument, str):
-            raise TypeError(
-                f"a command to run takes text arguments, not {type(argument).__name__}"
-            )
-        words.append(argument)
-    return words
+    words = _words(command, positionals, options, flags)
+    values = [*positionals, *(value for _, value in options)]
+    if not all(pasteable(value) for value in values):
+        return None
+    if any(value.startswith("-") for value in positionals):
+        return None
+    return " ".join([command.text, *words])
+
+
+def command_argv(
+    command: Command,
+    *,
+    positionals: Sequence[str] = (),
+    options: Sequence[tuple[str, str]] = (),
+    flags: Sequence[str] = (),
+) -> list[str]:
+    """The words of ``command`` as the list a program is run with.
+
+    The command :func:`render_command` prints, for a caller that runs it instead,
+    in the same order and under the same checks of a group given as text, of an
+    option or flag the command does not list and of a value that is not text. A
+    list is run and never printed, so each value is any text, exactly as given,
+    and is held neither to :func:`pasteable` nor to the rule on a leading ``-``.
+    For values :func:`render_command` prints, the printed line split at its spaces
+    is this list.
+    """
+    return [*command.text.split(), *_words(command, positionals, options, flags)]
 
 
 def terminal_text(value: str) -> str:
@@ -138,7 +170,15 @@ def terminal_text(value: str) -> str:
 
     ``shown_on_one_line`` of ``utils/terminal_text.py``, the package's one
     definition of that rule, so an ordinary name such as ``cfg.yaml`` comes out as
-    it went in.
+    it went in. The rule writes out the C0 controls (the tab and the line feed
+    included), DEL, the C1 controls, the Unicode format characters (the
+    bidirectional controls among them) and the line and paragraph separators, each
+    as a backslash and its code point: ``x`` and two hex digits up to U+00FF, ``u``
+    and four up to U+FFFF, ``U`` and eight beyond. A backslash that would read as
+    one of those escapes is doubled, so text that spells an escape reads as text
+    and never as the character. The package's rule goes past that list: it writes
+    out lone surrogates and private-use and unassigned code points the same way,
+    and it breaks the two forms of a CI command a line could start with.
 
     For a call site that shows a WHOLE one-line message itself, as every sink does.
     A part shown here and then put into a message a sink shows is shown twice: the

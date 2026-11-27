@@ -993,11 +993,11 @@ def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> 
     The command is last and unquoted, so it can be pasted as is. A path with a
     character outside letters, digits and `_ . / : -` (pasteable_path) is not
     printed in it: no one quoting is safe in both POSIX shells and cmd.exe, so
-    the command points at the file the message names instead. When one path
-    needs that, neither is printed: `--config <the file named above>
-    --source-dir /srv/repo` is a valid POSIX command line (input from a file
-    named `the`, output to one named `--source-dir`), while a line that ends
-    in `>` is not.
+    `command_names.render_command` prints no command for it, and the hint
+    points at the file the message names instead. When one path needs that,
+    neither is printed: `--config <the file named above> --source-dir
+    /srv/repo` is a valid POSIX command line (input from a file named `the`,
+    output to one named `--source-dir`), while a line that ends in `>` is not.
     """
     # A scan's copy of a session profile is pointed back at the profile: the
     # copy is removed when the run ends, so a command naming it lints nothing,
@@ -1011,18 +1011,15 @@ def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> 
         cwd is None or Path(source_dir).resolve() != cwd.resolve()
     ):
         paths.append(source_dir)
-    shown: List[str | command_names.Placeholder]
-    if all(pasteable_path(path) for path in paths):
-        shown = [Path(path).as_posix() for path in paths]
-    else:
-        shown = [
-            command_names.Placeholder("the file named above"),
-            command_names.Placeholder("the directory the scan scanned"),
-        ]
-    arguments: List[str | command_names.Placeholder] = ["--config", shown[0]]
+    options = [("--config", Path(paths[0]).as_posix())]
     if len(paths) > 1:
-        arguments += ["--source-dir", shown[1]]
-    command = command_names.render_command(command_names.CONFIG_LINT, *arguments)
+        options.append(("--source-dir", Path(paths[1]).as_posix()))
+    command = command_names.render_command(command_names.CONFIG_LINT, options=options)
+    if command is None:
+        # Some path holds a character the command cannot print as it is.
+        command = f"{command_names.CONFIG_LINT.text} --config <the file named above>"
+        if len(paths) > 1:
+            command += " --source-dir <the directory the scan scanned>"
     return f"Run: {command}"
 
 
