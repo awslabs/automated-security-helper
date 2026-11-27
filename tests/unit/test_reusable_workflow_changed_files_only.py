@@ -19,7 +19,9 @@ What is asserted
 * A step picks the base: the pull request's base commit on pull_request, the merge
   group's base commit on merge_group, and the `base-ref` input otherwise; it fails
   when that ref is not in the checkout instead of letting ASH report every file.
-* The scan step passes that step's ref to `--base-ref`.
+* Each scan line of the scan step, one for each spelling it can run the scan with,
+  passes that step's ref to `--base-ref`, once, and nothing else. A line that is
+  dropped, repeated or changed fails the check, and so does one it does not know.
 * What git prints while the step runs it is never read as a workflow command: each
   git call runs through with_commands_stopped. A git that writes a command to stderr
   on every call shows it.
@@ -96,27 +98,202 @@ def test_a_step_resolves_the_base_and_the_scan_uses_it():
     assert steps.index(resolve) < steps.index(run_ash)
 
 
+#: The argument every scan line passes for the base: the resolve step's output, quoted.
+BASE_ARGUMENT = '--base-ref "${BASE_REF}"'
+
+#: What each scan line has that no other has, by the spelling it runs the scan with:
+#: `ash scan fs` on an ASH that has it, `ash --source-dir` on one older than 3.9, and
+#: `ash scan <subject>` on one that has the subject a workspace, an image or a clone in
+#: ash-args names. The step runs one of them and says which. Each is looked for in a
+#: command line whose spaces are collapsed, so the words start and end with a space.
+SCAN_SPELLINGS = {
+    "fs": ' ash scan fs "${scan_path}" ',
+    "older": ' ash --source-dir "${scan_dir}" ',
+    "routed": ' ash scan "${routed_subject}" ',
+}
+
+
+def _run_ash_script() -> str:
+    return _step(name="Run ASH")["run"]
+
+
+def _scan_lines(script: str) -> list[str]:
+    """The script's uvx command lines, continuation lines joined, spaces collapsed.
+
+    The step's ash-args check names --base-ref too, in its lists of options that take
+    a value, and its help probes run uvx inside a command substitution. None of those
+    starts a line with uvx, and none runs the scan.
+    """
+    return [
+        " ".join(line.split())
+        for line in script.replace("\\\n", " ").splitlines()
+        if line.lstrip().startswith("uvx ")
+    ]
+
+
+def _scan_problems(script: str) -> list[str]:
+    """Why the scans of the script do not pass the resolved base once and nothing else.
+
+    Each spelling is found by its own words, so a line that is dropped, repeated or
+    changed is named, and so is a scan line of a spelling this check does not know,
+    where a count of lines would pass whatever happens to add up.
+    """
+    scans = _scan_lines(script)
+    problems = []
+    for spelling, words in SCAN_SPELLINGS.items():
+        found = [scan for scan in scans if words in scan]
+        if len(found) != 1:
+            problems.append(
+                f"{len(found)} uvx lines run the {spelling} spelling "
+                f"({words.strip()}), and the step has one"
+            )
+        for scan in found:
+            if scan.count("--base-ref") != 1 or BASE_ARGUMENT not in scan:
+                problems.append(
+                    f"the {spelling} scan does not pass {BASE_ARGUMENT} "
+                    f"once and nothing else: {scan}"
+                )
+    unknown = [
+        scan
+        for scan in scans
+        if not any(words in scan for words in SCAN_SPELLINGS.values())
+    ]
+    if unknown:
+        problems.append(f"uvx lines in no spelling this check knows: {unknown}")
+    return problems
+
+
 @pytest.mark.unit
 def test_the_scan_passes_the_resolved_base_and_nothing_else():
     """ASH must diff against the ref the step resolved, not a literal.
 
     Read from the uvx command lines themselves, with their continuation lines joined:
     the step's ash-args check names --base-ref too, in its list of options that take
-    a value, and that list passes nothing to ASH. There are two, one for an ASH with
-    the `ash scan fs` spelling and one for an older ASH, and each passes it.
+    a value, and that list passes nothing to ASH. There are three, one for each
+    spelling the step can run the scan with: `ash scan fs`, the older `ash
+    --source-dir`, and `ash scan <subject>` for a workspace, an image or a clone named
+    in ash-args. Each passes the base once, as the resolve step's output.
     """
-    script = _step(name="Run ASH")["run"].replace("\\\n", " ")
-    scans = [
-        " ".join(line.split())
-        for line in script.splitlines()
-        if line.lstrip().startswith("uvx ")
-    ]
+    assert _scan_problems(_run_ash_script()) == []
 
-    assert len(scans) == 2, scans
-    assert " ash scan fs " in scans[0] and " ash --source-dir " in scans[1], scans
-    for scan in scans:
-        assert scan.count("--base-ref") == 1, scan
-        assert '--base-ref "${BASE_REF}"' in scan, scan
+
+@pytest.mark.unit
+def test_the_check_reads_one_scan_line_for_each_spelling():
+    """The denominator of the test above: every spelling has its line, and only it."""
+    scans = _scan_lines(_run_ash_script())
+
+    assert len(scans) == len(SCAN_SPELLINGS), scans
+    for words in SCAN_SPELLINGS.values():
+        assert sum(words in scan for scan in scans) == 1, (words, scans)
+
+
+def _rewrite_the_scan(script: str, spelling: str, rewrite) -> str:
+    """The script with the one scan line of *spelling* replaced by *rewrite*'s lines.
+
+    *rewrite* is given the line with its continuation lines joined and its spaces
+    collapsed, and returns the lines that stand in its place; none drops the line.
+    """
+    lines = script.replace("\\\n", " ").splitlines()
+    words = SCAN_SPELLINGS[spelling]
+    at = [
+        number
+        for number, line in enumerate(lines)
+        if line.lstrip().startswith("uvx ") and words in " ".join(line.split())
+    ]
+    assert len(at) == 1, (spelling, at)
+    lines[at[0] : at[0] + 1] = rewrite(" ".join(lines[at[0]].split()))
+    return "\n".join(lines)
+
+
+#: The ways a scan line can stop passing the resolved base and nothing else.
+BASE_CHANGES = {
+    "drops-the-base": lambda scan: scan.replace(f" {BASE_ARGUMENT}", ""),
+    "names-a-literal": lambda scan: scan.replace(
+        BASE_ARGUMENT, "--base-ref origin/main"
+    ),
+    "names-another-variable": lambda scan: scan.replace(
+        "${BASE_REF}", "${PR_BASE_SHA}"
+    ),
+    "leaves-it-unquoted": lambda scan: scan.replace('"${BASE_REF}"', "${BASE_REF}"),
+    "names-a-second": lambda scan: f"{scan} --base-ref origin/main",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("spelling", list(SCAN_SPELLINGS))
+@pytest.mark.parametrize("change", list(BASE_CHANGES))
+def test_a_scan_line_that_changes_the_base_is_flagged(spelling, change):
+    """The must-flag controls: each change, made to each of the step's scan lines."""
+    script = _rewrite_the_scan(
+        _run_ash_script(), spelling, lambda scan: [BASE_CHANGES[change](scan)]
+    )
+
+    problems = _scan_problems(script)
+
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(f"the {spelling} scan does not pass"), problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("spelling", list(SCAN_SPELLINGS))
+@pytest.mark.parametrize(
+    ("rewrite", "count"),
+    [
+        pytest.param(lambda scan: [], 0, id="dropped"),
+        pytest.param(lambda scan: [scan, scan], 2, id="repeated"),
+    ],
+)
+def test_a_scan_line_that_is_dropped_or_repeated_is_flagged(spelling, rewrite, count):
+    script = _rewrite_the_scan(_run_ash_script(), spelling, rewrite)
+
+    problems = _scan_problems(script)
+
+    assert len(problems) == 1, problems
+    expected = f"{count} uvx lines run the {spelling} spelling"
+    assert problems[0].startswith(expected), problems
+
+
+@pytest.mark.unit
+def test_a_scan_line_of_a_spelling_this_check_does_not_know_is_flagged():
+    """A fourth way to run the scan, with the base in place, is one this check is
+    taught and not one it skips."""
+    other = (
+        'uvx --reinstall --from "${ASH_UVX_SOURCE}" ash scan image "${REF}" '
+        f"{BASE_ARGUMENT}"
+    )
+
+    problems = _scan_problems(f"{_run_ash_script()}\n{other}\n")
+
+    assert len(problems) == 1, problems
+    assert problems[0].startswith("uvx lines in no spelling this check knows"), problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("spelling", list(SCAN_SPELLINGS))
+def test_a_scan_line_wrapped_another_way_is_not_flagged(spelling):
+    """The must-not-flag control: where the step wraps a command line is no part of
+    what is checked, as the continuation lines are joined first."""
+    script = _rewrite_the_scan(
+        _run_ash_script(),
+        spelling,
+        lambda scan: [
+            scan.replace(" --output-dir", " \\\n    --output-dir").replace(
+                " --build-target", " \\\n    --build-target"
+            )
+        ],
+    )
+
+    assert "\\\n    --output-dir" in script, "control: the line is wrapped there"
+    assert _scan_problems(script) == []
+
+
+@pytest.mark.unit
+def test_a_line_that_only_names_the_option_is_not_a_scan():
+    """The must-not-flag control for the reading: a line that names --base-ref and does
+    not start with uvx, as the step's list of options that take a value does."""
+    script = f'{_run_ash_script()}\nASH_VALUE_OPTIONS="--base-ref --config"\n'
+
+    assert _scan_problems(script) == []
 
 
 posix_only = pytest.mark.skipif(
