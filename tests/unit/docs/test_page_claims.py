@@ -13980,6 +13980,196 @@ def test_trivy_repo_passes_scan_timeout_as_trivys_deadline(
     assert timeouts == [f"--timeout={deadline}"], argv
 
 
+_FAQ = "faq.md"
+
+#: How the FAQ and the homepage described trivy-repo and ASH's output directories
+#: before they matched the code.
+_TRIVY_REPO_READS_OUTPUT_DIRS_CLAIMS = ("still reads those directories",)
+
+_OUTPUT_DIRS_ARE_SKIPPED_SENTENCE = (
+    "ASH tells each scanner that can skip a directory to skip the output directories "
+    "that hold no committed file (`trivy --skip-dirs` for trivy and trivy-repo), and "
+    "drops the findings a scanner still reports there, except in committed files."
+)
+
+
+@pytest.mark.unit
+def test_trivy_and_trivy_repo_skip_the_output_directories_that_hold_no_committed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """faq.md and index.md (the paragraph on ASH's own output).
+
+    Both pages say ASH tells each scanner that can skip a directory to skip the
+    output directories that hold no committed file, ``trivy --skip-dirs`` for trivy
+    and trivy-repo alike, and drops what a scanner still reports there, except in
+    committed files. Neither may say trivy-repo still reads those directories. The
+    probe builds each scanner's command for a tree whose output directory is inside
+    it. While the scan set holds no file of that directory, it is one
+    ``--skip-dirs`` value; once the scan set holds a committed file there, the
+    directory is no longer skipped whole and ASH's own directories in it are. The
+    drop then removes a result in one of ASH's reports and keeps the one in the
+    committed file.
+    """
+    for page in (_FAQ, _HOMEPAGE):
+        assert_on_page(page, _OUTPUT_DIRS_ARE_SKIPPED_SENTENCE)
+        text = _normalize(_page_text(page))
+        stale = [
+            claim
+            for claim in _TRIVY_REPO_READS_OUTPUT_DIRS_CLAIMS
+            if _normalize(claim) in text
+        ]
+        assert not stale, (page, stale)
+
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from automated_security_helper.base import scanner_plugin
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+        TrivyScannerConfig,
+        TrivyScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+    )
+    from automated_security_helper.utils import scan_output_dirs
+
+    source = Path(os.path.realpath(tmp_path)) / "src"
+    output = source / ".ash" / "ash_output"
+    committed = output / "keep" / "tracked.py"
+    for directory in (output / "converted", output / "reports", committed.parent):
+        directory.mkdir(parents=True, exist_ok=True)
+    (source / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+    (output / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
+    committed.write_text("x = 1\n", encoding="utf-8")
+    # trivy counts as installed without a process: the lookup answers a path, and
+    # trivy-repo's run itself is the double in skips() below.
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(
+                module, "find_executable", lambda name: "/opt/trivy/bin/trivy"
+            )
+    for name in (
+        "ASH_OFFLINE",
+        "TRIVY_CONFIG",
+        "TRIVY_IGNOREFILE",
+        "TRIVY_SECRET_CONFIG",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    document = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy"}}, "results": []}],
+    }
+
+    def skips() -> Dict[str, List[str]]:
+        """The ``--skip-dirs`` values of the command each scanner builds for ``source``."""
+        builtin = TrivyScanner(
+            context=PluginContext(
+                source_dir=source,
+                output_dir=output,
+                work_dir=output / "converted",
+                config=AshConfig(),
+            ),
+            config=TrivyScannerConfig(options=TrivyScannerConfigOptions(offline=False)),
+        )
+        final_args, _, _ = builtin._execute_scan(source, "source", [])
+        repo = TrivyRepoScanner(
+            context=PluginContext(
+                source_dir=source,
+                output_dir=output,
+                work_dir=output / "converted",
+                config=get_default_config(),
+            )
+        )
+        repo.dependencies_satisfied = True
+        argv: List[str] = []
+
+        def _run(self: Any, command: List[Any], **kwargs: Any) -> Dict[str, Any]:
+            argv[:] = [str(arg) for arg in command]
+            report = Path(command[command.index("--output") + 1])
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(json.dumps(document), encoding="utf-8")
+            return {"stdout": "", "stderr": "", "returncode": 0}
+
+        # The double is spec'd on the real _run_subprocess (autospec), so a change to
+        # its signature fails here instead of passing silently.
+        with (
+            patch.object(repo, "_pre_scan", return_value=True),
+            patch.object(repo, "_post_scan"),
+            patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+            patch.object(repo, "_plugin_log"),
+        ):
+            double.side_effect = _run
+            repo.scan(target=source, target_type="source")
+        return {
+            "trivy": [a for a in map(str, final_args) if a.startswith("--skip-dirs=")],
+            "trivy-repo": [a for a in argv if a.startswith("--skip-dirs=")],
+        }
+
+    whole = "--skip-dirs=.ash/ash_output"
+    reports = "--skip-dirs=.ash/ash_output/reports"
+    before = skips()
+    assert all(whole in found for found in before.values()), before
+
+    # The repository committed a file to the output directory, so the scan set holds
+    # it: a tool cannot be told to skip a directory but for one file, so the
+    # directory is read, and ASH's own directories in it are skipped.
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "scan_set_of",
+        lambda context: [os.fspath(source / "requirements.txt"), os.fspath(committed)],
+    )
+    after = skips()
+    assert all(whole not in found and reports in found for found in after.values()), (
+        after
+    )
+
+    def located(uri: str) -> Any:
+        return SimpleNamespace(
+            locations=[
+                SimpleNamespace(
+                    physicalLocation=SimpleNamespace(
+                        root=SimpleNamespace(artifactLocation=SimpleNamespace(uri=uri))
+                    )
+                )
+            ]
+        )
+
+    in_a_report = ".ash/ash_output/reports/ash.sarif"
+    in_the_committed_file = ".ash/ash_output/keep/tracked.py"
+    in_the_tree = "requirements.txt"
+    report = SimpleNamespace(
+        runs=[
+            SimpleNamespace(
+                results=[
+                    located(uri)
+                    for uri in (in_a_report, in_the_committed_file, in_the_tree)
+                ]
+            )
+        ]
+    )
+    context = SimpleNamespace(
+        source_dir=source, output_dir=output, work_dir=output / "converted"
+    )
+
+    removed = scan_output_dirs.drop_results_in_ash_output_dirs(
+        report, context, scanner_name="trivy-repo", scanned_files=[committed]
+    )
+
+    kept = [
+        result.locations[0].physicalLocation.root.artifactLocation.uri
+        for result in report.runs[0].results
+    ]
+    assert removed == 1, (removed, kept)
+    assert kept == [in_the_committed_file, in_the_tree], kept
+
+
 # --------------------------------------------------------------------------- #
 # Suppression paths that name a directory
 # --------------------------------------------------------------------------- #
