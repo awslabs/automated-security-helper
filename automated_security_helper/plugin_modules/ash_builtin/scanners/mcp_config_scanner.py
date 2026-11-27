@@ -307,11 +307,13 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
         List[str],
         Field(
             description=(
-                "When not empty, every stdio command must be a path that starts "
-                "with one of these prefixes (MEDIUM), compared on path boundaries "
-                "after the command is normalized. A bare command name such as `npx` "
-                "does not start with a path prefix and is flagged. Empty turns the "
-                "check off."
+                "When not empty, every stdio command must be allowed by one of "
+                "these entries (MEDIUM). An entry that is a path allows the "
+                "commands that start with it, compared on path boundaries after "
+                "the command is normalized. An entry that is a bare name such as "
+                "`npx` allows exactly that bare command, which the client finds "
+                "on PATH, and no command that has a path, `./npx` included. "
+                "Empty turns the check off."
             ),
         ),
     ] = []
