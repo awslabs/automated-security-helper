@@ -82,6 +82,56 @@ def test_the_stage_reader_has_a_positive_and_a_negative_control() -> None:
     assert dockerfile_stages("RUN true\n") == {}
 
 
+def test_the_stage_reader_names_a_stage_as_docker_does() -> None:
+    """A FROM line may carry flags, spell AS in any case, indent itself or name no
+    stage at all. A stage with no name is filed under its position, which is how
+    ``COPY --from=<n>`` refers to it, and a name is folded to lower case."""
+    planted = (
+        "ARG BASE_IMAGE=x\n"
+        "FROM --platform=$BUILDPLATFORM ${BASE_IMAGE} AS builder\n"
+        "RUN one\n"
+        "From builder As Mixed\n"
+        "RUN two\n"
+        "FROM scratch\n"
+        "COPY --from=mixed /a /a\n"
+        "  FROM --platform=linux/amd64 builder\n"
+        "RUN four\n"
+    )
+
+    stages = dockerfile_stages(planted)
+
+    assert list(stages) == ["builder", "mixed", "2", "3"]
+    assert stages["builder"] == "RUN one"
+    assert stages["mixed"] == "RUN two"
+    assert stages["2"] == "COPY --from=mixed /a /a"
+    assert stages["3"] == "RUN four"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "FROM",
+        "FROM image extra",
+        "FROM image AS",
+        "FROM image BEFORE name",
+        "FROM image AS 9lives",
+        "FROM --platform=linux/amd64 \\",
+    ],
+)
+def test_the_stage_reader_refuses_a_from_line_it_cannot_name(line: str) -> None:
+    """A FROM line the reader cannot name would hand its lines to the stage before it,
+    and the rows that read a stage by name would read the wrong lines."""
+    planted = f"FROM base AS first\nRUN true\n{line}\nRUN false\n"
+
+    with pytest.raises(ValueError, match="cannot name the stage"):
+        dockerfile_stages(planted)
+
+
+def test_the_stage_reader_refuses_a_stage_named_twice() -> None:
+    with pytest.raises(ValueError, match="named twice"):
+        dockerfile_stages("FROM a AS one\nRUN true\nFROM b AS ONE\n")
+
+
 def _comment_run(lines: list[str], note: tuple[str, ...]) -> bool:
     """Whether *note* is a run of consecutive lines of *lines*."""
     width = len(note)
