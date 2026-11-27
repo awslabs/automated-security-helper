@@ -1968,7 +1968,9 @@ def _completed_findings_summary(
     at the top. Without them, from the SARIF results; and likewise when the
     stats name no bucket at all (``total_findings`` and ``actionable`` alone, say),
     which used to give all-zero buckets beside SARIF results that were never
-    graded.
+    graded. A result whose kind states no finding (pass, notApplicable,
+    informational) is in no bucket of that grading, as it is in none the scan
+    records; one with a suppression in effect is still a suppressed result.
     """
     summary = empty_severity_counts()
     if summary_stats:
@@ -1982,12 +1984,16 @@ def _completed_findings_summary(
         if named_a_bucket:
             return summary
 
-    from automated_security_helper.utils.sarif_utils import is_result_suppressed
+    from automated_security_helper.utils.sarif_utils import (
+        is_not_a_finding,
+        is_result_suppressed,
+    )
 
     for result in findings:
-        bucket = (
-            "suppressed" if is_result_suppressed(result) else result_severity(result)
-        ).lower()
+        suppressed = is_result_suppressed(result)
+        if is_not_a_finding(result) and not suppressed:
+            continue
+        bucket = ("suppressed" if suppressed else result_severity(result)).lower()
         summary[bucket if bucket in summary else UNKNOWN_SEVERITY] += 1
     return summary
 
@@ -2000,13 +2006,14 @@ def _completed_findings_count(
 
     From ``summary_stats.total`` when the document carries one; else what the
     buckets of ``findings_summary`` other than ``suppressed`` add up to: the SARIF
-    results less the suppressed ones when the buckets were graded from them, and
-    the recorded buckets' sum when they came from the summary stats. Taken from
-    the SARIF alone, a document whose stats gave ``{"critical": 7}`` and no
-    ``total`` read 7 critical beside a count of 0 (``findings`` is the SARIF
-    results, and only the stats' buckets were counted). The running view reports
-    the same quantity (the scanners' non-suppressed recorded counts), so a scan's
-    count no longer rises by its suppressed findings the moment it completes.
+    results less the suppressed ones and the ones whose kind states no finding
+    when the buckets were graded from them, and the recorded buckets' sum when
+    they came from the summary stats. Taken from the SARIF alone, a document
+    whose stats gave ``{"critical": 7}`` and no ``total`` read 7 critical beside
+    a count of 0 (``findings`` is the SARIF results, and only the stats' buckets
+    were counted). The running view reports the same quantity (the scanners'
+    non-suppressed recorded counts), so a scan's count no longer rises by its
+    suppressed findings the moment it completes.
     """
     total = summary_stats.get("total")
     if isinstance(total, int) and not isinstance(total, bool) and total >= 0:
