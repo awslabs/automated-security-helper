@@ -885,9 +885,11 @@ def actionable_results_by_scanner(
     project-wide *threshold* governing a scanner that has no setting of its own
     and a finding that names no scanner; ``properties.issue_severity`` decides
     when it names a severity ASH knows, otherwise the SARIF ``level`` does; and a
-    suppressed finding never counts. Both arms go through Phase 0's severity
-    ladder, which was verified to gate identically to the inline tables in
-    ``_compute_exit_code`` for all five real threshold values.
+    suppressed finding never counts, nor does a result whose kind states no
+    finding (``pass``, ``notApplicable``, ``informational``). Both arms go
+    through Phase 0's severity ladder, which was verified to gate identically to
+    the inline tables in ``_compute_exit_code`` for all five real threshold
+    values.
 
     Every scanner that produced a result is a key, counted or not, so a caller
     can tell "no actionable findings" from "no findings".
@@ -997,6 +999,11 @@ def has_finding_at_min_severity(
     LOW actionable: the same project exited 0 as ``ash --source-dir P`` and 2
     inside a workspace.
 
+    A result whose kind states no finding (``pass``, ``notApplicable``,
+    ``informational``: ``utils.sarif_utils.is_not_a_finding``) never qualifies.
+    Its level is ``none``, which this scale reads as low, so with no gate to turn
+    it away a rule that was not evaluated met ``--min-severity low``.
+
     Note that this scale is not the severity ladder's. It has no ``info``, and it
     treats ``critical`` and ``high`` as equal because SARIF's ``error`` covers
     both.
@@ -1013,10 +1020,20 @@ def has_finding_at_min_severity(
         return True
     gated = threshold is not None or threshold_for is not None
     effective = effective_threshold_resolver(threshold, threshold_for)
+    # Imported here, as result_is_suppressed imports its own: sarif_utils imports
+    # the results model this module also imports, and the module-level order is
+    # not fixed.
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
     for result in results:
         if not isinstance(result, Mapping):
             continue
         if result_is_suppressed(result):
+            continue
+        # The kind is read before the level: a pass, notApplicable or
+        # informational result carries level none, which the scale below reads
+        # as low, and states no finding at any severity.
+        if is_not_a_finding(result):
             continue
         # The resolver run_ash_scan._severity_filters_finding uses: the
         # declared issue_severity first, a missing level as
