@@ -30,6 +30,7 @@ from automated_security_helper.utils.image_attribution import mark_image_results
 from automated_security_helper.utils.image_digest_resolver import (
     resolve_image_locator,
 )
+from automated_security_helper.utils.image_tool_targets import archive_scheme
 
 pytestmark = pytest.mark.unit
 
@@ -42,6 +43,12 @@ CONFIG_BLOB = b'{"architecture": "amd64", "os": "linux"}'
 HEX = hashlib.sha256(CONFIG_BLOB).hexdigest()
 PAYLOAD_DIGEST = "sha256:" + HEX
 BLOB_PATH = f"blobs/sha256/{HEX}"
+
+#: The config blob of a different image, and the path a docker save manifest.json
+#: names it by: a manifest.json that is not the image an index.json names.
+OTHER_CONFIG_BLOB = b'{"architecture": "arm64", "os": "linux"}'
+OTHER_HEX = hashlib.sha256(OTHER_CONFIG_BLOB).hexdigest()
+OTHER_BLOB_PATH = f"blobs/sha256/{OTHER_HEX}"
 REF = "registry.example.com/team/app:1.2.3"
 CRANE = "/opt/bin/crane"
 
@@ -494,6 +501,11 @@ def _manifest_naming_the_digest() -> bytes:
     return json.dumps([{"Config": BLOB_PATH}]).encode()
 
 
+def _manifest_naming_the_other_image() -> bytes:
+    """A ``docker save`` manifest.json whose one config blob is OTHER_BLOB_PATH's."""
+    return json.dumps([{"Config": OTHER_BLOB_PATH}]).encode()
+
+
 def _saved_image(record="manifest.json", blob=CONFIG_BLOB, blob_name=BLOB_PATH):
     """The members of a ``docker save`` tar: its record, then the config blob it names.
 
@@ -847,6 +859,145 @@ class TestOnlyAnExactRecordNameIsARecord:
         other.mkdir()
         oci = _archive_holding(other, *_oci_archive_members(record="./index.json"))
         assert payload_digest(oci) == (PAYLOAD_DIGEST, "")
+
+
+#: Spellings of manifest.json that the archive routing reads as manifest.json and
+#: the digest reader's exact name test does not: the routing drops any leading run
+#: of dots and slashes from a member's name, the reader one leading "./".
+ROUTED_AS_MANIFEST_NAMES = {
+    "dot-prefixed": ".manifest.json",
+    "parent-directory": "../manifest.json",
+    "root-directory": "/manifest.json",
+    "double-slash": ".//manifest.json",
+    "repeated-dot-slash": "././manifest.json",
+}
+
+
+def _regular_member_called(name):
+    """A payload whose manifest.json is a regular member under another spelling.
+
+    The member names another image than the regular index.json beside it does, as
+    the manifest.json a tool reads would.
+    """
+
+    def build(tmp_path):
+        return _archive_holding(
+            tmp_path,
+            _record(name, _manifest_naming_the_other_image()),
+            *_oci_archive_members(),
+        )
+
+    return build
+
+
+#: Payloads in which a member the archive routing reads as manifest.json is not the
+#: regular member named exactly that, each beside a regular index.json that names
+#: PAYLOAD_DIGEST and the regular blob whose bytes have it.
+MISREAD_MANIFEST_PAYLOADS = [
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path,
+            _record("other.json", _manifest_naming_the_other_image()),
+            _link("manifest.json", tarfile.SYMTYPE, "other.json"),
+            *_oci_archive_members(),
+        ),
+        id="manifest-symlink-to-another-member",
+    ),
+    pytest.param(
+        lambda tmp_path: _archive_holding(
+            tmp_path,
+            _record("other.json", _manifest_naming_the_other_image()),
+            _link("manifest.json", tarfile.LNKTYPE, "other.json"),
+            *_oci_archive_members(),
+        ),
+        id="manifest-hard-link-to-another-member",
+    ),
+    *(
+        pytest.param(_regular_member_called(name), id=f"regular-{label}-name")
+        for label, name in ROUTED_AS_MANIFEST_NAMES.items()
+    ),
+]
+
+
+@pytest.mark.parametrize("build", MISREAD_MANIFEST_PAYLOADS)
+class TestAMemberReadAsManifestJsonIsTheRecordOrTheArchiveNamesNoDigest:
+    """A tool reads an archive through the member the routing reads as manifest.json.
+
+    ``archive_scheme`` hands a tar that holds a member called manifest.json (once
+    any leading run of dots and slashes is dropped, and whatever the member's type)
+    to grype and syft as a docker archive, and they read manifest.json from it, not
+    index.json. A regular index.json beside such a member can name the image of
+    another record than the one the tools scan, so the digest it names is not
+    taken: when a member the routing reads as manifest.json is not the regular,
+    exact-named record ``payload_digest`` reads, the archive names no digest, with
+    a reason that names manifest.json.
+    """
+
+    def test_the_archive_names_no_digest(self, tmp_path, build):
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        locator = build(tmp_path)
+        # The premise: the tools are told to read this tar as a docker archive.
+        assert archive_scheme(locator.oci_archive) == "docker-archive"
+        digest, why = payload_digest(locator)
+        assert digest is None
+        assert "manifest.json" in why
+        assert "not a regular file named exactly manifest.json" in why
+
+    def test_the_resolver_keys_the_payload_on_its_path(self, tmp_path, notices, build):
+        """Resolving such a payload keeps the locator, and the notice names the record."""
+        locator = build(tmp_path)
+        resolved = resolve_image_locator(locator, offline=True)
+        assert resolved is locator
+        assert resolved.resolved_digest is None
+        assert "manifest.json" in notices.text
+
+
+class TestTheManifestRecordStillDecidesWhenNothingElseIsRoutedAsOne:
+    """Controls: the refusal is for a misread member, not for manifest.json itself."""
+
+    def test_a_regular_exact_manifest_json_beside_an_index_names_its_own_digest(
+        self, tmp_path
+    ):
+        """The same tar with the record in place: manifest.json decides.
+
+        It names the config blob of the other image, not the manifest blob the
+        index names, as the tools that read the archive through manifest.json do.
+        """
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        archive = _archive_holding(
+            tmp_path,
+            _record("manifest.json", _manifest_naming_the_other_image()),
+            _record(OTHER_BLOB_PATH, OTHER_CONFIG_BLOB),
+            *_oci_archive_members(),
+        )
+        assert archive_scheme(archive.oci_archive) == "docker-archive"
+        assert payload_digest(archive) == (f"sha256:{OTHER_HEX}", "")
+
+    def test_names_that_only_look_like_manifest_json_keep_the_index_route(
+        self, tmp_path
+    ):
+        """A nested manifest.json and a longer name are not read as manifest.json.
+
+        Nothing in the tar is routed as manifest.json, so the index decides.
+        """
+        from automated_security_helper.utils.image_digest_resolver import (
+            payload_digest,
+        )
+
+        archive = _archive_holding(
+            tmp_path,
+            _record("layer/manifest.json", b"[]"),
+            _record("manifest.json.orig", b"[]"),
+            *_oci_archive_members(),
+        )
+        assert archive_scheme(archive.oci_archive) == "oci-archive"
+        assert payload_digest(archive) == (PAYLOAD_DIGEST, "")
 
 
 def _bare_layout(tmp_path):
