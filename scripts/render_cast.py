@@ -3,10 +3,12 @@
 The recording is an asciicast, a run record and a storyboard (see ``scripts/_cast.py``).
 This script turns them into two images that need no player and no script: an animated
 SVG that plays the recording once, and a still poster of the screen the storyboard names
-with ``poster_scene``. The output is a pure function of its three inputs, so it is the
-same on every machine, under every hash seed, and ``--check`` can compare it byte for
-byte with what is committed. Nothing here touches a terminal: the module imports no
-``pty``, ``termios`` or ``fcntl``, and runs, and is tested, on every platform.
+with ``poster_scene``. The output is a pure function of its three inputs and of the
+rich release that ``uv.lock`` pins (see Determinism), so it is the same on every
+machine, under every hash seed and every ``UNICODE_VERSION``, and ``--check`` can
+compare it byte for byte with what is committed. Nothing here touches a terminal: the
+module imports no ``pty``, ``termios`` or ``fcntl``, and runs, and is tested, on every
+platform.
 
 What it holds
 -------------
@@ -17,9 +19,10 @@ What it holds
   CNL, CPL, CHA and CUP, the erases ED and EL, SGR in 16 colors, 256 colors and true
   color with bold, dim, italic, underline and reverse, cursor show and hide (``?25``),
   OSC titles (ignored) and OSC 8 links (the text shows, the link does not). Cell widths
-  come from ``rich.cells``: a wide character takes two columns, and a combining mark or
-  a variation selector joins the cell before it. Any other sequence is refused with its
-  bytes named, so a new feature in ASH's output fails loudly instead of rendering wrong.
+  come from ``rich.cells``, measured with the table ``UNICODE_TABLE`` names: a wide
+  character takes two columns, and a combining mark or a variation selector joins the
+  cell before it. Any other sequence is refused with its bytes named, so a new feature
+  in ASH's output fails loudly instead of rendering wrong.
   A recorder that scrubs a recording reads the same screens: ``emulated_screens``.
 * the timeline: ``build_timeline`` follows the recording scene by scene. Output events
   closer than 50 ms merge into one frame. A typed command is one frame, the screen with
@@ -54,6 +57,15 @@ Determinism
 Rows are numbered by first appearance, color classes by sorted color, keyframe offsets
 are written with integer arithmetic to four decimals, and no set or hash order reaches
 the output. Files are written with Unix newlines.
+
+Cell widths are the one input the recording does not hold. When a call names no table,
+``rich.cells`` reads the Unicode table from the ``UNICODE_VERSION`` environment
+variable, so every width call here names ``UNICODE_TABLE`` (rich's newest table, which
+is also what rich uses when the variable is unset) and the variable changes nothing.
+Which characters are one cell wide, two or none still comes from the tables in the rich
+release that ``uv.lock`` pins (``pyproject.toml`` allows rich 15.x), so that release is
+an input of the images: an upgrade that ships a newer table can move a width, and
+``--check`` then reports the committed images stale until they are regenerated.
 """
 
 from __future__ import annotations
@@ -119,6 +131,11 @@ TAB_WIDTH = 8
 #: Longer than any control sequence the subset holds; a longer one is refused.
 MAX_CSI_LENGTH = 64
 MAX_OSC_LENGTH = 4096
+#: The Unicode table every cell width is measured with. ``rich.cells`` reads the
+#: ``UNICODE_VERSION`` environment variable when a call names no table, so a host that
+#: set it would draw other images than one that did not. ``"latest"`` is the newest
+#: table the installed rich ships, and what rich uses when the variable is unset.
+UNICODE_TABLE = "latest"
 
 FONT_STACK = (
     'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
@@ -377,7 +394,7 @@ class Emulator:
             cells[end] = self._blank()
 
     def _print(self, char: str) -> None:
-        width = get_character_cell_size(char)
+        width = get_character_cell_size(char, unicode_version=UNICODE_TABLE)
         cluster = self._cluster
         if cluster is not None and (width == 0 or self._joining):
             self._attach(char, cluster)
@@ -421,7 +438,11 @@ class Emulator:
         cells[col] = Cell(text, old.style)
         self._frozen[row] = None
         self._joining = char == _ZWJ
-        if width == 1 and cell_len(text) > 1 and col + 1 < self.cols:
+        if (
+            width == 1
+            and cell_len(text, unicode_version=UNICODE_TABLE) > 1
+            and col + 1 < self.cols
+        ):
             # A variation selector made a narrow emoji wide.
             self._clear_halves(cells, col + 1, 1)
             cells[col + 1] = Cell("", old.style)
@@ -849,7 +870,10 @@ def _scene_drafts(
     emulator: Emulator, index: int, scene, entry, events: Events, merge_ms: int
 ) -> list[_Draft]:
     span, command = entry.typing, entry.command
-    if any(get_character_cell_size(char) != 1 for char in command):
+    if any(
+        get_character_cell_size(char, unicode_version=UNICODE_TABLE) != 1
+        for char in command
+    ):
         raise RenderError(
             f"scene {scene.scene_id!r}: the typed command {command!r} holds characters "
             "that are not one cell wide; a command is revealed one cell at a time"
