@@ -30,17 +30,17 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Sized off a count rather than a guess: this workflow expands to 383 jobs on a push
-  # to main, 381 on a merge-queue run, where warm-image-layers does not run, and 159 on a
+  # Sized off a count rather than a guess: this workflow expands to 384 jobs on a push
+  # to main, 382 on a merge-queue run, where warm-image-layers does not run, and 163 on a
   # pull request, where the matrices run the pull-request cover (the note on ensure-cache),
   # and ash-iac-drift.yml to 6, so a queued merge that also pushes to main is
-  # ~776 runner jobs instead of ~387. The duplicate result on a queued merge is the
+  # ~778 runner jobs instead of ~388. The duplicate result on a queued merge is the
   # price of covering the bypassed one, and it was accepted deliberately. With
   # install-validation's five cheap install methods each as its own leg -- 4 methods x
   # 20 cells + uvx x 5 OS = 85 legs in place of the 20 bundled cells (uvx ran on 3.12
-  # only), 65 more legs on each of the two runs -- it would be ~906 against ~452, so
+  # only), 65 more legs on each of the two runs -- it would be ~908 against ~453, so
   # running them as one leg per combination cuts a large share of what this deliberate
-  # duplication costs. Most of the 383 is the
+  # duplication costs. Most of the 384 is the
   # unit-test and integration-test families, which are 288 legs since the suite was split
   # by tier and the slow pools took eight shards: the unit tier is 144 legs (2 Linux
   # images x 4 Python versions x 6 shards, plus 2 macOS images and 1 Windows image x 4 x
@@ -56,7 +56,7 @@ on:
   # longest pull-request leg near the ~10.5-minute floor the longest scan leg sets. Each
   # integration shard
   # repeats the checkout and dependency install, so the job
-  # count rises faster than the test time does. The 383-job push figure is
+  # count rises faster than the test time does. The 384-job push figure is
   # derived from a census rather than being one -- see the note on the required-checks job for
   # which link in that chain was actually measured, and
   # tests/unit/test_unified_ci_job_counts.py, which recounts both figures from the
@@ -3135,8 +3135,8 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Most jobs above name themselves from their matrix, so this workflow contributes 250 check
-  # runs to a pull request (674 to a merge-queue run, which runs the full matrices) and few of
+  # Most jobs above name themselves from their matrix, so this workflow contributes 254 check
+  # runs to a pull request (675 to a merge-queue run, which runs the full matrices) and few of
   # their names are stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` and the integration and e2e families means enumerating all 293 of their names -- and then any matrix edit either orphans
@@ -3146,16 +3146,16 @@ jobs:
   # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
-  # stale unnoticed. The 186 was measured on pull request 599, the 674 is derived
+  # stale unnoticed. The 186 was measured on pull request 599, the 675 is derived
   # below, and both are re-derivable:
   #
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 250 is this workflow's own contribution to a pull request: the 159 jobs that run there,
+  # 254 is this workflow's own contribution to a pull request: the 163 jobs that run there,
   # plus the 91 `PyTest - ...` check runs that mikepenz/action-junit-report publishes from
   # inside the unit, integration and e2e legs -- one per leg. A merge-queue run, which runs
-  # the full matrices, is 674: the 381 jobs that run there plus 293 check runs.
+  # the full matrices, is 675: the 382 jobs that run there plus 293 check runs.
   # warm-image-layers runs only on a push to main and is in neither; whether GitHub still
   # lists it as skipped on a pull request was not checked. The check runs are not jobs and
   # land in a separate check suite, so a job census alone undercounts what this file puts on
@@ -3220,22 +3220,25 @@ jobs:
   # utils/ash_helpers.sh (+5 on every event): 460 on a push, 458 on a merge-queue run, and
   # 206 on a pull request. Then Python 3.10 left the matrices when requires-python rose to
   # 3.11 (-77 on a push, -77 on a merge-queue run, -47 on a pull request): 383, 381 and 159.
+  # Then the four matrix-comment jobs were added, one leg each: all four run on a pull
+  # request (+4), and only the last on a push or in the merge queue (+1), because the first
+  # three skip every other event: 384, 382 and 163.
   # tests/unit/test_unified_ci_job_counts.py recounts the list below from the matrices, so
   # these figures can drift from GitHub's census but not from this file. The 293 `PyTest - ...`
   # runs are derived from the leg count of the unit, integration and e2e jobs by the
   # one-per-leg rule #602 measured at 20 legs, not counted again, and the collapse does not
   # touch them.
   #
-  # Where 383 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
+  # Where 384 comes from, per job, on a push to main: lint 1, ensure-cache 6, actionlint 1,
   # snapshot-trailers 1, unit-test 144, unit-coverage 1,
   # integration-test-linux 48, integration-test-macos 64, integration-test-windows 32,
   # e2e-test-linux 2, e2e-test-macos 2, e2e-test-windows 1, e2e-express 2, warm-image-layers 2,
   # scan-validation 29, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 27, homebrew-macos 1,
-  # required-checks 1.
+  # required-checks 1, matrix-comment 1.
   #
-  # Where 159 comes from, per job, on a pull request (the pull-request cover, the note on
+  # Where 163 comes from, per job, on a pull request (the pull-request cover, the note on
   # ensure-cache): lint 1, ensure-cache 2, actionlint 1, snapshot-trailers 1, unit-test 44,
   # unit-coverage 1, integration-test-linux 12, integration-test-macos 16,
   # integration-test-windows 16, e2e-test-linux 1, e2e-test-macos 1, e2e-test-windows 1,
@@ -3243,7 +3246,8 @@ jobs:
   # scan-validation 29, non-root-image-permissions 1, external-target-scan 2, sandbox 2,
   # sandbox-scanner-parity 2, multi-project-attribution 2, deploy-aws-helpers 1,
   # integration-test 4, docs-examples 1, build-docs 1, converter-integration 2, install-validation 11,
-  # homebrew-macos 1, required-checks 1. warm-image-layers is push-only and absent. The
+  # homebrew-macos 1, required-checks 1, matrix-comment-checks 1, matrix-comment-scans 1,
+  # matrix-comment-tiers 1, matrix-comment 1. warm-image-layers is push-only and absent. The
   # same test expands the overlay for the pull_request event and holds this list to it.
   #
   # unit-test reached 25 combinations from three independent changes that all had to land:
@@ -3290,7 +3294,7 @@ jobs:
   # job for integration-test, 80 fewer for the install-validation collapse, one more for
   # snapshot-trailers and one more for homebrew-macos, so a comparable CI-plumbing commit would
   # see 139 rather than 186. That 139 predates the tier split and the jobs added after
-  # it; the 674 above is the current merge-queue figure and 250 the pull-request one. That
+  # it; the 675 above is the current merge-queue figure and 254 the pull-request one. That
   # is arithmetic on a measured baseline,
   # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
@@ -3371,8 +3375,9 @@ jobs:
   #
   # .github/scripts/assert-required-checks-census.py now takes the census from this file's own
   # `jobs:` mapping and requires every job other than the gate to be in `needs`, unless it is
-  # named in that script's `_UNGATED` map with a reason -- empty today, and re-checked for
-  # staleness on every run. So a new job is covered by construction, and a deliberately
+  # named in that script's `_UNGATED` map with a reason -- six entries today, the image
+  # layer-cache warm-up, the advisory express cells and the four matrix-comment jobs at the
+  # end of this file, and re-checked for staleness on every run. So a new job is covered by construction, and a deliberately
   # advisory one is covered by a written statement rather than by a count that cannot tell the
   # two apart.
   required-checks:
@@ -3430,3 +3435,300 @@ jobs:
           python3 .github/scripts/assert-required-checks-census.py \
             --workflow .github/workflows/ash-unified-ci.yml \
             --gate-job "$GATE_JOB"
+
+  # ---------------------------------------------------------------------------
+  # One pull request comment that shows the whole matrix, filled in as the run goes
+  # ---------------------------------------------------------------------------
+  #
+  # The matrices above have hundreds of legs, and the pull request's checks list shows
+  # them as a flat column of names. The four jobs below keep one comment on the pull
+  # request that draws every cell of every matrix, with the result of the job that ran for
+  # it, and rewrite it as the run reaches each stage. Each of them runs
+  # .github/scripts/unified-ci-matrix-comment.py publish, which reads the run's job list
+  # and writes the table; the last one also runs on a push and in the merge queue, where
+  # it writes the table into the run's job summary only.
+  #
+  # WHY THE FOUR JOBS ARE CHAINED BY `needs`, AND NOT KEPT IN ONE CONCURRENCY GROUP
+  #
+  # Every link rewrites the same comment from the whole current state, so two links must
+  # not run at once, and a job-level `concurrency` group is the usual way to say that.
+  # It cannot be used here, for two reasons that were measured. A job that is pending in
+  # a group when a newer one joins is cancelled, and one cancelled job turns the whole
+  # run's conclusion to `cancelled`, even when other jobs failed. Two push runs on main,
+  # read from the public API on 2026-11-27, show it: run 45848350222 (event push, branch
+  # main) concluded `cancelled`, with its two warm-image-layers legs cancelled before they
+  # started (no steps) in their job-level group and 325 jobs failed; run 45848402299
+  # (event push, branch main), the push 19 seconds later, concluded `failure`, with no job
+  # cancelled and 327 failed. That
+  # conclusion is what ash-dependabot-auto-merge.yml reads: its job acts only when the
+  # run's conclusion is `success`, so a cancelled comment job would stall the auto-merge
+  # of a Dependabot pull request, and every red run would read as cancelled. The way to
+  # queue without cancelling, `queue: max`, is rejected by actionlint 1.7.12, the
+  # version the actionlint job pins, so the check job would fail on it.
+  #
+  # A chain does the same job without either problem. Each link needs its own group of
+  # jobs and the link before it, so only one link runs at a time, nothing is ever pending
+  # in a group, and no job is cancelled by another. The last link needs every other job,
+  # directly or through the chain, so it always sees the final state. The groups follow
+  # the order the jobs finish in on a pull request (the checks, then the scans, then the
+  # install and unit tiers, then the rest), so the comment moves at about 14, 20, 33 and
+  # 36 minutes of a 36-minute run. A slow group delays the links after it and nothing is
+  # lost: the next link rewrites everything. Across runs, a re-run of an older run's
+  # failed jobs could finish after a newer run; the comment names the run and attempt it
+  # shows, and a link leaves alone a comment that names a later run than its own.
+  #
+  # Every link runs under `!cancelled()`, so a failed job does not stop the table. The
+  # three links before the last write a comment for a pull request from this repository:
+  # a fork's token is read-only whatever a job asks for, so the comment is skipped there.
+  # The last link has nothing but `!cancelled()`, so it also writes the job summary on a
+  # push, in the merge queue and for a fork; it makes no comment request on a push or in
+  # the merge queue, and none for a fork.
+  #
+  # WHY THE RENDERER COMES FROM THE BASE BRANCH, AND THE WORKFLOW FILE IS READ AS DATA
+  #
+  # These jobs have `pull-requests: write`, so they run no pull-request code. The script
+  # is checked out from the pull request's base commit (the queue's base commit in the
+  # merge queue, the pushed commit on a push), never from the pull request. The matrices
+  # the table draws come from this workflow file as the run used it, which the script
+  # reads through the contents API at the run's workflow commit and parses as data. A
+  # pull request from a fork brings its own copy of the file, so the script treats every
+  # value in it, the job names above all, as untrusted text. Until the base branch has
+  # the script, each link says so and succeeds, which is why the first real run of these
+  # jobs is the one after they merge.
+  #
+  # WHY THESE JOBS NEVER FAIL A RUN
+  #
+  # The table is a view, and three things keep it from changing what the run concludes.
+  # The script turns its own errors into warning annotations and ends with status 0, so a
+  # failed read or write leaves a stale or missing comment and nothing more. Job-level
+  # `continue-on-error` covers the steps around the script (the checkout, the interpreter
+  # setup and the package install). And the script gives itself a time budget well inside
+  # the job's timeout, because a job that reaches its timeout is cancelled, and one
+  # cancelled job turns the run's conclusion to `cancelled`. Each step has its own limit,
+  # below the job's, so a hung step fails instead of the job reaching its timeout. These jobs are not in the gate's `needs` for
+  # the same reason: their result says whether the view was written, never whether the
+  # code passed, and each of them needs the gate's jobs or a link that does, so none of
+  # them could be in its `needs`. The census script names them in its `_UNGATED` map. The
+  # pull-request comment has no earlier "pending" version, because writing one before any
+  # job finished would need a runner of its own at the start of every run.
+  #
+  # A job added to this workflow must join the `needs` of one link below. The tests that
+  # read this file (tests/unit/test_unified_ci_matrix_comment.py) fail until it does. The
+  # one exception is ensure-cache, which no link names, because only the gate may wait for
+  # it (the note on ensure-cache and tests/unit/test_unified_ci_job_counts.py); the last
+  # link reaches it through required-checks.
+  matrix-comment-checks:
+    name: matrix comment (checks)
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    needs:
+      - lint
+      - actionlint
+      - snapshot-trailers
+      - build-docs
+      - docs-examples
+      - deploy-aws-helpers
+      - multi-project-attribution
+      - external-target-scan
+      - non-root-image-permissions
+      - converter-integration
+      - sandbox
+      - sandbox-scanner-parity
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    # A failure in the checkout, the interpreter setup or the package install must not turn the run red.
+    continue-on-error: true
+    permissions:
+      actions: read # the run and its jobs
+      contents: read # the renderer's checkout, and the run's own workflow file read as data
+      pull-requests: write # create or edit the one comment
+    steps:
+      - name: Check out the renderer from the base branch, not the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/unified-ci-matrix-comment.py
+            .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Say so when the base branch has no renderer yet
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') == '' }}
+        timeout-minutes: 1
+        run: echo "The base branch has no .github/scripts/unified-ci-matrix-comment.py yet; nothing to render."
+      - if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        timeout-minutes: 2
+        with:
+          python-version: "3.12"
+      - name: Install the YAML parser, pinned by hash
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 1
+        run: >-
+          python -m pip install --disable-pip-version-check --no-deps
+          --only-binary=:all: --require-hashes
+          -r .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Write the matrix into the pull request's comment
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/unified-ci-matrix-comment.py publish
+
+  matrix-comment-scans:
+    name: matrix comment (scans)
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    needs:
+      - scan-validation
+      - warm-image-layers
+      - matrix-comment-checks
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    # A failure in the checkout, the interpreter setup or the package install must not turn the run red.
+    continue-on-error: true
+    permissions:
+      actions: read # the run and its jobs
+      contents: read # the renderer's checkout, and the run's own workflow file read as data
+      pull-requests: write # create or edit the one comment
+    steps:
+      - name: Check out the renderer from the base branch, not the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/unified-ci-matrix-comment.py
+            .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Say so when the base branch has no renderer yet
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') == '' }}
+        timeout-minutes: 1
+        run: echo "The base branch has no .github/scripts/unified-ci-matrix-comment.py yet; nothing to render."
+      - if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        timeout-minutes: 2
+        with:
+          python-version: "3.12"
+      - name: Install the YAML parser, pinned by hash
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 1
+        run: >-
+          python -m pip install --disable-pip-version-check --no-deps
+          --only-binary=:all: --require-hashes
+          -r .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Write the matrix into the pull request's comment
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/unified-ci-matrix-comment.py publish
+
+  matrix-comment-tiers:
+    name: matrix comment (install and unit)
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    needs:
+      - install-validation
+      - homebrew-macos
+      - unit-test-linux
+      - unit-test-macos
+      - unit-test-windows
+      - unit-coverage
+      - matrix-comment-scans
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    # A failure in the checkout, the interpreter setup or the package install must not turn the run red.
+    continue-on-error: true
+    permissions:
+      actions: read # the run and its jobs
+      contents: read # the renderer's checkout, and the run's own workflow file read as data
+      pull-requests: write # create or edit the one comment
+    steps:
+      - name: Check out the renderer from the base branch, not the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/unified-ci-matrix-comment.py
+            .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Say so when the base branch has no renderer yet
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') == '' }}
+        timeout-minutes: 1
+        run: echo "The base branch has no .github/scripts/unified-ci-matrix-comment.py yet; nothing to render."
+      - if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        timeout-minutes: 2
+        with:
+          python-version: "3.12"
+      - name: Install the YAML parser, pinned by hash
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 1
+        run: >-
+          python -m pip install --disable-pip-version-check --no-deps
+          --only-binary=:all: --require-hashes
+          -r .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Write the matrix into the pull request's comment
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/unified-ci-matrix-comment.py publish
+
+  matrix-comment:
+    name: matrix comment
+    if: ${{ !cancelled() }}
+    needs:
+      - e2e-test-linux
+      - e2e-test-macos
+      - e2e-test-windows
+      - e2e-express
+      - integration-test-linux
+      - integration-test-macos
+      - integration-test-windows
+      - integration-test
+      - required-checks
+      - matrix-comment-tiers
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    # A failure in the checkout, the interpreter setup or the package install must not turn the run red.
+    continue-on-error: true
+    permissions:
+      actions: read # the run, its jobs, and the first lines of a finished job's log
+      contents: read # the renderer's checkout, and the run's own workflow file read as data
+      pull-requests: write # create or edit the one comment
+    steps:
+      - name: Check out the renderer from the base branch, not the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/scripts/unified-ci-matrix-comment.py
+            .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Say so when the base branch has no renderer yet
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') == '' }}
+        timeout-minutes: 1
+        run: echo "The base branch has no .github/scripts/unified-ci-matrix-comment.py yet; nothing to render."
+      - if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        timeout-minutes: 2
+        with:
+          python-version: "3.12"
+      - name: Install the YAML parser, pinned by hash
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 1
+        run: >-
+          python -m pip install --disable-pip-version-check --no-deps
+          --only-binary=:all: --require-hashes
+          -r .github/scripts/unified-ci-matrix-comment.requirements.txt
+      - name: Write the matrix into the pull request's comment and the job summary
+        if: ${{ hashFiles('.github/scripts/unified-ci-matrix-comment.py') != '' }}
+        timeout-minutes: 5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/unified-ci-matrix-comment.py publish --final

@@ -1,0 +1,32 @@
+﻿2026-11-26T17:20:16.0981770Z Current runner version: '2.338.2'
+2026-11-26T17:20:16.1013378Z ##[group]Runner Image Provisioner
+2026-11-26T17:20:16.1014505Z Hosted Compute Agent
+2026-11-26T17:20:16.1015123Z Version: 20261111.635
+2026-11-26T17:20:16.1015919Z Commit: b8a594ea514ff44cadb5342986c68b1eac6e22ed
+2026-11-26T17:20:16.1016689Z Build Date: 2026-11-11T01:49:01Z
+2026-11-26T17:20:16.1017495Z Worker ID: {eda1f91f-cbaf-414a-825c-307aca20a7a5}
+2026-11-26T17:20:16.1018674Z Region: centralus
+2026-11-26T17:20:16.1019299Z Cloud: Azure
+2026-11-26T17:20:16.1019960Z ##[endgroup]
+2026-11-26T17:20:16.1022154Z ##[group]Operating System
+2026-11-26T17:20:16.1023039Z Ubuntu
+2026-11-26T17:20:16.1023613Z 24.04.5
+2026-11-26T17:20:16.1024132Z LTS
+2026-11-26T17:20:16.1024756Z ##[endgroup]
+2026-11-26T17:20:16.1025367Z ##[group]Runner Image
+2026-11-26T17:20:16.1026050Z Image: ubuntu-24.04-arm
+2026-11-26T17:20:16.1026757Z Version: 20261116.188.1
+2026-11-26T17:20:16.1028525Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24-arm64/20261116.188/images/ubuntu/Ubuntu2404-Arm64-Readme.md
+2026-11-26T17:20:16.1030355Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24-arm64%2F20261116.188
+2026-11-26T17:20:16.1031350Z ##[endgroup]
+2026-11-26T17:20:16.1032621Z ##[group]GITHUB_TOKEN Permissions
+2026-11-26T17:20:16.1035714Z Contents: read
+2026-11-26T17:20:16.1036514Z Metadata: read
+2026-11-26T17:20:16.1037149Z ##[endgroup]
+2026-11-26T17:20:16.1040711Z Secret source: Actions
+2026-11-26T17:20:16.1041882Z Cache mode: write
+2026-11-26T17:20:16.1043045Z Prepare workflow directory
+2026-11-26T17:20:16.1502185Z Prepare all required actions
+2026-11-26T17:20:16.1555073Z Getting action download info
+2026-11-26T17:20:16.3962453Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-26T17:20:16.6282734Z Complete job name: actionlint
