@@ -181,7 +181,7 @@ jobs:
           # bandit is absent from pyproject.toml entirely, and BanditScanner installs
           # it with `uv tool install` at scan time, so this arm was reaching PyPI
           # mid-scan and a registry failure read as an upgrade that broke scanning.
-          "${VENV}/ash" scan --source-dir "$FIX" --output-dir "${FIX}/output" \
+          "${VENV}/ash" scan fs "$FIX" --output-dir "${FIX}/output" \
             --simple --phases scan --phases report --scanners detect-secrets
 
       - name: Record the arm in the run summary

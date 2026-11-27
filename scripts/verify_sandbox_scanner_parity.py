@@ -183,7 +183,7 @@ def run_scan(
     command = [
         *ash,
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),

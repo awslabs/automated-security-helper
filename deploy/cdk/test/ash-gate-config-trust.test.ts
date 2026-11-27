@@ -102,7 +102,9 @@ describe('CodeCommit gate harness (controls: these pass on the unmodified base)'
 
     expect(run.cloneDir).not.toBeNull();
     expect(ash.argv[0]).toBe('scan');
-    expect(ash.source_dir).toBe(run.cloneDir);
+    // In whichever form the image's ASH names a directory; ash-gate-scan-subject.test.ts
+    // holds which form that is.
+    expect(ash.scan_path ?? ash.source_dir).toBe(run.cloneDir);
   });
 
   test('the environment ash records is the scan environment the handler built', () => {

@@ -6,11 +6,12 @@
 
 Why this file exists
 --------------------
-A shard runs ``ash scan --source-dir <checkout>``. Without ``--config`` or
-``ASH_CONFIG``, ASH looks for a config inside the scanned tree, so a repository that
-commits one would choose its own scanners, ignore paths and ``fail_on_findings``.
-``ash merge`` forms the verdict from the config the shards recorded, so that choice
-would reach the pipeline's result too. With no base config, every shard and the merge
+A shard runs ``ash scan fs <checkout>`` (``ash scan --source-dir <checkout>`` on an
+ASH older than 3.9). Without ``--config`` or ``ASH_CONFIG``, ASH looks for a config
+inside the scanned tree, so a repository that commits one would choose its own
+scanners, ignore paths and ``fail_on_findings``. The merge (``ash results merge``,
+``ash merge`` before 3.9) forms the verdict from the config the shards recorded, so
+that choice would reach the pipeline's result too. With no base config, every shard and the merge
 are given ``{}`` (ASH's defaults), written outside the checkout.
 
 These tests run the committed buildspecs phase by phase, with this repository's own
@@ -236,7 +237,7 @@ def test_control_the_in_tree_config_decides_the_verdict_when_ash_is_given_none(
             [
                 "ash",
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 "--output-dir",
                 str(tmp_path / f"shard-{index}"),
@@ -270,6 +271,7 @@ def test_control_the_in_tree_config_decides_the_verdict_when_ash_is_given_none(
     merge = subprocess.run(
         [
             "ash",
+            "results",
             "merge",
             "--results",
             str(tmp_path / "shard-0"),

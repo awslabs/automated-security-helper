@@ -10,6 +10,11 @@
 #
 # Runs a full, unsharded ASH scan and fails the build on findings.
 # This document owns its own pass/fail verdict.
+#
+# Each ASH command first asks the installed ASH whether it has the ASH 3.9
+# spelling (`ash scan fs DIR`, `ash results merge`) and runs the older one
+# (`ash scan --source-dir DIR`, `ash merge`) when it does not, so an older
+# ASH_VERSION keeps working.
 version: 0.2
 env:
   variables:
@@ -25,7 +30,7 @@ phases:
       - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
   build:
     commands:
-      - 'ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings'
+      - 'if ash scan fs --help 2>/dev/null | grep "scan fs" >/dev/null; then ash scan fs "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings; else ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings; fi'
 artifacts:
   base-directory: '$ASH_OUTPUT_DIR'
   files:

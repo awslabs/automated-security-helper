@@ -95,13 +95,13 @@ printf 'print("hello")\n' >"$clean/sample.py"
 printf -- '-----BEGIN %s PRIVATE KEY-----\n' RSA >"$planted/key.pem"
 
 rc=0
-"$ash_bin" scan --source-dir "$clean" --output-dir "$WORK/out-clean" --simple \
+"$ash_bin" scan fs "$clean" --output-dir "$WORK/out-clean" --simple \
   --phases scan --phases report --scanners detect-secrets || rc=$?
 [ "$rc" -eq 0 ] || fail "scan of a clean directory exited $rc, expected 0"
 say "clean scan: exit 0"
 
 rc=0
-"$ash_bin" scan --source-dir "$planted" --output-dir "$WORK/out-planted" --simple \
+"$ash_bin" scan fs "$planted" --output-dir "$WORK/out-planted" --simple \
   --phases scan --phases report --scanners detect-secrets || rc=$?
 [ "$rc" -eq 2 ] || fail "scan of a planted private key exited $rc, expected 2 (actionable findings)"
 say "planted-key scan: exit 2"
@@ -118,7 +118,7 @@ PYTHON="$PYTHON" bash "$REPO/.github/actions/validate-install/scan-committed-fix
 # with the keg's uv at scan time and npm-audit needs Homebrew's npm, so this is
 # the one scan here that uses every tool the formula provides.
 rc=0
-(cd "$clean" && "$ash_bin" --mode precommit --output-dir "$WORK/out-precommit") || rc=$?
+(cd "$clean" && "$ash_bin" scan fs --mode precommit --output-dir "$WORK/out-precommit") || rc=$?
 [ "$rc" -eq 0 ] || fail "precommit-mode scan of a clean directory exited $rc, expected 0"
 say "precommit-mode scan: exit 0"
 
@@ -131,7 +131,7 @@ say "precommit-mode scan: exit 0"
 # pins this list.
 rc=0
 # semgrep is excluded: its core process dies on this runner with "failed to create domain backup thread".
-(cd "$clean" && ASH_EXCLUDED_SCANNERS=semgrep "$ash_bin" scan --output-dir "$WORK/out-default") || rc=$?
+(cd "$clean" && ASH_EXCLUDED_SCANNERS=semgrep "$ash_bin" scan fs --output-dir "$WORK/out-default") || rc=$?
 
 # ASH does not print a scanner's own stderr when it refuses the scanner's result, so a
 # scanner in ERROR leaves the job log with a summary and no cause. This prints what the

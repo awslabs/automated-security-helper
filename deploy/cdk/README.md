@@ -261,8 +261,9 @@ depends on.
 `AgentRuntimeArtifact.ContainerConfiguration` has exactly one property,
 `ContainerUri`. There is no `Command`, `EntryPoint` or `Args`, so the MCP
 invocation cannot come from the template and is baked into the image instead. ASH's
-own image ends with `CMD ["ash"]`, so pointing AgentCore at it directly would start
-a process that prints help and exits. The `mcp` image flavor adds a shell
+own image ends with `CMD ["ash", "scan", "fs"]`, so pointing AgentCore at it directly
+would start a scan of the working directory that exits when it finishes, never the MCP
+server. The `mcp` image flavor adds a shell
 entrypoint that reads the tunables from environment variables, which AgentCore
 *can* set.
 

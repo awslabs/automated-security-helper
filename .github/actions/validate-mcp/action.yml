@@ -205,4 +205,4 @@ runs:
     # fetch and a registry blip read as a completeness failure.
     - name: "mcp: self-test scan"
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ash scan fs /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets

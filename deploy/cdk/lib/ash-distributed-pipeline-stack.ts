@@ -551,11 +551,32 @@ export class AshDistributedPipelineStack extends Stack {
               // consumes. That is robust whether the flag is absent (usage error,
               // no results), a scanner crashed (no results), findings were found
               // (results present) or the shard was clean (results present).
+              //
+              // ASH 3.9 scans a directory as `ash scan fs PATH`; an AshVersion
+              // older than 3.9 has only `ash scan --source-dir PATH`, which 3.9
+              // still runs with a deprecation line and v4.0 removes. So the image's
+              // ASH is asked first, and only an answer picks a spelling (see
+              // `ifAshHas`): a probe that fails any other way fails the shard with
+              // status 70 and what it printed, and is not read as an older ASH.
+              // ASH_EXIT is the scan's status either way, since an `if` exits with
+              // its branch's last command.
               [
+                // post_build uploads this directory and runs after a failed build
+                // phase too. It is made before the probe, so a probe that ends the
+                // step leaves an empty directory to upload, not a second failure about
+                // a missing one that hides which step failed first.
+                'mkdir -p ./ash-shard-output',
                 'set +e',
-                'ash scan --source-dir "$CODEBUILD_SRC_DIR" --output-dir ./ash-shard-output \\',
-                '  --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" \\',
-                '  --no-fail-on-findings --no-progress --simple',
+                ...ifAshHas(
+                  SCAN_FS,
+                  'ash scan fs "$CODEBUILD_SRC_DIR"',
+                  'ash scan --source-dir "$CODEBUILD_SRC_DIR"',
+                  [
+                    '--output-dir ./ash-shard-output',
+                    '--shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT"',
+                    '--no-fail-on-findings --no-progress --simple',
+                  ],
+                ),
                 'ASH_EXIT=$?',
                 'set -e',
                 '# ASH may have died before creating its output directory.',
@@ -613,7 +634,7 @@ export class AshDistributedPipelineStack extends Stack {
   ): codebuild.Project {
     const resultsFlags = Array.from(
       { length: shardCount },
-      (_, index) => `  --results ./shard-results/shard-${index} \\`,
+      (_, index) => `--results ./shard-results/shard-${index}`,
     );
 
     // Same reason as the shard projects: 39 against W76's ceiling of 25 when the
@@ -650,8 +671,9 @@ export class AshDistributedPipelineStack extends Stack {
               // execution and downloads only that build's keys, so a shard's object at
               // <prefix>/shard-2/<build ARN>/ash_aggregated_results.json lands at
               // ./shard-results/shard-2/ash_aggregated_results.json — the layout the
-              // completeness check below and `ash merge` both expect. Any key under
-              // the prefix from a build this execution does not list fails the merge.
+              // completeness check below and the merge (`ash results merge`, or
+              // `ash merge` before ASH 3.9) both expect. Any key under the prefix
+              // from a build this execution does not list fails the merge.
               `python3 ${ASH_S3_SYNC_PATH} collect ` +
                 '"$ASH_RESULTS_BUCKET" "$ASH_RESULTS_PREFIX" ./shard-results ' +
                 '"$ASH_PIPELINE_EXECUTION_ID" "$ASH_SHARD_COUNT"',
@@ -702,11 +724,19 @@ export class AshDistributedPipelineStack extends Stack {
               // --results is repeatable and accepts a file or a directory. One
               // flag per shard directory, so a shard that vanished between the
               // check above and here still fails rather than being skipped.
-              [
-                'ash merge \\',
-                ...resultsFlags,
-                '  --output-dir ./ash-merged-output',
-              ].join('\n'),
+              //
+              // `ash results merge` from ASH 3.9, `ash merge` before it (3.9 still
+              // runs that with a deprecation line, v4.0 removes it); the image's
+              // ASH is asked which it has, as the shards ask about `scan fs`, and
+              // a probe that gives no answer fails the merge instead of choosing.
+              // The `if` exits with the merge's status, so the verdict passes
+              // through.
+              ifAshHas(
+                RESULTS_MERGE,
+                'ash results merge',
+                'ash merge',
+                [...resultsFlags, '--output-dir ./ash-merged-output'],
+              ).join('\n'),
             ],
           },
           post_build: {
@@ -737,6 +767,97 @@ export class AshDistributedPipelineStack extends Stack {
  * long as an execution id, with its hyphens in place.
  */
 export const EXECUTION_ID_SEGMENT = '????????-????-????-????-????????????';
+
+/** A command ASH 3.9 added, and what an older ASH says when it is asked for it. */
+interface NewAshCommand {
+  /** The command's words after `ash`, as its own help names it. */
+  readonly name: string;
+  /** The word an older ASH refuses: `fs` for `scan fs`, `results` for `results merge`. */
+  readonly refused: string;
+  /** What the command is for, in the line the probe prints: `scanning`, `merging`. */
+  readonly doing: string;
+}
+
+const SCAN_FS: NewAshCommand = { name: 'scan fs', refused: 'fs', doing: 'scanning' };
+const RESULTS_MERGE: NewAshCommand = { name: 'results merge', refused: 'results', doing: 'merging' };
+
+/**
+ * Shell lines that ask the image's ASH whether it has `command`, then run `newCommand`
+ * when it does and `oldCommand` when it does not, each followed by the same
+ * `argumentLines`, one continuation line apiece.
+ *
+ * For a command ASH 3.9 respells (`ash scan fs PATH` for `ash scan --source-dir
+ * PATH`, `ash results merge` for `ash merge`): the shard and merge projects run in
+ * the image the pipeline builds from `AshVersion`, which can predate 3.9. Both
+ * branches are written out whole, so the deploy CLI contract test reads the options
+ * of each. The `if` exits with the status of the branch that ran.
+ *
+ * Only an answer picks a spelling. The help is captured whole, with its exit status,
+ * and matched without a pipe:
+ *
+ * - exit 0 and a help that names the command: the ASH has it;
+ * - exit 0 and a help that does not (an older ASH shows the subject-less scan's help
+ *   for `ash scan fs --help`, since its help option is read before the extra argument
+ *   is refused), or a usage error that refuses the word the command adds: it does not;
+ * - anything else (a crash, an import error, an out-of-memory kill) says nothing about
+ *   the ASH's commands. The lines print the end of what the probe printed and exit 70,
+ *   so the build fails instead of running a spelling chosen by guess. 70 is not one of
+ *   ASH's own statuses: 1 is the merge's code for an incomplete result, so a merge
+ *   build that ended with 1 could be a refused merge or a probe that crashed.
+ *
+ * The spelling chosen and why are printed to stderr. This is a different function from
+ * the `onEitherAsh` of the CDK constructs package, which renders the same choice as one
+ * line because its YAML writer cannot emit a multi-line command.
+ */
+function ifAshHas(
+  command: NewAshCommand,
+  newCommand: string,
+  oldCommand: string,
+  argumentLines: string[],
+): string[] {
+  const branch = (text: string) => {
+    const lines = [text, ...argumentLines];
+    return lines.map(
+      (line, index) => `${index === 0 ? '  ' : '    '}${line}${index < lines.length - 1 ? ' \\' : ''}`,
+    );
+  };
+  const asked = `ash ${command.name} --help`;
+  const say = (message: string) => `echo "ash: ${message}" >&2`;
+  return [
+    'ASH_PROBE_STATUS=0',
+    `ASH_PROBE_HELP="$(ash ${command.name} --help 2>&1)" || ASH_PROBE_STATUS=$?`,
+    'case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in',
+    `  0:*"${command.name}"*)`,
+    '    ASH_SPELLING=current',
+    `    ${say(`${command.doing} with 'ash ${command.name}': its help names '${command.name}'`)} ;;`,
+    '  0:*)',
+    '    ASH_SPELLING=older',
+    `    ${say(
+      `${command.doing} with the older spelling: the help of '${asked}' does not name ` +
+        `'${command.name}', as an ASH older than 3.9 answers`,
+    )} ;;`,
+    `  *:*"unexpected extra argument"*"${command.refused}"*|*:*"No such command"*"${command.refused}"*)`,
+    '    ASH_SPELLING=older',
+    `    ${say(
+      `${command.doing} with the older spelling: this ASH refused the word ` +
+        `'${command.refused}', as an ASH older than 3.9 does`,
+    )} ;;`,
+    '  *)',
+    `    ${say(
+      `could not tell whether this ASH has 'ash ${command.name}': '${asked}' exited ` +
+        `$ASH_PROBE_STATUS without saying it refused '${command.refused}', so no spelling ` +
+        'is chosen by guess. The end of its output:',
+    )}`,
+    `    printf '%s\\n' "$ASH_PROBE_HELP" | tail -n 20 >&2`,
+    '    exit 70 ;;',
+    'esac',
+    'if [ "$ASH_SPELLING" = current ]; then',
+    ...branch(newCommand),
+    'else',
+    ...branch(oldCommand),
+    'fi',
+  ];
+}
 
 /**
  * Write the deployment-wide ASH config into the build, or `{}` when none was supplied.

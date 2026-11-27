@@ -46,6 +46,7 @@ The verdict is `ash merge`'s exit code, propagated unchanged:
 | 1 | The result is incomplete, so findings are **unknown**: shard coverage has a gap, a scanner in the merged result did not finish, a rule could not be evaluated, or a content database is past its age limit |
 | 2 | Actionable findings at or above `min_severity` |
 | 5 | Usage error — ASH refused the merge command line, so nothing was merged |
+| 70 | Not a status ASH gives: the check of which merge command the image's ASH has (see below) got no answer, so no merge ran |
 
 Exit 5 comes from ASH releases after 3.7.1. ASH 3.7.0 and 3.7.1 have no `ash
 merge`, and report that as exit 2.
@@ -145,21 +146,33 @@ execute here. Both buildspecs therefore invoke it explicitly:
 
 <!-- doctest: illustrative reason="excerpt of the two buildspecs; runs inside the ASH image in CodeBuild" -->
 ```bash
-/usr/local/bin/ash-container-init ash scan --source-dir . --output-dir ash_output \
+/usr/local/bin/ash-container-init ash scan fs . --output-dir ash_output \
   --shard-index "$SHARD_INDEX" --shard-count "$SHARD_COUNT" --no-fail-on-findings
 # The merge passes one --results per shard, and --fail-on-findings when
 # fail_on_findings is true.
-/usr/local/bin/ash-container-init ash merge --output-dir merged \
+/usr/local/bin/ash-container-init ash results merge --output-dir merged \
   --min-severity "$MIN_SEVERITY" --fail-on-findings --results shard-results/shard-0
 ```
 
 Without that, `ASH_CONFIG` would not be set, and each shard would use the
 repository's own config file if it has one, or ASH's defaults, instead of the
 configuration you supplied: a wrong result with no error. With it, every shard uses
-the base config and never reads the repository's own `.ash.yaml`. `ash merge` takes
-the scan config from the shard results rather than from a file. Invoking it
-explicitly is also correct if a future CodeBuild release did run the entrypoint,
-since the work it does is idempotent.
+the base config and never reads the repository's own `.ash.yaml`. `ash results merge`
+(`ash merge` before ASH 3.9) takes the scan config from the shard results rather than
+from a file. Invoking it explicitly is also correct if a future CodeBuild release did
+run the entrypoint, since the work it does is idempotent.
+
+The two commands above are the ASH 3.9 spellings. An `ash_version` older than 3.9 has
+only `ash scan --source-dir .` and `ash merge`, which 3.9 still runs with a
+deprecation line and v4.0 removes. So each buildspec first asks the image's ASH which
+it has: `ash scan fs --help` for a shard and `ash results merge --help` for the
+merge. Only an answer picks the older spelling: a help that does not name the
+command, or a usage error that refuses the word `fs` (`results` for the merge). A
+probe that fails any other way, such as a crash or an out-of-memory kill, fails the
+action with status 70 and the end of what it printed, and neither spelling runs. 70
+is not one of ASH's own statuses, so it cannot be mistaken for the merge's exit 1, a
+refusal to merge an incomplete result. Each action prints the spelling it chose and
+why to stderr.
 
 With `base_config_ssm_parameter_name` null, `ash-container-init` sets no
 `ASH_CONFIG`, so both buildspecs write `{}`, ASH's defaults, to a temporary

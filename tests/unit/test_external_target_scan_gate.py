@@ -864,11 +864,17 @@ class TestFixtureHandling:
         for path in written:
             assert path.read_text(encoding="utf-8") == gate.FIXTURE_FILES[path.name]
 
-    def test_scan_command_names_the_source_dir_explicitly(self, tmp_path):
+    def test_scan_command_names_the_target_as_the_fs_subjects_path(self, tmp_path):
+        """The target is named explicitly, in ASH 3.9's spelling: `ash scan fs PATH`.
+
+        The gate runs this tree's ASH, which has the subject, so it never needs the
+        subject-less `--source-dir` (which prints a deprecation line).
+        """
         command = gate.build_scan_command(tmp_path / "src", tmp_path / "out")
         assert isinstance(command, list), "a shell string would be an injection risk"
-        assert "--source-dir" in command
-        assert command[command.index("--source-dir") + 1] == str(tmp_path / "src")
+        start = command.index("scan")
+        assert command[start : start + 3] == ["scan", "fs", str(tmp_path / "src")]
+        assert "--source-dir" not in command
         assert "--output-dir" in command
         assert command[command.index("--output-dir") + 1] == str(tmp_path / "out")
 

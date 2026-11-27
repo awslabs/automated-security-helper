@@ -57,7 +57,11 @@ export interface CommonCommandOptions {
   readonly outputDirectory: string;
   /** Lowest severity that produces a non-zero exit code. */
   readonly severityThreshold: ASHSeverityThreshold;
-  /** Extra arguments appended verbatim to the `ash scan` invocation. */
+  /**
+   * Extra arguments appended verbatim to the `ash scan` invocation, except a
+   * `--source-dir`, which names the directory scanned in place of
+   * `sourceDirectory`; see `withoutSourceDirectory`.
+   */
   readonly extraScanArguments: string[];
 }
 
@@ -259,7 +263,7 @@ function refCheckCommands(ref: string): string[] {
  * because the executable is named `ash` while the distribution is named
  * `automated-security-helper`, and `--from` is what states that difference.
  */
-function ashInvocation(install: InstallOptions): string {
+export function ashInvocation(install: InstallOptions): string {
   if (install.mode !== ASHInstallMode.UVX) {
     return 'ash';
   }
@@ -268,6 +272,292 @@ function ashInvocation(install: InstallOptions): string {
     install.version ?? DEFAULT_ASH_REF,
   );
   return `uvx --from ${requirement} ash`;
+}
+
+/**
+ * A command ASH 3.9 added, and what an ASH older than 3.9 says when asked for it.
+ *
+ * ASH 3.9 names the scan's subject, `ash scan fs PATH`, and groups the commands
+ * that read saved results under `ash results`. The old spellings still work there
+ * but print a deprecation line, and they go in ASH v4.0. An ASH older than 3.9 has
+ * only the old ones, and the ref these commands install can be one: the default
+ * names the release this package came from until the release commit moves it, and
+ * a caller may pin any ref. So the command asks the ASH it is about to run.
+ */
+interface NewCommand {
+  /** The command's words after `ash`, as its own help names it. */
+  readonly words: string[];
+  /** The word an older ASH refuses: `fs` for `scan fs`, `results` for `results merge`. */
+  readonly refused: string;
+  /** What the command is for, in the line the probe prints: `scanning`, `merging`. */
+  readonly doing: string;
+}
+
+const SCAN_FS: NewCommand = { words: ['scan', 'fs'], refused: 'fs', doing: 'scanning' };
+const RESULTS_MERGE: NewCommand = {
+  words: ['results', 'merge'],
+  refused: 'results',
+  doing: 'merging',
+};
+
+/**
+ * The shell variables the probe answers through. Lower case on purpose: the
+ * generated buildspecs declare every `$ASH_` variable they read, and these are the
+ * probe's own, not settings.
+ */
+const PROBE_STATUS = 'ash_probe_status';
+const PROBE_HELP = 'ash_probe_help';
+const SPELLING = 'ash_spelling';
+
+/**
+ * The status a version check ends with when the ASH gives no answer. It is not one of
+ * ASH's own: 1 is the verdict for an incomplete result, 2 for findings and 5 for a
+ * usage error, so a build whose step ended with one of those could be a refused merge
+ * or a check that crashed. 70 is EX_SOFTWARE, an internal error, and a log reader
+ * seeing it knows no scan or merge ran.
+ */
+const UNANSWERED_PROBE_STATUS = 70;
+
+/**
+ * The shell text that asks the installed ASH whether it has `command`, and leaves
+ * the answer in `$ash_spelling`: `current` for an ASH that has it, `older` for one
+ * that does not. For an ASH that gives no answer it prints why and ends with status
+ * 70 (`UNANSWERED_PROBE_STATUS`) in a subshell, so a caller that chains the next
+ * command with `&&` never runs it, and the status of the chain is the 70.
+ *
+ * Only an answer settles it, and the answer is read from the probe's exit status
+ * and its output together:
+ *
+ * - exit 0 with a help that names the command: the ASH has it;
+ * - exit 0 with a help that does not: an older ASH shows the subject-less scan's
+ *   help for `ash scan fs --help`, since its help option is read before the extra
+ *   argument is refused;
+ * - a non-zero exit with the usage error an older ASH gives for the refused word
+ *   (`Got unexpected extra argument (fs)`, `No such command 'results'`): it does not.
+ *
+ * Any other failure (a crash, an import error, an out-of-memory kill, a `uvx` that
+ * could not fetch ASH) says nothing about the ASH's commands. Reading it as an
+ * older ASH would run the older spelling on an ASH that has the new one, so the
+ * step fails instead, with status 70 and the end of the probe's output, and nothing
+ * runs.
+ *
+ * The probe's output is captured whole and matched with `case`, with no pipe, so an
+ * ASH that prints thousands of lines never writes into a closed pipe, which under
+ * pipefail would read as a failed probe for an ASH that has the command. The
+ * choice and its reason go to stderr on every run.
+ */
+function askAsh(ash: string, command: NewCommand): string {
+  const name = command.words.join(' ');
+  const asked = `ash ${name} --help`;
+  const status = `$${PROBE_STATUS}`;
+  const help = `$${PROBE_HELP}`;
+  const say = (message: string): string => `echo "ash: ${message}" >&2`;
+  const answer = (spelling: string, message: string): string =>
+    `${SPELLING}=${spelling}; ${say(message)};;`;
+  return [
+    `${PROBE_STATUS}=0;`,
+    `${PROBE_HELP}="$(${ash} ${name} --help 2>&1)" || ${PROBE_STATUS}=$?;`,
+    `case "${status}:${help}" in`,
+    `0:*"${name}"*)`,
+    answer('current', `${command.doing} with 'ash ${name}': its help names '${name}'`),
+    '0:*)',
+    answer(
+      'older',
+      `${command.doing} with the older spelling: the help of '${asked}' does not name ` +
+        `'${name}', as an ASH older than 3.9 answers`,
+    ),
+    `*:*"unexpected extra argument"*"${command.refused}"*|*:*"No such command"*"${command.refused}"*)`,
+    answer(
+      'older',
+      `${command.doing} with the older spelling: this ASH refused the word ` +
+        `'${command.refused}', as an ASH older than 3.9 does`,
+    ),
+    '*)',
+    say(
+      `could not tell whether this ASH has 'ash ${name}': '${asked}' exited ${status} ` +
+        `without saying it refused '${command.refused}', so no spelling is chosen by guess. ` +
+        'The end of its output:',
+    ) + ';',
+    `printf '%s\\n' "${help}" | tail -n 20 >&2;`,
+    `(exit ${UNANSWERED_PROBE_STATUS});;`,
+    'esac',
+  ].join(' ');
+}
+
+/**
+ * One command line for each ASH: the new spelling when the installed ASH has it,
+ * the old one when it does not, and neither when it cannot be asked. The exit
+ * status of the `if` is that of the branch that ran, so the verdict is the scan's
+ * or the merge's own; when the probe gives no answer it is the probe's 70.
+ */
+function onEitherAsh(
+  ash: string,
+  command: NewCommand,
+  current: string[],
+  older: string[],
+): string {
+  return (
+    `${askAsh(ash, command)} && ` +
+    `if [ "$${SPELLING}" = current ]; then ${[ash, ...current].join(' ')}; ` +
+    `else ${[ash, ...older].join(' ')}; fi`
+  );
+}
+
+/** The option the scan's directory used to be named with, and still is before ASH 3.9. */
+const SOURCE_DIR_OPTION = '--source-dir';
+
+/** Whether a word is a `--source-dir`, written `--source-dir` or `--source-dir=DIR`. */
+function isSourceDirWord(word: string): boolean {
+  return word === SOURCE_DIR_OPTION || word.startsWith(`${SOURCE_DIR_OPTION}=`);
+}
+
+/** A quote, a backtick, `$` or a backslash: what lets a shell word mean more than its own text. */
+const SHELL_SPECIAL = /["'`$\\]/;
+
+/**
+ * A long option, or `--`, as the whole of a value: `--verbose`, `--log-level=INFO`.
+ * Written after `--source-dir` it is a directory that was left out, not a directory.
+ */
+const LONG_OPTION = /^--(?:[A-Za-z][A-Za-z0-9-]*(?:=.*)?)?$/;
+
+/**
+ * Whether the words of one element are `--source-dir` and one plain directory word,
+ * which is read as the two elements `['--source-dir', 'DIR']` would be.
+ */
+function isSourceDirAndPlainDirectory(words: string[]): boolean {
+  return (
+    words.length === 2 &&
+    words[0] === SOURCE_DIR_OPTION &&
+    !SHELL_SPECIAL.test(words[1]) &&
+    !words[1].startsWith('-')
+  );
+}
+
+/**
+ * The directory text a `--source-dir` names, checked and safe to put after `ash scan fs`.
+ *
+ * The text is what the caller wrote, trimmed, and goes into the command as written. It
+ * is refused when it is empty, when it holds another `--source-dir`, which ASH 3.9
+ * refuses beside the PATH, and when it is written like a long option, which is a
+ * directory that was left out. A name that starts with a dash is made `./NAME`, the
+ * same directory, because `ash scan fs` would read the bare name as an option. The
+ * checks read the word the shell makes, with its quotes taken out, so `"-x"` is
+ * written `./"-x"`. The reusable workflow rewrites the same input the same way.
+ */
+function sourceDirectoryWord(text: string): string {
+  const directory = text.trim();
+  const word = directory.replace(/["']/g, '');
+  if (word.trim() === '') {
+    throw new Error(
+      `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it: pass ` +
+        `['${SOURCE_DIR_OPTION}', 'DIR'] or ['${SOURCE_DIR_OPTION}=DIR'].`,
+    );
+  }
+  const words = word.split(/\s+/);
+  if (words.some(isSourceDirWord)) {
+    throw new Error(
+      `${SOURCE_DIR_OPTION} in extraScanArguments is followed by ${JSON.stringify(directory)}, ` +
+        `which holds another ${SOURCE_DIR_OPTION}. Name one directory.`,
+    );
+  }
+  if (LONG_OPTION.test(words[0])) {
+    throw new Error(
+      `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it, but ` +
+        `${JSON.stringify(directory)} reads as an option.`,
+    );
+  }
+  return word.startsWith('-') ? `./${directory}` : directory;
+}
+
+/** Extra scan arguments with a `--source-dir` among them taken out. */
+export interface ExtraScanArguments {
+  /** The directory the last `--source-dir` named, as the caller wrote it; absent if none did. */
+  readonly sourceDirectory?: string;
+  /** The extra arguments without any `--source-dir` and its directory, in their order. */
+  readonly rest: string[];
+}
+
+/**
+ * Take the directory a `--source-dir` among the extra arguments names out of them.
+ *
+ * Before ASH 3.9 every scan rendered here named its own directory with
+ * `--source-dir`, ahead of the extra arguments, so a `--source-dir DIR` among them
+ * came later and click scanned DIR; that was the way to scan part of the input.
+ * ASH 3.9 takes the directory as the argument of `ash scan fs` and refuses a
+ * `--source-dir` that names another one beside it, so DIR left among the extra
+ * arguments would fail the scan when it runs. `directoryScanCommand` names DIR the
+ * way the installed ASH names a directory instead.
+ *
+ * The arguments are read one element at a time: `--source-dir` and the directory
+ * as two elements, or `--source-dir=DIR` as one, or `--source-dir DIR` as one when
+ * DIR is a single word with no quote, backtick, `$` or backslash that does not start
+ * with a dash. An element that holds a `--source-dir` among other words, a
+ * `--source-dir` with no directory after it, a directory that holds another
+ * `--source-dir`, and a directory written like a long option (`--verbose`) are
+ * refused rather than guessed at. A directory name that starts with a dash is given
+ * as `./NAME`, the same directory, since `ash scan fs` would read the bare name as
+ * an option; the reusable workflow does the same. The directory is shell text the
+ * caller wrote, like every extra argument, and is passed on as written. When several
+ * are given, the last one is the directory, as click resolves a repeated option.
+ */
+export function withoutSourceDirectory(extraScanArguments: string[]): ExtraScanArguments {
+  let sourceDirectory: string | undefined;
+  const rest: string[] = [];
+  for (let index = 0; index < extraScanArguments.length; index++) {
+    const argument = extraScanArguments[index];
+    let directory: string;
+    if (argument === SOURCE_DIR_OPTION) {
+      index += 1;
+      directory = extraScanArguments[index] ?? '';
+    } else if (argument.startsWith(`${SOURCE_DIR_OPTION}=`)) {
+      directory = argument.slice(SOURCE_DIR_OPTION.length + 1);
+    } else {
+      const words = argument.trim().split(/\s+/);
+      if (!words.some(isSourceDirWord)) {
+        rest.push(argument);
+        continue;
+      }
+      if (!isSourceDirAndPlainDirectory(words)) {
+        throw new Error(
+          `${SOURCE_DIR_OPTION} must be an element of its own in extraScanArguments, ` +
+            `followed by the directory as the next element, or written ${SOURCE_DIR_OPTION}=DIR; ` +
+            `${JSON.stringify(argument)} holds it among other words, or with a directory that ` +
+            `is not one plain word. Write ['${SOURCE_DIR_OPTION}', 'DIR'] instead.`,
+        );
+      }
+      directory = words[1];
+    }
+    sourceDirectory = sourceDirectoryWord(directory);
+  }
+  return { sourceDirectory, rest };
+}
+
+/**
+ * A directory scan: `ash scan fs DIR` on an ASH that has the subject, and
+ * `ash scan --source-dir DIR` on one that does not, with the same options after.
+ *
+ * DIR is the one a `--source-dir` among the extra arguments names, else
+ * `sourceDirectory`; see `withoutSourceDirectory`. The options come first, then the
+ * rest of the extra arguments, so an option the caller repeats wins as it always did.
+ */
+function directoryScanCommand(
+  ash: string,
+  sourceDirectory: string,
+  options: string[],
+  extraScanArguments: string[],
+): string {
+  const extra = withoutSourceDirectory(extraScanArguments);
+  // Rendered before the choice, so an unsafe `sourceDirectory` is refused whether or
+  // not a `--source-dir` among the extra arguments replaces it.
+  const defaultDirectory = shellArg(sourceDirectory);
+  const directory = extra.sourceDirectory ?? defaultDirectory;
+  const after = [...options, ...extra.rest];
+  return onEitherAsh(
+    ash,
+    SCAN_FS,
+    ['scan', 'fs', directory, ...after],
+    ['scan', SOURCE_DIR_OPTION, directory, ...after],
+  );
 }
 
 /**
@@ -282,19 +572,20 @@ export function scanCommands(
   options: CommonCommandOptions,
   install: InstallOptions,
 ): string[] {
-  const argv = [
-    ashInvocation(install),
-    'scan',
-    '--source-dir',
-    shellArg(options.sourceDirectory),
-    '--output-dir',
-    shellArg(options.outputDirectory),
-    '--min-severity',
-    options.severityThreshold,
-    '--fail-on-findings',
-    ...options.extraScanArguments,
+  return [
+    directoryScanCommand(
+      ashInvocation(install),
+      options.sourceDirectory,
+      [
+        '--output-dir',
+        shellArg(options.outputDirectory),
+        '--min-severity',
+        options.severityThreshold,
+        '--fail-on-findings',
+      ],
+      options.extraScanArguments,
+    ),
   ];
-  return [argv.join(' ')];
 }
 
 /**
@@ -317,21 +608,22 @@ export function shardScanCommands(
   options: ShardCommandOptions,
   install: InstallOptions,
 ): string[] {
-  const argv = [
-    ashInvocation(install),
-    'scan',
-    '--source-dir',
-    shellArg(options.sourceDirectory),
-    '--output-dir',
-    shellArg(options.outputDirectory),
-    '--shard-index',
-    shellArg(options.shardIndex),
-    '--shard-count',
-    shellArg(options.shardCount),
-    '--no-fail-on-findings',
-    ...options.extraScanArguments,
+  return [
+    directoryScanCommand(
+      ashInvocation(install),
+      options.sourceDirectory,
+      [
+        '--output-dir',
+        shellArg(options.outputDirectory),
+        '--shard-index',
+        shellArg(options.shardIndex),
+        '--shard-count',
+        shellArg(options.shardCount),
+        '--no-fail-on-findings',
+      ],
+      options.extraScanArguments,
+    ),
   ];
-  return [argv.join(' ')];
 }
 
 /**
@@ -339,9 +631,12 @@ export function shardScanCommands(
  * and one exit code.
  *
  * One `--results` per shard, each a directory. Passing a single parent directory
- * holding every shard is refused by `ash merge`, on the grounds that it would
- * make the merged set depend on whatever else happens to be in the tree,
- * including a previous merged report.
+ * holding every shard is refused by the merge, on the grounds that it would make
+ * the merged set depend on whatever else happens to be in the tree, including a
+ * previous merged report.
+ *
+ * The merge is `ash results merge` on an ASH that has the `results` group (3.9 and
+ * later) and `ash merge` on one that does not; see `askAsh`.
  *
  * This command's exit code is the pipeline's verdict, which is also why
  * `--min-severity` is passed here and nowhere else: the severity floor has to
@@ -358,13 +653,27 @@ export function mergeCommands(
   if (resultsPaths.length === 0) {
     throw new Error('mergeCommands requires at least one results path.');
   }
-  const argv = [ashInvocation(install), 'merge'];
+  const options: string[] = [];
   for (const results of resultsPaths) {
-    argv.push('--results', shellArg(results));
+    options.push('--results', shellArg(results));
   }
-  argv.push('--output-dir', shellArg(outputDirectory));
-  argv.push('--min-severity', severityThreshold);
-  return [argv.join(' ')];
+  options.push('--output-dir', shellArg(outputDirectory));
+  options.push('--min-severity', severityThreshold);
+  return [resultsMergeCommand(ashInvocation(install), options)];
+}
+
+/**
+ * The merge with `options` after it: `ash results merge` on an ASH that has it,
+ * `ash merge` on one that does not.
+ *
+ * Exported for the buildspec generator, whose merge takes its `--results` from an
+ * environment variable at build time and so builds its options in the shell.
+ */
+export function resultsMergeCommand(ash: string, options: string[]): string {
+  return onEitherAsh(ash, RESULTS_MERGE, ['results', 'merge', ...options], [
+    'merge',
+    ...options,
+  ]);
 }
 
 /**

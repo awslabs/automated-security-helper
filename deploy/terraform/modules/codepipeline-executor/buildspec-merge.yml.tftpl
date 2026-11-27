@@ -13,6 +13,8 @@ version: 0.2
 #      ASH releases after 3.7.1 use 5 for this. 3.7.0 and 3.7.1 have no `ash
 #      merge` at all, and click reports that as 2, which the arm below would name
 #      as findings.
+#   70 not a status ASH gives: the check of which merge command the installed ASH
+#      has got no answer, so no merge ran. The build phase says why.
 #
 # Nothing here re-derives that judgment. ASH already routes it through
 # _compute_exit_code, the same function `ash scan` uses, precisely so a merged
@@ -99,6 +101,18 @@ phases:
       # propagated from post_build after the results are safely uploaded. The
       # explicit set +e / set -e pair is used rather than `if ! ash merge`,
       # because that form disables errexit for the whole compound statement.
+      #
+      # ASH 3.9 merges with `ash results merge`. An ash_version older than 3.9 has
+      # only `ash merge`, which 3.9 still runs with a deprecation line and v4.0
+      # removes, so the image's ASH is asked which it has, as each shard asks
+      # about `scan fs`. Only an answer picks a spelling: a help that names
+      # `results merge` (the new one), or a usage error naming `results` (an older
+      # ASH, which has no such command). Any other failure of the probe says
+      # nothing about the ASH, so the action fails with status 70 and what the
+      # probe printed instead of guessing. 70 is not one of ASH's own statuses
+      # (1 is the refusal to merge an incomplete result), and the probe records it
+      # in merge_exit_code, so post_build reports it as what it is and not as a
+      # refused merge. Each choice and its reason is printed to stderr.
       - |
         set -eu
         if [ -z "$ASH_BASE_CONFIG_SSM_PARAMETER" ]; then
@@ -106,9 +120,33 @@ phases:
           printf '{}\n' > "$ASH_CONFIG"
           export ASH_CONFIG
         fi
-        set -- /usr/local/bin/ash-container-init ash merge \
-          --output-dir merged \
-          --min-severity "$MIN_SEVERITY"
+        ASH_PROBE_STATUS=0
+        ASH_PROBE_HELP="$(ash results merge --help 2>&1)" || ASH_PROBE_STATUS=$?
+        case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in
+          0:*"results merge"*)
+            ASH_RESULTS_MERGE=yes
+            echo "ash: merging with 'ash results merge': its help names 'results merge'" >&2 ;;
+          0:*)
+            ASH_RESULTS_MERGE=no
+            echo "ash: merging with the older spelling: the help of 'ash results merge --help' does not name 'results merge', as an ASH older than 3.9 answers" >&2 ;;
+          *:*"No such command"*"results"*|*:*"unexpected extra argument"*"results"*)
+            ASH_RESULTS_MERGE=no
+            echo "ash: merging with the older spelling: this ASH refused the word 'results', as an ASH older than 3.9 does" >&2 ;;
+          *)
+            echo "ash: could not tell whether this ASH has 'ash results merge': 'ash results merge --help' exited $ASH_PROBE_STATUS without saying it refused 'results', so no spelling is chosen by guess. The end of its output:" >&2
+            printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
+            printf '%s' 70 > merge_exit_code
+            exit 70 ;;
+        esac
+        if [ "$ASH_RESULTS_MERGE" = yes ]; then
+          set -- /usr/local/bin/ash-container-init ash results merge \
+            --output-dir merged \
+            --min-severity "$MIN_SEVERITY"
+        else
+          set -- /usr/local/bin/ash-container-init ash merge \
+            --output-dir merged \
+            --min-severity "$MIN_SEVERITY"
+        fi
 
         if [ "$FAIL_ON_FINDINGS" = "true" ]; then
           set -- "$@" --fail-on-findings
@@ -148,6 +186,7 @@ phases:
           1) echo "ash merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
           2) echo "ash merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
           5) echo "ash merge: usage error - ASH refused its command line; check the image's ash_version" >&2 ;;
+          70) echo "ash merge: not run - the check of which merge command this ASH has got no answer; its output is in the build phase's log" >&2 ;;
           *) echo "ash merge: exited $MERGE_EXIT" >&2 ;;
         esac
         exit "$MERGE_EXIT"

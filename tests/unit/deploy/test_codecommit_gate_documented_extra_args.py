@@ -32,6 +32,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from tests.unit.deploy.gate_probe_answers import answer, fs_arguments
 from tests.utils.helpers import iter_repo_files
 
 pytestmark = pytest.mark.unit
@@ -85,14 +86,13 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
     gate = _load_gate()
     captured: list[list[str]] = []
 
-    def run(argv, cwd=None, env=None):
+    def run(argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
-            # The gate's probe of the image's options, answered as an ASH that has
-            # --fail-on-incomplete-scanners; it is not a scan, so it is not recorded.
-            return SimpleNamespace(
-                returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
-            )
+        reply = answer(argv)
+        if reply is not None:
+            # The gate's probes of the image's options, answered as this tree's ASH;
+            # they are not scans, so they are not recorded.
+            return reply
         captured.append(argv)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -111,7 +111,9 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
 
     assert captured and captured[0][:2] == ["ash", "scan"], captured
     scan = typer.main.get_command(app).commands["scan"].commands["fs"]
-    context = scan.make_context("scan", captured[0][2:], resilient_parsing=False)
+    context = scan.make_context(
+        "fs", fs_arguments(captured[0]), resilient_parsing=False
+    )
     assert not context.args, (
         f"`ash scan` collected unknown options from the example's argv: {context.args}"
     )

@@ -218,7 +218,7 @@ Windows for a file nobody edited.
 | `buildImage` | `IBuildImage` | `LinuxBuildImage.STANDARD_7_0` | |
 | `computeType` | `ComputeType` | `SMALL` | |
 | `environmentVariables` | `map<string, string>` | none | |
-| `extraScanArguments` | `string[]` | none | verdict and shard flags rejected; an option ASH does not accept fails the scan with exit 5 (ASH releases after 3.7.1) |
+| `extraScanArguments` | `string[]` | none | verdict and shard flags rejected; `--source-dir DIR` (two elements, `--source-dir=DIR`, or one element when `DIR` is a single plain word) names the directory scanned, relative to the input, and a `DIR` that starts with a dash is written `./DIR`; a `--source-dir` with no directory, or with a second `--source-dir` in it, is refused; an option ASH does not accept fails the scan with exit 5 (ASH releases after 3.7.1) |
 | `rolePolicyStatements` | `PolicyStatement[]` | none | added to each project role |
 
 `CRITICAL` and `HIGH` are equivalent: SARIF does not distinguish the two levels,

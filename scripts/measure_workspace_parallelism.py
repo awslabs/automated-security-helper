@@ -252,7 +252,7 @@ def single_project_command(project_dir: Path, output_dir: Path) -> List[str]:
         "-m",
         "automated_security_helper.cli.main",
         "scan",
-        "--source-dir",
+        "fs",
         str(project_dir),
         "--output-dir",
         str(output_dir),

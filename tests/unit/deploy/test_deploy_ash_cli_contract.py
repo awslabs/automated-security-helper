@@ -69,6 +69,11 @@ from tests.unit.deploy.buildspec_extraction import (
     codebuild_buildspecs,
     load_template,
 )
+from tests.unit.deploy.gate_probe_answers import (
+    RELEASE_WITH_SUBJECT,
+    RELEASE_WITHOUT_SUBJECT,
+    answer,
+)
 from tests.utils.helpers import iter_repo_files
 
 if sys.version_info >= (3, 11):
@@ -119,10 +124,11 @@ class Invocation:
 
 def _option(command, spelling: str):
     # `ash scan [options]` with no subject runs the scan's default subject, so that
-    # subject's options are the group's too (the form every deployment still uses).
-    # The form with no subject takes every option of the scan, which the subject
-    # itself no longer does (the workspace options are the workspace subject's), so
-    # a group that has a command for it names it.
+    # subject's options are the group's too. Every target runs that form when its ASH
+    # predates the `fs` subject, so it is checked as well as `ash scan fs`. The form
+    # with no subject takes every option of the scan, which the subject itself no
+    # longer does (the workspace options are the workspace subject's), so a group that
+    # has a command for it names it.
     candidates = [command]
     default = getattr(command, "legacy_default_subject", None)
     if default is not None:
@@ -422,20 +428,21 @@ def _environment(values: dict[str, str], clear_prefixes: tuple[str, ...]):
         yield
 
 
-def _gate_runner(captured: list[list[str]]):
+def _gate_runner(captured: list[list[str]], release: str):
     """A stand-in for the gate's subprocess runner that records what it would run.
 
-    The gate first asks ``ash scan --help`` whether the image's ASH has
-    ``--fail-on-incomplete-scanners`` and refuses to scan when it does not; the probe
-    is answered as an ASH that has it, and is not a scan, so it is not recorded.
+    The gate first asks the image's ASH how it names a directory (``ash scan fs
+    --help``, then ``ash scan --help`` without the subject) and whether it has
+    ``--fail-on-incomplete-scanners``, and refuses to scan when it does not. The
+    probes are answered as *release* (gate_probe_answers.py), and are not scans, so
+    they are not recorded.
     """
 
-    def run(argv, cwd=None, env=None):
+    def run(argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
-            return SimpleNamespace(
-                returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
-            )
+        reply = answer(argv, release)
+        if reply is not None:
+            return reply
         captured.append(argv)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -443,34 +450,41 @@ def _gate_runner(captured: list[list[str]]):
 
 
 def terraform_gate_invocations() -> list[Invocation]:
-    """Run the Terraform gate's own run_scan and capture the argv it would execute."""
-    gate = _load_by_path("_ash_pr_gate_cli_contract", TF_GATE)
+    """Run the Terraform gate's own run_scan and capture the argv it would execute.
+
+    Once per release shape, since the gate builds a different argv for an ASH with the
+    ``fs`` subject and for an older one. The gate is loaded afresh for each, because it
+    keeps its probe's answer for the life of the module.
+    """
     found: list[Invocation] = []
     with tempfile.TemporaryDirectory() as work:
-        for fail_on_findings in (True, False):
-            captured: list[list[str]] = []
-            with (
-                mock.patch.object(gate, "_run", _gate_runner(captured)),
-                mock.patch.object(gate, "WORK_ROOT", Path(work) / "ash-gate"),
-            ):
-                with _environment(
-                    {},
-                    (
-                        "ASH_SCAN_EXTRA_ARGS",
-                        "ASH_OFFLINE",
-                        "ASH_BAKED_",
-                        "ASH_IMAGE_PATH",
-                    ),
+        for release in (RELEASE_WITH_SUBJECT, RELEASE_WITHOUT_SUBJECT):
+            gate = _load_by_path(f"_ash_pr_gate_cli_contract_{release}", TF_GATE)
+            for fail_on_findings in (True, False):
+                captured: list[list[str]] = []
+                with (
+                    mock.patch.object(gate, "_run", _gate_runner(captured, release)),
+                    mock.patch.object(gate, "WORK_ROOT", Path(work) / "ash-gate"),
                 ):
-                    gate.run_scan(Path(work) / "src", "low", fail_on_findings)
-            for argv in captured:
-                assert argv[0] == "ash", argv
-                found.append(
-                    Invocation(
-                        f"{_relative(TF_GATE)} run_scan(fail_on_findings={fail_on_findings})",
-                        tuple(argv[1:]),
+                    with _environment(
+                        {},
+                        (
+                            "ASH_SCAN_EXTRA_ARGS",
+                            "ASH_OFFLINE",
+                            "ASH_BAKED_",
+                            "ASH_IMAGE_PATH",
+                        ),
+                    ):
+                        gate.run_scan(Path(work) / "src", "low", fail_on_findings)
+                for argv in captured:
+                    assert argv[0] == "ash", argv
+                    found.append(
+                        Invocation(
+                            f"{_relative(TF_GATE)} run_scan("
+                            f"fail_on_findings={fail_on_findings}), ASH {release}",
+                            tuple(argv[1:]),
+                        )
                     )
-                )
     return found
 
 
@@ -542,12 +556,28 @@ def workflow_invocations() -> list[Invocation]:
 
 #: source -> (reader, the command paths it must yield). The second half is the
 #: positive control: a reader that silently stopped matching would otherwise pass.
+#: The targets that scan or merge run each command both ways, ASH 3.9's spelling
+#: (`scan fs`, `results merge`) and the older one (`scan`, `merge`) for an ASH that
+#: predates it, so both paths are required. The reusable workflow's older spellings
+#: are bare `ash` for the scan and the top-level `report`.
 SOURCES: dict[str, tuple[Callable[[], list[Invocation]], set[str]]] = {
-    "reusable workflow": (workflow_invocations, {"", "dependencies install", "report"}),
-    "CDK templates": (cdk_template_invocations, {"scan", "merge", "mcp"}),
-    "cdk-constructs buildspecs": (cdk_constructs_invocations, {"scan", "merge"}),
-    "Terraform buildspecs": (terraform_buildspec_invocations, {"scan", "merge"}),
-    "Terraform gate": (terraform_gate_invocations, {"scan"}),
+    "reusable workflow": (
+        workflow_invocations,
+        {"", "scan fs", "dependencies install", "report", "results report"},
+    ),
+    "CDK templates": (
+        cdk_template_invocations,
+        {"scan", "scan fs", "merge", "results merge", "mcp"},
+    ),
+    "cdk-constructs buildspecs": (
+        cdk_constructs_invocations,
+        {"scan", "scan fs", "merge", "results merge"},
+    ),
+    "Terraform buildspecs": (
+        terraform_buildspec_invocations,
+        {"scan", "scan fs", "merge", "results merge"},
+    ),
+    "Terraform gate": (terraform_gate_invocations, {"scan", "scan fs"}),
     "Terraform ash-mcp-serve": (terraform_mcp_serve_invocations, {"mcp"}),
 }
 
@@ -591,6 +621,8 @@ def test_the_check_reports_what_the_cli_lacks():
     root = _cli()
     accepted = [
         Invocation("control", ("scan", "--source-dir", "$X", "--shard-index", "0")),
+        Invocation("control", ("scan", "fs", "$X", "--shard-index", "0")),
+        Invocation("control", ("results", "merge", "--results", "a")),
         Invocation("control", ("--output-dir", "out", "report")),
         Invocation("control", ("mcp", "--stateless-http", "--allowed-host", "h")),
     ]
@@ -599,6 +631,9 @@ def test_the_check_reports_what_the_cli_lacks():
 
     rejected = {
         Invocation("control", ("scan", "--shard-indx", "0")): "--shard-indx",
+        Invocation(
+            "control", ("scan", "fs", "$X", "--shard-indx", "0")
+        ): "--shard-indx",
         Invocation("control", ("merge-results", "--results", "a")): "merge-results",
         Invocation("control", ("mcp", "--fail-on-findings")): "--fail-on-findings",
     }

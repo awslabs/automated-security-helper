@@ -89,10 +89,39 @@ class Ash < Formula
   test do
     assert_match "automated-security-helper", shell_output("#{bin}/ash --version")
 
+    # ASH 3.9 and later scan a directory with `ash scan fs PATH`, and print a
+    # deprecation line for `ash scan --source-dir PATH`. The tag above names the
+    # release before that until the release commit moves it, and that release has no
+    # `fs` subject. So the installed ASH is asked which form it has, and only an
+    # answer picks the older one: an ASH with the subject prints its name in the help,
+    # and an older one shows the subject-less scan's help or refuses the word `fs`
+    # with a usage error. A probe that fails any other way (a crash, an import error)
+    # says nothing about the commands, so the test fails with what it printed instead
+    # of testing the older spelling on an ASH that may have the new one. The exit
+    # status is read here, which is why this is not shell_output.
+    fs_help = `#{bin}/ash scan fs --help 2>&1`
+    fs_status = Process.last_status
+    directory_word =
+      if fs_status.success? && fs_help.include?("scan fs")
+        warn "ash: scanning with 'ash scan fs': its help names 'scan fs'"
+        "fs"
+      elsif fs_status.success?
+        warn "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name " \
+             "'scan fs', as an ASH older than 3.9 answers"
+        "--source-dir"
+      elsif fs_help.match?(/(unexpected extra arguments?|no such command)[^\n]*\bfs\b/i)
+        warn "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does"
+        "--source-dir"
+      else
+        raise "could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' ended (#{fs_status}) " \
+              "without saying it refused 'fs', so no spelling is chosen by guess. The end of its output:\n" \
+              "#{fs_help.lines.last(20).join}"
+      end
+
     (testpath/"src/sample.py").write "print('hello')\n"
     # detect-secrets is a Python dependency of ASH, so this scan needs nothing
     # beyond what the formula installed; it fails if a dependency is missing.
-    system (bin/"ash").to_s, "scan", "--source-dir", (testpath/"src").to_s,
+    system (bin/"ash").to_s, "scan", directory_word.to_s, (testpath/"src").to_s,
            "--output-dir", (testpath/"out").to_s,
            "--simple", "--phases", "scan", "--phases", "report", "--scanners", "detect-secrets"
     assert_path_exists testpath/"out/ash_aggregated_results.json"
@@ -109,7 +138,7 @@ class Ash < Formula
           Type: AWS::S3::Bucket
     YAML
     # The exit status goes on a line of its own, after ash's last line whatever it ends with.
-    exited = shell_output("#{bin}/ash scan --source-dir #{testpath}/cfn --output-dir #{testpath}/out-cfn " \
+    exited = shell_output("#{bin}/ash scan #{directory_word} #{testpath}/cfn --output-dir #{testpath}/out-cfn " \
                           "--simple --phases scan --phases report --scanners cdk-nag; " \
                           "rc=$?; echo; echo \"ash exited $rc\"")
                  .lines.last.strip

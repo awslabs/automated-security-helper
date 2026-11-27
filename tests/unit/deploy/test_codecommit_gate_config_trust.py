@@ -38,6 +38,8 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+from tests.unit.deploy.gate_probe_answers import answer, fs_arguments
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -134,14 +136,14 @@ class _ScanCapture:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
 
-    def __call__(self, argv, cwd=None, env=None):
+    def __call__(self, argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
-        if argv == ["ash", "scan", "--help"]:
-            # The gate's probe of the image's options; answered as an ASH that has
-            # --fail-on-incomplete-scanners, and not a scan.
-            return SimpleNamespace(
-                returncode=0, stdout="  --fail-on-incomplete-scanners\n", stderr=""
-            )
+        probe = answer(argv)
+        if probe is not None:
+            # The gate's probe of the image's options; answered as this tree's ASH,
+            # which has the `fs` subject and --fail-on-incomplete-scanners, and not
+            # a scan.
+            return probe
         if argv[:2] == ["ash", "scan"]:
             effective = _effective_config(argv, env or {})
             content: Optional[str] = None
@@ -176,7 +178,7 @@ def _effective_config(argv: List[str], env: Dict[str, str]) -> Optional[str]:
     hidden = os.environ.pop("ASH_CONFIG", None)
     try:
         params = scan_command.make_context(
-            "scan", argv[2:], resilient_parsing=False
+            "fs", fs_arguments(argv), resilient_parsing=False
         ).params
     finally:
         if hidden is not None:

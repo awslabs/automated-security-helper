@@ -219,6 +219,36 @@ describe('verdict ownership in the generated buildspecs', () => {
   });
 });
 
+describe('each generated header names the spellings of the command its file runs', () => {
+  /** The leading comment block of a generated file. */
+  function headerOf(filename: string): string {
+    const lines = generatedBuildspecs()
+      .find((s) => s.filename === filename)!
+      .contents.split('\n');
+    return lines.slice(0, lines.findIndex((line) => !line.startsWith('#'))).join('\n');
+  }
+
+  test.each(['buildspec.yml', 'buildspec-shard.yml'])(
+    '%s names the scan spellings and not the merge ones',
+    (filename) => {
+      // These files scan and never merge, so a header that named `ash results
+      // merge` or `ash merge` told a reader of the scan that it merges.
+      const header = headerOf(filename);
+      expect(header).toContain('`ash scan fs DIR`');
+      expect(header).toContain('`ash scan --source-dir DIR`');
+      expect(header).not.toContain('results merge');
+      expect(header).not.toContain('ash merge');
+    },
+  );
+
+  test('buildspec-merge.yml names the merge spellings and not the scan ones', () => {
+    const header = headerOf('buildspec-merge.yml');
+    expect(header).toContain('`ash results merge`');
+    expect(header).toContain('`ash merge`');
+    expect(header).not.toContain('ash scan');
+  });
+});
+
 describe('the env-driven merge loop matches the literal merge command', () => {
   test('expands to the same argument vector for three shards', () => {
     // The loop in buildspec-merge.yml and mergeCommands() are two renderings of
@@ -230,16 +260,28 @@ describe('the env-driven merge loop matches the literal merge command', () => {
       { mode: ASHInstallMode.PIP, sourceRepository: DEFAULT_ASH_REPOSITORY },
     )[0];
 
-    expect(literal).toBe(
-      'ash merge --results "out/shard-0" --results "out/shard-1" ' +
-        '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low',
+    // The same options after `ash results merge` and after `ash merge`, one for an
+    // ASH with the results group and one for an older ASH.
+    const options =
+      '--results "out/shard-0" --results "out/shard-1" ' +
+      '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low';
+    // The probe comes first and the exit status is the chosen branch's own, so the
+    // command ends with the two spellings and nothing after them.
+    expect(literal).toMatch(/^ash_probe_status=0; /);
+    expect(literal).toContain(
+      ' && if [ "$ash_spelling" = current ]; ' +
+        `then ash results merge ${options}; else ash merge ${options}; fi`,
     );
+    expect(literal.endsWith('; fi')).toBe(true);
 
     const loop = mergeLoopCommands().join('\n');
+    const loopOptions =
+      '"$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"';
     expect(loop).toContain('--results "$shard_dir"');
-    expect(loop).toContain(
-      'ash merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
-    );
+    expect(loop).toContain(`then ash results merge ${loopOptions}; `);
+    expect(loop).toContain(`else ash merge ${loopOptions}; fi`);
+    // The loop builds "$@" before the probe, and the probe leaves it alone.
+    expect(loop).toContain('done; ash_probe_status=0; ');
   });
 
   test('mergeCommands refuses an empty results list', () => {

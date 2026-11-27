@@ -58,6 +58,18 @@ phases:
       # With no base config ash-container-init sets no ASH_CONFIG, and ASH would
       # then read a config committed in the scanned repository. So this writes
       # `{}`, ASH's defaults, outside the checkout and points ASH_CONFIG at it.
+      #
+      # ASH 3.9 scans a directory as `ash scan fs PATH`. An ash_version older
+      # than 3.9 has only `ash scan --source-dir PATH`, which 3.9 still runs with
+      # a deprecation line and v4.0 removes, so the image's ASH is asked first.
+      # Only an answer picks a spelling: a help that names `scan fs` (the new
+      # one), a help that does not or a usage error naming `fs` (an older ASH).
+      # Any other failure of the probe says nothing about the ASH, so the action
+      # fails with status 70 and what the probe printed instead of guessing. 70 is
+      # not one of ASH's own statuses, so the build's status tells a probe that
+      # got no answer from a scan that ran. Each choice and its reason is printed
+      # to stderr. ASH_EXIT is the scan's status either way, since an `if` exits
+      # with its branch's last command.
       - |
         set -eu
         mkdir -p ash_output
@@ -66,13 +78,38 @@ phases:
           printf '{}\n' > "$ASH_CONFIG"
           export ASH_CONFIG
         fi
+        ASH_PROBE_STATUS=0
+        ASH_PROBE_HELP="$(ash scan fs --help 2>&1)" || ASH_PROBE_STATUS=$?
+        case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in
+          0:*"scan fs"*)
+            ASH_SCAN_FS=yes
+            echo "ash: scanning with 'ash scan fs': its help names 'scan fs'" >&2 ;;
+          0:*)
+            ASH_SCAN_FS=no
+            echo "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name 'scan fs', as an ASH older than 3.9 answers" >&2 ;;
+          *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*)
+            ASH_SCAN_FS=no
+            echo "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does" >&2 ;;
+          *)
+            echo "ash: could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' exited $ASH_PROBE_STATUS without saying it refused 'fs', so no spelling is chosen by guess. The end of its output:" >&2
+            printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
+            exit 70 ;;
+        esac
         set +e
-        /usr/local/bin/ash-container-init ash scan \
-          --source-dir . \
-          --output-dir ash_output \
-          --shard-index "$SHARD_INDEX" \
-          --shard-count "$SHARD_COUNT" \
-          --no-fail-on-findings
+        if [ "$ASH_SCAN_FS" = yes ]; then
+          /usr/local/bin/ash-container-init ash scan fs . \
+            --output-dir ash_output \
+            --shard-index "$SHARD_INDEX" \
+            --shard-count "$SHARD_COUNT" \
+            --no-fail-on-findings
+        else
+          /usr/local/bin/ash-container-init ash scan \
+            --source-dir . \
+            --output-dir ash_output \
+            --shard-index "$SHARD_INDEX" \
+            --shard-count "$SHARD_COUNT" \
+            --no-fail-on-findings
+        fi
         ASH_EXIT=$?
         set -e
         echo "ash scan exited $ASH_EXIT"

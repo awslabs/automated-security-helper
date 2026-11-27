@@ -45,6 +45,9 @@ Marked `integration` to match the rest of this tree, so the integration job's
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +58,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 ASSERT_CASE = HERE / "assert_case.py"
 EXPECTED_JSON = HERE / "expected.json"
+RUN_REGRESSION = HERE / "run_regression.sh"
 
 sys.path.insert(0, str(HERE))
 
@@ -258,6 +262,135 @@ def test_the_derived_flags_include_every_flag_the_gate_always_sends():
     assert flags["min_severity"] == ["--min-severity"]
 
 
+def test_the_contract_names_the_directory_both_ways_the_gate_can():
+    """The gate scans `ash scan fs PATH` on an ASH with the `fs` subject (3.9 and
+    later) and `ash scan --source-dir PATH` on one without. Both words are in the
+    contract, so a gate that stops naming the directory either way changes it."""
+    import gate_contract
+
+    flags = gate_contract.load_contract()["scan_flags"]
+
+    assert flags["directory_with_subject"] == ["fs"]
+    assert flags["directory_without_subject"] == ["--source-dir"]
+
+
+def _handler_with(old: str, new: str) -> str:
+    """The extracted handler with one planted edit, which must have changed it."""
+    import gate_contract
+
+    source = gate_contract.extract_handler_source()
+    planted = source.replace(old, new)
+    assert planted != source, f"the handler no longer holds {old!r}; update this plant"
+    return planted
+
+
+def test_a_handler_whose_argv_drops_the_directory_is_refused():
+    """Planted control. Dropping `*directory` from argv leaves a scan with no
+    directory, and a derivation that read only literal flags out of argv would
+    report the same contract for it."""
+    import gate_contract
+
+    planted = _handler_with('["ash", "scan", *directory,', '["ash", "scan",')
+
+    with pytest.raises(AssertionError, match="`\\*directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+def test_a_handler_that_assigns_one_directory_spelling_is_refused():
+    """Planted control. One list for every ASH is not the two the contract names."""
+    import gate_contract
+
+    planted = _handler_with(
+        '["fs", source_dir] if has_subject else ["--source-dir", source_dir]',
+        '["--source-dir", source_dir]',
+    )
+
+    with pytest.raises(AssertionError, match="assigns `directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+def test_a_handler_that_assigns_directory_again_is_refused():
+    """Planted control. A plain assignment between the first one and the argv that
+    carries `*directory` overrides it, so the gate would name its path one way whatever
+    its ASH has, while the contract still read the two arms of the assignment it
+    overrides."""
+    import gate_contract
+
+    planted = _handler_with(
+        'argv = ["ash", "scan", *directory,',
+        'directory = ["--source-dir", source_dir]\n'
+        '    argv = ["ash", "scan", *directory,',
+    )
+
+    with pytest.raises(AssertionError, match="assigns `directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [
+        pytest.param('directory[:] = ["--source-dir", source_dir]', id="slice-store"),
+        pytest.param('directory[0] = "--source-dir"', id="item-store"),
+        pytest.param(
+            'directory, unused = ["--source-dir", source_dir], None', id="tuple-target"
+        ),
+        pytest.param(
+            '[directory, unused] = (["--source-dir", source_dir], None)',
+            id="list-target",
+        ),
+        pytest.param('(directory := ["--source-dir", source_dir])', id="walrus"),
+        pytest.param(
+            'for directory in (["--source-dir", source_dir],):\n        pass',
+            id="loop-target",
+        ),
+        pytest.param('with open("x") as directory:\n        pass', id="with-target"),
+        pytest.param('directory.append("--source-dir")', id="mutator-call"),
+        pytest.param("del directory", id="del"),
+    ],
+)
+def test_a_handler_that_writes_directory_another_way_is_refused(plant):
+    """Planted control, one per way Python has of changing what a name holds.
+
+    Each is planted ahead of the argv, after the assignment the contract reads, so each
+    one changes what the gate scans while the assignment still reads as the two
+    spellings. A reader that counted only `=`, `+=` and annotated assignments let all of
+    these through.
+    """
+    import gate_contract
+
+    planted = _handler_with(
+        'argv = ["ash", "scan", *directory,',
+        plant + '\n    argv = ["ash", "scan", *directory,',
+    )
+
+    with pytest.raises(AssertionError, match="assigns `directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+def test_a_handler_that_only_reads_directory_still_derives():
+    """Control for the planted writes above: the handler as it is has one write."""
+    import gate_contract
+
+    flags = gate_contract.derive_scan_flags()
+
+    assert flags["directory_with_subject"] == ["fs"]
+    assert flags["directory_without_subject"] == ["--source-dir"]
+
+
+def test_the_directory_words_are_read_from_the_handler_not_carried():
+    """Planted control. A word the handler changes is the word the derivation reports."""
+    import gate_contract
+
+    planted = _handler_with(
+        '["--source-dir", source_dir]', '["--source-tree", source_dir]'
+    )
+
+    flags = gate_contract.derive_scan_flags(planted)
+
+    assert flags["directory_without_subject"] == ["--source-tree"]
+    assert flags["directory_with_subject"] == ["fs"]
+
+
 def test_the_min_severity_default_comes_from_the_stack():
     """'medium' is the MinSeverity parameter's default, not an invented value.
 
@@ -333,3 +466,400 @@ def test_the_measured_observations_were_not_touched():
     )
     assert observed.get("scanner_statuses"), "the recorded scanner table is gone"
     assert observed.get("observations"), "the recorded observations are gone"
+
+
+# ---------------------------------------------------------------------------
+# The scan run_regression.sh hands the image's shell, against a stand-in ash
+# ---------------------------------------------------------------------------
+
+posix_only = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("sh") is None,
+    reason="runs the script the image's /bin/sh runs, which is a POSIX shell script",
+)
+
+#: A stand-in ``ash``. It answers ``ash scan fs --help`` as each kind of image's ASH
+#: does and records every other call as one JSON argv per line. Kinds:
+#: ``with-subject`` (ASH 3.9), ``without-subject`` (an older ASH, which shows the
+#: subject-less scan's help for ``scan fs --help`` since click reads ``--help`` before
+#: it refuses the extra argument), ``refusing`` (an older ASH that refuses the word
+#: ``fs`` with the usage error instead), ``no-such-command`` (one whose ``scan`` is a
+#: group with no ``fs`` command, which click refuses as an unknown command),
+#: ``crashing``, ``names-it-and-fails`` (an ASH that prints the usage line, which names
+#: the command, and then dies) and ``numbered-failure`` (an ASH that prints 25
+#: numbered lines and dies, so what the script shows of them can be counted).
+_STAND_IN_ASH = """\
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+release = os.environ["ASH_STUB_RELEASE"]
+if argv == ["scan", "fs", "--help"]:
+    if release == "crashing":
+        sys.stderr.write("Traceback (most recent call last):\\nMemoryError\\n")
+        sys.exit(1)
+    if release == "names-it-and-fails":
+        sys.stdout.write("Usage: ash scan fs [OPTIONS] [PATH]\\n")
+        sys.stderr.write("Error: it broke after printing its usage\\n")
+        sys.exit(1)
+    if release == "numbered-failure":
+        for number in range(1, 26):
+            sys.stderr.write(f"probe line {number:02d}\\n")
+        sys.exit(1)
+    if release == "no-such-command":
+        sys.stderr.write("Usage: ash scan [OPTIONS] COMMAND [ARGS]...\\n")
+        sys.stderr.write("Try 'ash scan --help' for help.\\n\\n")
+        sys.stderr.write("Error: No such command 'fs'.\\n")
+        sys.exit(2)
+    if release == "with-subject":
+        sys.stdout.write("Usage: ash scan fs [OPTIONS] [PATH]\\n")
+        sys.exit(0)
+    if release == "without-subject":
+        sys.stdout.write("Usage: ash scan [OPTIONS]\\n")
+        sys.exit(0)
+    sys.stderr.write("Usage: ash scan [OPTIONS]\\n")
+    sys.stderr.write("Error: Got unexpected extra argument (fs)\\n")
+    sys.exit(5)
+with open(os.environ["ASH_STUB_LOG"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(argv) + "\\n")
+sys.exit(int(os.environ.get("ASH_STUB_EXIT", "0")))
+"""
+
+#: The destination commit the script is handed as ``$1``.
+DESTINATION = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _inner_scan() -> str:
+    """The script run_regression.sh hands the image's /bin/sh, as its heredoc holds it."""
+    text = RUN_REGRESSION.read_text(encoding="utf-8")
+    match = re.search(
+        r"^IFS= read -r -d '' INNER_SCAN <<'SH' \|\| true\n(?P<body>.*?)^SH\n",
+        text,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match, "run_regression.sh no longer holds its scan script in INNER_SCAN"
+    return match["body"]
+
+
+def _run_inner_scan(
+    tmp_path: Path, release: str, exit_status: int = 0
+) -> tuple[list[list[str]], subprocess.CompletedProcess, Path, Path]:
+    """Run the inner script in a POSIX shell with the stand-in first on PATH.
+
+    The container's two mount points are two directories here. Returns the calls the
+    stand-in recorded, the finished shell, and the source and output directories.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ash = bin_dir / "ash"
+    ash.write_text(f"#!{sys.executable} -I\n{_STAND_IN_ASH}", encoding="utf-8")
+    ash.chmod(0o755)
+    source = tmp_path / "src"
+    output = tmp_path / "out"
+    source.mkdir()
+    output.mkdir()
+    log = tmp_path / "ash.jsonl"
+    shell = shutil.which("sh")
+    assert shell, "no sh on PATH"
+    script = _inner_scan().replace("/work/src", str(source))
+    script = script.replace("/work/out", str(output))
+    # `sh -c SCRIPT sh DESTINATION`, as run_scan hands it to the container.
+    finished = subprocess.run(
+        [shell, "-c", script, "sh", DESTINATION],
+        cwd=tmp_path,
+        env={
+            "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "ASH_STUB_RELEASE": release,
+            "ASH_STUB_LOG": str(log),
+            "ASH_STUB_EXIT": str(exit_status),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    calls = (
+        [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if log.exists()
+        else []
+    )
+    return calls, finished, source, output
+
+
+def _scan_argv(directory: list[str], output: Path) -> list[str]:
+    """The gate's flags after the directory, which both spellings carry."""
+    return [
+        "scan",
+        *directory,
+        "--output-dir",
+        str(output),
+        "--no-progress",
+        "--simple",
+        "--compact-report",
+        "--changed-files-only",
+        "--base-ref",
+        DESTINATION,
+        "--min-severity",
+        "medium",
+    ]
+
+
+def test_the_script_hands_the_scan_its_destination_commit_as_the_first_argument():
+    text = RUN_REGRESSION.read_text(encoding="utf-8")
+    assert '"$IMAGE" -c "$INNER_SCAN" sh "$dest"' in text, (
+        "run_scan must pass the destination commit after the script's own name, "
+        "which is where the script reads it as $1"
+    )
+    assert '--base-ref "$1"' in _inner_scan()
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, spelling",
+    [
+        ("with-subject", "fs"),
+        ("without-subject", "--source-dir"),
+        ("refusing", "--source-dir"),
+        # The scan's other refusal: an unknown command, not an extra argument.
+        ("no-such-command", "--source-dir"),
+    ],
+)
+def test_the_script_scans_the_way_its_ash_does(tmp_path, release, spelling):
+    calls, finished, source, output = _run_inner_scan(tmp_path, release, exit_status=2)
+
+    assert finished.returncode == 0, finished.stderr
+    assert calls == [_scan_argv([spelling, str(source)], output)], calls
+    # The scan's own status reaches the marker the caller reads.
+    assert "ASH_EXIT=2" in finished.stdout, finished.stdout
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, printed",
+    [
+        ("crashing", "MemoryError"),
+        # The usage line names the command, but the exit status is not 0: the help is
+        # not an answer, so the status is read before the words are.
+        ("names-it-and-fails", "it broke after printing its usage"),
+    ],
+)
+def test_the_script_does_not_read_a_failed_probe_as_an_older_ash(
+    tmp_path, release, printed
+):
+    """A failure says nothing about the image's ASH. Read as an older one, it would
+    scan with the older spelling on an ASH that has the new one and score that run."""
+    calls, finished, _, _ = _run_inner_scan(tmp_path, release)
+
+    assert calls == [], calls
+    assert finished.returncode == 70, finished.stderr
+    # No marker: the caller reports that ash never ran, with this output in the log.
+    assert "ASH_EXIT=" not in finished.stdout, finished.stdout
+    assert "could not tell whether this ASH has 'ash scan fs'" in finished.stderr
+    assert "'ash scan fs --help' exited 1" in finished.stderr
+    assert printed in finished.stderr
+
+
+@posix_only
+def test_the_script_shows_the_last_twenty_lines_of_what_a_failed_probe_printed(
+    tmp_path,
+):
+    """The probe printed 25 lines and failed: the tail is lines 6 to 25, no more, no less.
+
+    Fewer would cut the line that says why, and more would put a whole traceback in a
+    log the caller prints the end of.
+    """
+    calls, finished, _, _ = _run_inner_scan(tmp_path, "numbered-failure")
+
+    assert calls == [], calls
+    assert finished.returncode == 70, finished.stderr
+    for number in range(6, 26):
+        assert f"probe line {number:02d}" in finished.stderr, (number, finished.stderr)
+    for number in range(1, 6):
+        assert f"probe line {number:02d}" not in finished.stderr, (
+            number,
+            finished.stderr,
+        )
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, said",
+    [
+        ("with-subject", "scanning with 'ash scan fs': its help names 'scan fs'"),
+        (
+            "without-subject",
+            (
+                "scanning with the older spelling: the help of 'ash scan fs --help' "
+                "does not name 'scan fs'"
+            ),
+        ),
+        (
+            "refusing",
+            "scanning with the older spelling: this ASH refused the word 'fs'",
+        ),
+        (
+            "no-such-command",
+            "scanning with the older spelling: this ASH refused the word 'fs'",
+        ),
+    ],
+)
+def test_the_script_says_which_spelling_it_chose_and_why(tmp_path, release, said):
+    _, finished, _, _ = _run_inner_scan(tmp_path, release)
+
+    assert f"ash: {said}" in finished.stderr, finished.stderr
+
+
+# ---------------------------------------------------------------------------
+# What the operator sees when the scan script ends without a result
+# ---------------------------------------------------------------------------
+
+#: What the container prints when its check of which spelling the image's ASH takes
+#: gets no answer: the check's own line, then the last 20 lines it saw, as the script
+#: prints them. Three lines of earlier output come before, which a tail that is too
+#: short for the check's line and its 20 lines leaves out.
+_UNANSWERED_CHECK_LOG = (
+    "earlier line 1\nearlier line 2\nearlier line 3\n"
+    "ash: could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' "
+    "exited 1 without saying it refused 'fs', so no spelling is chosen by guess. "
+    "The end of its output:\n"
+) + "".join(f"probe line {number:02d}\n" for number in range(6, 26))
+
+_DOCKER_REFUSED_LOG = (
+    "docker: Error response from daemon: pull access denied for example.invalid/ash, "
+    "repository does not exist or may require 'docker login'.\n"
+)
+
+#: A stand-in `docker`: prints the log the test gives it and ends with the status the
+#: test gives it, whatever it was asked to run.
+_STAND_IN_DOCKER = """\
+#!/bin/sh
+cat "$STAND_IN_DOCKER_LOG"
+exit "$STAND_IN_DOCKER_STATUS"
+"""
+
+
+def _run_the_script(
+    tmp_path: Path, docker_log: str, docker_status: int
+) -> tuple[subprocess.CompletedProcess, Path]:
+    """Run run_regression.sh as an operator does, with a `docker` that returns a canned log.
+
+    Returns the finished script and the directory `mktemp -d` makes scratch trees in.
+    """
+    bash = shutil.which("bash")
+    git = shutil.which("git")
+    if bash is None or git is None:
+        pytest.skip("run_regression.sh needs bash and git")
+    version = subprocess.run(
+        [bash, "-c", 'echo "${BASH_VERSINFO[0]}"'],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if int(version.stdout.strip() or "0") < 4:
+        pytest.skip(
+            "run_regression.sh declares an associative array, which needs bash 4"
+        )
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(_STAND_IN_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    # The script calls `python3`, and the interpreter running these tests is the one
+    # that has this tree's dependencies.
+    python3 = bin_dir / "python3"
+    python3.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+    python3.chmod(0o755)
+    canned = tmp_path / "docker.log"
+    canned.write_text(docker_log, encoding="utf-8")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    finished = subprocess.run(
+        [bash, str(RUN_REGRESSION), "example.invalid/ash:test"],
+        cwd=REPO_ROOT,
+        env={
+            "PATH": os.pathsep.join(
+                [str(bin_dir), str(Path(git).parent), "/usr/bin", "/bin"]
+            ),
+            "HOME": str(home),
+            "TMPDIR": str(scratch),
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "STAND_IN_DOCKER_LOG": str(canned),
+            "STAND_IN_DOCKER_STATUS": str(docker_status),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    return finished, scratch
+
+
+def _retained_workdir(finished: subprocess.CompletedProcess) -> Path:
+    """The directory the script says it kept."""
+    match = re.search(
+        r"^workdir retained: (?P<path>.+)$", finished.stdout, re.MULTILINE
+    )
+    assert match, finished.stdout
+    return Path(match["path"])
+
+
+@posix_only
+def test_a_scan_script_that_got_no_answer_is_explained_and_its_log_is_kept(tmp_path):
+    finished, scratch = _run_the_script(tmp_path, _UNANSWERED_CHECK_LOG, 70)
+
+    out = finished.stdout
+    assert finished.returncode == 1, (out, finished.stderr)
+    # Both cases fail the same way: the container gave no marker for either.
+    assert out.count("FAIL: the container produced no ASH_EXIT marker") == 2, out
+    assert out.count("docker exited 70") == 2, out
+    assert out.count("70 is the status the scan script ends with") == 2, out
+    # What the check printed: its own line, then its 20 lines, and not the earlier ones.
+    assert out.count("ash: could not tell whether this ASH has 'ash scan fs'") == 2, out
+    for number in range(6, 26):
+        assert f"probe line {number:02d}" in out, (number, out)
+    assert "earlier line" not in out, out
+    # Two cases that never ran are not a pair of equal verdicts.
+    assert "NOT COMPARED" in out, out
+    assert "PASS: verdicts diverge" not in out, out
+    assert "REGRESSION PAIR: FAIL" in out, out
+    # The default run would delete the directory the log is in.
+    kept = _retained_workdir(finished)
+    assert kept.resolve().parent == scratch.resolve(), (kept, scratch)
+    assert (kept / "vulnerable.log").read_text(
+        encoding="utf-8"
+    ) == _UNANSWERED_CHECK_LOG
+    assert (kept / "clean.log").is_file()
+
+
+@posix_only
+def test_a_docker_failure_is_reported_as_docker_not_as_a_check_that_got_no_answer(
+    tmp_path,
+):
+    finished, _ = _run_the_script(tmp_path, _DOCKER_REFUSED_LOG, 125)
+
+    out = finished.stdout
+    assert finished.returncode == 1, (out, finished.stderr)
+    assert out.count("FAIL: the container produced no ASH_EXIT marker") == 2, out
+    assert out.count("docker exited 125") == 2, out
+    assert "pull access denied" in out, out
+    # The hint is about the scan script's check, which never ran.
+    assert "70 is the status" not in out, out
+    assert "ash: could not tell" not in out, out
+    assert _retained_workdir(finished).is_dir()
+
+
+@posix_only
+def test_a_run_whose_cases_both_answered_deletes_its_scratch_trees(tmp_path):
+    """Control: the retention above comes from the missing marker, not from the script."""
+    finished, scratch = _run_the_script(tmp_path, "ASH_EXIT=0\n", 0)
+
+    out = finished.stdout
+    assert "FAIL: the container produced no ASH_EXIT marker" not in out, out
+    assert "docker exited" not in out, out
+    assert "workdir retained" not in out, out
+    assert list(scratch.iterdir()) == [], list(scratch.iterdir())

@@ -97,9 +97,8 @@ runs:
       # reports a symptom and hides the cause, which cost a full CI round trip to diagnose.
       run: |
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-nix-selftest \
           --mode nix \
-          --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins \
           --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins \
@@ -107,7 +106,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
-          echo "::error::ash scan --mode nix exited $rc (expected 0, or 2 for findings)"
+          echo "::error::ash scan fs --mode nix exited $rc (expected 0, or 2 for findings)"
           exit "$rc"
         fi
         echo "scan exited $rc"
@@ -228,9 +227,8 @@ runs:
           > /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
         cat /tmp/ash-zizmor-selftest/.github/workflows/selftest.yml
         set +e
-        ash scan \
+        ash scan fs /tmp/ash-zizmor-selftest \
           --mode nix \
-          --source-dir /tmp/ash-zizmor-selftest \
           --output-dir /tmp/ash-zizmor-selftest/output \
           --scanners zizmor \
           --no-fail-on-findings \
@@ -239,7 +237,7 @@ runs:
         rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
-          echo "::error::ash scan --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
+          echo "::error::ash scan fs --scanners zizmor exited $rc; with --no-fail-on-findings only an incomplete or broken scan exits non-zero."
           exit "$rc"
         fi
         python3 <<'PY'

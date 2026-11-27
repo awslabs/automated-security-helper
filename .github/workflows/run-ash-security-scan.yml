@@ -2179,9 +2179,10 @@ jobs:
           # with a single spelling and no negation, so for those a caller can
           # add the flag but not remove it.
           #
-          # --source-dir and --output-dir did not change hands. ${ASH_ARGS}
-          # already sat after both, so a caller could override them before this
-          # change and still can.
+          # --output-dir did not change hands. ${ASH_ARGS} already sat after it, so
+          # a caller could override it before this change and still can. The same
+          # held for --source-dir, which names the directory scanned; "The
+          # directory" below says how a --source-dir in ash-args still names it.
           #
           # --mode deserves the closest look, being the only entry above with an
           # input of its own. `ash-mode` is what renders ${ASH_MODE} here, so
@@ -2202,12 +2203,13 @@ jobs:
           # an argument such as `--exclude *.md` was expanded against the checkout
           # before ASH saw it, and a caller had no way to stop that.
           read -r -a ASH_ARGS_LIST <<< "${ASH_ARGS}"
-          # Options only. `ash` is a click group whose callback is the scan, and
-          # click reads the first bare word after the options as a subcommand,
-          # which then runs with ash-args alone: no --output-dir, no
-          # --fail-on-findings, no --changed-files-only. So the words are read as
-          # click reads them, and every one must be an option or an option's
-          # value. The word after an option that takes a value is that value,
+          # Options only. For an ASH older than 3.9 the scan below is bare `ash`, a
+          # click group whose callback is the scan, and click reads the first bare
+          # word after the options as a subcommand, which then runs with ash-args
+          # alone: no --output-dir, no --fail-on-findings, no --changed-files-only.
+          # From 3.9 the scan is `ash scan fs DIR`, where a bare word is a second
+          # directory, which ASH refuses. So the words are read as click reads them,
+          # and every one must be an option or an option's value, for either ASH. The word after an option that takes a value is that value,
           # even when it names a subcommand (`--phases scan`, `--config config`);
           # `--phases=scan` and `-cconfig` carry it in the same word. In a cluster
           # of short options (`-vc config`) the first letter that takes a value
@@ -2219,21 +2221,37 @@ jobs:
           ASH_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --baseline --base-ref --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --git-depth --git-ref --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --source-git --strategy --workspace --workspace-config -c -f -g -o -u"
           takes_value=""
           position=0
+          # The directory to scan, and ash-args without the --source-dir that names
+          # it: see "The directory" below.
+          scan_dir="."
+          passed_args=()
           for word in "${ASH_ARGS_LIST[@]}"; do
             position=$((position + 1))
             if [ -n "${takes_value}" ]; then
+              if [ "${takes_value}" = "--source-dir" ]; then
+                scan_dir="${word}"
+              else
+                passed_args+=("${word}")
+              fi
               takes_value=""
               continue
             fi
             case "${word}" in
               --)
-                echo "::error::ash-args word $(one_line "${position}") is --, after which click reads the next word as an ash subcommand, whatever it looks like, and runs it without this workflow's options. ash-args takes options of ash scan only."
+                echo "::error::ash-args word $(one_line "${position}") is --, after which click reads the next word as an argument, whatever it looks like: an ASH older than 3.9 runs it as an ash subcommand without this workflow's options, and ASH 3.9 refuses it as a second directory. ash-args takes options of ash scan only."
                 exit 1
+                ;;
+              --source-dir=*)
+                scan_dir="${word#--source-dir=}"
+                continue
                 ;;
               --*=*) ;;
               --*)
                 if [[ " ${ASH_VALUE_OPTIONS} " == *" ${word} "* ]]; then
-                  takes_value="yes"
+                  takes_value="${word}"
+                  if [ "${word}" = "--source-dir" ]; then
+                    continue
+                  fi
                 fi
                 ;;
               -?*)
@@ -2247,41 +2265,90 @@ jobs:
                 done
                 ;;
               *)
-                echo "::error::ash-args word $(one_line "${position}") is neither an option nor an option's value: click would read it as an ash subcommand and run that, or fail on it, without this workflow's options. ash-args takes options of ash scan only."
+                echo "::error::ash-args word $(one_line "${position}") is neither an option nor an option's value: an ASH older than 3.9 would read it as an ash subcommand and run that, or fail on it, without this workflow's options, and ASH 3.9 refuses it as a second directory. ash-args takes options of ash scan only."
                 exit 1
                 ;;
             esac
+            passed_args+=("${word}")
           done
+          # An option that takes a value, with no word after it, is refused here, by
+          # position as the refusals above are. Passed on, it would take the next
+          # option this workflow adds as its value: with use-betterleaks on that is
+          # --config-overrides, and ASH would then refuse the word after it, a config
+          # override, for the wrong reason.
+          if [ "${takes_value}" = "--source-dir" ]; then
+            echo "::error::ash-args word $(one_line "${position}") is --source-dir with no directory after it, so it names nothing to scan. Write the directory as the next word (--source-dir services/api) or after an equals sign (--source-dir=services/api)."
+            exit 1
+          elif [ -n "${takes_value}" ]; then
+            echo "::error::ash-args word $(one_line "${position}") is an option that takes a value, with no word after it: ASH would refuse it, or read the next option this workflow adds as its value. Write the value as the next word, or after an equals sign."
+            exit 1
+          fi
           betterleaks_args=()
           if [ -n "${USE_BETTERLEAKS:-}" ]; then
             betterleaks_args+=(--config-overrides 'ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]')
             betterleaks_args+=(--config-overrides 'scanners.betterleaks.enabled=true')
             betterleaks_args+=(--config-overrides 'scanners.gitleaks.enabled=false')
           fi
-          # ASH 3.9 and later name what a scan scans, `ash scan fs PATH`, and print a
-          # deprecation line on standard error for the subject-less form this step
-          # ran before, `ash --source-dir .`, which goes in ASH v4.0. ash-version can
-          # name an older ASH, which has no `fs` subject, so the ASH installed above is
-          # asked first. Only an ASH with the subject prints `scan fs` in
-          # `ash scan fs --help`: an older one prints its subject-less scan's help
-          # there, since click reads --help before it refuses `fs` as an extra
-          # argument. The help is asked from RUNNER_TEMP, as the install preflight
-          # asks its own, with color off and the codes stripped, and it is not
-          # printed. A help that cannot be read gives the older spelling, which every
-          # ASH reads. With the subject the checkout is the path argument, right after
-          # `fs` and ahead of ash-args, where a bare word would be a second path; the
-          # check above refuses one before that.
-          shopt -s extglob
-          scan_help_status=0
-          scan_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 COLUMNS=200 uvx --from "${ASH_UVX_SOURCE}" ash scan fs --help 2>/dev/null)" || scan_help_status=$?
-          scan_help="${scan_help//$'\e'\[*([0-9;])m/}"
-          if [ "${scan_help_status}" -eq 0 ] && [[ "${scan_help}" == *"scan fs"* ]]; then
-            scan_subject=(scan fs .)
+          # The directory. ASH 3.9 scans one as `ash scan fs DIR`, and prints a
+          # deprecation line for bare `ash` and for --source-dir; both go in ASH
+          # v4.0. ash-version can name an older ASH, which has no `fs` subject, so
+          # this ASH is asked first, as the deploy targets ask theirs, and only an
+          # answer picks a spelling. Only an ASH with the subject prints `scan fs`
+          # in that help: an older one shows the subject-less scan's help there,
+          # since click reads --help before it refuses the extra word, and a help
+          # that does not name it picks the older spelling, as does the usage error
+          # that refuses the word `fs`. A probe that fails any other way (uvx cannot
+          # fetch the source, ASH crashes) says nothing about the ASH's commands, so
+          # the step fails with status 70, which ASH never gives, and the end of what
+          # the probe printed, and neither spelling runs. The probe names the scan's
+          # config as the scan does, though --help reads none. The help is read whole
+          # into a variable, with color off, so no pipe is closed early and no style
+          # code falls between the words. It is printed only when the probe fails,
+          # and then through one_line, a line at a time. The step says which spelling
+          # it chose and why, on stderr.
+          #
+          # This step used to pass --source-dir . ahead of ash-args, so a
+          # --source-dir in ash-args came later and named the directory scanned,
+          # click keeping the last value. `ash scan fs` refuses a --source-dir
+          # beside a PATH that names another directory, so the loop above takes the
+          # caller's --source-dir out of ash-args, and it is the directory on both
+          # spellings. On the new one a name that starts with a dash is given as
+          # ./NAME, the same directory, so it is not read as an option.
+          fs_help_status=0
+          fs_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || fs_help_status=$?
+          case "${fs_help_status}:${fs_help}" in
+            0:*"scan fs"*)
+              scan_has_subject=yes
+              echo "ash: scanning with 'ash scan fs': its help names 'scan fs'" >&2
+              ;;
+            0:*)
+              scan_has_subject=no
+              echo "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name 'scan fs', as an ASH older than 3.9 answers" >&2
+              ;;
+            *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*)
+              scan_has_subject=no
+              echo "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does" >&2
+              ;;
+            *)
+              echo "::error::Could not tell whether the ASH this workflow installs has 'ash scan fs': 'ash scan fs --help' exited $(one_line "${fs_help_status}") without saying it refused 'fs', so no spelling is chosen by guess. The end of its output follows." >&2
+              probe_tail="$(printf '%s\n' "${fs_help}" | tail -n 20)"
+              while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
+                printf '%s\n' "$(one_line "${probe_line}")" >&2
+              done <<<"${probe_tail}"
+              exit 70
+              ;;
+          esac
+          if [ "${scan_has_subject}" = yes ]; then
+            case "${scan_dir}" in
+              -*) scan_path="./${scan_dir}" ;;
+              *) scan_path="${scan_dir}" ;;
+            esac
+            uvx --reinstall --from "${ASH_UVX_SOURCE}" ash scan fs "${scan_path}" \
+              --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${passed_args[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
           else
-            scan_subject=(--source-dir .)
+            uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
+              --source-dir "${scan_dir}" --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${passed_args[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
           fi
-          uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
-            "${scan_subject[@]}" --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${ASH_ARGS_LIST[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
 
       # Default branch only, after the scan, so what is saved is the database grype
       # actually scanned with. The save is refused unless that database is at most
@@ -2341,13 +2408,57 @@ jobs:
           ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           # No --reinstall here. The Run ASH step above already installed this exact
           # source, so re-forcing a download makes the report step do a second git
           # fetch it does not need - and if the ref has disappeared in the meantime
           # (merge_group queue branches are deleted mid-run) that fetch is what
           # fails, after the scan itself has already succeeded.
-          uvx --from "${ASH_UVX_SOURCE}" ash \
-            --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
+          #
+          # ASH 3.9 renders saved results with `ash results report`; the top-level
+          # `ash report` still works there but prints a deprecation line, and goes
+          # in ASH v4.0. ash-version can name an older ASH, which has no `results`,
+          # so this ASH is asked first, as the Run ASH step asks it about `scan fs`,
+          # and only an answer picks a spelling: only an ASH that has the command
+          # prints `results report` in its help. A help that does not name it picks
+          # the older spelling, as does the usage error that refuses the word
+          # `results`. A probe that fails any other way says nothing about the ASH's
+          # commands, so the step fails with status 70, which ASH never gives, and
+          # the end of what the probe printed, and neither spelling runs. The probe
+          # names the report's config as the report does, though --help reads none.
+          # The step says which spelling it chose and why, on stderr.
+          report_help_status=0
+          report_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || report_help_status=$?
+          case "${report_help_status}:${report_help}" in
+            0:*"results report"*)
+              report_has_results=yes
+              echo "ash: reporting with 'ash results report': its help names 'results report'" >&2
+              ;;
+            0:*)
+              report_has_results=no
+              echo "ash: reporting with the older spelling: the help of 'ash results report --help' does not name 'results report', as an ASH older than 3.9 answers" >&2
+              ;;
+            *:*"unexpected extra argument"*"results"*|*:*"No such command"*"results"*)
+              report_has_results=no
+              echo "ash: reporting with the older spelling: this ASH refused the word 'results', as an ASH older than 3.9 does" >&2
+              ;;
+            *)
+              echo "::error::Could not tell whether the ASH this workflow installs has 'ash results report': 'ash results report --help' exited $(one_line "${report_help_status}") without saying it refused 'results', so no spelling is chosen by guess. The end of its output follows." >&2
+              probe_tail="$(printf '%s\n' "${report_help}" | tail -n 20)"
+              while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
+                printf '%s\n' "$(one_line "${probe_line}")" >&2
+              done <<<"${probe_tail}"
+              exit 70
+              ;;
+          esac
+          if [ "${report_has_results}" = yes ]; then
+            uvx --from "${ASH_UVX_SOURCE}" ash \
+              results report --output-dir "${ASH_OUTPUT_DIR}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
+          else
+            uvx --from "${ASH_UVX_SOURCE}" ash \
+              --output-dir "${ASH_OUTPUT_DIR}" report ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
+          fi
 
       # The listing holds names the scanned repository chose: an extracted archive
       # member keeps the name it had in the archive. The runner reads a line as a

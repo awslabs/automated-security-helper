@@ -13,16 +13,68 @@ phases:
     commands:
       - echo "Installing ASH ${RELEASE_TAG}"
       - pip install "git+${ASH_REPO_CLONE_URL}@${RELEASE_TAG}"
+  # ASH 3.9 spells these `ash scan fs` and `ash results report`. A RELEASE_TAG older
+  # than 3.9 has only `ash` with the scan's options and `ash report`, so each command
+  # asks the installed ASH first, and only an answer picks a spelling: a help that
+  # names the new command, or an older ASH's help or usage error that does not. A
+  # probe that fails any other way (a crash, an out-of-memory kill) says nothing about
+  # the ASH, so the build fails with status 70 and what the probe printed instead of
+  # guessing. 70 is not a status ASH gives, so it cannot be read as a scan's verdict.
+  # Each command prints the spelling it chose and why.
   build:
     commands:
       # CodeBuild runs as root, which builds the ci stage (the image that runs as root).
-      - ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output
+      - |
+        ASH_PROBE_STATUS=0
+        ASH_PROBE_HELP="$(ash scan fs --help 2>&1)" || ASH_PROBE_STATUS=$?
+        case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in
+          0:*"scan fs"*)
+            ASH_SCAN_FS=yes
+            echo "ash: scanning with 'ash scan fs': its help names 'scan fs'" >&2 ;;
+          0:*)
+            ASH_SCAN_FS=no
+            echo "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name 'scan fs', as an ASH older than 3.9 answers" >&2 ;;
+          *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*)
+            ASH_SCAN_FS=no
+            echo "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does" >&2 ;;
+          *)
+            echo "ash: could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' exited $ASH_PROBE_STATUS without saying it refused 'fs', so no spelling is chosen by guess. The end of its output:" >&2
+            printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
+            exit 70 ;;
+        esac
+        if [ "$ASH_SCAN_FS" = yes ]; then
+          ash scan fs --mode container --build-target ci --no-progress --output-dir .ash/ash_output
+        else
+          ash --mode container --build-target ci --no-progress --output-dir .ash/ash_output
+        fi
 
   # Runs whether or not the scan passed, so a build that fails on findings
   # still prints its summary.
   post_build:
     commands:
-      - ash report --output-dir .ash/ash_output
+      - |
+        ASH_PROBE_STATUS=0
+        ASH_PROBE_HELP="$(ash results report --help 2>&1)" || ASH_PROBE_STATUS=$?
+        case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in
+          0:*"results report"*)
+            ASH_RESULTS_REPORT=yes
+            echo "ash: reporting with 'ash results report': its help names 'results report'" >&2 ;;
+          0:*)
+            ASH_RESULTS_REPORT=no
+            echo "ash: reporting with the older spelling: the help of 'ash results report --help' does not name 'results report', as an ASH older than 3.9 answers" >&2 ;;
+          *:*"unexpected extra argument"*"results"*|*:*"No such command"*"results"*)
+            ASH_RESULTS_REPORT=no
+            echo "ash: reporting with the older spelling: this ASH refused the word 'results', as an ASH older than 3.9 does" >&2 ;;
+          *)
+            echo "ash: could not tell whether this ASH has 'ash results report': 'ash results report --help' exited $ASH_PROBE_STATUS without saying it refused 'results', so no spelling is chosen by guess. The end of its output:" >&2
+            printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
+            exit 70 ;;
+        esac
+        if [ "$ASH_RESULTS_REPORT" = yes ]; then
+          ash results report --output-dir .ash/ash_output
+        else
+          ash report --output-dir .ash/ash_output
+        fi
 
 # Paths are named rather than globbed from the repository root: the scan writes
 # under .ash/, and the artifact and the report group read exactly that directory.

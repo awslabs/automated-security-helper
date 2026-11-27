@@ -29,7 +29,10 @@ def _selected_scanners(command: list[str]) -> list[str]:
 def test_the_single_project_arm_names_the_gate_scanners(measure, tmp_path: Path):
     command = measure.single_project_command(tmp_path / "p", tmp_path / "out")
     assert _selected_scanners(command) == list(measure.GATE_SCANNERS)
-    assert "--source-dir" in command
+    # ASH 3.9's spelling, `ash scan fs PATH`: the tool times this tree's ASH.
+    start = command.index("scan")
+    assert command[start : start + 3] == ["scan", "fs", str(tmp_path / "p")]
+    assert "--source-dir" not in command
 
 
 def test_the_workspace_arm_names_the_same_scanners(measure, tmp_path: Path):

@@ -195,9 +195,17 @@ class TestTheInstallPath:
 
 STAND_IN_ASH = r"""#!/usr/bin/env bash
 # Records its arguments, then writes what the test asked for into --output-dir.
+# The directory is the PATH of `scan fs PATH`, or the value of --source-dir.
 printf '%s\n' "$*" >>"$STANDIN_LOG"
 out=""
 src=""
+if [ "${1:-}" = scan ] && [ "${2:-}" = fs ]; then
+  shift 2
+  case "${1:-}" in
+    -* | "") ;;
+    *) src="$1"; shift ;;
+  esac
+fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output-dir) out="$2"; shift ;;
@@ -275,7 +283,8 @@ class TestTheFixtureScanScript:
 
         assert proc.returncode == 0, proc.stderr
         argv, *listing = (tmp_path / "ash.log").read_text("utf-8").splitlines()
-        assert f"--source-dir {tmp_path / 'work' / 'fixture'}" in argv
+        assert argv.startswith(f"scan fs {tmp_path / 'work' / 'fixture'} ")
+        assert "--source-dir" not in argv
         assert "--scanners cdk-nag --scanners bandit" in argv
         assert sorted(listing) == ["README.md", "app.py", "template.yaml"]
 
@@ -369,6 +378,13 @@ out=""
 src=""
 scanners=""
 mode=""
+if [ "${1:-}" = scan ] && [ "${2:-}" = fs ]; then
+  shift 2
+  case "${1:-}" in
+    -* | "") ;;
+    *) src="$1"; shift ;;
+  esac
+fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --output-dir) out="$2"; shift ;;
@@ -491,7 +507,7 @@ class TestHomebrewShUnderStandIns:
 
         def narrowed(name: str, scanners: str) -> str:
             return (
-                f"scan --source-dir {work / name} --output-dir {work / ('out-' + name)}"
+                f"scan fs {work / name} --output-dir {work / ('out-' + name)}"
                 f" --simple --phases scan --phases report --scanners {scanners}"
             )
 
@@ -500,8 +516,8 @@ class TestHomebrewShUnderStandIns:
             narrowed("clean", "detect-secrets"),
             narrowed("planted", "detect-secrets"),
             narrowed("fixture", "cdk-nag --scanners bandit"),
-            f"--mode precommit --output-dir {work / 'out-precommit'}",
-            f"scan --output-dir {work / 'out-default'}",
+            f"scan fs --mode precommit --output-dir {work / 'out-precommit'}",
+            f"scan fs --output-dir {work / 'out-default'}",
         ]
         rendered = (tmp_path / "brew" / "tap" / "Formula" / "ash.rb").read_text("utf-8")
         assert rendered != (REPO_ROOT / "Formula" / "ash.rb").read_text("utf-8")

@@ -41,7 +41,7 @@ rm -rf "${src:?}" "${out:?}"
 cp -R "$FIXTURE" "$src"
 
 rc=0
-"$ASH_BIN" scan --source-dir "$src" --output-dir "$out" --simple \
+"$ASH_BIN" scan fs "$src" --output-dir "$out" --simple \
   --phases scan --phases report --scanners cdk-nag --scanners bandit || rc=$?
 [ "$rc" -eq 2 ] || fail "the scan of the committed fixture exited $rc, expected 2 (cdk-nag's findings on template.yaml)"
 
