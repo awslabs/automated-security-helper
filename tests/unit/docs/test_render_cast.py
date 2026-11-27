@@ -922,7 +922,7 @@ def test_a_sequence_outside_the_subset_is_refused_naming_its_bytes(rc, data, nam
 
 
 def test_an_unknown_csi_sequence_is_refused(rc):
-    """The brief's case: synchronized output is a CSI the subset does not hold."""
+    """Synchronized output (?2026) is a CSI sequence the subset does not hold."""
     with pytest.raises(rc.UnsupportedSequence) as raised:
         feed(rc, ESC + "[?2026h")
     assert "\\x1b[?2026h" in str(raised.value)
