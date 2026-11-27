@@ -52,6 +52,22 @@ class ReasonCode:
     MODULE_IMPORT_FAILED = "module_import_failed"
     NO_PLUGIN_CONTEXT = "no_plugin_context"
     NO_RESULTS_DIRECTORY = "no_results_directory"
+    # What a scanner's own checks refuse before its tool runs.
+    CONFIG_FILE_MISSING = "config_file_missing"
+    CONFIG_FILE_OUTSIDE_TREE = "config_file_outside_tree"
+    EXCLUDE_CANNOT_EXPRESS = "exclude_cannot_express"
+    TARGET_PATH_REFUSED = "target_path_refused"
+    OPTION_REFUSED = "option_refused"
+    IGNORE_FILE_IN_TREE = "ignore_file_in_tree"
+    OFFLINE_RULE_CACHE_UNUSABLE = "offline_rule_cache_unusable"
+    OFFLINE_NOTHING_TO_RUN = "offline_nothing_to_run"
+    DATABASE_UPDATE_FAILED = "database_update_failed"
+    PATTERN_TIME_LIMIT = "pattern_time_limit"
+    PATTERN_EVALUATION_FAILED = "pattern_evaluation_failed"
+    EXCLUSION_UNSUPPORTED = "exclusion_unsupported"
+    # What a scanner's tool left undone.
+    NOTHING_SCANNED = "nothing_scanned"
+    FILES_NOT_READ = "files_not_read"
     # What the statistics decide about a row no scanner reported on.
     TARGETS_FAILED = "targets_failed"
     COUNTERS_UNUSABLE = "counters_unusable"
@@ -103,6 +119,34 @@ DEFAULT_SENTENCES: dict[str, str] = {
     ReasonCode.MODULE_IMPORT_FAILED: "its plugin module failed to import",
     ReasonCode.NO_PLUGIN_CONTEXT: "it has no plugin context",
     ReasonCode.NO_RESULTS_DIRECTORY: "it has no results directory",
+    ReasonCode.CONFIG_FILE_MISSING: "an option of it names a file that does not exist",
+    ReasonCode.CONFIG_FILE_OUTSIDE_TREE: (
+        "a file an option of it names resolves outside the scanned tree"
+    ),
+    ReasonCode.EXCLUDE_CANNOT_EXPRESS: (
+        "its tool cannot be given the exclusions the configuration asks for"
+    ),
+    ReasonCode.TARGET_PATH_REFUSED: "its tool cannot be run on its target path",
+    ReasonCode.OPTION_REFUSED: "an option of it is refused",
+    ReasonCode.IGNORE_FILE_IN_TREE: (
+        "the scanned tree holds an ignore file its tool reads whatever ASH passes"
+    ),
+    ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE: "its offline rule cache is not usable",
+    ReasonCode.OFFLINE_NOTHING_TO_RUN: "offline, nothing is left for its tool to run",
+    ReasonCode.DATABASE_UPDATE_FAILED: "its content database could not be updated",
+    ReasonCode.PATTERN_TIME_LIMIT: (
+        "a regular expression from the configuration ran past the pattern time limit"
+    ),
+    ReasonCode.PATTERN_EVALUATION_FAILED: (
+        "a regular expression from the configuration could not be evaluated"
+    ),
+    ReasonCode.EXCLUSION_UNSUPPORTED: (
+        "it declares no way to build the glob an exclusion option needs"
+    ),
+    ReasonCode.NOTHING_SCANNED: (
+        "its tool scanned no file, so its result says nothing about the files it was given"
+    ),
+    ReasonCode.FILES_NOT_READ: "its tool did not read some of the files it found",
     ReasonCode.TARGETS_FAILED: "it failed on some of its targets",
     ReasonCode.COUNTERS_UNUSABLE: "its recorded target counts cannot be read",
     ReasonCode.STATUS_UNKNOWN: "its recorded status is not one ASH knows",

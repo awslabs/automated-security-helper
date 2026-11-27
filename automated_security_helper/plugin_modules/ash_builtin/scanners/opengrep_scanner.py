@@ -35,7 +35,11 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
@@ -606,7 +610,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 self.args.extra_args = []
                 self._process_config_options()
                 if self.dependency_unavailable_reason:
-                    raise ScannerError(self.dependency_unavailable_reason)
+                    raise ScannerError(
+                        self.dependency_unavailable_reason,
+                        reason=FailureReason(ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE),
+                    )
         self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
 
@@ -734,5 +741,13 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         selected, as for any other construction-time refusal.
         """
         if self.config.options.patterns:
-            raise ScannerError(patterns_mode_refusal(self.config.options.patterns))
+            raise ScannerError(
+                patterns_mode_refusal(self.config.options.patterns),
+                reason=FailureReason(
+                    ReasonCode.OPTION_REFUSED,
+                    "its patterns option is refused: opengrep runs a pattern "
+                    "search only with a language, which no option of this scanner "
+                    "supplies",
+                ),
+            )
         return super()._process_config_options()

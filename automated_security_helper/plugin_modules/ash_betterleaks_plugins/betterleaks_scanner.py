@@ -162,7 +162,11 @@ from automated_security_helper.config.confinement_remedy import (
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.models.vocab import Severity, TargetType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -580,7 +584,10 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
 
     def _source_dir(self) -> Path:
         if self.context is None:
-            raise ScannerError("BetterleaksScanner has no plugin context")
+            raise ScannerError(
+                "BetterleaksScanner has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         return Path(self.context.source_dir)
 
     def nothing_to_scan_reason(self) -> Optional[str]:
@@ -618,7 +625,12 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 f"scanners.betterleaks.options.config_file is {str(value)!r}, a path "
                 "inside the scanned tree that resolves outside it through a symbolic "
                 "link. The scanned repository decides what is at that path, so "
-                "Betterleaks is not given it, and Betterleaks is not run."
+                "Betterleaks is not given it, and Betterleaks is not run.",
+                reason=FailureReason(
+                    ReasonCode.CONFIG_FILE_OUTSIDE_TREE,
+                    "its config_file option names a path in the scanned tree that "
+                    "resolves outside it",
+                ),
             )
         if chosen.path is None:
             self._plugin_log(
@@ -635,7 +647,11 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             raise ScannerError(
                 f"scanners.betterleaks.options.config_file is {str(value)!r}, which is "
                 f"not a file (resolved to {chosen.path.as_posix()}). Fix the path or "
-                "unset the option; Betterleaks is not run without it."
+                "unset the option; Betterleaks is not run without it.",
+                reason=FailureReason(
+                    ReasonCode.CONFIG_FILE_MISSING,
+                    "its config_file option does not name a file",
+                ),
             )
         return chosen.path
 
@@ -737,7 +753,12 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             "suppressed, and Betterleaks is not run. Move its entries to ASH "
             "suppressions, or set scanners.betterleaks.options.honor_tree_ignore_files "
             "to true in a config outside every git checkout and the scanned "
-            "directory (or with --config-overrides)."
+            "directory (or with --config-overrides).",
+            reason=FailureReason(
+                ReasonCode.IGNORE_FILE_IN_TREE,
+                f"the scanned tree holds {' and '.join(present)}, which its tool "
+                "reads whatever ASH passes",
+            ),
         )
 
     def _empty_ignore_dir(self) -> Path:
@@ -802,7 +823,10 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         to every scanner's SARIF by ``apply_suppressions_to_sarif``.
         """
         if self.results_dir is None:
-            raise ScannerError("BetterleaksScanner has no results directory")
+            raise ScannerError(
+                "BetterleaksScanner has no results directory",
+                reason=FailureReason(ReasonCode.NO_RESULTS_DIRECTORY),
+            )
         # ScannerExecutor runs this instance over the source and then the converted
         # target, and the base class keeps the worst exit code across runs. Without
         # this, a source run that failed (1) failed a clean converted run.
@@ -835,7 +859,13 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         if self.exit_code not in self.success_exit_codes:
             raise ScannerError(
                 f"betterleaks exited {self.exit_code}; it exits 0 when it finds "
-                f"nothing and {LEAKS_EXIT_CODE} when it finds leaks, so this run failed"
+                f"nothing and {LEAKS_EXIT_CODE} when it finds leaks, so this run failed",
+                reason=FailureReason(
+                    ReasonCode.EXIT_CODE_REJECTED,
+                    f"its tool exited {self.exit_code}; it exits 0 when it finds "
+                    f"nothing and {LEAKS_EXIT_CODE} when it finds leaks, so this "
+                    "run failed",
+                ),
             )
         return super()._read_results_file(results_file)
 

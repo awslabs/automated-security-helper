@@ -196,7 +196,11 @@ from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (  # noqa: F401 -- TRIVY_SEVERITIES, _SARIF_LEVEL, UNBOUNDED_TRIVY_TIMEOUT and trivy_timeout are kept importable from here
@@ -607,7 +611,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         the findings of any it cannot.
         """
         if self.results_dir is None:
-            raise ScannerError("TrivyScanner has no results directory")
+            raise ScannerError(
+                "TrivyScanner has no results directory",
+                reason=FailureReason(ReasonCode.NO_RESULTS_DIRECTORY),
+            )
         results_file = self.results_dir.joinpath(target_type, "results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         # A report left by an earlier run must not be read as this run's: trivy
@@ -718,7 +725,10 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         )
 
         if self.results_dir is None:
-            raise ScannerError("TrivyScanner has no results directory")
+            raise ScannerError(
+                "TrivyScanner has no results directory",
+                reason=FailureReason(ReasonCode.NO_RESULTS_DIRECTORY),
+            )
         results_file = self.results_dir.joinpath("image", "results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
         results_file.unlink(missing_ok=True)
@@ -778,7 +788,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         if self.exit_code not in self.success_exit_codes:
             raise ScannerError(
                 f"trivy exited {self.exit_code}; run with --exit-code=0, it exits 0 "
-                "whether or not it finds anything, so this run failed"
+                "whether or not it finds anything, so this run failed",
+                reason=FailureReason(
+                    ReasonCode.EXIT_CODE_REJECTED,
+                    f"its tool exited {self.exit_code}; run with --exit-code=0 it "
+                    "exits 0 whether or not it finds anything, so this run failed",
+                ),
             )
         return super()._read_results_file(results_file)
 
@@ -845,7 +860,16 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 env=env,
             )
             if completed.returncode != 0:
-                raise ScannerError(f"trivy exited {completed.returncode}")
+                raise ScannerError(
+                    f"trivy exited {completed.returncode}",
+                    # Caught below: attribution never fails a scan. A reason
+                    # all the same, so no raise site of this class lacks one.
+                    reason=FailureReason(
+                        ReasonCode.EXIT_CODE_REJECTED,
+                        f"its tool exited {completed.returncode} on the pass "
+                        "that reads image layers",
+                    ),
+                )
             index = read_layer_index(json_path)
         except Exception as error:  # noqa: BLE001 - attribution never fails a scan
             self._plugin_log(

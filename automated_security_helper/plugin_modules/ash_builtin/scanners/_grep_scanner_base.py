@@ -47,7 +47,11 @@ from automated_security_helper.config.mcp_sandbox import config_is_client_suppli
 from automated_security_helper.config.path_trust import honored_path, resolved_path
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
 from automated_security_helper.core.enums import OfflineStrategy
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
     ToolExtraArg,
@@ -909,12 +913,16 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # should not depend on it, and a second caller (an installer probe, a
         # plugin-inventory path, an out-of-tree orchestrator) would not inherit it.
         if self.dependency_unavailable_reason:
-            raise ScannerError(self.dependency_unavailable_reason)
+            raise ScannerError(
+                self.dependency_unavailable_reason,
+                reason=FailureReason(ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE),
+            )
 
         if self.results_dir is None:
             raise ScannerError(
                 f"{self.__class__.__name__} has no results_dir; it must be set by "
-                "model_post_init before a scan is executed."
+                "model_post_init before a scan is executed.",
+                reason=FailureReason(ReasonCode.NO_RESULTS_DIRECTORY),
             )
         target_results_dir = self.results_dir.joinpath(target_type)
         results_file = target_results_dir.joinpath("results_sarif.sarif")
@@ -1307,7 +1315,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         raise ScannerError(
                             f"{where}: its --exclude patterns left out all "
                             f"{len(excluded)} files it found, so its result says "
-                            "nothing about them."
+                            "nothing about them.",
+                            reason=FailureReason(
+                                ReasonCode.NOTHING_SCANNED,
+                                f"its --exclude patterns left out all {len(excluded)} "
+                                "files it found",
+                            ),
                         )
                     # No operator pattern on the command, so the match is against an
                     # exclusion ASH added and does not recognize as its own here.
@@ -1318,7 +1331,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         f"{where}: an --exclude pattern ASH does not recognize as its "
                         f"own left out all {len(excluded)} files it found ({shown}"
                         f"{', ...' if len(not_ignored) > 3 else ''}), so its result "
-                        "says nothing about them."
+                        "says nothing about them.",
+                        reason=FailureReason(
+                            ReasonCode.NOTHING_SCANNED,
+                            "an --exclude pattern ASH does not recognize as its own "
+                            f"left out all {len(excluded)} files it found",
+                        ),
                     )
                 # Grouped by the LOWERCASED reason, once, so every test below
                 # reads the same spelling: three of the tool's own spellings are
@@ -1337,7 +1355,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         f"{where}: it found {count} file(s) in a language its rules "
                         "cover and could not parse them "
                         f"(skipped: {', '.join(sorted(unparsed))}), so its result "
-                        "says nothing about them."
+                        "says nothing about them.",
+                        reason=FailureReason(
+                            ReasonCode.FILES_NOT_READ,
+                            f"it found {count} file(s) in a language its rules cover "
+                            "and could not parse them",
+                        ),
                     )
                 unread = [r for r in by_reason if r in UNREAD_SKIP_REASONS]
                 if unread:
@@ -1352,7 +1375,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         "under which a target holding only such files is graded "
                         "SKIPPED. The tool's size limit is not configurable through "
                         "ASH, and an exclude pattern of this scanner is read as the "
-                        "operator's patterns, which keeps the scan refused."
+                        "operator's patterns, which keeps the scan refused.",
+                        reason=FailureReason(
+                            ReasonCode.FILES_NOT_READ,
+                            f"it did not read {count} file(s) it found",
+                        ),
                     )
                 unknown = sorted(r for r in by_reason if r not in KNOWN_SKIP_REASONS)
                 if unknown:
@@ -1361,7 +1388,12 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
                         f"{where}: it skipped {count} file(s) for a reason this "
                         f"version of ASH does not know ({', '.join(unknown)}), so "
                         "whether a rule covers them cannot be told, and its result "
-                        "says nothing about them."
+                        "says nothing about them.",
+                        reason=FailureReason(
+                            ReasonCode.FILES_NOT_READ,
+                            f"it skipped {count} file(s) for a reason this version "
+                            "of ASH does not know",
+                        ),
                     )
                 self.targets_attempted = 0
                 if excluded:

@@ -70,7 +70,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.core.enums import OfflineStrategy
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolExtraArg
 from automated_security_helper.models.vocab import Severity
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -1020,16 +1024,24 @@ def _existing_file(key: str, value: Any, path: Path, show_value: bool = False) -
     the operator's config path, is shown that way, as its tests pin.
     """
     if not path.is_file():
+        # The key is an option key or an environment variable's name, never a
+        # value: the sentence names it and nothing the operator chose.
+        reason = FailureReason(
+            ReasonCode.CONFIG_FILE_MISSING,
+            f"its {key} setting does not name a file",
+        )
         if show_value:
             raise ScannerError(
                 f"{key} is {str(value)!r}, which is not a file (resolved to "
                 f"{escape_controls(path.as_posix())}). Fix the path or unset "
-                "it; trivy is not run without it."
+                "it; trivy is not run without it.",
+                reason=reason,
             )
         raise ScannerError(
             f"{key} does not name a file: the path it is set to does not "
             "exist or is not a file. Fix the path or unset it; trivy is not "
-            "run without it."
+            "run without it.",
+            reason=reason,
         )
     return path.as_posix()
 
@@ -1281,7 +1293,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         Whether the file exists is the caller's question.
         """
         if self.context is None:
-            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+            raise ScannerError(
+                f"{self.__class__.__name__} has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         name = self.config.name if self.config is not None else "trivy"
         options = getattr(self.config, "options", None)
         value = getattr(options, "config_file", None)
@@ -1539,7 +1554,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         option cannot carry.
         """
         if self.context is None:
-            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+            raise ScannerError(
+                f"{self.__class__.__name__} has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         source_dir = self.context.source_dir
         wanted = [
             *(
@@ -1896,7 +1914,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         names the key, instead of failing a scan over an input it never opens.
         """
         if self.context is None:
-            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+            raise ScannerError(
+                f"{self.__class__.__name__} has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         source_dir = Path(self.context.source_dir)
         name = self.config.name if self.config is not None else "trivy"
         options: Any = self.config.options  # type: ignore[union-attr]
@@ -2071,7 +2092,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         if self._offline():
             return []
         if self.context is None:
-            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+            raise ScannerError(
+                f"{self.__class__.__name__} has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         effective = self._effective_scanners(command)
         wants_checks = "misconfig" in effective
         wants_vuln = "vuln" in effective
@@ -2163,7 +2187,10 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         and returns None, and the caller uses ASH's own.
         """
         if self.context is None:
-            raise ScannerError(f"{self.__class__.__name__} has no plugin context")
+            raise ScannerError(
+                f"{self.__class__.__name__} has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         name = self.config.name if self.config is not None else "trivy"
         key = f"scanners.{name}.options.{option}"
         # A configuration the embedding caller built is the operator's own write,
@@ -2346,13 +2373,18 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
             # trivy ran the Terraform checks the warning said were skipped. A set
             # that was misconfig alone leaves nothing to run, and the scan is
             # refused with the reason, as the token form already was.
+            nothing_left = FailureReason(
+                ReasonCode.OFFLINE_NOTHING_TO_RUN,
+                "offline, its misconfiguration checks are skipped and no other "
+                "check is left to run",
+            )
             index = args.index("--scanners") if "--scanners" in args else -1
             if index >= 0 and index + 1 < len(args):
                 remaining = [
                     name for name in args[index + 1].split(",") if name != "misconfig"
                 ]
                 if not remaining:
-                    raise ScannerError(message)
+                    raise ScannerError(message, reason=nothing_left)
                 args[index + 1] = ",".join(remaining)
             else:
                 remaining = [
@@ -2361,7 +2393,7 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     if name != "misconfig"
                 ]
                 if not remaining:
-                    raise ScannerError(message)
+                    raise ScannerError(message, reason=nothing_left)
                 head = [command, *self.subcommands]
                 insert_at = len(head) if args[: len(head)] == head else len(args)
                 args[insert_at:insert_at] = ["--scanners", ",".join(remaining)]

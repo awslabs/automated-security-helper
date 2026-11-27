@@ -148,7 +148,11 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    FailureReason,
+    ReasonCode,
+    ScannerError,
+)
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -253,6 +257,20 @@ _REJECTED_INPUT_PATTERN = re.compile(r"collect_inputs:[^\n]*?(failed to [^\n]*)"
 #: device the probe would block on).
 _NOT_AN_ACTION_LEAD = "failed to validate "
 _NOT_AN_ACTION_TAIL = " as action"
+
+
+class _ConfigFileMissing(FileNotFoundError):
+    """The operator's ``config_file`` does not exist.
+
+    Still a ``FileNotFoundError``, with the reason the reports show for the
+    scanner. ``reason_of`` reads a ``reason`` off any error, so the one the scan
+    wrapper raises from this is found to carry it.
+    """
+
+    reason = FailureReason(
+        ReasonCode.CONFIG_FILE_MISSING,
+        "its config_file option names a file that does not exist",
+    )
 
 
 def _names_a_workflow(path_text: str, cwd: Optional[Path] = None) -> bool:
@@ -966,7 +984,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     @property
     def _plugin_context(self) -> PluginContext:
         if self.context is None:
-            raise ScannerError("ZizmorScanner has no plugin context")
+            raise ScannerError(
+                "ZizmorScanner has no plugin context",
+                reason=FailureReason(ReasonCode.NO_PLUGIN_CONTEXT),
+            )
         return self.context
 
     # ------------------------------------------------------------------
@@ -1422,11 +1443,16 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     f"scanners.zizmor.options.config_file is {str(configured)!r}, a "
                     "path inside the scanned tree that resolves outside it through a "
                     "symbolic link. The scanned repository decides what is at that "
-                    "path, so zizmor is not given it, and zizmor is not run."
+                    "path, so zizmor is not given it, and zizmor is not run.",
+                    reason=FailureReason(
+                        ReasonCode.CONFIG_FILE_OUTSIDE_TREE,
+                        "its config_file option names a path in the scanned tree "
+                        "that resolves outside it",
+                    ),
                 )
             if chosen.path is not None:
                 if not chosen.path.is_file():
-                    raise FileNotFoundError(
+                    raise _ConfigFileMissing(
                         f"scanners.zizmor.options.config_file {str(configured)!r} "
                         f"does not exist (looked for {chosen.path.as_posix()})"
                     )
@@ -1674,7 +1700,10 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     ) -> Tuple[List[str], Path, Optional[Dict[str, str]]]:
         """Build zizmor's argv; SARIF arrives on stdout, written to the stdout log."""
         if self.results_dir is None:
-            raise ScannerError("ZizmorScanner has no results directory")
+            raise ScannerError(
+                "ZizmorScanner has no results directory",
+                reason=FailureReason(ReasonCode.NO_RESULTS_DIRECTORY),
+            )
         target_results_dir = self.results_dir.joinpath(target_type)
         target_results_dir.mkdir(parents=True, exist_ok=True)
         results_file = target_results_dir.joinpath(
