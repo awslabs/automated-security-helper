@@ -20,21 +20,35 @@ is the scanned tree, so a same-named file at the root of that tree, which the sw
 refuses, would answer for every directory in turn and hide the managed copy. The tests
 that put such a file there emulate that order where it is not native, and one runs the
 real Windows lookup.
+
+A scan reaches a virtualenv's scripts directory only as a PATH entry, and on Windows
+``shutil.which`` reads a name there through PATHEXT: a file with no extension is not
+found, and ``<tool>.com`` is. The sweep reads that directory the same way. The tests
+that put those files there emulate the Windows names and that rule where they are not
+native, and two run the real lookup.
+
+The run says which copy it counted (the "Resolved to" cell) and which it set aside as
+a system tool (an "Ignoring" line). One file is never both, however each lookup spells
+its path: a PATH entry that names the scripts directory through a link, or, on
+Windows, forward slashes against backslashes. A different copy on PATH is still set
+aside.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.install_providers import venv_scripts_dir
 from tests.unit.cli.dependencies_install_support import build_scene, run_install
-from tests.utils.stand_ins import write_stand_in
+from tests.utils.stand_ins import on_windows, write_stand_in
 
 pytestmark = pytest.mark.unit
 
@@ -87,18 +101,62 @@ def _bin_directory_holding_the_tool(tmp_path) -> Path:
     return bin_dir
 
 
-def _venv_holding_the_tool(path: Path) -> Path:
-    """A prepared virtualenv whose scripts directory holds the tool; that directory."""
+def _prepared_virtualenv(path: Path) -> Path:
+    """A virtualenv ASH takes for prepared (it holds ``pyvenv.cfg``); its scripts
+    directory, empty."""
     path.mkdir(parents=True)
     (path / "pyvenv.cfg").write_text("home = /usr/bin\nversion_info = 3.12.4\n")
     scripts = venv_scripts_dir(path)
     scripts.mkdir()
+    return scripts
+
+
+def _venv_holding_the_tool(path: Path) -> Path:
+    """A prepared virtualenv whose scripts directory holds the tool; that directory."""
+    scripts = _prepared_virtualenv(path)
     write_stand_in(scripts, TOOL, "")
     return scripts
 
 
+def _program(path: Path) -> Path:
+    """One executable file under exactly the name given: no launcher beside it, and
+    nothing runs it."""
+    path.write_bytes(b"")
+    path.chmod(0o755)
+    return path
+
+
+def _launcher(directory: Path) -> Path:
+    """The file of ``write_stand_in(directory, TOOL, ...)`` that a lookup finds: the
+    script on POSIX, its ``.bat`` launcher on Windows."""
+    return directory / (f"{TOOL}.bat" if on_windows() else TOOL)
+
+
 def _on_path_first(monkeypatch, directory: str) -> None:
     monkeypatch.setenv("PATH", os.pathsep.join([directory, os.environ.get("PATH", "")]))
+
+
+def _real(path: str | os.PathLike[str]) -> str:
+    """The file a path names, spelled one way, to compare files rather than spellings."""
+    return os.path.normcase(os.path.realpath(path))
+
+
+#: The characters that draw the results table: the box-drawing block, and a plain bar.
+_TABLE_BORDERS = re.compile(f"[{chr(0x2500)}-{chr(0x257F)}|]")
+
+
+def _resolved_to(text: str) -> str:
+    """What the "Resolved to" cell of the results table says about TOOL."""
+    for line in text.splitlines():
+        cells = [cell.strip() for cell in _TABLE_BORDERS.split(line)]
+        if TOOL in cells:
+            return cells[-2]
+    raise AssertionError(f"the results table has no row for {TOOL}:\n{text}")
+
+
+def _ignored_files(text: str) -> list[str]:
+    """The files the run says it set aside as system tools, one per "Ignoring" line."""
+    return re.findall(r"Ignoring (.+?): --no-inherit-system-tools", text)
 
 
 def _working_directory_first(monkeypatch) -> None:
@@ -117,6 +175,48 @@ def _working_directory_first(monkeypatch) -> None:
         return real_which(cmd, mode, os.curdir + os.pathsep + path)
 
     monkeypatch.setattr(shutil, "which", which)
+
+
+#: The suffixes CPython's Windows ``shutil.which`` adds to a name, in order.
+_WINDOWS_PATHEXT = (".com", ".exe", ".bat", ".cmd")
+
+
+def _windows_which(cmd, mode=os.F_OK | os.X_OK, path=None):
+    """CPython's Windows ``shutil.which``, on whatever platform runs this: a name is
+    read with each suffix of PATHEXT, and as it is only when it already ends in one.
+
+    So a file with no extension is not found, and ``<tool>.com`` is. A command with a
+    directory part is looked up in that directory alone; a bare name is looked up in
+    each directory of ``path``.
+    """
+    directory, name = os.path.split(cmd)
+    if directory:
+        directories = [directory]
+    else:
+        searched = os.environ.get("PATH", "") if path is None else path
+        directories = [entry for entry in searched.split(os.pathsep) if entry]
+    files = [name + suffix for suffix in _WINDOWS_PATHEXT]
+    if name.lower().endswith(_WINDOWS_PATHEXT):
+        files.insert(0, name)
+    for entry in directories:
+        for file in files:
+            candidate = os.path.join(entry, file)
+            if os.path.isfile(candidate) and os.access(candidate, mode):
+                return candidate
+    return None
+
+
+def _windows_lookup(monkeypatch) -> None:
+    """Give a scan's lookup and the sweep's the file names and the PATHEXT rule Windows
+    has: the names are the lookup's own, read as it reads them there."""
+    real_names = subprocess_utils._executable_candidate_names
+
+    def names(command):
+        with patch.object(subprocess_utils.platform, "system", return_value="Windows"):
+            return real_names(command)
+
+    monkeypatch.setattr(subprocess_utils, "_executable_candidate_names", names)
+    monkeypatch.setattr(shutil, "which", _windows_which)
 
 
 @MODES
@@ -181,7 +281,8 @@ def test_a_same_named_file_in_the_working_directory_does_not_hide_the_managed_co
     run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
 
     assert scene.result.exit_code == 0, scene.text
-    assert str(bin_dir / TOOL) in scene.text, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(_launcher(bin_dir)), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
 
 
 def test_the_managed_copy_is_counted_when_the_working_directory_holds_no_such_file(
@@ -195,7 +296,8 @@ def test_the_managed_copy_is_counted_when_the_working_directory_holds_no_such_fi
     run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
 
     assert scene.result.exit_code == 0, scene.text
-    assert str(bin_dir / TOOL) in scene.text, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(_launcher(bin_dir)), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
 
 
 @pytest.mark.skipif(
@@ -213,7 +315,8 @@ def test_a_batch_file_at_the_root_of_the_tree_does_not_hide_the_managed_copy(
     run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
 
     assert scene.result.exit_code == 0, scene.text
-    assert str(bin_dir / TOOL) in scene.text, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(_launcher(bin_dir)), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
 
 
 @MODES
@@ -277,3 +380,137 @@ def test_a_path_entry_that_is_another_name_for_the_scripts_directory_counts(
     run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(venv), *mode)
 
     assert scene.result.exit_code == 0, scene.text
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a symlink needs a privilege on Windows"
+)
+def test_a_copy_counted_through_another_name_for_the_scripts_directory_is_not_ignored(
+    tmp_path, monkeypatch
+):
+    """PATH names the scripts directory through a link, so a scan finds the tool under
+    the link's name and the sweep under the virtualenv's own. It is one file, and the
+    run does not set aside the copy it counted."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    venv = tmp_path / "venv"
+    scripts = _venv_holding_the_tool(venv)
+    alias = tmp_path / "scripts-alias"
+    alias.symlink_to(scripts, target_is_directory=True)
+    _on_path_first(monkeypatch, str(alias))
+
+    run_install(
+        scene,
+        monkeypatch,
+        tmp_path,
+        "--virtualenv-path",
+        str(venv),
+        "--no-inherit-system-tools",
+    )
+
+    assert scene.result.exit_code == 0, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(scripts / TOOL), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
+
+
+def test_a_different_copy_on_path_outside_the_managed_directories_is_still_ignored(
+    tmp_path, monkeypatch
+):
+    """The control: a scan finds a copy on PATH ahead of the managed one, the sweep
+    counts the managed one, and the other file is named as set aside."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    bin_dir = _bin_directory_holding_the_tool(tmp_path)
+    system_dir = tmp_path / "system-bin"
+    system_dir.mkdir()
+    write_stand_in(system_dir, TOOL, "")
+    _on_path_first(monkeypatch, str(system_dir))
+
+    run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(_launcher(bin_dir)), scene.text
+    assert [_real(file) for file in _ignored_files(scene.text)] == [
+        _real(_launcher(system_dir))
+    ], scene.text
+
+
+@MODES
+def test_pathext_leaves_a_file_with_no_extension_in_the_scripts_directory_absent(
+    tmp_path, monkeypatch, mode
+):
+    """Where Windows reads names through PATHEXT, a file with no extension in a
+    directory on PATH is not a tool a scan finds: a scan reads a name with each suffix
+    of PATHEXT, and as it is only when it already ends in one. The sweep reads the
+    scripts directory the same way, so it does not count the file either."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    _windows_lookup(monkeypatch)
+    venv = tmp_path / "venv"
+    scripts = _prepared_virtualenv(venv)
+    _program(scripts / TOOL)
+    _on_path_first(monkeypatch, str(scripts))
+
+    run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(venv), *mode)
+
+    assert scene.result.exit_code == 1, scene.text
+    assert "still absent after install" in " ".join(scene.text.split()), scene.text
+
+
+@MODES
+def test_pathext_finds_a_com_file_in_the_scripts_directory(tmp_path, monkeypatch, mode):
+    """The other direction: ``<tool>.com`` is not among the names a scan tries, but
+    ``which`` finds it through PATHEXT when its directory is on PATH, so a scan runs it
+    and the sweep counts it."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    _windows_lookup(monkeypatch)
+    venv = tmp_path / "venv"
+    scripts = _prepared_virtualenv(venv)
+    counted = _program(scripts / f"{TOOL}.com")
+    _on_path_first(monkeypatch, str(scripts))
+
+    run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(venv), *mode)
+
+    assert scene.result.exit_code == 0, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(counted), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="only Windows reads names through PATHEXT"
+)
+@MODES
+def test_on_windows_a_file_with_no_extension_in_the_scripts_directory_is_absent(
+    tmp_path, monkeypatch, mode
+):
+    """The real lookup, with nothing replaced."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+    venv = tmp_path / "venv"
+    scripts = _prepared_virtualenv(venv)
+    _program(scripts / TOOL)
+    _on_path_first(monkeypatch, str(scripts))
+
+    run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(venv), *mode)
+
+    assert scene.result.exit_code == 1, scene.text
+    assert "still absent after install" in " ".join(scene.text.split()), scene.text
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="only Windows reads names through PATHEXT"
+)
+@MODES
+def test_on_windows_a_com_file_in_the_scripts_directory_is_present(
+    tmp_path, monkeypatch, mode
+):
+    """The real lookup, with nothing replaced."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    monkeypatch.setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+    venv = tmp_path / "venv"
+    scripts = _prepared_virtualenv(venv)
+    counted = _program(scripts / f"{TOOL}.com")
+    _on_path_first(monkeypatch, str(scripts))
+
+    run_install(scene, monkeypatch, tmp_path, "--virtualenv-path", str(venv), *mode)
+
+    assert scene.result.exit_code == 0, scene.text
+    assert _real(_resolved_to(scene.text)) == _real(counted), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
