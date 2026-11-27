@@ -66,7 +66,7 @@ CONFIG_LINT = Command(
 REGISTERED = (CONFIG_LINT,)
 
 #: The command that rewrites a config file's old key spellings. None until the
-#: command line registers it: the unit that adds the command sets it here and adds
+#: command line registers it: the change that adds the command sets it here and adds
 #: it to REGISTERED, and every message that reads it then names it.
 CONFIG_UPGRADE: Command | None = None
 

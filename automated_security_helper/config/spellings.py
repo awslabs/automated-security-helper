@@ -1,12 +1,12 @@
 """One table of renamed configuration spellings, and the readers that use it.
 
 A configuration key is renamed in a release, and the old spelling keeps loading,
-with a deprecation line, until the release that removes it. Before this module
-each reader that touched a renamed key paired the field with its old spelling in
-its own way: the loader's merge saw two keys where there was one setting, no
-owner held the rule for a file that wrote both, a runtime-patch denial written in
-one spelling let a write in the other through, and the linter derived its own
-direction. Every reader now reads the rows of ``models/spelling_table.py`` instead:
+with a deprecation line, until the release that removes it. Every reader reads
+the rows of ``models/spelling_table.py``, so they agree on what one setting is:
+the loader's merge sees one key for it, one owner holds the rule for a file that
+writes both spellings, a runtime-patch denial written in either spelling of a
+renamed key covers both, and lint reads from the table which spelling replaces
+which. The readers:
 
 * the models declare a renamed field through :func:`renamed_field`, which takes
   the old spellings from the table, and apply the both-spellings rule through
