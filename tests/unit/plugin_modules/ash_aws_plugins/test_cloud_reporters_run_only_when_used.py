@@ -855,9 +855,8 @@ def test_the_aws_reporter_names_are_output_formats_of_the_aws_plugin_module():
     docs/content/docs/plugins/aws/index.md says a list that names one runs it when
     the AWS plugin module is loaded and the reporter is enabled. ExportFormat has
     a member per name, and AWS_PLUGIN_MODULE_FORMATS marks them as the formats a
-    run has a reporter for only when ``ash_plugin_modules`` loads that module,
-    which is how ``ash scan fs --help`` and ``ash results report --help`` list them
-    apart.
+    run has a reporter for only when ``ash_plugin_modules`` loads that module, which
+    is how ``ash scan fs --help`` and ``ash results report --help`` list them apart.
     """
     from automated_security_helper.core.enums import (
         AWS_PLUGIN_MODULE_FORMATS,
