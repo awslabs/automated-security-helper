@@ -111,6 +111,17 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **The deprecation line for an old key spelling names the file, once per spelling.**
+  `expiration`, the old spelling of `expires`, is the first entry of one list of renamed
+  config keys that the loader, `ash config lint` and runtime overrides all read. Each
+  file of an `extends` chain is read with its old spellings renamed before the files are
+  merged, so a base and the file that extends it agree on one spelling. The line names
+  the file once for each spelling it uses, whether the spelling is a key, the pointer of
+  a `patch` operation or a value the operation adds, and whether or not
+  `fail_on_unknown_keys` is set. `ash config lint` reports an old spelling in every list
+  that holds the entry, exclusions included. A runtime-override denial written under
+  either spelling of a renamed key covers both. An old spelling is read until the release
+  that removes it (ASH 4.0 for `expiration`).
 
 ### Maintenance
 
