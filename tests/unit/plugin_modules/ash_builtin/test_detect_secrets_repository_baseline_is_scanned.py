@@ -43,7 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     _detect_secrets_api,
 )
 
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path")
 
 BASELINE_NAME = ".secrets.baseline"
 # Assembled at runtime so this file holds no key-shaped literal for ASH's own
