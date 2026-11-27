@@ -132,8 +132,8 @@ declared daemons -- else the platform's default socket), then podman (`CONTAINER
 then its sockets), then none. Docker *contexts* are not read: a daemon reachable only
 through one (Colima, OrbStack, Docker Desktop without the default socket) counts once
 `DOCKER_HOST` names it. With a daemon present, one pull serves every scanner -- the
-engine's content store is the dedup; trivy is told
-`--image-src=<engine>,remote`, so an image the daemon does not hold still scans from
+engine's content store is the dedup; ASH passes
+`trivy image --image-src=<engine>,remote`, so an image the daemon does not hold still scans from
 the registry. For a daemon that is only *declared* (no local socket), grype and syft
 get the reference without a scheme and with its sources named
 (`--from <engine> --from registry`): their client honors the declaration, the registry
@@ -152,8 +152,8 @@ offline hosts use.
 
 containerd is reached only through a tool's own options and is never probed by ASH.
 
-trivy reads an OCI image-layout directory directly through the same `--input` flag
-that reads a saved archive (the pinned trivy's own container-image target
+trivy reads an OCI image-layout directory directly through `trivy image --input`, the
+same flag that reads a saved archive (the pinned trivy's own container-image target
 documentation, its OCI Layout section), so every submission shape reaches every image
 scanner without re-packing.
 
@@ -199,11 +199,16 @@ The MCP server carries both shapes beside its git and zip channels:
 
 - `set_source_image` records a reference on the session; nothing is fetched at
   delivery time. The reference's registry must be on the operator's
-  `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` list (`host[:port]` entries; bare Docker
-  Hub references need `docker.io` listed; empty, the default, admits none):
-  scanning a delivered reference makes the *server's* tools reach that
-  registry with the server's network, daemon store and registry credentials,
-  the same reach `ASH_MCP_GIT_ALLOWED_HOSTS` closes for the git channel. The
+  `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` list (`host[:port]` entries, matched
+  without regard to case; empty, the default, admits none): scanning a
+  delivered reference makes the *server's* tools reach that registry with the
+  server's network, daemon store and registry credentials, the same reach
+  `ASH_MCP_GIT_ALLOWED_HOSTS` closes for the git channel. The registry is read
+  as the image tools read it: the text before the first `/` is a registry host
+  when it holds a `.` or a `:`, is `localhost` or has an uppercase letter (a
+  repository path is lowercase, so `Intranet/app:1` names the host `Intranet`),
+  and `index.docker.io` is `docker.io`. Every other reference, `alpine:3` and
+  `team/app` alike, is on Docker Hub, so `docker.io` must be listed for it. The
   archive upload needs no registry and is not gated.
 - `set_source_image_archive_chunk` + `set_source_image_archive_finalize` upload a
   saved image in the zip channel's exact shape: ordered base64 chunks of at most
@@ -225,7 +230,7 @@ as written. Three attribution columns say which image it came from:
 |---|---|
 | `image_ref` | The image as submitted: the reference, or the archive or layout path. |
 | `image_digest` | The image's sha256 **manifest digest**, when one is named, read from these sources in order: the tool's own run output (trivy records `repoDigests`), the digest the lookup ladder resolved for a tag-only reference (the local engine, then `crane digest`; see above) or the digest a pinned reference (`repo@sha256:...`) states, else trivy's config-blob `imageID` -- last because it is a *different* value for the same image, used only when nothing names the manifest, as for a locally built, never-pushed image. Empty only when every source failed, as for a tag-only reference with no engine record whose registry read also failed (`crane` missing, or the registry unreachable). |
-| `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
+| `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. The second run happens only when it reads the same bytes as the first: for a saved archive or layout, or a reference that carries its digest (`repo@sha256:...`, or a tag whose digest the registry lookup named, which trivy is then handed pinned). A tag without a digest, such as one the local engine resolved, gets no second run and an empty column, and the scan logs a warning that says to pin the reference by digest. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
 
 **The id-stability contract.** A finding's id keys on the in-image path and the scan's
 one subject key: the digest the scan start resolved (the ladder above, a pinned
@@ -314,17 +319,19 @@ integration tests run the real trivy and syft over it for layer digests and igno
 and the digest ladder against a real unix-socket daemon.
 
 One CI job (`ash-image-scan-live-engine.yml`) covers the live engine and registry. It
-builds a small image, pushes it to a local registry container (both base and registry
-images pinned by digest from the public.ecr.aws gallery), scans it by tag, and requires
-the report's scope to key on the digest the registry holds: once while the engine holds
-the image (the engine rung) and once after the image is removed from the engine (the
-registry rung).
+builds a small image `FROM scratch`, pushes it to a local registry that the pinned
+`crane` serves (`crane registry serve`), scans it by tag, and requires the report's
+scope to key on the digest the registry holds: once while the engine holds the image
+(the engine rung) and once after the image is removed from the engine (the registry
+rung). No step pulls an image from a public registry.
 
 ## Limits that remain
 
 - Only grype, syft and trivy read images. Every other scanner is filesystem-only and is
   reported SKIPPED for an image scan.
-- `layer_digest` is filled for trivy findings only.
+- `layer_digest` is filled for trivy findings only, and only for a saved archive or
+  layout or a reference that carries its digest; a tag the local engine resolved gets
+  none until it is pinned by digest.
 - `--baseline`, shards, `--staged`, `--changed-files-only`, `--use-existing`,
   `--sandbox` and convert-only are refused with an image, as above.
 - Ignore paths reach the tools as absolute in-image globs only; relative patterns and

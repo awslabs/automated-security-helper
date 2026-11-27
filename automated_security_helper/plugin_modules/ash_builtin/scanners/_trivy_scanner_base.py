@@ -2572,7 +2572,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
 
     @classmethod
     def _attach_package_identity(
-        cls, sarif_report: SarifReport, target: Path
+        cls,
+        sarif_report: SarifReport,
+        target: Path,
+        *,
+        join_lockfiles: bool = True,
     ) -> SarifReport:
         """Give each dependency result one package copy and say which it is.
 
@@ -2588,8 +2592,17 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
         line of the copy's key in the lockfile, and a lockfile that moved since the
         scan, or a result trivy placed at line 1, would otherwise give the result
         another package's path.
+
+        The package's name, its version and ``fix_available`` come from trivy's
+        message, which has the same shape for any target, so they are written
+        whatever the target. The join to the target's lockfiles (the split of a
+        result into one per copy, and ``package_path``) describes a source tree.
+        An image scan passes ``join_lockfiles=False``: its results keep the three
+        values and are neither split nor given an install path, because the
+        scanned directory's lockfiles are not the image's and would attribute a
+        copy the image does not hold. No lockfile is read for it.
         """
-        lock_index = NpmLockIndex(target)
+        lock_index = NpmLockIndex(target) if join_lockfiles else None
         for run in sarif_report.runs or []:
             new_results = []
             for result in run.results or []:
@@ -2599,6 +2612,11 @@ class TrivyScannerBase(ScannerPluginBase[C], Generic[C]):
                     new_results.append(result)
                     continue
                 fix_known = cls._fixed_version_from_message(message) is not None
+
+                if lock_index is None:
+                    cls._set_identity(result, name, version, None, fix_known)
+                    new_results.append(result)
+                    continue
 
                 resolved = []
                 for location in result.locations or []:

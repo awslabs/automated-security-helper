@@ -66,7 +66,7 @@ import importlib
 import json
 import pkgutil
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator, Mapping, Optional
 
@@ -752,6 +752,58 @@ def test_the_registry_and_the_corpus_table_agree() -> None:
         assert (_FIXTURES / spec.directory).is_dir(), f"{name}: {spec.directory}"
         if not spec.sarif and spec.prep is None:
             assert spec.missing, f"{name}: a corpus-less spec names what to author"
+
+
+def _corpus_reach_problems(table: Mapping[str, Optional[CorpusSpec]]) -> list[str]:
+    """What in ``table`` sends a corpus glob down a tree or out of the fixtures.
+
+    A pattern with ``**`` walks the tree under its directory, and a ``..`` in a pattern
+    or in the directory, or a directory that is absolute (``_FIXTURES / "/x"`` is
+    ``/x``) or has a drive, reaches somewhere tests/test_data/scanners does not hold.
+    """
+    problems = []
+    for name, spec in table.items():
+        if spec is None:
+            continue
+        directory = PurePath(spec.directory)
+        if directory.anchor or ".." in directory.parts:
+            problems.append(
+                f"{name}: the directory {spec.directory!r} leaves the corpus"
+            )
+        for pattern in spec.sarif:
+            if "**" in pattern or ".." in pattern.split("/"):
+                problems.append(f"{name}: the glob {pattern!r} descends or climbs")
+    return problems
+
+
+def test_no_corpus_glob_descends_or_leaves_the_fixtures() -> None:
+    """No corpus glob descends, and no corpus directory leaves tests/test_data/scanners.
+
+    tests/unit/test_repo_walkers_skip_scratch.py cannot read a pattern that comes
+    from CORPORA rather than a literal at the call, so it flags the globs over
+    ``spec.sarif`` and exempts them on this: each lists files at a fixed depth of one
+    committed fixture directory.
+    """
+    assert any(spec.sarif for spec in CORPORA.values() if spec), "no glob to check"
+    assert _corpus_reach_problems(CORPORA) == []
+
+
+def test_the_corpus_reach_check_flags_what_it_names_and_nothing_else() -> None:
+    planted = {
+        "recursive": CorpusSpec("a", sarif=("**/*.sarif",)),
+        "climbing": CorpusSpec("a", sarif=("../b/*.sarif",)),
+        "absolute": CorpusSpec("/a", sarif=("*.sarif",)),
+        "above": CorpusSpec("../a", sarif=("*.sarif",)),
+        "a-level-down": CorpusSpec("a", sarif=("captured/*.sarif", "*.sarif")),
+        "no-corpus": None,
+    }
+    flagged = _corpus_reach_problems(planted)
+    assert sorted(line.split(":")[0] for line in flagged) == [
+        "above",
+        "absolute",
+        "climbing",
+        "recursive",
+    ], flagged
 
 
 def test_discovery_does_not_depend_on_which_tier_declares_a_scanner() -> None:
