@@ -14,7 +14,7 @@ import importlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, ClassVar, List, Literal
+from typing import Any, ClassVar, List, Literal, Tuple
 
 import pytest
 import typer
@@ -685,11 +685,34 @@ class _LocalListReporter(ReporterPluginBase[_LocalListConfig]):
         return None
 
 
+class _RelayOptions(ReporterOptionsBase):
+    destinations: List[str] = ["plugin-default"]
+    label: str = "plugin-label"
+
+
+class _RelayConfig(ReporterPluginConfigBase):
+    name: Literal["orbit-relay"] = "orbit-relay"
+    enabled: bool = False
+    options: _RelayOptions = _RelayOptions()
+
+
+class _RelayReporter(ReporterPluginBase[_RelayConfig]):
+    """Sends findings off the host, and declares its list as a destination option."""
+
+    sends_off_host: ClassVar[bool] = True
+    destination_options: ClassVar[Tuple[str, ...]] = ("destinations",)
+
+    def report(self, model):
+        return None
+
+
 _UPLINK = "reporters.orbit-uplink.options.destinations"
 _LOCAL = "reporters.orbit-local.options.destinations"
 _UPLINK_ITEM = "appended-uplink-5e1d"
 _LOCAL_ITEM = "appended-local-3b7c"
 _CAPTURE = "reporters.orbit-capture.options.destinations"
+_RELAY = "reporters.orbit-relay.options.destinations"
+_RELAY_ITEM = "appended-relay-9c4a"
 
 
 def _scan_with_a_view(tmp_path: Path, key: str, item: str, operator_base: AshConfig):
@@ -728,7 +751,7 @@ class TestAppendOntoAnUntypedPluginOption:
     (``warn_unread_appends``). The same overrides are applied again to other
     bases (the trusted views, the replays, the MCP gate), which can lack a key the
     real document holds, and those applications never warn. A reporter that sends
-    findings off the host runs with such a view's section, and building it names
+    findings off the host is built from such a view's section, and building it names
     the key.
 
     An append is not refused for having no default to add to. A respelling of a
@@ -1215,10 +1238,11 @@ class TestAppendOntoAnUntypedPluginOption:
         (``_with_reporter_overrides``, ``_with_scanner_overrides``), which holds no
         such section, so the replayed list starts from the appended items, and the
         replay used to log that no plugin reads the section and advise ``=[...]``
-        for a list the scan had extended. A reporter that sends findings off the
-        host runs with the replayed list, and building it names the key (the
-        off-host reporter tests of this class); no reporter is built here. Only the
-        control key, which the file did not write, is named, once.
+        for a list the scan had extended. In the reporters case, a reporter that
+        sends findings off the host is built from the replayed list, and building
+        it names the key (the off-host reporter tests of this class); no reporter
+        is built here. Only the control key, which the file did not write, is
+        named, once.
 
         ``resolve_config`` returns before the trusted replays when its chain holds
         no file inside the scanned tree, so the file is the repository's, in a
@@ -1295,6 +1319,8 @@ class TestAppendOntoAnUntypedPluginOption:
         assert "off the host" in warnings[0]
         assert f"{_UPLINK}=[...]" in warnings[0]
         assert _UPLINK_ITEM not in warnings[0]
+        assert "from the operator's configuration and the overrides" in warnings[0]
+        assert "ASH's defaults" not in warnings[0]
 
     def test_a_reporter_that_stays_on_the_host_is_not_warned_of(self, caplog, tmp_path):
         """A reporter that writes only a local file runs with the section its scan
@@ -1351,9 +1377,11 @@ class TestAppendOntoAnUntypedPluginOption:
         assert len(_warnings_naming(caplog, _UPLINK)) == 2
 
     def test_an_off_host_reporter_with_no_recorded_view_is_warned_of(self, caplog):
-        """With no view recorded the reporter runs with the configuration's own
-        section, built from the defaults and the overrides, where the append started
-        the list. Building the reporter names the key."""
+        """With no view recorded the reporter is built from the configuration's own
+        section, made here from the defaults and the overrides as ``ash merge`` makes
+        it when given no ``--config``. The append started the list there, so building
+        the reporter names the key, and the warning says that ``ash merge`` takes the
+        section from ASH's defaults and the overrides."""
         with caplog.at_level("WARNING", logger="ash"):
             config = apply_config_overrides(
                 AshConfig(), [f'{_UPLINK}+=["{_UPLINK_ITEM}"]']
@@ -1361,7 +1389,11 @@ class TestAppendOntoAnUntypedPluginOption:
             section = reporter_section(config, _UplinkReporter)
 
         assert section["options"]["destinations"] == [_UPLINK_ITEM]
-        assert len(_warnings_naming(caplog, _UPLINK)) == 1
+        warnings = _warnings_naming(caplog, _UPLINK)
+        assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+        assert "(in ash merge, from ASH's defaults and the overrides)" in warnings[0]
+        assert "ash report and ash merge take" not in warnings[0]
+        assert "runs with" not in warnings[0]
 
     def test_an_off_host_reporter_given_the_trusted_bases_section_is_warned_of(
         self, caplog, tmp_path
@@ -1369,7 +1401,9 @@ class TestAppendOntoAnUntypedPluginOption:
         """A command given stored results takes such a reporter's section from the
         defaults and the overrides, in place of the named file's. The append started
         the list there, so building the reporter names the key, though the command's
-        own configuration extended the file's list."""
+        own configuration extended the file's list. The warning says that
+        ``ash report`` and ``ash merge`` take the section from ASH's defaults and the
+        overrides, and does not name the operator's configuration."""
         override = f'{_UPLINK}+=["{_UPLINK_ITEM}"]'
         named_file = AshConfig.model_validate(
             {
@@ -1392,7 +1426,61 @@ class TestAppendOntoAnUntypedPluginOption:
             section = reporter_section(config, _UplinkReporter)
 
         assert section["options"]["destinations"] == [_UPLINK_ITEM]
-        assert len(_warnings_naming(caplog, _UPLINK)) == 1
+        warnings = _warnings_naming(caplog, _UPLINK)
+        assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "ash report and ash merge take its section from ASH's defaults and the "
+            "overrides" in warnings[0]
+        )
+        assert "the operator's configuration" not in warnings[0]
+        assert "runs with" not in warnings[0]
+
+    def test_only_declared_destinations_come_from_the_defaults_given_a_named_file(
+        self, caplog, tmp_path
+    ):
+        """A reporter that sends findings off the host and declares a destination
+        option takes that option and ``enabled`` from ASH's defaults and the overrides
+        in ``ash report`` and ``ash merge``, and its other options from the named
+        file. The append started the declared list there, so building the reporter
+        names the key once, and the warning says so, though the command's own
+        configuration extended the file's list."""
+        override = f'{_RELAY}+=["{_RELAY_ITEM}"]'
+        named_file = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "orbit-relay": {
+                        "options": {
+                            "destinations": ["named-file"],
+                            "label": "named-file-label",
+                        }
+                    }
+                }
+            }
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(
+                named_file, [override], warn_unread_appends=True
+            )
+            confine_off_host_reporters_to_overrides(
+                config, [tmp_path / "ash.yaml"], [override], REPORT_CONFIG_FILE
+            )
+            confine_declared_reporter_destinations(
+                config, [_RelayReporter], source=REPORT_CONFIG_FILE
+            )
+            section = reporter_section(config, _RelayReporter)
+
+        assert section["options"]["destinations"] == [_RELAY_ITEM]
+        assert section["options"]["label"] == "named-file-label"
+        appended = [
+            text for text in _warnings_naming(caplog, _RELAY) if f"{_RELAY}+=" in text
+        ]
+        assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert "from ASH's defaults and the overrides" in appended[0]
+        assert (
+            "when it declares destination options, only those options and enabled"
+            in appended[0]
+        )
 
     def test_the_warned_keys_stay_bounded_in_a_long_lived_process(self, caplog):
         module = _resolve_config_module()
