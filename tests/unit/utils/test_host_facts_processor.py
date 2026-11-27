@@ -369,6 +369,8 @@ POLARS_SPELLED_FLAGS = (
 def test_the_level_of_a_planted_proc_cpuinfo(tmp_path, flags, level, missing):
     reading = read(linux_host(tmp_path, cpuinfo_text=cpuinfo(flags)))
     assert (reading.cpu_level, reading.cpu_missing_flags) == (level, missing)
+    # Whatever its level, the processor is an x86-64 one, so the process is native.
+    assert reading.translation == "native"
 
 
 def test_the_kernel_spellings_are_what_the_reader_looks_for(tmp_path):
@@ -428,6 +430,11 @@ def test_an_unreadable_proc_cpuinfo_reads_unknown(tmp_path, text):
     assert reading.cpu_level == UNKNOWN
     assert reading.cpu_missing_flags == ()
     assert stand_in_matches(reading) == []
+    # An x86-64 machine whose processor file shows no x86-64 processor runs under an
+    # emulator that presents another processor: the process is not shown native. The
+    # file was read, so nothing failed.
+    assert reading.translation == UNKNOWN
+    assert reading.failed == ()
 
 
 @pytest.mark.parametrize(
@@ -453,13 +460,20 @@ def test_the_processor_level_is_not_read_off_x86(tmp_path):
             return inner(path, limit)
         raise UnplantedRead(path)
 
-    for machine, level in (("aarch64", "n/a"), ("ppc64le", "n/a"), ("", UNKNOWN)):
+    for machine, level, translation in (
+        ("aarch64", "n/a", "native"),
+        ("ppc64le", "n/a", "native"),
+        ("", UNKNOWN, UNKNOWN),
+    ):
         reading = read(
             dataclasses.replace(
                 sources, machine=lambda m=machine: m, read_text=only_the_kernel_release
             )
         )
         assert reading.cpu_level == level, machine
+        # Nor is it read to check the translation: a machine that is no x86-64 one has
+        # no x86-64 processor to compare with.
+        assert reading.translation == translation, machine
         # The runtime it would have been judged against is still named.
         assert reading.polars_runtime == "runtime-32"
 
@@ -1243,6 +1257,12 @@ def test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named():
         assert host_facts.read_runtime_flags(installed) == ()
         return
     assert runtime_drift(installed, "runtime-32") == []
+    # The reader's own judgment of the same file, the one a reading's processor level
+    # waits on, agrees. It is a function of its own, which the drift check above does
+    # not call, and it meets the real file nowhere else.
+    assert host_facts.runtime_flags_match(
+        "runtime-32", host_facts.read_runtime_flags(installed)
+    )
 
 
 def test_polars_still_selects_a_runtime_the_way_the_reader_mirrors():
@@ -1290,6 +1310,51 @@ def test_each_anchor_turns_the_check_red_when_its_line_changes():
         changed = text.replace(anchor, anchor.replace(" ", "  ", 1))
         assert changed != text, f"the control found no {anchor!r} to change"
         assert anchors_missing(changed, PLR_ANCHORS) == [anchor]
+
+
+#: Changes to the way polars chooses a runtime that the reader's mirror of it has to
+#: notice: (the line as polars writes it, the line as a changed polars could write it).
+PLR_CHANGES = [
+    pytest.param(
+        "if _force is not None:",
+        "if _force:",
+        id="an-empty-force-variable-counts-as-unset",
+    ),
+    pytest.param(
+        "if _prefer is not None:",
+        "if _prefer:",
+        id="an-empty-prefer-variable-counts-as-unset",
+    ),
+    pytest.param(
+        "        try:\n            pkgs[_force]()",
+        "        try:\n            rt_compat()\n            pkgs[_force]()",
+        id="the-forced-runtime-is-no-longer-the-only-one-tried",
+    ),
+    pytest.param(
+        "for pkg in preference:",
+        "for pkg in reversed(preference):",
+        id="the-runtimes-are-tried-in-another-order",
+    ),
+    pytest.param(
+        'msg = "could not find Polars\' Rust module"',
+        'msg = "no Polars runtime"',
+        id="no-runtime-loading-ends-another-way",
+    ),
+]
+
+
+@pytest.mark.parametrize(("line", "changed_line"), PLR_CHANGES)
+def test_a_polars_that_chooses_its_runtime_another_way_fails_the_anchors(
+    line, changed_line
+):
+    polars = _installed("polars")
+    assert polars is not None
+    text = polars.locate_file("polars/_plr.py").read_text(encoding="utf-8")
+    assert anchors_missing(text, PLR_ANCHORS) == []
+    assert line in text, f"the control found no {line!r} to change"
+    changed = text.replace(line, changed_line)
+    assert changed != text
+    assert anchors_missing(changed, PLR_ANCHORS) != []
 
 
 # The controls: a copy of the flags text an x86-64 runtime carries, with one flag added,
@@ -1420,6 +1485,27 @@ def test_an_empty_flags_file_on_x86_64_is_drift(monkeypatch, tmp_path, machine):
         test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named()
 
 
+#: The same flags with the order of the generated file reversed. The reader compares a
+#: runtime's flags as a set, so the order of the file is no drift.
+REVERSED_FLAGS_TEXT = (
+    'BUILD_FEATURE_FLAGS = "'
+    + ",".join(f"+{flag}" for flag in reversed(DEFAULT_SET))
+    + '"\n'
+)
+
+
+@pytest.mark.parametrize("machine", ["x86_64", "AMD64"])
+def test_the_locked_runtimes_flags_are_compared_as_a_set(
+    monkeypatch, tmp_path, machine
+):
+    assert REVERSED_FLAGS_TEXT != DEFAULT_FLAGS_TEXT
+    assert host_facts.parse_flags_file(REVERSED_FLAGS_TEXT) == tuple(
+        reversed(DEFAULT_SET)
+    )
+    plant_lane(monkeypatch, tmp_path, machine, REVERSED_FLAGS_TEXT)
+    test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named()
+
+
 # The second lane, where polars[rtcompat] (or polars[rt64]) is installed. The default
 # lane installs neither, so these two skip there; a lane that installs one runs its case.
 
@@ -1449,3 +1535,83 @@ def test_an_installed_optional_runtime_matches_its_declared_set(distribution, to
     installed = _installed(distribution)
     assert installed is not None
     assert runtime_drift(installed, token) == []
+
+
+# The optional runtimes on planted lanes. The default lane installs neither, so the test
+# above skips there, and an arm64 host that installs one is a lane nobody has: these run
+# the same test body on every host, with a runtime holding the text given and a host of
+# the machine given.
+
+#: (distribution, selector, token, the flags file an x86-64 build of it carries)
+OPTIONAL_RUNTIMES = [
+    pytest.param(
+        "polars-runtime-compat", "compat", "compat", COMPAT_FLAGS_TEXT, id="compat"
+    ),
+    pytest.param(
+        "polars-runtime-64", "64", "runtime-64", DEFAULT_FLAGS_TEXT, id="runtime-64"
+    ),
+]
+EACH_OPTIONAL_RUNTIME = pytest.mark.parametrize(
+    ("distribution", "selector", "token", "text"), OPTIONAL_RUNTIMES
+)
+
+
+def plant_optional_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    machine: str,
+    selector: str,
+    flags_text: str,
+) -> None:
+    """Install the optional runtime ``selector`` holding ``flags_text`` on ``machine``."""
+    runtime = Site(tmp_path).add_runtime(selector, flags_text)
+    name = f"polars-runtime-{selector}"
+    real = _installed
+
+    def installed(requested: str) -> Optional[importlib.metadata.Distribution]:
+        return runtime if requested == name else real(requested)
+
+    monkeypatch.setattr(sys.modules[__name__], "_installed", installed)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+
+
+@EACH_OPTIONAL_RUNTIME
+@pytest.mark.parametrize("machine", ["x86_64", "AMD64"])
+def test_an_optional_runtime_on_an_x86_64_lane_matches_its_declared_set(
+    monkeypatch, tmp_path, machine, distribution, selector, token, text
+):
+    plant_optional_runtime(monkeypatch, tmp_path, machine, selector, text)
+    test_an_installed_optional_runtime_matches_its_declared_set(distribution, token)
+
+
+@EACH_OPTIONAL_RUNTIME
+@pytest.mark.parametrize("machine", ["x86_64", "AMD64"])
+def test_an_optional_runtime_on_an_x86_64_lane_with_other_flags_is_drift(
+    monkeypatch, tmp_path, machine, distribution, selector, token, text
+):
+    changed = text.replace('"\n', ',+avx512f"\n')
+    assert changed != text, "the control found no flag to extend"
+    plant_optional_runtime(monkeypatch, tmp_path, machine, selector, changed)
+    with pytest.raises(AssertionError):
+        test_an_installed_optional_runtime_matches_its_declared_set(distribution, token)
+
+
+@EACH_OPTIONAL_RUNTIME
+@pytest.mark.parametrize("machine", ["aarch64", "arm64"])
+def test_an_optional_runtime_on_an_arm64_lane_declares_no_flags(
+    monkeypatch, tmp_path, machine, distribution, selector, token, text
+):
+    plant_optional_runtime(monkeypatch, tmp_path, machine, selector, EMPTY_FLAGS_TEXT)
+    test_an_installed_optional_runtime_matches_its_declared_set(distribution, token)
+
+
+@EACH_OPTIONAL_RUNTIME
+@pytest.mark.parametrize("machine", ["aarch64", "arm64"])
+def test_flags_in_an_optional_arm64_runtime_are_drift(
+    monkeypatch, tmp_path, machine, distribution, selector, token, text
+):
+    # The reader never reads the file there. A polars that starts to set flags for
+    # arm64 must turn the lane red, not pass as unread.
+    plant_optional_runtime(monkeypatch, tmp_path, machine, selector, text)
+    with pytest.raises(AssertionError):
+        test_an_installed_optional_runtime_matches_its_declared_set(distribution, token)

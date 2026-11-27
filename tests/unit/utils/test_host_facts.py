@@ -35,6 +35,7 @@ import os
 import struct
 import subprocess
 import sys
+import warnings
 from collections import Counter
 from importlib.metadata import PathDistribution
 from pathlib import Path
@@ -894,18 +895,6 @@ def test_a_translated_x86_process_is_a_rosetta_reading_with_its_row(tmp_path):
             (IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64),
             "x64-on-arm64",
         ),
-        # 32-bit x86 on 64-bit x86 Windows is WOW64, which translates nothing.
-        (
-            "win-amd64",
-            (IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_AMD64),
-            "native",
-        ),
-        # 32-bit x86 emulated on arm64 has no token: unknown, never x64-on-arm64.
-        (
-            "win-amd64",
-            (IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_ARM64),
-            "unknown",
-        ),
         ("win-amd64", (0x1234, 0x5678), "unknown"),
         # Windows before 10 1511 has no IsWow64Process2.
         ("win-amd64", AttributeError("IsWow64Process2"), "unknown"),
@@ -917,6 +906,32 @@ def test_windows_translation_follows_iswow64process2_and_the_interpreter(
 ):
     reading = read(windows_host(tmp_path, platform_name=platform_name, wow64=wow64))
     assert reading.translation == expected
+
+
+@pytest.mark.parametrize(
+    ("native_machine", "expected"),
+    [
+        # 32-bit x86 on 64-bit x86 Windows is WOW64, which translates nothing.
+        (IMAGE_FILE_MACHINE_AMD64, "native"),
+        # 32-bit x86 emulated on arm64 has no token: unknown, never x64-on-arm64.
+        (IMAGE_FILE_MACHINE_ARM64, "unknown"),
+    ],
+)
+def test_a_32_bit_python_on_windows_is_a_wow64_process(
+    tmp_path, native_machine, expected
+):
+    # Only a 32-bit interpreter reports an x86 process machine, so the host is planted
+    # with the platform name and the pointer size such an interpreter has.
+    sources = dataclasses.replace(
+        windows_host(
+            tmp_path,
+            platform_name="win32",
+            wow64=(IMAGE_FILE_MACHINE_I386, native_machine),
+        ),
+        pointer_bits=lambda: 32,
+    )
+    reading = read(sources)
+    assert (reading.arch, reading.translation) == ("other", expected)
 
 
 def test_an_x64_python_on_a_windows_arm_host_matches_the_emulation_row(tmp_path):
@@ -952,9 +967,37 @@ def test_an_unreadable_interpreter_architecture_leaves_arm_host_translation_unkn
     assert stand_in_matches(reading) == []
 
 
-def test_linux_translation_is_native_with_no_read(tmp_path):
+def test_linux_translation_is_native_beside_an_x86_processor(tmp_path):
     # sysctl_int and wow64_machines stay unplanted on the Linux host.
     assert read(linux_host(tmp_path)).translation == "native"
+
+
+def only_the_kernel_release(sources: Sources) -> Sources:
+    """The host with every read of ``/proc/cpuinfo`` left unplanted."""
+    inner = sources.read_text
+
+    def read_text(path: str, limit: int) -> str:
+        if path == "/proc/sys/kernel/osrelease":
+            return inner(path, limit)
+        raise UnplantedRead(path)
+
+    return dataclasses.replace(sources, read_text=read_text)
+
+
+@pytest.mark.parametrize("machine", ["aarch64", "arm64", "i686", "ppc64le"])
+def test_linux_translation_off_x86_64_is_native_and_reads_no_cpuinfo(tmp_path, machine):
+    # The processor file is unplanted: a read of it raises UnplantedRead.
+    sources = dataclasses.replace(
+        only_the_kernel_release(linux_host(tmp_path)), machine=lambda: machine
+    )
+    assert read(sources).translation == "native"
+
+
+def test_linux_translation_of_a_machine_with_no_name_is_unknown(tmp_path):
+    # An x86-64 reading cannot be checked against a processor of an unnamed machine.
+    reading = read(dataclasses.replace(linux_host(tmp_path), machine=lambda: ""))
+    assert (reading.arch, reading.translation) == (UNKNOWN, UNKNOWN)
+    assert reading.failed == ()
 
 
 # --------------------------------------------------------------------------------------
@@ -1061,6 +1104,10 @@ def test_the_release_is_recorded_not_matched(tmp_path):
         ("5.15.153.1-microsoft-standard-WSL2\n", "wsl2"),
         ("6.6.87.2-microsoft-standard-WSL2\n", "wsl2"),
         ("5.10.16.3-Microsoft-standard-WSL2", "wsl2"),
+        # The first WSL2 kernels carry no WSL2 suffix; microsoft-standard names them.
+        ("4.19.128-microsoft-standard\n", "wsl2"),
+        ("4.19.104-microsoft-standard", "wsl2"),
+        ("4.19.121-Microsoft-Standard", "wsl2"),
         ("4.4.0-19041-Microsoft\n", "wsl1"),
         ("4.4.0-22621-Microsoft\n", "wsl1"),
         ("4.4.0-17763-microsoft", "wsl1"),
@@ -2328,6 +2375,23 @@ def test_the_requires_python_shapes_are_not_all_one_answer(tmp_path):
     assert any("unknown" in outcome for outcome in outcomes)
 
 
+def test_a_metadata_text_with_no_requires_python_warns_of_nothing(tmp_path):
+    # A header block the parser has to read (it holds a line that is no header) and that
+    # has no Requires-Python. From Python 3.12 the parser's mapping warns of an implicit
+    # None when a missing key is subscripted, and a run that turns warnings into errors
+    # would fail the read: the reader asks whether the key is there first.
+    distribution = Site(tmp_path).add(
+        "automated-security-helper", "3.8.0", headers="not a header\n"
+    )
+    # The control: this text is one the reader leaves to the parser.
+    text = distribution.read_text("METADATA")
+    assert host_facts._plain_header(text, "Requires-Python") == (False, None)
+    assert "Requires-Python" not in distribution.metadata
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert requires_python_of(distribution) == ("reads", (UNKNOWN, UNKNOWN))
+
+
 @pytest.mark.parametrize(
     ("text", "name", "expected"),
     [
@@ -2394,9 +2458,9 @@ def test_the_image_sets_its_own_variable(tmp_path, value):
 
 @pytest.mark.parametrize("value", ["NO", "no", "0", "false", "", "maybe"])
 def test_other_values_of_the_image_variable_do_not_name_the_image(tmp_path, value):
+    # The prefix names no channel and the installer file says uv: pip.
     assert (
-        channel(tmp_path, prefix="/opt/venv", env={"ASH_IN_CONTAINER": value})
-        != "image"
+        channel(tmp_path, prefix="/opt/venv", env={"ASH_IN_CONTAINER": value}) == "pip"
     )
 
 
@@ -2425,8 +2489,8 @@ def test_a_prefix_in_the_nix_store_is_nix(tmp_path, prefix):
 
 
 def test_a_path_that_only_looks_like_the_nix_store_is_not_nix(tmp_path):
-    assert channel(tmp_path, prefix="/home/u/nix/store/venv") != "nix"
-    assert channel(tmp_path, prefix="/nix/storeroom/venv") != "nix"
+    assert channel(tmp_path, prefix="/home/u/nix/store/venv") == "pip"
+    assert channel(tmp_path, prefix="/nix/storeroom/venv") == "pip"
 
 
 @pytest.mark.parametrize(
@@ -2442,7 +2506,7 @@ def test_a_prefix_in_a_homebrew_cellar_is_brew(tmp_path, prefix):
 
 
 def test_a_directory_that_is_merely_named_cellar_at_the_end_is_not_brew(tmp_path):
-    assert channel(tmp_path, prefix="/srv/Cellar") != "brew"
+    assert channel(tmp_path, prefix="/srv/Cellar") == "pip"
 
 
 @pytest.mark.parametrize(
@@ -2473,7 +2537,7 @@ def test_the_default_tools_directory_is_not_used_when_the_variable_moves_it(tmp_
             prefix="/home/u/.local/share/uv/tools/automated-security-helper",
             env={"UV_TOOL_DIR": "/custom/tools"},
         )
-        != "uv-tool"
+        == "pip"
     )
 
 
@@ -2489,10 +2553,45 @@ def test_the_default_tools_directory_is_not_used_when_the_variable_moves_it(tmp_
             "/custom/cache/environments-v2/9f1c2d3e4a5b6c7d",
             {"UV_CACHE_DIR": "/custom/cache"},
         ),
+        # uvx runs from the archive its environment is kept in: ``<cache>/archive-v0/<id>``
+        # (the layout ``python_installer.is_uvx_environment`` looks for), where ``<id>``
+        # is the 21 characters uv names an archive by.
+        ("/home/u/.cache/uv/archive-v0/rZ0pJnA3yqDy7sd4mvNm1", {}),
+        (
+            "/xdg/cache/uv/archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
+            {"XDG_CACHE_HOME": "/xdg/cache"},
+        ),
+        (
+            "/custom/cache/archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
+            {"UV_CACHE_DIR": "/custom/cache"},
+        ),
+        # The directory's version is not part of the rule, here or for the environments.
+        ("/home/u/.cache/uv/archive-v1/rZ0pJnA3yqDy7sd4mvNm1", {}),
     ],
 )
 def test_a_prefix_in_the_uv_cache_is_uvx(tmp_path, prefix, env):
     assert channel(tmp_path, prefix=prefix, env=env) == "uvx"
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        # The cache's own directories hold no environment of their own.
+        "/home/u/.cache/uv",
+        "/home/u/.cache/uv/archive-v0",
+        "/home/u/.cache/uv/environments-v2",
+        # Nor do the other buckets of the cache.
+        "/home/u/.cache/uv/wheels-v5/pypi/ash/3.8.0",
+        "/home/u/.cache/uv/builds-v0/archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
+        # A directory that only begins with the name of the cache is not under it.
+        "/home/u/.cache/uv-old/archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
+        # A name that is no versioned bucket.
+        "/home/u/.cache/uv/archive/rZ0pJnA3yqDy7sd4mvNm1",
+        "/home/u/.cache/uv/my-archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
+    ],
+)
+def test_a_path_in_the_uv_cache_that_holds_no_environment_is_not_uvx(tmp_path, prefix):
+    assert channel(tmp_path, prefix=prefix) == "pip"
 
 
 @pytest.mark.parametrize(
@@ -2504,10 +2603,129 @@ def test_a_prefix_in_the_uv_cache_is_uvx(tmp_path, prefix, env):
             "/opt/pipx-home/venvs/automated-security-helper",
             {"PIPX_HOME": "/opt/pipx-home"},
         ),
+        # Where XDG_DATA_HOME is set, pipx's home is under it ...
+        (
+            "/xdg/data/pipx/venvs/automated-security-helper",
+            {"XDG_DATA_HOME": "/xdg/data"},
+        ),
+        # ... and the default homes stay pipx's: an environment made before the
+        # variable was set is still where it was made.
+        (
+            "/home/u/.local/share/pipx/venvs/automated-security-helper",
+            {"XDG_DATA_HOME": "/xdg/data"},
+        ),
     ],
 )
 def test_a_prefix_under_the_pipx_venvs_directory_is_pipx(tmp_path, prefix, env):
     assert channel(tmp_path, prefix=prefix, env=env) == "pipx"
+
+
+@pytest.mark.parametrize(
+    ("host", "prefix"),
+    [
+        # platformdirs, which pipx takes its home from, ignores XDG_DATA_HOME on macOS
+        # and Windows.
+        ("macos", "/xdg/data/pipx/venvs/automated-security-helper"),
+        ("windows", "C:\\xdg\\data\\pipx\\venvs\\automated-security-helper"),
+    ],
+)
+def test_xdg_data_home_is_no_pipx_home_off_linux(tmp_path, host, prefix):
+    env = {"XDG_DATA_HOME": "C:\\xdg\\data" if host == "windows" else "/xdg/data"}
+    assert channel(tmp_path, prefix=prefix, env=env, host=host) == "pip"
+
+
+@pytest.mark.parametrize(
+    ("host", "prefix", "env", "expected"),
+    [
+        # Windows: pipx's user data directory is %LOCALAPPDATA%\pipx\pipx, and its older
+        # homes are under the user's profile.
+        (
+            "windows",
+            "C:\\Users\\u\\AppData\\Local\\pipx\\pipx\\venvs\\automated-security-helper",
+            {},
+            "pipx",
+        ),
+        (
+            "windows",
+            "C:\\Users\\u\\.local\\pipx\\venvs\\automated-security-helper",
+            {},
+            "pipx",
+        ),
+        (
+            "windows",
+            "c:\\users\\U\\appdata\\local\\PIPX\\pipx\\venvs\\automated-security-helper",
+            {},
+            "pipx",
+        ),
+        # The variables that move a home are read, not assumed.
+        (
+            "windows",
+            "E:\\Local\\pipx\\pipx\\venvs\\automated-security-helper",
+            {"LOCALAPPDATA": "E:\\Local"},
+            "pipx",
+        ),
+        (
+            "windows",
+            "C:\\Users\\u\\AppData\\Local\\pipx\\pipx\\venvs\\automated-security-helper",
+            {"LOCALAPPDATA": "E:\\Local"},
+            "pip",
+        ),
+        (
+            "windows",
+            "D:\\tools\\pipx\\venvs\\automated-security-helper",
+            {"PIPX_HOME": "D:\\tools\\pipx"},
+            "pipx",
+        ),
+        (
+            "windows",
+            "C:\\Users\\u\\pipx\\venvs\\automated-security-helper",
+            {"PIPX_HOME": "D:\\tools\\pipx"},
+            "pip",
+        ),
+        # macOS: platformdirs' user data directory, and the two Unix homes.
+        (
+            "macos",
+            "/Users/u/Library/Application Support/pipx/venvs/automated-security-helper",
+            {},
+            "pipx",
+        ),
+        (
+            "macos",
+            "/Users/u/.local/pipx/venvs/automated-security-helper",
+            {},
+            "pipx",
+        ),
+        (
+            "macos",
+            "/Users/u/.local/share/pipx/venvs/automated-security-helper",
+            {},
+            "pipx",
+        ),
+        (
+            "macos",
+            "/opt/pipx-home/venvs/automated-security-helper",
+            {"PIPX_HOME": "/opt/pipx-home"},
+            "pipx",
+        ),
+        (
+            "macos",
+            "/Users/u/Library/Application Support/pipx/venvs/automated-security-helper",
+            {"PIPX_HOME": "/opt/pipx-home"},
+            "pip",
+        ),
+        # Library/Application Support is macOS's own: on Linux it is no pipx home.
+        (
+            "linux",
+            "/home/u/Library/Application Support/pipx/venvs/automated-security-helper",
+            {},
+            "pip",
+        ),
+    ],
+)
+def test_pipx_homes_follow_each_platforms_defaults(
+    tmp_path, host, prefix, env, expected
+):
+    assert channel(tmp_path, prefix=prefix, env=env, host=host) == expected
 
 
 def test_pipx_home_replaces_the_default_directories(tmp_path):
@@ -2517,7 +2735,7 @@ def test_pipx_home_replaces_the_default_directories(tmp_path):
             prefix="/home/u/.local/pipx/venvs/automated-security-helper",
             env={"PIPX_HOME": "/opt/pipx-home"},
         )
-        != "pipx"
+        == "pip"
     )
 
 
@@ -2595,12 +2813,13 @@ def test_a_prefix_beats_the_records_beside_it(tmp_path):
 
 def test_a_symlinked_home_is_matched_after_resolving_the_links(tmp_path):
     # HOME says /home/u, the interpreter says /data/home/u: only the real paths agree.
-    def realpath(path: str) -> str:
-        return path.replace("/home/u", "/data/home/u", 1)
-
+    # The resolver is idempotent, as a real one is: a path that is already resolved
+    # comes back as it is, so the reader may resolve a path more than once.
+    realpath = link_resolver("/home", "/data/home")
+    assert realpath(realpath("/home/u")) == realpath("/home/u") == "/data/home/u"
     prefix = "/data/home/u/.local/share/uv/tools/automated-security-helper"
     assert channel(tmp_path, prefix=prefix, realpath=realpath) == "uv-tool"
-    assert channel(tmp_path / "other", prefix=prefix) != "uv-tool"
+    assert channel(tmp_path / "other", prefix=prefix) == "pip"
 
 
 def link_resolver(link: str, target: str) -> Callable[[str], str]:
@@ -2644,6 +2863,13 @@ def junction_resolver(link: str, target: str) -> Callable[[str], str]:
             "/home",
             "/data/home",
             "/home/u/.cache/uv/environments-v2/9f1c2d3e4a5b6c7d",
+            {},
+            "uvx",
+        ),
+        (
+            "/home",
+            "/data/home",
+            "/home/u/.cache/uv/archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
             {},
             "uvx",
         ),
@@ -2697,7 +2923,7 @@ def test_a_prefix_spelled_through_a_link_is_matched_after_resolving_it(
 def test_a_prefix_beside_the_link_but_not_under_this_home_is_no_tool_of_it(tmp_path):
     realpath = link_resolver("/home", "/data/home")
     prefix = "/home/other/.local/share/uv/tools/automated-security-helper"
-    assert channel(tmp_path, prefix=prefix, realpath=realpath) != "uv-tool"
+    assert channel(tmp_path, prefix=prefix, realpath=realpath) == "pip"
 
 
 @pytest.mark.parametrize("linked", [False, True])
@@ -2707,7 +2933,7 @@ def test_a_sibling_directory_that_starts_with_the_tools_directorys_name_is_no_to
     # tools-old begins with the text of the tools directory without being under it.
     realpath = link_resolver("/home", "/data/home") if linked else None
     prefix = "/home/u/.local/share/uv/tools-old/automated-security-helper"
-    assert channel(tmp_path, prefix=prefix, realpath=realpath) != "uv-tool"
+    assert channel(tmp_path, prefix=prefix, realpath=realpath) == "pip"
 
 
 @pytest.mark.parametrize(
@@ -2715,6 +2941,10 @@ def test_a_sibling_directory_that_starts_with_the_tools_directorys_name_is_no_to
     [
         (WINDOWS_PREFIX, "uv-tool"),
         ("C:\\Users\\u\\AppData\\Local\\uv\\cache\\environments-v2\\9f1c2d", "uvx"),
+        (
+            "C:\\Users\\u\\AppData\\Local\\uv\\cache\\archive-v0\\rZ0pJnA3yqDy7sd4mvNm1",
+            "uvx",
+        ),
         ("C:\\Users\\u\\pipx\\venvs\\automated-security-helper", "pipx"),
     ],
 )
@@ -2729,9 +2959,7 @@ def test_a_windows_prefix_spelled_through_a_junction_is_matched_after_resolving_
 def test_a_path_with_dot_dot_is_normalized_before_it_is_compared(tmp_path):
     prefix = "/home/u/.local/share/uv/tools/x/../automated-security-helper"
     assert channel(tmp_path, prefix=prefix) == "uv-tool"
-    assert (
-        channel(tmp_path / "up", prefix="/home/u/.local/share/uv/../../..") != "uv-tool"
-    )
+    assert channel(tmp_path / "up", prefix="/home/u/.local/share/uv/../../..") == "pip"
 
 
 def test_an_empty_prefix_names_no_channel_from_the_prefix(tmp_path):
@@ -2749,7 +2977,12 @@ def test_windows_tool_and_cache_directories_follow_appdata(tmp_path):
         prefix="C:\\Users\\u\\AppData\\Local\\uv\\cache\\environments-v2\\9f1c2d",
         host="windows",
     )
-    assert (tools, cache) == ("uv-tool", "uvx")
+    archive = channel(
+        tmp_path / "a",
+        prefix="C:\\Users\\u\\AppData\\Local\\uv\\cache\\archive-v0\\rZ0pJnA3yqDy7sd4mvNm1",
+        host="windows",
+    )
+    assert (tools, cache, archive) == ("uv-tool", "uvx", "uvx")
 
 
 def test_windows_paths_compare_without_regard_to_case(tmp_path):
@@ -2901,56 +3134,119 @@ def test_a_failing_source_changes_facts_to_unknown_and_nothing_else(host, tmp_pa
             assert changed, f"{source} is read and its failure changes nothing"
 
 
+#: Everything that depends on the name of the operating system.
+LOST_WITH_THE_PLATFORM = {
+    "os",
+    "host_os",
+    "os_release",
+    "arch",
+    "translation",
+    "cpu_level",
+    "libc",
+    "wsl",
+    "install_channel",
+}
+
+#: For each baseline host, the facts that go to ``unknown`` when one source fails, and
+#: no others. Each set is spelled out, so a fact that comes to depend on one more source
+#: (or on one fewer) changes a row here instead of passing as "some facts went unknown".
+#: ``read_text`` is read for two files and has its own table below.
+FAILURE_TABLES: dict[str, dict[str, set[str]]] = {
+    "linux": {
+        "sys_platform": LOST_WITH_THE_PLATFORM,
+        # The machine is named for the architecture and the processor level, and beside
+        # an x86-64 machine the translation is checked against the processor file.
+        "machine": {"arch", "cpu_level", "translation"},
+        "pointer_bits": {"arch", "cpu_level", "translation"},
+        "freedesktop_os_release": {"os_release"},
+        "python_version": {"python_in_range"},
+        "implementation_name": {"python_build"},
+        "gil_disabled": {"python_build"},
+        "polars_plr_injected": {"polars_runtime", "cpu_level"},
+        "sys_prefix": {"install_channel"},
+        "realpath": {"install_channel"},
+        "home": {"install_channel"},
+        "distribution": {"polars_runtime", "cpu_level", "python_in_range"},
+        "getenv": {"polars_runtime", "cpu_level", "install_channel"},
+        # The C library read has a fallback: the interpreter's own loader answers.
+        "libc_version": set(),
+    },
+    "macos": {
+        "sys_platform": LOST_WITH_THE_PLATFORM,
+        "machine": {"arch", "cpu_level"},
+        "pointer_bits": {"arch", "cpu_level"},
+        "mac_version": {"os_release"},
+        "sysctl_int": {"translation"},
+        "sysctl_str": {"cpu_level"},
+        "python_version": {"python_in_range"},
+        "implementation_name": {"python_build"},
+        "gil_disabled": {"python_build"},
+        "polars_plr_injected": {"polars_runtime", "cpu_level"},
+        "sys_prefix": {"install_channel"},
+        "realpath": {"install_channel"},
+        "home": {"install_channel"},
+        "distribution": {"polars_runtime", "cpu_level", "python_in_range"},
+        "getenv": {"polars_runtime", "cpu_level", "install_channel"},
+    },
+    "windows": {
+        "sys_platform": LOST_WITH_THE_PLATFORM,
+        "sysconfig_platform": {"arch", "cpu_level"},
+        "pointer_bits": {"arch", "cpu_level"},
+        "windows_version": {"os_release", "cpu_level"},
+        "windows_feature_present": {"cpu_level"},
+        "wow64_machines": {"translation"},
+        "python_version": {"python_in_range"},
+        "implementation_name": {"python_build"},
+        "gil_disabled": {"python_build"},
+        "polars_plr_injected": {"polars_runtime", "cpu_level"},
+        "sys_prefix": {"install_channel"},
+        "realpath": {"install_channel"},
+        "distribution": {"polars_runtime", "cpu_level", "python_in_range"},
+        "getenv": {"polars_runtime", "cpu_level", "install_channel"},
+    },
+}
+
+
+@pytest.mark.parametrize("host", sorted(HOSTS))
+def test_the_failure_table_names_every_source_the_baseline_reads(host, tmp_path):
+    recorded, called = recording(HOSTS[host](tmp_path))
+    HostFactsReader(recorded).read(express_supported=lambda: EXPRESS[host])
+    assert called - {"read_text"} == set(FAILURE_TABLES[host])
+
+
 @pytest.mark.parametrize(
-    ("source", "unknown_facts"),
+    ("host", "source"),
     [
-        (
-            "sys_platform",
-            {
-                "os",
-                "host_os",
-                "os_release",
-                "arch",
-                "translation",
-                "cpu_level",
-                "libc",
-                "wsl",
-                "install_channel",
-            },
-        ),
-        ("machine", {"arch", "cpu_level"}),
-        ("pointer_bits", {"arch", "cpu_level"}),
-        ("freedesktop_os_release", {"os_release"}),
-        ("python_version", {"python_in_range"}),
-        ("implementation_name", {"python_build"}),
-        ("gil_disabled", {"python_build"}),
-        ("polars_plr_injected", {"polars_runtime", "cpu_level"}),
-        ("sys_prefix", {"install_channel"}),
-        ("home", {"install_channel"}),
-        ("distribution", {"polars_runtime", "cpu_level", "python_in_range"}),
-        ("getenv", {"polars_runtime", "cpu_level", "install_channel"}),
-        ("libc_version", set()),
+        pytest.param(host, source, id=f"{host}-{source}")
+        for host in sorted(FAILURE_TABLES)
+        for source in sorted(FAILURE_TABLES[host])
     ],
 )
-def test_the_facts_a_failing_linux_source_takes_with_it(
-    tmp_path, source, unknown_facts
-):
-    sources = linux_host(tmp_path)
-    baseline = read(sources)
-    reading = read(dataclasses.replace(sources, **{source: _raises}))
+def test_the_facts_a_failing_source_takes_with_it(tmp_path, host, source):
+    sources = HOSTS[host](tmp_path)
+    baseline = read(sources, express=EXPRESS[host])
+    reading = read(
+        dataclasses.replace(sources, **{source: _raises}), express=EXPRESS[host]
+    )
     changed = {
         name
         for name in READING_FIELDS
         if getattr(reading, name) != getattr(baseline, name)
     }
-    assert changed == unknown_facts
+    assert changed == FAILURE_TABLES[host][source]
 
 
 @pytest.mark.parametrize(
     ("path", "unknown_facts"),
-    [("/proc/cpuinfo", {"cpu_level"}), ("/proc/sys/kernel/osrelease", {"wsl"})],
+    [
+        # The processor file also says whether an x86-64 machine runs x86 code natively.
+        ("/proc/cpuinfo", {"cpu_level", "translation"}),
+        ("/proc/sys/kernel/osrelease", {"wsl"}),
+    ],
 )
-def test_an_unreadable_proc_file_takes_only_its_own_fact(tmp_path, path, unknown_facts):
+def test_an_unreadable_proc_file_takes_the_facts_that_read_it(
+    tmp_path, path, unknown_facts
+):
     sources = linux_host(tmp_path)
     inner = sources.read_text
 
@@ -3035,8 +3331,11 @@ def test_host_facts_that_cannot_change_are_read_once_per_reader(tmp_path):
     first = reader.read(express_supported=lambda: True)
     second = reader.read(express_supported=lambda: True)
     assert first == second
-    assert counts[("read_text", "/proc/cpuinfo", 65536)] == 1
-    assert counts[("read_text", "/proc/sys/kernel/osrelease", 4096)] == 1
+    # Each file once, whatever limit or calling style a read uses: the translation and
+    # the processor level both read the processor file, and they share one read.
+    for path in ("/proc/cpuinfo", "/proc/sys/kernel/osrelease"):
+        reads = {key: n for key, n in counts.items() if key[:2] == ("read_text", path)}
+        assert sum(reads.values()) == 1, (path, reads)
     assert counts[("libc_version",)] == 1
     assert counts[("freedesktop_os_release",)] == 1
     for name in ("polars", "polars-runtime-32", "automated-security-helper"):
@@ -3088,17 +3387,19 @@ def test_the_flags_file_judged_follows_the_runtime_a_request_selects(tmp_path):
 def test_a_failed_read_is_remembered_not_retried(tmp_path):
     attempts = []
 
-    def failing_once(path: str, limit: int) -> str:
+    def always_failing(path: str, limit: int) -> str:
         attempts.append(path)
         raise OSError(errno.EIO, path)
 
     reader = HostFactsReader(
-        dataclasses.replace(linux_host(tmp_path), read_text=failing_once)
+        dataclasses.replace(linux_host(tmp_path), read_text=always_failing)
     )
     first = reader.read(express_supported=lambda: True)
     second = reader.read(express_supported=lambda: True)
     assert first == second
+    # The failed processor file is one failure the translation and the level share.
     assert ("cpu_level", "OSError") in second.failed
+    assert ("translation", "OSError") in second.failed
     assert sorted(attempts) == ["/proc/cpuinfo", "/proc/sys/kernel/osrelease"]
 
 
@@ -3357,6 +3658,80 @@ def test_the_control_the_import_walk_sees_a_planted_module_scope_import():
         "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import collections\n"
     )
     assert _module_scope_imports(guarded) == {"typing"}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        # Every block of a statement that runs when the module is imported counts: a
+        # handler, an else and a finally block as much as the try body (and the star
+        # form of the handler), the else of a loop, and the body of a class.
+        pytest.param(
+            "try:\n    import a\nexcept ImportError:\n    import b\n",
+            {"a", "b"},
+            id="a-try-body-and-its-handler",
+        ),
+        pytest.param(
+            "try:\n    pass\nexcept ValueError:\n    pass\nelse:\n    import a\n",
+            {"a"},
+            id="a-try-else",
+        ),
+        pytest.param(
+            "try:\n    pass\nfinally:\n    import a\n", {"a"}, id="a-try-finally"
+        ),
+        pytest.param(
+            "try:\n    pass\nexcept* ValueError:\n    import a\n",
+            {"a"},
+            id="a-star-handler",
+        ),
+        pytest.param(
+            "try:\n    import a\nexcept ImportError:\n    if y:\n        import b\n",
+            {"a", "b"},
+            id="a-statement-in-a-handler",
+        ),
+        pytest.param("with open(f):\n    import a\n", {"a"}, id="a-with-body"),
+        pytest.param(
+            "for x in y:\n    import a\nelse:\n    import b\n",
+            {"a", "b"},
+            id="a-for-and-its-else",
+        ),
+        pytest.param(
+            "while x:\n    import a\nelse:\n    import b\n",
+            {"a", "b"},
+            id="a-while-and-its-else",
+        ),
+        pytest.param("class C:\n    import a\n", {"a"}, id="a-class-body"),
+        pytest.param(
+            "match x:\n    case 1:\n        import a\n", {"a"}, id="a-match-case"
+        ),
+        pytest.param(
+            "if x:\n    import a\nelif y:\n    import b\nelse:\n    import c\n",
+            {"a", "b", "c"},
+            id="every-branch-of-an-if",
+        ),
+        pytest.param(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n    import a\nelse:\n    import b\n",
+            {"typing", "b"},
+            id="the-else-of-a-type-checking-block",
+        ),
+        # What runs only when it is called does not count.
+        pytest.param("def f():\n    import a\n", set(), id="a-function"),
+        pytest.param("async def f():\n    import a\n", set(), id="an-async-function"),
+        pytest.param(
+            "class C:\n    def f(self):\n        import a\n", set(), id="a-method"
+        ),
+        pytest.param(
+            "try:\n    def f():\n        import a\nexcept ImportError:\n    pass\n",
+            set(),
+            id="a-function-in-a-try",
+        ),
+    ],
+)
+def test_the_import_walk_sees_every_statement_that_runs_when_the_module_is_imported(
+    source, expected
+):
+    assert _module_scope_imports(ast.parse(source)) == expected
 
 
 def test_a_module_scope_ntpath_import_is_one_the_walk_would_flag():

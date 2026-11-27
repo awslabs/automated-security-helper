@@ -134,6 +134,57 @@ def reads_of_the_owned_facts(source: str) -> list[tuple[str, int]]:
             "from winapi import IsWow64Process2", "IsWow64Process2", id="an-import"
         ),
         pytest.param('f"/proc/cpuinfo?{x}"', "/proc/cpuinfo", id="inside-an-f-string"),
+        # The macOS feature strings and the kernel release are reads of the reader too.
+        pytest.param(
+            'libc.sysctlbyname(b"machdep.cpu.features", None, size, None, 0)',
+            "machdep.cpu.features",
+            id="the-feature-string-sysctl",
+        ),
+        pytest.param(
+            'KEY = "machdep.cpu.leaf7_features"',
+            "machdep.cpu.leaf7_features",
+            id="the-leaf7-sysctl",
+        ),
+        pytest.param(
+            'KEY = "machdep.cpu.extfeatures"',
+            "machdep.cpu.extfeatures",
+            id="the-extended-feature-sysctl",
+        ),
+        pytest.param(
+            'open("/proc/sys/kernel/osrelease")',
+            "/proc/sys/kernel/osrelease",
+            id="the-kernel-release-file",
+        ),
+        # A name built from pieces is still a read: its last piece stands alone.
+        pytest.param('Path("/proc") / "cpuinfo"', "cpuinfo", id="a-joined-path"),
+        pytest.param(
+            'os.path.join("/proc", "cpuinfo")', "cpuinfo", id="a-path-joined-by-os-path"
+        ),
+        pytest.param(
+            'PROC = Path("/proc")\nFLAGS = PROC / "cpuinfo"\n',
+            "cpuinfo",
+            id="a-path-joined-to-a-module-constant",
+        ),
+        pytest.param(
+            'Path("/proc/sys/kernel") / "osrelease"',
+            "osrelease",
+            id="the-kernel-release-joined",
+        ),
+        pytest.param(
+            'name = "sysctl." + "proc_translated"',
+            "proc_translated",
+            id="the-translation-sysctl-added-up",
+        ),
+        pytest.param(
+            '".".join(("machdep", "cpu", "features"))',
+            "machdep",
+            id="a-feature-sysctl-joined-by-dots",
+        ),
+        pytest.param(
+            'prefix = "machdep.cpu"\nname = prefix + ".extfeatures"',
+            "machdep.cpu",
+            id="a-feature-sysctl-after-its-prefix",
+        ),
     ],
 )
 def test_the_guard_flags_a_read_of_an_owned_fact(source, token):
@@ -167,6 +218,25 @@ def test_the_guard_flags_a_read_of_an_owned_fact(source, token):
         pytest.param("kernel32.IsWow64Process(h, byref(x))", id="the-older-wow64-call"),
         pytest.param("kernel32.GetCurrentProcess()", id="another-kernel32-call"),
         pytest.param("platform.machine()", id="the-stdlib-machine-name"),
+        # A sysctl name the reader does not read is not one it owns: the reader's own
+        # reads and the owned names are held to one set by the derivation test below.
+        pytest.param(
+            'libc.sysctlbyname(b"machdep.cpu.brand_string", None, size, None, 0)',
+            id="another-machdep-sysctl",
+        ),
+        # A piece counts only when it is a whole constant: prose that names it, a name
+        # spelled like it and the import of a library of that name are not reads.
+        pytest.param(
+            'message = "could not read the cpuinfo of this host"',
+            id="a-message-that-names-a-piece",
+        ),
+        pytest.param("cpuinfo = 1\nprint(cpuinfo)", id="a-name-spelled-like-a-piece"),
+        pytest.param("import cpuinfo", id="an-import-of-a-library-of-that-name"),
+        pytest.param('Path("/proc") / "meminfo"', id="another-joined-proc-file"),
+        pytest.param(
+            'def f():\n    """Joins /proc and cpuinfo."""\n    return 1\n',
+            id="a-docstring-that-names-the-pieces",
+        ),
     ],
 )
 def test_the_guard_passes_what_is_not_a_read(source):
@@ -209,6 +279,131 @@ def test_the_walk_sees_the_reader_read_every_owned_fact():
     assert {token for token, _line in reads_of_the_owned_facts(source)} == set(
         ALL_TOKENS
     )
+
+
+#: The sources the reader reads a file or a sysctl through, by their names in ``Sources``.
+READ_SOURCES = ("read_text", "read_head", "sysctl_int", "sysctl_str")
+#: The ``kernel32`` calls the reader makes that name no fact of their own, and why.
+SUPPORT_CALLS = {"GetCurrentProcess": "the handle ``IsWow64Process2`` is asked about"}
+
+
+def names_the_reader_asks_the_host_for(source: str) -> set[str]:
+    """Every host name ``source`` hands to a read source or looks up on ``kernel32``.
+
+    The reader asks the host for a file or a sysctl through ``self._src("<source>",
+    <name>, ...)`` and for a Windows call through an attribute of ``kernel32``. A name
+    given as a string, as a module constant or as the variable of a loop over a tuple of
+    those is found. A name only its caller knows (the interpreter's own executable) is
+    not, and is not one the guard can name.
+    """
+    tree = ast.parse(source)
+    constants: dict[str, ast.expr] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name):
+                constants[target.id] = node.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            constants[node.target.id] = node.value
+    loops: dict[str, list[ast.expr]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.For) and isinstance(node.target, ast.Name):
+            loops.setdefault(node.target.id, []).append(node.iter)
+
+    def strings(node: ast.expr, seen: frozenset[str]) -> set[str]:
+        if isinstance(node, ast.Constant):
+            return {node.value} if isinstance(node.value, str) else set()
+        found: set[str] = set()
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            for element in node.elts:
+                found |= strings(element, seen)
+        elif isinstance(node, ast.Name) and node.id not in seen:
+            values = list(loops.get(node.id, ()))
+            if node.id in constants:
+                values.append(constants[node.id])
+            for value in values:
+                found |= strings(value, seen | {node.id})
+        return found
+
+    asked: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_src"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value in READ_SOURCES
+        ):
+            asked |= strings(node.args[1], frozenset())
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "kernel32"
+        ):
+            asked.add(node.attr)
+    return asked
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            'self._src("read_text", "/proc/x", 64)', {"/proc/x"}, id="a-text-read"
+        ),
+        pytest.param(
+            'self._src("read_head", "/proc/x", 64)', {"/proc/x"}, id="a-head-read"
+        ),
+        pytest.param('self._src("sysctl_int", "a.b")', {"a.b"}, id="an-integer-sysctl"),
+        pytest.param(
+            'self._src("sysctl_str", "machdep.cpu.brand_string")',
+            {"machdep.cpu.brand_string"},
+            id="a-string-sysctl-that-is-new",
+        ),
+        pytest.param(
+            'NAME = "x.y"\nself._src("sysctl_int", NAME)', {"x.y"}, id="a-constant"
+        ),
+        pytest.param(
+            'KEYS = ("a.b", "c.d")\nfor key in KEYS:\n    self._src("sysctl_str", key)\n',
+            {"a.b", "c.d"},
+            id="a-loop-over-a-tuple-of-strings",
+        ),
+        pytest.param(
+            'A = "a.b"\nB = "c.d"\nKEYS = (A, B)\n'
+            'for key in KEYS:\n    self._src("sysctl_str", key)\n',
+            {"a.b", "c.d"},
+            id="a-loop-over-a-tuple-of-constants",
+        ),
+        pytest.param("kernel32.IsNewCall(1)", {"IsNewCall"}, id="a-kernel32-call"),
+        pytest.param(
+            "kernel32.IsNewCall.restype = 1", {"IsNewCall"}, id="a-kernel32-setting"
+        ),
+        pytest.param(
+            'self._src("read_head", path, 4096)', set(), id="a-name-only-its-caller-has"
+        ),
+        pytest.param(
+            'self._src("getenv", "HOME")', set(), id="a-source-that-reads-no-file"
+        ),
+        pytest.param(
+            "libc.sysctlbyname(key, None, 0)", set(), id="the-live-call-itself"
+        ),
+    ],
+)
+def test_the_derivation_finds_the_names_the_reader_asks_the_host_for(source, expected):
+    """The control for the test below: the walk finds each way the reader names a read."""
+    assert names_the_reader_asks_the_host_for(source) == expected
+
+
+def test_the_guards_names_are_exactly_what_the_reader_asks_the_host_for():
+    """A read added to the reader that the guard does not own turns this red."""
+    asked = names_the_reader_asks_the_host_for(READER.read_text(encoding="utf-8"))
+    assert asked - set(SUPPORT_CALLS) == set(ALL_TOKENS)
+    # Each support call is asked, so the table of them holds nothing that went stale.
+    assert set(SUPPORT_CALLS) <= asked
 
 
 def test_the_walk_covers_the_package_and_passes_the_other_sysctl_read():
