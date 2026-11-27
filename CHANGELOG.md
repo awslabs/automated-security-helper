@@ -111,6 +111,14 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **A repository's config, or one an MCP client delivers, no longer turns back on an
+  off-host scanner the operator turned off.** When the operator's config sets
+  `enabled: false` for detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy,
+  trivy-repo or zizmor, the scanner stays off under a config file inside the scanned
+  tree or a git checkout, or one an MCP client delivered. That holds whether such a
+  config leaves the scanner's section out or sets `enabled: true`, and a config that
+  sets it is named in a warning. Such a config may still turn one of these scanners
+  off.
 
 ### Maintenance
 

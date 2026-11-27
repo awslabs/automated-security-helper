@@ -106,7 +106,10 @@ from automated_security_helper.config.path_trust import (
 from automated_security_helper.config.reporter_trust import (
     confine_reporter_destinations,
 )
-from automated_security_helper.config.restrictions_kept import keep_restrictions
+from automated_security_helper.config.restrictions_kept import (
+    keep_operator_floors,
+    keep_restrictions,
+)
 from automated_security_helper.config.secret_verification_trust import (
     confine_detect_secrets_settings,
 )
@@ -2943,7 +2946,9 @@ def resolve_config(
     # the scanners' own config files and tool versions, then the content
     # database staleness settings, detect-secrets' scan settings,
     # honor_ignore_files and the archive extraction limits. Each replays its
-    # own overrides onto the trusted base itself.
+    # own overrides onto the trusted base itself. The operator's floors
+    # (restrictions_kept.keep_operator_floors) follow the tool versions;
+    # confine_to_trusted_base does not run them, since a merge runs no scanner.
     tier_two_documents = _cached_documents(in_tree, reads)
     tier_two_overrides = list(operator_overrides)
     # The source is recorded on config beside the record, for
@@ -2994,6 +2999,9 @@ def resolve_config(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     confine_tool_versions(
+        config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
+    )
+    keep_operator_floors(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     confine_content_db_staleness(
