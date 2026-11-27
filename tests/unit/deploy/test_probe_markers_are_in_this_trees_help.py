@@ -16,11 +16,14 @@ removes that spelling.
 What is asserted
 ----------------
 This tree's CLI, started as the ``ash`` console script in a subprocess, exits 0 and
-prints each name in the help of its command, in the two environments the probes run in:
+prints each name in the help of its command, in the three environments the probes run in:
 
 * the gate handlers' own, colour off and 200 columns (``NO_COLOR=1``, ``COLUMNS=200``);
-* a buildspec's, the workflow's and the formula's: a pipe with no colour or width
-  setting, so the help is laid out at the default width.
+* the workflow's, colour off and 140 columns on a GitHub runner (``GITHUB_ACTIONS=true``,
+  ``NO_COLOR=1``, ``COLUMNS=140``), where typer treats the output as a terminal, so
+  styling codes other than colour can be in the help the probe reads;
+* a buildspec's and the formula's: a pipe with no colour or width setting, so the help
+  is laid out at the default width.
 
 The gates also read an option's name out of the same help (``--fail-on-incomplete-scanners``
 in ``ash scan fs --help``, which they refuse to scan without), so that name is asserted
@@ -60,6 +63,7 @@ PROBED = [
 #: help goes to a pipe, as a buildspec's command substitution reads it.
 ENVIRONMENTS = {
     "gates": {"NO_COLOR": "1", "COLUMNS": "200"},
+    "workflow": {"GITHUB_ACTIONS": "true", "NO_COLOR": "1", "COLUMNS": "140"},
     "plain": {},
 }
 
