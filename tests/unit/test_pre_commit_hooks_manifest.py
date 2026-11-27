@@ -154,29 +154,96 @@ def test_the_entry_names_an_executable_the_hook_environment_has(hook):
         )
 
 
-@pytest.mark.parametrize("hook", HOOKS, ids=HOOK_IDS)
-def test_the_cli_accepts_the_hook_command_line(hook):
-    """Parses the entry and args with ASH's own CLI, without running a scan.
+def _parse_every_level(command: Any, argv: list[str]) -> Any:
+    """Parse *argv* at every level of the command tree, down to the command that runs.
 
-    The root command rejects options it does not know (`ash scan` would ignore
-    them), and the hooks call the root command, so a misspelled option or a
-    --mode value that does not exist fails here as it would in the hook.
+    A group's `make_context` parses the group's own options and leaves the tokens
+    from the subcommand's name on unparsed, for `invoke` to hand to the subcommand
+    (AshTyperGroup.invoke reads them from the context's protected args). The hooks run
+    `ashv3 scan fs ...`, so parsing the root alone accepts any word after `scan`.
+    This does what `invoke` does between the levels, resolve the subcommand and make
+    its context from the tokens that remain, and calls nothing: no group's callback
+    and no command body runs, so nothing is scanned.
     """
+    ctx = command.make_context(argv[0], argv[1:])
+    while True:
+        remaining = [*ctx._protected_args, *ctx.args]
+        if not remaining or not hasattr(ctx.command, "resolve_command"):
+            return ctx
+        name, subcommand, rest = ctx.command.resolve_command(ctx, remaining)
+        ctx = subcommand.make_context(name, rest, parent=ctx)
+
+
+def _refusal(argv: list[str]) -> str | None:
+    """What ASH's CLI says about *argv*, parsed at every level; None if it accepts."""
     from automated_security_helper.cli.main import app
 
-    command = typer.main.get_command(app)
-    argv = _argv(hook)
     try:
-        command.make_context(argv[0], argv[1:])
+        _parse_every_level(typer.main.get_command(app), argv)
     # Typer vendors its own copy of click, so its usage errors are not
     # click.ClickException; catch broadly and report what the CLI said.
     except Exception as exc:
         format_message = getattr(exc, "format_message", None)
-        reason = format_message() if callable(format_message) else repr(exc)
-        pytest.fail(
-            f"hook {hook['id']!r} runs `{shlex.join(argv)}`, which ASH refuses: "
-            f"{reason}"
-        )
+        return format_message() if callable(format_message) else str(exc) or repr(exc)
+    return None
+
+
+@pytest.mark.parametrize("hook", HOOKS, ids=HOOK_IDS)
+def test_the_cli_accepts_the_hook_command_line(hook):
+    """Parses the entry and args with ASH's own CLI, without running a scan.
+
+    Every level is parsed: the options after `scan fs` belong to the `fs` command, and
+    the root command's own parse never reads them. The commands refuse an option they
+    do not know and a --mode value that does not exist, so a misspelling in a hook
+    fails here as it would in the hook.
+    """
+    argv = _argv(hook)
+
+    reason = _refusal(argv)
+
+    assert reason is None, (
+        f"hook {hook['id']!r} runs `{shlex.join(argv)}`, which ASH refuses: {reason}"
+    )
+
+
+@pytest.mark.parametrize(
+    "words, shown",
+    [
+        pytest.param(
+            ["scan", "fs", "--mode=precommit", "--stagd"],
+            "--stagd",
+            id="a misspelled option",
+        ),
+        pytest.param(
+            ["scan", "fs", "--mode=precomit", "--staged"],
+            "precomit",
+            id="a mode that does not exist",
+        ),
+    ],
+)
+def test_a_planted_misspelling_in_a_hook_command_line_is_refused(words, shown):
+    """The control for the test above: it can fail.
+
+    The words are a hook's own, `scan fs --mode=precommit --staged`, with one broken.
+    Parsed at the root alone, which is what this test did while the hooks ran bare
+    `ashv3 --mode=precommit --staged`, every one of them is accepted.
+    """
+    reason = _refusal(["ashv3", *words])
+
+    assert reason is not None, f"`ashv3 {shlex.join(words)}` was accepted"
+    assert shown in reason, reason
+
+
+def test_the_hook_command_lines_end_at_the_fs_command():
+    """The parse reaches the command the hooks run, not only a group on the way to it."""
+    from automated_security_helper.cli.main import app
+
+    command = typer.main.get_command(app)
+    scanning = [hook for hook in HOOKS if _argv(hook)[1:3] == ["scan", "fs"]]
+    assert scanning, "no hook runs `scan fs`"
+    for hook in scanning:
+        leaf = _parse_every_level(command, _argv(hook))
+        assert leaf.command.name == "fs", hook["id"]
 
 
 @pytest.mark.parametrize(
