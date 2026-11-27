@@ -1306,6 +1306,7 @@ def refuse_relative_extend_path(
     *,
     text: Optional[str] = None,
     path: Optional[Path] = None,
+    read_by_tool: bool = True,
     _depth: int = 0,
 ) -> None:
     """Refuse a gitleaks-style config whose ``[extend] path`` is not absolute.
@@ -1323,8 +1324,10 @@ def refuse_relative_extend_path(
     An empty path is skipped, as both tools skip it. Each file is read as a
     regular file of at most ``TOOL_CONFIG_MAX_BYTES``, and each absolute extended
     file is followed to the tool's own depth limit. A UTF-8 byte order mark at the
-    start of the text, which some editors save, is refused, naming the file or the
-    variable: neither gitleaks nor Betterleaks can read past it.
+    start of the text, which some editors save, is refused in a config the tool
+    reads, naming the file or the variable: gitleaks and Betterleaks each stop at it.
+    In a config the tool does not read (``read_by_tool`` false), and in the files
+    it extends, the mark is skipped and the rest is checked.
 
     A file or text ASH cannot read or parse (missing, not a regular file, too
     large, not UTF-8, not TOML) is refused, not left to the tool, because ASH could
@@ -1338,11 +1341,14 @@ def refuse_relative_extend_path(
             path of the extended file), for the message.
         text: The config's text, when the operator gave text.
         path: The config file, when the operator gave a file.
+        read_by_tool: Whether the tool reads this config. False for a config that
+            another one the operator set takes precedence over, which the tool
+            never opens; its byte order mark is not refused.
 
     Raises:
         ScannerError: ``extend.path`` in the config, or in a file it extends, is
             not absolute; the config or a file it extends cannot be read or
-            parsed, or starts with a byte order mark; or its
+            parsed, or one the tool reads starts with a byte order mark; or its
             ``[extend]`` cannot be read the way the tools read it.
     """
     import tomllib
@@ -1354,15 +1360,19 @@ def refuse_relative_extend_path(
         where = repr(str(path))
     else:
         where = f"the config text in {source}"
-    # chr(0xFEFF) is the byte order mark. Neither gitleaks nor Betterleaks can read a
-    # config that starts with one: each stops at the mark ("invalid character at start
-    # of key") and exits 1. So the config is refused here, naming it, before the tool
-    # is given text it would fail on.
+    # chr(0xFEFF) is the byte order mark. gitleaks 8.30.1 and Betterleaks 1.10.1 each
+    # stop at one at the start of a config file passed with --config ("invalid
+    # character at start of key") and exit 1; a config's text in a variable, and a
+    # file a config extends, are refused the same way. So a config the tool reads is
+    # refused here, naming it, before the tool is given text it would fail on. A
+    # config the tool does not read cannot fail it, so only ASH's parse skips the mark.
     if text.startswith(chr(0xFEFF)):
-        raise ScannerError(
-            f"{source}: {where} starts with a UTF-8 byte order mark, which "
-            f"{tool} cannot read; remove the mark. {tool} is not run."
-        )
+        if read_by_tool:
+            raise ScannerError(
+                f"{source}: {where} starts with a UTF-8 byte order mark, which "
+                f"{tool} cannot read; remove the mark. {tool} is not run."
+            )
+        text = text[1:]
     try:
         data = tomllib.loads(text)
     except (ValueError, RecursionError):
@@ -1394,6 +1404,11 @@ def refuse_relative_extend_path(
             f"that file. Use an absolute path to the file; {tool} is not run."
         )
     if _depth < EXTEND_DEPTH_LIMIT:
+        # The tool opens the file a config extends only when it reads the config.
         refuse_relative_extend_path(
-            tool, extended, path=Path(extended), _depth=_depth + 1
+            tool,
+            extended,
+            path=Path(extended),
+            read_by_tool=read_by_tool,
+            _depth=_depth + 1,
         )

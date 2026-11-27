@@ -245,6 +245,15 @@ def _config_env_value() -> Optional[Tuple[str, str]]:
     return None
 
 
+def _config_env_read_name() -> Optional[str]:
+    """The config variable Betterleaks reads, by its precedence, or None: the path
+    variable ``_config_env_value`` names, else the first TOML variable set."""
+    given = _config_env_value()
+    if given is not None:
+        return given[0]
+    return next((n for n in _config_env_names_set() if n.endswith("_TOML")), None)
+
+
 def _mask_quoted_ignore_entries(log_path: Path) -> None:
     """Remove what Betterleaks quotes from an ignore file in its log at ``log_path``.
 
@@ -703,11 +712,16 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         elif set_vars:
             # A relative extend path in the config would be opened from the
             # scanned tree, so each config variable that is set is read first.
+            # Betterleaks opens only the one it reads by its precedence, so a byte
+            # order mark is refused in that one alone.
             environ = snapshot_environ()
+            read = _config_env_read_name()
             for name in set_vars:
                 value = environ.get(name, "")
                 if name.endswith("_TOML"):
-                    refuse_relative_extend_path("Betterleaks", name, text=value)
+                    refuse_relative_extend_path(
+                        "Betterleaks", name, text=value, read_by_tool=name == read
+                    )
                 else:
                     # An absolute value is left to Betterleaks, which opens it as
                     # given, so it is checked as given: os.path.abspath would drop
@@ -721,6 +735,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                             if is_anchored(value)
                             else Path(os.path.abspath(os.path.expanduser(value)))
                         ),
+                        read_by_tool=name == read,
                     )
             given = _config_env_value()
             if given is not None and not is_anchored(given[1]):

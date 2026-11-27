@@ -179,10 +179,11 @@
   but no drive on Windows, and when ASH cannot read the file (missing, not a regular
   file, larger than 4 MiB, not UTF-8 or not valid TOML). A config that starts with a
   UTF-8 byte order mark is refused, naming the file or the variable, because neither
-  gitleaks nor betterleaks can read past the mark. A config from the environment is now
-  passed to gitleaks as `--config`, so gitleaks no longer looks for `.gitleaks.toml`
-  in the tree. ferret-scan's `--version` check now runs outside the tree with an
-  empty config.
+  gitleaks nor betterleaks can read past the mark; a betterleaks config variable that
+  another takes precedence over, and that betterleaks never opens, is checked with the
+  mark skipped. A config from the environment is now passed to gitleaks as `--config`,
+  so gitleaks no longer looks for `.gitleaks.toml` in the tree. ferret-scan's
+  `--version` check now runs outside the tree with an empty config.
 
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
