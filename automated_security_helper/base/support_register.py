@@ -2400,16 +2400,23 @@ class PinnedBinary:
 
 
 def _gap_paths(os_token: str, arch: str) -> tuple[str, ...]:
-    """The ways out of a missing build for ``os_token`` on ``arch``.
+    """The ways out of a missing build for ``os_token`` on ``arch``, each one a way out
+    the machine that has the gap is offered.
 
     WSL 2, the container image and another operating system keep the processor or land
-    on Linux with it, so they lead out of a Windows or macOS gap. A Linux gap has no
-    such way out: the image runs the same Linux on the same processor. Its way out is
-    another machine: an arm64 one for a missing x86-64 build, an x86-64 one or a CI
-    runner for a missing arm64 build.
+    on Linux with it, so they lead out of a Windows gap. A Mac is offered the image
+    only: WSL 2 is offered from Windows only, and the path to Linux or macOS is offered
+    from Windows and from other systems, where it also names the platform that lacks
+    the build. A Linux gap has no such way out: the image runs the same Linux on the
+    same processor. Its way out is another machine: an arm64 one for a missing x86-64
+    build, an x86-64 one or a CI runner for a missing arm64 build.
     """
-    if os_token != "linux":
+    if os_token == "windows":
         return _HERE_PATHS
+    if os_token == "darwin":
+        return ("container-image",)
+    if os_token != "linux":
+        raise SupportRegisterError(f"no way out is declared for a {os_token} gap")
     if arch == "amd64":
         return ("arm64-host",)
     return ("x86-host-with-features", "ci-runner")
