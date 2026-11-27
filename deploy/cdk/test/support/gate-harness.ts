@@ -101,8 +101,10 @@ export interface GateRun {
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
-  /** The handler's return value, or `{ error }` when it raised. */
+  /** The last invocation's return value, or `{ error }` when it raised. */
   readonly outcome: Record<string, unknown>;
+  /** Every invocation's, in order: one entry unless `invocations` asked for more. */
+  readonly outcomes: Record<string, unknown>[];
   readonly ash: AshRecord[];
   readonly boto3: Boto3Call[];
   readonly gitCalls: string[][];
@@ -123,6 +125,13 @@ export interface GateRunOptions {
   readonly ashScanHelp?: AshScanHelp;
   /** Which ASH the stand-in answers as; see `AshRelease`. Default `with-subject`. */
   readonly ashRelease?: AshRelease;
+  /**
+   * How many pull-request events the one handler module is given, in order. More
+   * than one is a warm Lambda execution environment, whose module-level state
+   * (what the handler learned about its ASH) outlives the first pull request.
+   * Default 1.
+   */
+  readonly invocations?: number;
 }
 
 /**
@@ -144,9 +153,24 @@ export type AshScanHelp = 'listed' | 'missing' | 'coloured' | 'fails';
  * - `without-subject`: ASH 3.8 and earlier. `ash scan fs --help` shows the
  *   subject-less scan's help, since click reads `--help` before it refuses the extra
  *   argument, and there is no `results` command, so `ash results merge --help` is a
- *   usage error.
+ *   usage error;
+ * - `without-subject-refusing`: as `without-subject`, except that `ash scan fs --help`
+ *   refuses the word `fs` with the usage error click gives an extra argument (exit 5,
+ *   "Got unexpected extra argument (fs)") instead of showing help;
+ * - `new-spellings-crash`: `ash scan fs --help` and `ash results merge --help` die with
+ *   a traceback (exit 1) while `ash scan --help` answers as without the subject. A
+ *   caller that read the first failure as "this ASH lacks the command" would pick the
+ *   older spelling, and the second probe would let it;
+ * - `first-probe-crashes`: the first help probe the stand-in is asked, whichever it is,
+ *   dies with a traceback, and every later one answers as an ASH with the subject. A
+ *   transient failure, for a handler that stays warm between pull requests.
  */
-export type AshRelease = 'with-subject' | 'without-subject';
+export type AshRelease =
+  | 'with-subject'
+  | 'without-subject'
+  | 'without-subject-refusing'
+  | 'new-spellings-crash'
+  | 'first-probe-crashes';
 
 let cachedPython: string | undefined;
 
@@ -260,6 +284,7 @@ argv = sys.argv[1:]
 CREDENTIAL_VARIABLES = ${JSON.stringify(CREDENTIAL_VARIABLES)}
 HELP = ${JSON.stringify(scanHelp)}
 RELEASE = ${JSON.stringify(release)}
+PROBES_FILE = ${JSON.stringify(`${recordFile}.probes`)}
 
 
 def scan_help(usage):
@@ -275,11 +300,46 @@ def scan_help(usage):
     sys.exit(0)
 
 
-if argv[:3] == ["scan", "fs", "--help"] or argv[:2] == ["scan", "--help"]:
-    # With the subject, the subject-less form shows the subject's help too.
-    scan_help("Usage: ash scan fs [OPTIONS] [PATH]" if RELEASE == "with-subject" else "Usage: ash scan [OPTIONS]")
-if argv[:3] == ["results", "merge", "--help"]:
-    if RELEASE == "with-subject":
+def crash():
+    """Die as an ASH does when it cannot start: a traceback on stderr and exit 1."""
+    print("Traceback (most recent call last):", file=sys.stderr)
+    print('  File "/usr/local/bin/ash", line 3, in <module>', file=sys.stderr)
+    print("MemoryError", file=sys.stderr)
+    sys.exit(1)
+
+
+def probes_asked_before_this_one():
+    """How many help probes this stand-in was asked before the one now answering."""
+    try:
+        with open(PROBES_FILE, encoding="utf-8") as handle:
+            asked = int(handle.read() or "0")
+    except FileNotFoundError:
+        asked = 0
+    with open(PROBES_FILE, "w", encoding="utf-8") as handle:
+        handle.write(str(asked + 1))
+    return asked
+
+
+SCAN_FS_PROBE = argv[:3] == ["scan", "fs", "--help"]
+SCAN_PROBE = argv[:2] == ["scan", "--help"]
+MERGE_PROBE = argv[:3] == ["results", "merge", "--help"]
+
+if SCAN_FS_PROBE or SCAN_PROBE or MERGE_PROBE:
+    # What this probe meets: the release, or what a transient failure does this time.
+    kind = RELEASE
+    if RELEASE == "first-probe-crashes":
+        kind = "crash" if probes_asked_before_this_one() == 0 else "with-subject"
+    if kind == "crash" or (kind == "new-spellings-crash" and not SCAN_PROBE):
+        crash()
+    if SCAN_FS_PROBE and kind == "without-subject-refusing":
+        print("Usage: ash scan [OPTIONS]", file=sys.stderr)
+        print("Try 'ash scan --help' for help.", file=sys.stderr)
+        print("Error: Got unexpected extra argument (fs)", file=sys.stderr)
+        sys.exit(5)
+    if SCAN_FS_PROBE or SCAN_PROBE:
+        # With the subject, the subject-less form shows the subject's help too.
+        scan_help("Usage: ash scan fs [OPTIONS] [PATH]" if kind == "with-subject" else "Usage: ash scan [OPTIONS]")
+    if kind == "with-subject":
         print("Usage: ash results merge [OPTIONS]")
         sys.exit(0)
     print("Error: No such command 'results'.", file=sys.stderr)
@@ -330,12 +390,16 @@ spec = importlib.util.spec_from_file_location("ash_gate_handler", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 event = json.loads(sys.argv[2])
-try:
-    outcome = module.handler(event, None)
-except BaseException as exc:  # recorded, not swallowed: the test reads it
-    outcome = {"error": repr(exc)}
+outcomes = []
+# One module for every event, as a warm execution environment has it: what the
+# handler remembered about its ASH after one pull request is there for the next.
+for _ in range(int(sys.argv[4])):
+    try:
+        outcomes.append(module.handler(event, None))
+    except BaseException as exc:  # recorded, not swallowed: the test reads it
+        outcomes.append({"error": repr(exc)})
 with open(sys.argv[3], "w", encoding="utf-8") as handle:
-    json.dump(outcome, handle, default=str)
+    json.dump(outcomes, handle, default=str)
 `;
 
 /** A pull request event as EventBridge delivers it. */
@@ -419,43 +483,48 @@ export function runGateHandler(options: GateRunOptions): GateRun {
     fs.writeFileSync(driver, DRIVER);
 
     const searchPath = `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`;
-    const result = spawnSync(python, [driver, handlerFile, JSON.stringify(PULL_REQUEST_EVENT), resultFile], {
-      encoding: 'utf-8',
-      // A minimal environment, so nothing from the developer's shell or the CI
-      // runner reaches the handler: in particular no real AWS credential.
-      env: {
-        PATH: searchPath,
-        PYTHONPATH: pythonPath,
-        PYTHONDONTWRITEBYTECODE: '1',
-        HOME: dir,
-        AWS_REGION: 'us-east-1',
-        AWS_EC2_METADATA_DISABLED: 'true',
-        AWS_ENDPOINT_URL: 'http://127.0.0.1:9',
-        // The Lambda image records its PATH here (Dockerfile.lambda), and the
-        // handler restores it for the scan.
-        ASH_IMAGE_PATH: searchPath,
-        ...FUNCTION_CREDENTIALS,
-        ...options.env,
+    const result = spawnSync(
+      python,
+      [driver, handlerFile, JSON.stringify(PULL_REQUEST_EVENT), resultFile, String(options.invocations ?? 1)],
+      {
+        encoding: 'utf-8',
+        // A minimal environment, so nothing from the developer's shell or the CI
+        // runner reaches the handler: in particular no real AWS credential.
+        env: {
+          PATH: searchPath,
+          PYTHONPATH: pythonPath,
+          PYTHONDONTWRITEBYTECODE: '1',
+          HOME: dir,
+          AWS_REGION: 'us-east-1',
+          AWS_EC2_METADATA_DISABLED: 'true',
+          AWS_ENDPOINT_URL: 'http://127.0.0.1:9',
+          // The Lambda image records its PATH here (Dockerfile.lambda), and the
+          // handler restores it for the scan.
+          ASH_IMAGE_PATH: searchPath,
+          ...FUNCTION_CREDENTIALS,
+          ...options.env,
+        },
       },
-    });
+    );
 
-    const outcome = fs.existsSync(resultFile)
-      ? (JSON.parse(fs.readFileSync(resultFile, 'utf-8')) as Record<string, unknown>)
-      : { error: 'the driver wrote no result' };
+    const outcomes = fs.existsSync(resultFile)
+      ? (JSON.parse(fs.readFileSync(resultFile, 'utf-8')) as Record<string, unknown>[])
+      : [{ error: 'the driver wrote no result' }];
     const gitCalls = readLines<string[]>(gitLog);
-    const clone = gitCalls.find((call) => call[0] === 'clone');
-    const cloneDir = clone ? clone[clone.length - 1] : null;
+    const clones = gitCalls.filter((call) => call[0] === 'clone').map((call) => call[call.length - 1]);
+    const cloneDir = clones.length > 0 ? clones[0] : null;
     const run: GateRun = {
       status: result.status,
       stdout: result.stdout ?? '',
       stderr: result.stderr ?? '',
-      outcome,
+      outcome: outcomes[outcomes.length - 1],
+      outcomes,
       ash: readLines<AshRecord>(ashLog),
       boto3: readLines<Boto3Call>(boto3Log),
       gitCalls,
       cloneDir,
     };
-    removeHandlerWorkdir(cloneDir);
+    for (const clone of clones) removeHandlerWorkdir(clone);
     return run;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

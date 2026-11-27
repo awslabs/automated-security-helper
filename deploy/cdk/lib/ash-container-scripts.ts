@@ -789,10 +789,17 @@ exec "$@"
  * The same probe settles how the directory is named. ASH 3.9 and later scan it as
  * `ash scan fs PATH` and print a deprecation line for the subject-less
  * `ash scan --source-dir PATH`, which goes in ASH v4.0; an `AshVersion` older than
- * 3.9 has no `fs` subject. `ash scan fs --help` is asked first, and only an ASH with
- * the subject prints `scan fs` in it (an older one shows the subject-less scan's
- * help, since click reads `--help` before it refuses the extra argument); without
- * it, `ash scan --help` is asked, and the scan takes `--source-dir`.
+ * 3.9 has no `fs` subject. `ash scan fs --help` is asked first, and only an answer
+ * settles it. Exiting 0 with a help that names `scan fs` is an ASH with the subject.
+ * Exiting 0 with a help that does not (an older one shows the subject-less scan's
+ * help, since click reads `--help` before it refuses the extra argument), or exiting
+ * non-zero with the usage error an older ASH gives for the word `fs`, is an ASH
+ * without it: `ash scan --help` is asked, and the scan takes `--source-dir`. Any
+ * other failure (a crash, an import error, an out-of-memory kill) says nothing about
+ * the ASH's commands. It is not read as an older ASH: the scan is refused through the
+ * same comment-and-REVOKE path as the offline refusal below, nothing is remembered,
+ * and the next scan in the warm execution environment asks again. The spelling chosen
+ * and why, or what a failed probe printed, go to the function's log on stderr.
  *
  * WHAT THIS COSTS: with an `AshVersion` of v3.7.1 or older the gate refuses every
  * pull request until it is deployed with an `AshVersion` whose `ash scan` has the
@@ -850,6 +857,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 
@@ -997,31 +1005,77 @@ COMMIT_ID = re.compile(r"[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?")
 COMPLETENESS_FLAG = "--fail-on-incomplete-scanners"
 # What only the help of an ASH with the subject prints: its own command path.
 SUBJECT_COMMAND = "scan fs"
+# What an ASH without the subject says when it refuses the word 'fs' instead of
+# showing help: click's usage error for an extra argument or an unknown command.
+SUBJECT_REFUSED = re.compile(
+    r"(unexpected extra arguments?|no such command)[^\\n]*\\bfs\\b", re.IGNORECASE)
 _completeness_flag_found = None
 _scan_has_subject = None
 
 
+def _note(message):
+    """A line in the function's log, on stderr."""
+    print("ash-gate: " + message, file=sys.stderr)
+
+
 def _help_text(argv, scan_env):
-    """argv's exit status and its help, plain: colour off, a wide terminal, no ANSI."""
+    """argv's exit status, help and stderr, plain: colour off, a wide terminal, no ANSI."""
     env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
     env.pop("FORCE_COLOR", None)
     probe = _run(argv, env=env)
-    return probe.returncode, re.sub(r"\\x1b\\[[0-9;]*m", "", probe.stdout or "")
+    ansi = r"\\x1b\\[[0-9;]*m"
+    return (probe.returncode, re.sub(ansi, "", probe.stdout or ""),
+            re.sub(ansi, "", probe.stderr or ""))
+
+
+def _probe_failed(probe_argv, status, output):
+    """What a probe that did not answer printed, in the function's log."""
+    _note("%s exited %d; the end of its output: %s"
+          % (" ".join(probe_argv), status, output.strip()[-2000:]))
+
+
+def _ask_subject(scan_env):
+    """Whether this image's ASH has 'ash scan fs': (answer, its help, why).
+
+    Only an answer settles it: exit 0 with a help that names 'scan fs', exit 0 with a
+    help that does not, or a usage error naming 'fs' (an older ASH gives either). Any
+    other failure says nothing about the ASH's commands, so it refuses and nothing is
+    remembered; the next scan asks again.
+    """
+    probe_argv = ["ash", "scan", "fs", "--help"]
+    asked = " ".join(probe_argv)
+    status, help_text, errors = _help_text(probe_argv, scan_env)
+    if status == 0 and SUBJECT_COMMAND in help_text:
+        return True, help_text, "%s exited 0 and its help names '%s'" % (asked, SUBJECT_COMMAND)
+    if status == 0:
+        return False, help_text, ("%s exited 0 and its help does not name '%s', as an ASH "
+                                  "older than 3.9 answers" % (asked, SUBJECT_COMMAND))
+    refusal = SUBJECT_REFUSED.search(errors) or SUBJECT_REFUSED.search(help_text)
+    if refusal:
+        return False, help_text, "%s exited %d refusing the word 'fs' (%s)" % (
+            asked, status, refusal.group(0))
+    _probe_failed(probe_argv, status, errors or help_text)
+    raise RuntimeError("'ash scan fs --help' exited %d without saying it has no 'fs' subject, so "
+                       "this image's ASH could not be checked for how it names a directory or "
+                       "for %s. Refusing to scan; the next scan asks again." % (status, COMPLETENESS_FLAG))
 
 
 def _check_completeness_flag(scan_env):
     """Refuse an ASH that cannot fail an incomplete scan. Returns whether it has 'scan fs'."""
     global _completeness_flag_found, _scan_has_subject
     if _completeness_flag_found is None:
-        status, help_text = _help_text(["ash", "scan", "fs", "--help"], scan_env)
-        has_subject = status == 0 and SUBJECT_COMMAND in help_text
+        has_subject, help_text, why = _ask_subject(scan_env)
         if not has_subject:
-            status, help_text = _help_text(["ash", "scan", "--help"], scan_env)
+            probe_argv = ["ash", "scan", "--help"]
+            status, help_text, errors = _help_text(probe_argv, scan_env)
             if status != 0:
+                _probe_failed(probe_argv, status, errors or help_text)
                 raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
                                    "checked for %s. Refusing to scan." % (status, COMPLETENESS_FLAG))
         _completeness_flag_found = COMPLETENESS_FLAG in help_text
         _scan_has_subject = has_subject
+        _note("scanning with %s: %s" % (
+            "'ash scan fs PATH'" if has_subject else "'ash scan --source-dir PATH'", why))
     if not _completeness_flag_found:
         raise RuntimeError(
             "The ASH in this image has no %s option, so a scan whose scanners never ran "
