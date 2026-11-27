@@ -3864,6 +3864,15 @@ global_settings:
         sample source under the canonical form. They pin the record format, so
         a computed value would check the code against itself. Content digests,
         not secrets.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/config/test_a_released_default_denied_paths_list_stays_a_shipped_default.py
+      line_start: 73
+      line_end: 73
+      reason: >-
+        Test code. The SHA-256 of the v3.8.0 default denied_paths entries,
+        sorted and joined by newlines, computed from the release tag's bytes.
+        The test compares its fixture with it, so it must stay a literal to pin
+        anything. A content digest, not a secret.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/mcp_config/test_json_spans.py
       reason: >-
@@ -4060,6 +4069,23 @@ global_settings:
         ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; a content digest,
         not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.50.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the pydantic-core 2.50.5
+        sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/pydantic-core/2.50.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        pydantic-core 2.50.5: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rpds-py/0.30.0/harvest-manifest.json
       line_start: 6
       line_end: 6
@@ -4079,6 +4105,23 @@ global_settings:
         ash-agent-plugins/agentic-coding/transpiler/uv.lock both pin; a content
         digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rpds-py/2026.9.1/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the rpds-py 2026.9.1
+        sdist that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/rpds-py/2026.9.1/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        rpds-py 2026.9.1: the scan inside the image writes its output to /out,
+        outside its source directory, so the converted file is reported by its
+        absolute path. Line 6 is the sha256 digest of the sdist that uv.lock pins;
+        a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rtoml/0.13.0/harvest-manifest.json
       line_start: 6
       line_end: 6
@@ -4092,6 +4135,23 @@ global_settings:
       reason: >-
         False positive. The container scan's spelling of the manifest above for
         rtoml 0.13.0: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/rtoml/0.14.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the rtoml 0.14.0 sdist
+        that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/rtoml/0.14.0/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        rtoml 0.14.0: the scan inside the image writes its output to /out, outside
         its source directory, so the converted file is reported by its absolute
         path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
         digest, not a secret.
@@ -4113,6 +4173,23 @@ global_settings:
         path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
         digest, not a secret.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/ruff/0.17.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the ruff 0.17.5 sdist
+        that uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/ruff/0.17.5/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for
+        ruff 0.17.5: the scan inside the image writes its output to /out, outside
+        its source directory, so the converted file is reported by its absolute
+        path. Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/uv/0.13.5/harvest-manifest.json
       line_start: 6
       line_end: 6
@@ -4129,6 +4206,23 @@ global_settings:
         source directory, so the converted file is reported by its absolute path.
         Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
         digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: .ash/ash_output/converted/sdist-lock-harvester/sdist-locks/uv/0.13.9/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. Line 6 is the sha256 digest of the uv 0.13.9 sdist that
+        uv.lock pins; a content digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: /out/converted/sdist-lock-harvester/sdist-locks/uv/0.13.9/harvest-manifest.json
+      line_start: 6
+      line_end: 6
+      reason: >-
+        False positive. The container scan's spelling of the manifest above for uv
+        0.13.9: the scan inside the image writes its output to /out, outside its
+        source directory, so the converted file is reported by its absolute path.
+        Line 6 is the sha256 digest of the sdist that uv.lock pins; a content
+        digest, not a secret.
     # Harvested third-party Cargo.lock advisories. The sdist-lock harvester
     # extracts the Cargo.lock embedded in a dependency's PyPI sdist so grype
     # and trivy can read the upstream project's own build pins. Those pins are
@@ -4137,17 +4231,21 @@ global_settings:
     # crate and this repository taking that release. Each entry expires so the
     # advisory resurfaces and the pin bump is reconsidered.
     #
-    # Only polars-runtime-32 still embeds an advisory-hit crate: 1.44.2, the
-    # last polars 1.x release, pins rustls 0.23.43, and pyproject.toml holds
-    # polars below 2.0. ruff, pydantic-core, rpds-py, rtoml and uv are locked
-    # at releases whose sdist-embedded Cargo.locks carry the fixed zip (9.0.5),
-    # pyo3 (0.29 or later) and rustls (0.23.46), so they carry no entry here;
-    # tests/unit/config/test_no_stale_sdist_crate_suppressions.py fails if one
-    # comes back or a lock falls below a fixed release. One entry per scanner
-    # spelling (trivy's bare GHSA id, grype's id with the crate name appended),
-    # each pinned to the locked rustls, as tests/utils/sdist_harvest_oracle.py
-    # holds them. .ash/.ash_alpha_plugins.yaml carries no copy: it disables
-    # syft, and the harvester writes nothing while syft is disabled
+    # Two harvested lockfiles still embed an advisory-hit crate.
+    # polars-runtime-32 1.44.2, the last polars 1.x release, pins rustls
+    # 0.23.43, and pyproject.toml holds polars below 2.0. rpds-py 0.30.0, the
+    # release ash-agent-plugins/agentic-coding/transpiler/uv.lock pins, embeds
+    # pyo3 0.27.2; uv.lock itself pins rpds-py 2026.9.1. ruff, pydantic-core,
+    # rtoml and uv, and rpds-py in uv.lock, are locked at releases whose
+    # sdist-embedded Cargo.locks carry the fixed zip (9.0.5), pyo3 (0.29 or
+    # later) and rustls (0.23.46), so they carry no entry here.
+    # tests/unit/config/test_no_stale_sdist_crate_suppressions.py reads every
+    # harvested uv.lock and holds these entries to the versions those locks
+    # pin. One entry per scanner spelling (trivy's bare GHSA id, grype's id
+    # with the crate name appended), each pinned to the embedded crate version;
+    # the four polars entries are the ones tests/utils/sdist_harvest_oracle.py
+    # holds. .ash/.ash_alpha_plugins.yaml carries no copy: it disables syft,
+    # and the harvester writes nothing while syft is disabled
     # (converters/sdist_lock_harvester.py), so that scan has no harvested
     # lockfile to report on.
     - rule_id: GHSA-2mjx-qc3c-rqvc
@@ -4198,6 +4296,46 @@ global_settings:
         polars frames from rows in memory and calls no polars IO function, so
         polars' TLS client is never used. No polars 1.x release embeds a
         fixed rustls.
+    - rule_id: GHSA-36hh-v3qg-5jq4
+      path: "**/sdist-locks/rpds-py/0.30.0/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.27.2"
+      expires: "2026-12-27"
+      reason: >-
+        trivy's id. pyo3 0.27.2 inside rpds-py 0.30.0's sdist-embedded
+        Cargo.lock (fixed in 0.29.0). rpds-py 0.30.0 is the release
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; uv.lock pins
+        rpds-py 2026.9.1, which embeds pyo3 0.29.3. The transpiler lock taking a
+        release that embeds a fixed pyo3 removes the finding.
+    - rule_id: GHSA-36hh-v3qg-5jq4-pyo3
+      path: "**/sdist-locks/rpds-py/0.30.0/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.27.2"
+      expires: "2026-12-27"
+      reason: >-
+        grype's id for the same pyo3 0.27.2 advisory in rpds-py 0.30.0's
+        sdist-embedded Cargo.lock, the release
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock pins.
+    - rule_id: GHSA-chgr-c6px-7xpp
+      path: "**/sdist-locks/rpds-py/0.30.0/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.27.2"
+      expires: "2026-12-27"
+      reason: >-
+        trivy's id. pyo3 0.27.2 inside rpds-py 0.30.0's sdist-embedded
+        Cargo.lock (fixed in 0.29.0). rpds-py 0.30.0 is the release
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock pins; uv.lock pins
+        rpds-py 2026.9.1, which embeds pyo3 0.29.3. The transpiler lock taking a
+        release that embeds a fixed pyo3 removes the finding.
+    - rule_id: GHSA-chgr-c6px-7xpp-pyo3
+      path: "**/sdist-locks/rpds-py/0.30.0/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.27.2"
+      expires: "2026-12-27"
+      reason: >-
+        grype's id for the same pyo3 0.27.2 advisory in rpds-py 0.30.0's
+        sdist-embedded Cargo.lock, the release
+        ash-agent-plugins/agentic-coding/transpiler/uv.lock pins.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed
     # over every workflow on the claim that interpolations were author-defined;
     # removing it surfaced shell injection through `${{ inputs.* }}` in
