@@ -927,16 +927,24 @@ def test_a_document_of_another_shape_is_refused_not_guessed_at():
         {"not": "sarif"},
         {"error": "the tool could not read the template", "code": 2},
         {"$schema": "https://example.com/other.json", "note": "x"},
+        {"$schema": "https://json.schemastore.org/sarif-2.1.0.json", "note": "x"},
         {"results": [{"ruleId": "r"}]},
     ],
-    ids=["one unknown key", "a tool's error object", "another schema", "a result list"],
+    ids=[
+        "one unknown key",
+        "a tool's error object",
+        "another schema",
+        "SARIF's own schema name and no run or version",
+        "a result list",
+    ],
 )
 def test_a_json_object_that_is_not_a_sarif_log_is_refused_and_not_repaired_to_an_empty_one(
     raw,
 ):
-    """Every key such a document holds is one the model does not define, so
-    dropping them would leave a report with no run, which a reader takes for a
-    scan that found nothing."""
+    """The rule is that a document is a SARIF log when it has a ``runs`` or a
+    ``version`` key; a ``$schema`` key does not make it one, though the model
+    defines it. Such a document is refused as it is: dropping its other keys would
+    leave a report with no run, which a reader takes for a scan that found nothing."""
     record = IngestRecord()
 
     with pytest.raises(ValidationError):

@@ -36,11 +36,12 @@ from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import (
 pytestmark = pytest.mark.unit
 
 
-def _file_level_result(uri: str) -> dict:
-    """A result as gitleaks 8.30.1 writes one for ``pkcs12-file`` (captured)."""
+def _file_level_result(uri: str, rule: str = "pkcs12-file") -> dict:
+    """A result as gitleaks 8.30.1 writes one for ``pkcs12-file`` (captured). *rule*
+    names another file rule where a test needs two results told apart."""
     return {
-        "ruleId": "pkcs12-file",
-        "message": {"text": "pkcs12-file has detected secret for file " + uri + "."},
+        "ruleId": rule,
+        "message": {"text": rule + " has detected secret for file " + uri + "."},
         "locations": [
             {
                 "physicalLocation": {
@@ -234,7 +235,7 @@ def test_each_dropped_region_is_noted_with_its_place_and_its_rule():
     raw = _report(
         _file_level_result("a.p12"),
         _result("b.py", "github-pat", 3, column=7),
-        _file_level_result("c.pfx"),
+        _file_level_result("c.pfx", "keystore-file"),
     )
     record = IngestRecord()
 
@@ -242,12 +243,13 @@ def test_each_dropped_region_is_noted_with_its_place_and_its_rule():
 
     summary = record.summary()
     assert summary["repaired"] == 2 and summary["left_out"] == 0
+    # Two different rules, so a note paired with the wrong result would show.
     assert [
         (e["action"], e["code"], e["pointer"], e["rule_id"])
         for e in summary["elements"]
     ] == [
         ("dropped", "region_line_unreadable", _region_of(0), "pkcs12-file"),
-        ("dropped", "region_line_unreadable", _region_of(2), "pkcs12-file"),
+        ("dropped", "region_line_unreadable", _region_of(2), "keystore-file"),
     ]
 
 

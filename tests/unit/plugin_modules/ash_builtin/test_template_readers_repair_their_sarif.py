@@ -541,7 +541,10 @@ def test_cfn_lint_loses_only_the_template_it_cannot_repair_and_counts_the_other(
 
 
 def test_cfn_lint_records_every_template_of_a_batch_it_cannot_repair(tmp_path):
-    repo = _lint_repo(tmp_path, "a.yaml")
+    """Two templates, and every run of them is refused: the batch of two, then each
+    template on its own. Both are unevaluated and the repairs made on the way to the
+    refusals are counted for none."""
+    repo = _lint_repo(tmp_path, "a.yaml", "b.yaml")
 
     def make(files):
         return _bytes(
@@ -552,13 +555,15 @@ def test_cfn_lint_records_every_template_of_a_batch_it_cannot_repair(tmp_path):
             )
         )
 
+    fake = _WritesTheBatch(make)
     scanner = _lint(repo)
 
-    report = _lint_scan(scanner, _WritesTheBatch(make), repo)
+    report = _lint_scan(scanner, fake, repo)
 
+    assert [len(call[call.index("--") + 1 :]) for call in fake.calls] == [2, 1, 1]
     assert report.runs[0].results == []
-    assert scanner.targets_attempted == 1 and scanner.targets_failed == 1
-    assert sorted(scanner.unevaluated_targets) == ["a.yaml"]
+    assert scanner.targets_attempted == 2 and scanner.targets_failed == 2
+    assert sorted(scanner.unevaluated_targets) == ["a.yaml", "b.yaml"]
     assert scanner.output_ingest_record is None
 
 

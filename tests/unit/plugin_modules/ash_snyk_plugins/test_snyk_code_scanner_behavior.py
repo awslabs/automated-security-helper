@@ -626,20 +626,26 @@ def test_exit_code_one_without_a_results_file_is_not_a_clean_scan(
 def test_unreadable_results_file_is_wrapped_in_scanner_error(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
-    """An error outside the SARIF try block surfaces as ScannerError."""
+    """A file that is not JSON is read before the try block that refuses a document
+    that is not SARIF, so it surfaces as the scan failing with the decoder's own
+    text, not as "not SARIF ASH can read"."""
 
     def _write_invalid_json(self, command, **kwargs):
         destination = next(
             arg.split("=", 1)[1] for arg in command if arg.startswith(SARIF_OUTPUT_FLAG)
         )
-        # json.load() happens before the try block that catches parse errors.
+        # read_json_tolerant() happens before the try block that refuses a document.
         Path(destination).write_text("{not valid json at all", encoding="utf-8")
         return {"stdout": "", "stderr": "", "returncode": 0}
 
     subprocess_double.side_effect = _write_invalid_json
 
-    with pytest.raises(ScannerError, match="Snyk Code scan failed"):
+    with pytest.raises(
+        ScannerError, match="Snyk Code scan failed: Expecting property name"
+    ) as raised:
         scanner.scan(target=populated_source, target_type="source")
+
+    assert "not SARIF ASH can read" not in str(raised.value)
 
 
 # ---------------------------------------------------------------------------

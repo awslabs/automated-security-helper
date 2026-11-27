@@ -1303,7 +1303,10 @@ def _cyclonedx_component_count(raw: Any) -> int:
 
 
 def _is_a_sarif_log(raw: Any) -> bool:
-    """A SARIF log carries ``runs`` or ``version``; the spec requires both."""
+    """A JSON object is taken for a SARIF log when it has a ``runs`` or a ``version``
+    key. The spec requires both, but one is enough to say the tool meant SARIF: the
+    other is then repaired or refused like any part. A ``$schema`` key alone is not
+    enough, though the model defines it."""
     return isinstance(raw, dict) and ("runs" in raw or "version" in raw)
 
 
