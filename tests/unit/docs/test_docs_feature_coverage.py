@@ -3429,7 +3429,10 @@ def test_check_exits_2_when_the_results_write_it_reads_exit_1_by_is_gone(
     tmp_path, monkeypatch, capsys
 ):
     """A rename of the results write must fail the check loudly, naming it, never
-    leave every exit-1 example silently uncovered (or covered)."""
+    leave every exit-1 example silently uncovered (or covered). It stops as a
+    measurement error: the catch-all that prints a traceback for an error nothing
+    expected exits 2 too, and its traceback names the missing attribute as well, so
+    the exit and the name alone cannot tell the deliberate stop from a crash."""
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
     cov = _cov()
@@ -3459,8 +3462,11 @@ def test_check_exits_2_when_the_results_write_it_reads_exit_1_by_is_gone(
         ]
     )
 
-    assert code == 2
-    assert "_write_results_file" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert code == 2, err
+    assert "_write_results_file" in err
+    assert "measurement error" in err
+    assert "Traceback" not in err
 
 
 #: Blocks expecting exit 1 that run a scan which writes its results and then, as a
@@ -3483,6 +3489,24 @@ SCANS_SHARING_AN_EXIT_1_BLOCK_WITH_A_REFUSAL = [
         },
         {"command:ash config init"},
         id="a-scan-then-config-init-refusing-a-second-config-source",
+    ),
+    pytest.param(
+        "ash scan --offline --no-fail-on-findings --output-dir out\n"
+        "ash results report --output-dir out --format aws-security-hub",
+        "command:ash results report",
+        "dependencies_ok",
+        {
+            "command:ash scan",
+            "option:ash scan --offline",
+            "option:ash scan --fail-on-findings",
+            "option:ash scan --output-dir",
+        },
+        {
+            "command:ash results report",
+            "option:ash results report --format",
+            "option:ash results report --output-dir",
+        },
+        id="a-scan-then-a-report-whose-reporters-dependency-check-refuses",
     ),
 ]
 
@@ -4827,6 +4851,66 @@ SAVES_A_LATER_BLOCK_MAY_HAVE_CHANGED = [
         SEVERITY_ROWS | {"config:project_name"},
         id="a-named-config-rewritten-before-the-scan-that-names-it",
     ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ashrc.yaml"),
+            _scan_block("printf 'project_name: demo\\n' > .ash.yaml"),
+            _scan_block(),
+        ),
+        SEVERITY_ROWS | {"config:project_name"},
+        id="outranked-by-a-file-a-block-wrote",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(
+                "project_name: demo\nglobal_settings:\n"
+                "  severity_threshold: HIGH\n  ignore_paths: []",
+                save_as=".ash.yaml",
+            ),
+            _scan_block("sed -i '/severity_threshold/d' .ash.yaml"),
+            _scan_block(),
+        ),
+        {"config:global_settings.severity_threshold"},
+        id="edited-in-place",
+    ),
+    pytest.param(
+        _a_save_then(
+            f"{FENCE}python\nfrom pathlib import Path\n\n"
+            f"Path('.ash.yaml').write_text('{REWRITTEN}\\n', encoding='utf-8')\n{FENCE}",
+            _scan_block(),
+        ),
+        SEVERITY_ROWS | {"config:project_name"},
+        id="rewritten-by-a-python-block",
+    ),
+    pytest.param(
+        _a_save_then(
+            f"{FENCE}python\nimport os\n\nfor name in os.listdir('.'):\n"
+            f"    if name.startswith('.ash'):\n        os.remove(name)\n{FENCE}",
+            _scan_block(),
+        ),
+        SEVERITY_ROWS,
+        id="removed-by-a-python-block-that-never-spells-its-name",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY),
+            _scan_block("ash config init --force"),
+            _scan_block(),
+        ),
+        SEVERITY_ROWS,
+        id="replaced-by-ash-config-init",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY),
+            _scan_block(
+                "ash config update --set global_settings.severity_threshold=LOW"
+            ),
+            _scan_block(),
+        ),
+        SEVERITY_ROWS,
+        id="edited-by-ash-config-update",
+    ),
 ]
 
 
@@ -4844,7 +4928,13 @@ def test_a_save_a_later_block_may_have_rewritten_or_removed_counts_for_nothing(
     written over or removed counts for nothing. What the block wrote never counts
     either (docs/content/contributing/documentation.md: the check cannot see a file
     that a shell block writes). A path written with ``./`` or matched by a glob names
-    the file as much as its own spelling does."""
+    the file as much as its own spelling does.
+
+    The same holds where a block changes what the scan reads without touching the
+    save: a file it writes under a name discovery ranks above the saved one, an edit
+    in place (``sed -i``), ``ash config init`` and ``ash config update``, which write
+    a configuration whose name their command line need not spell, and a python block,
+    whose code the check does not read, even one that never spells the name."""
     run = _loading_run(tmp_path, text=text)
 
     result = _covered(run, _config_features())
@@ -4919,6 +5009,98 @@ def test_the_config_the_trust_model_page_saves_counts_for_its_passing_scan(tmp_p
     result = _covered(run, _config_features())
 
     assert shown <= result, sorted(shown - result)
+
+
+#: Pages whose loading block points its scan at another configuration or directory
+#: where the block's text does not say so: in the marker's env, or by running the
+#: scan through env -C.
+SCANS_A_BLOCK_POINTS_ELSEWHERE_OUTSIDE_ITS_TEXT = [
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _saved_config("project_name: demo", save_as=TEAM),
+            f'<!-- doctest: run env="ASH_CONFIG={TEAM}" -->\n{_scan_block()}',
+        ),
+        id="ash-config-in-the-markers-env",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            '<!-- doctest: run env="ASH_SOURCE_DIR=sub" -->\n'
+            + _scan_block("mkdir -p sub\nash scan --offline"),
+        ),
+        id="ash-source-dir-in-the-markers-env",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _saved_config("project_name: demo", save_as="sub/.ash.yaml"),
+            _scan_block("env -C sub ash scan --offline"),
+        ),
+        id="a-scan-run-through-env-c",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _saved_config("project_name: demo", save_as="sub/.ash.yaml"),
+            _scan_block("env --chdir=sub ash scan --offline"),
+        ),
+        id="a-scan-run-through-env-chdir",
+    ),
+]
+
+
+@pytest.mark.parametrize("text", SCANS_A_BLOCK_POINTS_ELSEWHERE_OUTSIDE_ITS_TEXT)
+def test_a_save_counts_for_nothing_where_the_block_points_its_scan_elsewhere_unwritten(
+    tmp_path, text
+):
+    """The saved-config rules read ASH_CONFIG, ASH_SOURCE_DIR and a change of
+    directory from a block's text, and a block can set each where its text does not
+    show it. The runner puts a marker's env= variables in that block's environment
+    (docs_runner.py, ``marker_env``), so ``ASH_CONFIG`` there names the file the scan
+    reads instead of discovering one and ``ASH_SOURCE_DIR`` the directory discovery
+    searches. ``env -C DIR`` and ``env --chdir=DIR`` start the scan in another
+    directory. In each case the save discovery would pick in the working directory
+    is not the file the scan read, so it counts for nothing."""
+    run = _loading_run(tmp_path, text=text)
+
+    result = _covered(run, _config_features())
+
+    _assert_absent(SEVERITY_ROWS, result, _config_features())
+
+
+#: Pages whose loading block sets its environment in ways that leave its scan in
+#: the working directory, discovering: (page).
+SCANS_WHOSE_ENVIRONMENT_POINTS_NOWHERE_ELSE = [
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            '<!-- doctest: run env="ASH_OFFLINE=YES,LANG=C" -->\n' + _scan_block(),
+        ),
+        id="a-markers-env-that-names-neither-variable",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _scan_block("env LANG=C ash scan --offline"),
+        ),
+        id="a-scan-run-through-env-that-sets-no-directory",
+    ),
+]
+
+
+@pytest.mark.parametrize("text", SCANS_WHOSE_ENVIRONMENT_POINTS_NOWHERE_ELSE)
+def test_a_save_still_counts_where_the_blocks_environment_points_nowhere_else(
+    tmp_path, text
+):
+    """The other half: a marker's env that sets other variables, and ``env`` that
+    only sets a variable for the scan, leave the scan discovering in the working
+    directory, so the save counts."""
+    run = _loading_run(tmp_path, text=text)
+
+    result = _covered(run, _config_features())
+
+    assert SEVERITY_ROWS <= result, sorted(SEVERITY_ROWS - result)
 
 
 def _discovery_order(tmp_path: Path, names) -> list[str]:
@@ -5197,6 +5379,7 @@ def test_a_config_discovery_the_check_cannot_call_stops_it_naming_discovery(
     assert code == 2, err
     assert "discover_config_source" in err
     assert "measurement error" in err
+    assert "Traceback" not in err
 
 
 DISCOVERED = _saved_config(SEVERITY, save_as=".ash.yaml")
