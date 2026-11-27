@@ -679,8 +679,8 @@ jobs:
 """
 
 
-#: The same workflow with the runner a required input and no default, so every caller
-#: has to name it.
+#: The same workflow with the runner declared required and given no default, so its
+#: label is the one each call passes.
 CALLEE_REQUIRING_A_RUNNER = CALLEE.replace(
     "        default: ubuntu-latest\n", "        required: true\n"
 )
@@ -1052,9 +1052,9 @@ class TestACallToAReusableWorkflow:
             ci.check_runner_labels(bad, called=called)
 
     def test_a_required_input_is_checked_at_each_call_and_not_in_the_callee(self):
-        """Every caller has to pass a required input, and the check of each call reads
-        what it passes. Read on its own, the called workflow names no label from it
-        and is not refused for having no default."""
+        """A required input with no default is read from the calls, and the check of
+        each call reads what it passes. Read on its own, the called workflow names no
+        label from it and is not refused for having no default."""
         called = {CALLEE_USES: ci.parse_workflow(CALLEE_REQUIRING_A_RUNNER)}
         callee = called[CALLEE_USES]
         assert ci.check_runner_labels(callee) == set()
@@ -1074,9 +1074,10 @@ class TestACallToAReusableWorkflow:
     def test_an_input_a_caller_may_leave_out_is_still_read_for_its_default(
         self, declared
     ):
-        """GitHub gives a string input that is left out the value "", so the runs-on
-        would be empty, and no call passes a label for the check to read. Only an
-        input that every caller has to pass is the caller's."""
+        """GitHub's reference gives a string input with no default the value "", so a
+        runs-on that reads one a call leaves out would be empty, and no call passes a
+        label for the check to read. Only an input declared required, with no default,
+        is read from the calls."""
         optional = CALLEE.replace("        default: ubuntu-latest\n", declared)
         assert "required: true" not in optional
         with pytest.raises(ci.UnsupportedExpression, match="no string default"):

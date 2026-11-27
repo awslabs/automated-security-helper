@@ -261,8 +261,8 @@ def axis_cells(matrix: Mapping[str, Any], event: str = "push") -> list[dict[str,
     An exclude entry names axes. A key it names that is no axis (a typo, or a key only an
     ``include`` adds) is refused with UnsupportedMatrix, on every event and for a void
     entry too: GitHub rejects the workflow, and an entry that matched nothing would leave
-    the legs looking right. An entry with no key at all is refused the same way: it would
-    match every leg, since every one of no keys matches, and drop them all.
+    the legs looking right. An entry with no key at all is refused too, on every event:
+    it would match every leg, since every one of no keys matches, and drop them all.
     """
     _check_event(event)
     _refuse_unread_expressions(matrix)
@@ -685,14 +685,15 @@ def _input_default(workflow: Mapping[str, Any] | None, name: str, text: str) -> 
 
 
 def _every_caller_passes(workflow: Mapping[str, Any] | None, name: str) -> bool:
-    """Whether every caller has to pass the ``workflow_call`` input ``name``, and the
-    input has no string default to fall back on.
+    """Whether ``workflow`` declares the ``workflow_call`` input ``name`` as required,
+    with no string default.
 
-    GitHub's workflow syntax reference says of ``required`` that the input "must be
-    supplied", so the label such an input gives a runs-on is one each caller wrote, and
-    check_runner_labels reads it in that call. It also says that a string input left out
-    with no default is "", so an input that is not required can leave a runs-on empty,
-    and no call names a label for it:
+    The label such an input gives a runs-on is the one a call passes, and
+    check_runner_labels reads it in that call, so the workflow read on its own names
+    none. A call that leaves the input out names no label and is not refused here. An
+    input not declared required is "" when a call leaves it out, as GitHub's workflow
+    syntax reference says of a string input with no default, so its runs-on can be
+    empty and no call names a label for it:
     https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
     """
     declared = _declared_input(workflow, name)
@@ -732,8 +733,8 @@ def runs_on_labels(
 
     Read: a literal label, ``${{ matrix.<key> }}``, the override shape above, and
     ``${{ inputs.<name> }}``. That is the default of the ``workflow_call`` input of
-    ``workflow``, or no label when the input is required and has no default: each call
-    passes its label, and _called_labels reads it there. A job that calls a reusable
+    ``workflow``, or no label when the input is declared required with no default:
+    _called_labels reads the label a call passes there. A job that calls a reusable
     workflow names none: check_runner_labels reads what its ``with:`` passes. Anything
     else raises. So does a matrix key that the job's matrix does not name or that a leg
     lacks. The override needs the axis it compares to be named, and an ``os`` in every
