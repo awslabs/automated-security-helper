@@ -316,9 +316,9 @@ def is_under_test_scratch(path: Path) -> bool:
 #: The base temp directory the run shares, resolved: the ``--basetemp`` it was given or,
 #: in an xdist worker, the directory its own ``popen-gwN`` one sits in. None in a process
 #: that cannot tell (the run was given none and this is not a worker); pytest's default
-#: place is then under ``PYTEST_DEBUG_TEMPROOT``, which ``pytest_temp_trees_inside``
-#: reads for itself. ``record_run_basetemp`` sets it, once per process, from the root
-#: conftest's ``pytest_configure``.
+#: place is then a ``pytest-of-<user>`` directory under ``PYTEST_DEBUG_TEMPROOT``, which
+#: ``pytest_temp_trees_inside`` reads for itself. ``record_run_basetemp`` sets it, once
+#: per process, from the root conftest's ``pytest_configure``.
 RUN_BASETEMP: Optional[Path] = None
 
 
@@ -343,16 +343,51 @@ def record_run_basetemp(config) -> None:
     RUN_BASETEMP = run_basetemp_of(config)
 
 
+def _pytest_user_dirs(temproot: Optional[str], top: Path) -> list[Path]:
+    """The ``pytest-of-<user>`` directories in ``temproot`` that can lie inside ``top``.
+
+    pytest keeps its numbered base directories there, in ``pytest-of-<user>`` (or
+    ``pytest-of-unknown`` when the user's name cannot be used in a directory name).
+    Nothing in a directory lies inside ``top`` unless the directory is ``top`` or lies
+    inside it, so any other temp root is not listed: the usual one is the system's, and
+    a walk of the checkout has no business reading what everything else keeps there. A
+    temp root that cannot be listed gives none, and the walk then meets pytest's trees
+    as it did before they were left out.
+    """
+    if not temproot:
+        return []
+    try:
+        resolved = Path(temproot).resolve()
+        if not resolved.is_relative_to(top):
+            return []
+        with os.scandir(resolved) as entries:
+            return [
+                Path(entry.path)
+                for entry in entries
+                if entry.name.startswith("pytest-of-") and entry.is_dir()
+            ]
+    except (OSError, RuntimeError):
+        return []
+
+
 def pytest_temp_trees_inside(root: Path) -> list[Path]:
     """pytest's own temp trees that lie strictly inside ``root``, resolved.
 
-    ``RUN_BASETEMP``, and ``PYTEST_DEBUG_TEMPROOT``, where pytest puts
-    ``pytest-of-<user>/pytest-<n>`` when it is given no ``--basetemp`` (tests/conftest.py
-    sets it to the system's temp directory when the developer has not). Under pytest-xdist
-    every worker's ``tmp_path`` directories are made, filled and deleted in them while a
-    walk of ``root`` runs, as in the scratch tree. They are inside ``root`` only when the
-    run was told to keep them there: CI puts them in the runner's temp directory, and a
-    default run in the system's.
+    Two places, read differently:
+
+    * ``RUN_BASETEMP``, the directory the run was given with ``--basetemp``. pytest
+      empties it and makes it afresh, so all of it is pytest's and it is listed whole.
+    * The ``pytest-of-<user>`` directories in ``PYTEST_DEBUG_TEMPROOT``, where pytest
+      puts ``pytest-<n>`` when it is given no ``--basetemp`` (tests/conftest.py sets the
+      variable to the system's temp directory when the developer has not). The variable
+      names a directory the developer chose, which can hold anything else as well,
+      source included. Only the directories pytest made are listed, not the one that
+      holds them.
+
+    Under pytest-xdist every worker's ``tmp_path`` directories are made, filled and
+    deleted in these while a walk of ``root`` runs, as in the scratch tree. They are
+    inside ``root`` only when the run was told to keep them there: CI puts them in the
+    runner's temp directory, and a default run in the system's.
 
     A tree that is ``root`` or holds it is not listed. Every walk of a ``tmp_path`` is a
     walk inside the base temp directory, and a root is not skipped for being where pytest
@@ -360,7 +395,8 @@ def pytest_temp_trees_inside(root: Path) -> list[Path]:
     """
     top = root.resolve()
     trees = []
-    for named in (RUN_BASETEMP, os.environ.get("PYTEST_DEBUG_TEMPROOT")):
+    temproot = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+    for named in (RUN_BASETEMP, *_pytest_user_dirs(temproot, top)):
         if not named:
             continue
         try:
@@ -431,11 +467,13 @@ def iter_repo_files(
     directory holds every worker's ``tmp_path`` directories, which tests make, fill and
     delete while a walk runs, and a run that was told to keep it inside ``root`` (a
     ``--basetemp`` there, recorded in ``RUN_BASETEMP``, or a ``PYTEST_DEBUG_TEMPROOT``
-    there) has it in the walked tree. ``pytest_temp_trees_inside`` finds them, and they
-    are pruned the same way, before ``os.walk`` descends. Only trees *inside* ``root``:
-    a walk of a ``tmp_path`` is a walk inside the base temp directory, and is not pruned
-    for it. A ``PYTEST_DEBUG_TEMPROOT`` that names a directory of source hides that
-    directory from every walk; it is meant to name a temp directory.
+    there, which pytest keeps its ``pytest-of-<user>`` directories in) has it in the
+    walked tree. ``pytest_temp_trees_inside`` finds them, and they are pruned the same
+    way, before ``os.walk`` descends. Only trees *inside* ``root``: a walk of a
+    ``tmp_path`` is a walk inside the base temp directory, and is not pruned for it.
+    A ``--basetemp`` is left out whole. Of a ``PYTEST_DEBUG_TEMPROOT`` only the
+    ``pytest-of-<user>`` directories are, because the variable names a directory the
+    developer chose: whatever else it holds, source included, is walked.
 
     ``prune_scratch=False``
     -----------------------

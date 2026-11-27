@@ -1279,8 +1279,9 @@ class TestIterRepoFilesPrunesTheScratchTree:
         assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(REPO_ROOT.resolve())
 
     # pytest's own temp trees: the base directory a run was given with --basetemp, and
-    # PYTEST_DEBUG_TEMPROOT. A run can keep either inside the repository, where every
-    # worker's tmp_path directories are made and deleted while a walk runs.
+    # the pytest-of-<user> directories in PYTEST_DEBUG_TEMPROOT. A run can keep either
+    # inside the repository, where every worker's tmp_path directories are made and
+    # deleted while a walk runs. The rest of a PYTEST_DEBUG_TEMPROOT is not pytest's.
 
     @staticmethod
     def _planted_tree(tmp_path, monkeypatch):
@@ -1333,15 +1334,130 @@ class TestIterRepoFilesPrunesTheScratchTree:
     def test_pytest_debug_temproot_inside_the_root_is_not_entered(
         self, tmp_path, monkeypatch
     ):
-        """Where pytest puts its base directory when it is given no ``--basetemp``."""
-        root, basetemp, in_basetemp, beside_it = self._planted_tree(
+        """Where pytest puts its base directory when it is given no ``--basetemp``.
+
+        That is ``pytest-of-<user>`` in the directory the variable names. What a worker's
+        ``tmp_path`` holds is in it, and the temp root's other files are not pytest's.
+        """
+        root, temproot, in_temproot, beside_it = self._planted_tree(
             tmp_path, monkeypatch
         )
+        in_pytests = temproot / "pytest-of-someone" / "pytest-0" / "planted_probe.py"
+        in_pytests.parent.mkdir(parents=True)
+        in_pytests.write_text("x = 1\n", encoding="utf-8")
         self._record_basetemp(monkeypatch, None)
-        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(basetemp))
+        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(temproot))
 
         yielded = {p.resolve() for p in iter_repo_files(root)}
-        assert in_basetemp.resolve() not in yielded
+        assert in_pytests.resolve() not in yielded
+        assert in_temproot.resolve() in yielded
+        assert beside_it.resolve() in yielded
+
+    def _planted_temproot(self, tmp_path, monkeypatch):
+        """A root holding a ``PYTEST_DEBUG_TEMPROOT`` directory and what lies in it.
+
+        pytest keeps its numbered base directories in ``pytest-of-<user>`` there
+        (``pytest-of-unknown`` when the user's name cannot be used in a directory
+        name). The variable names a directory the developer chose, so it can hold
+        anything else as well. Sets the variable to ``root / "temproot"`` and records
+        no ``--basetemp``.
+
+        Returns ``(root, in_pytests, its_own, beside_it)``: files in pytest's
+        directories; files in the temp root that are not pytest's, one of them under
+        ``pytest-offline``, which only begins like pytest's names; and a file in the
+        tree proper.
+        """
+        monkeypatch.setattr(
+            "tests.utils.helpers.ASH_TEST_TEMP_ROOT", tmp_path / "scratch"
+        )
+        self._record_basetemp(monkeypatch, None)
+        root = tmp_path / "tree"
+        temproot = root / "temproot"
+        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(temproot))
+        someone = temproot / "pytest-of-someone" / "pytest-0"
+        unknown = temproot / "pytest-of-unknown" / "pytest-1"
+        in_pytests = [
+            someone / "popen-gw2" / "test_one_0" / "planted_probe.py",
+            unknown / "test_two_0" / "planted_probe.py",
+        ]
+        its_own = [
+            temproot / "its_own_source.py",
+            temproot / "sources" / "inner" / "its_own_source.py",
+            temproot / "pytest-offline" / "its_own_source.py",
+        ]
+        beside_it = root / "unit" / "planted_probe.py"
+        for planted in (*in_pytests, *its_own, beside_it):
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text("x = 1\n", encoding="utf-8")
+        return root, in_pytests, its_own, beside_it
+
+    def test_a_file_the_temproot_holds_beside_pytests_trees_is_still_yielded(
+        self, tmp_path, monkeypatch
+    ):
+        """Only the ``pytest-of-<user>`` directories in the temp root are pytest's.
+
+        What else is in the directory the variable names is the developer's. A walk
+        that left all of it out would report an empty result for files it never looked
+        at, and ``pytest-offline`` only begins like pytest's names.
+        """
+        root, in_pytests, its_own, beside_it = self._planted_temproot(
+            tmp_path, monkeypatch
+        )
+
+        written = (*in_pytests, *its_own, beside_it)
+        assert all(p.exists() for p in written), "the test did not write the probes"
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        for planted in in_pytests:
+            assert planted.resolve() not in yielded, planted
+        for planted in its_own:
+            assert planted.resolve() in yielded, planted
+        assert beside_it.resolve() in yielded
+
+    def test_pytests_trees_are_left_out_of_a_walk_of_the_temproot_itself(
+        self, tmp_path, monkeypatch
+    ):
+        """The root is the directory the variable names, and pytest's trees lie in it.
+
+        A root is not skipped for being where pytest put it, and what pytest made
+        inside it is still pytest's.
+        """
+        root, in_pytests, its_own, _ = self._planted_temproot(tmp_path, monkeypatch)
+
+        yielded = {p.resolve() for p in iter_repo_files(root / "temproot")}
+        for planted in in_pytests:
+            assert planted.resolve() not in yielded, planted
+        for planted in its_own:
+            assert planted.resolve() in yielded, planted
+
+    def test_a_root_inside_pytests_tree_in_the_temproot_is_still_walked(
+        self, tmp_path, monkeypatch
+    ):
+        """A walk of a ``tmp_path`` is a walk inside pytest's tree, and is not emptied.
+
+        An empty walk reads as a clean tree.
+        """
+        _, in_pytests, _, _ = self._planted_temproot(tmp_path, monkeypatch)
+
+        for planted in in_pytests:
+            yielded = {p.resolve() for p in iter_repo_files(planted.parent)}
+            assert planted.resolve() in yielded, planted
+
+    def test_an_explicit_basetemp_is_left_out_whole(self, tmp_path, monkeypatch):
+        """Unlike the temp root, the directory ``--basetemp`` names is all pytest's.
+
+        pytest empties the directory it is given and makes it afresh, so what is in it,
+        and what it is called, does not matter. The layout is the one the cases above
+        plant, with the same directory named the other way.
+        """
+        root, in_pytests, its_own, beside_it = self._planted_temproot(
+            tmp_path, monkeypatch
+        )
+        monkeypatch.delenv("PYTEST_DEBUG_TEMPROOT")
+        self._record_basetemp(monkeypatch, root / "temproot")
+
+        yielded = {p.resolve() for p in iter_repo_files(root)}
+        for planted in (*in_pytests, *its_own):
+            assert planted.resolve() not in yielded, planted
         assert beside_it.resolve() in yielded
 
     def test_a_root_inside_the_basetemp_is_still_walked(self, tmp_path, monkeypatch):
