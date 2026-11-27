@@ -452,9 +452,18 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
     "ADD of a local xz archive": [
         ("stage", "ADD vendor/tool.tar.xz /opt/"),
         ("stage", "ADD --chown=1:1 vendor/tool.txz /opt/"),
+        ("stage", 'ADD ["vendor/tool.tar.xz", "/opt/"]'),
+        ("stage", 'ADD [ "a.tar.xz", "/opt/" ]'),
+        ("stage", 'ADD --chown=1:1 ["vendor/tool.txz", "/opt/"]'),
+        ("stage", 'ADD ["a.txt", "b.tar.xz", "/opt/"]'),
+        ("stage", 'ADD ["my dir/tool.tar.xz", "/opt/"]'),
+        ("stage", 'ADD [ \\\n    "vendor/tool.tar.xz", \\\n    "/opt/" ]'),
     ],
     "ADD --chown of a local archive": [
         ("stage", "ADD --chown=1000:1000 vendor/tool.tar.gz /opt/"),
+        ("stage", 'ADD --chown=1:1 ["a.tar.gz", "/opt/"]'),
+        ("stage", 'ADD --chown=1:1 [ "a.tar.gz", "/opt/" ]'),
+        ("stage", 'ADD --chown=1:1 ["a.txt", "b.tgz", "/opt/"]'),
     ],
     "platform argument in FROM or a global ARG": [
         ("top", "ARG PLANTED_ARCH=${TARGETARCH}"),
@@ -487,6 +496,25 @@ NEGATIVE = {
         "ADD https://example.com/a.tar.xz /opt/"
     ),
     "ADD of a gzip archive": "ADD a.tar.gz /opt/",
+    "ADD of a local file in the exec form": 'ADD ["app.py", "/opt/"]',
+    "ADD --chown of a local file in the exec form": (
+        'ADD --chown=1:1 ["app.py", "/opt/"]'
+    ),
+    "ADD of a URL to an xz archive in the exec form": (
+        'ADD ["https://example.com/a.tar.xz", "/opt/"]'
+    ),
+    "ADD --chown of a URL in the exec form": (
+        'ADD --chown=1:1 ["https://example.com/a.tar.gz", "/opt/"]'
+    ),
+    "an exec-form ADD whose destination is named like an xz archive": (
+        'ADD ["app.py", "/opt/app.tar.xz"]'
+    ),
+    "an exec-form ADD --chown whose destination is named like an archive": (
+        'ADD --chown=1:1 ["app.py", "/opt/app.tar.gz"]'
+    ),
+    "an array in single quotes, which is not JSON": "ADD ['a.tar.xz', '/opt/']",
+    "an array that is never closed": 'ADD ["a.tar.xz", "/opt/"',
+    "an array that holds a number": 'ADD ["a.tar.xz", 1]',
     "a here-document marker inside quotes": 'RUN echo "<<EOF"',
     "shell arithmetic with a space after <<": "RUN echo $((1 << 3))",
     "a here-string": 'RUN cat <<< "x"',
@@ -628,6 +656,13 @@ class TestReadingAnInstruction:
 
     def test_a_syntax_line_after_other_lines_is_still_found(self):
         assert findings("FROM scratch\n# syntax=docker/dockerfile:1\n")
+
+    def test_text_that_is_not_a_json_array_is_read_as_the_shell_form(self):
+        """Brackets alone do not make the exec form. This is a list of words, and its
+        first word, ``[a.tar.xz``, is a file name that ends in the xz suffix."""
+        text = "ADD [a.tar.xz /opt/\n"
+
+        assert [f.form.name for f in findings(text)] == ["ADD of a local xz archive"]
 
     def test_a_byte_order_mark_does_not_hide_a_directive(self, tmp_path):
         copy = tmp_path / "Dockerfile"
