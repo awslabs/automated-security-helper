@@ -1745,6 +1745,19 @@ class PluginBase(UVToolMixin, BaseModel):
         next. ``ScannerExecutor`` calls this before each ``scan()``."""
         self._scan_timed_out_after = None
 
+    def clear_scan_exit_code(self) -> None:
+        """Put ``exit_code`` back to the value a plugin starts with, so the code of
+        the previous target's tool is not read as this target's.
+
+        The ``scan()`` the base classes provide sets ``exit_code`` at the start of
+        every run, but a scanner that overrides ``scan()`` may not, and its code
+        then outlives the target it belongs to: a later target that fails before
+        its tool starts would be read as having exited with it, and the code folds
+        with the largest of the run's (``_folded_exit_code``). ``ScannerExecutor``
+        calls this before each ``scan()``, beside the other ``clear_*`` methods.
+        """
+        self.exit_code = 0
+
     @property
     def unevaluated_targets(self) -> List[str]:
         """The targets of this plugin's most recent run that its tool never

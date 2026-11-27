@@ -1303,6 +1303,145 @@ class TestTheScanPhasesOwnFailures:
         )
 
 
+class _TargetByTarget(_Scripted):
+    """A scanner whose own ``scan()`` never resets ``exit_code``, as an override of
+    the template's does not: each call plays the next scripted step, which may set
+    the code the way a tool run does and then return or raise."""
+
+    def scan(
+        self,
+        target,
+        target_type=None,
+        global_ignore_paths=None,
+        config=None,
+        *args,
+        **kwargs,
+    ):
+        return self.steps.pop(0)(self)
+
+
+def _the_tool_exits_with(code, then):
+    """A step: the tool's exit code is recorded, then *then* returns or raises."""
+
+    def step(plugin):
+        plugin.exit_code = code
+        if isinstance(then, BaseException):
+            raise then
+        return then
+
+    return step
+
+
+def _fails_before_its_tool_starts(plugin):
+    raise ScannerError("it could not set the target up")
+
+
+def _two_targets(context):
+    converted = context.work_dir / "converted"
+    converted.mkdir(exist_ok=True)
+    return [
+        {"path": context.source_dir, "type": "source"},
+        {"path": converted, "type": "converted"},
+    ]
+
+
+class TestAPreviousTargetsExitCodeIsNotThisTargets:
+    """The failure reason reads the plugin's ``exit_code``, which a scan() that does
+    not reset it carries from the target before, so a target that failed before its
+    tool started was reported as having exited with the last target's code."""
+
+    def _rows(self, context, steps):
+        scanner = _scanner(context, cls=_TargetByTarget)
+        scanner.steps = list(steps)
+        rows = _executor(context)._execute_scanner(
+            "scripted", scanner, _two_targets(context)
+        )
+        assert len(rows) == 2, rows
+        return rows
+
+    def test_a_target_that_fails_before_its_tool_starts_is_not_charged_the_last_code(
+        self, tmp_path
+    ):
+        context = _context(tmp_path)
+
+        _, second = self._rows(
+            context,
+            [_the_tool_exits_with(2, _sarif()), _fails_before_its_tool_starts],
+        )
+
+        assert second.status == ScannerStatus.ERROR
+        assert second.error_reason_code != ReasonCode.EXIT_CODE_REJECTED, _why(second)
+        assert _why(second) == (None, None), _why(second)
+
+    def test_the_second_targets_row_does_not_carry_the_first_targets_code(
+        self, tmp_path
+    ):
+        context = _context(tmp_path)
+
+        _, second = self._rows(
+            context,
+            [_the_tool_exits_with(2, _sarif()), _fails_before_its_tool_starts],
+        )
+
+        assert second.exit_code != 2, second.exit_code
+
+    def test_control_a_target_whose_own_tool_exits_with_a_rejected_code_is_charged_it(
+        self, tmp_path
+    ):
+        context = _context(tmp_path)
+
+        _, second = self._rows(
+            context,
+            [
+                _the_tool_exits_with(2, _sarif()),
+                _the_tool_exits_with(3, ScannerError("the results file is missing")),
+            ],
+        )
+
+        _assert_reason(
+            second,
+            ReasonCode.EXIT_CODE_REJECTED,
+            "its tool exited with code 3, which this scanner does not accept as a "
+            "completed run, so its results file is not graded",
+        )
+
+    def test_control_the_first_target_is_charged_its_own_code(self, tmp_path):
+        context = _context(tmp_path)
+
+        first, _ = self._rows(
+            context,
+            [
+                _the_tool_exits_with(2, ScannerError("the results file is missing")),
+                _the_tool_exits_with(0, _sarif()),
+            ],
+        )
+
+        assert first.error_reason_code == ReasonCode.EXIT_CODE_REJECTED, _why(first)
+
+    def test_the_plugin_is_reset_by_the_method_the_executor_calls(self, tmp_path):
+        """``clear_scan_exit_code`` puts the code back to the value a plugin starts
+        with, and the executor calls it beside the other ``clear_*`` methods."""
+        plugin = _scanner(_context(tmp_path))
+        plugin.exit_code = 7
+
+        plugin.clear_scan_exit_code()
+
+        assert plugin.exit_code == 0
+
+    def test_without_the_reset_the_stale_code_is_read(self, tmp_path, monkeypatch):
+        """The control for the cases above: take the reset away, and the row of the
+        target that never started its tool names the last target's code."""
+        context = _context(tmp_path)
+        monkeypatch.setattr(PluginBase, "clear_scan_exit_code", lambda self: None)
+
+        _, second = self._rows(
+            context,
+            [_the_tool_exits_with(2, _sarif()), _fails_before_its_tool_starts],
+        )
+
+        assert second.error_reason_code == ReasonCode.EXIT_CODE_REJECTED, _why(second)
+
+
 class TestTheControls:
     """Each takes away what a case above rests on, and the case then fails."""
 

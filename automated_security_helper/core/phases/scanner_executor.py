@@ -1693,6 +1693,12 @@ class ScannerExecutor:
                             scanner_plugin.clear_scan_kept_flag()
                             scanner_plugin.clear_scan_could_not_stop()
                             scanner_plugin.clear_unevaluated_targets()
+                            # The code of the last target's tool is not this
+                            # target's: a scanner whose own scan() does not reset
+                            # it would otherwise have it read, by the failure
+                            # reason and by the row, for a target whose tool
+                            # never started.
+                            scanner_plugin.clear_scan_exit_code()
                         # Resolved before the scan, so a scanner that cannot be
                         # sandboxed as requested never starts and never runs
                         # unsandboxed. The grade follows what was asked: a
