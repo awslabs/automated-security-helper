@@ -9,7 +9,6 @@ import logging
 import os
 import platform
 import shlex
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
@@ -2871,8 +2870,20 @@ def _managed_executable(
     next directory. The virtualenv's scripts directory is searched only when PATH
     names it, which is the one way a scan reaches it; ASH's own environment
     directories are searched anyway.
+
+    Each directory is probed as a scan probes ASH's own directories
+    (``_executable_candidates``): the file names a scan tries for the command, joined
+    onto the directory and checked as files. ``shutil.which(command, path=directory)``
+    is not used, because on Windows it searches the working directory first whatever
+    ``path`` says. The working directory is the scanned tree, and a same-named file at
+    its root, which is refused here, would answer for every directory in turn and hide
+    the managed copy.
     """
-    from automated_security_helper.utils.subprocess_utils import own_environment_dirs
+    from automated_security_helper.utils.subprocess_utils import (
+        _executable_candidate_names,
+        _is_executable_file,
+        own_environment_dirs,
+    )
 
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
@@ -2887,15 +2898,17 @@ def _managed_executable(
         directories.append(venv_scripts_dir(virtualenv))
     directories.extend(own_environment_dirs())
     directories.append(bin_dir)
+    names = _executable_candidate_names(outcome.command)
     for directory in directories:
-        found = shutil.which(outcome.command, path=str(directory))
-        if found is None:
-            continue
-        refusal = in_tree_path_refusal(
-            f"{outcome.command} at {found}", Path(found), source_dir
-        )
-        if refusal is None:
-            return found
+        for name in names:
+            candidate = directory / name
+            if not _is_executable_file(str(candidate)):
+                continue
+            refusal = in_tree_path_refusal(
+                f"{outcome.command} at {candidate}", candidate, source_dir
+            )
+            if refusal is None:
+                return str(candidate)
     return None
 
 
