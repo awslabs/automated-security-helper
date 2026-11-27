@@ -144,11 +144,11 @@ def _scan(env, tree, out, *extra):
     return _run(
         env,
         "scan",
-        "--source-dir",
+        "fs",
         os.fspath(tree),
         "--output-dir",
         os.fspath(out),
-        "--scanners",
+        "--add-scanners",
         "detect-secrets",
         "--no-progress",
         "--quiet",

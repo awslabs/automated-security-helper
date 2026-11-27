@@ -136,7 +136,7 @@ class TestTheConfigKeepsTheValue:
         assert valid, errors
 
     def test_the_scan_results_record_it(self):
-        """``ash merge`` reads the scan's config back from the results file."""
+        """``ash results merge`` reads the scan's config back from the results file."""
         model = AshAggregatedResults(
             ash_config=AshConfig(project_name="p", output_formats=["sarif"])
         )
@@ -190,7 +190,7 @@ def test_ash_scan_without_the_flag_leaves_the_choice_to_the_config(tmp_path):
     with patch("automated_security_helper.cli.scan.run_ash_scan") as mock_run:
         result = CliRunner().invoke(
             app,
-            ["scan", "--source-dir", str(source), "--output-dir", str(tmp_path / "o")],
+            ["scan", "fs", str(source), "--output-dir", str(tmp_path / "o")],
         )
 
     assert result.exit_code == 0, result.output

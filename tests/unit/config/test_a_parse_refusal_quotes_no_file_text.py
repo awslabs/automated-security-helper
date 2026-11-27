@@ -205,9 +205,9 @@ def _invoke(args) -> _Reply:
 def _scan_args(world: _World, *more: str) -> list:
     return [
         "scan",
-        "--no-progress",
-        "--source-dir",
+        "fs",
         str(world.project),
+        "--no-progress",
         "--output-dir",
         str(world.output),
         *more,
@@ -233,9 +233,9 @@ def _cli_scan_ash_config(world: _World, text: str) -> _Reply:
 def _ws_args(world: _World, *more: str) -> list:
     return [
         "scan",
-        "--no-progress",
-        "--workspace",
+        "workspace",
         str(world.workspace_file),
+        "--no-progress",
         "--output-dir",
         str(world.output),
         *more,
@@ -297,7 +297,14 @@ def _cli_plugin_list(world: _World, text: str) -> _Reply:
 def _cli_report_config(world: _World, text: str) -> _Reply:
     world.write(world.named, text)
     return _invoke(
-        ["report", "--config", str(world.named), "--output-dir", str(world.output)]
+        [
+            "results",
+            "report",
+            "--config",
+            str(world.named),
+            "--output-dir",
+            str(world.output),
+        ]
     )
 
 
@@ -885,7 +892,7 @@ def test_an_extends_base_that_does_not_parse_is_refused_without_its_text(
 
 
 def test_a_merge_config_that_does_not_parse_is_refused_without_its_text(world, ash_log):
-    """ash merge reads --config through the same loader, and refuses it in the
+    """ash results merge reads --config through the same loader, and refuses it in the
     formatter's words."""
     canary = _canary()
     results = world.write(world.root / "results.json", "{}")
@@ -895,6 +902,7 @@ def test_a_merge_config_that_does_not_parse_is_refused_without_its_text(world, a
 
     reply = _invoke(
         [
+            "results",
             "merge",
             "--results",
             str(results),

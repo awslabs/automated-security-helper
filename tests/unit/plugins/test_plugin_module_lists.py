@@ -173,15 +173,15 @@ def _scan(packages: Path, tmp_path: Path, plugin_args, extra_env=None):
         packages,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(output),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "alpha-scanner",
-            "--scanners",
+            "--add-scanners",
             "beta-scanner",
             "--no-progress",
             *plugin_args,
@@ -267,15 +267,15 @@ def test_a_comma_list_in_the_flag_loads_each_module_in_a_workspace_scan(
         plugin_packages,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace_file),
             "--output-dir",
             str(output),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "alpha-scanner",
-            "--scanners",
+            "--add-scanners",
             "beta-scanner",
             "--no-progress",
             "--ash-plugin-modules",
@@ -313,7 +313,7 @@ def test_a_module_outside_the_namespace_refuses_a_workspace_scan(
         plugin_packages,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace_file),
             "--output-dir",
             str(output),
@@ -447,7 +447,8 @@ def _load_plugins(plugin_packages, tmp_path, entry, direct=""):
 def test_load_plugins_imports_each_module_of_a_comma_list_in_order(
     plugin_packages, tmp_path
 ):
-    """The path `ash report`, `ash dependencies install` and `ash merge` load through.
+    """The path `ash results report`, `ash dependencies install` and `ash results merge`
+    load through.
 
     load_plugins hands the config's entries to load_additional_plugin_modules, which
     imported each entry whole: "beta_ash_plugins, alpha_ash_plugins" was one module

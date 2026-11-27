@@ -227,20 +227,21 @@ def test_the_scanned_trees_actionlint_config_does_not_change_the_run(
 
 
 def test_a_full_scan_with_actionlint_selected(repo, tmp_path):
-    """``--scanners actionlint`` runs it, offline, and fails on the HIGH findings."""
+    """``--add-scanners actionlint`` runs it, offline, and fails on the HIGH
+    findings."""
     _require_actionlint()
     output = tmp_path / "out"
     env = {**os.environ, "ASH_OFFLINE": "true"}
 
     result = _ash(
         "scan",
+        "fs",
+        str(repo),
         "--mode",
         "local",
-        "--source-dir",
-        str(repo),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "actionlint",
         "--no-progress",
         env=env,
@@ -277,13 +278,13 @@ def test_enabled_but_missing_is_missing_and_exits_one(repo, tmp_path):
 
     result = _ash(
         "scan",
+        "fs",
+        str(repo),
         "--mode",
         "local",
-        "--source-dir",
-        str(repo),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "actionlint",
         "--no-progress",
         env=env,
@@ -328,17 +329,17 @@ def _scan(
 ) -> subprocess.CompletedProcess:
     return _ash(
         "scan",
+        "fs",
+        str(repo),
         "--mode",
         "local",
-        "--source-dir",
-        str(repo),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "actionlint",
         "--no-progress",
-        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
-        # takes no extra arguments.
+        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan fs`
+        # takes no argument besides the path.
         "--no-fail-on-findings",
         *extra,
         env={**os.environ, "ASH_OFFLINE": "true"},

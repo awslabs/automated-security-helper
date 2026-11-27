@@ -223,7 +223,7 @@ def scan(tmp_path_factory):
             "-I",
             "-c",
             DRIVER,
-            "--source-dir",
+            "fs",
             str(tree),
             "--output-dir",
             str(output),

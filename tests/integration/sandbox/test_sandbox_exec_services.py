@@ -271,18 +271,18 @@ def _attempt(
     command = [
         _ash_executable(),
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "sandbox-escape",
         "--sandbox",
         mode,
         "--offline",
         "--no-progress",
-        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
-        # takes no extra arguments.
+        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan fs`
+        # takes no argument besides the path.
         "--no-fail-on-findings",
         # The fixture plugin, as an operator installs one. Its module sits in this
         # git checkout, which an in-tree config may not import from.

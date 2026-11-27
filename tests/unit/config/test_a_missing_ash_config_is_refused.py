@@ -8,12 +8,12 @@ from, and the environment spelling of ``--config``. Were naming a file that is
 not there to leave every run on the built-in defaults, which drop the file's
 suppressions and settings, the run would report success: the scan would exit 0,
 ``ash config validate`` would call a valid ``--config`` file valid although a
-scan with the same environment would not use it, and ``ash report`` would exit 1
+scan with the same environment would not use it, and ``ash results report`` would exit 1
 for a reason that had nothing to do with the configuration.
 
 Each refuses with exit 3. The message names ASH_CONFIG and the path, in the
-words a scan uses (``default_config.get_default_config``). ``ash report`` refuses
-a ``--config`` that does not exist the same way, as the config commands do. An
+words a scan uses (``default_config.get_default_config``). ``ash results report``
+refuses a ``--config`` that does not exist the same way, as the config commands do. An
 empty ASH_CONFIG counts as unset, and one of only whitespace is refused.
 """
 
@@ -108,7 +108,7 @@ def test_a_scan_exits_3_without_scanning(missing, tmp_path, monkeypatch):
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
@@ -153,7 +153,7 @@ def test_an_unreadable_ash_config_exits_3_naming_the_errno(tmp_path, monkeypatch
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(tmp_path / "src"),
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -194,7 +194,7 @@ def test_a_looped_ash_config_exits_3_naming_the_loop(tmp_path, monkeypatch):
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
@@ -235,6 +235,7 @@ _REFUSED_ASH_CONFIG = {
 def _command(command: str, config: Path, tmp_path: Path) -> list:
     if command == "report":
         return [
+            "results",
             "report",
             "--output-dir",
             str(tmp_path / "out"),
@@ -276,7 +277,9 @@ def test_a_check_of_another_file_refuses_it_wherever_that_file_is(
 
 
 def test_report_refuses_it(missing, tmp_path):
-    result = CliRunner().invoke(app, ["report", "--output-dir", str(tmp_path / "out")])
+    result = CliRunner().invoke(
+        app, ["results", "report", "--output-dir", str(tmp_path / "out")]
+    )
 
     assert result.exit_code == 3, result.output
     assert f"ASH_CONFIG names {missing}, {NOT_THERE}" in _flat(result.output)
@@ -289,7 +292,15 @@ def test_report_refuses_a_config_option_that_does_not_exist(
     named = tmp_path / "named-but-missing.yaml"
 
     result = CliRunner().invoke(
-        app, ["report", "--output-dir", str(tmp_path / "out"), "--config", str(named)]
+        app,
+        [
+            "results",
+            "report",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--config",
+            str(named),
+        ],
     )
 
     assert result.exit_code == 3, result.output

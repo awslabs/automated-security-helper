@@ -3,7 +3,7 @@
 
 """The human reports show a scanner's name, not obey it.
 
-A scan's own results name each scanner from its plugin. ``ash report`` with no
+A scan's own results name each scanner from its plugin. ``ash results report`` with no
 ``--output-dir`` renders the results file under ``.ash/ash_output`` of the
 directory it runs in, and a repository can commit that file, so every scanner
 name a report prints can be the repository's text. The text, Markdown and HTML
@@ -17,7 +17,7 @@ its name is probed the same way.
 
 One cell per place, so dropping the one guard there turns its own cell red, one
 cell per report and model for the whole document, and three cells that render a
-committed results file through ``ash report`` to a pipe.
+committed results file through ``ash results report`` to a pipe.
 """
 
 import html
@@ -293,7 +293,7 @@ def test_no_place_in_the_report_obeys_a_scanner_s_name(
 
 
 # ---------------------------------------------------------------------------
-# A committed results file rendered by `ash report` to a pipe
+# A committed results file rendered by `ash results report` to a pipe
 # ---------------------------------------------------------------------------
 
 
@@ -318,7 +318,7 @@ def _through_a_pipe(args, monkeypatch):
 def test_a_committed_results_file_reports_its_scanner_names_shown(
     fmt, tmp_path, monkeypatch
 ):
-    """``ash report`` with no ``--output-dir`` reads ``.ash/ash_output`` of the
+    """``ash results report`` with no ``--output-dir`` reads ``.ash/ash_output`` of the
     directory it runs in, as a checkout of a repository that committed it."""
     output = tmp_path / ".ash" / "ash_output"
     output.mkdir(parents=True)
@@ -327,7 +327,7 @@ def test_a_committed_results_file_reports_its_scanner_names_shown(
     )
     monkeypatch.chdir(tmp_path)
 
-    printed = _through_a_pipe(["report", "--format", fmt], monkeypatch)
+    printed = _through_a_pipe(["results", "report", "--format", fmt], monkeypatch)
 
     # The control: the committed file is the one rendered.
     assert "SCAN-" in printed, printed[:400]

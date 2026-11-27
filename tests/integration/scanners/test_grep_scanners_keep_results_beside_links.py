@@ -4,7 +4,7 @@
 """semgrep and opengrep still scan a project that holds a link named like itself.
 
 The project is a directory inside a git work tree (as a workspace project, or any
-``--source-dir`` below a checkout's root, is) and holds ``sub/proj``, a link out of
+``ash scan fs`` PATH below a checkout's root, is) and holds ``sub/proj``, a link out of
 the tree named like the project directory. ASH used to pass such a link's name in
 ``--exclude`` when nothing below the target had it. semgrep matches ``--exclude``
 against paths below the git work tree's root, so ``proj`` left out the whole
@@ -111,7 +111,7 @@ def scan(tmp_path_factory):
             "-I",
             "-c",
             DRIVER,
-            "--source-dir",
+            "fs",
             str(project),
             "--output-dir",
             str(output),
@@ -120,7 +120,7 @@ def scan(tmp_path_factory):
             "--no-progress",
             "--no-fail-on-findings",
             "--no-fail-on-incomplete-scanners",
-            "--scanners",
+            "--add-scanners",
             "semgrep,opengrep",
         ],
         capture_output=True,

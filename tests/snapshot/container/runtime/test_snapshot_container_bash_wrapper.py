@@ -84,13 +84,14 @@ def run_wrapper(tmp_path: Path, bare_path: Path):
     log = tmp_path / "runner.log"
     (tmp_path / "src").mkdir()
 
-    def _run(*args: str, **env: str) -> dict:
+    def _run(*args: str, directory: str = "src", **env: str) -> dict:
         result = subprocess.run(  # nosec B603 - fixed interpreter and script, list args
             [
                 bash,
                 str(ASH_SCRIPT),
-                "--source-dir",
-                "src",
+                "scan",
+                "fs",
+                directory,
                 "--output-dir",
                 "out",
                 *args,
@@ -137,8 +138,7 @@ def test_malformed_base_oci_layout(run_wrapper, snapshot, fake_runner):
 
 
 def test_source_dir_that_does_not_exist(run_wrapper, snapshot, fake_runner):
-    # The later --source-dir wins, as it always has.
-    assert run_wrapper("--source-dir", "does-not-exist") == snapshot
+    assert run_wrapper(directory="does-not-exist") == snapshot
 
 
 def test_option_without_its_value(run_wrapper, snapshot, fake_runner):

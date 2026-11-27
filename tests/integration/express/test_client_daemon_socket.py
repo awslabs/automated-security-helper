@@ -153,7 +153,7 @@ class TestTheWire:
         sock = client._connect(socket_dir)
         outcome = client._run_on_daemon(
             sock,
-            ["scan", "--source-dir", "."],
+            ["scan", "fs", "."],
             {
                 "ASH_MODE": "local",
                 "UNRELATED": "carried",
@@ -166,7 +166,7 @@ class TestTheWire:
         assert len(daemon.received_fds) == 3
         assert daemon.peer_uid == os.getuid()
         assert daemon.request["op"] == "scan"
-        assert daemon.request["argv"] == ["scan", "--source-dir", "."]
+        assert daemon.request["argv"] == ["scan", "fs", "."]
         assert daemon.request["cwd"] == os.getcwd()
         # Asserted by names and the one named value, never the mapping itself:
         # a failed assertion prints its operands (tests/utils/env_assertions.py).
@@ -341,7 +341,7 @@ class TestTheWire:
         assert daemon.go_frame is None, "no go may follow a recorded signal"
 
     def test_frames_survive_json_with_non_ascii_values(self, socket_dir):
-        argv = ["scan", "--source-dir", "précis"]
+        argv = ["scan", "fs", "précis"]
         daemon = _ScriptedDaemon(
             socket_dir, answers=[{"ok": True, "pid": 1}, {"exit": 0}]
         )

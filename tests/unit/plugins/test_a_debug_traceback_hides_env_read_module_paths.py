@@ -103,20 +103,20 @@ def _scan(tmp_path, monkeypatch):
     monkeypatch.chdir(source)
     return source, [
         "scan",
+        "fs",
+        str(source),
         "--mode",
         "local",
         "--no-progress",
         "--log-level",
         "DEBUG",
-        "--source-dir",
-        str(source),
         "--output-dir",
         str(tmp_path / "out"),
     ]
 
 
 def _merge_args(tmp_path, config):
-    args = ["merge"]
+    args = ["results", "merge"]
     for path in write_shards(tmp_path / "artifacts", build_shards(2)):
         args += ["--results", path]
     return args + [

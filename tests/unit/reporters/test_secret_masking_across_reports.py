@@ -496,6 +496,7 @@ class TestStoredResultsRerendered:
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "report",
                 "--format",
                 report_format,
@@ -577,7 +578,7 @@ class TestStoredResultsRerendered:
         )
 
         # The stored file, stamped as the one shard of a one-shard run, as
-        # `ash scan --shard-index 0 --shard-count 1` would have written it.
+        # `ash scan fs --shard-index 0 --shard-count 1` would have written it.
         results_file = stored_output_dir / "ash_aggregated_results.json"
         # Rebuilt the way the fixture built it, not read back: reading the file
         # into a model masks it, and the stored shard must hold the values.
@@ -605,7 +606,7 @@ class TestStoredResultsRerendered:
         )
         merged_dir = tmp_path / "merged"
 
-        # Called as the `ash merge` command function rather than through
+        # Called as the `ash results merge` command function rather than through
         # CliRunner: after other in-process CLI runs, CliRunner's captured stream
         # is closed under it here, which would fail the test for a reason unrelated
         # to masking. Exit 0 returns; any other exit raises typer.Exit.

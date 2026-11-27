@@ -64,6 +64,8 @@ def _ash_scan(
                 "from automated_security_helper.cli.entrypoint import main; main()"
             ),
             "scan",
+            "fs",
+            source.as_posix(),
             *(
                 [
                     "--ash-plugin-modules",
@@ -72,8 +74,6 @@ def _ash_scan(
                 if list_module
                 else []
             ),
-            "--source-dir",
-            source.as_posix(),
             "--output-dir",
             output.as_posix(),
             "--no-progress",
@@ -149,7 +149,7 @@ def test_a_scan_reports_every_hadolint_level(fixture_copy, tmp_path):
     _hadolint()
     source = fixture_copy("positive")
     output = tmp_path / "out"
-    proc = _ash_scan(source, output, "--scanners", "hadolint")
+    proc = _ash_scan(source, output, "--add-scanners", "hadolint")
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "Dockerfile.broken" in proc.stdout + proc.stderr
     row = _results(output)["scanner_results"]["hadolint"]
@@ -169,7 +169,7 @@ def test_a_clean_dockerfile_passes(fixture_copy, tmp_path):
     _hadolint()
     source = fixture_copy("negative")
     output = tmp_path / "out"
-    proc = _ash_scan(source, output, "--scanners", "hadolint")
+    proc = _ash_scan(source, output, "--add-scanners", "hadolint")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     row = _results(output)["scanner_results"]["hadolint"]
     assert row["status"] == "PASSED"
@@ -179,7 +179,7 @@ def test_a_clean_dockerfile_passes(fixture_copy, tmp_path):
 def test_enabling_in_the_project_config_runs_it_without_a_selection(
     fixture_copy, tmp_path
 ):
-    """No --scanners at all: the listed module and the project config run hadolint.
+    """No scanner option at all: the listed module and the project config run hadolint.
 
     Every other scanner is switched off in the same file so the run does not
     depend on which other tools this machine has.
@@ -214,7 +214,7 @@ def test_the_projects_hadolint_yaml_is_not_read(fixture_copy, tmp_path):
     _hadolint()
     source = fixture_copy("configured")
     output = tmp_path / "out"
-    _ash_scan(source, output, "--scanners", "hadolint")
+    _ash_scan(source, output, "--add-scanners", "hadolint")
     assert "DL3007" in _by_rule(output), "the tree's .hadolint.yaml was applied"
 
 
@@ -228,7 +228,7 @@ def test_an_operator_config_outside_the_tree_is_honored(fixture_copy, tmp_path):
     _ash_scan(
         source,
         output,
-        "--scanners",
+        "--add-scanners",
         "hadolint",
         "--config-overrides",
         f"scanners.hadolint.options.config_file={operator.as_posix()}",
@@ -248,7 +248,7 @@ def test_an_unparseable_config_is_an_error_not_a_silent_default(fixture_copy, tm
     proc = _ash_scan(
         source,
         output,
-        "--scanners",
+        "--add-scanners",
         "hadolint",
         "--config-overrides",
         f"scanners.hadolint.options.config_file={operator.as_posix()}",
@@ -262,7 +262,7 @@ def test_without_its_module_it_leaves_no_trace(fixture_copy, tmp_path):
     _hadolint()
     source = fixture_copy("positive")
     output = tmp_path / "out"
-    _ash_scan(source, output, "--scanners", "detect-secrets", list_module=False)
+    _ash_scan(source, output, "--add-scanners", "detect-secrets", list_module=False)
     results = _results(output)
     assert "hadolint" not in results["scanner_results"]
     assert "hadolint" not in (results["metadata"].get("expected_scanners") or [])
@@ -283,7 +283,7 @@ def test_an_ash_line_suppression_suppresses_exactly_that_finding(
         "      reason: fixture\n"
     )
     output = tmp_path / "out"
-    _ash_scan(source, output, "--scanners", "hadolint")
+    _ash_scan(source, output, "--add-scanners", "hadolint")
     counts = _results(output)["scanner_results"]["hadolint"]["severity_counts"]
     assert counts["suppressed"] == 1
     assert counts["medium"] == 5
@@ -299,7 +299,7 @@ def test_offline_mode_runs_it_unchanged(fixture_copy, tmp_path):
     _hadolint()
     source = fixture_copy("positive")
     output = tmp_path / "out"
-    proc = _ash_scan(source, output, "--scanners", "hadolint", "--offline")
+    proc = _ash_scan(source, output, "--add-scanners", "hadolint", "--offline")
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "Dockerfile.broken" in proc.stdout + proc.stderr
     assert _results(output)["scanner_results"]["hadolint"]["finding_count"] == 12
@@ -327,7 +327,7 @@ def test_enabled_but_not_installed_is_missing_and_fails_the_scan(
     }
     source = fixture_copy("negative")
     output = tmp_path / "out"
-    proc = _ash_scan(source, output, "--scanners", "hadolint", env=env)
+    proc = _ash_scan(source, output, "--add-scanners", "hadolint", env=env)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert _results(output)["scanner_results"]["hadolint"]["status"] == "MISSING"
 
@@ -342,7 +342,7 @@ def test_a_config_symlinked_out_of_the_tree_is_not_applied(fixture_copy, tmp_pat
     outside.write_text("ignored:\n  - DL3007\n")
     (source / ".hadolint.yaml").symlink_to(outside)
     output = tmp_path / "out"
-    proc = _ash_scan(source, output, "--scanners", "hadolint")
+    proc = _ash_scan(source, output, "--add-scanners", "hadolint")
     assert proc.returncode == 2, proc.stdout + proc.stderr
     sarif = json.loads((output / "reports" / "ash.sarif").read_text())
     rules = {r["ruleId"] for run in sarif["runs"] for r in run.get("results") or []}

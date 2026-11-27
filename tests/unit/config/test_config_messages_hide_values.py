@@ -103,6 +103,7 @@ def _run(project: Path, command: str, config: Path, monkeypatch, *extra: str):
         )
         args = [
             "scan",
+            "fs",
             "--mode",
             "local",
             "--no-progress",
@@ -703,7 +704,7 @@ def _workspace(project: Path, project_config: str) -> list:
     (project / "svc" / ".ash.yaml").write_text(
         textwrap.dedent(project_config), encoding="utf-8"
     )
-    return ["scan", "--no-progress", "--workspace", "team.code-workspace"]
+    return ["scan", "workspace", "team.code-workspace", "--no-progress"]
 
 
 def _stub_scan(monkeypatch):
@@ -777,7 +778,7 @@ def test_an_ash_config_file_chain_error_is_hidden_from_the_scan(
     operator = _operator_config(project, monkeypatch)
     _stub_scan(monkeypatch)
     if mode == "scan":
-        args = ["scan", "--mode", "local", "--no-progress", "--output-dir", "out"]
+        args = ["scan", "fs", "--mode", "local", "--no-progress", "--output-dir", "out"]
     else:
         args = _workspace(project, "project_name: svc\n")
         if mode == "workspace-config":
@@ -848,7 +849,7 @@ def test_an_ash_config_file_model_error_is_hidden(
             _stub_scan(monkeypatch)
             result = CliRunner().invoke(
                 app,
-                ["scan", "--mode", "local", "--no-progress", "--source-dir", "repo"],
+                ["scan", "fs", "repo", "--mode", "local", "--no-progress"],
             )
             assert result.exit_code == 3, result.output
             output = result.output

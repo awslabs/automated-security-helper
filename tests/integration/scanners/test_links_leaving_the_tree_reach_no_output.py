@@ -360,7 +360,7 @@ def scan(scan_base, scan_env):
             "-I",
             "-c",
             DRIVER,
-            "--source-dir",
+            "fs",
             str(tree),
             "--output-dir",
             str(output),

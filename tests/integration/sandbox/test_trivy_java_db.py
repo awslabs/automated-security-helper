@@ -115,17 +115,17 @@ def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
         [
             str(ash if ash.exists() else shutil.which("ash")),
             "scan",
-            "--source-dir",
+            "fs",
             str(repo),
             "--output-dir",
             str(output),
-            "--scanners",
+            "--add-scanners",
             "trivy-repo",
             "--sandbox",
             mode,
             "--no-progress",
-            # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
-            # takes no extra arguments.
+            # An on/off flag: `--fail-on-findings false` is refused, since `ash scan fs`
+            # takes no argument besides the path.
             "--no-fail-on-findings",
             "--config-overrides",
             "ash_plugin_modules=[automated_security_helper.plugin_modules.ash_trivy_plugins]",

@@ -3,7 +3,7 @@
 
 """Every command that loads a config's plugin modules refuses an import failure.
 
-``ash report``, ``ash dependencies install`` and ``ash plugin list`` each load
+``ash results report``, ``ash dependencies install`` and ``ash plugin list`` each load
 the configuration's plugin modules through ``load_plugins``; a configured
 module that fails to import refuses each of them with exit 3 and the refusal's
 composed text, as the scan is refused. These cells exist because each command's
@@ -75,7 +75,9 @@ def test_report_refuses(tmp_path, broken_config):
         AshAggregatedResults().model_dump_json(), encoding="utf-8"
     )
 
-    result = CliRunner().invoke(app, ["report", "--config", str(broken_config)])
+    result = CliRunner().invoke(
+        app, ["results", "report", "--config", str(broken_config)]
+    )
 
     output = _streams(result)
     assert result.exit_code == 3, (result.exit_code, output[-2000:])
@@ -345,7 +347,7 @@ def test_report_gives_a_registration_refusal_the_declaration_advice(
     )
 
     result = CliRunner().invoke(
-        app, ["report", "--config", str(register_failing_config)]
+        app, ["results", "report", "--config", str(register_failing_config)]
     )
 
     output = _streams(result)
@@ -382,7 +384,7 @@ def test_merge_gives_a_registration_refusal_the_declaration_advice(
 ):
     from tests.unit.cli.test_merge import build_shards, write_shards
 
-    args = ["merge"]
+    args = ["results", "merge"]
     for path in write_shards(tmp_path / "artifacts", build_shards(2)):
         args += ["--results", path]
     args += [

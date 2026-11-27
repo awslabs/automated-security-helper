@@ -515,7 +515,7 @@ def workspace_run(tmp_path_factory):
             "-c",
             _DRIVER,
             "scan",
-            "--workspace",
+            "workspace",
             str(work / "w.code-workspace"),
             "--output-dir",
             str(output),

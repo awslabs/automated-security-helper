@@ -337,17 +337,17 @@ def _scan(
     command = [
         _ash_executable(),
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "sandbox-escape",
         "--sandbox",
         mode,
         "--no-progress",
-        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`
-        # takes no extra arguments.
+        # An on/off flag: `--fail-on-findings false` is refused, since `ash scan fs`
+        # takes no argument besides the path.
         "--no-fail-on-findings",
         # The listeners' directory is visible in every sandbox; see _Listeners.
         "--config-overrides",

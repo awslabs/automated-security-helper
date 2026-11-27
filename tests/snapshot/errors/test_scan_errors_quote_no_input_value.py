@@ -29,7 +29,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 CANARY = "ash-canary-7f3e"
-SCAN = ["scan", "--no-progress"]
+SCAN = ["scan", "fs", "--no-progress"]
+WORKSPACE_SCAN = ["scan", "workspace", "--no-progress"]
 SECRET = "${ASH_PROBE_VALUE}"
 BAD = f"project_name: canary\nfail_on_findings: {SECRET}\n"
 
@@ -142,27 +143,27 @@ def test_an_invalid_config_file(run_cli, in_tmp, config):
 def test_an_invalid_repository_config(run_cli, in_tmp, config):
     _write(in_tmp / "src" / "app.py", "print('hello')\n")
     _write(in_tmp / "src" / ".ash.yaml", config)
-    seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
+    seen = run_cli([*SCAN, "src", "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp)
 
 
 def test_an_invalid_ash_config_file(run_cli, in_tmp, monkeypatch):
     monkeypatch.setenv("ASH_CONFIG", str(_write(in_tmp / "env.yaml", BAD)))
     _write(in_tmp / "src" / "app.py", "print('hello')\n")
-    seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
+    seen = run_cli([*SCAN, "src", "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp)
 
 
 def test_an_invalid_project_config_in_a_workspace(run_cli, in_tmp):
     workspace = _workspace(in_tmp, project_config=True)
-    seen = run_cli([*SCAN, "--workspace", workspace.name, "--output-dir", "out"])
+    seen = run_cli([*WORKSPACE_SCAN, workspace.name, "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp, logged=False)
 
 
 def test_an_invalid_ash_config_file_in_a_workspace(run_cli, in_tmp, monkeypatch):
     monkeypatch.setenv("ASH_CONFIG", str(_write(in_tmp / "env.yaml", BAD)))
     workspace = _workspace(in_tmp, project_config=False)
-    seen = run_cli([*SCAN, "--workspace", workspace.name, "--output-dir", "out"])
+    seen = run_cli([*WORKSPACE_SCAN, workspace.name, "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp, logged=False)
 
 
@@ -184,7 +185,7 @@ def test_an_env_read_option_key_of_a_loaded_plugin(run_cli, in_tmp):
         "    options:\n"
         f"      {SECRET}: true\n",
     )
-    seen = run_cli([*SCAN, "--source-dir", "src", "--output-dir", "out"])
+    seen = run_cli([*SCAN, "src", "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp)
     # The control: the refusal is the option check's, before any plugin is built.
     assert seen["exit_code"] == 3, seen
@@ -222,7 +223,7 @@ def test_a_workspace_project_that_fails(run_cli, in_tmp, monkeypatch):
         raise_it,
     )
     workspace = _workspace(in_tmp, project_config=False)
-    seen = run_cli([*SCAN, "--workspace", workspace.name, "--output-dir", "out"])
+    seen = run_cli([*WORKSPACE_SCAN, workspace.name, "--output-dir", "out"])
     _assert_no_canary(seen, in_tmp)
     written = [path for path in (in_tmp / "out").rglob("*") if path.is_file()]
     assert written, "the run wrote no results"
@@ -260,7 +261,7 @@ def test_a_validation_error_reaching_the_generic_exit(
             raise_it,
         )
         _write(in_tmp / "src" / "app.py", "print('hello')\n")
-        args = [*SCAN, "--source-dir", "src", "--output-dir", "out"]
+        args = [*SCAN, "src", "--output-dir", "out"]
     else:
         # run_ash_scan imports it inside _run_workspace_mode.
         monkeypatch.setattr(
@@ -268,7 +269,7 @@ def test_a_validation_error_reaching_the_generic_exit(
             raise_it,
         )
         workspace = _workspace(in_tmp, project_config=False)
-        args = [*SCAN, "--workspace", workspace.name, "--output-dir", "out"]
+        args = [*WORKSPACE_SCAN, workspace.name, "--output-dir", "out"]
     seen = run_cli(args)
     _assert_no_canary(seen, in_tmp)
     # The control: the error reached the generic exit, and was described there

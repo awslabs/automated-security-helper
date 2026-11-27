@@ -204,7 +204,7 @@ _DRIVER = CHILD_TOOL_PROBE_STUBS + (
 
 
 def _findings_of_ash_scan(cwd: Path, source_dir: str) -> list[str]:
-    """``ash scan --scanners detect-secrets`` run in a child process, as a user runs it."""
+    """``ash scan fs --add-scanners detect-secrets`` run in a child process, as a user runs it."""
     output = cwd / f"out-{abs(hash(source_dir))}"
     env = dict(os.environ)
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
@@ -213,13 +213,13 @@ def _findings_of_ash_scan(cwd: Path, source_dir: str) -> list[str]:
             sys.executable,
             "-c",
             _DRIVER,
-            "--source-dir",
+            "fs",
             source_dir,
             "--output-dir",
             str(output),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--no-progress",
             "--no-fail-on-findings",
@@ -248,7 +248,7 @@ def _findings_of_ash_scan(cwd: Path, source_dir: str) -> list[str]:
 def test_ash_scan_of_a_source_directory_named_so_finds_what_the_control_finds(
     tmp_path, name
 ):
-    """The measured case: one file, ``--source-dir`` given as typed, relative."""
+    """The measured case: one file, the scan's path given as typed, relative."""
     _tree(tmp_path / CONTROL, LAYOUTS["one-file"])
     _tree(tmp_path / name, LAYOUTS["one-file"])
 

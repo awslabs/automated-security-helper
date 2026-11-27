@@ -511,8 +511,8 @@ def test_a_config_with_no_untrusted_file_selects_what_its_own_modules_load():
     assert drop_untrusted_off_host_plugins(AshConfig(), plugins, [SNYK]) == plugins
 
 
-# ``ash report``: resolves --config, loads the config's plugin modules, and looks
-# up the reporter --format names.
+# ``ash results report``: resolves --config, loads the config's plugin modules, and
+# looks up the reporter --format names.
 _REPORT = """
 import json, os, sys
 
@@ -547,7 +547,7 @@ def test_ash_report_runs_a_re_exported_reporter_only_from_the_operators_config(
         AshAggregatedResults(ash_config=AshConfig()).model_dump_json(),
         encoding="utf-8",
     )
-    args = ["report", "--format", "s3", "--config", str(config)]
+    args = ["results", "report", "--format", "s3", "--config", str(config)]
     args += ["--output-dir", str(output)]
     environment = {k: v for k, v in os.environ.items() if k not in _AMBIENT}
     environment["PYTHONPATH"] = os.pathsep.join(

@@ -109,11 +109,11 @@ DRIVER = reaching_the_stand_in(
         return CliRunner().invoke(
             app,
             [
-                "scan", "--mode", "local", "--no-progress",
-                "--source-dir", str(layout / "src"),
+                "scan", "fs", str(layout / "src"),
+                "--mode", "local", "--no-progress",
                 "--output-dir", str(layout / out_name),
                 "--config", str(layout / config_name),
-                "--scanners", "good-scanner",
+                "--add-scanners", "good-scanner",
             ],
         )
 

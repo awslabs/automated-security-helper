@@ -3,12 +3,12 @@
 
 """Commands other than a scan refuse a plugin module outside the namespace too.
 
-``ash plugin list``, ``ash dependencies install``, ``ash report`` and ``ash merge``
-import the plugin modules their config names through ``load_plugins``. A name
-outside ASH's plugin namespace (see ``plugins/loader.py``) refuses each of them
-with exit code 3, as it refuses a scan, before anything is imported or written:
-``ash merge`` checks the config carried by the shard results before it writes the
-merged results file. It imports only the entries of that config which the
+``ash plugin list``, ``ash dependencies install``, ``ash results report`` and
+``ash results merge`` import the plugin modules their config names through
+``load_plugins``. A name outside ASH's plugin namespace (see ``plugins/loader.py``)
+refuses each of them with exit code 3, as it refuses a scan, before anything is imported
+or written: ``ash results merge`` checks the config carried by the shard results before
+it writes the merged results file. It imports only the entries of that config which the
 operator's own config also names (``config/plugin_module_trust.py``), so a merge
 test that needs a module imported names it in both, as an operator merging the
 shards would; a name outside the namespace is refused whichever config names it.
@@ -21,7 +21,7 @@ and the namespace rule is the one under test.
 
 Each command is stubbed past the point it should stop at, so that if the refusal
 regressed the test fails without doing the command's work: ``dependencies install``
-would otherwise download and install tools, and ``merge`` would run reporters.
+would otherwise download and install tools, and ``results merge`` would run reporters.
 HOME and the AWS settings point at nothing for the same reason.
 """
 
@@ -193,6 +193,7 @@ class TestCommandsExitThreeForANameThatDoesNotImport:
     def test_report(self, packages, tmp_path):
         result = _invoke(
             [
+                "results",
                 "report",
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -213,6 +214,7 @@ class TestCommandsExitThreeForANameThatDoesNotImport:
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [NOT_INSTALLED]
         args = [
+            "results",
             "merge",
             "--output-dir",
             str(tmp_path / "merged"),
@@ -264,6 +266,7 @@ class TestCommandsExitThree:
     def test_report(self, packages, tmp_path):
         result = _invoke(
             [
+                "results",
                 "report",
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -284,7 +287,7 @@ class TestCommandsExitThree:
         shards = build_shards(3)
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [REFUSED]
-        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        args = ["results", "merge", "--output-dir", str(tmp_path / "merged")]
         for path in write_shards(tmp_path / "artifacts", shards):
             args += ["--results", path]
 
@@ -308,6 +311,7 @@ class TestCommandsExitThree:
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [joined]
         args = [
+            "results",
             "merge",
             "--output-dir",
             str(tmp_path / "merged"),
@@ -386,6 +390,7 @@ class TestARefusalQuotingMarkupStillExitsThree:
     def test_report(self, packages, tmp_path):
         result = _invoke(
             [
+                "results",
                 "report",
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -409,7 +414,7 @@ class TestARefusalQuotingMarkupStillExitsThree:
         shards = build_shards(3)
         for shard in shards:
             shard.ash_config.ash_plugin_modules = [MARKUP_NAME]
-        args = ["merge", "--output-dir", str(tmp_path / "merged")]
+        args = ["results", "merge", "--output-dir", str(tmp_path / "merged")]
         for path in write_shards(tmp_path / "artifacts", shards):
             args += ["--results", path]
 

@@ -350,13 +350,14 @@ class _Run:
 
     def scan_args(self, *extra: str) -> List[str]:
         return [
-            "--source-dir",
+            "scan",
+            "fs",
             str(self.tree),
             "--output-dir",
             str(self.root / "out"),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--phases",
             "scan",
@@ -473,13 +474,14 @@ class TestARefusedModuleRefusesTheScan:
             "cli",
             {
                 "args": [
-                    "--workspace",
+                    "scan",
+                    "workspace",
                     str(workspace_file),
                     "--output-dir",
                     str(tmp_path / "out"),
                     "--mode",
                     "local",
-                    "--scanners",
+                    "--add-scanners",
                     "detect-secrets",
                     "--no-progress",
                 ]
@@ -602,13 +604,14 @@ class TestEveryEntryPointSplitsCommaJoinedNames:
             "cli",
             {
                 "args": [
-                    "--workspace",
+                    "scan",
+                    "workspace",
                     str(workspace_file),
                     "--output-dir",
                     str(tmp_path / "out"),
                     "--mode",
                     "local",
-                    "--scanners",
+                    "--add-scanners",
                     "detect-secrets",
                     "--no-progress",
                     "--ash-plugin-modules",
@@ -692,13 +695,14 @@ class TestANamedModuleThatDoesNotImportRefusesTheScan:
             "cli",
             {
                 "args": [
-                    "--workspace",
+                    "scan",
+                    "workspace",
                     str(workspace_file),
                     "--output-dir",
                     str(tmp_path / "out"),
                     "--mode",
                     "local",
-                    "--scanners",
+                    "--add-scanners",
                     "detect-secrets",
                     "--no-progress",
                     "--ash-plugin-modules",

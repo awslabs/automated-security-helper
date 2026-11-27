@@ -57,7 +57,7 @@ def test_an_env_read_key_of_a_loaded_plugin(
     monkeypatch.setenv("ASH_PROBE_VALUE", CANARY)
     text, location = _SHAPES[shape]
     _write(in_tmp / "src" / "app.py", "print('hello')\n")
-    args = ["scan", "--no-progress", "--source-dir", "src", "--output-dir", "out"]
+    args = ["scan", "fs", "--no-progress", "src", "--output-dir", "out"]
     if source == "--config":
         args += ["--config", str(_write(in_tmp / "op.yaml", text))]
     elif source == "ASH_CONFIG":

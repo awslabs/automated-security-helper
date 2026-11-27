@@ -6,8 +6,8 @@
 ``load_additional_plugin_modules`` logs each module it imports (``Importing
 additional plugin module: ...``) and names an env-read entry by its label. For
 an ``ash_plugin_modules`` entry the config read from the environment, the label
-keeps the variable's value off the console and out of ash.log of ``ash
-report``, ``ash dependencies install`` and ``ash merge`` -- the leak class the
+keeps the variable's value off the console and out of ash.log of ``ash results
+report``, ``ash dependencies install`` and ``ash results merge`` -- the leak class the
 engine's INFO line already masks. ``load_plugins`` already builds the shown map
 for its
 refusal; these cells pin that the import lines read it too.
@@ -254,7 +254,7 @@ def test_report_import_log_names_the_entry_masked(
     )
 
     result = CliRunner().invoke(
-        app, ["report", "--config", str(env_read_importable_config)]
+        app, ["results", "report", "--config", str(env_read_importable_config)]
     )
 
     assert result.exception is None or isinstance(result.exception, SystemExit), repr(
@@ -340,9 +340,9 @@ def test_a_single_scans_crash_line_names_the_module_masked(
         app,
         [
             "scan",
-            "--no-progress",
-            "--source-dir",
+            "fs",
             str(source),
+            "--no-progress",
             "--output-dir",
             str(tmp_path / "out"),
             "--config",
@@ -362,7 +362,7 @@ def test_a_workspace_runs_crash_line_names_the_module_masked(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--no-progress", "--workspace", workspace, "--output-dir", "out"],
+        ["scan", "workspace", workspace, "--no-progress", "--output-dir", "out"],
     )
 
     _crash_named_masked(result, log_records)
@@ -419,9 +419,9 @@ def test_a_workspace_dry_runs_crash_line_names_the_module_masked(
         app,
         [
             "scan",
-            "--no-progress",
-            "--workspace",
+            "workspace",
             workspace,
+            "--no-progress",
             "--output-dir",
             "out",
             "--dry-run",

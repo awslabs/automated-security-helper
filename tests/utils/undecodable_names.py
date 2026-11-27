@@ -54,7 +54,7 @@ SECRET_LINE = 'aws_secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 
 #: The scan the tests run: one scanner that reads each file by its path.
 SCAN_ARGS = (
-    "--scanners",
+    "--add-scanners",
     "detect-secrets",
     "--python-only",
     "--no-progress",
@@ -152,7 +152,7 @@ def ash(cwd: Path, args: Sequence[Name], timeout: float = 600) -> "Ran":
 
 class Ran(NamedTuple):
     """What a child ``ash`` exited with and printed, decoded for an assertion, and
-    its stdout as written (``ash report`` writes the report there)."""
+    its stdout as written (``ash results report`` writes the report there)."""
 
     code: int
     stdout: str
@@ -166,26 +166,34 @@ class Ran(NamedTuple):
 
 
 def report_of(cwd: Path, output: Path, reporter: str) -> "Ran":
-    """``ash report`` of *output*'s saved results with *reporter*, uncolored, so the
-    report on stdout is the reporter's own text."""
+    """``ash results report`` of *output*'s saved results with *reporter*, uncolored,
+    so the report on stdout is the reporter's own text."""
     return ash(
         cwd,
-        ["report", "--output-dir", str(output), "--format", reporter, "--no-color"],
+        [
+            "results",
+            "report",
+            "--output-dir",
+            str(output),
+            "--format",
+            reporter,
+            "--no-color",
+        ],
     )
 
 
 def scan(
     cwd: Path, source: Path, output: Path, *extra: Name, scanner_args=SCAN_ARGS
 ) -> Ran:
-    """``ash scan`` of *source* into *output*, local mode, with *extra* arguments."""
+    """``ash scan fs`` of *source* into *output*, local mode, with *extra* arguments."""
     return ash(
         cwd,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
             *scanner_args,

@@ -147,11 +147,11 @@ def _refused_by_the_scan(tmp_path, named, monkeypatch):
         app,
         [
             "scan",
+            "fs",
+            str(src),
             "--mode",
             "local",
             "--no-progress",
-            "--source-dir",
-            str(src),
             "--output-dir",
             str(tmp_path / "out"),
             "--config",
