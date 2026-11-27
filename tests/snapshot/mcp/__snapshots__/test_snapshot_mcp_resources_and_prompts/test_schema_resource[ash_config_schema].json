@@ -555,7 +555,7 @@
             }
           ],
           "default": true,
-          "description": "Whether an unknown key in a suppression or ignore-path entry refuses the config at load. True (the default since ASH 4.0) refuses the config, naming the key, with a did-you-mean. False keeps the 3.x behavior: the config loads with a warning that names the same key, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression.",
+          "description": "Whether an unknown key in a suppression or ignore-path entry refuses the config at load. True (the default since ASH 4.0) refuses the config, naming the key, with a did-you-mean. False keeps the 3.x behavior: the config loads with a warning that names the same key, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression. The same setting decides what a suppression's scope.engines block does when a scan starts and the block names a scanner no plugin of the run registers, or the named scanner refuses it: True refuses the scan, False warns. Either way the block suppresses nothing.",
           "title": "Fail On Unknown Keys"
         },
         "global_settings": {
