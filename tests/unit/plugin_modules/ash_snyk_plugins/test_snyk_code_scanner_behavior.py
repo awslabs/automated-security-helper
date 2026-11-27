@@ -2186,3 +2186,91 @@ def test_a_name_ending_in_whitespace_is_copied_under_its_own_name(
     assert seen["files"] == ["a.js", "a.js "], seen["files"]
     messages = " ".join(record.getMessage() for record in caplog.records)
     assert "Testing a copy of 2 files" in messages, messages
+
+
+# ---------------------------------------------------------------------------
+# Working directory of the snyk process
+# ---------------------------------------------------------------------------
+
+EMPTY_SARIF = json.dumps(
+    {
+        "version": "2.1.0",
+        "runs": [
+            {"tool": {"driver": {"name": "SnykCode", "rules": []}}, "results": []}
+        ],
+    }
+)
+
+
+@pytest.fixture
+def snyk_run_record(monkeypatch):
+    """Record the ``cwd`` and ``command`` the subprocess layer is given.
+
+    Patches the name ``_run_subprocess`` actually calls, so the working directory
+    the scanner passes is the one observed, and writes an empty SARIF file where
+    the argv names it.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    seen = {}
+
+    def run(command, *args, **kwargs):
+        command = [str(part) for part in command]
+        seen["command"] = command
+        seen["cwd"] = kwargs.get("cwd")
+        destination = next(
+            part.split("=", 1)[1]
+            for part in command
+            if part.startswith(SARIF_OUTPUT_FLAG)
+        )
+        Path(destination).write_text(EMPTY_SARIF, encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(subprocess_utils, "run_command_with_output_handling", run)
+    return seen
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "name,body",
+    [
+        ("snyk.json", '{"endpoint": "https://example.invalid"}'),
+        ("snyk.yaml", "endpoint: https://example.invalid\n"),
+    ],
+)
+def test_snyk_starts_outside_the_scanned_tree_in_an_empty_directory(
+    scanner, snyk_on_path, plugin_context, snyk_run_record, name, body
+):
+    source = plugin_context.source_dir
+    (source / name).write_text(body, encoding="utf-8")
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    scanner.scan(target=source, target_type="source")
+
+    cwd = Path(snyk_run_record["cwd"]).resolve()
+    copy = next(
+        Path(arg).resolve()
+        for arg in snyk_run_record["command"][3:]
+        if not arg.startswith("-")
+    )
+    assert cwd != source.resolve()
+    assert source.resolve() not in cwd.parents
+    assert cwd != copy
+    assert copy not in cwd.parents
+    assert [e.name for e in cwd.iterdir() if e.name.startswith("snyk.")] == []
+
+
+@pytest.mark.unit
+def test_control_snyk_is_still_given_the_staged_copy_and_the_sarif_output(
+    scanner, snyk_on_path, plugin_context, snyk_run_record
+):
+    source = plugin_context.source_dir
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    scanner.scan(target=source, target_type="source")
+
+    command = snyk_run_record["command"]
+    target = Path(next(arg for arg in command[3:] if not arg.startswith("-")))
+    assert target.is_absolute()
+    assert target.resolve() != source.resolve()
+    assert any(arg.startswith(SARIF_OUTPUT_FLAG) for arg in command)
