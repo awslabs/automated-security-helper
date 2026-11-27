@@ -275,10 +275,9 @@ with:
 
 The `install-*` inputs only matter in local mode, where they download scanner tools onto
 the runner. In container mode the scanners run inside the image, so the example sets none
-of them. The inputs a workflow accepts depend on its version: the workflow at `v{{VERSION}}`
-defines only `install-grype`, `install-syft`, and `install-opengrep`, all defaulting to
-`false`, and a caller that passes an input the referenced workflow does not define fails
-before any job starts. Check the workflow file at the tag you pin before adding one.
+of them. The inputs a workflow accepts depend on its version, and a caller that passes an
+input the referenced workflow does not define fails before any job starts. Before adding
+one, read the `inputs:` block of the workflow file at the tag you pin.
 
 `changed-files-only` does not work with container mode. The workflow checks the mode before
 it runs ASH, whether it comes from `ash-mode` or from `--mode container` in `ash-args`, and
