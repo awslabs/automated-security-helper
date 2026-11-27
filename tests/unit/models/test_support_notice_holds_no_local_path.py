@@ -25,7 +25,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from automated_security_helper.base.support_register import REGISTER
+from automated_security_helper.base.support_register import REGISTER, VOCABULARY
 from automated_security_helper.models.asharp_model import SupportNotice
 from tests.unit.models._support_notice_helpers import cpu_notice, upgrade_path
 
@@ -53,6 +53,15 @@ LOCAL_PATHS = {
     "a file URI in capitals": "FILE:///home/alice/ash",
     "a file URI in mixed case": "File:///home/alice/ash",
     "a file URI with a drive": "file:///c:/users/alice",
+    # The shapes the rules above still pass. A network share the way
+    # PureWindowsPath(r"\\fileserver\share").as_posix() writes it, and a POSIX path
+    # whose leading slash is doubled: the second slash follows a slash, which is
+    # never the start of a token, so the rule for an absolute path never reaches it.
+    # And a drive with a path that is relative to the drive's own current directory:
+    # the colon is followed by a name, not by a separator.
+    "a network share in forward slashes": "//fileserver/share/alice/ash",
+    "a path with a doubled leading slash": "//home/alice/.venv/bin/python",
+    "a drive-relative path": "C:Users\\alice\\AppData",
 }
 
 #: Ordinary text a notice holds, each in a spelling a path guard could get wrong.
@@ -68,6 +77,19 @@ PLAIN_TEXT = {
     "backslashes that start no path": "a\\b, a lone \\ and 5 \\ 3 are not paths.",
     "words that are not a file URI": (
         "Set it aside: the file: prefix, a FILE: label and profile: are words."
+    ),
+    # Doubled slashes and colons that start no path. The "//" of a URL follows the
+    # colon of its scheme, and a letter before a colon is a drive only when it stands
+    # alone, not when it ends a word.
+    "a URL with a host and a path": "https://host/path",
+    "a URL of another scheme": "s3://bucket/prefix/key",
+    "an image tag": "ubuntu:22.04",
+    "a runtime and its build": "polars:runtime-32",
+    "a time": "20:54",
+    "a ratio": "3:1",
+    "all of them in a sentence": (
+        "ubuntu:22.04 started at 20:54, the ratio was 3:1 and s3://bucket/key held "
+        "polars:runtime-32."
     ),
 }
 
@@ -134,6 +156,24 @@ def test_control_every_sentence_the_register_declares_is_accepted():
     for text in texts:
         assert cpu_notice(message=text).message == text
         assert upgrade_path("probe", "same-os", text).summary == text
+
+
+def test_control_every_id_and_token_the_register_declares_is_accepted():
+    """The names a notice carries are the register's: the ids of its rows, stand-ins
+    and paths, and the tokens its facts take. None of them holds a colon today, so the
+    colon controls above are written out by hand; a name the register gains in a
+    spelling the guard reads as a path would fail here, where it can be fixed."""
+    names = [row.id for row in REGISTER.rows]
+    names.extend(polyfill.id for polyfill in REGISTER.polyfills)
+    names.extend(path.id for path in REGISTER.paths)
+    for tokens in VOCABULARY.values():
+        names.extend(tokens)
+
+    assert len(names) > 40
+    for name in names:
+        notice = cpu_notice(id=name, polyfill=name, found=name, facts={"arch": name})
+        assert (notice.id, notice.polyfill, notice.found) == (name, name, name)
+        assert upgrade_path(name, "same-os", "One sentence.").id == name
 
 
 def test_a_command_attached_to_a_notice_or_a_path_is_not_kept():
