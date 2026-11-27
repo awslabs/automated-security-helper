@@ -160,7 +160,10 @@ from automated_security_helper.config.confinement_remedy import (
     KEEP_A_SETTING,
     SET_BY_THE_OPERATOR,
 )
-from automated_security_helper.config.tool_config_trust import empty_tool_directory
+from automated_security_helper.config.tool_config_trust import (
+    empty_tool_directory,
+    refuse_relative_extend_path,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -681,6 +684,11 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         """
         operator_config = self._operator_config_path()
         if operator_config is not None:
+            refuse_relative_extend_path(
+                "Betterleaks",
+                "scanners.betterleaks.options.config_file",
+                path=operator_config,
+            )
             return operator_config
         set_vars = _config_env_names_set()
         if set_vars and active_scope() is not None:
@@ -691,6 +699,19 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 level=logging.WARNING,
             )
         elif set_vars:
+            # A relative extend path in the config would be opened from the
+            # scanned tree, so each config variable that is set is read first.
+            environ = snapshot_environ()
+            for name in set_vars:
+                value = environ.get(name, "")
+                if name.endswith("_TOML"):
+                    refuse_relative_extend_path("Betterleaks", name, text=value)
+                else:
+                    refuse_relative_extend_path(
+                        "Betterleaks",
+                        name,
+                        path=Path(os.path.abspath(os.path.expanduser(value))),
+                    )
             given = _config_env_value()
             if given is not None and not os.path.isabs(given[1]):
                 ASH_LOGGER.debug(

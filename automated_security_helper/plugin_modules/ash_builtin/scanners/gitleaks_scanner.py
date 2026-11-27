@@ -177,6 +177,7 @@ from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERA
 from automated_security_helper.config.tool_config_trust import (
     empty_tool_config,
     empty_tool_directory,
+    refuse_relative_extend_path,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -908,6 +909,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         """
         operator_config = self._operator_option_path("config_file")
         if operator_config is not None:
+            refuse_relative_extend_path(
+                "gitleaks",
+                "scanners.gitleaks.options.config_file",
+                path=operator_config,
+            )
             return operator_config
         set_vars = [name for name in CONFIG_ENV_VARS if os.environ.get(name)]
         if set_vars and active_scope() is not None:
@@ -930,20 +936,35 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # either (a shell expands it only in some positions, and CI
             # ``env:`` blocks, ``.env`` files and ``--env-file`` never do), and
             # gitleaks does not expand it, so ``~/rules.toml`` as given would
-            # name a ``~`` directory inside the scanned tree. Only a path that
-            # is absolute as typed, or GITLEAKS_CONFIG_TOML (the config's text,
-            # not a path), is left to gitleaks as before.
+            # name a ``~`` directory inside the scanned tree.
+            #
+            # An absolute path and GITLEAKS_CONFIG_TOML (the config's text,
+            # written to a file outside the tree) are passed as --config too.
+            # With none, gitleaks sets its config path to
+            # ``<source>/.gitleaks.toml`` and skips that one file.
             given = self._config_env_value()
-            if given and not os.path.isabs(given):
-                anchored = self._anchored_config_env(given)
-                ASH_LOGGER.debug(
-                    "GITLEAKS_CONFIG is not an absolute path; passing it to "
-                    "gitleaks resolved against the working directory ASH runs in"
+            if given:
+                chosen = (
+                    Path(given)
+                    if os.path.isabs(given)
+                    else self._anchored_config_env(given)
                 )
-                return anchored
-            ASH_LOGGER.debug(
-                f"{', '.join(set_vars)} set; leaving gitleaks config resolution to gitleaks"
-            )
+                refuse_relative_extend_path("gitleaks", "GITLEAKS_CONFIG", path=chosen)
+                ASH_LOGGER.debug(
+                    "GITLEAKS_CONFIG set; passing it to gitleaks as --config, "
+                    "resolved against the working directory ASH runs in"
+                )
+                return chosen
+            toml_text = os.environ.get("GITLEAKS_CONFIG_TOML")
+            if toml_text:
+                refuse_relative_extend_path(
+                    "gitleaks", "GITLEAKS_CONFIG_TOML", text=toml_text
+                )
+                return empty_tool_config(
+                    "ash-gitleaks-env-config.toml",
+                    toml_text,
+                    context=self.context,
+                ).resolve()
             return None
         present = [n for n in TREE_CONFIG_NAMES if (self._source_dir() / n).is_file()]
         if present:

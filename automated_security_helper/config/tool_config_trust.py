@@ -114,6 +114,7 @@ from automated_security_helper.config.untrusted_source import (
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ASHRespelledOverrideError,
+    ScannerError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.terminal_text import shown_on_one_line
@@ -1156,3 +1157,68 @@ def empty_tool_directory(name: str, *, context: Any) -> Path:
     )
 
     return make_tool_config_directory(name, context=context)
+
+
+#: How many ``[extend]`` files gitleaks and betterleaks follow from the config they
+#: are given (``maxExtendDepth`` in each tool's ``config/config.go``).
+EXTEND_DEPTH_LIMIT = 2
+
+
+def refuse_relative_extend_path(
+    tool: str,
+    source: str,
+    *,
+    text: Optional[str] = None,
+    path: Optional[Path] = None,
+    _depth: int = 0,
+) -> None:
+    """Refuse a gitleaks-style config whose ``[extend] path`` is not absolute.
+
+    gitleaks and betterleaks run with the scanned tree as their working
+    directory and open a relative ``extend.path`` from it, then append that
+    file's allowlists, so the scanned repository would supply a file the
+    operator's config names. The config is read the way the tool does (TOML,
+    ``extend.path``) and each absolute extended file is followed to the tool's own
+    depth limit.
+
+    Args:
+        tool: The tool's name, for the message.
+        source: Where the config came from (an option or variable name, or the
+            path of the extended file), for the message.
+        text: The config's text, when the operator gave text.
+        path: The config file, when the operator gave a file. A file that is
+            missing or unreadable is left to the tool, which reports it.
+
+    Raises:
+        ScannerError: ``extend.path`` in the config, or in a file it extends, is
+            not absolute.
+    """
+    import os
+    import tomllib
+
+    if text is None:
+        if path is None:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return
+    extend = data.get("extend")
+    extended = extend.get("path") if isinstance(extend, dict) else None
+    if not isinstance(extended, str) or not extended:
+        return
+    if not os.path.isabs(extended):
+        raise ScannerError(
+            f"{source} sets [extend] path = {extended!r}, which is not an "
+            f"absolute path. {tool} opens a relative extend path from its working "
+            "directory, the scanned tree, so the scanned repository would supply "
+            f"that file. Use an absolute path to the file; {tool} is not run."
+        )
+    if _depth < EXTEND_DEPTH_LIMIT:
+        refuse_relative_extend_path(
+            tool, extended, path=Path(extended), _depth=_depth + 1
+        )

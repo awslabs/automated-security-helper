@@ -330,14 +330,14 @@ def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
 
 @pytest.mark.parametrize("variable", ["GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"])
 @pytest.mark.unit
-def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, variable):
-    """The operator's environment, not the tree: gitleaks resolves it.
+def test_a_gitleaks_config_env_var_is_passed_as_config(tmp_path, monkeypatch, variable):
+    """The operator's environment, not the tree, chooses the config.
 
-    An absolute ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML`` (the config's
-    text), needs nothing from ASH. A RELATIVE ``GITLEAKS_CONFIG`` is the one
-    value gitleaks would resolve against its working directory, the scanned
-    tree, so ASH anchors that one where the operator set it and passes it as
-    ``--config`` (the test below)."""
+    An absolute ``GITLEAKS_CONFIG`` is passed as ``--config``, and so is
+    ``GITLEAKS_CONFIG_TOML`` (the config's text), written outside the tree: with
+    no ``--config`` gitleaks sets its config path to ``<source>/.gitleaks.toml``.
+    A RELATIVE ``GITLEAKS_CONFIG`` is anchored where the operator set it (the
+    test below)."""
     value = (
         str(tmp_path / "operator.toml")
         if variable == "GITLEAKS_CONFIG"
@@ -351,7 +351,14 @@ def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, va
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text("")
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
-    assert not any(a.startswith("--config") for a in args)
+    configs = [a for a in args if a.startswith("--config")]
+    assert len(configs) == 1 and configs[0].startswith("--config=")
+    passed = Path(configs[0].split("=", 1)[1])
+    if variable == "GITLEAKS_CONFIG":
+        assert passed == tmp_path / "operator.toml"
+    else:
+        assert _ashs_own(passed, scanner.context.source_dir)
+        assert passed.read_text() == value
 
 
 @pytest.mark.unit
@@ -904,14 +911,15 @@ def test_post_processing_with_a_context_finds_the_output_dir_in_the_base(tmp_pat
 
 
 @pytest.mark.unit
-def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
+def test_gitleaks_config_variables_are_passed_as_config_outside_a_sandbox(
     tmp_path, monkeypatch
 ):
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text('title = "repo"\n')
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
 
-    assert scanner._resolve_config_file() is None
+    assert scanner._resolve_config_file() == tmp_path / "operator.toml"
 
 
 @pytest.mark.unit
