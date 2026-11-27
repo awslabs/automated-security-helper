@@ -14,6 +14,7 @@ nav:
       - Roll out across repositories: getting-started/platform-teams.md
   - How-to guides:
       - Install ASH: how-to/install.md
+      - Supported configurations: how-to/supported-configurations.md
       - Manage scanner tools: docs/advanced-usage.md
       - Configure ASH: how-to/configure.md
       - Choose scanners: how-to/choose-scanners.md
