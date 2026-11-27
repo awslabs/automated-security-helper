@@ -92,17 +92,19 @@ def _key(entry: Dict[str, Any]) -> Tuple[Any, ...]:
 
 
 def _symbol_spans(entry: Dict[str, Any]) -> List[Tuple[int, int]]:
-    """The resolved spans of a symbol entry, skipping when the extra is missing."""
-    try:
-        from automated_security_helper.utils.symbol_spans import (
-            grammar_for_path,
-            index_symbols,
-        )
+    """The resolved spans of a symbol entry, skipping when the extra is missing.
 
-        grammar = grammar_for_path(entry["path"])
-        assert grammar is not None, f"no symbol grammar for {entry['path']}"
-        spans = index_symbols((REPO_ROOT / entry["path"]).read_bytes(), grammar)
-    except ImportError as exc:  # pragma: no cover - environment-dependent
+    symbol_spans imports tree-sitter only when it parses, and reports a missing
+    tree-sitter or grammar as SymbolsUnavailableError, never as ImportError, so
+    the skip catches that class.
+    """
+    grammar = symbol_spans.grammar_for_path(entry["path"])
+    assert grammar is not None, f"no symbol grammar for {entry['path']}"
+    try:
+        spans = symbol_spans.index_symbols(
+            (REPO_ROOT / entry["path"]).read_bytes(), grammar
+        )
+    except symbol_spans.SymbolsUnavailableError as exc:
         if os.environ.get("ASH_REQUIRE_SYMBOLS_EXTRA", "").strip().upper() in (
             "1",
             "YES",
