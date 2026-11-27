@@ -1381,6 +1381,95 @@ def test_a_delivered_config_may_turn_on_more_cdk_nag_packs() -> None:
     assert isinstance(_scan_resolution(source), AshConfig)
 
 
+#: The config file the next test delivers beside its allowlists: an unpinned runner,
+#: and a second entry that declares both a command and a URL, so that each list sits
+#: next to a check that is on by default.
+_PLANTED_MCP_CONFIG = json.dumps(
+    {
+        "mcpServers": {
+            "runner": {"command": "npx", "args": ["-y", "some-mcp-server"]},
+            "both": {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["-y", "other-mcp-server"],
+                "url": "https://mcp.example.com/v1",
+            },
+        }
+    },
+    indent=2,
+)
+#: The options the mcp-config scanner reads.
+_MCP_CONFIG_OPTIONS = (
+    "forbid_privilege_escalation",
+    "forbid_unpinned_runners",
+    "forbid_auto_approval",
+    "require_local",
+    "remote_url_prefixes",
+    "allowed_command_prefixes",
+    "flag_env_secrets",
+)
+
+
+def test_a_delivered_allowlist_does_not_hide_an_unpinned_runner() -> None:
+    """The planted control for the two reviewed mcp-config lists.
+
+    ``_REVIEWED_OPTIONS`` lets a delivered config set ``allowed_command_prefixes`` and
+    ``remote_url_prefixes`` because a list only reports more. That holds only if no
+    check but the list's own reads it: one that took a listed command or URL as
+    trusted would let a client hide an unpinned ``npx`` behind an allowlist that
+    names it, with no denied option touched. The scanner reads each list in one
+    place (``evaluate_entry``), and this holds it end to end: the config a client
+    delivers lists the very command and URL its fixture uses and resolves, and the
+    findings of the checks that are on by default come out as they do under the
+    defaults.
+    """
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
+        RULE_UNPINNED_RUNNER,
+        McpConfigScannerConfigOptions,
+        evaluate_entry,
+    )
+    from automated_security_helper.utils.mcp_config import parse_mcp_config_text
+
+    lists = {
+        "allowed_command_prefixes": ["npx"],
+        "remote_url_prefixes": ["https://mcp.example.com"],
+    }
+    document = {"scanners": {"mcp-config": {"options": lists}}}
+    source = _upload(
+        {".ash.yaml": yaml.safe_dump(document), ".mcp.json": _PLANTED_MCP_CONFIG}
+    )
+    outcome = _scan_resolution(source)
+    # Accepted, since the lists are reviewed and not denied...
+    assert isinstance(outcome, AshConfig), outcome
+    resolved = outcome.get_plugin_config("scanner", "mcp-config")["options"]
+    # ...and in force, so the control cannot pass by the lists never arriving.
+    assert {name: resolved[name] for name in lists} == lists
+
+    entries = parse_mcp_config_text(
+        (source / ".mcp.json").read_text(encoding="utf-8"), ".mcp.json"
+    )
+
+    def found(options: Any) -> List[tuple]:
+        return sorted(
+            (finding.rule_id, finding.pointer)
+            for entry in entries
+            for finding in evaluate_entry(entry, options)
+        )
+
+    flagged = [
+        (RULE_UNPINNED_RUNNER, "/mcpServers/both/args/1"),
+        (RULE_UNPINNED_RUNNER, "/mcpServers/runner/args/1"),
+    ]
+    # The fixture is flagged under the defaults, so there is something to hide...
+    assert found(McpConfigScannerConfigOptions()) == flagged
+    # ...and the delivered lists, which match both entries, hide none of it.
+    delivered = McpConfigScannerConfigOptions(
+        **{name: resolved[name] for name in _MCP_CONFIG_OPTIONS}
+    )
+    assert found(delivered) == flagged
+
+
 #: Every scanner option a delivered config may change that is neither denied
 #: by default nor re-applied as a marked suppression, and why changing it leaves
 #: no finding out. ``"*"`` stands for every scanner with the option. Each option
@@ -1437,6 +1526,10 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
         "how many dependencies verify downloads at once; throughput, not findings"
     ),
     ("mcp-config", "require_local"): "off by default; on reports more",
+    # The next two rows claim that a list reports more and that no check but its own
+    # reads it. test_a_delivered_allowlist_does_not_hide_an_unpinned_runner holds that
+    # through a delivered config, and the list rows of test_mcp_config_scanner.py
+    # hold it check by check.
     ("mcp-config", "remote_url_prefixes"): (
         "empty by default, which turns the check off; a list reports more"
     ),

@@ -15,7 +15,7 @@ the converted target is reported empty.
 import json
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, NamedTuple, Tuple
 
 import pytest
 
@@ -515,6 +515,145 @@ def test_an_entry_with_a_command_and_a_url_is_checked_on_both_sides() -> None:
     server = stdio("sudo", url="https://mcp.example.com/x")
     found = rules(server, forbid_privilege_escalation=True, require_local=True)
     assert sorted(found) == sorted([RULE_PRIVILEGE_ESCALATION, RULE_REMOTE_NOT_LOCAL])
+
+
+# ---------------------------------------------------------------------------
+# The two prefix lists feed their own checks and no other. A check beyond its own
+# that took a listed command or URL as trusted would let a config hide a finding by
+# listing what the finding is about, with no denied option touched. The delivered
+# config policy relies on that: it lets a client set both lists because a list only
+# reports more (_REVIEWED_OPTIONS in
+# tests/unit/cli/mcp/test_delivered_scanner_exclusions.py). The rows above start
+# from everything off, so none of them could see one check lean on another's
+# option; every row here runs with each check that is on by default.
+# ---------------------------------------------------------------------------
+
+#: The rules a prefix list exists to raise. A list may add these and nothing else.
+PREFIX_RULES = frozenset(
+    {RULE_COMMAND_PREFIX, RULE_REMOTE_URL_PREFIX, RULE_REMOTE_URL_INSECURE}
+)
+LISTED_URL = "https://mcp.example.com/v1"
+LISTED_URL_PREFIX = "https://mcp.example.com"
+#: Lists that match none of the rows' commands or URLs, so each fires its own check.
+NON_MATCHING_LISTS = {
+    "allowed_command_prefixes": ["/nowhere/at/all"],
+    "remote_url_prefixes": ["https://other.example.net"],
+}
+
+
+class ListedEntry(NamedTuple):
+    """One entry that trips a check that is on by default, and the lists matching it."""
+
+    name: str
+    path: str
+    server: dict
+    lists: Dict[str, List[str]]
+    rule: str
+
+
+LISTED_ENTRIES = [
+    ListedEntry(
+        "an-unpinned-npx-listed-by-name",
+        ".mcp.json",
+        stdio("npx", "-y", "some-mcp-server"),
+        {"allowed_command_prefixes": ["npx"]},
+        RULE_UNPINNED_RUNNER,
+    ),
+    ListedEntry(
+        "an-unpinned-npx-listed-by-directory",
+        ".mcp.json",
+        stdio("/usr/local/bin/npx", "-y", "some-mcp-server"),
+        {"allowed_command_prefixes": ["/usr/local/bin"]},
+        RULE_UNPINNED_RUNNER,
+    ),
+    ListedEntry(
+        "an-unpinned-uvx-beside-a-listed-url",
+        ".mcp.json",
+        stdio("uvx", "some-mcp-server", type="stdio", url=LISTED_URL),
+        {
+            "allowed_command_prefixes": ["uvx"],
+            "remote_url_prefixes": [LISTED_URL_PREFIX],
+        },
+        RULE_UNPINNED_RUNNER,
+    ),
+    ListedEntry(
+        "a-sudo-command-listed-by-name",
+        ".mcp.json",
+        stdio("sudo", "/opt/mcp/server"),
+        {"allowed_command_prefixes": ["sudo"]},
+        RULE_PRIVILEGE_ESCALATION,
+    ),
+    ListedEntry(
+        "a-literal-secret-under-a-listed-command",
+        ".mcp.json",
+        stdio("/opt/mcp/server", env={"API_KEY": "literal-1"}),
+        {"allowed_command_prefixes": ["/opt/mcp"]},
+        RULE_ENV_SECRET,
+    ),
+    ListedEntry(
+        "a-literal-secret-at-a-listed-url",
+        ".mcp.json",
+        {"type": "http", "url": LISTED_URL, "env": {"API_KEY": "literal-2"}},
+        {"remote_url_prefixes": [LISTED_URL_PREFIX]},
+        RULE_ENV_SECRET,
+    ),
+    ListedEntry(
+        "an-auto-approved-server-at-a-listed-url",
+        ".gemini/settings.json",
+        {"httpUrl": LISTED_URL, "trust": True},
+        {"remote_url_prefixes": [LISTED_URL_PREFIX]},
+        RULE_AUTO_APPROVAL,
+    ),
+    ListedEntry(
+        "an-auto-approved-command-under-a-listed-prefix",
+        ".kiro/settings/mcp.json",
+        stdio("/opt/mcp/server", autoApprove=["read"]),
+        {"allowed_command_prefixes": ["/opt/mcp"]},
+        RULE_AUTO_APPROVAL,
+    ),
+]
+
+
+def findings(path: str, server: dict, **changes) -> List[Tuple[str, str]]:
+    """(rule id, pointer) of each finding for one entry, with every default check on.
+
+    ``rules`` starts from everything off, so a row turns on the one option it is
+    about. This starts from the defaults, so a list set beside a check that is on by
+    default shows whether it leaves that check's findings as they were.
+    """
+    text = json.dumps({"mcpServers": {"s": server}}, indent=2)
+    settings = McpConfigScannerConfigOptions(**changes)
+    return [
+        (found.rule_id, found.pointer)
+        for entry in parse_mcp_config_text(text, path)
+        for found in evaluate_entry(entry, settings)
+    ]
+
+
+def test_an_allowlist_that_matches_an_unpinned_runner_does_not_hide_it() -> None:
+    """The planted control: an unpinned `npx`, and a list that names `npx`."""
+    server = stdio("npx", "-y", "some-mcp-server")
+    flagged = [(RULE_UNPINNED_RUNNER, "/mcpServers/s/args/1")]
+    assert findings(".mcp.json", server) == flagged
+    assert findings(".mcp.json", server, allowed_command_prefixes=["npx"]) == flagged
+
+
+@pytest.mark.parametrize("row", LISTED_ENTRIES, ids=lambda row: row.name)
+def test_a_list_that_matches_an_entry_hides_none_of_its_findings(row) -> None:
+    baseline = findings(row.path, row.server)
+    # The row trips its check by default, so there is a finding to hide.
+    assert row.rule in [rule for rule, _ in baseline], baseline
+    assert findings(row.path, row.server, **row.lists) == baseline
+
+
+@pytest.mark.parametrize("row", LISTED_ENTRIES, ids=lambda row: row.name)
+def test_a_list_that_matches_nothing_adds_findings_of_its_own_rules_only(row) -> None:
+    baseline = findings(row.path, row.server)
+    listed = findings(row.path, row.server, **NON_MATCHING_LISTS)
+    # The lists are live, so the rows above did not pass by the lists going unread.
+    assert [found for found in listed if found[0] in PREFIX_RULES], listed
+    # And everything they leave is what the defaults found, unmoved.
+    assert [found for found in listed if found[0] not in PREFIX_RULES] == baseline
 
 
 # ---------------------------------------------------------------------------
