@@ -1881,6 +1881,12 @@ scanners:
       confidence_levels: "high"
       checks: "CREDIT_CARD,SECRETS,SSN,PASSPORT"
       recursive: true
+      # Read only from the operator: a config file inside the scanned tree does not
+      # choose it (automated_security_helper/config/tool_config_trust.py), so a scan
+      # that names this file runs ferret-scan with its bundled config and warns that
+      # this value was ignored. CI passes it with --config-overrides
+      # (.github/actions/run-scan-test); a local run that should match CI passes
+      # --config-overrides scanners.ferret-scan.options.use_default_config=false.
       use_default_config: false
       exclude_patterns:
         - ".venv"
