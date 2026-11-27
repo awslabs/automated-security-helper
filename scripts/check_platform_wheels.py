@@ -89,9 +89,7 @@ from typing import Any, NamedTuple
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 UV_LOCK = REPO_ROOT / "uv.lock"
-REGISTRY = (
-    REPO_ROOT / "automated_security_helper" / "base" / "plugin_provisioning.py"
-)
+REGISTRY = REPO_ROOT / "automated_security_helper" / "base" / "plugin_provisioning.py"
 RECORD = Path(__file__).resolve().with_name("platform_wheels.json")
 
 FORMAT = 1
@@ -268,7 +266,9 @@ _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z")
 def parse_timestamp(text: str) -> datetime:
     """A UTC timestamp written ``YYYY-MM-DDTHH:MM:SSZ``."""
     if _TIMESTAMP.fullmatch(text) is None:
-        raise ValueError(f"{text!r} is not a UTC timestamp such as 2026-11-20T12:00:00Z")
+        raise ValueError(
+            f"{text!r} is not a UTC timestamp such as 2026-11-20T12:00:00Z"
+        )
     return datetime.fromisoformat(text[:-1] + "+00:00")
 
 
@@ -288,7 +288,9 @@ def read_cooldown(lock_text: str) -> tuple[str, timedelta | datetime]:
     """
     options = tomllib.loads(lock_text).get("options")
     if not isinstance(options, dict):
-        raise ValueError("uv.lock has no [options] table, so it records no exclude-newer")
+        raise ValueError(
+            "uv.lock has no [options] table, so it records no exclude-newer"
+        )
     span = options.get("exclude-newer-span")
     if isinstance(span, str):
         return span, parse_duration(span)
@@ -404,7 +406,9 @@ def alpha_candidates(blocks: Mapping[str, Any]) -> list[Candidate]:
     for block in blocks.values():
         for pin in block.pypi_pins:
             member = pin.extra == "alpha"
-            held = pin.excluded is not None and pin.excluded.reason.value == "owner_hold"
+            held = (
+                pin.excluded is not None and pin.excluded.reason.value == "owner_hold"
+            )
             if member or held:
                 found.append(
                     Candidate(
@@ -453,7 +457,9 @@ def member_rows(blocks: Mapping[str, Any]) -> frozenset[str]:
 # ---------------------------------------------------------------------------
 
 
-def cell_command(uv: str, platform: Platform, python: str, exclude_newer: str) -> list[str]:
+def cell_command(
+    uv: str, platform: Platform, python: str, exclude_newer: str
+) -> list[str]:
     return [
         uv,
         "pip",
@@ -534,7 +540,9 @@ def defuse(text: str) -> str:
 
 
 def _excerpt(text: str, limit: int = 400) -> str:
-    flat = " | ".join(line.strip() for line in defuse(text).splitlines() if line.strip())
+    flat = " | ".join(
+        line.strip() for line in defuse(text).splitlines() if line.strip()
+    )
     return flat if len(flat) <= limit else flat[: limit - 3] + "..."
 
 
@@ -824,7 +832,9 @@ def _anyio_control(
     env = child_environment(environment)
     base = _resolve(runner, argv, core_requirements, env, "the base closure")
     if not base.ok:
-        return ControlResult(name, False, "the base install does not resolve universally")
+        return ControlResult(
+            name, False, "the base install does not resolve universally"
+        )
     if "anyio" not in base.pins:
         return ControlResult(
             name,
@@ -946,10 +956,14 @@ def _validate(record: Any) -> None:
             raise RecordError(f"row {set_id!r} is not an object of platforms")
         for platform, cells in rows.items():
             if not isinstance(cells, dict):
-                raise RecordError(f"{set_id!r} / {platform!r} is not an object of cells")
+                raise RecordError(
+                    f"{set_id!r} / {platform!r} is not an object of cells"
+                )
             for python, cell in cells.items():
                 if not isinstance(cell, str):
-                    raise RecordError(f"{set_id!r} / {platform!r} / {python!r}: not a cell")
+                    raise RecordError(
+                        f"{set_id!r} / {platform!r} / {python!r}: not a cell"
+                    )
                 parse_cell(cell)
 
 
@@ -972,7 +986,9 @@ def _cells_of(row: Mapping[str, Mapping[str, str]]) -> set[tuple[str, str]]:
     return {(platform, python) for platform, cells in row.items() for python in cells}
 
 
-def _shape_message(missing: Sequence[tuple[str, str]], gone: Sequence[tuple[str, str]]) -> str:
+def _shape_message(
+    missing: Sequence[tuple[str, str]], gone: Sequence[tuple[str, str]]
+) -> str:
     def listing(cells: Sequence[tuple[str, str]]) -> str:
         shown = [f"{platform} / {python}" for platform, python in cells[:6]]
         if len(cells) > 6:
@@ -1003,7 +1019,9 @@ def compare(
     findings: list[Finding] = []
     for set_id in sorted(set(recorded) - set(measured)):
         findings.append(
-            Finding("stale-row", set_id, "recorded, but this script no longer measures it")
+            Finding(
+                "stale-row", set_id, "recorded, but this script no longer measures it"
+            )
         )
     for set_id in sorted(measured):
         if set_id not in recorded:
@@ -1026,7 +1044,9 @@ def compare(
         if here != there:
             findings.append(
                 Finding(
-                    "shape", set_id, _shape_message(sorted(there - here), sorted(here - there))
+                    "shape",
+                    set_id,
+                    _shape_message(sorted(there - here), sorted(here - there)),
                 )
             )
         for platform, python in sorted(here & there):
@@ -1077,7 +1097,7 @@ def cooldown_report(blocks: Mapping[str, Any], today: date) -> list[str]:
             if today >= until:
                 lines.append(
                     f"{pin.distribution}: held for its cooldown until {until.isoformat()}, "
-                    "which has passed; replace the exclusion with extra=\"alpha\" and "
+                    'which has passed; replace the exclusion with extra="alpha" and '
                     "re-record this matrix, or record why it stays out"
                 )
     return sorted(lines)
@@ -1101,7 +1121,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="measure, compare with the record, and check the base closure",
     )
-    modes.add_argument("--record", action="store_true", help="measure and write the record")
+    modes.add_argument(
+        "--record", action="store_true", help="measure and write the record"
+    )
     modes.add_argument(
         "--controls",
         action="store_true",
@@ -1188,7 +1210,9 @@ def _check(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
     uv_version = read_uv_version(runner, args.uv, os.environ)
     measured = measure_sets(runner, args.uv, sets, pythons, cutoff, os.environ)
     if args.measured_out is not None:
-        metadata = _metadata(uv_version, moment, cutoff, cooldown, pythons, ORIGIN_MEASURED)
+        metadata = _metadata(
+            uv_version, moment, cutoff, cooldown, pythons, ORIGIN_MEASURED
+        )
         write_record(args.measured_out, build_record(measured, metadata))
     findings = compare(
         record["sets"],
@@ -1198,7 +1222,9 @@ def _check(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
     )
     candidates = alpha_candidates(blocks)
     closure: list[str] = []
-    closure_note = "no alpha candidate: the base closure has nothing to be compared with"
+    closure_note = (
+        "no alpha candidate: the base closure has nothing to be compared with"
+    )
     if candidates:
         closure_note = ""
         closure = closure_findings(
@@ -1265,7 +1291,9 @@ def _controls(args: argparse.Namespace, runner: Runner, moment: datetime) -> int
     results = run_controls(runner, args.uv, core, pythons, cutoff, os.environ)
     failed = not all(r.passed for r in results)
     lines = [f"## Platform wheels controls: {'FAILED' if failed else 'ok'}", ""]
-    lines += [f"- {'ok' if r.passed else 'FAILED'}: {r.name}: {r.message}" for r in results]
+    lines += [
+        f"- {'ok' if r.passed else 'FAILED'}: {r.name}: {r.message}" for r in results
+    ]
     print(defuse("\n".join(lines)))
     return EXIT_FOUND if failed else EXIT_OK
 
@@ -1275,7 +1303,17 @@ def _cooldown(args: argparse.Namespace, moment: datetime) -> int:
     if not lines:
         print("no cooldown exclusion has ended")
         return EXIT_OK
-    print(defuse("\n".join(["## Cooldown exclusions that have ended", "", *(f"- {x}" for x in lines)])))
+    print(
+        defuse(
+            "\n".join(
+                [
+                    "## Cooldown exclusions that have ended",
+                    "",
+                    *(f"- {x}" for x in lines),
+                ]
+            )
+        )
+    )
     return EXIT_FOUND
 
 
@@ -1297,7 +1335,10 @@ def main(
             return _controls(args, runner, moment)
         return _check(args, runner, moment)
     except (OSError, ValueError, ResolverError) as exc:
-        print(f"check_platform_wheels: cannot measure: {defuse(str(exc))}", file=sys.stderr)
+        print(
+            f"check_platform_wheels: cannot measure: {defuse(str(exc))}",
+            file=sys.stderr,
+        )
         return EXIT_ERROR
 
 

@@ -428,7 +428,9 @@ class TestRequirementSets:
     def test_one_marker_stands_alone_and_none_leaves_the_bare_requirement(
         self, script, register
     ):
-        one = _pin(register, "a", extra="alpha", platform_marker="sys_platform != 'win32'")
+        one = _pin(
+            register, "a", extra="alpha", platform_marker="sys_platform != 'win32'"
+        )
         none = _pin(register, "b", spec=">=2,<3", extra="alpha")
         assert script.render_pin(one) == ("a==1.0.0; sys_platform != 'win32'",)
         assert script.render_pin(none) == ("b>=2,<3",)
@@ -472,7 +474,9 @@ class TestRequirementSets:
 
     def test_no_candidate_means_no_alpha_row_at_all(self, script, register):
         blocks = _blocks(register, _pin(register, "x", reason="no_wheels"))
-        sets = script.requirement_sets({"project": {"dependencies": list(CORE)}}, blocks)
+        sets = script.requirement_sets(
+            {"project": {"dependencies": list(CORE)}}, blocks
+        )
         assert set(sets) == {"core"}
 
     def test_the_register_is_the_alpha_source_not_pyproject(self, script, register):
@@ -951,7 +955,9 @@ class TestTheBaseClosure:
 
 class TestTheControls:
     def _run(self, script, fake):
-        return script.run_controls(fake, "uv", CORE, ("3.11", "3.12"), CUTOFF, ENVIRONMENT)
+        return script.run_controls(
+            fake, "uv", CORE, ("3.11", "3.12"), CUTOFF, ENVIRONMENT
+        )
 
     def test_the_controls_pass_when_the_planted_requirements_break_what_they_must(
         self, script
@@ -1153,9 +1159,13 @@ class TestTheCommandLine:
     def test_a_record_checks_clean_against_the_same_resolution(
         self, script, project, capsys
     ):
-        assert script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW) == 0
+        assert (
+            script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW) == 0
+        )
         capsys.readouterr()
-        assert script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        )
         assert capsys.readouterr().out.startswith("## Platform wheels: ok")
 
     def test_a_cell_that_changed_fails_the_check_and_names_the_cell(
@@ -1192,7 +1202,9 @@ class TestTheCommandLine:
         capsys.readouterr()
         blocks = _blocks(register, _pin(register, "zz-new", extra="alpha"))
         monkeypatch.setattr(script, "load_blocks", lambda path: blocks)
-        assert script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 1
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 1
+        )
         out = capsys.readouterr().out
         assert "core+alpha:zz-new" in out and "member-row" in out
 
@@ -1205,7 +1217,9 @@ class TestTheCommandLine:
         del record["sets"]["core+symbols"]
         record_path.write_text(script.render_record(record), encoding="utf-8")
         capsys.readouterr()
-        assert script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        )
         out = capsys.readouterr().out
         assert "core+symbols" in out and "no recorded row" in out
         strict = [*_argv(project, "--check"), "--require-complete"]
@@ -1220,7 +1234,9 @@ class TestTheCommandLine:
         record["sets"]["core+gone"] = record["sets"]["core"]
         record_path.write_text(script.render_record(record), encoding="utf-8")
         capsys.readouterr()
-        assert script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 1
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 1
+        )
         assert "stale-row" in capsys.readouterr().out
 
     def test_a_candidate_that_moves_the_base_closure_fails_the_check(
@@ -1241,7 +1257,9 @@ class TestTheCommandLine:
         monkeypatch.setattr(script, "load_blocks", lambda path: _blocks(register))
         script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
         capsys.readouterr()
-        assert script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        )
         assert "no alpha candidate" in capsys.readouterr().out
 
     def test_an_unreachable_index_records_nothing(self, script, project, capsys):
@@ -1272,12 +1290,16 @@ class TestTheCommandLine:
         assert "Platform wheels: ok" not in captured.out
 
     def test_a_record_that_is_missing_cannot_be_checked(self, script, project, capsys):
-        assert script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 2
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 2
+        )
         assert "platform_wheels.json" in capsys.readouterr().err
 
     def test_a_lock_with_no_cooldown_cannot_be_measured(self, script, project, capsys):
         (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-        assert script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW) == 2
+        assert (
+            script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW) == 2
+        )
         assert "exclude-newer" in capsys.readouterr().err
 
     def test_the_controls_pass_and_fail_through_the_command_line(
@@ -1286,7 +1308,10 @@ class TestTheCommandLine:
         good = FakeUv(script, broken={"scancode-toolkit": MUSL_TRIPLES})
         assert script.main(_argv(project, "--controls"), runner=good, now=NOW) == 0
         assert "scancode-musl" in capsys.readouterr().out
-        assert script.main(_argv(project, "--controls"), runner=FakeUv(script), now=NOW) == 1
+        assert (
+            script.main(_argv(project, "--controls"), runner=FakeUv(script), now=NOW)
+            == 1
+        )
         assert "FAILED" in capsys.readouterr().out
 
     def test_the_cooldown_report_fails_only_when_a_window_has_ended(
@@ -1353,9 +1378,11 @@ class TestTheCommittedFiles:
         record = script.load_record(RECORD_PATH)
         text = RECORD_PATH.read_bytes().decode("utf-8")
         assert text == script.render_record(record)
-        assert text == json.dumps(
-            json.loads(text), indent=2, sort_keys=True, ensure_ascii=True
-        ) + "\n"
+        assert (
+            text
+            == json.dumps(json.loads(text), indent=2, sort_keys=True, ensure_ascii=True)
+            + "\n"
+        )
 
     def test_the_committed_record_covers_the_platforms_the_script_measures(
         self, script
@@ -1466,7 +1493,9 @@ class TestTheWorkflow:
         assert measuring, "no job runs the check"
         for name in set(measuring):
             assert "if" not in workflow["jobs"][name], f"{name} skips pull requests"
-        reporting = {name for name, run in _runs(workflow) if "--cooldown-report" in run}
+        reporting = {
+            name for name, run in _runs(workflow) if "--cooldown-report" in run
+        }
         assert len(reporting) == 1
         (name,) = reporting
         condition = workflow["jobs"][name]["if"]
