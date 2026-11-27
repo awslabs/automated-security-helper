@@ -2080,7 +2080,7 @@ def install_dependencies(
                 outcome.errors.append(error_text(e, environment_values))
                 continue
 
-            commands = _routed_commands(
+            routed = _routed_commands(
                 commands,
                 plugin_name=plugin_name,
                 tool_key=getattr(plugin_instance, "command", None),
@@ -2092,7 +2092,19 @@ def install_dependencies(
                 venv_version=venv_version,
             )
 
-            for cmd, shell in commands:
+            # A run-once key (nix realizes the whole toolchain with one command) is
+            # realized for the plugins after this one only when the last command
+            # built for it has run and exited 0. One that failed is built again by
+            # the next plugin that routes to it, and each plugin reports its own
+            # result.
+            unfinished_for_key: Dict[str, int] = {}
+            for _argv, _shell, once_key in routed:
+                if once_key is not None:
+                    unfinished_for_key[once_key] = (
+                        unfinished_for_key.get(once_key, 0) + 1
+                    )
+
+            for cmd, shell, once_key in routed:
                 # An empty argv is not a command. These reached run_command before
                 # this change, failed, and pushed the run's exit code to 1 -- which
                 # then went nowhere, because the returned code was discarded.
@@ -2160,6 +2172,10 @@ def install_dependencies(
                     print(f"Command succeeded with exit code: {cmd_exit_code}")
                     outcome.commands_succeeded += 1
                     ash_environment_requirements.extend(_ash_environment_install(cmd))
+                    if once_key is not None:
+                        unfinished_for_key[once_key] -= 1
+                        if unfinished_for_key[once_key] == 0:
+                            realized_once.add(once_key)
     finally:
         # Whatever escapes the loop (a plugin helper raising, an interrupt), the
         # values are reset: an in-process caller (a test runner, an embedding
@@ -2743,7 +2759,7 @@ def _routed_commands(
     context: RouteContext,
     realized: set,
     venv_version: Optional[str],
-) -> List[Tuple[List[str], bool]]:
+) -> List[Tuple[List[str], bool, Optional[str]]]:
     """Each declared command mapped through its provider, refusals counted.
 
     With ``--providers`` absent and no virtualenv, every command is built by the
@@ -2751,11 +2767,19 @@ def _routed_commands(
     exactly what the plugins declared. A command no permitted provider can serve is
     not run: it is counted in ``outcome.commands_refused`` with the refusal text in
     ``outcome.errors``, and nothing is substituted.
+
+    Each command comes back as ``(argv, shell, run_once_key)``. A provider that
+    realizes everything with one command (nix) gives its commands a key, and a key
+    is built once for the plugin. ``realized`` holds the keys whose command already
+    ran and succeeded earlier in the run, and is only read here: the caller adds a
+    key once the commands built for it have exited 0, so a realization that failed
+    is built again for the next plugin that routes to it.
     """
-    routed: List[Tuple[List[str], bool]] = []
+    routed: List[Tuple[List[str], bool, Optional[str]]] = []
+    built_keys: set = set()
     for cmd, shell in commands:
         if not cmd:
-            routed.append((cmd, shell))
+            routed.append((cmd, shell, None))
             continue
         request = classify_install_command(cmd, shell, tool_key)
         venv = env_options.virtualenv_path
@@ -2797,17 +2821,19 @@ def _routed_commands(
         for caveat in route.caveats:
             print(f"[yellow]Note ({escape(route.provider)}):[/yellow] {escape(caveat)}")
         if route.run_once_key is not None:
-            if route.run_once_key in realized:
+            if route.run_once_key in realized or route.run_once_key in built_keys:
                 print(
                     f"Already realized by {escape(route.provider)} earlier in this "
                     f"run: {escape(plugin_name)}"
                 )
                 outcome.commands_satisfied += 1
                 continue
-            realized.add(route.run_once_key)
+            built_keys.add(route.run_once_key)
         for built in route.commands:
             built_argv = list(built)
-            routed.append((built_argv, shell and built_argv == list(cmd)))
+            routed.append(
+                (built_argv, shell and built_argv == list(cmd), route.run_once_key)
+            )
     return routed
 
 
