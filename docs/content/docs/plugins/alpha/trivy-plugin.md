@@ -1504,7 +1504,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ash scan fs --scanners trivy-repo --formats sarif,html \
+          ash scan --scanners trivy-repo --formats sarif,html \
             --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
@@ -1532,7 +1532,7 @@ security-scan:
   image: python:3.11
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
-    - ash scan fs --scanners trivy-repo --formats sarif,markdown --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+    - ash scan --scanners trivy-repo --formats sarif,markdown --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
   artifacts:
     reports:
       sast: .ash/ash_output/reports/ash_aggregated_results.sarif
