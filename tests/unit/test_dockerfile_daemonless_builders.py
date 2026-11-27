@@ -3,10 +3,10 @@
 Why this exists
 ---------------
 A daemonless builder reads the Dockerfile itself and carries out each instruction in
-its own process, with no BuildKit frontend behind it. The pages of kaniko, such a
-builder, write down forms it does not carry out. Some it parses and then drops, so a
-build can finish and produce an image that is not the one the file describes: of
-``COPY --link`` the second fork's page says "Kaniko parses `--link` and drops it".
+its own process, with no BuildKit frontend behind it. kaniko is one, and the pages of
+its two maintained forks write down forms it does not carry out. Some it parses and
+then drops, so a build can finish and produce an image that is not the one the file
+describes: one page says of ``COPY --link`` that kaniko "parses `--link` and drops it".
 Others fail the build, such as an ``ADD`` of an xz archive.
 
 ASH builds this Dockerfile with docker, podman, finch or nerdctl, whichever the host
@@ -23,13 +23,14 @@ container, that names the form, the line and the page that documents it.
 Where the list comes from
 -------------------------
 ``FORMS`` is read from the pages of the two maintained forks of kaniko (the upstream
-repository is archived), each cited at the tag it was read at. A tag says which page
-was read. It does not pick a builder or a version, and nothing here prefers one fork
-to the other. Three entries are there because BuildKit's frontend defines the form:
-``# syntax=``, ``RUN --mount`` and here-documents. No page mentions the first. For the
-other two the first fork's README is silent, and the second fork's feature-flags page
-documents them as carried out only in part, behind flags that are off by default at its
-tag. Each entry says what its pages do say.
+repository is archived), each cited at the tag it was read at; the entries call them
+the first and the second fork, after ``FIRST_FORK`` and ``SECOND_FORK``. A tag says
+which page was read. It does not pick a builder or a version, and nothing here prefers
+one fork to the other. Three entries are there because BuildKit's frontend defines the
+form: ``# syntax=``, ``RUN --mount`` and here-documents. No page mentions the first.
+For the other two the first fork's README is silent, and the second fork's
+feature-flags page documents them as carried out only in part, behind flags that are
+off by default at its tag. Each entry says what its pages do say.
 
 An entry joins the list with the page that documents the form. It leaves when pages at
 a newer tag document the form as carried out, and the change that removes it cites them.
@@ -83,6 +84,9 @@ FIRST_FORK = "https://github.com/chainguard-forks/kaniko/blob/v1.25.24"
 SECOND_FORK = "https://github.com/osscontainertools/kaniko/blob/v1.29.2"
 # Docker's reference defines the forms that only BuildKit's Dockerfile frontend knows.
 DOCKER_REFERENCE = "https://docs.docker.com/reference/dockerfile"
+_FIRST_README = f"{FIRST_FORK}/README.md"
+_SECOND_README = f"{SECOND_FORK}/README.md"
+_SECOND_FLAGS = f"{SECOND_FORK}/docs/feature-flags.md"
 
 
 def _lines(page: str, first: int, last: int | None = None) -> str:
@@ -163,7 +167,196 @@ class Form(NamedTuple):
     sources: tuple[str, ...]  # public pages, at the tag each was read at
 
 
-FORMS: list[Form] = []
+def _is_syntax_directive(item: Instruction) -> bool:
+    return item.keyword == "#" and item.words[0] == "syntax"
+
+
+def _has_flag(keywords: tuple[str, ...], flag: str) -> Callable[[Instruction], bool]:
+    def probe(item: Instruction) -> bool:
+        return item.keyword in keywords and flag in item.flags
+
+    return probe
+
+
+# A here-document marker is a word that starts with << (digits may come first) and holds
+# no other <, so neither a bare << nor <<< (a here-string) opens one.
+_MARKER = re.compile(r"\d*<<-?([^<]*)")
+
+
+def _opens_a_here_document(item: Instruction) -> bool:
+    if item.keyword not in ("RUN", "COPY", "ADD"):
+        return False
+    markers = (_MARKER.fullmatch(word) for word in item.words)
+    return any(marker and marker[1] for marker in markers)
+
+
+_XZ = (".tar.xz", ".txz")
+_ARCHIVES = (
+    ".tar",
+    ".tar.gz",
+    ".tgz",
+    ".tar.bz2",
+    ".tbz2",
+    ".tar.xz",
+    ".txz",
+    ".tar.zst",
+)
+
+
+def _is_remote(source: str) -> bool:
+    return "://" in source or source.startswith("git@")
+
+
+def _local_sources(item: Instruction) -> list[str]:
+    """The local sources of an ADD or COPY: no URL, and not the destination."""
+    names = [word.strip("\"'") for word in item.words[:-1]]
+    return [name for name in names if not _is_remote(name)]
+
+
+def _adds_a_local_xz_archive(item: Instruction) -> bool:
+    return item.keyword == "ADD" and any(
+        name.lower().endswith(_XZ) for name in _local_sources(item)
+    )
+
+
+def _adds_a_local_archive_with_chown(item: Instruction) -> bool:
+    return (
+        item.keyword == "ADD"
+        and "--chown" in item.flags
+        and any(name.lower().endswith(_ARCHIVES) for name in _local_sources(item))
+    )
+
+
+# BuildKit's predefined platform arguments.
+_PLATFORM_ARGUMENT = re.compile(r"\$\{?(?:TARGET|BUILD)(?:PLATFORM|OS|ARCH|VARIANT)\b")
+
+
+def _reads_a_platform_argument_in_from_or_global_arg(item: Instruction) -> bool:
+    where_it_is_empty = item.keyword == "FROM" or (
+        item.keyword == "ARG" and item.before_first_from
+    )
+    return where_it_is_empty and bool(_PLATFORM_ARGUMENT.search(item.text))
+
+
+_WINDOWS_IMAGES = "mcr.microsoft.com/windows"
+
+
+def _builds_a_windows_container(item: Instruction) -> bool:
+    if item.keyword != "FROM":
+        return False
+    platform = item.flags.get("--platform", "").strip("\"'").lower()
+    image = (item.words[0] if item.words else "").strip("\"'").lower()
+    return platform.startswith("windows") or image.startswith(_WINDOWS_IMAGES)
+
+
+# Each entry: the form, the probe that finds it, why it is refused and the pages it was
+# read from. The comment above an entry quotes them; "line N" is a line of the page's
+# source at the tag in its link.
+FORMS = [
+    # Neither README, and no markdown page under docs/ at either tag, mentions a parser
+    # directive. Docker's reference defines it: "Use the `syntax` parser directive to
+    # declare the Dockerfile syntax version to use for the build." and "If unspecified,
+    # BuildKit uses a bundled version of the Dockerfile frontend." (read 2026-11-26).
+    Form(
+        "# syntax= parser directive",
+        _is_syntax_directive,
+        "it names a BuildKit Dockerfile frontend, and no page says a build with "
+        "either fork selects one",
+        (f"{DOCKER_REFERENCE}/#syntax", _FIRST_README, _SECOND_README),
+    ),
+    # The first README never mentions --mount. The second fork's feature-flags page says
+    # (line 417) "Kaniko skips `RUN --mount=type=bind` flags with `from=<stage>` or
+    # `from=<image>`." and (line 456) that a flag enables tmpfs mounts; both flags
+    # default to false at that tag (lines 419 and 458). Its README suggests
+    # `RUN --mount=type=cache` in a layer hint (line 652); the entry still refuses every
+    # --mount, because the first fork documents none.
+    Form(
+        "RUN --mount",
+        _has_flag(("RUN",), "--mount"),
+        "BuildKit mounts: the second fork's page lists bind mounts from another stage "
+        "or image as skipped and tmpfs mounts as off by default",
+        (
+            _lines(_SECOND_FLAGS, 417, 419),
+            _lines(_SECOND_FLAGS, 456, 458),
+            _lines(_SECOND_README, 652),
+            _FIRST_README,
+        ),
+    ),
+    # Docker's reference: "Here-documents allow redirection of subsequent Dockerfile
+    # lines to the input of `RUN` or `COPY` commands." The first README never mentions
+    # them. The second fork's feature-flags page says (line 430) "Kaniko was running the
+    # body of a lone `RUN <<EOF` through the shell twice. This caused variables to get
+    # expanded before the script runs and the example above to fail." with the fix off
+    # by default (line 432), and (line 213) that a `COPY` or `ADD` body is written
+    # verbatim unless a flag expands it, which is on by default at that tag (line 215).
+    Form(
+        "here-document",
+        _opens_a_here_document,
+        "BuildKit here-documents: the second fork's page says the body of a lone RUN "
+        "here-document runs through the shell twice by default",
+        (
+            f"{DOCKER_REFERENCE}/#here-documents",
+            _lines(_SECOND_FLAGS, 430, 432),
+            _lines(_SECOND_FLAGS, 213, 215),
+            _FIRST_README,
+        ),
+    ),
+    # The first README never mentions --link. Second fork's feature-flags page, line
+    # 168: "Kaniko parses `--link` and drops it, building the layer as if it were not
+    # there." The flag that honors it is off by default (line 171).
+    Form(
+        "COPY --link and ADD --link",
+        _has_flag(("COPY", "ADD"), "--link"),
+        "kaniko parses --link and drops it, so the layer is built as if the flag were "
+        "absent",
+        (_lines(_SECOND_FLAGS, 168, 171), _FIRST_README),
+    ),
+    # Both READMEs: "Kaniko currently supports `COPY --chown` and `ADD --chown`
+    # Dockerfile command. It does not support `RUN --chown`." (first README line 1528,
+    # second README line 868).
+    Form(
+        "RUN --chown",
+        _has_flag(("RUN",), "--chown"),
+        "both pages say kaniko does not support RUN --chown",
+        (_lines(_FIRST_README, 1528), _lines(_SECOND_README, 868)),
+    ),
+    # Second fork's feature-flags page, line 519: "kaniko detects xz but does not
+    # decompress it, so `ADD archive.tar.xz` fails with `unsupported compression
+    # algorithm`." The flag that extracts xz is off by default (line 521).
+    Form(
+        "ADD of a local xz archive",
+        _adds_a_local_xz_archive,
+        "kaniko detects an xz archive but does not unpack it, so the ADD fails",
+        (_lines(_SECOND_FLAGS, 519, 521),),
+    ),
+    # Second fork's feature-flags page, line 62: "`ADD --chown` is not applied to an
+    # extracted archive, the files keep the owners recorded in the tar." The flag that
+    # applies it is off by default (line 64).
+    Form(
+        "ADD --chown of a local archive",
+        _adds_a_local_archive_with_chown,
+        "--chown is not applied to the files of an extracted archive",
+        (_lines(_SECOND_FLAGS, 62, 64),),
+    ),
+    # Second fork's feature-flags page, line 227: "The predefined platform args such as
+    # `TARGETARCH` resolve to empty in `FROM` and in global `ARG` defaults." The flag
+    # that resolves them is off by default (line 229).
+    Form(
+        "platform argument in FROM or a global ARG",
+        _reads_a_platform_argument_in_from_or_global_arg,
+        "the predefined platform arguments resolve to empty in FROM and in the "
+        "default of a global ARG",
+        (_lines(_SECOND_FLAGS, 227, 229),),
+    ),
+    # Both READMEs: "kaniko does not support building Windows containers." (first
+    # README line 181, second README line 154).
+    Form(
+        "Windows container base",
+        _builds_a_windows_container,
+        "both pages say kaniko does not support building Windows containers",
+        (_lines(_FIRST_README, 181), _lines(_SECOND_README, 154)),
+    ),
+]
 
 
 class Finding(NamedTuple):
@@ -181,21 +374,25 @@ def findings(text: str) -> list[Finding]:
     ]
 
 
-def assert_clean(path: Path) -> None:
-    found = findings(path.read_text(encoding="utf-8-sig"))
-    assert not found, "\n".join(
-        [
-            f"{path.name} uses {len(found)} form(s) that a daemonless image builder "
-            "leaves out, by the pages cited below. A build with BuildKit accepts them, "
-            "so nothing else reports the difference:"
-        ]
-        + [
-            f"  line {item.line}: {item.form.name} -- {item.form.why}\n"
-            f"    {item.text[:160]}\n"
-            f"    read at {item.form.sources[0]}"
-            for item in found
-        ]
+def _describe(item: Finding) -> str:
+    pages = "".join(f"\n    read at {url}" for url in item.form.sources)
+    return (
+        f"  line {item.line}: {item.form.name} -- {item.form.why}\n"
+        f"    {item.text[:160]}{pages}"
     )
+
+
+def assert_clean(path: Path) -> None:
+    """Fail, naming each form with its line and pages, unless the file holds none."""
+    found = findings(path.read_text(encoding="utf-8-sig"))
+    if not found:
+        return
+    header = (
+        f"{path.name} uses {len(found)} form(s) that a daemonless builder leaves "
+        "out, by the pages cited below. A build with BuildKit accepts them, so "
+        "nothing else reports the difference:"
+    )
+    raise AssertionError("\n".join([header, *(_describe(item) for item in found)]))
 
 
 def plant(text: str, where: str, snippet: str) -> tuple[str, int]:
@@ -391,36 +588,27 @@ class TestAPlantedFormTurnsTheCheckRed:
         with pytest.raises(AssertionError) as raised:
             assert_clean(copy)
 
-        assert f"line {line}: {name}" in str(raised.value)
+        message = str(raised.value)
+        assert f"line {line}: {name}" in message
+        assert "read at https://" in message
 
 
 class TestReadingAnInstruction:
     def test_a_flag_on_a_continued_line_is_found_at_the_first_line(self):
-        text = (
-            "FROM scratch\n"
-            "RUN \\\n"
-            "    --mount=type=cache,target=/x \\\n"
-            "    true\n"
-        )
+        text = "FROM scratch\nRUN \\\n    --mount=type=cache,target=/x \\\n    true\n"
 
         assert [(f.line, f.form.name) for f in findings(text)] == [(2, "RUN --mount")]
 
     def test_blank_and_comment_lines_inside_an_instruction_do_not_end_it(self):
         text = (
-            "RUN \\\n"
-            "\n"
-            "    # a comment\n"
-            "    --mount=type=cache,target=/x \\\n"
-            "    true\n"
+            "RUN \\\n\n    # a comment\n    --mount=type=cache,target=/x \\\n    true\n"
         )
 
         assert [(f.line, f.form.name) for f in findings(text)] == [(1, "RUN --mount")]
 
     def test_a_form_named_only_in_a_comment_inside_an_instruction_is_not_found(self):
         text = (
-            "RUN set -eux; \\\n"
-            "    # RUN --mount and <<EOF are not used \\\n"
-            "    true\n"
+            "RUN set -eux; \\\n    # RUN --mount and <<EOF are not used \\\n    true\n"
         )
 
         assert findings(text) == []
