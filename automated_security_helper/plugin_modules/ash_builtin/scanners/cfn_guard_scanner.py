@@ -532,6 +532,23 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="cfn-guard",
+                version_check=("cfn-guard", "--version"),
+                dockerfile_note=(
+                    "# cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates",
+                    "# templates against. The binary comes from its pinned release asset like the tools",
+                    "# above. The rules archive is pinned the same way (RULES_BUNDLES in",
+                    "# utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan",
+                    "# user cannot rewrite the rules a later scan trusts. `ash dependencies install`",
+                    "# below finds the bundle already in place, its rule files matching the contents",
+                    "# pinned beside the archive digest, and leaves it alone.",
+                    "# Under /usr/share rather than /deps, whose cache directories stay writable for the",
+                    "# scanners: the bundle and every directory above it are root's and writable by no one",
+                    "# else, which `--assert-root-only` checks here and again in the final stage.",
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.CONSTANT,
                 note="every finding is HIGH (a constant in the adapter)",

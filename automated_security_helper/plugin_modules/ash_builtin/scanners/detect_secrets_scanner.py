@@ -504,6 +504,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 provisionable=(),
                 note="a pinned Python dependency imported in-process; platform support is the package's and was not read here",
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.ASH_WHEEL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.CONSTANT,
                 note="every finding is error",
