@@ -998,7 +998,7 @@ def test_a_workspace_with_no_policy_scans_a_project_that_spells_a_scanner_twice(
     """Two spellings only matter when the policy marks a scanner as its own.
 
     With no policy file nothing is marked, and the project scans as it does under
-    ``ash --source-dir``, where the lookup reads one of the two sections.
+    ``ash scan fs``, where the lookup reads one of the two sections.
     """
     plan = resolve_workspace(_workspace(tmp_path, {"api": body}, policy_scanners=None))
 

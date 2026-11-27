@@ -184,7 +184,7 @@ def test_the_cli_refuses_an_operator_config_inside_the_workspace_with_exit_3(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--workspace", str(workspace), "--config", str(inside), "--dry-run"],
+        ["scan", "workspace", str(workspace), "--config", str(inside), "--dry-run"],
     )
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output

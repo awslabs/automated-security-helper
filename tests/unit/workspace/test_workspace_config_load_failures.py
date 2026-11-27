@@ -237,9 +237,9 @@ def _cli(root: Path, *args: str):
         app,
         [
             "scan",
-            "--no-progress",
-            "--workspace",
+            "workspace",
             str(root / "team.code-workspace"),
+            "--no-progress",
             "--output-dir",
             str(root / "out"),
             *args,
@@ -291,7 +291,7 @@ class TestAshScanWorkspaceCommand:
 
 
 def _api_workspace_scan(root: Path, config: str | None):
-    """run_ash_scan in workspace mode, as ``ash scan --workspace`` calls it.
+    """run_ash_scan in workspace mode, as ``ash scan workspace`` calls it.
 
     Returns the SystemExit code, or None when it returned. Called directly rather
     than through CliRunner: there, a workspace scan that gets as far as execution

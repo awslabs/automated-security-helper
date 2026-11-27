@@ -12,7 +12,7 @@ the tool may still be writing into the output directory after the verdict read
 it. The workspace layer read both facts into its ``scan_incompleteness`` object
 and then dropped them: ``WorkspaceProjectResult`` had no field for either, and
 the ``scan_incomplete`` fold read only the gated arms and the stale-database arm.
-So ``ash --source-dir P`` exited 1 where the same P inside a workspace exited 0,
+So ``ash scan fs P`` exited 1 where the same P inside a workspace exited 0,
 or 2 when it also had findings.
 
 The contract these cases pin:

@@ -70,7 +70,7 @@ def test_a_dry_run_refuses_what_the_real_run_refuses(workspace_with_broken_modul
     that reports the command line good for a run the scan refuses sends the
     operator into the refusal twice."""
     result = CliRunner().invoke(
-        app, ["scan", "--workspace", workspace_with_broken_module, "--dry-run"]
+        app, ["scan", "workspace", workspace_with_broken_module, "--dry-run"]
     )
 
     assert result.exit_code == 3, (result.exit_code, result.output[-4000:])
@@ -88,9 +88,9 @@ def test_a_scanners_selection_is_refused_as_the_configuration_error_it_is(
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             workspace_with_broken_module,
-            "--scanners",
+            "--add-scanners",
             "wsbroken-scanner",
         ],
     )

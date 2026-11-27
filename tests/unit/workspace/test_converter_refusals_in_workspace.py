@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A workspace project counts incomplete conversion as ``ash --source-dir P`` does.
+"""A workspace project counts incomplete conversion as ``ash scan fs P`` does.
 
 ``_compute_exit_code`` fails a single-directory scan when ``incomplete_converters``
 names a converter: one that crashed, one whose tool was absent with inputs to

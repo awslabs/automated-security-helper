@@ -10,7 +10,7 @@ report the scan's own SARIF reporter wrote this run, because that reporter
 serializes every suppression where the in-memory model's ``result.suppressions``
 is not reliably set. The workspace counted from the in-memory model, so a project
 whose findings were all suppressed in the written report could be recorded
-FAILED with three actionable findings inside a workspace while ``ash --source-dir
+FAILED with three actionable findings inside a workspace while ``ash scan fs
 P`` exited 0 on the same tree.
 
 The contract these cases pin:

@@ -87,7 +87,7 @@ def test_a_refused_project_is_logged_as_data_not_markup(tmp_path):
 def test_the_workspace_summary_prints_a_refused_project_as_written(
     tmp_path, monkeypatch, capsys
 ):
-    """Through ``ash --workspace``: the project's own orchestrator refuses it, which
+    """Through ``ash scan workspace``: the project's own orchestrator refuses it, which
     a workspace reaches when its check before the run saw nothing, and the summary
     prints the refusal."""
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan

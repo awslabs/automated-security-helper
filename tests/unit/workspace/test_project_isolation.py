@@ -16,7 +16,7 @@ available way for this to fail. It is a silent false negative on a security
 scanner, on exactly the axis the central invariant protects:
 
     For any project P, the findings reported for P and the pass/fail verdict for
-    P are identical to what ``ash --source-dir P`` would produce.
+    P are identical to what ``ash scan fs P`` would produce.
 
 What an earlier version of this file got wrong, and why it is recorded here
 --------------------------------------------------------------------------
@@ -1234,11 +1234,11 @@ class TestPluginManagerSingletonState:
           conftest code, and removes the probe plugin it registers.
         * ``tests/unit/cli/test_report_refuses_invalid_plugin_options.py`` gives
           each of its tests an empty ``_resolved_plugins`` and puts the previous
-          one back afterwards. An earlier ``ash report`` in the worker had
+          one back afterwards. An earlier ``ash results report`` in the worker had
           memoised the reporters before ``ash_aws_plugins`` registered, so the
           module failed in some orders. Same category: it stops leakage between
           tests, and it leaves ``plugin_library`` alone.
-        * ``tests/unit/cli/test_operator_text_is_not_markup.py`` runs ash report,
+        * ``tests/unit/cli/test_operator_text_is_not_markup.py`` runs ash results report,
           scan and merge in-process and gives each test its own copy of the
           registry and an empty lookup cache. ``plugin_modules()`` memoizes what it
           found per process, and without the copy a later test in the same worker

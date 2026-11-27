@@ -5,7 +5,7 @@
 
 ``_discard_project_output`` removed the results file and the reports directory
 but left ``projects/<key>/history/<report_id>.json`` in place, so the abandoned
-run stayed a point in ``ash trend`` beside a FAILED verdict. The record removed
+run stayed a point in ``ash results trend`` beside a FAILED verdict. The record removed
 is the one the removed results file names by its ``report_id``; a results file
 that is missing or unreadable names none, and other runs' records stay.
 """
