@@ -908,8 +908,8 @@ def test_on_windows_a_swap_refused_twice_is_tried_again_and_lands(
     assert os.listdir(tmp_path) == ["page.md"]
 
 
-#: What a refusal can look like: the two-argument form the operating system raises, and
-#: a bare message, which carries no errno and no message of its own.
+#: What a refusal can look like: an errno and a message, as the operating system raises
+#: it, and a bare message, which carries neither.
 REFUSALS = [
     pytest.param(held_open, id="with-errno"),
     pytest.param(
@@ -955,8 +955,8 @@ def test_on_windows_a_swap_that_is_always_refused_gives_up_and_names_the_page(
 
 
 def test_the_swap_retry_is_a_few_short_tries_and_not_a_long_wait():
-    """A generator run holds a page another program has open for as long as it
-    retries, so the tries stay few and the first pause short."""
+    """The retry blocks the generator, or the hook that runs it, for as long as it
+    lasts, so the tries stay few and the pauses short."""
     assert 3 <= gb._REPLACE_ATTEMPTS <= 10
     assert 0 < gb._REPLACE_PAUSE <= 0.5
 
