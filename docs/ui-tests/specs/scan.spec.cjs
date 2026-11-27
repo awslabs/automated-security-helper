@@ -111,3 +111,19 @@ test("the static example survives an unavailable animation module", async ({ pag
   await page.getByRole("link", { name: "Start scanning", exact: true }).click();
   await expect(page.locator("#quickstart")).toBeInViewport();
 });
+
+test("the static example survives an unavailable animation library", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.route("https://cdnjs.cloudflare.com/**", route => route.abort());
+  await page.goto("./");
+  const example = page.locator("[data-ash-scan]");
+  await expect(example.locator("[data-scan-source]")).toHaveCount(4);
+  await expect(example.locator("[data-scan-finding]")).toHaveCount(4);
+  await expect(example.locator("[data-scan-state]")).toHaveText("Reports ready");
+  await expect(example).not.toHaveClass(/is-ready/);
+  await expect(example.locator("[data-scan-play]")).toBeHidden();
+  await expect(example.locator("[data-scan-caption]")).toContainText("animation did not load");
+  await expect(example.getByRole("link", { name: "HTML", exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
