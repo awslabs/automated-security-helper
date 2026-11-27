@@ -16,7 +16,10 @@ scan wrapper's, and the scanner's own is its context, which ``reason_of`` follow
 The control for each case runs it again with the scanner's module raising an error
 that keeps no reason, which is what a raise site written without one does, and
 expects the check to fail: a case that passed with the reason removed would check
-nothing. Presence at every raise site is checked in
+nothing. It also expects the error it gets to come from that module's own raise
+site: a scenario that fails before it reaches the site (at a check of the template,
+which carries no reason of its own) would otherwise pass the control for nothing.
+Presence at every raise site is checked in
 ``tests/unit/core/test_every_scanner_error_names_a_reason.py``; here the values
 are: the code, and a sentence that names a count or an option and holds none of
 what the failure's own message quotes.
@@ -34,7 +37,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional
 from unittest.mock import patch
 
 import pytest
@@ -174,6 +177,34 @@ def _drop_in(module: Any) -> Callable[[pytest.MonkeyPatch], None]:
     return drop
 
 
+def _links(error: BaseException) -> Iterator[BaseException]:
+    """``error``, and what it was raised from or while handling, each once."""
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        link = pending.pop()
+        if id(link) in seen:
+            continue
+        seen.add(id(link))
+        yield link
+        pending.extend(
+            other for other in (link.__cause__, link.__context__) if other is not None
+        )
+
+
+def _came_from_a_dropped_site(error: BaseException) -> bool:
+    """Whether the error, or what it was raised from, is one the control made.
+
+    The control removes the reason where a scanner's module raises it. A scenario
+    that fails earlier, at a check of the template that carries no reason in any
+    case, would fail the check too and prove nothing about the site.
+    """
+    return any(
+        isinstance(link, (_DropsTheReason, zizmor_module._ConfigFileMissing))
+        for link in _links(error)
+    )
+
+
 @dataclass(frozen=True)
 class Case:
     """One failure: how to cause it, how to remove its reason, and what it must say."""
@@ -256,9 +287,14 @@ def _betterleaks_scan(
 
 
 def _betterleaks_exit_code(tmp_path, monkeypatch):
+    # The scanner's own refusal is in _read_results_file. scan() reaches the
+    # template's refusal of the exit code before it reads the results file, and the
+    # executor reads that one from the run's recorded exit code, so the case calls
+    # the override the way the trivy case calls its own.
     _betterleaks_tree(tmp_path)
     scanner = _betterleaks(tmp_path, monkeypatch)
-    return _raised(lambda: _betterleaks_scan(scanner, monkeypatch, exit_code=1))
+    scanner.exit_code = 1
+    return _raised(lambda: scanner._read_results_file(tmp_path / "results.sarif"))
 
 
 def _betterleaks_config_missing(tmp_path, monkeypatch):
@@ -909,6 +945,9 @@ def test_control_a_site_with_its_reason_removed_fails_its_case(
     error = case.scenario(tmp_path, monkeypatch)
 
     assert reason_of(error) is None, "the control left a reason in place"
+    assert _came_from_a_dropped_site(error), (
+        f"the case failed before it reached the site: {type(error).__name__}"
+    )
     with pytest.raises(AssertionError):
         _reason(error, case.code, holds=case.holds, never=case.never)
 
