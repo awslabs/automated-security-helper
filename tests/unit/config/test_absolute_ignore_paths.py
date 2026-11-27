@@ -91,6 +91,17 @@ def _validate_path_warnings(config: Path, tmp_path: Path):
     return valid, [p for p in problems if p.startswith("Path '")]
 
 
+def _link(tmp_path: Path, name: str, target: Path) -> Path:
+    """``tmp_path/name``, a symbolic link to the directory ``target``. The test is
+    skipped where a link cannot be made."""
+    link = tmp_path / name
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("a symbolic link cannot be made here")
+    return link
+
+
 def test_the_matcher_reads_an_absolute_pattern_as_matching_nothing():
     """The premise, and the semantics this change leaves alone."""
     assert _path_pattern_matches("vendor/a.py", "vendor/**")
@@ -194,6 +205,42 @@ def test_without_a_relative_spelling_it_says_to_write_one(tmp_path, kind, patter
     assert "Write it relative to the scan root" in warning, warning
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symbolic links")
+@pytest.mark.parametrize("kind", ["ignore_path", "suppression_path"])
+@pytest.mark.parametrize(
+    "pattern, advice",
+    [
+        pytest.param("{link}", "Write it relative to the scan root", id="the-link"),
+        pytest.param(
+            "{link}/", "Write it relative to the scan root", id="the-link-and-a-slash"
+        ),
+        pytest.param("{link}/**", "Use '**'", id="the-link-and-a-glob"),
+        pytest.param(
+            "{link}/**/*.py", "Use '**/*.py'", id="the-link-and-a-glob-and-a-tail"
+        ),
+    ],
+)
+def test_a_link_to_the_root_is_warned_about_as_the_root_is(
+    tmp_path, kind, pattern, advice
+):
+    """A scan removes the resolved source directory from a path it reports, so no
+    file in the tree reaches the matcher by a link's spelling of the root, and a
+    pattern that starts with it matches none. The root's own spelling (``{root}``,
+    ``{root}/**``) is pointed out, and so is a link to it, with the same advice."""
+    root = tmp_path / "root"
+    root.mkdir()
+    link = _link(tmp_path, "link", root)
+    pattern = pattern.format(link=link.as_posix())
+    config = _write(root, **{kind: pattern})
+
+    (issue,) = _lint(config, root)
+    assert f"'{pattern}'" in issue.message, issue.message
+    assert advice in issue.message, issue.message
+    valid, (warning,) = _validate(config, root)
+    assert valid, "a scan accepts the file, so validate still calls it valid"
+    assert f"'{pattern}'" in warning and advice in warning, warning
+
+
 @pytest.mark.parametrize("kind", ["ignore_path", "suppression_path"])
 @pytest.mark.parametrize(
     "pattern",
@@ -247,6 +294,34 @@ def test_an_absolute_path_outside_the_root_that_names_nothing_in_it_draws_no_war
 
     assert _lint_path_issues(config, tmp_path) == []
     assert _validate_path_warnings(config, tmp_path) == (True, [])
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX symbolic links")
+@pytest.mark.parametrize("kind", ["ignore_path", "suppression_path"])
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        pytest.param("{link}", id="the-link"),
+        pytest.param("{link}/**", id="the-link-and-a-glob"),
+    ],
+)
+def test_a_link_to_a_directory_outside_the_root_draws_no_warning(
+    tmp_path, kind, pattern
+):
+    """Only a link that resolves to the root, or below it, spells the root. One that
+    resolves elsewhere names a path outside the source directory, which a scan
+    compares as written with a file reported there, as it does any other absolute
+    path outside the root."""
+    root = tmp_path / "root"
+    root.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    link = _link(tmp_path, "link", elsewhere)
+    pattern = pattern.format(link=link.as_posix())
+    config = _write(root, **{kind: pattern})
+
+    assert _lint_path_issues(config, root) == []
+    assert _validate_path_warnings(config, root) == (True, [])
 
 
 def test_a_suppression_path_is_checked_too(tmp_path):
