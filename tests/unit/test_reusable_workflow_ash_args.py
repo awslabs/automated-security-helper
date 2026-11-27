@@ -46,9 +46,9 @@ What is asserted
   spellings. What else names what is scanned and which `fs` takes beside its PATH
   (`--workspace`, `--source-git`) is refused by `fs` or handed on to the engine as it
   was typed, and never dropped.
-* The step's list of options that take a value is the `ash` group's: every option that
-  is not a flag or a count, long and short spellings, each taking one word. It holds
-  every one that `ash scan fs` takes as well, bar the one it names below.
+* The step's list of options that take a value is the `ash` group's and `ash scan fs`'s:
+  every option that is not a flag or a count, long and short spellings, each taking one
+  word. `ash scan fs` takes two the group does not, `--archive` and `--cli-json-input`.
 * Click does read a bare word after the options as a subcommand, and a word after a
   value-taking option as its value (a control on ASH's own CLI).
 * An ASH that has the `fs` subject (3.9 and later) scans the checkout as the path of
@@ -777,18 +777,19 @@ def _takes_a_value(command) -> set[str]:
 
 
 @pytest.mark.unit
-def test_the_options_that_take_a_value_are_the_ash_groups():
-    assert _value_options_in_the_step() == _takes_a_value(_ash_group())
+def test_the_options_that_take_a_value_are_those_of_the_ash_group_and_the_fs_subject():
+    """The step reads the options of the `ash` group, which an ASH older than 3.9 runs
+    the scan with, and of `ash scan fs`, which an ASH with the subject runs it with. The
+    list holds neither fewer nor more: an option it lacks has its value read as a bare
+    word and refused, and one it holds that neither command takes would skip a word
+    both commands read."""
+    assert _value_options_in_the_step() == (
+        _takes_a_value(_ash_group()) | _takes_a_value(_fs())
+    )
     # The step skips exactly one word after each, as click does for nargs 1; that the
     # word is skipped even when it starts with a dash is the next test's.
     assert all(option.nargs == 1 for option in _options_of(_ash_group()))
-
-
-#: The options that take a value on `ash scan fs` and are not in the step's list. The
-#: step reads the word after one of them as a bare word and refuses it, so a document
-#: of parameters cannot come in through ash-args; the options of the scan itself all
-#: sit in the list.
-_FS_OPTIONS_THE_STEP_DOES_NOT_LIST = {"--cli-json-input"}
+    assert all(option.nargs == 1 for option in _options_of(_fs()))
 
 
 @pytest.mark.unit
@@ -798,11 +799,39 @@ def test_the_options_that_take_a_value_include_those_of_the_fs_subject():
     value read as a bare word and refused, though the scan takes it as the value; the
     step's reading of a cluster of short options and of `--name=value` follows from
     the same list."""
-    fs = _fs()
-    missing = _takes_a_value(fs) - _value_options_in_the_step()
+    missing = _takes_a_value(_fs()) - _value_options_in_the_step()
 
-    assert missing <= _FS_OPTIONS_THE_STEP_DOES_NOT_LIST, sorted(missing)
-    assert all(option.nargs == 1 for option in _options_of(fs))
+    assert not missing, sorted(missing)
+    assert all(option.nargs == 1 for option in _options_of(_fs()))
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("option", ["--archive", "--cli-json-input"])
+def test_an_option_only_the_fs_subject_takes_keeps_its_value_in_ash_args(
+    tmp_path, option
+):
+    """The two options `ash scan fs` takes and the `ash` group does not. Each is in the
+    step's list, so the word after it is its value and is passed on to `fs`, not
+    refused as a bare word, as the word after any other option is."""
+    result, argv = _run(tmp_path, f"{option} params.json", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + [option, "params.json"], argv
+
+
+@pytest.mark.integration
+@posix_only
+def test_an_archive_in_ash_args_is_refused_beside_the_path_of_fs(tmp_path, monkeypatch):
+    """The archive is the directory `ash scan fs` scans, so it refuses a PATH beside
+    --archive. The step always gives the PATH, so a caller's archive stops the scan with
+    an error that names it, and is not scanned in place of the checkout or dropped."""
+    result, argv = _run(tmp_path, "--archive source.zip", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + ["--archive", "source.zip"], argv
+    with pytest.raises(UsageError, match="--archive"):
+        _what_the_scan_is_given(argv, monkeypatch)
 
 
 def _value_spellings() -> list[str]:
