@@ -219,6 +219,36 @@ describe('verdict ownership in the generated buildspecs', () => {
   });
 });
 
+describe('each generated header names the spellings of the command its file runs', () => {
+  /** The leading comment block of a generated file. */
+  function headerOf(filename: string): string {
+    const lines = generatedBuildspecs()
+      .find((s) => s.filename === filename)!
+      .contents.split('\n');
+    return lines.slice(0, lines.findIndex((line) => !line.startsWith('#'))).join('\n');
+  }
+
+  test.each(['buildspec.yml', 'buildspec-shard.yml'])(
+    '%s names the scan spellings and not the merge ones',
+    (filename) => {
+      // These files scan and never merge, so a header that named `ash results
+      // merge` or `ash merge` told a reader of the scan that it merges.
+      const header = headerOf(filename);
+      expect(header).toContain('`ash scan fs DIR`');
+      expect(header).toContain('`ash scan --source-dir DIR`');
+      expect(header).not.toContain('results merge');
+      expect(header).not.toContain('ash merge');
+    },
+  );
+
+  test('buildspec-merge.yml names the merge spellings and not the scan ones', () => {
+    const header = headerOf('buildspec-merge.yml');
+    expect(header).toContain('`ash results merge`');
+    expect(header).toContain('`ash merge`');
+    expect(header).not.toContain('ash scan');
+  });
+});
+
 describe('the env-driven merge loop matches the literal merge command', () => {
   test('expands to the same argument vector for three shards', () => {
     // The loop in buildspec-merge.yml and mergeCommands() are two renderings of

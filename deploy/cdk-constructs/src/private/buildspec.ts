@@ -63,12 +63,46 @@ function standaloneInstall(): string[] {
 }
 
 /**
+ * What a generated file says about the one ASH command it runs: the ASH 3.9
+ * spelling, the older one, and how the file picks between them.
+ *
+ * A file names only the spellings of its own command. The scan and the shard
+ * run `ash scan fs DIR` or `ash scan --source-dir DIR`, and the merge runs
+ * `ash results merge` or `ash merge`, so a header that listed all of them told
+ * a reader of the scan that it merges.
+ */
+function spellingNote(command: string, current: string, older: string): string[] {
+  return [
+    `The ${command} first asks the installed ASH whether it has the ASH 3.9`,
+    `spelling (${current}) and runs the older one (${older})`,
+    'when it does not, so an older ASH_VERSION keeps working. Only an answer',
+    'picks the older spelling: a help that does not name the command, or a usage',
+    'error that refuses its first word. A probe that fails any other way stops',
+    'the step with the end of its output instead of being read as an older ASH.',
+  ];
+}
+
+/** The note for a file that scans: the unsharded buildspec and each shard. */
+const SCAN_SPELLING_NOTE = spellingNote(
+  'scan command',
+  '`ash scan fs DIR`',
+  '`ash scan --source-dir DIR`',
+);
+
+/** The note for the file that merges. */
+const MERGE_SPELLING_NOTE = spellingNote(
+  'merge command',
+  '`ash results merge`',
+  '`ash merge`',
+);
+
+/**
  * The header every generated file carries.
  *
  * It names the regeneration command because the first thing a reader who wants
  * to change one of these files needs is the command that rewrites it.
  */
-function header(purpose: string[]): string[] {
+function header(purpose: string[], spelling: string[]): string[] {
   return [
     'GENERATED FILE - DO NOT EDIT.',
     '',
@@ -82,13 +116,7 @@ function header(purpose: string[]): string[] {
     '',
     ...purpose,
     '',
-    'Each ASH command first asks the installed ASH whether it has the ASH 3.9',
-    'spelling (`ash scan fs DIR`, `ash results merge`) and runs the older one',
-    '(`ash scan --source-dir DIR`, `ash merge`) when it does not, so an older',
-    'ASH_VERSION keeps working. Only an answer picks the older spelling: a help',
-    'that does not name the command, or a usage error that refuses its first',
-    'word. A probe that fails any other way stops the step with the end of its',
-    'output instead of being read as an older ASH.',
+    ...spelling,
   ];
 }
 
@@ -259,39 +287,48 @@ export function generatedBuildspecs(): GeneratedBuildspec[] {
     {
       filename: 'buildspec.yml',
       contents: toYamlFile(
-        header([
-          'Runs a full, unsharded ASH scan and fails the build on findings.',
-          'This document owns its own pass/fail verdict.',
-        ]),
+        header(
+          [
+            'Runs a full, unsharded ASH scan and fails the build on findings.',
+            'This document owns its own pass/fail verdict.',
+          ],
+          SCAN_SPELLING_NOTE,
+        ),
         scanBuildspec(),
       ),
     },
     {
       filename: 'buildspec-shard.yml',
       contents: toYamlFile(
-        header([
-          `One shard of a fanned-out scan. Set ${SHARD_INDEX_VAR} to 0..N-1 and`,
-          `${SHARD_COUNT_VAR} to N, then run buildspec-merge.yml over the outputs.`,
-          '',
-          'This document never fails on findings, by design. A shard runs a subset',
-          'of the scanners, so its exit code describes a subset of the repository:',
-          'a shard that finds nothing exits 0 even when another shard found a',
-          'critical issue. Gate on the merge step, never on a shard.',
-        ]),
+        header(
+          [
+            `One shard of a fanned-out scan. Set ${SHARD_INDEX_VAR} to 0..N-1 and`,
+            `${SHARD_COUNT_VAR} to N, then run buildspec-merge.yml over the outputs.`,
+            '',
+            'This document never fails on findings, by design. A shard runs a subset',
+            'of the scanners, so its exit code describes a subset of the repository:',
+            'a shard that finds nothing exits 0 even when another shard found a',
+            'critical issue. Gate on the merge step, never on a shard.',
+          ],
+          SCAN_SPELLING_NOTE,
+        ),
         shardBuildspec(),
       ),
     },
     {
       filename: 'buildspec-merge.yml',
       contents: toYamlFile(
-        header([
-          'Merges every shard\'s partial results into one report and one exit code.',
-          `Set ${SHARD_RESULTS_VAR} to a space-separated list of shard output`,
-          'directories, one per shard.',
-          '',
-          'This step is the verdict for the whole scan, so the merge must exit',
-          'non-zero when the merged findings breach the configured threshold.',
-        ]),
+        header(
+          [
+            'Merges every shard\'s partial results into one report and one exit code.',
+            `Set ${SHARD_RESULTS_VAR} to a space-separated list of shard output`,
+            'directories, one per shard.',
+            '',
+            'This step is the verdict for the whole scan, so the merge must exit',
+            'non-zero when the merged findings breach the configured threshold.',
+          ],
+          MERGE_SPELLING_NOTE,
+        ),
         mergeBuildspec(),
       ),
     },
