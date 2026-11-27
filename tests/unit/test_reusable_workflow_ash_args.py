@@ -31,6 +31,9 @@ What is asserted
   value, fails the step with exactly one `::` line before uvx starts, whatever the word
   names: a subcommand after a flag (`--verbose scan`), every subcommand ash registers,
   a word after `--phases scan`, and `--` (after which click reads every word as bare).
+* An option that takes a value, with no word after it (`--config`, `-vc`,
+  `--source-dir`), fails the step the same way: passed on, it would take the next option
+  the step adds as its value.
 * Options whose values name a subcommand reach uvx unchanged, after the workflow's own
   options, and ash's own CLI parses that command line as the scan with the workflow's
   options: no subcommand, --fail-on-findings set, --source-dir `.`.
@@ -205,6 +208,34 @@ def test_the_dashdash_refusal_says_what_click_does(tmp_path):
     _assert_refused(result, argv)
     message = result.stdout + result.stderr
     assert "the next word" in message and "every word" not in message, message
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "ash_args, position",
+    [
+        ("--config", 1),
+        ("--verbose -c", 2),
+        ("--exclude-scanners grype --phases", 3),
+        # A cluster whose last letter takes a value.
+        ("-vc", 1),
+        ("--source-dir", 1),
+        ("--verbose --source-dir", 2),
+    ],
+)
+def test_an_option_with_no_value_after_it_is_refused(tmp_path, ash_args, position):
+    """Passed on, it would take the next option the step adds as its value.
+
+    With use-betterleaks on that is `--config-overrides`, and ASH would refuse the word
+    after it for the wrong reason. The step refuses the option itself, by position as
+    it refuses a bare word, before it runs anything.
+    """
+    result, argv = _run(tmp_path, ash_args)
+
+    _assert_refused(result, argv)
+    (command,) = command_lines(result.stdout + result.stderr)
+    assert command.startswith(f"::error::ash-args word {position} is "), command
 
 
 def _ash_group():

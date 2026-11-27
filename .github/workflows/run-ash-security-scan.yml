@@ -2271,10 +2271,17 @@ jobs:
             esac
             passed_args+=("${word}")
           done
-          # A --source-dir with no word after it is passed on as it was, for ASH to
-          # refuse as an option with no value.
+          # An option that takes a value, with no word after it, is refused here, by
+          # position as the refusals above are. Passed on, it would take the next
+          # option this workflow adds as its value: with use-betterleaks on that is
+          # --config-overrides, and ASH would then refuse the word after it, a config
+          # override, for the wrong reason.
           if [ "${takes_value}" = "--source-dir" ]; then
-            passed_args+=(--source-dir)
+            echo "::error::ash-args word $(one_line "${position}") is --source-dir with no directory after it, so it names nothing to scan. Write the directory as the next word (--source-dir services/api) or after an equals sign (--source-dir=services/api)."
+            exit 1
+          elif [ -n "${takes_value}" ]; then
+            echo "::error::ash-args word $(one_line "${position}") is an option that takes a value, with no word after it: ASH would refuse it, or read the next option this workflow adds as its value. Write the value as the next word, or after an equals sign."
+            exit 1
           fi
           betterleaks_args=()
           if [ -n "${USE_BETTERLEAKS:-}" ]; then

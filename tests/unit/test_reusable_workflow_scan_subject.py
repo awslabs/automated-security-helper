@@ -54,8 +54,10 @@ would and records every other call:
    the step fails with status 70 and the probe's last 20 lines, and runs no scan.
 2. A ``--source-dir`` in ``ash-args``, written either way, is the directory on both;
    one that is another option's value is left as that value; one with no word after
-   it is passed on, for ASH to refuse; a directory whose name starts with a dash is
-   given as ``./`` plus the name, the same directory.
+   it is refused by the step, with or without use-betterleaks, by position and before
+   any probe, since passed on it would take the next option the step adds as its
+   directory; a directory whose name starts with a dash is given as ``./`` plus the
+   name, the same directory.
 3. The 3.9 command line, run through this tree's CLI with the scan engine stubbed,
    scans that directory and prints no deprecation line.
 4. The report runs ``ash results report`` on 3.9 and ``ash --output-dir ... report``
@@ -89,7 +91,6 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli import scan_group
 from automated_security_helper.cli.main import app
-from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.workflow_one_line import command_lines, write_helper
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -403,8 +404,6 @@ def test_the_scans_exit_status_is_the_steps(tmp_path, helps, release):
         ("--config --source-dir", ".", ".", ["--config", "--source-dir"]),
         # A name that starts with a dash: the same directory, never read as an option.
         ("--source-dir -x", "-x", "./-x", []),
-        # No word after it: passed on, and ASH refuses an option with no value.
-        ("--verbose --source-dir", ".", ".", ["--verbose", "--source-dir"]),
     ],
 )
 def test_a_source_dir_in_ash_args_names_the_directory(
@@ -477,18 +476,30 @@ def test_the_new_spelling_scans_that_directory_with_no_deprecation_line(
 
 @pytest.mark.integration
 @posix_only
-def test_a_source_dir_with_no_directory_is_still_refused(
-    tmp_path, helps, engine, monkeypatch
+@pytest.mark.parametrize("use_betterleaks", ["true", ""], ids=["betterleaks", "none"])
+@pytest.mark.parametrize(
+    "ash_args, position",
+    [("--source-dir", 1), ("--verbose --source-dir", 2)],
+)
+def test_a_source_dir_with_no_directory_is_refused_before_anything_runs(
+    tmp_path, helps, ash_args, position, use_betterleaks
 ):
-    (call,) = _run(
-        tmp_path, helps, RUN_ASH, "3.9", {**SCAN_ENV, "ASH_ARGS": "--source-dir"}
-    ).calls
-    monkeypatch.chdir(tmp_path)
+    """Passed on, it would take the next option the step adds as its directory.
 
-    result = _cli(call[len(UVX_SCAN) :])
+    With use-betterleaks on that is `--config-overrides`, and ASH would refuse the word
+    after it, a config override, for the wrong reason. The step refuses it first, by
+    position as it refuses `--` and a bare word, and asks the ASH nothing.
+    """
+    env = {**SCAN_ENV, "ASH_ARGS": ash_args, "USE_BETTERLEAKS": use_betterleaks}
 
-    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
-    assert engine.calls == []
+    ran = _run(tmp_path, helps, RUN_ASH, "3.9", env)
+
+    assert ran.result.returncode == 1, _output(ran)
+    assert ran.probes == [] and ran.calls == [], (ran.probes, ran.calls)
+    (command,) = command_lines(_output(ran))
+    assert command.startswith(
+        f"::error::ash-args word {position} is --source-dir with no directory after it"
+    ), command
 
 
 @pytest.mark.integration
