@@ -18,8 +18,9 @@ and the runner's records:
 * a call that the function's early exit answers does not reach its region.
 
 It also pins what the runner records (every block it ran or saved, with its session
-and the exit it expects) and that a block's context is its own: given to that block
-only, never carried to the next one, and nothing at all without coverage.
+and the exit it expects, and nothing for a page whose run raised) and that a block's
+context is its own: given to that block only, never carried to the next one, and
+nothing at all without coverage.
 
 Each test builds its own coverage directory and never reads ASH_DOCS_COVERAGE_DIR: the
 docs examples job sets that variable for this whole directory, and these pages must
@@ -30,6 +31,7 @@ Skipped on Windows, which the docs runner does not support (see docs_runner.py).
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import inspect
@@ -182,6 +184,45 @@ def _region_contexts(directory: Path) -> set[str]:
     return _contexts_on(region.path, region.lines, directory)
 
 
+def _lines_before_the_region() -> set[int]:
+    """The lines of the planted function's body statements before its region: the
+    statements up to and through its early exit. Not its def, decorator or docstring
+    lines: the def line runs when the module is imported, so a block that only
+    imports the module puts its context there."""
+    function = _planted_function()
+    (region,) = _planted().regions
+    tree = ast.parse(Path(inspect.getsourcefile(function)).read_text(encoding="utf-8"))
+    (node,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == function.__name__
+        and function.__code__.co_firstlineno
+        in (node.lineno, *(decorator.lineno for decorator in node.decorator_list))
+    ]
+    body = node.body
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    first = min(region.lines)
+    lines = {
+        line
+        for statement in body
+        if statement.end_lineno < first
+        for line in range(statement.lineno, statement.end_lineno + 1)
+    }
+    assert lines and not lines & region.lines, (
+        "the planted function has no statement before its region, so no call that its "
+        "early exit answers can be told from a call that does not run it at all"
+    )
+    assert node.lineno not in lines
+    return lines
+
+
 def _fence_lines(page) -> list[int]:
     return [block.fence_line for block in page.blocks]
 
@@ -222,6 +263,14 @@ def test_a_page_whose_block_does_not_call_the_planted_function_fails_the_gate(tm
         "the planted function's body ran without the block calling it, so this page "
         "cannot show the gate failing; plant a function whose body does not run when "
         "its module is imported"
+    )
+    (region,) = _planted().regions
+    assert not _contexts_on(
+        region.path, _lines_before_the_region(), coverage.directory
+    ), (
+        "importing the planted function's module ran the statements before its "
+        "region, so the early-exit test cannot tell a call its early exit answers "
+        "from an import"
     )
     code, report, feature, markdown = _check(tmp_path, coverage, page)
 
@@ -390,13 +439,12 @@ def test_a_call_that_the_functions_early_exit_answers_does_not_reach_its_region(
     assert [r.ok for r in results] == [True], runner.failure_report(results)
     (line,) = _fence_lines(page)
     (region,) = _planted().regions
-    source, start = inspect.getsourcelines(_planted_function())
-    before = set(range(start, start + len(source))) - region.lines
     assert f"page.md::{line}" in _contexts_on(
-        region.path, before, coverage.directory
+        region.path, _lines_before_the_region(), coverage.directory
     ), (
-        "the block did not run the planted function at all, so this test would pass "
-        "for the wrong reason"
+        "the block did not run the planted function's statements before its region, "
+        "so it never called the function and this test would pass for the wrong "
+        "reason"
     )
     assert not _region_contexts(coverage.directory)
     code, report, feature, _markdown = _check(tmp_path, coverage, page)
@@ -472,6 +520,42 @@ second
             },
         ],
     }
+
+
+def test_a_page_whose_run_raised_leaves_no_record(tmp_path):
+    """A record gives each block's verdict, and a run that raised part way has none
+    for the blocks it never reached: it writes no record, so the page gives no
+    evidence (the examples test fails on the error itself). Here the second save
+    needs a directory where the first save left a file."""
+    coverage = _coverage(tmp_path)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    path = docs / "page.md"
+    path.write_text(
+        f"""<!-- doctest: save-as=notes.txt -->
+{FENCE}text
+some notes
+{FENCE}
+
+<!-- doctest: save-as=notes.txt/inner.yaml -->
+{FENCE}yaml
+project_name: example
+{FENCE}
+""",
+        encoding="utf-8",
+    )
+    page = checks.parse_page(path, docs)
+    scratch = tmp_path / "sessions"
+    scratch.mkdir()
+
+    with pytest.raises(OSError):
+        runner.PageRunner(page, scratch, coverage=coverage).run()
+
+    blocks = coverage.directory / "blocks"
+    assert blocks.is_dir(), (
+        "the page's session never started, so this test would pass for the wrong reason"
+    )
+    assert list(blocks.iterdir()) == []
 
 
 def test_each_block_gets_its_own_context_and_cannot_carry_one_forward(tmp_path):

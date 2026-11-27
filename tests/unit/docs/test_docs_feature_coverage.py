@@ -6,7 +6,8 @@ rows of the configuration reference, the MCP tools), reads the coverage data the
 examples job collects (one coverage context per executed block, ``<page>::<fence
 line>``) together with the runner's record of every block it ran or saved, and says
 which features a passing executed example, one expected to succeed or to report
-findings, reached. ``check`` fails on an uncovered feature missing from a
+findings (or a scan expected to end with scanner errors that wrote its results),
+reached. ``check`` fails on an uncovered feature missing from a
 shrink-only baseline (F1) and on a baseline line that names no feature (F2); given
 the base branch's baseline it also fails on a line for a covered feature (F3) and on
 a line the pull request added (F4). It exits 2 when the measurement measured nothing.
@@ -41,6 +42,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import pytest
+import yaml
 from coverage import CoverageData
 
 from automated_security_helper.core.enums import AshExitCode
@@ -73,9 +75,17 @@ DENOMINATORS = (
 #: The file the runner writes into its coverage directory for every measured process.
 RCFILE_NAME = "coverage.rc"
 #: The exit codes a block may expect and still be evidence (AshExitCode names):
-#: success, scan errors, actionable findings. Every other expectation shows ASH
-#: refusing something or being stopped, and the code it names never ran its work.
-COUNTING_EXITS = ("SUCCESS", "SCAN_ERRORS", "ACTIONABLE_FINDINGS")
+#: success and actionable findings. Every other expectation shows ASH refusing
+#: something or being stopped, and the code it names never ran its work.
+COUNTING_EXITS = ("SUCCESS", "ACTIONABLE_FINDINGS")
+#: An exit that counts only when the block's scan also wrote its results (it reached
+#: ASHScanOrchestrator._write_results_file past its early exits): ASH exits 1 for a
+#: scan with scanner errors and for many refusals alike (``--use-existing`` with no
+#: results, ``ash config init`` refusing a second source), and a refusal never ran the
+#: work its feature names.
+COUNTING_ONCE_A_SCAN_WROTE_ITS_RESULTS = ("SCAN_ERRORS",)
+#: The workflow that runs the docs examples and the docs feature coverage check.
+UNIFIED_CI = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 
 #: A planted feature's code. The file need not exist: the evaluation reads only the
 #: coverage data and the feature's own region.
@@ -166,6 +176,13 @@ class Run:
         self.corpus.append(path)
         page = _checks().parse_page(path, self.docs)
         return [block.fence_line for block in page.blocks]
+
+    def real_page(self, rel: str):
+        """A page of this repository's docs, copied into the docs tree under its own
+        path, parsed: the test reads the page as it is now, never a copy of its
+        lines."""
+        self.page(rel, (REPO_ROOT / rel).read_text(encoding="utf-8"))
+        return _checks().parse_page(self.docs / rel, self.docs)
 
     def record(self, rel: str, *blocks: dict) -> None:
         """The runner's record of a page: every block it ran or saved."""
@@ -267,6 +284,44 @@ def _covered(run: Run, features) -> frozenset:
 
 def _join(*blocks: str) -> str:
     return "\n\n".join(blocks) + "\n"
+
+
+def _the_block(page, *needles: str):
+    """The one block of a page whose text holds every needle: found by its content,
+    so a case on a real page follows the page when its lines move."""
+    found = [block for block in page.blocks if all(n in block.body for n in needles)]
+    assert len(found) == 1, (page.rel, needles, [block.fence_line for block in found])
+    return found[0]
+
+
+def _expected_exit(block) -> str:
+    """The exit a block's marker expects, as the runner reads it (``0`` by default)."""
+    if block.marker is None:
+        return "0"
+    return str(block.marker.keys.get("expect-exit", "0"))
+
+
+def _record_as_the_runner_does(run: Run, rel: str):
+    """Record every block of a page that the runner runs or saves, each in the
+    session the runner gives it and expecting what its marker says, every one
+    passing: the record a run of the page leaves. The parsed page."""
+    checks = _checks()
+    page = checks.parse_page(run.docs / rel, run.docs)
+    blocks = []
+    for number, _fixture, block in _runner().page_sessions(page):
+        runs = checks.runner_runs(block)
+        blocks.append(
+            _block(
+                rel,
+                block.fence_line,
+                session=number,
+                runs=runs,
+                save_as=block.save_as or None,
+                expected=_expected_exit(block) if runs else "0",
+            )
+        )
+    run.record(rel, *blocks)
+    return page
 
 
 ONE_BLOCK = f"""# A page
@@ -433,6 +488,45 @@ def _source_path(obj) -> str:
     return text[text.rindex("automated_security_helper/") :]
 
 
+def _branch_lines(node, name: str) -> frozenset:
+    """The lines of the bodies of every ``if`` in ``node``, at any depth, whose test
+    reads ``name``: each body statement as its full span, never the test line or the
+    ``else``. An oracle for an option's own branch, read from the syntax tree."""
+    lines: set[int] = set()
+    for statement in ast.walk(node):
+        if isinstance(statement, ast.If) and any(
+            isinstance(word, ast.Name)
+            and isinstance(word.ctx, ast.Load)
+            and word.id == name
+            for word in ast.walk(statement.test)
+        ):
+            for inner in statement.body:
+                lines.update(range(inner.lineno, inner.end_lineno + 1))
+    return frozenset(lines)
+
+
+def _line_of(source: str, text: str) -> int:
+    """The number of the one line of ``source`` that holds ``text``."""
+    (number,) = [
+        number
+        for number, line in enumerate(source.splitlines(), start=1)
+        if text in line
+    ]
+    return number
+
+
+def _self_calls(node) -> set[str]:
+    """The names a function calls on ``self``: ``self.<name>(...)``."""
+    return {
+        call.func.attr
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "self"
+    }
+
+
 # --------------------------------------------------------------------------- #
 # The runner's coverage hook
 # --------------------------------------------------------------------------- #
@@ -459,7 +553,9 @@ def test_the_rc_file_measures_the_package_per_block_into_the_coverage_directory(
     absolute path in the coverage directory (a process that lost a variable must not
     write to ``/data``), label them with the block's context, and keep the sysmon
     core (branch, concurrency and dynamic_context would each make coverage fall back
-    from it)."""
+    from it). Its warnings stay off: a measured process's stderr is its block's
+    output, which an output sample is compared against, and on Python 3.11, which
+    has no sysmon core, every measured process would print the no-sysmon warning."""
     directory = tmp_path / "coverage"
     coverage = _runner().DocsCoverage(directory=directory)
     coverage.session_environment()
@@ -480,6 +576,14 @@ def test_the_rc_file_measures_the_package_per_block_into_the_coverage_directory(
     for falls_back in ("branch", "concurrency", "dynamic_context"):
         assert falls_back not in run, falls_back
     assert "identifiers" not in run.get("omit", "")
+    assert set(re.split(r"[,\s]+", run["disable_warnings"].strip())) == {
+        "no-data-collected",
+        "module-not-imported",
+        "module-not-measured",
+        "no-sysmon",
+        "already-imported",
+        "couldnt-parse",
+    }
 
 
 @pytest.mark.parametrize("value", [None, "", "   "], ids=["unset", "empty", "blank"])
@@ -564,6 +668,78 @@ def test_a_pages_record_is_written_whole_under_a_name_from_the_page(
     assert len(replaced) == 1
     source, target = replaced[0]
     assert target == path and source.parent == path.parent and source != path
+
+
+def _recording_replace(monkeypatch) -> list:
+    """os.replace, recording each (source, target) it is called with."""
+    replaced = []
+    real_replace = os.replace
+
+    def recording_replace(src, dst, *args, **kwargs):
+        replaced.append((Path(src), Path(dst)))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", recording_replace)
+    return replaced
+
+
+def test_the_rc_file_is_written_whole_beside_itself_and_renamed_into_place(
+    tmp_path, monkeypatch
+):
+    """Every measured process reads the rc file as it starts, while the sessions of
+    every worker ask for it again. A write in place truncates the file first, and a
+    process that reads it then runs coverage with its defaults: its lines are lost
+    and a stray ``.coverage`` lands in the page's project. So the text goes to a
+    temporary name in the same directory, renamed over the file, both when there is
+    no file yet and when the file holds other text."""
+    runner = _runner()
+    directory = tmp_path / "coverage"
+    replaced = _recording_replace(monkeypatch)
+    coverage = runner.DocsCoverage(directory=directory)
+
+    coverage.session_environment()
+    text = coverage.rcfile.read_text(encoding="utf-8")
+    coverage.rcfile.write_text("[run]\nparallel = False\n", encoding="utf-8")
+    runner.DocsCoverage(directory=directory).session_environment()
+
+    assert coverage.rcfile.read_text(encoding="utf-8") == text
+    assert len(replaced) == 2, replaced
+    for source, target in replaced:
+        assert target == coverage.rcfile
+        assert source.parent == target.parent and source != target
+    assert sorted(p.name for p in directory.iterdir()) == [
+        "blocks",
+        RCFILE_NAME,
+        "data",
+    ]
+
+
+def test_asking_again_for_an_rc_file_that_holds_its_text_leaves_it_untouched(
+    tmp_path, monkeypatch
+):
+    """Each session of each worker asks for the same rc file; when it already holds
+    the text, nothing is written, so a process that starts meanwhile reads it whole."""
+    runner = _runner()
+    directory = tmp_path / "coverage"
+    first = runner.DocsCoverage(directory=directory)
+    first.session_environment()
+    text = first.rcfile.read_text(encoding="utf-8")
+    # An old time stamp, so that a rewrite shows even within one tick of the clock.
+    os.utime(first.rcfile, ns=(1_000_000_000, 1_000_000_000))
+    before = first.rcfile.stat()
+    replaced = _recording_replace(monkeypatch)
+
+    env = runner.DocsCoverage(directory=directory).session_environment()
+
+    after = first.rcfile.stat()
+    assert env == {"COVERAGE_PROCESS_START": str(first.rcfile)}
+    assert first.rcfile.read_text(encoding="utf-8") == text
+    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    assert replaced == []
 
 
 # --------------------------------------------------------------------------- #
@@ -1149,6 +1325,161 @@ def test_a_command_whose_callback_is_typers_own_is_an_inventory_error(synthetic_
         cov.cli_features(root)
 
 
+#: A command tree shaped like ASH's scan, for the options a branch of the callback
+#: reads: the root's callback is the scan (bare ``ash`` is ``ash scan``), it ends at a
+#: version exit as ASH's does, and its options carry ASH's own spellings, so the docs
+#: parser reads a block's command line here as it reads one for ASH. ``--offline``'s
+#: branch sits inside a loop and spans three lines; ``--source-dir``'s is an ``elif``
+#: and the ``else`` below it belongs to no option; nothing branches on ``--output-dir``.
+FAKE_SCAN_CLI = """\
+import typer
+
+app = typer.Typer(add_completion=False)
+
+
+def scan(
+    ctx: typer.Context,
+    version: bool = typer.Option(False, "--version"),
+    quiet: bool = typer.Option(False, "--quiet/--no-quiet"),
+    offline: bool = typer.Option(False, "--offline/--no-offline"),
+    source_dir: str = typer.Option(".", "--source-dir"),
+    output_dir: str = typer.Option("out", "--output-dir"),
+):
+    if ctx.invoked_subcommand is not None:
+        return
+    if version:
+        print("version 1")
+        raise typer.Exit
+    if not quiet:
+        print("not quiet")
+    for item in [source_dir]:
+        if offline and item:
+            print(
+                item,
+            )
+        elif source_dir:
+            print("a source directory")
+        else:
+            print("neither")
+    print(output_dir)
+
+
+app.callback(invoke_without_command=True)(scan)
+app.command("scan")(scan)
+"""
+
+
+def _fake_scan_node():
+    """The fake scan callback's syntax tree."""
+    (node,) = [
+        node
+        for node in ast.parse(FAKE_SCAN_CLI).body
+        if isinstance(node, ast.FunctionDef) and node.name == "scan"
+    ]
+    return node
+
+
+def test_an_option_a_branch_of_the_callback_reads_is_measured_in_that_branch_too(
+    synthetic_module,
+):
+    """An option whose work is an early exit (``ash --version`` prints and exits
+    before the command's own code) could never reach the command's region. So an
+    option is also measured in the bodies of every ``if`` of the callback, at any
+    depth, whose test reads its parameter, early exits included: one more region,
+    the union of those bodies, never the test line or an ``else``. The command's
+    region stays the option's first. An option no branch reads gets no more."""
+    import typer
+
+    cov = _cov()
+    module = synthetic_module("fake_scan_cli.py", FAKE_SCAN_CLI)
+    node = _fake_scan_node()
+
+    features = {
+        feature.id: feature
+        for feature in cov.cli_features(typer.main.get_command(module.app))
+    }
+
+    command = cov.function_region(module.scan)
+    assert features["command:ash scan"].regions == (command,)
+
+    def branch(parameter: str):
+        return cov.Region(path=command.path, lines=_branch_lines(node, parameter))
+
+    for option, parameter in (
+        ("--version", "version"),
+        ("--quiet", "quiet"),
+        ("--offline", "offline"),
+        ("--source-dir", "source_dir"),
+    ):
+        feature = features[f"option:ash scan {option}"]
+        assert feature.regions[0] == command, option
+        assert set(feature.regions) == {command, branch(parameter)}, option
+        assert len(feature.regions) == 2, option
+    assert features["option:ash scan --output-dir"].regions == (command,)
+
+    assert branch("version").lines == {
+        _line_of(FAKE_SCAN_CLI, 'print("version 1")'),
+        _line_of(FAKE_SCAN_CLI, "raise typer.Exit"),
+    }
+    assert not branch("version").lines & command.lines
+    assert _line_of(FAKE_SCAN_CLI, "if version:") not in branch("version").lines
+    assert branch("quiet").lines == {_line_of(FAKE_SCAN_CLI, 'print("not quiet")')}
+    middle = _line_of(FAKE_SCAN_CLI, "item,")
+    assert branch("offline").lines == {middle - 1, middle, middle + 1}
+    assert branch("source_dir").lines == {
+        _line_of(FAKE_SCAN_CLI, 'print("a source directory")')
+    }
+    neither = _line_of(FAKE_SCAN_CLI, 'print("neither")')
+    assert not [
+        feature.id
+        for feature in features.values()
+        if feature.kind == "option"
+        and any(neither in region.lines for region in feature.regions[1:])
+    ]
+
+
+@pytest.mark.parametrize(
+    ("command_line", "parameter", "covered", "uncovered"),
+    [
+        pytest.param(
+            "ash --version",
+            "version",
+            {"option:ash scan --version"},
+            {"command:ash scan"},
+            id="the-version-exit-shows-the-version-option-and-not-the-scan",
+        ),
+        pytest.param(
+            "ash scan --offline",
+            "quiet",
+            {"command:ash scan", "option:ash scan --offline"},
+            {"option:ash scan --quiet"},
+            id="a-branch-run-because-an-option-was-not-given-does-not-show-it",
+        ),
+    ],
+)
+def test_a_block_that_reaches_a_branch_of_the_callback_covers_only_options_it_gives(
+    tmp_path, synthetic_module, command_line, parameter, covered, uncovered
+):
+    """An option's own branch is evidence only beside a command line that gives the
+    option: ``if not quiet:`` runs when ``--quiet`` is not given, so a block that
+    reached it shows the scan, and any option it gave, but never ``--quiet``."""
+    import typer
+
+    cov = _cov()
+    module = synthetic_module("fake_scan_cli.py", FAKE_SCAN_CLI)
+    features = cov.cli_features(typer.main.get_command(module.app))
+    path = cov.function_region(module.scan).path
+    run = Run(tmp_path)
+    line = _one_command(run, command_line)
+    run.record("page.md", _block("page.md", line))
+    run.hit(f"page.md::{line}", path, _branch_lines(_fake_scan_node(), parameter))
+
+    result = _covered(run, features)
+
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
+
+
 # --------------------------------------------------------------------------- #
 # Plugins: each measured in the work the framework leaves to it
 # --------------------------------------------------------------------------- #
@@ -1165,16 +1496,20 @@ class SyntheticScanner(ScannerPluginBase):
 
 class _SharedTemplate(ScannerPluginBase):
     def _execute_scan(self, target, target_type, global_ignore_paths):
-        args = ["shared", str(target)]
+        args = self._arguments(target)
         return args, target, None
 
 
 class FirstShared(_SharedTemplate):
-    pass
+    def _arguments(self, target):
+        found = ["first", str(target)]
+        return found
 
 
 class SecondShared(_SharedTemplate):
-    pass
+    def _arguments(self, target):
+        found = ["second", str(target)]
+        return found
 
 
 class OverridesScan(ScannerPluginBase):
@@ -1343,6 +1678,122 @@ def test_plugins_that_share_one_work_method_say_so(synthetic_package):
     assert "shares its code with" not in features[alone].note
 
 
+def test_plugins_that_share_a_work_method_each_need_a_method_of_their_own(
+    synthetic_package,
+):
+    """Reaching the shared code shows that one of them ran, not which. Each also needs
+    the methods it defines in its own class body that the shared method calls on
+    ``self``, so that its own code tells it apart; a plugin with a work method of its
+    own needs nothing more."""
+    cov = _cov()
+    checks = _checks()
+    package = synthetic_package({"scanners": SYNTHETIC_SCANNERS})
+
+    features = {feature.id: feature for feature in cov.plugin_features(package)}
+
+    scanners = sys.modules[f"{package.__name__}.scanners"]
+
+    def fid(plugin):
+        return f"scanner:{checks._declared_plugin_name(plugin)}"
+
+    assert features[fid(scanners.FirstShared)].requires == (
+        cov.function_region(scanners.FirstShared._arguments),
+    )
+    assert features[fid(scanners.SecondShared)].requires == (
+        cov.function_region(scanners.SecondShared._arguments),
+    )
+    for plugin in (
+        scanners.SyntheticScanner,
+        scanners.OverridesScan,
+        scanners.DelegatesScan,
+    ):
+        assert features[fid(plugin)].requires == (), plugin.__name__
+
+
+@pytest.mark.parametrize(
+    ("reached", "covered"),
+    [
+        pytest.param(("shared",), set(), id="the-shared-method-alone-covers-neither"),
+        pytest.param(("shared", "first"), {"first"}, id="with-the-first-ones-own"),
+        pytest.param(("shared", "second"), {"second"}, id="with-the-second-ones-own"),
+        pytest.param(("first",), set(), id="its-own-method-alone-covers-nothing"),
+    ],
+)
+def test_a_plugin_that_shares_its_work_method_is_covered_where_its_own_method_ran_too(
+    tmp_path, synthetic_package, reached, covered
+):
+    """A plugin that shares its work method is covered when a passing block reached
+    the shared method and one of the methods it needs of its own."""
+    cov = _cov()
+    checks = _checks()
+    package = synthetic_package({"scanners": SYNTHETIC_SCANNERS})
+    features = {feature.id: feature for feature in cov.plugin_features(package)}
+    scanners = sys.modules[f"{package.__name__}.scanners"]
+    ids = {
+        "first": f"scanner:{checks._declared_plugin_name(scanners.FirstShared)}",
+        "second": f"scanner:{checks._declared_plugin_name(scanners.SecondShared)}",
+    }
+    regions = {
+        "shared": cov.function_region(scanners.FirstShared._execute_scan),
+        "first": cov.function_region(scanners.FirstShared._arguments),
+        "second": cov.function_region(scanners.SecondShared._arguments),
+    }
+    run = Run(tmp_path)
+    (line,) = run.page("page.md", ONE_BLOCK)
+    run.record("page.md", _block("page.md", line))
+    for name in reached:
+        run.hit(f"page.md::{line}", regions[name].path, {min(regions[name].lines)})
+
+    result = _covered(run, [features[ids["first"]], features[ids["second"]]])
+
+    assert result == {ids[name] for name in covered}
+
+
+#: Two scanners that share a work method, one of which defines none of the methods
+#: that work method calls on ``self``: it inherits the template's.
+SHARED_WITHOUT_A_METHOD_OF_ITS_OWN = """\
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+
+class _SharedTemplate(ScannerPluginBase):
+    def _execute_scan(self, target, target_type, global_ignore_paths):
+        args = self._arguments(target)
+        return args, target, None
+
+    def _arguments(self, target):
+        found = ["shared", str(target)]
+        return found
+
+
+class FirstShared(_SharedTemplate):
+    def _arguments(self, target):
+        found = ["first", str(target)]
+        return found
+
+
+class SecondShared(_SharedTemplate):
+    pass
+
+
+ASH_SCANNERS = [FirstShared, SecondShared]
+"""
+
+
+def test_a_plugin_that_shares_its_work_method_and_owns_nothing_it_calls_is_an_inventory_error(
+    synthetic_package,
+):
+    """Line coverage could never tell such a plugin from the one it shares with, so
+    the inventory refuses it at the change that creates it, naming it, rather than
+    read the other plugin's run as its own."""
+    cov = _cov()
+    package = synthetic_package({"scanners": SHARED_WITHOUT_A_METHOD_OF_ITS_OWN})
+
+    with pytest.raises(cov.InventoryError) as raised:
+        cov.plugin_features(package)
+
+    assert "secondshared" in str(raised.value).lower(), str(raised.value)
+
+
 def test_a_plugin_module_that_does_not_import_is_an_inventory_error(synthetic_package):
     """A module that imports here and not on the CI runner would make the inventory
     differ between them, and the baseline read stale; the inventory refuses instead."""
@@ -1504,6 +1955,38 @@ def test_the_scan_command_is_one_feature_that_bare_ash_belongs_to():
     assert "command:ash" not in by_id
     assert "option:ash scan --scanners" in by_id
     assert not [fid for fid in by_id if fid.startswith("option:ash --")]
+
+
+def test_the_version_option_is_measured_in_the_scan_callbacks_version_branch():
+    """``ash --version`` prints and exits at the scan callback's version exit, before
+    the scan's own code: that branch's body is the option's code. The region is read
+    from the callback's syntax tree and the option's parameter name, never a line
+    number."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    path, node = _scan_callback()
+    (parameter,) = [
+        param
+        for param in typer.main.get_command(app).params
+        if "--version" in param.opts
+    ]
+    guard = _scan_early_exit(node, mentions="version")
+    body = {
+        line
+        for statement in guard.body
+        for line in range(statement.lineno, statement.end_lineno + 1)
+    }
+    expected = _branch_lines(node, parameter.name)
+    by_id = _by_id()
+
+    feature = by_id["option:ash scan --version"]
+
+    assert body and body <= expected
+    assert guard.lineno not in expected
+    assert _cov().Region(path=path, lines=expected) in feature.regions
+    assert feature.regions[0] == by_id["command:ash scan"].regions[0]
 
 
 @pytest.mark.parametrize(
@@ -1735,6 +2218,96 @@ def test_opengrep_and_semgrep_share_the_grep_bases_execute_scan_and_say_so():
         )
 
 
+def _grep_base():
+    """The class whose _execute_scan opengrep and semgrep share."""
+    return next(
+        klass
+        for klass in _scanner_classes()["opengrep"].__mro__
+        if "_execute_scan" in klass.__dict__
+    )
+
+
+def _own_regions_the_shared_method_calls(plugin) -> set:
+    """The regions of the methods ``plugin`` defines in its own class body that the
+    grep base's _execute_scan calls on ``self``: an oracle, read from the syntax
+    trees on their own."""
+    cov = _cov()
+    owner = _grep_base()
+    shared = _function_node(_source_path(owner), "_execute_scan", cls=owner.__name__)
+    path = _source_path(plugin)
+    return {
+        cov.Region(
+            path=path,
+            lines=_region_oracle(_function_node(path, name, cls=plugin.__name__)),
+        )
+        for name in sorted(_self_calls(shared))
+        if name in plugin.__dict__
+    }
+
+
+def test_opengrep_and_semgrep_each_need_a_method_of_their_own_beside_the_shared_one():
+    """semgrep runs in the docs job and opengrep does not, so the shared method alone
+    would cover opengrep whenever semgrep ran. Each needs a method it defines itself
+    that the shared method calls; every plugin with a work method of its own, and
+    every other feature, needs nothing more."""
+    classes = _scanner_classes()
+    by_id = _by_id()
+
+    for name in ("opengrep", "semgrep"):
+        expected = _own_regions_the_shared_method_calls(classes[name])
+        requires = by_id[f"scanner:{name}"].requires
+        assert expected, f"{name} defines no method the shared one calls"
+        assert set(requires) == expected and len(requires) == len(expected), name
+    assert not set(by_id["scanner:opengrep"].requires) & set(
+        by_id["scanner:semgrep"].requires
+    )
+    for feature in _inventory():
+        if feature.id not in ("scanner:opengrep", "scanner:semgrep"):
+            assert feature.requires == (), feature.id
+
+
+@pytest.mark.parametrize(
+    ("own", "covered", "uncovered"),
+    [
+        pytest.param(
+            None,
+            set(),
+            {"scanner:opengrep", "scanner:semgrep"},
+            id="the-shared-method-alone",
+        ),
+        pytest.param(
+            "semgrep",
+            {"scanner:semgrep"},
+            {"scanner:opengrep"},
+            id="semgreps-own-method-ran-too",
+        ),
+        pytest.param(
+            "opengrep",
+            {"scanner:opengrep"},
+            {"scanner:semgrep"},
+            id="opengreps-own-method-ran-too",
+        ),
+    ],
+)
+def test_reaching_the_grep_bases_work_method_covers_the_grep_scanner_whose_own_code_ran(
+    tmp_path, own, covered, uncovered
+):
+    by_id = _by_id()
+    run = Run(tmp_path)
+    (line,) = run.page("page.md", ONE_BLOCK)
+    run.record("page.md", _block("page.md", line))
+    (shared,) = by_id["scanner:semgrep"].regions
+    run.hit(f"page.md::{line}", shared.path, {min(shared.lines)})
+    if own is not None:
+        for region in _own_regions_the_shared_method_calls(_scanner_classes()[own]):
+            run.hit(f"page.md::{line}", region.path, {min(region.lines)})
+
+    result = _covered(run, [by_id["scanner:opengrep"], by_id["scanner:semgrep"]])
+
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
+
+
 def test_no_plugin_is_measured_in_a_stub_that_only_raises_not_implemented():
     plugins = [
         f for f in _inventory() if f.kind in ("scanner", "reporter", "converter")
@@ -1933,26 +2506,56 @@ def _an_exit_no_member_names() -> str:
     return str(next(code for code in range(256) if code not in codes))
 
 
-#: Every exit a block can expect, and whether such a block is evidence.
+#: Every exit a block can expect, with its AshExitCode name where it has one.
 EXPECTED_EXITS = [
-    pytest.param(str(int(member)), member.name in COUNTING_EXITS, id=member.name)
+    pytest.param(str(int(member)), member.name, id=member.name)
     for member in AshExitCode
 ] + [
-    pytest.param("nonzero", False, id="nonzero"),
-    pytest.param("any", False, id="any"),
-    pytest.param(_an_exit_no_member_names(), False, id="an-exit-ash-does-not-use"),
+    pytest.param("nonzero", None, id="nonzero"),
+    pytest.param("any", None, id="any"),
+    pytest.param(_an_exit_no_member_names(), None, id="an-exit-ash-does-not-use"),
 ]
+#: How far a block's processes got with a scan's results write.
+RESULTS_WRITES = ["no-results-write", "an-early-exit-of-the-write", "wrote-its-results"]
 
 
-@pytest.mark.parametrize(("expected", "counts"), EXPECTED_EXITS)
+def _results_write():
+    """ASHScanOrchestrator._write_results_file, which a scan runs once its phases
+    have run, to write the results it found."""
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    return ASHScanOrchestrator._write_results_file
+
+
+def _scan_wrote_its_results(run: Run, context: str) -> None:
+    """Coverage data in which ``context`` ran the results write past its early exits."""
+    region = _cov().function_region(_results_write())
+    run.hit(context, region.path, {min(region.lines)})
+
+
+def _scan_left_the_results_write_at_an_early_exit(run: Run, context: str) -> None:
+    """Coverage data in which ``context`` ran the results write up to its last early
+    exit and no further."""
+    path = "automated_security_helper/core/orchestrator.py"
+    node = _function_node(path, "_write_results_file", cls="ASHScanOrchestrator")
+    body = _without_docstring(node.body)
+    guards = [statement for statement in body if _is_guard(statement)]
+    run.hit(context, path, set(range(body[0].lineno, guards[-1].end_lineno + 1)))
+
+
+@pytest.mark.parametrize("results", RESULTS_WRITES)
+@pytest.mark.parametrize(("expected", "name"), EXPECTED_EXITS)
 def test_only_a_block_expected_to_succeed_or_to_report_findings_is_evidence(
-    tmp_path, expected, counts
+    tmp_path, expected, name, results
 ):
     """A passing block that expects ASH to refuse something (an invalid configuration,
     a workspace error, a usage error) shows the refusal: the code it reaches stops
     before doing the work its feature names. So do a block that expects to be
-    stopped, one that expects any nonzero exit, and one that expects anything. The
-    codes are read from AshExitCode."""
+    stopped, one that expects any nonzero exit, and one that expects anything. ASH
+    exits 1 both for a scan whose scanners failed and for many refusals, so a block
+    that expects 1 is evidence only when its scan also wrote its results: it reached
+    the results write past its early exits (no results file for this run; the engine
+    returned something else). The codes are read from AshExitCode."""
     run = Run(tmp_path)
     (line,) = run.page(
         "page.md",
@@ -1961,13 +2564,171 @@ def test_only_a_block_expected_to_succeed_or_to_report_findings_is_evidence(
     )
     run.record("page.md", _block("page.md", line, expected=expected))
     run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+    if results == "wrote-its-results":
+        _scan_wrote_its_results(run, f"page.md::{line}")
+    elif results == "an-early-exit-of-the-write":
+        _scan_left_the_results_write_at_an_early_exit(run, f"page.md::{line}")
     # A block expected to succeed passes too, so the measurement itself is sound.
     run.page("other.md", ONE_BLOCK)
     run.record("other.md", _block("other.md", 3))
     run.hit("other.md::3", OTHER_PATH, {5})
     planted = _planted()
+    counts = name in COUNTING_EXITS or (
+        name in COUNTING_ONCE_A_SCAN_WROTE_ITS_RESULTS
+        and results == "wrote-its-results"
+    )
 
     assert (planted.id in _covered(run, [planted])) is counts
+
+
+def test_a_scan_wrote_its_results_once_it_passed_both_early_exits_of_the_results_write():
+    """The code that tells a scan with scanner errors from a refusal, both exit 1: the
+    results write past its two early exits, the return for a run that writes no
+    results file and the return for an engine that gave something other than
+    results. Pinned, so that a change to either exit, or a third one, is a visible
+    change to what an exit-1 example must reach."""
+    path = "automated_security_helper/core/orchestrator.py"
+    node = _function_node(path, "_write_results_file", cls="ASHScanOrchestrator")
+    guards = [
+        statement for statement in _without_docstring(node.body) if _is_guard(statement)
+    ]
+
+    region = _cov().function_region(_results_write())
+
+    assert len(guards) == 2, [ast.unparse(guard.test) for guard in guards]
+    assert "_writes_results_file" in ast.unparse(guards[0].test)
+    assert "AshAggregatedResults" in ast.unparse(guards[1].test)
+    assert region.path == path
+    _assert_region(region, node)
+    for guard in guards:
+        assert not region.lines & set(range(guard.lineno, guard.end_lineno + 1))
+
+
+@pytest.mark.parametrize(
+    ("rel", "needles", "reached", "wrote_results", "covered", "uncovered"),
+    [
+        pytest.param(
+            "docs/content/reference/exit-codes.md",
+            ("--use-existing",),
+            "command:ash scan",
+            False,
+            set(),
+            {
+                "command:ash scan",
+                "option:ash scan --use-existing",
+                "option:ash scan --output-dir",
+                "option:ash scan --source-dir",
+            },
+            id="use-existing-with-no-results-to-use",
+        ),
+        pytest.param(
+            "docs/content/reference/exit-codes.md",
+            ("ash config init",),
+            "command:ash config init",
+            False,
+            set(),
+            {"command:ash config init"},
+            id="config-init-refusing-a-second-config-source",
+        ),
+        pytest.param(
+            "docs/content/faq.md",
+            ("npm-audit,detect-secrets",),
+            "command:ash scan",
+            True,
+            {
+                "command:ash scan",
+                "option:ash scan --offline",
+                "option:ash scan --scanners",
+            },
+            set(),
+            id="an-offline-scan-with-npm-audit-missing",
+        ),
+        pytest.param(
+            "docs/content/faq.md",
+            ("npm-audit,detect-secrets",),
+            "command:ash scan",
+            False,
+            set(),
+            {"command:ash scan", "option:ash scan --offline"},
+            id="the-same-scan-had-it-written-no-results",
+        ),
+        pytest.param(
+            "docs/content/how-to/run-offline.md",
+            ("js-app-results",),
+            "command:ash scan",
+            True,
+            {
+                "command:ash scan",
+                "option:ash scan --offline",
+                "option:ash scan --source-dir",
+                "option:ash scan --output-dir",
+            },
+            set(),
+            id="an-offline-scan-of-a-project-with-a-lockfile",
+        ),
+    ],
+)
+def test_an_exit_1_example_on_these_pages_counts_only_when_its_scan_wrote_its_results(
+    tmp_path, rel, needles, reached, wrote_results, covered, uncovered
+):
+    """``--use-existing`` with an output directory that holds no results exits 1 well
+    past the scan callback's early exits, and ``ash config init`` exits 1 refusing a
+    second config source: they show a refusal, not the features their command lines
+    name. An offline scan that reports npm-audit MISSING exits 1 too, after it wrote
+    its results, and shows the scan."""
+    run = Run(tmp_path)
+    block = _the_block(run.real_page(rel), *needles)
+    assert _expected_exit(block) == str(int(AshExitCode.SCAN_ERRORS)), (
+        f"{rel}:{block.fence_line} no longer expects exit 1; this case is stale"
+    )
+    context = f"{rel}::{block.fence_line}"
+    run.record(rel, _block(rel, block.fence_line, expected=_expected_exit(block)))
+    _reach(run, context, reached)
+    if wrote_results:
+        _scan_wrote_its_results(run, context)
+
+    result = _covered(run, _cli_features())
+
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
+
+
+def test_check_exits_2_when_the_results_write_it_reads_exit_1_by_is_gone(
+    tmp_path, monkeypatch, capsys
+):
+    """A rename of the results write must fail the check loudly, naming it, never
+    leave every exit-1 example silently uncovered (or covered)."""
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    cov = _cov()
+    run = Run(tmp_path)
+    (line,) = run.page(
+        "page.md",
+        f"<!-- doctest: run expect-exit=1 -->\n{FENCE}python\nprint(1)\n{FENCE}\n",
+    )
+    run.record("page.md", _block("page.md", line, expected="1"))
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+    planted = _planted()
+    monkeypatch.setattr(cov, "inventory", lambda: [planted])
+    monkeypatch.setattr(cov, "corpus_pages", lambda docs_root: list(run.corpus))
+    monkeypatch.delattr(ASHScanOrchestrator, "_write_results_file")
+
+    code = cov.main(
+        [
+            "check",
+            "--data",
+            str(run.data),
+            "--baseline",
+            str(_baseline(tmp_path / "baseline.txt", [])),
+            "--docs-root",
+            str(run.docs),
+            "--out",
+            str(run.out),
+        ]
+    )
+
+    assert code == 2
+    assert "_write_results_file" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -2156,39 +2917,41 @@ def test_a_passing_block_covers_the_command_it_invokes_and_the_options_it_gives(
 
 
 @pytest.mark.parametrize(
-    ("command_line", "stops_at", "option", "covers"),
+    ("command_line", "stops_at", "covered", "uncovered"),
     [
         pytest.param(
             "ash config validate --config .ash/.ash.yaml",
             "invoked_subcommand",
-            "option:ash scan --config",
-            False,
+            set(),
+            {"command:ash scan", "option:ash scan --config"},
             id="another-subcommand-runs-the-callback-up-to-its-return",
         ),
         pytest.param(
             "ash --version",
             "version",
-            "option:ash scan --version",
-            False,
-            id="the-version-exit",
+            {"option:ash scan --version"},
+            {"command:ash scan"},
+            id="the-version-exit-is-the-version-options-own-work",
         ),
         pytest.param(
             "ash scan --config .ash/.ash.yaml",
             None,
-            "option:ash scan --config",
-            True,
+            {"command:ash scan", "option:ash scan --config"},
+            set(),
             id="the-scan-reaches-its-own-code",
         ),
     ],
 )
 def test_only_the_scan_callbacks_code_past_its_early_exits_shows_the_scan(
-    tmp_path, command_line, stops_at, option, covers
+    tmp_path, command_line, stops_at, covered, uncovered
 ):
     """click runs the root group's callback, the scan's own function, before every
     subcommand, and the function returns at once there; ``ash --version`` prints and
     exits a few lines further on. The lines up to those exits run for invocations
     that scan nothing, so a block that reached only them covers neither the scan nor
-    an option it gives; a block that reached the scan's own code covers both."""
+    an option it gives, except the one option whose own work that exit is:
+    ``ash --version`` shows ``--version``, never the scan. A block that reached the
+    scan's own code covers the scan and the options it gives."""
     path, node = _scan_callback()
     run = Run(tmp_path)
     line = _one_command(run, command_line)
@@ -2202,8 +2965,36 @@ def test_only_the_scan_callbacks_code_past_its_early_exits_shows_the_scan(
 
     result = _covered(run, _cli_features())
 
-    assert ({"command:ash scan", option} <= result) is covers, sorted(result)
-    assert bool({"command:ash scan", option} & result) is covers, sorted(result)
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "docs/content/getting-started/local.md",
+        "docs/content/getting-started/agents.md",
+    ],
+)
+def test_ash_version_on_these_pages_covers_the_version_option_and_not_the_scan(
+    tmp_path, rel
+):
+    """These pages run ``ash --version``, which prints the version and exits at the
+    scan callback's version exit."""
+    path, node = _scan_callback()
+    run = Run(tmp_path)
+    page = run.real_page(rel)
+    (block,) = [block for block in page.blocks if block.body.strip() == "ash --version"]
+    context = f"{rel}::{block.fence_line}"
+    run.record(rel, _block(rel, block.fence_line, expected=_expected_exit(block)))
+    first = _without_docstring(node.body)[0].lineno
+    guard = _scan_early_exit(node, mentions="version")
+    run.hit(context, path, set(range(first, guard.end_lineno + 1)))
+
+    result = _covered(run, _cli_features())
+
+    assert "option:ash scan --version" in result
+    assert "command:ash scan" not in result
 
 
 def test_a_python_block_that_reaches_a_commands_code_covers_it_and_none_of_its_options(
@@ -2302,9 +3093,13 @@ def _anchor(name: str):
 
 
 def _saved_config(
-    body: str, *, kind: str = "kind=ash", save_as: str = ".ash/.ash.yaml"
+    body: str,
+    *,
+    kind: str = "kind=ash",
+    save_as: str = ".ash/.ash.yaml",
+    lang: str = "yaml",
 ) -> str:
-    return f"<!-- doctest: config {kind} save-as={save_as} -->\n{FENCE}yaml\n{body}\n{FENCE}"
+    return f"<!-- doctest: config {kind} save-as={save_as} -->\n{FENCE}{lang}\n{body}\n{FENCE}"
 
 
 def _scan_block(
@@ -2315,6 +3110,11 @@ def _scan_block(
 
 
 SEVERITY = "global_settings:\n  severity_threshold: HIGH"
+
+
+def _overrides(value: str) -> str:
+    """A scan command line that gives ``value`` to --config-overrides, quoted."""
+    return f"ash scan --config-overrides '{value}'"
 
 
 def _config_run(
@@ -2358,20 +3158,6 @@ def _config_run(
             {"config:global_settings", "config:global_settings.severity_threshold"},
             {"config:fail_on_findings"},
             id="a-saved-ash-config",
-        ),
-        pytest.param(
-            {
-                "page": _join(
-                    "<!-- doctest: config kind=ash-fragment at=global_settings "
-                    "save-as=.ash/fragment.yaml -->\n"
-                    f"{FENCE}yaml\nseverity_threshold: HIGH\n{FENCE}",
-                    _scan_block(),
-                ),
-                "save_as": ".ash/fragment.yaml",
-            },
-            {"config:global_settings", "config:global_settings.severity_threshold"},
-            set(),
-            id="a-fragment-under-its-at-prefix",
         ),
         pytest.param(
             {
@@ -2540,6 +3326,296 @@ def test_a_config_key_is_not_covered_unless_a_passing_block_loaded_a_saved_ash_c
     )
 
 
+def _loading_run(tmp_path: Path, *, text: str, loading: int = -1) -> Run:
+    """A page recorded as the runner records it, whose ``loading``-th runnable block
+    reached load_config_file."""
+    run = Run(tmp_path)
+    run.page("page.md", text)
+    page = _record_as_the_runner_does(run, "page.md")
+    block = [block for block in page.blocks if _checks().runner_runs(block)][loading]
+    region = _anchor("load_config_file")
+    run.hit(f"page.md::{block.fence_line}", region.path, {min(region.lines)})
+    return run
+
+
+def _discovered_names() -> list[str]:
+    """Every name config discovery reads in the directory it searches, from the lists
+    core/constants.py gives it (config/config_sources.py): the canonical file, each
+    dedicated name at the top and in ``.ash/``, then each rc name at the top."""
+    from automated_security_helper.core import constants
+
+    names = [constants.ASH_CANONICAL_CONFIG_FILE_NAME]
+    for name in constants.ASH_CONFIG_FILE_NAMES:
+        names += [name, f".ash/{name}"]
+    names += constants.ASH_RC_FILE_NAMES
+    return list(dict.fromkeys(names))
+
+
+#: A configuration that sets project_name, in the language of each config file name.
+PROJECT_NAME = {
+    "yaml": "project_name: demo",
+    "json": '{"project_name": "demo"}',
+    "toml": 'project_name = "demo"',
+}
+
+
+@pytest.mark.parametrize("name", _discovered_names())
+def test_a_config_saved_under_a_name_discovery_reads_counts_for_a_scan_of_its_directory(
+    tmp_path, name
+):
+    """A scan that names no configuration loads the first config source discovery
+    finds in the directory it scans, the working directory when no --source-dir is
+    given; a saved configuration under any of discovery's names is one it can have
+    loaded. The names are read from the code."""
+    suffix = name.rpartition(".")[2]
+    lang = {"yml": "yaml"}.get(suffix, suffix)
+    run = _loading_run(
+        tmp_path,
+        text=_join(
+            _saved_config(PROJECT_NAME[lang], save_as=name, lang=lang), _scan_block()
+        ),
+    )
+
+    assert "config:project_name" in _covered(run, _config_features())
+
+
+#: The rows SEVERITY sets.
+SEVERITY_ROWS = {"config:global_settings", "config:global_settings.severity_threshold"}
+#: A configuration file under a name discovery never reads.
+TEAM = "configs/team.yaml"
+#: A fragment holding a key of global_settings at its root.
+FRAGMENT = "severity_threshold: HIGH"
+FRAGMENT_KIND = "kind=ash-fragment at=global_settings"
+
+
+@pytest.mark.parametrize(
+    ("variant", "covered", "uncovered"),
+    [
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config("fail_on_findings: false", save_as=".ash.yaml"),
+                    _saved_config("project_name: demo", save_as=".ash.yaml"),
+                    _scan_block(),
+                )
+            },
+            {"config:project_name"},
+            {"config:fail_on_findings"},
+            id="a-later-save-of-the-same-name-replaced-it",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config("fail_on_findings: false", save_as=".ash.yaml"),
+                    _scan_block(),
+                    _saved_config("project_name: demo", save_as=".ash.yaml"),
+                ),
+                "loading": 0,
+            },
+            {"config:fail_on_findings"},
+            {"config:project_name"},
+            id="replaced-only-after-the-block-that-loaded-it",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config("project_name: demo", save_as=".ash.yaml"),
+                    _saved_config(SEVERITY, save_as="notes/team.yaml"),
+                    _scan_block(),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="a-name-discovery-does-not-read",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=".ash/.ashrc.yaml"), _scan_block()
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="an-rc-name-in-the-ash-directory",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(
+                        FRAGMENT, kind=FRAGMENT_KIND, save_as=".ash/fragment.yaml"
+                    ),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="a-fragment-under-its-at-prefix",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(FRAGMENT, kind=FRAGMENT_KIND, save_as=".ash.yaml"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="a-fragment-under-a-name-discovery-reads",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block(f"ash scan --config {TEAM} --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="named-by-config",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block(f"ash scan --config={TEAM} --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="named-by-config-inline",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block(f"ash scan -c {TEAM} --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="named-by-the-short-spelling-of-config",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block(f"ASH_CONFIG={TEAM} ash scan --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="named-by-ash-config-on-the-command",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block(f"export ASH_CONFIG={TEAM}\nash scan --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="named-by-ash-config-exported-in-the-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block("ash scan --config configs/other.yaml --offline"),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="config-names-another-file",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block('ASH_CONFIG="$TEAM_CONFIG" ash scan --offline'),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-from-a-variable",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=TEAM),
+                    _scan_block(f"export ASH_CONFIG={TEAM}"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-exported-by-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as="sub/.ash.yaml"),
+                    _scan_block("ash --source-dir sub --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="in-the-directory-source-dir-names",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=".ash.yaml"),
+                    _scan_block("ash --source-dir . --offline"),
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="source-dir-names-the-working-directory",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as=".ash.yaml"),
+                    _scan_block("ash --source-dir sub --offline"),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="in-the-working-directory-while-source-dir-names-another",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as="sub/.ash.yaml"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="in-a-subdirectory-and-no-source-dir",
+        ),
+    ],
+)
+def test_a_saved_config_counts_only_where_the_loading_block_can_have_loaded_it(
+    tmp_path, variant, covered, uncovered
+):
+    """A block that reached load_config_file loaded one configuration, not every one
+    the page saved. A saved one counts when the block can have loaded it: the latest
+    save of its name before the block, under a name discovery reads in the directory
+    the block scans (--source-dir, else the working directory), or the name the
+    block's own command line gives --config, or a literal ASH_CONFIG=<name> the block
+    itself assigns. A fragment never counts: loaded on its own, its keys sit at the
+    root, not under its at= prefix. Anything that cannot be shown loaded does not
+    count."""
+    run = _loading_run(tmp_path, **variant)
+
+    result = _covered(run, _config_features())
+
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
+
+
 @pytest.mark.parametrize(
     ("command_line", "anchor", "covered", "uncovered"),
     [
@@ -2578,16 +3654,169 @@ def test_a_config_key_is_not_covered_unless_a_passing_block_loaded_a_saved_ash_c
             {"config:global_settings.severity_threshold"},
             id="the-overrides-code-did-not-run",
         ),
+        pytest.param(
+            _overrides(
+                'global_settings.ignore_paths+=[{"path": "app.py", '
+                '"reason": "generated", "expires": "2020-01-01"}]'
+            ),
+            "apply_config_overrides",
+            {
+                "config:global_settings",
+                "config:global_settings.ignore_paths",
+                "config:global_settings.ignore_paths[].path",
+                "config:global_settings.ignore_paths[].reason",
+                "config:global_settings.ignore_paths[].expires",
+            },
+            {"config:global_settings.suppressions"},
+            id="the-keys-of-mappings-appended-to-a-list",
+        ),
+        pytest.param(
+            _overrides(
+                'global_settings.ignore_paths+={"path": "build/", "reason": "generated"}'
+            ),
+            "apply_config_overrides",
+            {
+                "config:global_settings.ignore_paths[].path",
+                "config:global_settings.ignore_paths[].reason",
+            },
+            {"config:global_settings.ignore_paths[].expires"},
+            id="the-keys-of-one-mapping-appended-to-a-list",
+        ),
+        pytest.param(
+            _overrides(
+                'global_settings.suppressions=[{"rule_id": "B101", '
+                '"path": "tests/**", "reason": "asserts in tests"}]'
+            ),
+            "apply_config_overrides",
+            {
+                "config:global_settings.suppressions",
+                "config:global_settings.suppressions[].rule_id",
+                "config:global_settings.suppressions[].path",
+                "config:global_settings.suppressions[].reason",
+            },
+            {"config:global_settings.suppressions[].expires"},
+            id="the-keys-of-mappings-that-replace-a-list",
+        ),
+        pytest.param(
+            _overrides('global_settings={"severity_threshold": "HIGH"}'),
+            "apply_config_overrides",
+            {"config:global_settings", "config:global_settings.severity_threshold"},
+            {"config:global_settings.ignore_paths"},
+            id="the-keys-of-a-mapping-set-on-a-section",
+        ),
+        pytest.param(
+            _overrides(
+                'global_settings.suppressions+=[{"path": "app.py", "ruleId": "B101"}]'
+            ),
+            "apply_config_overrides",
+            {
+                "config:global_settings.suppressions",
+                "config:global_settings.suppressions[].path",
+            },
+            {"config:global_settings.suppressions[].rule_id"},
+            id="a-key-inside-the-value-that-names-no-row-sets-nothing",
+        ),
+        pytest.param(
+            _overrides("global_settings={severity_threshold: HIGH}"),
+            "apply_config_overrides",
+            {"config:global_settings"},
+            {"config:global_settings.severity_threshold"},
+            id="a-value-that-does-not-parse-sets-only-its-key",
+        ),
+        pytest.param(
+            _overrides(
+                'global_settings.ignore_paths+=[{"path": "app.py", "reason": "x"}]'
+            ),
+            "load_config_file",
+            set(),
+            {
+                "config:global_settings.ignore_paths",
+                "config:global_settings.ignore_paths[].path",
+            },
+            id="keys-inside-a-value-the-overrides-code-never-read",
+        ),
     ],
 )
 def test_a_config_override_covers_its_key_when_the_overrides_code_ran(
     tmp_path, command_line, anchor, covered, uncovered
 ):
+    """An override's value sets keys too: it is parsed the way apply_config_overrides
+    parses it (a JSON list or object, a bracketed list), and each key inside it is a
+    row under the override's key, under its ``[]`` when the value is a list or the
+    override appends to a list. A key that names no row sets nothing, and a value
+    that does not parse sets only the key the override names."""
     run = Run(tmp_path)
     line = _one_command(run, command_line)
     run.record("page.md", _block("page.md", line))
     region = _anchor(anchor)
     run.hit(f"page.md::{line}", region.path, {min(region.lines)})
+
+    result = _covered(run, _config_features())
+
+    assert covered <= result, sorted(covered - result)
+    assert not uncovered & result, sorted(uncovered & result)
+
+
+SUPPRESS_FINDINGS = "docs/content/how-to/suppress-findings.md"
+
+
+@pytest.mark.parametrize(
+    ("needles", "covered", "uncovered"),
+    [
+        pytest.param(
+            ("ignore_paths+=", '"expires"'),
+            {
+                "config:global_settings.ignore_paths",
+                "config:global_settings.ignore_paths[].path",
+                "config:global_settings.ignore_paths[].reason",
+                "config:global_settings.ignore_paths[].expires",
+            },
+            {"config:global_settings.suppressions"},
+            id="an-ignore-path-that-has-expired",
+        ),
+        pytest.param(
+            ("suppressions+=", '"rule_id"', '"expires"'),
+            {
+                "config:global_settings.suppressions",
+                "config:global_settings.suppressions[].path",
+                "config:global_settings.suppressions[].rule_id",
+                "config:global_settings.suppressions[].reason",
+                "config:global_settings.suppressions[].expires",
+            },
+            {"config:global_settings.ignore_paths"},
+            id="a-suppression-that-has-expired",
+        ),
+        pytest.param(
+            ("suppressions+=", '"ruleId"'),
+            {
+                "config:global_settings.suppressions",
+                "config:global_settings.suppressions[].path",
+                "config:global_settings.suppressions[].reason",
+            },
+            {
+                "config:global_settings.suppressions[].rule_id",
+                "config:global_settings.suppressions[].expires",
+            },
+            id="a-suppression-whose-rule-key-is-misspelled",
+        ),
+    ],
+)
+def test_the_keys_suppress_findings_gives_inside_an_override_value_are_covered(
+    tmp_path, needles, covered, uncovered
+):
+    """The page demonstrates suppressions and ignore paths end to end through
+    --config-overrides, one run per entry, each expected to report the finding the
+    entry no longer covers."""
+    run = Run(tmp_path)
+    block = _the_block(run.real_page(SUPPRESS_FINDINGS), *needles)
+    run.record(
+        SUPPRESS_FINDINGS,
+        _block(SUPPRESS_FINDINGS, block.fence_line, expected=_expected_exit(block)),
+    )
+    region = _anchor("apply_config_overrides")
+    run.hit(
+        f"{SUPPRESS_FINDINGS}::{block.fence_line}", region.path, {min(region.lines)}
+    )
 
     result = _covered(run, _config_features())
 
@@ -2861,6 +4090,33 @@ def test_a_measurement_that_measured_nothing_or_came_from_another_tree_exits_2(
     breaks(run, line)
 
     assert _check(run, [_planted()]) == 2
+
+
+@pytest.mark.parametrize("damage", ["garbage", "truncated"])
+def test_a_coverage_data_file_that_cannot_be_read_exits_2_naming_it(
+    tmp_path, capsys, damage
+):
+    """coverage.py's combine skips a data file it cannot read and says so only to a
+    warning callback, so the lines of a process killed while it saved its data (a
+    truncated file) would drop out without a word, and the features only that
+    process reached would read as uncovered: a flaky gate failure. Every data file
+    must read, or the measurement cannot be trusted."""
+    run, line = _valid_run(tmp_path)
+    damaged = run.data / "data" / ".coverage.damaged.4242"
+    if damage == "garbage":
+        damaged.write_bytes(b"not a coverage data file\n" * 64)
+    else:
+        data = CoverageData(
+            basename=str(run.data / "data" / ".coverage"), suffix="damaged.4242"
+        )
+        data.set_context(f"page.md::{line}")
+        data.add_lines({run.measured(OTHER_PATH): [3]})
+        data.write()
+        data.close()
+        damaged.write_bytes(damaged.read_bytes()[:1024])
+
+    assert _check(run, [_planted()]) == 2
+    assert damaged.name in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("text", MALFORMED_BASELINES)
@@ -3295,3 +4551,77 @@ def test_the_committed_baseline_is_sorted_unique_and_names_only_features():
         "the committed baseline names features the inventory does not have (renamed "
         f"or removed: delete their lines): {unknown}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# The workflow: the check gets the base branch's baseline on a pull request
+# --------------------------------------------------------------------------- #
+
+CHECK_STEP = "Check the docs feature coverage"
+BASE_STEP = "Read the base branch's docs feature coverage baseline"
+
+
+def _docs_examples_step(name: str) -> dict:
+    jobs = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))["jobs"]
+    (step,) = [
+        step for step in jobs["docs-examples"]["steps"] if step.get("name") == name
+    ]
+    return step
+
+
+def _base_baseline_file() -> str:
+    """The file the base step writes the base branch's baseline into."""
+    written = re.findall(r'>\s*"([^"]+)"', _docs_examples_step(BASE_STEP)["run"])
+    assert len(written) == 1, written
+    return written[0]
+
+
+def _check_run() -> str:
+    """The check step's script, its continuation lines joined."""
+    return re.sub(r"\\\n", " ", _docs_examples_step(CHECK_STEP)["run"])
+
+
+def test_the_check_step_reports_after_a_red_examples_step_and_only_a_cancel_skips_it():
+    condition = re.sub(r"\s+", "", str(_docs_examples_step(CHECK_STEP).get("if", "")))
+
+    assert condition == "${{!cancelled()}}", condition
+
+
+def test_on_a_pull_request_and_in_the_merge_queue_the_check_gets_the_base_baseline():
+    """Without the base branch's baseline the check applies neither F3 nor F4, and the
+    baseline would stop being shrink-only. The base step runs on exactly these two
+    events, and the check passes on the file that step writes."""
+    condition = re.sub(r"\s+", "", str(_docs_examples_step(BASE_STEP).get("if", "")))
+    base_file = _base_baseline_file()
+    run = _check_run()
+    (command,) = [
+        line
+        for line in run.splitlines()
+        if "scripts/docs_feature_coverage.py check" in line
+    ]
+    passed = f'--base-baseline "{base_file}"'
+
+    assert condition.startswith("${{!cancelled()&&("), condition
+    assert set(re.findall(r"github\.event_name==['\"](\w+)['\"]", condition)) == {
+        "pull_request",
+        "merge_group",
+    }, condition
+    if passed not in command:
+        arrays = re.findall(r'"\$\{(\w+)\[@\]\}"', command)
+        assert any(f"{array}=({passed})" in run for array in arrays), (
+            f"the check is not given {passed}: {command!r}"
+        )
+
+
+def test_a_base_baseline_that_lists_no_feature_still_reaches_the_check():
+    """The base step writes the file only when the base branch has one, and a base
+    baseline that lists no feature still means every listed line is new (F4) and
+    every covered one is to delete (F3): the check is given the file when it exists,
+    not only when it is not empty."""
+    base_file = _base_baseline_file()
+
+    tests = re.findall(
+        r'\[\s+(-\w)\s+"' + re.escape(base_file) + r'"\s+\]', _check_run()
+    )
+
+    assert tests == ["-f"], tests

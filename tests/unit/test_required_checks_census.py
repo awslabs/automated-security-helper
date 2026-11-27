@@ -273,15 +273,16 @@ def _jobs_skippable_unseen(jobs: dict[str, Any], gated: list[str]) -> list[str]:
 
 
 #: Jobs that carry the docs gates, and the commands that are the gate in each: lint
-#: runs scripts/verify_docs_freshness.py, docs-examples runs the docs examples, and
-#: build-docs runs the strict site build and the versioned-site check. Each must run on
-#: every pull request, be in required-checks' needs, and report its own exit status.
-#: The census above lets a gated job carry `${{ !cancelled() }}` or `${{ always() }}`;
-#: these may carry no job-level `if:` at all, so no edit can turn them off for pull
-#: requests.
+#: runs scripts/verify_docs_freshness.py, docs-examples runs the docs examples and
+#: then checks which product features they reached (scripts/docs_feature_coverage.py),
+#: and build-docs runs the strict site build and the versioned-site check. Each must
+#: run on every pull request, be in required-checks' needs, and report its own exit
+#: status. The census above lets a gated job carry `${{ !cancelled() }}` or
+#: `${{ always() }}`; these may carry no job-level `if:` at all, so no edit can turn
+#: them off for pull requests.
 _UNCONDITIONAL_JOBS: dict[str, tuple[str, ...]] = {
     "lint": ("scripts/verify_docs_freshness.py",),
-    "docs-examples": ("tests/integration/docs",),
+    "docs-examples": ("tests/integration/docs", "scripts/docs_feature_coverage.py"),
     "build-docs": ("mkdocs build", "scripts/docs_versions.py check"),
 }
 #: (job, command) for every docs gate, for the parametrized tests below.
