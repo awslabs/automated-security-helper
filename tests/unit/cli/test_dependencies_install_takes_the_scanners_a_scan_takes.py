@@ -64,15 +64,19 @@ def _install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, named: bool) ->
     monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.chdir(tmp_path)
-    refused_option = {"options": {"no_such_option": True}}
     config = tmp_path / "cfg.yaml"
+    # Each section gets its own mapping: one shared object would be written as a
+    # YAML anchor and alias, which the config parser refuses.
     config.write_text(
         yaml.safe_dump(
             {
                 "ash_plugin_modules": (
                     [TRIVY_MODULE, GUARDDOG_MODULE] if named else [TRIVY_MODULE]
                 ),
-                "scanners": {"trivy-repo": refused_option, "guarddog": refused_option},
+                "scanners": {
+                    "trivy-repo": {"options": {"no_such_option": True}},
+                    "guarddog": {"options": {"no_such_option": True}},
+                },
             },
             sort_keys=False,
         ),
