@@ -40,6 +40,7 @@ import ast
 import importlib.util
 import json
 import re
+import shlex
 import sys
 import tomllib
 from datetime import date, datetime, timedelta, timezone
@@ -63,6 +64,10 @@ NOW = datetime(2026, 11, 27, 12, 0, 0, tzinfo=timezone.utc)
 CUTOFF = "2026-11-20T12:00:00Z"
 ENVIRONMENT = {"PATH": "/usr/bin", "HOME": "/home/ci"}
 CORE = ("requests>=2.0,<3", "rich>=15.0,<16")
+
+#: What a person types to record the matrix, spelled the way the script's usage text and
+#: the workflow's comments spell it.
+RERECORD = "python scripts/check_platform_wheels.py --record"
 
 #: The platforms the script measures, with the name uv gives each. The table is the
 #: specification: a platform is added or renamed here and in the script together.
@@ -885,6 +890,20 @@ class TestComparing:
         strict = script.compare(self.RECORDED, measured, require_complete=True)
         assert [(f.kind, f.blocking) for f in strict] == [("unrecorded-row", True)]
 
+    def test_a_row_that_fails_for_want_of_a_record_is_not_called_uncompared(
+        self, script
+    ):
+        measured = {
+            **self._measured(),
+            "core+symbols": {"linux-x86_64-glibc": {"3.11": "ok", "3.12": "ok"}},
+        }
+        (note,) = script.compare(self.RECORDED, measured)
+        (required,) = script.compare(self.RECORDED, measured, require_complete=True)
+        assert "no recorded row" in note.message and "not compared" in note.message
+        assert required.blocking
+        assert "no recorded row" in required.message
+        assert "not compared" not in required.message
+
     def test_a_recorded_row_that_is_no_longer_measured_fails(self, script):
         recorded = {**self.RECORDED, "core+gone": self.RECORDED["core"]}
         findings = script.compare(recorded, self._measured())
@@ -1156,6 +1175,15 @@ def _argv(project, *modes, registry=REGISTRY_PATH):
     ]
 
 
+def _rerecord_lines(out):
+    """The lines of a check's output that hold the re-record command and nothing else.
+
+    The summary is Markdown, so a line indented four spaces after a blank line is a
+    code block, which a person copies whole.
+    """
+    return [line for line in out.splitlines() if line.strip() == RERECORD]
+
+
 class TestTheCommandLine:
     def test_recording_writes_every_cell_and_says_how_it_was_measured(
         self, script, project, capsys
@@ -1206,6 +1234,19 @@ class TestTheCommandLine:
         assert "recorded ok, measured fail: requests" in out
         assert "--record" in out
 
+    def test_a_cell_that_changed_names_the_re_record_command_to_run(
+        self, script, project, capsys
+    ):
+        script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
+        capsys.readouterr()
+        drifted = FakeUv(script, broken={"requests": MUSL_TRIPLES})
+        assert script.main(_argv(project, "--check"), runner=drifted, now=NOW) == 1
+        out = capsys.readouterr().out
+        assert "a re-record, not a defect" in out
+        assert "network access" in out
+        assert "scripts/platform_wheels.json" in out
+        assert _rerecord_lines(out) == [f"    {RERECORD}"]
+
     def test_a_failed_check_leaves_the_record_alone_and_can_keep_what_it_saw(
         self, script, project
     ):
@@ -1233,6 +1274,22 @@ class TestTheCommandLine:
         out = capsys.readouterr().out
         assert "core+alpha:zz-new" in out and "member-row" in out
 
+    def test_a_member_with_no_recorded_row_names_the_re_record_command_to_run(
+        self, script, register, project, monkeypatch, capsys
+    ):
+        script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
+        capsys.readouterr()
+        blocks = _blocks(register, _pin(register, "zz-new", extra="alpha"))
+        monkeypatch.setattr(script, "load_blocks", lambda path: blocks)
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 1
+        )
+        out = capsys.readouterr().out
+        assert "member-row: core+alpha:zz-new" in out
+        assert "A row with no record yet is added the same way" in out
+        assert "network access" in out
+        assert _rerecord_lines(out) == [f"    {RERECORD}"]
+
     def test_a_row_that_is_not_recorded_is_a_note_and_a_failure_when_required(
         self, script, project, capsys
     ):
@@ -1249,6 +1306,22 @@ class TestTheCommandLine:
         assert "core+symbols" in out and "no recorded row" in out
         strict = [*_argv(project, "--check"), "--require-complete"]
         assert script.main(strict, runner=FakeUv(script), now=NOW) == 1
+
+    def test_a_required_row_with_no_record_names_the_re_record_command_to_run(
+        self, script, project, capsys
+    ):
+        script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
+        record_path = project / "platform_wheels.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        del record["sets"]["core+symbols"]
+        record_path.write_text(script.render_record(record), encoding="utf-8")
+        capsys.readouterr()
+        strict = [*_argv(project, "--check"), "--require-complete"]
+        assert script.main(strict, runner=FakeUv(script), now=NOW) == 1
+        out = capsys.readouterr().out
+        assert "unrecorded-row: core+symbols: no recorded row" in out
+        assert "not compared" not in out
+        assert _rerecord_lines(out) == [f"    {RERECORD}"]
 
     def test_a_record_with_a_row_the_script_no_longer_has_fails(
         self, script, project, capsys
@@ -1275,6 +1348,44 @@ class TestTheCommandLine:
         assert script.main(_argv(project, "--check"), runner=mover, now=NOW) == 1
         out = capsys.readouterr().out
         assert "anyio" in out and "4.16.0" in out and "4.15.0" in out
+
+    def test_a_moved_base_version_is_not_cleared_by_a_re_record_and_does_not_say_so(
+        self, script, register, project, monkeypatch, capsys
+    ):
+        blocks = _blocks(register, _pin(register, "mover", reason="owner_hold"))
+        monkeypatch.setattr(script, "load_blocks", lambda path: blocks)
+        script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
+        capsys.readouterr()
+        mover = FakeUv(script, moves_anyio={"mover"})
+        assert script.main(_argv(project, "--check"), runner=mover, now=NOW) == 1
+        out = capsys.readouterr().out
+        assert "### Differences from the record" not in out  # only the closure failed
+        assert "does not clear a base closure difference" in out
+        assert "--record" not in out
+
+    def test_a_cell_that_changed_and_a_moved_base_version_each_get_their_own_advice(
+        self, script, register, project, monkeypatch, capsys
+    ):
+        blocks = _blocks(register, _pin(register, "mover", reason="owner_hold"))
+        monkeypatch.setattr(script, "load_blocks", lambda path: blocks)
+        script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
+        capsys.readouterr()
+        both = FakeUv(script, broken={"requests": MUSL_TRIPLES}, moves_anyio={"mover"})
+        assert script.main(_argv(project, "--check"), runner=both, now=NOW) == 1
+        out = capsys.readouterr().out
+        assert "### Differences from the record" in out
+        assert "4.15.0" in out
+        assert _rerecord_lines(out) == [f"    {RERECORD}"]
+        assert "does not clear a base closure difference" in out
+
+    def test_a_check_that_passes_offers_no_re_record(self, script, project, capsys):
+        script.main(_argv(project, "--record"), runner=FakeUv(script), now=NOW)
+        capsys.readouterr()
+        assert (
+            script.main(_argv(project, "--check"), runner=FakeUv(script), now=NOW) == 0
+        )
+        out = capsys.readouterr().out
+        assert "--record" not in out and "re-record" not in out
 
     def test_a_check_with_no_candidates_skips_the_closure_and_says_so(
         self, script, register, project, monkeypatch, capsys
@@ -1449,6 +1560,22 @@ def _runs(workflow):
     ]
 
 
+def _script_commands(run):
+    """The words of each command in a ``run`` block that starts the check script.
+
+    A backslash at the end of a line joins it to the next, as the shell reads it, and
+    a comment line is not a command. The words keep the shell's operators, so a flag is
+    found by being a word, not by being a substring.
+    """
+    joined = re.sub(r"\\\n[ \t]*", " ", run)
+    commands = []
+    for line in joined.splitlines():
+        line = line.strip()
+        if not line.startswith("#") and "scripts/check_platform_wheels.py" in line:
+            commands.append(shlex.split(line))
+    return commands
+
+
 class TestTheWorkflow:
     def test_it_runs_on_the_files_it_depends_on_and_on_a_weekly_schedule(self):
         workflow = _workflow()
@@ -1531,6 +1658,25 @@ class TestTheWorkflow:
         runs = " ".join(run for _, run in _runs(_workflow()))
         assert "--check" in runs and "--controls" in runs
 
+    def test_the_check_step_fails_on_a_measured_row_that_has_no_record(self):
+        checks = [
+            words
+            for _, run in _runs(_workflow())
+            for words in _script_commands(run)
+            if "--check" in words
+        ]
+        assert len(checks) == 1, "one command runs the check"
+        assert "--require-complete" in checks[0], (
+            "without it a new extra or alpha candidate is a note, and the record "
+            "falls behind the matrix"
+        )
+
+    def test_the_re_record_command_is_spelled_one_way_everywhere_it_is_named(
+        self, script
+    ):
+        assert RERECORD in script.__doc__
+        assert RERECORD in WORKFLOW_PATH.read_text(encoding="utf-8")
+
     def test_what_the_workflow_runs_exists_in_the_script(self, script):
         help_text = script.build_parser().format_help()
         for _, run in _runs(_workflow()):
@@ -1551,3 +1697,37 @@ class TestTheWorkflow:
         assert re.search(r"\b(always|cancelled|failure)\(", upload["if"])
         assert upload["with"]["if-no-files-found"] == "ignore"
         assert "platform_wheels" in upload["with"]["path"]
+
+
+class TestReadingTheWorkflowsCommands:
+    """The detector the workflow test relies on: what it flags, and what it must not."""
+
+    BLOCK = (
+        'report="${RUNNER_TEMP}/report.md"\n'
+        "python scripts/check_platform_wheels.py --check \\\n"
+        '  --measured-out "${RUNNER_TEMP}/measured.json" \\\n'
+        "  --require-complete \\\n"
+        '  > "$report" || status=$?\n'
+        'cat "$report"\n'
+    )
+
+    def test_a_flag_on_a_continued_line_belongs_to_the_command(self):
+        (words,) = _script_commands(self.BLOCK)
+        assert {"--check", "--measured-out", "--require-complete"} <= set(words)
+
+    def test_a_command_without_the_flag_does_not_carry_it(self):
+        block = self.BLOCK.replace("  --require-complete \\\n", "")
+        (words,) = _script_commands(block)
+        assert "--check" in words and "--require-complete" not in words
+
+    def test_a_flag_that_only_starts_with_the_name_is_not_the_flag(self):
+        block = self.BLOCK.replace("--require-complete", "--require-complete-rows")
+        (words,) = _script_commands(block)
+        assert "--require-complete" not in words
+
+    def test_a_comment_is_not_a_command(self):
+        comment = "# python scripts/check_platform_wheels.py --check\n"
+        assert _script_commands(comment) == []
+
+    def test_a_block_that_never_starts_the_script_has_no_command(self):
+        assert _script_commands('cat "$report" >> "$GITHUB_STEP_SUMMARY"\n') == []
