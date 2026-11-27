@@ -67,8 +67,9 @@ pytestmark = [
 ]
 
 #: The stand-in ``ash``. Probes are answered as RELEASE and not recorded; every other
-#: call is recorded, one JSON argv per line, and exits 0.
-_FAKE_ASH = """import json, sys
+#: call is recorded, one JSON argv per line, and exits 0. A scan call also leaves the
+#: results file that a shard checks for in its ``--output-dir``, as a finished scan does.
+_FAKE_ASH = """import json, os, sys
 argv = sys.argv[1:]
 RELEASE = {release}
 IS_PROBE = (
@@ -93,6 +94,11 @@ if argv[:3] == ["results", "merge", "--help"]:
     sys.exit(2)
 with open({record}, "a", encoding="utf-8") as handle:
     handle.write(json.dumps(argv) + "\\n")
+if argv[:1] == ["scan"] and "--output-dir" in argv:
+    out = argv[argv.index("--output-dir") + 1]
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, "ash_aggregated_results.json"), "w") as handle:
+        handle.write("{{}}")
 """
 
 
