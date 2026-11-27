@@ -3616,6 +3616,478 @@ def test_a_saved_config_counts_only_where_the_loading_block_can_have_loaded_it(
     assert not uncovered & result, sorted(uncovered & result)
 
 
+#: A workflow a page saves for another program: its step changes directory in the
+#: shell of a CI runner, never in a shell of the page's session.
+SAVED_WORKFLOW_THAT_CHANGES_DIRECTORY = _saved_config(
+    "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
+    "      - run: |\n          cd sub\n          make test",
+    kind="kind=github-actions",
+    save_as=".github/workflows/test.yml",
+)
+
+
+def _changes_directory_before_the_scan(moves: str) -> str:
+    """A page that saves SEVERITY under a name discovery reads, runs ``moves`` in a
+    shell block of its own, then scans the working directory."""
+    return _join(
+        _saved_config(SEVERITY, save_as=".ash.yaml"),
+        _scan_block(moves),
+        _scan_block(),
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            _changes_directory_before_the_scan("cd sub"), id="cd-in-an-earlier-block"
+        ),
+        pytest.param(
+            _join(
+                _scan_block("cd sub"),
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block(),
+            ),
+            id="cd-before-the-save",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=TEAM),
+                _scan_block("cd sub"),
+                _scan_block(f"ash scan --config {TEAM} --offline"),
+            ),
+            id="cd-before-a-scan-that-names-the-config",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=TEAM),
+                _scan_block("cd sub"),
+                _scan_block(f"ASH_CONFIG={TEAM} ash scan --offline"),
+            ),
+            id="cd-before-a-scan-whose-ash-config-names-it",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as="sub/.ash.yaml"),
+                _scan_block("cd sub"),
+                _scan_block("ash --source-dir sub --offline"),
+            ),
+            id="cd-before-a-scan-of-the-directory-source-dir-names",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block("cd sub && ash scan --offline"),
+            ),
+            id="cd-in-the-loading-block",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=TEAM),
+                _scan_block(f"cd sub && ash scan --config {TEAM} --offline"),
+            ),
+            id="cd-in-the-loading-block-that-names-the-config",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=TEAM),
+                _scan_block(f"cd sub && ASH_CONFIG={TEAM} ash scan --offline"),
+            ),
+            id="cd-in-the-loading-block-whose-ash-config-names-it",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("mkdir -p sub\ncd sub"),
+            id="cd-on-a-later-line",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("if [ -d sub ]; then\n  cd sub\nfi"),
+            id="cd-on-an-indented-line",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("cd"), id="cd-with-no-argument"
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("mkdir -p sub; cd sub"),
+            id="cd-after-a-semicolon",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("mkdir -p sub && cd sub"),
+            id="cd-after-and",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("mkdir sub 2>/dev/null || cd sub"),
+            id="cd-after-or",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("ls | cd sub"), id="cd-after-a-pipe"
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("(cd sub && ls)"),
+            id="cd-right-after-an-opening-parenthesis",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("( cd sub && ls )"),
+            id="cd-in-a-subshell",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("{ cd sub; ls; }"),
+            id="cd-after-an-opening-brace",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("pushd sub"),
+            id="pushd-in-an-earlier-block",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block("pushd sub\nash scan --offline\npopd"),
+            ),
+            id="pushd-and-popd-around-the-loading-scan",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                f"{FENCE}console\n$ mkdir -p sub\n$ cd sub\n{FENCE}",
+                _scan_block(),
+            ),
+            id="cd-after-the-prompt-of-a-console-block",
+        ),
+    ],
+)
+def test_after_a_shell_block_of_the_session_changes_directory_no_saved_config_counts(
+    tmp_path, text
+):
+    """The runner carries the directory a shell block ends in into the next block of
+    its session (docs_runner.py, ``_carry_state``), while every save stays anchored at
+    the page's project (``_save``). So once a shell block of the session, at or before
+    the block that loaded a configuration, holds cd, pushd or popd in command position
+    (at the start of a line, after its indentation, or after ;, &&, ||, |, ( or {),
+    nothing shows which file the scan read, and no saved configuration counts under any
+    name: one discovery reads, one --config names, or one ASH_CONFIG names. A console
+    block is read as the commands the runner runs from it, its prompts taken off. A cd
+    in a subshell, which moves nothing after it, stops the credit too: the reading is
+    static, and an uncovered feature is the safe side of a doubt."""
+    run = _loading_run(tmp_path, text=text)
+
+    result = _covered(run, _config_features())
+
+    assert not SEVERITY_ROWS & result, sorted(SEVERITY_ROWS & result)
+
+
+def test_a_shell_block_that_changed_directory_stops_the_credit_though_it_failed(
+    tmp_path,
+):
+    """The shell's exit trap writes the directory a block ended in whatever the block's
+    exit, so a failing block that changed directory moved the blocks of the session
+    after it as much as a passing one would."""
+    run = Run(tmp_path)
+    save, moves, scan = run.page(
+        "page.md",
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _scan_block("cd sub && false"),
+            _scan_block(),
+        ),
+    )
+    run.record(
+        "page.md",
+        _block("page.md", save, runs=False, save_as=".ash.yaml"),
+        _block("page.md", moves, ok=False),
+        _block("page.md", scan),
+    )
+    region = _anchor("load_config_file")
+    run.hit(f"page.md::{scan}", region.path, {min(region.lines)})
+
+    result = _covered(run, _config_features())
+
+    assert not SEVERITY_ROWS & result, sorted(SEVERITY_ROWS & result)
+
+
+@pytest.mark.parametrize(
+    ("text", "loading"),
+    [
+        pytest.param(
+            _changes_directory_before_the_scan("echo cd"),
+            -1,
+            id="the-word-as-an-argument",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("ls cd-notes"),
+            -1,
+            id="an-argument-that-starts-with-the-word",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan('echo "cd sub"'),
+            -1,
+            id="the-word-inside-a-string",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block("echo cd && ash scan --offline"),
+            ),
+            -1,
+            id="the-word-as-an-argument-in-the-loading-block",
+        ),
+        pytest.param(
+            _join(
+                _scan_block("cd sub"),
+                _scan_block("ls", fresh=True),
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block(),
+            ),
+            -1,
+            id="cd-in-an-earlier-session",
+        ),
+        pytest.param(
+            _join(
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block(),
+                _scan_block("cd sub"),
+            ),
+            0,
+            id="cd-after-the-loading-block",
+        ),
+        pytest.param(
+            _join(
+                SAVED_WORKFLOW_THAT_CHANGES_DIRECTORY,
+                _saved_config(SEVERITY, save_as=".ash.yaml"),
+                _scan_block(),
+            ),
+            -1,
+            id="cd-in-a-saved-file-of-another-program",
+        ),
+    ],
+)
+def test_a_saved_config_still_counts_where_no_shell_of_its_session_changed_directory_before_the_load(
+    tmp_path, text, loading
+):
+    """The word alone stops nothing. As an argument or inside a string it is not a
+    command; a cd in an earlier session moved nothing in this one, which starts in a
+    fresh copy of its fixture; a cd after the loading block moved nothing that block
+    ran; and a file saved for another program is not a shell block of the session."""
+    run = _loading_run(tmp_path, text=text, loading=loading)
+
+    result = _covered(run, _config_features())
+
+    assert SEVERITY_ROWS <= result, sorted(SEVERITY_ROWS - result)
+
+
+def _discovery_order(tmp_path: Path, names) -> list[str]:
+    """``names`` in the order config discovery ranks them, taken from discovery itself:
+    each is written into a new directory and discover_config_source runs on it, so the
+    order is the product's (config/config_sources.py), never restated here. The first
+    is the one discovery picks when all of them are there. A pyproject.toml is written
+    with a [tool.ash] table, without which it is no config source."""
+    from automated_security_helper.config.config_sources import discover_config_source
+    from automated_security_helper.core import constants
+
+    directory = tmp_path / "discovery" / uuid.uuid4().hex
+    for name in names:
+        target = directory / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = "[tool.ash]\n" if name == constants.ASH_PYPROJECT_FILE_NAME else ""
+        target.write_text(text, encoding="utf-8")
+    found = discover_config_source(directory)
+    assert found.selected is not None, names
+    return [
+        source.path.relative_to(directory).as_posix()
+        for source in (found.selected, *found.ignored)
+    ]
+
+
+#: Configurations that each set one top-level row of their own, so the rows covered
+#: show which saved configuration counted.
+SETTING = {
+    "config:project_name": {"project_name": "demo"},
+    "config:fail_on_findings": {"fail_on_findings": False},
+    "config:honor_ignore_files": {"honor_ignore_files": False},
+}
+
+
+def _saved_under(name: str, document: dict, *, kind: str = "") -> str:
+    """A block that saves ``document``, a mapping of top-level scalars, as ``name``: in
+    that file's language, as the [tool.ash] table of a pyproject.toml, and of the kind
+    that file is unless ``kind`` names another."""
+    from automated_security_helper.core import constants
+
+    suffix = name.rpartition(".")[2]
+    lang = {"yml": "yaml"}.get(suffix, suffix)
+    pyproject = name.rpartition("/")[2] == constants.ASH_PYPROJECT_FILE_NAME
+    if lang == "json":
+        text = json.dumps(document)
+    else:
+        separator = " = " if lang == "toml" else ": "
+        lines = [
+            f"{key}{separator}{json.dumps(value)}" for key, value in document.items()
+        ]
+        text = "\n".join(["[tool.ash]", *lines] if pyproject else lines)
+    kind = kind or ("kind=pyproject" if pyproject else "kind=ash")
+    return _saved_config(text, kind=kind, save_as=name, lang=lang)
+
+
+def _rival_run(
+    tmp_path: Path, names: dict[str, str], steps, *, scan: str = "ash scan --offline"
+) -> Run:
+    """A page that saves, in order, the SETTING of each (role, row) step under the
+    name ``names`` gives its role, and runs ``scan`` at the step "scan": the block
+    that reached load_config_file."""
+    blocks = [
+        _scan_block(scan)
+        if step == "scan"
+        else _saved_under(names[step[0]], SETTING[step[1]])
+        for step in steps
+    ]
+    return _loading_run(tmp_path, text=_join(*blocks))
+
+
+#: Where the page saves the configuration discovery picks: before the other one, or
+#: after it.
+PICKED_FIRST = [
+    pytest.param(True, id="the-one-it-picks-saved-first"),
+    pytest.param(False, id="the-one-it-picks-saved-last"),
+]
+
+
+def _two_saves_and_the_scan(picked_first: bool) -> list:
+    saves = [
+        ("picked", "config:project_name"),
+        ("outranked", "config:fail_on_findings"),
+    ]
+    return [*(saves if picked_first else saves[::-1]), "scan"]
+
+
+@pytest.mark.parametrize("picked_first", PICKED_FIRST)
+@pytest.mark.parametrize(
+    "rank",
+    [
+        pytest.param(rank, id=f"discovery-ranks-{rank}-and-{rank + 1}")
+        for rank in range(len(_discovered_names()))
+    ],
+)
+def test_of_two_saved_configs_discovery_could_read_only_the_one_it_picks_counts(
+    tmp_path, rank, picked_first
+):
+    """Discovery picks exactly one config source and never merges two
+    (config/config_sources.py), so of two configurations saved under names it reads,
+    the scan loaded one: the first in discovery's order, wherever the page saved it.
+    Each pair is two names next to each other in that order, read from discovery over
+    every name it reads, so every step of the order is held."""
+    from automated_security_helper.core import constants
+
+    every = [*_discovered_names(), constants.ASH_PYPROJECT_FILE_NAME]
+    order = _discovery_order(tmp_path, every)
+    assert sorted(order) == sorted(every), "discovery reads every one of these names"
+    picked, outranked = _discovery_order(tmp_path, order[rank : rank + 2])
+    run = _rival_run(
+        tmp_path,
+        {"picked": picked, "outranked": outranked},
+        _two_saves_and_the_scan(picked_first),
+    )
+
+    result = _covered(run, _config_features())
+
+    assert "config:project_name" in result, (picked, outranked)
+    assert "config:fail_on_findings" not in result, (picked, outranked)
+
+
+@pytest.mark.parametrize(
+    ("steps", "covered", "uncovered"),
+    [
+        pytest.param(
+            [
+                ("picked", "config:project_name"),
+                ("outranked", "config:fail_on_findings"),
+                ("picked", "config:honor_ignore_files"),
+                "scan",
+            ],
+            {"config:honor_ignore_files"},
+            {"config:project_name", "config:fail_on_findings"},
+            id="saved-again-after-the-one-it-outranks",
+        ),
+        pytest.param(
+            [
+                ("picked", "config:project_name"),
+                ("picked", "config:honor_ignore_files"),
+                ("outranked", "config:fail_on_findings"),
+                "scan",
+            ],
+            {"config:honor_ignore_files"},
+            {"config:project_name", "config:fail_on_findings"},
+            id="saved-again-before-the-one-it-outranks",
+        ),
+        pytest.param(
+            [
+                ("picked", "config:project_name"),
+                ("outranked", "config:fail_on_findings"),
+                "scan",
+                ("picked", "config:honor_ignore_files"),
+            ],
+            {"config:project_name"},
+            {"config:fail_on_findings", "config:honor_ignore_files"},
+            id="saved-again-only-after-the-block-that-loaded-it",
+        ),
+    ],
+)
+def test_the_config_discovery_picks_counts_by_its_latest_save_before_the_load(
+    tmp_path, steps, covered, uncovered
+):
+    """A later save of the name discovery picks replaces the file the scan reads, so
+    the replacing save's rows count and the replaced one's do not, and the name it
+    outranks never counts. A save after the loading block replaced nothing that block
+    read. The two names are the two that discovery ranks first, read from discovery."""
+    picked, outranked = _discovery_order(tmp_path, _discovered_names())[:2]
+    run = _rival_run(tmp_path, {"picked": picked, "outranked": outranked}, steps)
+
+    result = _covered(run, _config_features())
+
+    assert covered <= result, (sorted(covered - result), picked, outranked)
+    assert not uncovered & result, (sorted(uncovered & result), picked, outranked)
+
+
+def test_a_file_discovery_picks_hides_the_ones_it_outranks_even_when_it_never_counts(
+    tmp_path,
+):
+    """Discovery reads files, not the kind a page gives a block: a fragment saved under
+    the name it picks is the file the scan loads, so a full configuration saved under
+    a name it ranks lower was never loaded. Neither counts, since a fragment never does
+    (loaded on its own, its keys sit at the root, not under its at= prefix)."""
+    picked, outranked = _discovery_order(tmp_path, _discovered_names())[:2]
+    run = _loading_run(
+        tmp_path,
+        text=_join(
+            _saved_under(picked, {"severity_threshold": "HIGH"}, kind=FRAGMENT_KIND),
+            _saved_under(outranked, SETTING["config:project_name"]),
+            _scan_block(),
+        ),
+    )
+
+    result = _covered(run, _config_features())
+
+    shown = (SEVERITY_ROWS | {"config:project_name"}) & result
+    assert not shown, (sorted(shown), picked, outranked)
+
+
+@pytest.mark.parametrize("picked_first", PICKED_FIRST)
+def test_of_two_saved_configs_in_the_directory_source_dir_names_only_the_one_discovery_picks_counts(
+    tmp_path, picked_first
+):
+    """Discovery ranks the names in the directory it searches, the one --source-dir
+    names, as it ranks them in the working directory."""
+    picked, outranked = _discovery_order(tmp_path, _discovered_names())[:2]
+    run = _rival_run(
+        tmp_path,
+        {"picked": f"sub/{picked}", "outranked": f"sub/{outranked}"},
+        _two_saves_and_the_scan(picked_first),
+        scan="ash --source-dir sub --offline",
+    )
+
+    result = _covered(run, _config_features())
+
+    assert "config:project_name" in result, (picked, outranked)
+    assert "config:fail_on_findings" not in result, (picked, outranked)
+
+
 @pytest.mark.parametrize(
     ("command_line", "anchor", "covered", "uncovered"),
     [
