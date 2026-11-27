@@ -26,6 +26,9 @@ POLYFILL_ID = "scanner.guarddog.sandbox-replaced"
 #: The path kinds that change this machine; every other kind moves the scan elsewhere.
 _THIS_MACHINE = ("same-os", "container", "wsl")
 
+#: What both hosts of ``cpu_notice_of_two_hosts`` read, and nothing else.
+AGREED_CPU_FACTS = {"arch": "amd64", "polars_runtime": "runtime-32"}
+
 
 def upgrade_path(
     path_id: str, kind: str, summary: str, **changes: Any
@@ -91,6 +94,33 @@ def cpu_notice(**changes: Any) -> SupportNotice:
     }
     fields.update(changes)
     return SupportNotice(**fields)
+
+
+def cpu_notice_of_two_hosts() -> tuple[SupportNotice, SupportNotice]:
+    """The processor row as two hosts met it: one row, a different read on each.
+
+    Both processors lack what polars is built for, but the second is further below it.
+    Each notice records the flags its own host lacked and the level its own processor
+    is at, so ``found`` differs and so does one fact. The architecture and the runtime
+    are what both read (``AGREED_CPU_FACTS``).
+    """
+    near = cpu_notice(
+        found="avx2, bmi2 and fma are missing (polars-runtime-32 1.44.2).",
+        facts={
+            "arch": "amd64",
+            "cpu_level": "compat-only",
+            "polars_runtime": "runtime-32",
+        },
+    )
+    far = cpu_notice(
+        found="avx, avx2, bmi2, fma and sse4.2 are missing (polars-runtime-32 1.44.2).",
+        facts={
+            "arch": "amd64",
+            "cpu_level": "below-compat",
+            "polars_runtime": "runtime-32",
+        },
+    )
+    return near, far
 
 
 def sandbox_notice(**changes: Any) -> SupportNotice:

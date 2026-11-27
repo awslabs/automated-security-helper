@@ -11,12 +11,17 @@ projects that reached the decision. A root that kept the first project's notices
 would drop the others'.
 
 The writer takes each project's ``metadata.support_notices`` in workspace-file order
-and records them united by id, the first record of an id kept. It writes no key when no
-project recorded one, so the results of a workspace on a fully supported
-configuration are written as they were before the field existed.
+and records them united by id. A notice that two projects met is recorded once, and
+what it holds of what the projects read is what every one of them read: the facts they
+recorded alike, and the ``found`` text when they recorded the same. Two projects that
+meet one row can read different things of it (the processor flags that are missing, the
+level the processor is at), and the first project's record alone would publish its read
+as the workspace's. The writer writes no key when no project recorded one, so the
+results of a workspace on a fully supported configuration are written as they were
+before the field existed.
 
-The controls are the same file with no notice in any project, and a project that
-holds none beside one that does.
+The controls are the same file with no notice in any project, a project that holds
+none beside one that does, and projects that met a notice alike.
 """
 
 import json
@@ -28,10 +33,12 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.workspace.aggregation import WorkspaceAggregator
 from automated_security_helper.workspace.plan import WorkspacePlan
 from tests.unit.models._support_notice_helpers import (
+    AGREED_CPU_FACTS,
     CPU_ID,
     POLYFILL_ID,
     SANDBOX_ID,
     cpu_notice,
+    cpu_notice_of_two_hosts,
     polyfill_notice,
     sandbox_notice,
 )
@@ -80,18 +87,30 @@ class TestEveryProjectsNoticesAreRecorded:
         ]
         assert model.metadata.support_notices == [cpu_notice()]
 
-    def test_a_notice_two_projects_share_is_recorded_once_as_the_first_has_it(
+    def test_a_notice_two_projects_met_differently_is_recorded_once_with_what_both_read(
         self, tmp_path
     ):
-        first = cpu_notice(found="avx2 is missing (polars-runtime-32 1.44.2).")
-        second = cpu_notice(
-            found="avx2 and fma are missing (polars-runtime-32 1.44.2)."
-        )
+        near, far = cpu_notice_of_two_hosts()
 
-        document, _ = _written(tmp_path, [[first], [second, sandbox_notice()]])
+        document, model = _written(tmp_path, [[near], [far, sandbox_notice()]])
 
         assert _ids(document) == [CPU_ID, SANDBOX_ID]
-        assert document["metadata"]["support_notices"][0]["found"] == first.found
+        # What the file says of the row is what both projects read and no more: the
+        # flags and the level the two recorded differently are not in it.
+        record = document["metadata"]["support_notices"][0]
+        assert record.get("found") is None, record
+        assert record["facts"] == AGREED_CPU_FACTS, record
+        assert model.metadata.support_notices[0].found is None
+        assert model.metadata.support_notices[0].facts == AGREED_CPU_FACTS
+
+    def test_control_projects_that_met_a_notice_alike_record_it_whole(self, tmp_path):
+        near, _ = cpu_notice_of_two_hosts()
+
+        document, model = _written(tmp_path, [[near], [near.model_copy(deep=True)]])
+
+        written = document["metadata"]["support_notices"]
+        assert written == [near.model_dump(mode="json")]
+        assert model.metadata.support_notices == [near]
 
     def test_the_order_is_the_workspace_file_order_of_the_projects(self, tmp_path):
         document, _ = _written(

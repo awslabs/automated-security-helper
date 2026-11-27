@@ -9,14 +9,20 @@ its own run met: a processor below polars' default runtime on one runner, a Land
 kernel below ABI 6 on another. A merge that kept shard 0's notices alone would say one
 host's story about a scan that ran on several.
 
-The merge records every shard's notices united by id, the first record of an id kept,
-in shard order. The key is absent when no shard recorded a notice, so the merge of
-shards that ran on a supported configuration is written as it was before the field
-existed.
+The merge records every shard's notices united by id, in shard order. A notice that
+two shards met is recorded once, and what it holds of what the shards read is what
+every one of them read: the facts they recorded alike, and the ``found`` text when
+they recorded the same. Two hosts that meet one row do not read the same of it (the
+processor flags that are missing, the level the processor is at), and the first
+shard's record alone would publish one host's read as the scan's. The key is absent
+when no shard recorded a notice, so the merge of shards that ran on a supported
+configuration is written as it was before the field existed.
 
 The controls are the same merge with no notice in any shard, and the merge of shards
 that all met the same notice.
 """
+
+import json
 
 import pytest
 
@@ -24,10 +30,12 @@ from automated_security_helper.cli.merge import merge_shard_results
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.unit.cli.merge_shard_support import as_loaded, build_shards
 from tests.unit.models._support_notice_helpers import (
+    AGREED_CPU_FACTS,
     CPU_ID,
     POLYFILL_ID,
     SANDBOX_ID,
     cpu_notice,
+    cpu_notice_of_two_hosts,
     polyfill_notice,
     sandbox_notice,
 )
@@ -59,19 +67,35 @@ class TestEveryShardsNoticesAreRecorded:
 
         assert _ids(merged) == [CPU_ID, SANDBOX_ID, POLYFILL_ID]
 
-    def test_a_notice_two_shards_share_is_recorded_once_as_the_first_has_it(self):
+    def test_a_notice_two_shards_met_differently_is_recorded_once_with_what_both_read(
+        self, tmp_path
+    ):
+        near, far = cpu_notice_of_two_hosts()
         shards = build_shards(3)
-        first = cpu_notice(found="avx2 is missing (polars-runtime-32 1.44.2).")
-        second = cpu_notice(
-            found="avx2 and fma are missing (polars-runtime-32 1.44.2)."
-        )
-        shards[1].metadata.support_notices = [first]
-        shards[2].metadata.support_notices = [second, sandbox_notice()]
+        shards[1].metadata.support_notices = [near]
+        shards[2].metadata.support_notices = [far, sandbox_notice()]
+
+        merged = merge_shard_results(as_loaded(shards))
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(merged.model_dump_json(indent=2), encoding="utf-8")
+        written = json.loads(path.read_text("utf-8"))["metadata"]["support_notices"]
+
+        assert _ids(merged) == [CPU_ID, SANDBOX_ID]
+        assert [notice["id"] for notice in written] == [CPU_ID, SANDBOX_ID]
+        # What the file says of the row is what both shards read and no more: the flags
+        # and the level the two hosts recorded differently are not in it.
+        assert written[0].get("found") is None, written[0]
+        assert written[0]["facts"] == AGREED_CPU_FACTS, written[0]
+
+    def test_control_shards_that_met_a_notice_alike_record_it_whole(self):
+        near, _ = cpu_notice_of_two_hosts()
+        shards = build_shards(3)
+        shards[1].metadata.support_notices = [near]
+        shards[2].metadata.support_notices = [near.model_copy(deep=True)]
 
         merged = merge_shard_results(as_loaded(shards))
 
-        assert _ids(merged) == [CPU_ID, SANDBOX_ID]
-        assert merged.metadata.support_notices[0].found == first.found
+        assert merged.metadata.support_notices == [near]
 
     def test_control_shards_that_all_met_the_same_notice_give_that_notice(self):
         shards = build_shards(3)
@@ -115,6 +139,17 @@ class TestTheMergeSharesNothingWithItsShards:
 
         assert shards[0].metadata.support_notices is None
         assert shards[1].metadata.support_notices == [polyfill_notice()]
+
+    def test_a_notice_met_differently_leaves_each_shards_record_as_it_was(self):
+        near, far = cpu_notice_of_two_hosts()
+        shards = build_shards(2)
+        shards[0].metadata.support_notices = [near]
+        shards[1].metadata.support_notices = [far]
+
+        merge_shard_results(as_loaded(shards))
+
+        assert shards[0].metadata.support_notices == [cpu_notice_of_two_hosts()[0]]
+        assert shards[1].metadata.support_notices == [cpu_notice_of_two_hosts()[1]]
 
 
 class TestShardsOnASupportedConfigurationWriteNoKey:
