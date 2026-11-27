@@ -38,7 +38,7 @@ class TestSuppressionMatcher:
         # None case
         assert _rule_id_matches(None, "RULE-123") is False
 
-    def testfile_path_matches(self):
+    def test_file_path_matches(self):
         """Test file path matching."""
         # Exact match
         assert file_path_matches("src/example.py", "src/example.py") is True
