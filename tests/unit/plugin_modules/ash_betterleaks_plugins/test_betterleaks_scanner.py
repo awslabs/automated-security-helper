@@ -975,44 +975,53 @@ def _with_byte_order_mark(tree, tmp_path, monkeypatch, how: str, text: str):
     return _with_config_text(tree, tmp_path, monkeypatch, how, _BYTE_ORDER_MARK + text)
 
 
-@pytest.mark.parametrize("how", _EXTEND_SOURCES)
-def test_a_relative_extend_path_behind_a_byte_order_mark_is_refused(
-    tree, tmp_path, monkeypatch, how
-):
-    """A config saved with a byte order mark is still read, so its relative extend
-    path is refused for what it is, not as text ASH could not parse."""
-    scanner = _with_byte_order_mark(tree, tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
-    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
-        scanner._build_arguments(tree, tmp_path / "o.sarif")
+#: The words of the refusal of a config that starts with the mark.
+_MARK_REFUSAL = re.escape(
+    "starts with a UTF-8 byte order mark, which Betterleaks cannot read"
+)
 
 
+def _marked(tmp_path, how: str) -> str:
+    """How the refusal names the config of ``how`` that starts with the mark: the
+    file (for ``chain``, the extended one), or the variable that holds the text."""
+    if how.endswith("_TOML"):
+        return f"the config text in {how}"
+    return repr(
+        str(tmp_path / "op" / ("mid.toml" if how == "chain" else "betterleaks.toml"))
+    )
+
+
+@pytest.mark.parametrize("extend", ["relative", "absolute"])
 @pytest.mark.parametrize("how", _EXTEND_SOURCES)
-def test_an_absolute_extend_path_behind_a_byte_order_mark_builds_an_argv(
-    tree, tmp_path, monkeypatch, how
+def test_a_config_behind_a_byte_order_mark_is_refused_for_the_mark(
+    tree, tmp_path, monkeypatch, how, extend
 ):
-    """The control: with an absolute extend path the argv is the one built without
-    the mark."""
+    """Betterleaks cannot read a config that starts with a UTF-8 byte order mark: its
+    TOML reader stops at the first byte ("invalid character at start of key") and it
+    exits 1. So ASH refuses the config before Betterleaks runs, naming it, whatever
+    its extend path says. The same configs without the mark are the controls above:
+    the relative one is refused for its path and the absolute one builds an argv."""
     common = tmp_path / "op" / "common.toml"
-    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
-    scanner = _with_byte_order_mark(tree, tmp_path, monkeypatch, how, absolute)
+    text = (
+        _RELATIVE_EXTEND
+        if extend == "relative"
+        else f"[extend]\npath = '{common.as_posix()}'\n"
+    )
+    scanner = _with_byte_order_mark(tree, tmp_path, monkeypatch, how, text)
     common.write_text(_TREE_COMMON)
-    args = scanner._build_arguments(tree, tmp_path / "o.sarif")
-    configs = [a for a in args if a.startswith("--config")]
-    if how in ("config_file", "chain"):
-        operator = (tmp_path / "op" / "betterleaks.toml").resolve()
-        assert configs == [f"--config={operator.as_posix()}"]
-    else:
-        assert configs == []
+    with pytest.raises(ScannerError, match=_MARK_REFUSAL) as refused:
+        scanner._build_arguments(tree, tmp_path / "o.sarif")
+    assert _marked(tmp_path, how) in str(refused.value)
 
 
 @pytest.mark.parametrize("how", _EXTEND_SOURCES)
 def test_a_byte_order_mark_inside_an_extend_path_is_part_of_the_path(
     tree, tmp_path, monkeypatch, how
 ):
-    """Only a mark at the start of the text is skipped. One at the start of the path
-    value is part of the path, which then does not start at a root, so Betterleaks
-    would open it from the scanned tree. It is refused as written, although the
-    path with the mark removed names a file outside the tree."""
+    """A mark at the start of the path value, not of the text, is part of the path,
+    which then does not start at a root, so Betterleaks would open it from the
+    scanned tree. It is refused as written, although the path with the mark removed
+    names a file outside the tree."""
     common = tmp_path / "op" / "common.toml"
     value = _BYTE_ORDER_MARK + common.as_posix()
     scanner = _with_config_text(
