@@ -1371,6 +1371,8 @@ ELF_SHAPES = [
     ("an-entry-size-below-the-minimum", patched(_WHOLE_ELF, 0x36, 8, 2), "unknown"),
     ("a-table-beyond-the-head", patched(_WHOLE_ELF, 0x20, 1 << 40, 8), "unknown"),
     ("a-loader-name-with-no-end", _WHOLE_ELF[:-1] + b"x", "unknown"),
+    # The loader's segment has to lie inside the head, though its name ends inside it.
+    ("a-segment-longer-than-the-head", patched(_WHOLE_ELF, 152, 1 << 20, 8), "unknown"),
 ]
 
 
@@ -2531,6 +2533,16 @@ def test_a_prefix_spelled_through_a_link_is_matched_after_resolving_it(
 def test_a_prefix_beside_the_link_but_not_under_this_home_is_no_tool_of_it(tmp_path):
     realpath = link_resolver("/home", "/data/home")
     prefix = "/home/other/.local/share/uv/tools/automated-security-helper"
+    assert channel(tmp_path, prefix=prefix, realpath=realpath) != "uv-tool"
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_a_sibling_directory_that_starts_with_the_tools_directorys_name_is_no_tool(
+    tmp_path, linked
+):
+    # tools-old begins with the text of the tools directory without being under it.
+    realpath = link_resolver("/home", "/data/home") if linked else None
+    prefix = "/home/u/.local/share/uv/tools-old/automated-security-helper"
     assert channel(tmp_path, prefix=prefix, realpath=realpath) != "uv-tool"
 
 
