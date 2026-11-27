@@ -53,6 +53,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.utils.get_scan_set import file_links_leaving_tree
 from automated_security_helper.utils.link_exclusions import (
     ignored_entries,
@@ -322,6 +323,7 @@ def rewrite_checkov_paths(
     source_dir: str,
     scanned_dirs: Sequence[str] = (),
     scanned_files: Optional[Callable[[], Iterable[str]]] = None,
+    record: Optional[IngestRecord] = None,
 ) -> None:
     """Make the paths in a checkov SARIF or JSON report read as if run in source_dir.
 
@@ -342,6 +344,16 @@ def rewrite_checkov_paths(
     spells exactly that way, and the only one, is used instead. When both
     ``a\\b.tf`` and ``a/b.tf`` exist, checkov's path names an existing file and
     is kept: its output cannot tell the two apart.
+
+    The SARIF is read before it is validated, so a part of it that is not the
+    object the walk expects (a run, a result, a location that is a number or a
+    string) is passed over and left for the validation to refuse in its own words,
+    where it used to raise ``AttributeError`` out of this function and lose the
+    whole report with an error that named neither the part nor the format. A JSON
+    report whose ``results`` is not an object has no records to rewrite: it is
+    left as checkov wrote it, and noted on *record* when one is given (``results``
+    of the *n*-th report). The SARIF, which the JSON report only adds resources
+    to, is not affected.
     """
     cwd = os.path.realpath(source_dir)
     given = os.path.abspath(source_dir)
@@ -410,8 +422,15 @@ def rewrite_checkov_paths(
         )
 
     def _locations(items: Any) -> None:
-        for location in items or []:
-            artifact = (location.get("physicalLocation") or {}).get("artifactLocation")
+        # Only what is an object is read: anything else is left as it is, for the
+        # SARIF validation after this to refuse or repair by its own rules.
+        for location in items if isinstance(items, list) else []:
+            physical = (
+                location.get("physicalLocation") if isinstance(location, dict) else None
+            )
+            artifact = (
+                physical.get("artifactLocation") if isinstance(physical, dict) else None
+            )
             if isinstance(artifact, dict) and isinstance(artifact.get("uri"), str):
                 # A URL (the guideline attach_checkov_guidelines writes as a
                 # related location) is not a path to rebuild.
@@ -420,31 +439,52 @@ def rewrite_checkov_paths(
                 artifact["uri"] = _uri(artifact["uri"])
 
     if isinstance(document, dict) and "runs" in document:
-        for run in document.get("runs") or []:
-            for result in run.get("results") or []:
-                _locations(result.get("locations"))
-                _locations(result.get("relatedLocations"))
-            for artifact in run.get("artifacts") or []:
-                location = artifact.get("location")
+        runs = document.get("runs")
+        for run in runs if isinstance(runs, list) else []:
+            if not isinstance(run, dict):
+                continue
+            run_results = run.get("results")
+            for result in run_results if isinstance(run_results, list) else []:
+                if isinstance(result, dict):
+                    _locations(result.get("locations"))
+                    _locations(result.get("relatedLocations"))
+            artifacts = run.get("artifacts")
+            for artifact in artifacts if isinstance(artifacts, list) else []:
+                location = (
+                    artifact.get("location") if isinstance(artifact, dict) else None
+                )
                 if isinstance(location, dict) and isinstance(location.get("uri"), str):
                     location["uri"] = _uri(location["uri"])
         return
 
     reports = document if isinstance(document, list) else [document]
-    for report in reports:
+    for number, report in enumerate(reports):
         results = report.get("results") if isinstance(report, dict) else None
+        if results and not isinstance(results, dict):
+            # A list or a string where checkov writes the records by kind. There
+            # is nothing to rewrite in it, and the rest of the run, the SARIF
+            # above all, does not depend on it.
+            if record is not None:
+                record.note(
+                    "dropped",
+                    "side_report_unreadable",
+                    ("results",)
+                    if not isinstance(document, list)
+                    else (number, "results"),
+                )
+            continue
         for records in (results or {}).values():
-            for record in records if isinstance(records, list) else []:
-                if isinstance(record, dict) and isinstance(
-                    record.get("file_abs_path"), str
+            for entry in records if isinstance(records, list) else []:
+                if isinstance(entry, dict) and isinstance(
+                    entry.get("file_abs_path"), str
                 ):
                     # The same choice _uri makes for the SARIF report: checkov
                     # wrote the path as the scanned directory was given, so a
                     # symlinked source directory is relative to the given
                     # spelling, and the two reports agree on the file.
-                    written = os.path.abspath(record["file_abs_path"])
+                    written = os.path.abspath(entry["file_abs_path"])
                     base = given if _within(written, given) else cwd
-                    record["repo_file_path"] = _source_relative_path(written, base)
+                    entry["repo_file_path"] = _source_relative_path(written, base)
 
 
 #: The checkov frameworks whose records name the infrastructure resource a check
@@ -2064,6 +2104,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     ran_in=ran_in,
                     source_dir=source_dir,
                     scanned_dirs=scanned_dirs,
+                    record=self._ingest_record,
                 )
                 # Staged beside it under the write guard and renamed into place
                 # when the block ends: a failure while writing (disk full) left a
@@ -2096,6 +2137,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 source_dir=source_dir,
                 scanned_dirs=scanned_dirs,
                 scanned_files=self._scan_set,
+                record=self._ingest_record,
             )
         return raw
 

@@ -1843,3 +1843,349 @@ def test_control_a_cyclonedx_repair_that_drops_the_purl_it_should_rewrite_fails_
         AssertionError, match="the report differs from the minimal repair"
     ):
         check_cdx_repair_case(case, ingest=drops_the_purl)
+
+
+# --------------------------------------------------------------------------- #
+# What the converters share: one field of a tool's own JSON, and a record that
+# crossed a process boundary
+# --------------------------------------------------------------------------- #
+
+
+def _changes(record: IngestRecord) -> list[dict[str, Any]]:
+    summary = record.summary()
+    assert summary is not None
+    return summary["changes"]
+
+
+def _pointers(record: IngestRecord) -> list[str]:
+    summary = record.summary()
+    assert summary is not None
+    return [element["pointer"] for element in summary["elements"]]
+
+
+def test_text_is_returned_as_it_is_and_nothing_is_noted():
+    record = IngestRecord()
+
+    assert record.text_or("a title", "fallback", ("via", 0, "title")) == "a title"
+    assert record.text_or("", "fallback", ("via", 0, "title")) == ""
+
+    assert record.is_empty
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, 5, 1.5, True, [], ["a"], {"a": 1}],
+    ids=["null", "int", "float", "bool", "empty-list", "list", "object"],
+)
+def test_what_is_not_text_is_replaced_and_noted_where_it_was(value):
+    record = IngestRecord()
+
+    answer = record.text_or(
+        value,
+        "GHSA-aaaa-bbbb-cccc",
+        ("vulnerabilities", "left-pad", "via", 0, "title"),
+        code="title_not_text",
+        rule_id="GHSA-aaaa-bbbb-cccc",
+    )
+
+    assert answer == "GHSA-aaaa-bbbb-cccc"
+    assert _changes(record) == [
+        {"action": "rewritten", "code": "title_not_text", "count": 1}
+    ]
+    # The package name is the tool's own key, so it is never written; the
+    # fields are the report's own names.
+    assert _pointers(record) == ["vulnerabilities/*/via/0/title"]
+    summary = record.summary()
+    assert summary is not None
+    assert summary["elements"][0]["rule_id"] == "GHSA-aaaa-bbbb-cccc"
+    assert "left-pad" not in json.dumps(summary)
+
+
+def test_an_integer_is_written_as_text_only_when_the_caller_asks_for_it():
+    record = IngestRecord()
+
+    assert record.text_or(7, "x", ("ruleName",)) == "x"
+    assert record.text_or(7, "x", ("ruleName",), integers=True) == "7"
+    # A number with a fraction lost the digits the tool wrote when it was read as a
+    # float, and a boolean is no number.
+    assert record.text_or(1.10, "x", ("ruleName",), integers=True) == "x"
+    assert record.text_or(True, "x", ("ruleName",), integers=True) == "x"
+
+    counts = {(c["code"], c["count"]) for c in _changes(record)}
+    assert counts == {("number_as_text", 1), ("field_not_text", 3)}
+
+
+def test_a_replacement_of_none_is_a_value_the_caller_can_leave_out():
+    record = IngestRecord()
+
+    assert record.text_or(["x"], None, ("risks", 0, "threat_code")) is None
+    assert _pointers(record) == ["risks/0/threat_code"]
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=["null", "empty"])
+def test_an_absent_link_is_no_repair(value):
+    record = IngestRecord()
+
+    assert record.url_or_none(value, ("via", 0, "url")) is None
+
+    assert record.is_empty
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+        "http://example.com/a?b=1#c",
+    ],
+)
+def test_a_link_the_model_takes_is_kept(value):
+    record = IngestRecord()
+
+    assert record.url_or_none(value, ("via", 0, "url")) == value
+
+    assert record.is_empty
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["N/A", "/advisories/GHSA-aaaa", "not a url", 5, ["https://a.example"], {"u": 1}],
+    ids=["n-a", "relative", "words", "int", "list", "object"],
+)
+def test_what_is_not_a_link_is_dropped_and_noted_where_it_was(value):
+    record = IngestRecord()
+
+    assert record.url_or_none(value, ("via", 2, "url"), rule_id="GHSA-aaaa") is None
+
+    assert _changes(record) == [
+        {"action": "dropped", "code": "url_not_absolute", "count": 1}
+    ]
+    assert _pointers(record) == ["via/2/url"]
+
+
+def test_a_link_is_kept_exactly_when_the_sarif_model_takes_it():
+    """The check is the model's own type, so what it keeps the model accepts and what
+    it drops the model refuses: no value is dropped that would have validated, and
+    none is kept that would have refused the report."""
+    from automated_security_helper.schemas.sarif_schema_model import ReportingDescriptor
+
+    for value in (
+        "https://a.example/x",
+        "ftp://a.example/x",
+        "mailto:a@b.example",
+        "N/A",
+        "a/b",
+        "//a.example/x",
+        "http://",
+    ):
+        kept = IngestRecord().url_or_none(value) is not None
+        try:
+            ReportingDescriptor(id="rule", helpUri=value)
+            accepted = True
+        except ValidationError:
+            accepted = False
+        assert kept == accepted, value
+
+
+def test_a_new_kind_of_change_is_said_in_words():
+    record = IngestRecord()
+    record.note("rewritten", "title_not_text", ("via", 0, "title"))
+    record.note("dropped", "url_not_absolute", ("via", 0, "url"))
+    record.note("rewritten", "text_as_number", ("errors", 0, "line"))
+
+    sentence = record.sentence("npm-audit")
+
+    assert sentence is not None
+    for words in (
+        "a title that is not text",
+        "a link that is not an absolute URL",
+        "a number written as text",
+    ):
+        assert words in sentence, sentence
+
+
+def test_a_pointer_writes_the_tool_report_fields_the_converters_read():
+    record = IngestRecord()
+    for pointer in (
+        ("pluginReports", 0, "violations", 3, "ruleName"),
+        ("risks", 1, "threat_code"),
+        ("results", "capability-network-lolbas", 0, "message"),
+        ("errors", 4, "line"),
+        ("line_number",),
+    ):
+        record.note("rewritten", "field_not_text", pointer)
+
+    assert _pointers(record) == [
+        "pluginReports/0/violations/3/ruleName",
+        "risks/1/threat_code",
+        "results/*/0/message",
+        "errors/4/line",
+        "line_number",
+    ]
+
+
+def _a_record_that_noted_a_few_things() -> IngestRecord:
+    record = IngestRecord()
+    record.results_read = 4
+    record.note("dropped", "region_line_unreadable", ("line_number",), count=2)
+    record.note("rewritten", "number_as_text", ("pluginReports", 0, "violations", 1))
+    with record.scoped("template 2"):
+        record.note("rewritten", "field_not_text", ("risks", 0, "threat_code"))
+    record.note("left_out", "result_unreadable:missing", ("runs", 0, "results", 3))
+    return record
+
+
+def test_a_record_read_back_from_its_summary_is_the_record_it_described():
+    record = _a_record_that_noted_a_few_things()
+    wire = json.loads(json.dumps(record.summary()))
+
+    read_back = IngestRecord.from_summary(wire)
+
+    assert read_back.summary() == record.summary()
+    assert (read_back.repaired, read_back.left_out) == (
+        record.repaired,
+        record.left_out,
+    )
+    assert read_back.sentence("cdk-nag") == record.sentence("cdk-nag")
+
+
+@pytest.mark.parametrize(
+    "junk",
+    [
+        None,
+        5,
+        "text",
+        [],
+        {},
+        {"changes": 5, "elements": "x"},
+        {"changes": [5, {"action": "dropped"}]},
+        {"changes": [{"action": "nope", "code": "a_b", "count": 1}]},
+        {"changes": [{"action": ["dropped"], "code": "a_b", "count": 1}]},
+        {"changes": [{"action": "dropped", "code": "A B", "count": 1}]},
+        {"changes": [{"action": "dropped", "code": "a_b", "count": 0}]},
+        {"changes": [{"action": "dropped", "code": "a_b", "count": True}]},
+    ],
+    ids=[
+        "none",
+        "int",
+        "text",
+        "list",
+        "empty-object",
+        "parts-of-the-wrong-type",
+        "changes-that-are-no-changes",
+        "unknown-action",
+        "unhashable-action",
+        "code-with-a-space",
+        "count-of-zero",
+        "count-of-a-boolean",
+    ],
+)
+def test_nothing_is_read_from_what_is_not_a_summary(junk):
+    assert IngestRecord.from_summary(junk).summary() is None
+
+
+@pytest.mark.parametrize(
+    "element",
+    [
+        {"action": "dropped", "code": "a_b", "pointer": 3},
+        {"action": "dropped", "code": "a_b", "pointer": "x" * 500},
+        {"action": "dropped", "code": "a_b", "pointer": "two\nlines"},
+        {"action": ["dropped"], "code": "a_b", "pointer": "x"},
+        {"action": "dropped", "code": "A B", "pointer": "x"},
+        {"action": "dropped", "code": "a_b", "pointer": "x", "rule_id": "has space"},
+        "text",
+    ],
+    ids=[
+        "pointer-that-is-a-number",
+        "pointer-of-500-characters",
+        "pointer-with-a-newline",
+        "unhashable-action",
+        "code-with-a-space",
+        "rule-id-that-is-not-an-id",
+        "element-that-is-text",
+    ],
+)
+def test_an_element_that_is_not_one_a_record_names_is_not_read(element):
+    wire = {
+        "changes": [{"action": "dropped", "code": "a_b", "count": 1}],
+        "elements": [element],
+    }
+
+    summary = IngestRecord.from_summary(wire).summary()
+
+    assert summary is not None
+    assert summary["repaired"] == 1
+    assert summary["elements"] == []
+
+
+def test_the_counts_of_a_record_read_back_are_the_ones_its_parts_add_up_to():
+    wire = {
+        "results_read": 9,
+        "repaired": 999,
+        "left_out": 999,
+        "changes": [
+            {"action": "dropped", "code": "a_b", "count": 2},
+            {"action": "left_out", "code": "c_d", "count": 1},
+        ],
+        "elements": [],
+        "elements_not_listed": 0,
+    }
+
+    record = IngestRecord.from_summary(wire)
+
+    assert (record.results_read, record.repaired, record.left_out) == (9, 2, 1)
+
+
+def test_one_record_absorbs_another_and_names_its_elements_under_a_scope():
+    other = _a_record_that_noted_a_few_things()
+    before = other.summary()
+    record = IngestRecord()
+    record.results_read = 1
+    record.note("rewritten", "text_as_number", ("errors", 0, "line"))
+
+    record.absorb(other, scope="template 3")
+
+    assert other.summary() == before
+    summary = record.summary()
+    assert summary is not None
+    assert summary["results_read"] == 5
+    assert (summary["repaired"], summary["left_out"]) == (5, 1)
+    assert {(c["action"], c["code"]): c["count"] for c in summary["changes"]} == {
+        ("dropped", "region_line_unreadable"): 2,
+        ("rewritten", "number_as_text"): 1,
+        ("rewritten", "field_not_text"): 1,
+        ("rewritten", "text_as_number"): 1,
+        ("left_out", "result_unreadable:missing"): 1,
+    }
+    assert _pointers(record) == [
+        "errors/0/line",
+        "template 3: line_number",
+        "template 3: pluginReports/0/violations/1",
+        "template 3: template 2: risks/0/threat_code",
+        "template 3: runs/0/results/3",
+    ]
+
+
+def test_a_scope_that_is_a_name_is_not_written_when_a_record_is_absorbed():
+    other = IngestRecord()
+    other.note("rewritten", "field_not_text", ("risks", 0))
+    record = IngestRecord()
+
+    record.absorb(other, scope="prod.yaml")
+
+    assert _pointers(record) == ["input: risks/0"]
+
+
+def test_absorbing_keeps_to_the_most_elements_a_record_names():
+    record = IngestRecord()
+    other = IngestRecord()
+    for position in range(60):
+        other.note("dropped", "field_not_text", ("risks", position))
+    record.note("dropped", "field_not_text", ("risks", 99))
+
+    record.absorb(other)
+
+    summary = record.summary()
+    assert summary is not None
+    assert len(summary["elements"]) == 50
+    assert summary["elements_not_listed"] == 11
+    assert summary["repaired"] == 61

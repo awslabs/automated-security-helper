@@ -24,6 +24,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
 )
@@ -71,6 +72,7 @@ from automated_security_helper.core.constants import (
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
     ArtifactLocation,
@@ -2599,6 +2601,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         suppressions: Optional[List[Any]] = None,
         config_name: str = "detect-secrets",
         tool_type: str = ScannerToolType.SECRETS.value,
+        record: Optional[IngestRecord] = None,
+        pointer: Sequence[str | int] = (),
     ) -> Result:
         """One SARIF result for one detect-secrets finding, value-free.
 
@@ -2609,8 +2613,33 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Pure: no library scan runs and nothing outside the arguments is read.
         The message and snippet are synthesized from the finding's type and
         place; the secret value never enters the report.
+
+        A line that is not a line (``PotentialSecret`` defaults it to 0, and SARIF
+        starts at 1) is no place to point at: the finding is kept on its file with
+        no region and no line in its message, and the repair is noted on *record*
+        at *pointer*, the path of the line in the worker's output, when given.
         """
         rule_id = re.sub(pattern=r"\W+", repl="-", string=finding_type).upper()
+        has_line = type(line_number) is int and line_number >= 1
+        if not has_line and record is not None:
+            record.note(
+                "dropped",
+                "region_line_unreadable",
+                pointer,
+                rule_id=f"SECRET-{rule_id}",
+            )
+        place = f"'{uri}' at line {line_number}" if has_line else f"'{uri}'"
+        physical_fields: Dict[str, Any] = {
+            "artifactLocation": ArtifactLocation(uri=uri)
+        }
+        if has_line:
+            physical_fields["region"] = Region(
+                startLine=line_number,
+                endLine=line_number,
+                startColumn=start_column,
+                snippet=ArtifactContent(text=f"Secret of type {finding_type} detected"),
+            )
+        physical = PhysicalLocation2(**physical_fields)
         return Result(
             ruleId=f"SECRET-{rule_id}",
             suppressions=suppressions,
@@ -2627,28 +2656,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             kind=Kind.fail,
             message=Message(
                 root=Message1(
-                    text=f"Secret of type '{finding_type}' detected in file "
-                    f"'{uri}' at line {line_number}"
+                    text=f"Secret of type '{finding_type}' detected in file {place}"
                 )
             ),
             locations=[
                 Location(
                     id=1,
-                    physicalLocation=PhysicalLocation(
-                        root=PhysicalLocation2(
-                            artifactLocation=ArtifactLocation(
-                                uri=uri,
-                            ),
-                            region=Region(
-                                startLine=line_number,
-                                endLine=line_number,
-                                startColumn=start_column,
-                                snippet=ArtifactContent(
-                                    text=f"Secret of type {finding_type} detected"
-                                ),
-                            ),
-                        )
-                    ),
+                    physicalLocation=PhysicalLocation(root=physical),
                 )
             ],
         )
@@ -2901,6 +2915,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # of files given to detect-secrets, set below; None until then (no claim).
         self.exit_code = 0
         self.targets_attempted: Optional[int] = None
+        # This target's own record of what reading its findings repaired.
+        self._start_ingest_record()
         # Where this target's errors start. ``self.errors`` is the instance's,
         # appended across targets (and read whole by the executor), so the
         # converted target's invocation record carried the source target's
@@ -3528,6 +3544,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             finding_type=finding.type,
                             uri=uri,
                             line_number=finding.line_number,
+                            record=self._ingest_record,
+                            pointer=("line_number",),
                             # Where the secret starts, so two of one type on one
                             # line are two findings; see _scan_in_worker.
                             start_column=self._secret_columns.get(
@@ -3549,6 +3567,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                             ),
                         )
                     )
+            self._ingest_record.results_read = len(results)
+            self._say_what_the_ingest_repaired(target_type)
             if kept_known:
                 self._plugin_log(
                     f"{kept_known} candidate(s) listed in the scanned repository's "
@@ -3609,7 +3629,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 runs=[
                     Run(
                         tool=sarif_tool,
-                        invocations=[sarif_invocation],
+                        invocations=[self._noting_the_ingest(sarif_invocation)],
                         results=results,
                     )
                 ],

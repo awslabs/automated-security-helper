@@ -52,6 +52,7 @@ from automated_security_helper.models.core import AshSuppression, IgnorePathWith
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     actionlint_scanner as module,
 )
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner import (
     ACTIONLINT_FORMAT,
     KIND_SEVERITY,
@@ -512,8 +513,24 @@ def test_an_untrusted_input_message_in_an_unknown_shape_is_logged_once(caplog):
             1,
             "no integer line",
         ),
+        # Only the digits of an integer are read as one (below); a word, a
+        # fraction, or the text of a negative number is not.
         (
-            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": "3"}]},
+            {
+                "errors": [
+                    {"kind": "id", "message": "m", "filepath": "a", "line": "three"}
+                ]
+            },
+            1,
+            "no integer line",
+        ),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": 3.5}]},
+            1,
+            "no integer line",
+        ),
+        (
+            {"errors": [{"kind": "id", "message": "m", "filepath": "a", "line": "-1"}]},
             1,
             "no integer line",
         ),
@@ -532,11 +549,12 @@ def test_malformed_output_raises(payload, exit_code, match):
 
 @pytest.mark.parametrize("line", [-1, -7], ids=["minus-one", "minus-seven"])
 @pytest.mark.unit
-def test_a_negative_line_is_not_read_as_no_position(line):
-    """Only the integer 0 is "no position": actionlint never writes a negative
-    line, so one means the output format changed, and giving it the line-0
-    treatment would silently drop the region (line-scoped suppressions,
-    line-keyed masking)."""
+def test_a_negative_line_keeps_its_finding_without_a_region_and_says_so(line):
+    """actionlint writes 0 for an error with no position and never a negative
+    line. A negative one is no position either, so the finding is kept without a
+    region, as line 0 is, and unlike line 0 the record names it: the output was
+    not what the template writes. Refusing it lost every other finding of the
+    run."""
     payload = {
         "version": "1.7.12",
         "errors": [
@@ -546,11 +564,153 @@ def test_a_negative_line_is_not_read_as_no_position(line):
                 "filepath": ".github/workflows/a.yml",
                 "line": line,
                 "column": 1,
+            },
+            {
+                "kind": "expression",
+                "message": "other finding",
+                "filepath": ".github/workflows/b.yml",
+                "line": 4,
+                "column": 1,
+            },
+        ],
+    }
+    record = IngestRecord()
+
+    results = build_sarif(payload, 1, record=record)["runs"][0]["results"]
+
+    assert [result["ruleId"] for result in results] == ["syntax-check", "expression"]
+    assert "region" not in results[0]["locations"][0]["physicalLocation"]
+    assert results[1]["locations"][0]["physicalLocation"]["region"]["startLine"] == 4
+    summary = record.summary()
+    assert summary is not None
+    assert summary["changes"] == [
+        {"action": "dropped", "code": "region_line_unreadable", "count": 1}
+    ]
+    assert [element["pointer"] for element in summary["elements"]] == ["errors/0/line"]
+
+
+@pytest.mark.unit
+def test_the_digits_of_a_line_written_as_text_are_that_line():
+    """A line written as ``"3"`` is line 3, and the finding keeps its region and
+    its place in the credentials check; the record names the rewrite."""
+    payload = {
+        "version": "1.7.12",
+        "errors": [
+            {
+                "kind": "syntax-check",
+                "message": "m",
+                "filepath": ".github/workflows/a.yml",
+                "line": "3",
+                "column": 2,
             }
         ],
     }
-    with pytest.raises(ScannerError, match="negative line"):
-        build_sarif(payload, exit_code=1)
+    record = IngestRecord()
+
+    results = build_sarif(payload, 1, record=record)["runs"][0]["results"]
+
+    region = results[0]["locations"][0]["physicalLocation"]["region"]
+    assert (region["startLine"], region["endLine"], region["startColumn"]) == (3, 3, 2)
+    summary = record.summary()
+    assert summary is not None
+    assert summary["changes"] == [
+        {"action": "rewritten", "code": "text_as_number", "count": 1}
+    ]
+    assert [element["pointer"] for element in summary["elements"]] == ["errors/0/line"]
+
+
+@pytest.mark.unit
+def test_a_credentials_line_is_one_line_however_it_is_written():
+    """The snippet of every finding on a credentials finding's line is dropped,
+    because it quotes the password; "3" and 3 are one line, so a finding that
+    writes its line the other way loses its snippet too, in the SARIF and in the
+    raw payload that is written to disk."""
+    errors = [
+        {
+            "kind": "credentials",
+            "message": "hard-coded password",
+            "filepath": "a.yml",
+            "line": 3,
+            "column": 1,
+            "snippet": "password: hunter2",
+        },
+        {
+            "kind": "expression",
+            "message": "other finding on the same line",
+            "filepath": "a.yml",
+            "line": "3",
+            "column": 1,
+            "snippet": "password: hunter2",
+        },
+        {
+            "kind": "expression",
+            "message": "a finding on another line",
+            "filepath": "a.yml",
+            "line": 9,
+            "column": 1,
+            "snippet": "run: echo",
+        },
+    ]
+    payload = {"version": "1.7.12", "errors": errors}
+
+    results = build_sarif(payload, 1)["runs"][0]["results"]
+    regions = [r["locations"][0]["physicalLocation"]["region"] for r in results]
+
+    assert ["snippet" in region for region in regions] == [False, False, True]
+    redacted = module.redact_credentials(payload)["errors"]
+    assert ["snippet" in error for error in redacted] == [False, False, True]
+
+
+@pytest.mark.unit
+def test_the_credential_check_keeps_matching_what_it_matched_before():
+    """What compared equal under the raw ``(filepath, line)`` key still does:
+    3.0 is 3 and True is 1, and a line the check cannot read is placed with the
+    others it cannot read, so no snippet that was dropped before is kept now."""
+    for credentials_line, other_line in ((3, 3.0), (1, True), (None, None), ("x", "y")):
+        errors = [
+            {
+                "kind": "credentials",
+                "message": "p",
+                "filepath": "a.yml",
+                "line": credentials_line,
+                "snippet": "password: hunter2",
+            },
+            {
+                "kind": "expression",
+                "message": "q",
+                "filepath": "a.yml",
+                "line": other_line,
+                "snippet": "password: hunter2",
+            },
+        ]
+        redacted = module.redact_credentials({"errors": errors})["errors"]
+        assert ["snippet" in error for error in redacted] == [False, False], (
+            credentials_line,
+            other_line,
+        )
+
+
+@pytest.mark.unit
+def test_an_unhashable_line_does_not_stop_the_credential_check():
+    """A list in ``line`` raised TypeError out of the set the check builds, a
+    failure of its own, not the output-format refusal the line gets."""
+    payload = {
+        "errors": [
+            {
+                "kind": "credentials",
+                "message": "p",
+                "filepath": "a.yml",
+                "line": [1],
+                "snippet": "password: hunter2",
+            }
+        ]
+    }
+
+    redacted = module.redact_credentials(payload)["errors"]
+
+    assert "snippet" not in redacted[0]
+    with pytest.raises(ScannerError, match="no integer line"):
+        build_sarif(payload, 1)
 
 
 @pytest.mark.parametrize("line", [0], ids=["zero"])

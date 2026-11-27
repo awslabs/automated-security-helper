@@ -29,13 +29,23 @@ resolved against, a CycloneDX vulnerability) are not repaired: the report is
 refused as before.
 
 What the record holds. Each change is counted by kind and named by a pointer
-built only from list indices and names the SARIF or CycloneDX schema defines; any
-other key, which the tool chose (a property name, a fingerprint name), is written
-``*``. The record holds no value from the report and no path, host or user name,
-so it can go into a log line, a results file and a SARIF notification. A read
-that is refused leaves the changes its attempt made to the copy it discarded: a
-reader that goes on after a refusal rolls the record back (``checkpoint`` and
-``rollback``), and none says what was repaired of a report it did not read.
+built only from list indices, names the SARIF or CycloneDX schema defines and the
+field names of the tool reports the converters read (``_TOOL_FIELDS``, a fixed
+list); any other key, which the tool chose (a property name, a fingerprint name, a
+package name), is written ``*``. The record holds no value from the report and no
+path, host or user name, so it can go into a log line, a results file and a SARIF
+notification. A read that is refused leaves the changes its attempt made to the
+copy it discarded: a reader that goes on after a refusal rolls the record back
+(``checkpoint`` and ``rollback``), and none says what was repaired of a report it
+did not read.
+
+Converters. A scanner that builds its SARIF from the tool's own JSON (npm audit,
+GuardDog, detect-secrets, actionlint, cdk-nag) repairs the one field it cannot
+convert where it converts, and notes it on the same record with a pointer into
+the tool's JSON: :meth:`IngestRecord.text_or` and :meth:`IngestRecord.url_or_none`
+are the two repairs they share. A record made in another process (cdk-nag's
+worker) crosses as its :meth:`~IngestRecord.summary` and is read back with
+:meth:`~IngestRecord.from_summary` and added with :meth:`~IngestRecord.absorb`.
 
 The input is never changed: a refused document is repaired on a copy.
 """
@@ -47,9 +57,9 @@ import copy
 import functools
 import json
 import re
-from typing import Any, Callable, Iterator, NamedTuple, Sequence
+from typing import Any, Callable, Iterator, NamedTuple, Sequence, TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AnyUrl, BaseModel, TypeAdapter, ValidationError
 
 from automated_security_helper.schemas import (
     cyclonedx_bom_1_6_schema as _cyclonedx_module,
@@ -75,6 +85,10 @@ _MAX_CHANGES = 10_000
 #: Elements a record names; the rest are only counted.
 _MAX_NAMED = 50
 
+#: The longest pointer a record read back from JSON keeps. A pointer is a handful
+#: of names and indices, so a longer one is not a pointer this module wrote.
+_MAX_POINTER = 400
+
 #: What a rule id may look like to be kept in a summary. Anything else (a path, a
 #: URL, a sentence) is recorded as no rule id.
 _RULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -83,6 +97,43 @@ _RULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 #: ordinal, ``template 3`` or ``batch 2.1``. Never a name: a file name would fit
 #: any looser pattern.
 _SCOPE_LABEL = re.compile(r"^[a-z]+ [0-9]{1,6}(\.[0-9]{1,6})?$")
+
+#: The field names of the tool reports the converters read, which a pointer may
+#: write as they are when the SARIF and CycloneDX models do not define them (npm
+#: audit's ``via``, GuardDog's ``risks`` and its ``threat_*`` fields, detect-secrets'
+#: ``line_number``, actionlint's ``errors``, cdk-nag's ``pluginReports``). Names
+#: the code reads, never a key the tool chose.
+_TOOL_FIELDS = frozenset(
+    {
+        "via",
+        "risks",
+        "threat_description",
+        "threat_code",
+        "threat_location",
+        "file_path",
+        "mitre_tactics",
+        "code",
+        "match",
+        "line_number",
+        "errors",
+        "pluginReports",
+        "violations",
+        "ruleName",
+    }
+)
+
+#: What a link must be for a SARIF link field to take it: the model's own type, so
+#: a link this accepts is one the model accepts.
+_LINK = TypeAdapter(AnyUrl)
+
+#: What :meth:`IngestRecord.text_or` falls back to: text for a caller that has a
+#: text to put in its place, ``None`` for one that leaves the field out. Its
+#: answer is text or the fallback's own type.
+_Fallback = TypeVar("_Fallback")
+
+#: A record's kinds of change, as ``summary`` writes them.
+_ACTIONS = frozenset({"dropped", "rewritten", "left_out"})
+_CODE = re.compile(r"^[a-z][a-z0-9_:]{0,95}$")
 
 _BOM_BYTES = b"\xef\xbb\xbf"
 _BOM_TEXT = _BOM_BYTES.decode("utf-8")
@@ -108,6 +159,12 @@ _PHRASES = {
     "fix_unreadable": "a fix with a region that cannot be read",
     "unknown_key": "a key the schema does not define",
     "number_as_text": "a number where the schema wants text",
+    "text_as_number": "a number written as text",
+    "title_not_text": "a title that is not text",
+    "field_not_text": "a field that is not text",
+    "text_not_unicode": "text that is not valid Unicode",
+    "url_not_absolute": "a link that is not an absolute URL",
+    "side_report_unreadable": "a side report that cannot be read",
     "tag_not_text": "a tag that is not text",
     "property_unreadable": "a property that cannot be read",
     "fingerprint_unreadable": "a fingerprint that cannot be read",
@@ -133,6 +190,11 @@ _PHRASES = {
     "result_unreadable:string_unicode": "text that is not valid Unicode",
     "component_unreadable": "a component that cannot be read",
 }
+
+
+def _scope_label(label: str) -> str:
+    """*label* when it is a scope label (a word and an ordinal), else ``input``."""
+    return label if _SCOPE_LABEL.fullmatch(label) else "input"
 
 
 def _phrase(code: str) -> str:
@@ -165,7 +227,7 @@ def _known_names() -> frozenset[str]:
                     if isinstance(alias, str):
                         names.add(alias)
     names.discard("root")
-    return frozenset(names)
+    return frozenset(names) | _TOOL_FIELDS
 
 
 class IngestRecord:
@@ -221,7 +283,7 @@ class IngestRecord:
         label of any other form is replaced by ``input``.
         """
         previous = self._scope
-        self._scope = label if _SCOPE_LABEL.fullmatch(label) else "input"
+        self._scope = _scope_label(label)
         try:
             yield
         finally:
@@ -350,6 +412,146 @@ class IngestRecord:
                 "properties": {"ash_output_ingest": self.summary()},
             }
         ]
+
+    def text_or(
+        self,
+        value: object,
+        fallback: _Fallback,
+        pointer: Sequence[str | int] = (),
+        *,
+        code: str = "field_not_text",
+        rule_id: object = None,
+        integers: bool = False,
+    ) -> str | _Fallback:
+        """*value* when it is text, else *fallback*, the change noted as rewritten.
+
+        For a converter that reads a field of the tool's JSON its SARIF wants as
+        text. With *integers*, an integer is written as its decimal text and noted
+        as ``number_as_text``; a number with a fraction is not (reading it as a
+        float lost the digits the tool wrote). Anything else, ``None`` included,
+        is replaced by *fallback* and noted under *code*. A caller for which an
+        absent or empty value is no repair filters it out before asking.
+        """
+        if isinstance(value, str):
+            return value
+        if integers and isinstance(value, int) and not isinstance(value, bool):
+            self.note("rewritten", "number_as_text", pointer, rule_id=rule_id)
+            return str(value)
+        self.note("rewritten", code, pointer, rule_id=rule_id)
+        return fallback
+
+    def url_or_none(
+        self,
+        value: object,
+        pointer: Sequence[str | int] = (),
+        *,
+        code: str = "url_not_absolute",
+        rule_id: object = None,
+    ) -> str | None:
+        """*value* when it is a link the SARIF models take, else ``None``.
+
+        A value that is not such a link (``N/A``, a relative path, a number) is
+        left out and noted as dropped under *code*; a link field is not part of
+        what a finding says. An absent link (``None`` or an empty string) is not a
+        repair and is not noted.
+        """
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            try:
+                _LINK.validate_python(value)
+            except ValueError:
+                pass
+            else:
+                return value
+        self.note("dropped", code, pointer, rule_id=rule_id)
+        return None
+
+    def absorb(self, other: IngestRecord, scope: str | None = None) -> None:
+        """Add what *other* recorded to this record; *other* is not changed.
+
+        For a reader whose parts ran apart from it, cdk-nag's worker process
+        answering one template at a time: the counts add, and the elements *other*
+        named are named here too, under *scope* (``template 2``, a word and an
+        ordinal) when one is given, up to the most a record names.
+        """
+        prefix = _scope_label(scope) if scope is not None else None
+        self.results_read += other.results_read
+        self.repaired += other.repaired
+        self.left_out += other.left_out
+        for key, count in other._counts.items():
+            self._counts[key] = self._counts.get(key, 0) + count
+        for action, code, pointer, rule in other._named:
+            if len(self._named) < _MAX_NAMED:
+                shown = f"{prefix}: {pointer}" if prefix else pointer
+                self._named.append((action, code, shown, rule))
+            else:
+                self._not_listed += 1
+        self._not_listed += other._not_listed
+
+    @classmethod
+    def from_summary(cls, summary: object) -> IngestRecord:
+        """The record a :meth:`summary` described, read back from JSON.
+
+        For a record that crossed a process boundary. A summary that is not of the
+        shape ``summary`` writes, or a part of one that is not, is not read: the
+        result holds the parts that are, and the counts it reports are the ones
+        those parts add up to.
+        """
+        record = cls()
+        if not isinstance(summary, dict):
+            return record
+        read = summary.get("results_read")
+        if type(read) is int and read >= 0:
+            record.results_read = read
+        changes = summary.get("changes")
+        for change in changes if isinstance(changes, list) else []:
+            if not isinstance(change, dict):
+                continue
+            action, code = change.get("action"), change.get("code")
+            count = change.get("count")
+            if not (
+                isinstance(action, str)
+                and action in _ACTIONS
+                and isinstance(code, str)
+                and _CODE.fullmatch(code)
+                and type(count) is int
+                and count >= 1
+            ):
+                continue
+            key = (action, code)
+            record._counts[key] = record._counts.get(key, 0) + count
+            if action == "left_out":
+                record.left_out += count
+            else:
+                record.repaired += count
+        elements = summary.get("elements")
+        for element in elements if isinstance(elements, list) else []:
+            if not isinstance(element, dict):
+                continue
+            action, code = element.get("action"), element.get("code")
+            pointer, rule = element.get("pointer"), element.get("rule_id")
+            if not (
+                isinstance(action, str)
+                and action in _ACTIONS
+                and isinstance(code, str)
+                and _CODE.fullmatch(code)
+                and isinstance(pointer, str)
+                and pointer.isprintable()
+                and len(pointer) <= _MAX_POINTER
+                and (
+                    rule is None or (isinstance(rule, str) and _RULE_ID.fullmatch(rule))
+                )
+            ):
+                continue
+            if len(record._named) < _MAX_NAMED:
+                record._named.append((action, code, pointer, rule))
+            else:
+                record._not_listed += 1
+        unlisted = summary.get("elements_not_listed")
+        if type(unlisted) is int and unlisted >= 0:
+            record._not_listed += unlisted
+        return record
 
 
 # --------------------------------------------------------------------------- #

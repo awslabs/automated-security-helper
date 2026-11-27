@@ -37,6 +37,7 @@ from automated_security_helper.utils.cfn_template_model import (
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.schemas.sarif_schema_model import Location
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from cfn_tools import dump_yaml
 from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_markup
 from automated_security_helper.utils.process_env import (
@@ -84,6 +85,11 @@ class CdkNagWrapperResponse:
     entry at all, so the ``{pack: []}`` shape for a clean evaluation is re-materialized from
     the wrapper's own record of the pack's completed ``validate()`` -- see
     :func:`_build_nag_pack` and :func:`_violations_from_validation_report`.
+
+    ``ingest`` is what reading the validation report repaired (a rule name or
+    description that is not text), when it was read: the record the scanner adds
+    to its own, since the report is read here, in the worker's process, and not
+    where the scanner's record is kept.
     """
 
     def __init__(
@@ -92,11 +98,13 @@ class CdkNagWrapperResponse:
         outdir: Path | None = None,
         template: CloudFormationTemplateModel | None = None,
         failure: str | None = None,
+        ingest: IngestRecord | None = None,
     ):
         self.results = results
         self.outdir = outdir
         self.template = template
         self.failure = failure
+        self.ingest = ingest
 
 
 _env_lock = threading.Lock()
@@ -560,6 +568,13 @@ NOT_EVALUATED = "Not-Evaluated"
 # prefix means that stops being load-bearing -- if it ever flips, detection keeps working
 # instead of silently reverting to reporting these as critical findings.
 _UNEVALUATED_DESCRIPTION_PREFIX = "Rule threw an error during validation."
+
+# What a violation's description reads as when the report holds one that is not text
+# (a list, an object, a fraction): the one sentence, the same for every rule, since
+# nothing of the rule's own can be read from it. The finding stays, as a violation.
+_UNREADABLE_DESCRIPTION = (
+    "cdk-nag reported this violation without a description ASH can read."
+)
 
 
 def _compliance_for_violation(description: str) -> str:
@@ -1098,6 +1113,7 @@ def _violations_from_validation_report(
     every_requested_named: bool = True,
     unnamed_requested: int = 0,
     validate_outcomes: Mapping[str, Mapping] | None = None,
+    record: IngestRecord | None = None,
 ) -> tuple[Dict[str, List["_NagFinding"]], str | None]:
     """Read CDK's policy validation report into per-pack normalized finding dicts.
 
@@ -1146,6 +1162,13 @@ def _violations_from_validation_report(
     ``IPolicyValidationPlugin`` implementations rather than aspects, and their output lands in
     a single ``validation-report.json`` written by CDK, keyed by plugin.
 
+    A violation whose ``ruleName`` or ``description`` is not text used to fail the
+    template (an ``AttributeError`` out of the description check, or a rule id the
+    SARIF model refused). An integer is written as its text, and a description of any
+    other kind is the fixed sentence ``_UNREADABLE_DESCRIPTION`` (a rule name of any
+    other kind is empty, as a missing one is); each is noted on *record*, when one is
+    given, with its path in the validation report, and the finding is kept.
+
     The returned shape deliberately matches the fields the downstream mapping already
     consumes, so the resource lookup and template line-number search are reused rather than
     rewritten. That mapping depends on the last path segment of the construct path being the
@@ -1184,6 +1207,8 @@ def _violations_from_validation_report(
         return {}, reason
 
     per_pack: Dict[str, List[_NagFinding]] = {}
+    # A caller that wants no record gets one that is thrown away.
+    ingest = record if record is not None else IngestRecord()
     failed_packs: List[str] = []
     # The same packs without their recorded error text, for the logged reason.
     failed_labels: List[str] = []
@@ -1203,7 +1228,7 @@ def _violations_from_validation_report(
         )
         ASH_LOGGER.error(reason)
         return {}, reason
-    for plugin_report in plugin_reports:
+    for plugin_index, plugin_report in enumerate(plugin_reports):
         if not isinstance(plugin_report, Mapping):
             # Said out loud, as every other unreadable piece of the report is: an
             # entry no reader can take apart is one pack's rules unaccounted for.
@@ -1292,7 +1317,7 @@ def _violations_from_validation_report(
         # indistinguishable from one that ran and found nothing. The failed pack is
         # carried by ``failure`` instead.
         entry_rows: List[_NagFinding] = []
-        for violation in violations:
+        for violation_index, violation in enumerate(violations):
             if not isinstance(violation, Mapping):
                 # The top level and the plugin entries were type-checked; a violation
                 # that is not an object raised AttributeError out of the wrapper, which
@@ -1303,8 +1328,30 @@ def _violations_from_validation_report(
                     f"{type(violation).__name__}, not an object, so it is not reported"
                 )
                 continue
-            rule_id = violation.get("ruleName") or ""
-            rule_info = violation.get("description") or ""
+            ingest.results_read += 1
+            # A rule name or a description that is not text raised out of the
+            # description check below or was refused by the SARIF model, and the
+            # template failed with it: each is read as text where it can be, and
+            # the finding is kept.
+            violation_place = (
+                "pluginReports",
+                plugin_index,
+                "violations",
+                violation_index,
+            )
+            rule_id = ingest.text_or(
+                violation.get("ruleName") or "",
+                "",
+                (*violation_place, "ruleName"),
+                integers=True,
+            )
+            rule_info = ingest.text_or(
+                violation.get("description") or "",
+                _UNREADABLE_DESCRIPTION,
+                (*violation_place, "description"),
+                rule_id=rule_id,
+                integers=True,
+            )
             rule_level = _normalize_rule_level(violation.get("severity", ""))
             # Decided once per violation rather than per construct: every construct under one
             # violation shares the description, so the state cannot differ between them.
@@ -2170,12 +2217,16 @@ def run_cdk_nag_against_cfn_template(
             # 2.x produced. Globbing for those files against a v3 install finds nothing and
             # yields an empty result set -- a scan that looks clean because it read the wrong
             # place.
+            # What reading the report repairs is recorded here and handed back on the
+            # response: this runs in the worker's process, not the scanner's.
+            ingest = IngestRecord()
             cdk_nag_report_lines, report_failure = _violations_from_validation_report(
                 Path(app_outdir) / "validation-report.json",
                 expected_plugins=registered_plugin_names,
                 every_requested_named=every_requested_named,
                 unnamed_requested=unnamed_requested,
                 validate_outcomes=validate_outcomes,
+                record=ingest,
             )
 
             if not cdk_nag_report_lines:
@@ -2195,6 +2246,7 @@ def run_cdk_nag_against_cfn_template(
                 outdir=outdir,
                 template=model,
                 failure=report_failure,
+                ingest=ingest,
             )
         finally:
             sys.stderr = original_stderr
