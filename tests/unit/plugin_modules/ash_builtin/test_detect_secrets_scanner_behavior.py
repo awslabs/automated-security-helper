@@ -348,7 +348,12 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     )
     in_source = plugin_context.source_dir / "custom.baseline"
     in_source.write_text(
-        json.dumps(baseline_document(plugins=[{"name": "SourceMarker"}])),
+        json.dumps(
+            baseline_document(
+                plugins=[{"name": "SourceMarker"}],
+                filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -365,10 +370,20 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     assert scanner._baseline_in_use()
     assert scanner._baseline_file_path() == in_source.resolve()
     assert str(scanner.config.options.baseline_file) == "custom.baseline"
-    # The file is in the scanned tree, so its settings are not applied; the
-    # document the scan read is the marker of which file that was.
+    # The document the scan read is the marker of which file that was.
     assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "SourceMarker"
+    ]
+    # The file is in the scanned tree, so it is the repository's whoever named
+    # it, and its settings are not applied: the scan runs the default plugins
+    # and none of the baseline's filters.
+    effective_plugins = [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+    assert "SourceMarker" not in effective_plugins
+    assert "AWSKeyDetector" in effective_plugins
+    assert EXCLUDE_FILTER_PATH not in [
+        f.path for f in scanner.config.options.scan_settings.filters_used
     ]
 
 
@@ -403,7 +418,12 @@ def test_a_found_configured_baseline_leaves_the_option_as_written(
     so every dump of the configuration still shows it."""
     monkeypatch.chdir(tmp_path)
     (plugin_context.source_dir / "custom.baseline").write_text(
-        json.dumps(baseline_document(plugins=[{"name": "StandIn"}])),
+        json.dumps(
+            baseline_document(
+                plugins=[{"name": "StandIn"}],
+                filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+            )
+        ),
         encoding="utf-8",
     )
     options = DetectSecretsScannerConfigOptions(baseline_file="custom.baseline")
@@ -419,6 +439,16 @@ def test_a_found_configured_baseline_leaves_the_option_as_written(
     assert scanner._baseline_in_use() is True
     assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
+    ]
+    # Named by the operator but sitting in the scanned tree, the file is the
+    # repository's: its plugins and filters are not applied.
+    effective_plugins = [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+    assert "StandIn" not in effective_plugins
+    assert "AWSKeyDetector" in effective_plugins
+    assert EXCLUDE_FILTER_PATH not in [
+        f.path for f in scanner.config.options.scan_settings.filters_used
     ]
 
 
@@ -610,7 +640,10 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     work = output / ASH_WORK_DIR_NAME
     work.mkdir(parents=True)
     baseline_document_with_marker = json.dumps(
-        baseline_document(plugins=[{"name": "StandIn"}])
+        baseline_document(
+            plugins=[{"name": "StandIn"}],
+            filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+        )
     )
     if first_pass == "missing":
         first_baseline = tmp_path / "gone" / "absent.baseline"
@@ -668,10 +701,20 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     assert scanner._baseline_in_use() is True
     assert asked, "the valid baseline was never consulted"
     # The repository wrote a config of its own, so the baseline is not the
-    # operator's and its settings are not applied; the document read is the
+    # operator's: its settings are not applied, though it sits outside the
+    # tree, and its entries are not trusted either. The document read is the
     # marker that this baseline, and not the first pass's, was the one used.
     assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
+    ]
+    assert scanner._baseline_entries_trusted() is False
+    effective_plugins = [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+    assert "StandIn" not in effective_plugins
+    assert "AWSKeyDetector" in effective_plugins
+    assert EXCLUDE_FILTER_PATH not in [
+        f.path for f in scanner.config.options.scan_settings.filters_used
     ]
 
 

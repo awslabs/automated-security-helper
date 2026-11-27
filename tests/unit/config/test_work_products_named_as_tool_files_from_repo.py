@@ -1410,9 +1410,15 @@ def test_a_refused_option_baseline_is_never_opened_by_the_scan(tmp_path, monkeyp
 
 
 @pytest.mark.unit
-def test_an_operator_option_naming_the_work_product_baseline_is_loaded(tmp_path):
-    """Control: the operator's own configuration naming the same baseline
-    keeps today's answer."""
+def test_an_option_naming_the_work_product_baseline_beside_a_repository_config(
+    tmp_path,
+):
+    """The scanned repository carries a config of its own, so the typed option
+    is not recorded as the operator's. The baseline it names is read (the
+    document is the marker of which file that was), but it sets no plugins or
+    filters: the scan runs the default plugins and none of the baseline's
+    filters. This control used to keep the old answer, where the baseline's
+    marker plugin replaced the defaults."""
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
         DetectSecretsScannerConfig,
     )
@@ -1420,7 +1426,7 @@ def test_an_operator_option_naming_the_work_product_baseline_is_loaded(tmp_path)
     layout = _layout(tmp_path)
     _repo_config(layout["source"], "")
     derived = layout["work"] / "derived.baseline"
-    derived.write_text(_baseline_json())
+    derived.write_text(_named_baseline_json("StandIn"))
     scanner = _detect_secrets_built(
         layout,
         scanner_config=DetectSecretsScannerConfig(
@@ -1428,12 +1434,23 @@ def test_an_operator_option_naming_the_work_product_baseline_is_loaded(tmp_path)
         ),
     )
     options = scanner.config.options
-    # The option keeps the value as written, and the scan loaded that
-    # baseline (its marker plugin is in the document the scan read).
+    # The option keeps the value as written, and the scan read that baseline
+    # (its marker plugin is in the document the scan read).
     assert str(options.baseline_file) == derived.as_posix(), options.baseline_file
     assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
     ]
+    # What the scan runs with: the default plugins, none of the baseline's.
+    assert "StandIn" not in _plugin_names(options), _plugin_names(options)
+    assert "AWSKeyDetector" in _plugin_names(options), _plugin_names(options)
+    assert _BASELINE_FILTER_PATH not in _filter_paths(options), _filter_paths(options)
+
+
+_BASELINE_FILTER_PATH = "detect_secrets.filters.regex.should_exclude_secret"
+
+
+def _filter_paths(options) -> list:
+    return [item.path for item in options.scan_settings.filters_used]
 
 
 def _named_baseline_json(plugin_name: str) -> str:
@@ -1445,6 +1462,7 @@ def _named_baseline_json(plugin_name: str) -> str:
         {
             "version": "1.5.0",
             "plugins_used": [{"name": plugin_name}],
+            "filters_used": [{"path": _BASELINE_FILTER_PATH, "pattern": [".*"]}],
             "results": {},
         }
     )
@@ -1474,13 +1492,18 @@ def test_a_relative_baseline_option_names_the_scanned_trees_file(tmp_path, monke
         ),
     )
     options = scanner.config.options
-    # The scan loaded the scanned tree's file (MarkerA), not the same-named
+    # The scan read the scanned tree's file (MarkerA), not the same-named
     # one in the working directory (MarkerB), and the option keeps the
     # relative value as written.
     assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "MarkerA"
     ]
     assert str(options.baseline_file) == "team.baseline", options.baseline_file
+    # The file sits in the scanned tree, so it is the repository's whoever
+    # named it: it sets no plugins or filters.
+    assert "MarkerA" not in _plugin_names(options), _plugin_names(options)
+    assert "AWSKeyDetector" in _plugin_names(options), _plugin_names(options)
+    assert _BASELINE_FILTER_PATH not in _filter_paths(options), _filter_paths(options)
 
 
 @pytest.mark.unit
@@ -1498,13 +1521,18 @@ def test_a_discovered_baseline_is_found_in_the_scanned_tree_not_the_cwd(
     monkeypatch.chdir(rundir)
     scanner = _detect_secrets_built(layout)
     options = scanner.config.options
-    # The scan loaded the scanned tree's discovered file (MarkerA), not the
+    # The scan read the scanned tree's discovered file (MarkerA), not the
     # working directory's (MarkerB), and with nothing configured the option
     # stays unset.
     assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "MarkerA"
     ]
     assert options.baseline_file is None, options.baseline_file
+    # A found baseline marks candidates and nothing more: the default
+    # plugins run and none of its filters apply.
+    assert "MarkerA" not in _plugin_names(options), _plugin_names(options)
+    assert "AWSKeyDetector" in _plugin_names(options), _plugin_names(options)
+    assert _BASELINE_FILTER_PATH not in _filter_paths(options), _filter_paths(options)
 
 
 @pytest.mark.unit

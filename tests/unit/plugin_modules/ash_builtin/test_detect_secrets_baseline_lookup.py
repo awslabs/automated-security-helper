@@ -8,7 +8,7 @@ The defect
 process working directory. So:
 
 * ``ash scan --source-dir repo`` run from anywhere but ``repo`` ignores
-  ``repo/.secrets.baseline``: its plugin list and filters are not applied, and the
+  ``repo/.secrets.baseline``: the candidates it lists are not marked, and the
   same tree reports different findings depending on where ASH was started.
 * a ``.secrets.baseline`` in the working directory is applied to whatever tree is
   scanned, although it belongs to a different directory.
@@ -21,11 +21,17 @@ no effect on a scan of another tree.
 
 How the tests observe it
 ------------------------
-The baseline carries a ``should_exclude_file`` filter for ``skipme.py``. Two files in
-the tree hold the same planted key id, ``skipme.py`` and ``keepme.py``. With the
-baseline applied only ``keepme.py`` is reported; with it ignored both are. The kept
-file is what shows the scan ran at all, so no case can pass by reporting nothing.
-None of these baselines enables verification, so nothing here uses the network.
+The baseline in the tree lists the planted candidate of ``skipme.py`` under
+``results`` and also carries a ``should_exclude_file`` filter for ``skipme.py``.
+Two files in the tree hold the same planted key id, ``skipme.py`` and
+``keepme.py``. A baseline found in the scanned tree, or named by a relative
+``baseline_file`` that resolves into it, only marks the candidates it lists: its
+filters are not applied. So when the right file is read, ``skipme.py`` is
+reported as a suppressed finding and ``keepme.py`` as an ordinary one; when the
+file is not read, neither is marked; and because the filter is not applied,
+``skipme.py`` is never missing from the report. The kept file is what shows the
+scan ran at all, so no case can pass by reporting nothing. None of these
+baselines enables verification, so nothing here uses the network.
 """
 
 import json
@@ -55,9 +61,19 @@ pytestmark = pytest.mark.integration
 # self-scan to report. AWS's documentation placeholder.
 PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
 EXCLUDE_FILTER_PATH = "detect_secrets.filters.regex.should_exclude_file"
+SECRET_TYPE = "AWS Access Key"  # pragma: allowlist secret
 
 
-def _baseline_excluding(name: str) -> str:
+def _baseline_listing(name: str) -> str:
+    """A baseline that lists *name*'s planted candidate and also excludes *name*.
+
+    The listing is what a baseline in the tree may still do (mark the candidate);
+    the exclusion filter is what it may not (a tree baseline's filters are not
+    applied), so a scan that read the file reports *name* as suppressed and a
+    scan that applied the filter would not report it at all.
+    """
+    from detect_secrets.core.potential_secret import PotentialSecret
+
     return json.dumps(
         {
             "version": "1.5.0",
@@ -68,7 +84,16 @@ def _baseline_excluding(name: str) -> str:
                     "pattern": [rf"(^|[\\/]){re.escape(name)}$"],
                 }
             ],
-            "results": {},
+            "results": {
+                name: [
+                    {
+                        "type": SECRET_TYPE,
+                        "hashed_secret": PotentialSecret.hash_secret(PLANTED_KEY),
+                        "line_number": 1,
+                        "is_secret": False,
+                    }
+                ]
+            },
             "generated_at": "2026-01-01T00:00:00Z",
         }
     )
@@ -129,33 +154,42 @@ def _scanner(source: Path, output: Path, **options) -> DetectSecretsScanner:
     )
 
 
-def _reported_files(scanner: DetectSecretsScanner, source: Path) -> set:
+def _reported_files(scanner: DetectSecretsScanner, source: Path) -> dict:
+    """The planted files the scan reported, each with whether it is suppressed."""
     report = scanner.scan(target=source, target_type="source")
     assert report is not False, "the scan did not run"
-    names = set()
+    names = {}
     for result in report.runs[0].results:
         text = result.message.root.text
         for candidate in ("skipme.py", "keepme.py"):
             if candidate in text:
-                names.add(candidate)
+                names[candidate] = bool(result.suppressions)
     return names
 
 
+# What a scan that read the tree's baseline reports: its listed candidate is kept
+# in the report as suppressed (a baseline in the tree marks, it does not remove),
+# the other file is an ordinary finding, and the baseline's own exclusion filter
+# for skipme.py is not applied, or skipme.py would be missing.
+MARKED_BY_THE_TREES_BASELINE = {"skipme.py": True, "keepme.py": False}
+NOTHING_MARKED = {"skipme.py": False, "keepme.py": False}
+
+
 @pytest.mark.parametrize("name", [".secrets.baseline", ".ash/.secrets.baseline"])
-def test_baseline_in_the_source_directory_applies_from_any_working_directory(
+def test_baseline_in_the_source_directory_is_read_from_any_working_directory(
     layout, monkeypatch, name
 ):
     source, output, cwd = layout
     baseline = source / name
     baseline.parent.mkdir(parents=True, exist_ok=True)
-    baseline.write_text(_baseline_excluding("skipme.py"), encoding="utf-8")
+    baseline.write_text(_baseline_listing("skipme.py"), encoding="utf-8")
     monkeypatch.chdir(cwd)
 
     reported = _reported_files(_scanner(source, output), source)
 
-    assert reported == {"keepme.py"}, (
-        f"the tree's own {name} was not applied when ASH ran from another "
-        f"directory: reported {sorted(reported)}"
+    assert reported == MARKED_BY_THE_TREES_BASELINE, (
+        f"the tree's own {name} was not read when ASH ran from another "
+        f"directory, or its filter was applied: reported {reported}"
     )
 
 
@@ -163,7 +197,7 @@ def test_relative_baseline_file_is_taken_from_the_source_directory(layout, monke
     source, output, cwd = layout
     (source / "config").mkdir()
     (source / "config" / "team.baseline").write_text(
-        _baseline_excluding("skipme.py"), encoding="utf-8"
+        _baseline_listing("skipme.py"), encoding="utf-8"
     )
     monkeypatch.chdir(cwd)
 
@@ -171,9 +205,9 @@ def test_relative_baseline_file_is_taken_from_the_source_directory(layout, monke
         _scanner(source, output, baseline_file="config/team.baseline"), source
     )
 
-    assert reported == {"keepme.py"}, (
+    assert reported == MARKED_BY_THE_TREES_BASELINE, (
         "baseline_file='config/team.baseline' was not read from the source "
-        f"directory: reported {sorted(reported)}"
+        f"directory, or its filter was applied: reported {reported}"
     )
 
 
@@ -184,52 +218,47 @@ def test_baseline_in_the_working_directory_does_not_apply_to_another_tree(
     source, output, cwd = layout
     decoy = cwd / name
     decoy.parent.mkdir(parents=True, exist_ok=True)
-    decoy.write_text(_baseline_excluding("keepme.py"), encoding="utf-8")
+    decoy.write_text(_baseline_listing("keepme.py"), encoding="utf-8")
     monkeypatch.chdir(cwd)
 
     reported = _reported_files(_scanner(source, output), source)
 
-    assert reported == {"skipme.py", "keepme.py"}, (
+    assert reported == NOTHING_MARKED, (
         f"the working directory's {name} was applied to a scan of {source}: "
-        f"reported {sorted(reported)}"
+        f"reported {reported}"
     )
 
 
-def test_control_baseline_applies_when_run_from_the_source_directory(
+def test_control_baseline_is_read_when_run_from_the_source_directory(
     layout, monkeypatch
 ):
-    """Control: from inside the tree the baseline already applies."""
+    """Control: from inside the tree the baseline is read the same way."""
     source, output, _ = layout
     (source / ".secrets.baseline").write_text(
-        _baseline_excluding("skipme.py"), encoding="utf-8"
+        _baseline_listing("skipme.py"), encoding="utf-8"
     )
     monkeypatch.chdir(source)
 
     reported = _reported_files(_scanner(source, output), source)
 
-    assert reported == {"keepme.py"}
+    assert reported == MARKED_BY_THE_TREES_BASELINE
 
 
 def test_control_no_baseline_reports_both_files(layout, monkeypatch):
-    """Control: without a baseline both planted keys are reported."""
+    """Control: without a baseline both planted keys are reported, unmarked."""
     source, output, cwd = layout
     monkeypatch.chdir(cwd)
 
-    assert _reported_files(_scanner(source, output), source) == {
-        "skipme.py",
-        "keepme.py",
-    }
+    assert _reported_files(_scanner(source, output), source) == NOTHING_MARKED
 
 
-def test_cli_scan_from_another_directory_applies_the_trees_baseline(
-    layout, monkeypatch
-):
+def test_cli_scan_from_another_directory_reads_the_trees_baseline(layout, monkeypatch):
     """The same through ``run_ash_scan``, the function behind ``ash scan``."""
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 
     source, output, cwd = layout
     (source / ".secrets.baseline").write_text(
-        _baseline_excluding("skipme.py"), encoding="utf-8"
+        _baseline_listing("skipme.py"), encoding="utf-8"
     )
     monkeypatch.chdir(cwd)
 
@@ -254,13 +283,28 @@ def test_cli_scan_from_another_directory_applies_the_trees_baseline(
             output / "scanners" / "detect-secrets" / "source" / "results_sarif.sarif"
         ).read_text(encoding="utf-8")
     )
-    messages = " ".join(
-        result["message"]["text"]
-        for run in sarif.get("runs", [])
-        for result in run.get("results", [])
+    results = [
+        result for run in sarif.get("runs", []) for result in run.get("results", [])
+    ]
+    marked = {
+        name: any(
+            name in result["message"]["text"] and result.get("suppressions")
+            for result in results
+        )
+        for name in ("skipme.py", "keepme.py")
+    }
+    present = {
+        name: any(name in result["message"]["text"] for result in results)
+        for name in ("skipme.py", "keepme.py")
+    }
+    assert present["keepme.py"], "the harness did not reach detect-secrets"
+    # The tree's baseline was read from another working directory (its listed
+    # candidate is marked) and, as the tree's own, set no filters (skipme.py is
+    # still in the report).
+    assert present["skipme.py"], (
+        "the tree's baseline filter was applied: skipme.py is missing"
     )
-    assert "keepme.py" in messages, "the harness did not reach detect-secrets"
-    assert "skipme.py" not in messages, (
-        "ash scan --source-dir run from another directory ignored the tree's "
-        ".secrets.baseline"
+    assert marked == {"skipme.py": True, "keepme.py": False}, (
+        "ash scan --source-dir run from another directory did not read the "
+        f"tree's .secrets.baseline: {marked}"
     )
