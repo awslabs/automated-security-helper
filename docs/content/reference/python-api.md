@@ -152,7 +152,7 @@ Every parameter is optional and can be passed by keyword. Unless the table says 
 | `run` | `True` | Container mode only. |
 | `force` | `False` | Container mode only. |
 | `oci_runner` | `None` | Container mode only. |
-| `build_engine` | `BuildEngine.RUNNER` | Container mode only: the program that builds the image, a `BuildEngine` from `automated_security_helper.core.enums`. `BuildEngine.RUNNER`, the only one so far, builds with the container runtime that runs the scan. |
+| `build_engine` | `BuildEngine.RUNNER` | Container mode only: the program that builds the image, a `BuildEngine` from `automated_security_helper.core.enums`. The default, `BuildEngine.RUNNER`, builds with the container runtime that runs the scan. |
 | `build_target` | `None` | Container mode only. |
 | `offline_semgrep_rulesets` | `'p/ci'` | Container mode only. |
 | `container_uid` | `None` | Container mode only. |
