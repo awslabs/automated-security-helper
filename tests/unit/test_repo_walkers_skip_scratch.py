@@ -1279,8 +1279,9 @@ class TestIterRepoFilesPrunesTheScratchTree:
         assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(REPO_ROOT.resolve())
 
     # pytest's own temp trees: the base directory a run was given with --basetemp, and
-    # PYTEST_DEBUG_TEMPROOT. A run can keep either inside the repository, where every
-    # worker's tmp_path directories are made and deleted while a walk runs.
+    # the pytest-of-<user> directories in PYTEST_DEBUG_TEMPROOT. A run can keep either
+    # inside the repository, where every worker's tmp_path directories are made and
+    # deleted while a walk runs. The rest of a PYTEST_DEBUG_TEMPROOT is not pytest's.
 
     @staticmethod
     def _planted_tree(tmp_path, monkeypatch):
@@ -1333,15 +1334,23 @@ class TestIterRepoFilesPrunesTheScratchTree:
     def test_pytest_debug_temproot_inside_the_root_is_not_entered(
         self, tmp_path, monkeypatch
     ):
-        """Where pytest puts its base directory when it is given no ``--basetemp``."""
-        root, basetemp, in_basetemp, beside_it = self._planted_tree(
+        """Where pytest puts its base directory when it is given no ``--basetemp``.
+
+        That is ``pytest-of-<user>`` in the directory the variable names. What a worker's
+        ``tmp_path`` holds is in it, and the temp root's other files are not pytest's.
+        """
+        root, temproot, in_temproot, beside_it = self._planted_tree(
             tmp_path, monkeypatch
         )
+        in_pytests = temproot / "pytest-of-someone" / "pytest-0" / "planted_probe.py"
+        in_pytests.parent.mkdir(parents=True)
+        in_pytests.write_text("x = 1\n", encoding="utf-8")
         self._record_basetemp(monkeypatch, None)
-        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(basetemp))
+        monkeypatch.setenv("PYTEST_DEBUG_TEMPROOT", str(temproot))
 
         yielded = {p.resolve() for p in iter_repo_files(root)}
-        assert in_basetemp.resolve() not in yielded
+        assert in_pytests.resolve() not in yielded
+        assert in_temproot.resolve() in yielded
         assert beside_it.resolve() in yielded
 
     def _planted_temproot(self, tmp_path, monkeypatch):
