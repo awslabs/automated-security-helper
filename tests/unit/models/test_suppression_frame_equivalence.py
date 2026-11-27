@@ -572,6 +572,55 @@ class TestFrameLayerAgreesWithTheReference:
         )
         assert frame == reference
 
+    @pytest.mark.parametrize(
+        ("finding_package_path", "entry_package_path", "expected_index"),
+        [
+            # a trailing slash on the finding's copy still names that copy
+            pytest.param("node_modules/a/", "node_modules/a", 0, id="slash-on-finding"),
+            # the reverse is not a match for the reference, and so not for the layer
+            pytest.param(
+                "node_modules/a", "node_modules/a/", None, id="slash-on-entry"
+            ),
+            # a longer name that merely starts the same is another copy
+            pytest.param("node_modules/ab/", "node_modules/a", None, id="longer-name"),
+            # control: the same spelling on both sides matches on both
+            pytest.param("node_modules/a", "node_modules/a", 0, id="control-equal"),
+        ],
+    )
+    def test_a_trailing_slash_on_package_path_without_the_saved_example(
+        self, finding_package_path, entry_package_path, expected_index
+    ):
+        finding = build_finding(
+            {
+                "scanner": ENGINE,
+                "rule_id": "R1",
+                "file_path": "package-lock.json",
+                "package_path": finding_package_path,
+            }
+        )
+        entry = AshSuppression.model_validate(
+            {
+                "path": "**",
+                "reason": "r",
+                "package_path": entry_package_path,
+            },
+            context={TOLERATE_STORED_CONFIG: []},
+        )
+
+        def operation(impl, entries, f, resolver, warned):
+            if impl == "reference":
+                return REFERENCE.first(entries, f, resolver, warned)
+            hit = should_suppress_finding(f, entries, resolver, warned_engines=warned)
+            return (
+                None
+                if hit[1] is None
+                else next(i for i, e in enumerate(entries) if e is hit[1])
+            )
+
+        reference, frame = run_both(operation, [entry], finding, resolver_answers(True))
+        assert reference[0] == expected_index
+        assert frame == reference
+
     @SETTINGS
     @given(case=cases(min_size=1, max_size=4, repeat=40), answer=st.booleans())
     def test_a_list_longer_than_one_chunk_keeps_list_order(self, case, answer):

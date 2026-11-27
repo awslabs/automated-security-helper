@@ -4,6 +4,7 @@
 import logging
 import os
 import re
+import sys
 import threading
 from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -19,6 +20,95 @@ ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 ASH_INSTALLED_REVISION_PATH = ASH_ASSETS_DIR.joinpath("ASH_INSTALLED_REVISION")
 ASH_DOCS_URL = "https://awslabs.github.io/automated-security-helper"
 ASH_REPO_URL = "https://github.com/awslabs/automated-security-helper"
+
+
+#: A version string that can name a release tag: starts with a digit and holds only
+#: the characters PEP 440 versions use. get_version() returns "unknown" when it cannot
+#: read one, and a tag built from that would be ``vunknown``.
+_TAGGABLE_VERSION = re.compile(r"^[0-9][0-9A-Za-z.+!-]*$")
+
+#: Appended to a hint whose version could not be read, so the reader knows the
+#: command no longer pins the ASH they are running.
+UNPINNED_INSTALL_NOTE = (
+    "(note: ASH could not read its own version, so this installs the repository's "
+    "default branch, which may not be the version you are running)"
+)
+
+
+def _running_tag() -> Optional[str]:
+    """``v<running version>``, or None when the version cannot name a tag."""
+    from automated_security_helper import __version__
+
+    version = str(__version__ or "")
+    return f"v{version}" if _TAGGABLE_VERSION.match(version) else None
+
+
+def ash_git_requirement(extra: str = "") -> str:
+    """ASH as a PEP 508 direct reference to its own repository, at the running version.
+
+    ASH is installed from git, not from a package index, and the name
+    ``automated-security-helper`` on PyPI belongs to an unrelated third party, so a
+    requirement that names ASH without a URL resolves to a stranger's package.
+
+    The reference is pinned to the tag of the running version, so following a hint
+    built from it reinstalls the same ASH. An untagged URL was tried and rejected: it
+    resolves to the default branch, so on a v4 install it silently replaced ASH with
+    an older release. Before a version's tag exists the pinned form fails to resolve,
+    which is loud, and the release creates the tag.
+
+    When the version cannot be read (get_version() returns "unknown"), the reference
+    is untagged rather than ``@vunknown``, which names no tag at all. The command
+    builders below say so in the hint.
+    """
+    # One expression, so the name is never a requirement without its repository: a
+    # name and extra built apart and joined to the URL later read, to the install
+    # hint gate, as a bare index requirement.
+    extras = f"[{extra}]" if extra else ""
+    tag = _running_tag()
+    ref = f"@{tag}" if tag else ""
+    return f"automated-security-helper{extras} @ git+{ASH_REPO_URL}.git{ref}"
+
+
+def _running_python() -> str:
+    """The interpreter running ASH, as a command word.
+
+    A hint that says ``pip install`` reaches whatever pip is first on PATH. Inside
+    the MSIX, Chocolatey and Flatpak packages ASH runs from its own virtualenv, so
+    that pip installs into some other environment and the hint does nothing for ASH.
+    ``<this python> -m pip`` installs into the environment that is running. The path
+    is double-quoted when it contains a space or a shell metacharacter, which cmd,
+    POSIX shells and PowerShell's argument mode all accept (PowerShell needs a
+    leading ``&`` to run a quoted path as a command).
+    """
+    executable = sys.executable or "python"
+    if re.search(r"[\s&()^%!;'`$|<>*?]", executable):
+        return f'"{executable}"'
+    return executable
+
+
+def _with_note(command: str) -> str:
+    return command if _running_tag() else f"{command} {UNPINNED_INSTALL_NOTE}"
+
+
+def ash_reinstall_command() -> str:
+    """The command that reinstalls the running version of ASH from its repository."""
+    return _with_note(
+        f'{_running_python()} -m pip install --force-reinstall "{ash_git_requirement()}"'
+    )
+
+
+def ash_extra_install_command(extra: str) -> str:
+    """The command that adds one of ASH's optional extras to the running install.
+
+    ASH is installed from git, not from a package index, and the name
+    ``automated-security-helper`` on PyPI belongs to an unrelated third party. So a
+    hint that installs the distribution and its extra by name alone installs a
+    stranger's package. This names ASH's own repository as a PEP 508 direct
+    reference instead, installed with the interpreter that is running ASH.
+    """
+    return _with_note(
+        f'{_running_python()} -m pip install "{ash_git_requirement(extra)}"'
+    )
 
 
 def _installed_revision(path: Path) -> str:
@@ -287,9 +377,10 @@ def is_blank_bin_path(value: "str | None") -> bool:
     lookup search it. Path() also drops a trailing separator, which made "  /" the
     relative "  ". So a value is blank when it is only whitespace or when every
     component Path() keeps is: "  /", " /" and "\\t/" are blank. "/" and "." name
-    a directory, and so does " /x", a relative path, so they are not blank. Tool
-    lookup does not search a relative ASH_BIN_PATH (subprocess_utils.find_executable),
-    and ``ash dependencies install`` makes a relative bin path absolute.
+    a directory, and so does " /x", a relative path, so they are not blank.
+    ``ash dependencies install`` makes a relative --bin-path absolute, where it was
+    typed. A relative ASH_BIN_PATH is used neither by tool lookup nor by installs
+    (subprocess_utils.usable_bin_path).
     """
     if not value or not value.strip():
         return True
@@ -1194,6 +1285,14 @@ ASH_EXIT_CODES: Dict[int, str] = {
     AshExitCode.WORKSPACE_ERROR.value: "workspace definition or policy error",
     AshExitCode.USAGE_ERROR.value: "usage error",
 }
+
+#: The spelling of the option that reads a command's options from a JSON document.
+#: cli/json_input.py adds it to the commands that take it and re-exports this name.
+#: It is defined here, in the layer ``interactions`` may read, because
+#: interactions/wrapper_contract.py has to know which commands take it, and the
+#: layer order lets ``interactions`` import ``core`` but not ``cli``
+#: (tests/unit/test_layer_dag_boundaries.py).
+CLI_JSON_INPUT_FLAG = "--cli-json-input"
 
 
 #: The ASH_OFFLINE values that name offline mode, and the ones that name online

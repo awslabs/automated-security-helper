@@ -73,7 +73,7 @@ Automated Security Helper, the agentic security harness · one workflow for your
 ash [OPTIONS] COMMAND [ARGS]...
 ```
 
-Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--only-scanners`](#scan--only-scanners), [`--add-scanners`](#scan--add-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--express`](#scan--express), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--annotate-duplicates`](#scan--annotate-duplicates), [`--fold-duplicates`](#scan--fold-duplicates), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--staged`](#scan--staged), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--require-scanner-selection`](#scan--require-scanner-selection), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg), [`--baseline`](#scan--baseline), [`--image`](#scan--image), [`--image-archive`](#scan--image-archive), [`--image-layout`](#scan--image-layout).
+Run with no command, `ash` runs a scan. It accepts these options of [`ash scan`](#scan), with the same types, defaults and environment variables: [`--source-dir`](#scan--source-dir), [`--output-dir`](#scan--output-dir), [`--scanners`](#scan--scanners), [`--exclude-scanners`](#scan--exclude-scanners), [`--only-scanners`](#scan--only-scanners), [`--add-scanners`](#scan--add-scanners), [`--ash-plugin-modules`](#scan--ash-plugin-modules), [`--config-overrides`](#scan--config-overrides), [`--offline`](#scan--offline), [`--sandbox`](#scan--sandbox), [`--express`](#scan--express), [`--offline-semgrep-rulesets`](#scan--offline-semgrep-rulesets), [`--strategy`](#scan--strategy), [`--progress`](#scan--progress), [`--output-formats`](#scan--output-formats), [`--cleanup`](#scan--cleanup), [`--phases`](#scan--phases), [`--inspect`](#scan--inspect), [`--use-existing`](#scan--use-existing), [`--version`](#scan--version), [`--mode`](#scan--mode), [`--python-only`](#scan--python-only), [`--show-summary`](#scan--show-summary), [`--quiet`](#scan--quiet), [`--log-level`](#scan--log-level), [`--config`](#scan--config), [`--verbose`](#scan--verbose), [`--debug`](#scan--debug), [`--color`](#scan--color), [`--fail-on-findings`](#scan--fail-on-findings), [`--fail-on-incomplete-scanners`](#scan--fail-on-incomplete-scanners), [`--allow-stale-content-db`](#scan--allow-stale-content-db), [`--simple`](#scan--simple), [`--ignore-suppressions`](#scan--ignore-suppressions), [`--honor-ignore-files`](#scan--honor-ignore-files), [`--min-severity`](#scan--min-severity), [`--compact-report`](#scan--compact-report), [`--annotate-duplicates`](#scan--annotate-duplicates), [`--fold-duplicates`](#scan--fold-duplicates), [`--changed-files-only`](#scan--changed-files-only), [`--base-ref`](#scan--base-ref), [`--staged`](#scan--staged), [`--allow-in-tree-tools`](#scan--allow-in-tree-tools), [`--shard-index`](#scan--shard-index), [`--shard-count`](#scan--shard-count), [`--config-from-scanned-repository`](#scan--config-from-scanned-repository), [`--config-file-from-scanned-repository`](#scan--config-file-from-scanned-repository), [`--config-file-from-another-checkout`](#scan--config-file-from-another-checkout), [`--require-scanner-selection`](#scan--require-scanner-selection), [`--ash-config-from-host`](#scan--ash-config-from-host), [`--workspace`](#scan--workspace), [`--workspace-config`](#scan--workspace-config), [`--allow-missing-projects`](#scan--allow-missing-projects), [`--dry-run`](#scan--dry-run), [`--build`](#scan--build), [`--run`](#scan--run), [`--force`](#scan--force), [`--oci-runner`](#scan--oci-runner), [`--build-target`](#scan--build-target), [`--container-uid`](#scan--container-uid), [`--container-gid`](#scan--container-gid), [`--ash-revision-to-install`](#scan--ash-revision-to-install), [`--custom-containerfile`](#scan--custom-containerfile), [`--custom-build-arg`](#scan--custom-build-arg), [`--baseline`](#scan--baseline), [`--image`](#scan--image), [`--image-archive`](#scan--image-archive), [`--image-layout`](#scan--image-layout), [`--source-git`](#scan--source-git), [`--git-ref`](#scan--git-ref), [`--git-depth`](#scan--git-depth).
 
 Options that only `ash` itself accepts:
 
@@ -758,7 +758,9 @@ platform, pinned provisioning, and docs generated from the manifest. A row that 
 be evaluated here reads not-run, which is not a pass.
 
 Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
-but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+plugin that cannot be loaded). A red row outranks a load error: a run that found both
+exits 1, so a red verdict is never masked by an unrelated plugin's import failure.
 
 ```text
 ash plugin verify [OPTIONS] [names]...
@@ -1049,9 +1051,12 @@ ash scan [OPTIONS]
 | <a id="scan--custom-containerfile"></a>`--custom-containerfile` | text | not set |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build \*after\* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | <a id="scan--custom-build-arg"></a>`--custom-build-arg` | text, repeatable | not set |  | Custom build arguments to pass to the container build |
 | <a id="scan--baseline"></a>`--baseline` | text | not set | `ASH_BASELINE` | Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise). |
-| <a id="scan--image"></a>`--image` | text, repeatable | not set |  | Scan a container image named by reference (registry/repo[:tag]) instead of a source directory. ASH fetches nothing itself: the image is prepared by a container engine or the scanner tools' own registry clients. Repeat it, or give a comma list, to scan several images: each is its own scan, with its own reports under &lt;output-dir&gt;/&lt;NN&gt;-&lt;image&gt;-&lt;hash&gt;/, and the exit code is the worst of theirs. Exclusive with --source-dir, --image-archive and --image-layout; scanners that do not declare container_image targets are reported SKIPPED. |
+| <a id="scan--image"></a>`--image` | text, repeatable | not set |  | Scan a container image named by reference (registry/repo, optionally followed by :tag, @sha256:digest or both) instead of a source directory. ASH fetches nothing itself: the image is prepared by a container engine or the scanner tools' own registry clients. Repeat it, or give a comma list, to scan several images: each is its own scan, with its own reports under &lt;output-dir&gt;/&lt;NN&gt;-&lt;image&gt;-&lt;hash&gt;/, and the exit code is the worst of theirs. Exclusive with --source-dir, --image-archive and --image-layout; scanners that do not declare container_image targets are reported SKIPPED. |
 | <a id="scan--image-archive"></a>`--image-archive` | text | not set |  | Scan a saved container image (an uncompressed docker save / OCI archive tarball) instead of a source directory. Needs no container engine. Exclusive with --source-dir, --image and --image-layout. |
 | <a id="scan--image-layout"></a>`--image-layout` | text | not set |  | Scan a container image from an OCI image-layout directory (the directory holding the oci-layout marker file) instead of a source directory. Needs no container engine. Exclusive with --source-dir, --image and --image-archive. |
+| <a id="scan--source-git"></a>`--source-git` | text | not set |  | Scan a remote git repository instead of a source directory: ASH clones it (https or ssh URL, or user@host:path; never a local path) into a temporary directory, scans that, and removes it. git runs without your configuration or credentials, so the repository must be readable anonymously or by a key a non-interactive ssh finds. Same request rules as the MCP set_source_git tool. Exclusive with --source-dir, --workspace, the image options, --staged, --use-existing and --changed-files-only. |
+| <a id="scan--git-ref"></a>`--git-ref` | text | not set |  | Branch, tag or commit of --source-git to scan. Default: the remote's default branch. |
+| <a id="scan--git-depth"></a>`--git-depth` | integer | not set |  | How many commits of history --source-git fetches, 1 to 1000 (default 1). |
 | <a id="scan--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
 | <a id="scan--generate-cli-skeleton"></a>`--generate-cli-skeleton` | flag | off |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, or null where it is required or an environment variable backs it, and exit. |
 
@@ -1111,7 +1116,8 @@ Record a new review: re-hash locked files whose bytes changed.
 
 Run it after reading what changed in a file and confirming its suppressions
 still hold. It prints each file whose hash changed. A locked file that no
-longer exists is reported and left as it was; exit code 1 then.
+longer exists is reported and left as it was (exit code 1), unless
+--drop-missing removes its dead entry.
 
 ```text
 ash suppress refresh [OPTIONS] [paths]...
@@ -1120,11 +1126,13 @@ ash suppress refresh [OPTIONS] [paths]...
 <!-- doctest: options of=cli.suppress.refresh -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Every locked file when none is named. |
+| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Pass --all for every locked file. |
 
 <!-- doctest: options of=cli.suppress.refresh -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
+| <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Re-hash every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
+| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-verify"></a>`ash suppress verify`
@@ -1132,8 +1140,12 @@ ash suppress refresh [OPTIONS] [paths]...
 Check the lock against the tree. Exits 1 when anything is out of date.
 
 Lists every locked file whose bytes changed or that is gone, and every
-symbol suppression in the named configs whose file has no lock entry. Exit
-code 0 means a scan applies every symbol suppression.
+symbol suppression in the checked configs that the lock does not record
+(no entry for its file, or no recorded (rule_id, symbol) scope). It checks
+the named --config files, or the one config file a scan of the source
+directory discovers, and prints which; suppressions an `extends` base
+contributes are not read, so exit code 0 covers the checked files, not
+every config a scan could merge.
 
 ```text
 ash suppress verify [OPTIONS]

@@ -104,7 +104,7 @@ import os
 import platform
 import re
 import shutil
-import subprocess  # nosec B404 - runs pinned executables' --version only
+import subprocess  # nosec B404 - runs pinned executables' version commands only
 import sys
 import sysconfig
 import tarfile
@@ -1511,7 +1511,7 @@ def reports_version(output: str, bare_version: str) -> bool:
 def version_output(executable: str, argv: "list[str] | None" = None) -> str:
     """``executable --version``'s combined output, run in a throwaway HOME.
 
-    With ``argv``, that command is run instead (an entry's ``version_probe``).
+    With ``argv``, that command is run instead: an entry's ``version_args`` or probe.
 
     Throwaway because a version query is not always read-only. opengrep is a
     self-extracting bundle that unpacks 208 MB into ``$HOME/.cache/opengrep`` on
@@ -1654,10 +1654,11 @@ def verify_third_party(
     present, non-empty and world-readable; every URL file still matches its
     digest; ``SOURCE`` names the entry's commit; its first executable is on
     ``search_path`` (PATH when None) in a copy no Python package installed; and
-    every such copy of any of its executables reports the recorded version. A
-    directory with no entry is a problem too: it would be a license claim for
-    something this table no longer describes. So is a publish's work directory
-    that still holds an earlier entry, which a publish that did not finish leaves.
+    every such copy of any of its executables, run with the entry's
+    ``version_args``, reports the recorded version. A directory with no entry
+    is a problem too: it would be a license claim for something this table no
+    longer describes. So is a publish's work directory that still holds an
+    earlier entry, which a publish that did not finish leaves.
 
     Reading a file as another user also takes search permission on the
     directories the path goes through, which a mode on the file does not give:
@@ -1777,6 +1778,9 @@ def verify_third_party(
                     f"the one installed. Output: {output.strip()[:200]!r}"
                 )
             continue
+        # getattr, as for version_probe: a table from before version_args existed
+        # asks every executable with --version. crane takes `version` instead.
+        version_args = tuple(getattr(entry, "version_args", ("--version",)))
         for position, executable in enumerate(entry.executable_names):
             copies = [
                 c
@@ -1789,14 +1793,16 @@ def verify_third_party(
                     "Python package's copy"
                 )
             for found in copies:
+                command = [found, *version_args]
+                shown = " ".join(command)
                 try:
-                    output = version_output(found)
+                    output = version_output(found, command)
                 except (OSError, subprocess.TimeoutExpired) as exc:
-                    problems.append(f"{tool}: `{found} --version` failed: {exc}")
+                    problems.append(f"{tool}: `{shown}` failed: {exc}")
                     continue
                 if not reports_version(output, bare_version):
                     problems.append(
-                        f"{tool}: `{found} --version` does not report {bare_version}, "
+                        f"{tool}: `{shown}` does not report {bare_version}, "
                         f"so the files under {directory} describe a different "
                         f"release than the one installed. Output: "
                         f"{output.strip()[:200]!r}"

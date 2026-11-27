@@ -55,7 +55,7 @@ scanners:
 | `forbid_unpinned_runners` | `true` | MEDIUM | `npx`, `bunx`, `pnpm dlx`, `pnpx` or `uvx` started with a package that has no exact version. `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg`, `pkg@latest` and ranges are not. |
 | `require_local` | `false` | MEDIUM | A remote entry (`url`, `httpUrl` or `serverUrl`) whose host is not loopback. `localhost`, `127.0.0.0/8` and `::1` count as local, however the IPv6 address is written. |
 | `remote_url_prefixes` | `[]` | MEDIUM | With a list: a remote URL that does not start with a listed prefix, and a remote URL that is not loopback and is not `https`. An empty list turns both checks off. |
-| `allowed_command_prefixes` | `[]` | MEDIUM | With a list: a declared command that is not a path starting with a listed prefix. A bare name such as `npx` is flagged. An empty list turns the check off. |
+| `allowed_command_prefixes` | `[]` | MEDIUM | With a list: a declared command that no listed entry allows. An entry that is a path allows the commands that start with it. An entry that is a bare name such as `npx` allows exactly that bare command, which the client finds on PATH, and no command that has a path, `./npx` included. An empty list turns the check off. |
 | `flag_env_secrets` | `true` | LOW | A literal value in an `env` entry whose name says key, token, secret or password. A reference such as `${NAME}` is fine. The value is never written into the finding. |
 
 The three `forbid_*` checks are on by default because each is a hazard the MCP specification and the clients' own documentation name, and each fires on an exact whole-word or exact-flag match, so a clean repository stays quiet. The prefix policies depend on the site, so they stay off until configured. An unknown option name is refused, and an error message never repeats a configured value.
@@ -82,8 +82,23 @@ With this, a remote server must live under `https://mcp.example.com/` and be rea
 
 ## What the converter writes
 
-For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (`.cursor/mcp.json` becomes `cursor__mcp.json`):
+For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (`.cursor/mcp.json` becomes `cursor__mcp.json`). This `.mcp.json` starts one server through `sudo`:
 
+<!-- doctest: config kind=mcp-client save-as=.mcp.json -->
+```json
+{
+  "mcpServers": {
+    "elevated": {
+      "command": "sudo",
+      "args": ["/usr/local/bin/mcp-files", "--root", "/srv/data"]
+    }
+  }
+}
+```
+
+The converter writes this script for it:
+
+<!-- doctest: illustrative reason="the script the converter writes for the entry above; running it would run sudo" -->
 ```sh
 #!/bin/sh
 # ash-mcp-span: {"source":".mcp.json","pointer":"/mcpServers/elevated","line":3,"col":17}
@@ -110,8 +125,14 @@ Some limits to know:
 
 ## Running it
 
+<!-- doctest: run expect-exit=2 -->
+```sh
+ash --source-dir . --scanners mcp-config --output-dir ash_output
+```
+
+The policy findings come from `mcp-config` alone. On the `.mcp.json` above it reports `MCP-PRIVILEGE-ESCALATION` (HIGH) at the server's `command`, so the scan exits 2. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan:
+
+<!-- doctest: illustrative reason="runs semgrep, whose default ruleset p/ci is fetched from the Semgrep registry over the network" -->
 ```sh
 ash --source-dir . --scanners mcp-config,semgrep --output-dir ash_output
 ```
-
-The policy findings come from `mcp-config` alone. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan, as above.

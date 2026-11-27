@@ -238,11 +238,21 @@ def safe_directories_for(target: Path) -> List[str]:
     ``.git`` it meets as the top, so a parent above it is not the checkout's. No
     ``.git`` above ``target`` names nothing more, the conservative reading.
 
+    Where the platform has no user ids (Windows: there is no ``os.geteuid``, and
+    ``os.lstat`` reports uid 0 for every file, because the owner there is a
+    security descriptor's SID, which ``st_uid`` does not carry), no ``.git`` can be
+    shown to belong to either user, so none passes the test: the walk stops at the
+    first ``.git``, logs it, and names nothing more, the same reading as an owner
+    that cannot be read. git's own ownership check, which reads the owner itself,
+    then decides whether to trust the checkout's top. ``target`` is named as on
+    every platform, so a scan of the checkout's top still names it.
+
     The one list both spawn paths read: ``build_scanner_policy`` stores it on the
     sandbox policy, and the scanner's unsandboxed spawn calls this function itself.
     """
     real = Path(os.path.realpath(target))
     named = [str(real)] if _usable_safe_directory(str(real)) else []
+    geteuid = getattr(os, "geteuid", None)
     try:
         owner = os.lstat(real).st_uid
     except OSError:
@@ -252,13 +262,26 @@ def safe_directories_for(target: Path) -> List[str]:
         git = parent / ".git"
         if not os.path.lexists(git):
             continue
+        top = str(parent)
+        if geteuid is None:
+            if top not in named:
+                from automated_security_helper.utils.log import ASH_LOGGER
+
+                ASH_LOGGER.debug(
+                    "safe_directories_for: not naming %s: the owner of %s cannot be "
+                    "read on this platform (no user ids), so git's own ownership "
+                    "check decides whether to trust it",
+                    top,
+                    str(git),
+                )
+            break
+        effective = geteuid()
         try:
             git_owner: int | None = os.lstat(git).st_uid
-            same_owner = git_owner in (owner, os.geteuid())
+            same_owner = git_owner in (owner, effective)
         except OSError:
             git_owner = None
             same_owner = False
-        top = str(parent)
         if same_owner and _usable_safe_directory(top) and top not in named:
             named.append(top)
         elif not same_owner:
@@ -271,7 +294,7 @@ def safe_directories_for(target: Path) -> List[str]:
                 str(git),
                 git_owner,
                 owner,
-                os.geteuid(),
+                effective,
             )
         break
     return named

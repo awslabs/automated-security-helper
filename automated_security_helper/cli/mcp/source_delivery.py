@@ -87,6 +87,7 @@ from automated_security_helper.utils.path_containment import (
     validate_contained_path,
 )
 from automated_security_helper.utils.git_command import GIT_PROGRAM, git_argv
+from automated_security_helper.utils.image_reference import image_reference_problem
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import (
@@ -317,7 +318,8 @@ def get_session_source_dir(session_id: str) -> Optional[Path]:
 
 
 def delivered_session_count() -> int:
-    """Return how many sessions currently have a recorded ``source_dir``.
+    """How many sessions currently hold a scan subject: a recorded
+    ``source_dir`` or an image binding.
 
     Deliberately a count and not the ids. The one caller is a diagnostic that
     needs to distinguish "nobody has delivered anything" from "somebody
@@ -347,26 +349,80 @@ def _clear_image_dir_except(image_dir: Path, keep: Optional[Path] = None) -> Non
             continue
         with contextlib.suppress(OSError):
             if entry.is_dir() and not entry.is_symlink():
-                shutil.rmtree(entry)
+                # _remove_tree, not a bare rmtree: it clears the read-only
+                # bit of an entry the process owns, as every other scratch
+                # removal in this module does.
+                _remove_tree(entry)
             else:
                 entry.unlink()
 
 
-def _remove_delivered_image_archive(session_id: str) -> None:
-    """Remove the archive directory of the session's current image binding."""
+def _remove_delivered_image_archive(
+    session_id: str,
+    previous: "Optional[ImageLocator]" = None,
+    *,
+    workspace_root: Optional[Path] = None,
+) -> None:
+    """Remove the staged archive of an image binding the session replaced.
 
-    previous = _SESSION_IMAGE_LOCATORS.get(session_id)
-    if previous is not None and previous.oci_archive is not None:
-        _clear_image_dir_except(previous.oci_archive.parent)
+    Only when the binding's archive sits where the finalize itself stages one,
+    ``<session>/image``: the locator registry is a module global, and emptying
+    whatever directory a stored path's parent happens to be would let a future
+    caller that binds an operator-owned archive path have that operator's
+    directory emptied by the next delivery. A binding outside the expected
+    directory is simply dropped by the caller; nothing of it is deleted.
+
+    *previous* is the binding the caller already POPPED (the registry change
+    comes first, so an exception here never leaves a session with two scan
+    subjects); None reads the live registry, for a caller that replaces the
+    binding itself right after. *workspace_root* is the override the delivery
+    ran under, where it had one: the expected directory is checked under it
+    AND under the default resolution, so an archive staged under an overridden
+    root is still cleared by a later delivery that carries the same override.
+    """
+
+    if previous is None:
+        previous = _SESSION_IMAGE_LOCATORS.get(session_id)
+    if previous is None or previous.oci_archive is None:
+        return
+    parent = Path(previous.oci_archive).parent
+    roots = []
+    if workspace_root is not None:
+        roots.append(workspace_root)
+    try:
+        roots.append(resolve_workspace_root())
+    except (OSError, RuntimeError, ValueError):
+        # RuntimeError: Path.home() with no resolvable home raises it, and a
+        # cleanup must never fail the delivery that asked for it.
+        pass
+    for root in roots:
+        try:
+            expected = _session_workspace(root, session_id) / "image"
+        except (OSError, ValueError):
+            continue
+        if parent == expected:
+            break
+        try:
+            if os.path.samefile(parent, expected):
+                break
+        except OSError:
+            continue
+    else:
+        return
+    _clear_image_dir_except(parent)
 
 
-def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
+def _set_session_source_dir(
+    session_id: str, source_dir: Path, *, workspace_root: Optional[Path] = None
+) -> None:
     _SESSION_SOURCE_DIRS[session_id] = source_dir
     # The latest delivery wins: a source tree delivered after an image makes
     # the tree the session's one scan subject, exactly as an image delivered
     # after a tree makes the image it (get_session_image_locator's contract).
-    _remove_delivered_image_archive(session_id)
-    _SESSION_IMAGE_LOCATORS.pop(session_id, None)
+    # The binding is POPPED before the archive cleanup, so a cleanup failure
+    # can never leave the session with two scan subjects.
+    previous = _SESSION_IMAGE_LOCATORS.pop(session_id, None)
+    _remove_delivered_image_archive(session_id, previous, workspace_root=workspace_root)
 
 
 def _drop_session_source_dir(session_id: str) -> None:
@@ -386,10 +442,11 @@ def ensure_session_workspace(
 ) -> Path:
     """The session's workspace directory, created and marked as the server's.
 
-    The anchor an image scan runs in: an image asset has no target directory
-    of its own, so its output tree (``<workspace>/<session>/.ash/ash_output``)
-    goes under the directory the server already owns for the session, which is
-    also why ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref -- the
+    What every delivery anchors in: the uploads, the staged archives and,
+    through :func:`ensure_session_image_scan_dir`, the directory an image
+    scan is anchored in (an image asset has no target directory of its own).
+    The directory the server already owns for the session is also why
+    ``ASH_MCP_ALLOWED_ROOTS`` is not implicated by a bare ref -- the
     sandbox already permits a session its own workspace.
     """
 
@@ -411,6 +468,25 @@ def ensure_session_image_scan_dir(
 
     session_dir = ensure_session_workspace(session_id, workspace_root=workspace_root)
     return _ensure_dir(session_dir / "image-scan")
+
+
+def is_session_image_scan_dir(path: "os.PathLike | str", session_id: str) -> bool:
+    """Whether *path* names this session's image-scan anchor directory.
+
+    Creates nothing and never raises for a malformed path or session id: a
+    caller is asking "is this that directory?", not making one. The anchor is
+    the directory an image scan is anchored IN -- it holds only the scan's
+    own output -- so a caller that got it back as ``directory_path`` and sends
+    it in again as a ``source_dir`` is not naming a source tree, and the scan
+    tool refuses it rather than scanning an empty directory clean.
+    """
+
+    try:
+        candidate = Path(path).resolve()
+        anchor = _session_workspace(resolve_workspace_root(), session_id) / "image-scan"
+        return candidate == anchor.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def get_session_image_locator(session_id: str) -> Optional["ImageLocator"]:
@@ -2039,7 +2115,7 @@ def _clone_into_session(
         if not swapped:
             _discard_staging(staging)
 
-    _set_session_source_dir(session_id, target)
+    _set_session_source_dir(session_id, target, workspace_root=workspace_root)
     if replaced is not None:
         # The new tree is in place and recorded; what is left of the old one is
         # session scratch that the next delivery, clear_source or the end of the
@@ -2543,6 +2619,7 @@ def set_source_zip_chunk(
     *,
     workspace_root: Optional[Path] = None,
     session_id: str,
+    payload_noun: str = "zip",
 ) -> Dict[str, object]:
     """Append a base64-encoded chunk to an in-flight zip upload.
 
@@ -2554,6 +2631,9 @@ def set_source_zip_chunk(
             ``upload_id`` are rejected.
         workspace_root: Override workspace root.
         session_id: MCP session identifier used to scope the upload.
+        payload_noun: What the cap refusal calls the upload. The image
+            channel shares this machinery and passes ``"image archive"``, so
+            its clients are never told about a zip they did not send.
 
     Returns:
         ``{"received": <bytes-so-far>, "next_sequence": <int>, "last": <bool>}``
@@ -2582,6 +2662,7 @@ def set_source_zip_chunk(
             last,
             workspace_root=workspace_root,
             session_id=session_id,
+            payload_noun=payload_noun,
         )
 
 
@@ -2593,6 +2674,7 @@ def _append_zip_chunk(
     *,
     workspace_root: Optional[Path],
     session_id: str,
+    payload_noun: str = "zip",
 ) -> Dict[str, object]:
     """:func:`set_source_zip_chunk`, once the session is held against the sweep."""
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
@@ -2641,7 +2723,8 @@ def _append_zip_chunk(
         part.unlink(missing_ok=True)
         _meta_path(session_dir, upload_id).unlink(missing_ok=True)
         raise ValueError(
-            f"upload exceeds max zip size {_MAX_ZIP_BYTES} bytes (got {new_total})"
+            f"upload exceeds max {payload_noun} size {_MAX_ZIP_BYTES} bytes "
+            f"(got {new_total})"
         )
 
     next_seq = sequence + 1
@@ -2981,7 +3064,7 @@ def _finalize_zip_upload(
         if not swapped:
             _discard_staging(staging)
 
-    _set_session_source_dir(session_id, target)
+    _set_session_source_dir(session_id, target, workspace_root=workspace_root)
     if replaced is not None:
         # The new tree is in place and recorded; what is left of the old one is
         # session scratch that the next delivery, clear_source or the end of the
@@ -3056,6 +3139,7 @@ def remove_session_workspace(
     session_dir = _session_workspace(root, session_id)
     doomed = _set_aside_for_removal(session_dir, session_id)
     gone = True if doomed is None else _remove_tree(doomed)
+    # Ends the source record AND the image binding (its docstring's contract).
     _drop_session_source_dir(session_id)
     _drop_session_image_locator(session_id)
     return gone
@@ -3126,15 +3210,50 @@ _REF_REFUSED = re.compile(r"[\s\x00-\x1f\x7f]")
 #: session registry and in every log line that shows it.
 _MAX_IMAGE_REF_CHARS = 512
 
+#: Source-scheme words the scanner tools read as "not a registry reference":
+#: handed one schemeless (a declared-remote daemon hands grype and syft the
+#: ref as written), the tool reads a LOCAL PATH or another store instead of a
+#: registry, so a remote client could name server files with them. ``purl``
+#: and ``cpe`` are grype's own input prefixes: it reads them as inputs of its
+#: own, not as an image. A real repository that happens to carry one of these
+#: names is still reachable spelled in full (``docker.io/library/docker:latest``).
+_TOOL_SOURCE_SCHEMES = frozenset(
+    {
+        "containerd",
+        "cpe",
+        "dir",
+        "docker",
+        "docker-archive",
+        "file",
+        "oci",
+        "oci-archive",
+        "oci-dir",
+        "podman",
+        "purl",
+        "registry",
+        "sbom",
+        "singularity",
+    }
+)
+
 
 def validate_image_ref(image_ref: str) -> str:
     """The ref as stored, or a ValueError naming what cannot be one.
 
     A grammar floor, not a parser: registries disagree on fine points, and the
     tools that resolve the ref answer malformed ones themselves. What is
-    refused here is only what can never be a reference (empty, whitespace,
-    control characters) or what would read as something else where the ref is
-    later used (a leading ``-``, which is an option to any argv).
+    refused here is what can never be a reference (empty, whitespace, control
+    characters, non-ASCII -- no OCI reference grammar allows any of them) or
+    what would read as something ELSE where the ref is later used: a leading
+    ``-`` (an option to any argv), a ``:`` followed by ``/`` (no port and no
+    tag starts with a slash, but every ``scheme:/path`` spelling does), and a
+    first segment that is a tool source scheme (``docker-archive:x.tar`` would
+    read as a server path, not a registry name). Last, the one reference
+    grammar every surface reads (``utils/image_reference``): a path-shaped
+    value (``/etc``, ``../x``, ``team/../etc``) passes every check above and
+    resolves against docker.io, so a server that lists Hub would otherwise
+    accept it, and a tool trying its local sources first reads it as a server
+    directory.
     """
 
     ref = (image_ref or "").strip()
@@ -3144,6 +3263,11 @@ def validate_image_ref(image_ref: str) -> str:
         raise ValueError(
             f"image_ref is too long: {len(ref)} characters, at most "
             f"{_MAX_IMAGE_REF_CHARS} (no registry reference is longer)"
+        )
+    if not ref.isascii():
+        raise ValueError(
+            "image_ref carries non-ASCII text, which no registry reference "
+            "grammar allows"
         )
     if ref.startswith("-"):
         raise ValueError(
@@ -3155,7 +3279,91 @@ def validate_image_ref(image_ref: str) -> str:
             "image_ref carries whitespace or a control character, which no "
             "registry reference grammar allows"
         )
+    if ":/" in ref:
+        raise ValueError(
+            "image_ref reads as a scheme-and-path, not a registry reference: "
+            "no port and no tag starts with '/'"
+        )
+    scheme_like, colon, _rest = ref.partition(":")
+    if colon and "/" not in scheme_like and scheme_like.lower() in _TOOL_SOURCE_SCHEMES:
+        raise ValueError(
+            f"image_ref starts with {scheme_like!r}:, which the scanner tools "
+            "read as a source scheme (a local path or another store), not a "
+            "registry reference. Spell the repository in full, as "
+            f"docker.io/library/{scheme_like}:<tag>."
+        )
+    problem = image_reference_problem(ref)
+    if problem is not None:
+        raise ValueError(f"image_ref {ref!r} {problem}")
     return ref
+
+
+#: The registries ``set_source_image`` accepts references into, set by the
+#: operator. Comma- or whitespace-separated ``host[:port]`` entries, compared
+#: case-insensitively with a ``:443`` suffix dropped on both sides; bare
+#: Docker Hub references (``alpine:3``) resolve against ``docker.io``, so Hub
+#: must be listed to allow them. Docker Hub's legacy host ``index.docker.io``
+#: reads as ``docker.io``, in an entry and in a reference alike. Unset or
+#: empty means no reference is allowed: scanning a reference makes the
+#: SERVER's tools reach that registry -- any host a ref can spell, internal
+#: addresses included -- through the server's own network, daemon store and
+#: registry credentials, which is the exact reach ``ASH_MCP_GIT_ALLOWED_HOSTS``
+#: closes for the git channel. The direct payload shapes (the archive upload)
+#: need no registry and are not gated.
+ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV = "ASH_MCP_IMAGE_ALLOWED_REGISTRIES"
+
+#: Docker Hub as every registry reading here names it, and the legacy host the
+#: image tools read as the same registry.
+_HUB_REGISTRY = "docker.io"
+_HUB_LEGACY_HOST = "index.docker.io"
+
+
+def _registry_spelling(host: str) -> str:
+    """*host* in the one spelling registries are compared in.
+
+    Lower-cased, without a trailing ``.`` and without a default ``:443``, and
+    with Docker Hub's legacy host ``index.docker.io`` read as ``docker.io``, as
+    the image tools read it. A reference and a list entry that name one
+    registry then compare equal whichever spelling each uses.
+    """
+    host = host.lower().rstrip(".").removesuffix(":443")
+    return _HUB_REGISTRY if host == _HUB_LEGACY_HOST else host
+
+
+def image_ref_registry(ref: str) -> str:
+    """The registry host[:port] *ref* resolves against, lower-cased.
+
+    The reading the image tools give a reference: the text before the first
+    ``/`` is a registry host when it holds a ``.`` or a ``:``, is
+    ``localhost`` or holds an uppercase letter -- a repository path is
+    lowercase only (``utils/image_reference``), so ``Intranet/app:1`` names the
+    host ``Intranet`` and cannot be a Docker Hub namespace. Everything else --
+    a bare ``alpine:3``, a namespaced ``team/app`` -- resolves against Docker
+    Hub (``docker.io``). A default ``:443`` is dropped so one spelling
+    matches, and Docker Hub's legacy host ``index.docker.io`` reads as
+    ``docker.io``.
+    """
+    first, slash, _ = ref.partition("/")
+    if slash and (
+        "." in first or ":" in first or first == "localhost" or first != first.lower()
+    ):
+        return _registry_spelling(first)
+    return _HUB_REGISTRY
+
+
+def image_registry_allowed(ref: str) -> bool:
+    """Whether the operator's list admits *ref*'s registry; empty admits none."""
+    raw = os.environ.get(ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV, "")
+    entries = {
+        _registry_spelling(entry.strip())
+        for entry in raw.replace(",", " ").split()
+        if entry.strip()
+    }
+    return image_ref_registry(ref) in entries
+
+
+class ImageRegistryRefused(ValueError):
+    """A reference whose registry the operator's allowlist does not admit."""
 
 
 @_while_no_scan_runs(removes_workspace=False)
@@ -3175,13 +3383,40 @@ def set_source_image(
     Raises:
         ValueError: for a value that can never be a reference
             (:func:`validate_image_ref`).
+        ImageRegistryRefused: for a reference into a registry the operator's
+            ``ASH_MCP_IMAGE_ALLOWED_REGISTRIES`` list does not admit (an empty
+            list admits none): a scan of the ref makes the server's own tools
+            reach that registry -- any host the ref can spell -- with the
+            server's network, daemon store and registry credentials, the same
+            reach the git channel's host allowlist closes.
     """
 
-    locator = ImageLocator(ref=validate_image_ref(image_ref))
+    ref = validate_image_ref(image_ref)
+    if not image_registry_allowed(ref):
+        raise ImageRegistryRefused(
+            f"the reference's registry ({image_ref_registry(ref)!r}) is not in "
+            f"{ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV}, the registries the "
+            "operator lets this server's scanners reach. The list is empty "
+            "unless the operator sets it (entries are host[:port]; bare Docker "
+            "Hub references need 'docker.io' listed). Ask the operator to add "
+            "the registry, or deliver the image itself with "
+            "set_source_image_archive_chunk and set_source_image_archive_finalize, "
+            "which reach no registry."
+        )
+    locator = ImageLocator(ref=ref)
+    # The session directory exists from this delivery on, although a bare ref
+    # writes nothing into it: the TTL sweep finds sessions through their
+    # workspace directories, so a session whose only delivery is a ref would
+    # otherwise never be collected (and on a stateless server with one new id
+    # per client, the registry's eviction pass past its cap would find
+    # nothing to free).
+    ensure_session_workspace(session_id)
     # A reference replaces a delivered archive as the subject: the archive is
-    # scratch now and must not stay in the session workspace.
-    _remove_delivered_image_archive(session_id)
+    # scratch now and must not stay in the session workspace. The registry
+    # changes first, so a cleanup failure never leaves the old subject bound.
+    previous = _SESSION_IMAGE_LOCATORS.pop(session_id, None)
     _set_session_image_locator(session_id, locator)
+    _remove_delivered_image_archive(session_id, previous)
     ASH_LOGGER.info(
         "session %s delivered image ref %s as its scan subject",
         session_id,
@@ -3209,23 +3444,17 @@ def set_source_image_archive_chunk(
     (:func:`set_source_image_archive_finalize`).
     """
 
-    try:
-        return set_source_zip_chunk(
-            upload_id,
-            sequence,
-            data_b64,
-            last,
-            workspace_root=workspace_root,
-            session_id=session_id,
-        )
-    except ValueError as error:
-        # The zip channel's cap wording names a zip; this is an image archive.
-        text = str(error)
-        if "max zip size" in text:
-            raise ValueError(
-                text.replace("max zip size", "max image archive size")
-            ) from error
-        raise
+    return set_source_zip_chunk(
+        upload_id,
+        sequence,
+        data_b64,
+        last,
+        workspace_root=workspace_root,
+        session_id=session_id,
+        # The cap refusal then names what this client sent, with no
+        # string-rewrite of another channel's wording.
+        payload_noun="image archive",
+    )
 
 
 @_while_no_scan_runs(removes_workspace=False)

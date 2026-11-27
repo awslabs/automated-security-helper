@@ -29,11 +29,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests.utils.helpers import WINDOWS_CHILD_START_NAMES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKS_PATH = REPO_ROOT / "scripts" / "docs_checks.py"
@@ -1235,6 +1238,42 @@ def test_report_file_check_can_fail(tmp_path, file_code, case, text, expected):
     _assert_reports(dc.check_report_files([page], tmp_path, file_code), expected, 1)
 
 
+#: The move the legacy lock's deprecation warning advises, as the suppression guide
+#: spells it, and the same sentence with the old file misspelled.
+LEGACY_LOCK_MOVES = [
+    (
+        "the legacy lock ASH still reads",
+        "Move it with `git mv .ash/ash.lock .ash.lock`.\n",
+        [],
+    ),
+    (
+        "the legacy lock misspelled",
+        "Move it with `git mv .ash/ash.lok .ash.lock`.\n",
+        [
+            (
+                "docs/page.md:1: [files] `git mv .ash/ash.lok .ash.lock` "
+                "names ash.lok, which no reporter ASH registers writes and no "
+                "file-name constant in ASH names; did you mean ash.lock?"
+            )
+        ],
+    ),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "case,text,expected", LEGACY_LOCK_MOVES, ids=[c[0] for c in LEGACY_LOCK_MOVES]
+)
+def test_the_legacy_lock_is_a_file_ash_reads(tmp_path, case, text, expected):
+    """ASH still reads .ash/ash.lock when .ash.lock does not exist, and the package
+    names that file with a file-name constant (LEGACY_LOCK_FILE_NAME in
+    utils/ash_lock.py). Checked against the real code tree: the sentence that tells a
+    reader to move the file passes, and the same sentence with the old file
+    misspelled is still reported."""
+    page = _write(tmp_path, "docs/page.md", text)
+    assert _messages(dc.check_report_files([page], tmp_path, REPO_ROOT)) == expected
+
+
 @pytest.mark.integration
 def test_renaming_a_reporters_extension_fails_the_pages_that_name_it(
     tmp_path, file_code
@@ -1822,6 +1861,66 @@ def test_the_page_module_runs_without_the_callers_credentials(tmp_path, monkeypa
         dc.check_config_blocks([page], tmp_path),
         "scanners.acme-scan.options: Value error, Unknown key 'selct'",
     )
+
+
+@pytest.mark.unit
+def test_the_page_module_child_is_given_every_name_the_suites_child_builders_carry():
+    """The names a Windows Python needs are listed once in the suite
+    (WINDOWS_CHILD_START_NAMES) and once for this child. This child may carry more,
+    never fewer. The carry test below sees only the names its host sets, and a
+    native 64-bit Windows has no PROCESSOR_ARCHITEW6432, so this one compares the
+    lists themselves."""
+    assert set(WINDOWS_CHILD_START_NAMES) <= set(dc._CHILD_ENVIRONMENT_NAMES)
+
+
+@pytest.mark.unit
+def test_the_page_module_child_keeps_the_names_a_windows_python_needs(
+    tmp_path, monkeypatch
+):
+    """The child that imports the page's module is given a built environment. On
+    a Windows Python 3.11 ``platform.machine()`` reads PROCESSOR_ARCHITECTURE, and
+    without it polars' import-time CPU check raised "unknown feature flag: 'sse3'"
+    in the child, so every block that loads a page module failed to validate on
+    that leg. No child starts here (its run is replaced). Off Windows a stand-in
+    value stands for each name; on Windows the host's own values are what the
+    child must be given, and a stand-in architecture name set in this process
+    would change what ``platform.machine()`` answers here."""
+    if os.name == "nt":
+        expected = {
+            name: os.environ[name]
+            for name in WINDOWS_CHILD_START_NAMES
+            if name in os.environ
+        }
+        # A Windows host always sets these two, so the carry is proved there too.
+        named = set(expected)
+        assert {"SYSTEMROOT", "PROCESSOR_ARCHITECTURE"} <= named, sorted(named)
+    else:
+        expected = dict.fromkeys(WINDOWS_CHILD_START_NAMES, "stand-in")
+        for name, value in expected.items():
+            monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AWS_PROFILE", "docs-check-test")
+    given = []
+    real_run = subprocess.run
+
+    def run(argv, *args, **kwargs):
+        if list(argv[:3]) != [sys.executable, "-I", "-c"]:
+            return real_run(argv, *args, **kwargs)
+        given.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=f"{dc._CHILD_RESULT}[]\n", stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+    page = _write(tmp_path, "docs/page.md", PAGE_PLUGIN + _typo_config())
+
+    assert dc.check_config_blocks([page], tmp_path) == []
+    # A failure shows the child's names, not its environment's values.
+    count = len(given)
+    assert count == 1, [sorted(each) for each in given]
+    carried = {name: given[0].get(name) for name in expected}
+    assert carried == expected
+    names = set(given[0])
+    assert "AWS_PROFILE" not in names
 
 
 @pytest.mark.unit

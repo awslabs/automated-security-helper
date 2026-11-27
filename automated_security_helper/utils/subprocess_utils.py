@@ -874,21 +874,46 @@ def _bin_path() -> Optional[Path]:
     The module-level constant remains the fallback, so tests that patch
     ``subprocess_utils.ASH_BIN_PATH`` keep working.
 
-    A relative value is not used: the first time each one is seen, one warning
-    names it, and ``~/.ash/bin`` is the bin directory instead. None when there is
-    no bin directory: ASH_BIN_PATH is unset (or relative) and there is no usable
-    home for ``~/.ash/bin`` (``core.constants.home_bin_path``), and one warning
-    says that too.
+    A relative value is not used (:func:`usable_bin_path`): the first time each one
+    is seen, one warning names it, and ``~/.ash/bin`` is the bin directory instead.
+    None when there is no bin directory: ASH_BIN_PATH is unset (or relative) and
+    there is no usable home for ``~/.ash/bin`` (``core.constants.home_bin_path``),
+    and one warning says that too.
     """
     from_env = ash_bin_path_from_environment()
-    path = Path(from_env) if from_env else ASH_BIN_PATH
-    if path is not None and not _is_anchored(str(path)):
-        _warn_relative_bin_path(str(path))
-        path = home_bin_path()
+    path = usable_bin_path(Path(from_env) if from_env else ASH_BIN_PATH)
     if path is None:
         warn_if_home_unusable()
         return None
     return path
+
+
+def usable_bin_path(value: "str | os.PathLike[str] | None") -> Optional[Path]:
+    """The bin directory *value* names, or ``~/.ash/bin`` when *value* is relative.
+
+    A relative ASH bin directory names a directory under the working directory,
+    usually the repository being scanned. Installing into it, downloading into it or
+    building a rules directory beside it would write into that repository, so it is
+    not used: one warning names the value, once per value per process, and the bin
+    directory is ``~/.ash/bin`` (``core.constants.home_bin_path``) instead. That is
+    None when there is no usable home. A *value* of None gives None.
+
+    A leading ``~`` is expanded before a value gets here, by
+    ``core.constants.ash_bin_path_from_environment`` and by the install's own tilde
+    branch. This function expands none, so an unexpanded ``~`` would read as
+    relative.
+
+    Every reader that turns ASH_BIN_PATH into a directory goes through this: tool
+    lookup (:func:`_bin_path`), ``download_utils.current_bin_path`` (so every
+    install command, download and rules directory built from it), and ``ash
+    dependencies install``.
+    """
+    if value is None:
+        return None
+    if not _is_anchored(str(value)):
+        _warn_relative_bin_path(str(value))
+        return home_bin_path()
+    return Path(value)
 
 
 def ignored_relative_bin_path() -> Optional[str]:
@@ -1561,12 +1586,26 @@ class HeldInterrupt:
 
     Only a Python handler is held. SIGINT ignored (a script run as ``cmd &``
     starts that way, and its children inherit it), at its default, or set outside
-    Python is left as it is: a recording handler in its place would be reset at
-    exec, so a child started inside the block would stop ignoring SIGINT, and a
-    SIGINT would raise KeyboardInterrupt where it is meant to be ignored. Only the
-    main thread can set a signal handler, so elsewhere nothing is held either. The
-    signal mask is not touched: a child inherits the mask, but not a handler,
-    which exec resets.
+    Python is not: a recording handler in its place would be reset at exec, so a
+    child started inside the block would stop ignoring SIGINT, and a SIGINT would
+    raise KeyboardInterrupt where it is meant to be ignored.
+
+    An ignored SIGINT is set again instead, so that the child inherits it. A
+    native library can install a SIGINT handler behind Python's back, and
+    ``signal.getsignal`` then still reads SIG_IGN while the process catches
+    SIGINT. Importing polars does that (measured with polars 1.44.2, whose startup
+    registers the handler), so every child ASH started once polars was loaded
+    began with SIGINT at its default, exec having reset the handler. Setting
+    SIG_IGN again puts back the disposition Python records. A Python handler
+    needs no such step: holding it sets it, and the restore sets it again.
+
+    Only the main thread can set a signal handler, so elsewhere nothing is held or
+    set. The disposition belongs to the process, so a child started off the main
+    thread gets what was set last. In a process that ignores SIGINT, once polars
+    has loaded, that is polars' handler until the main thread sets SIG_IGN again,
+    which a pool whose workers start children has it do before the pool starts
+    (:func:`keep_an_ignored_sigint_ignored`). The signal mask is not touched: a
+    child inherits the mask, but not a handler, which exec resets.
     """
 
     def __init__(self) -> None:
@@ -1577,11 +1616,15 @@ class HeldInterrupt:
         self._left = False
 
     def __enter__(self) -> Self:
-        if threading.current_thread() is threading.main_thread() and callable(
-            signal.getsignal(signal.SIGINT)
-        ):
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        current = signal.getsignal(signal.SIGINT)
+        if callable(current):
             self._previous = signal.signal(signal.SIGINT, self._record)
             self._held = True
+        elif current == signal.SIG_IGN:
+            # See the class docstring: a native handler can have replaced it.
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
         return self
 
     def _record(self, signum: int, frame: Any) -> None:
@@ -1645,6 +1688,59 @@ class HeldInterrupt:
             self._hand_over()
         except KeyboardInterrupt as interrupt:
             raise interrupt from exc
+
+
+def keep_an_ignored_sigint_ignored() -> None:
+    """Set an ignored SIGINT again, on the main thread, before a pool's workers
+    start children.
+
+    Importing polars puts a SIGINT handler in place from native code while
+    ``signal.getsignal`` still reads SIG_IGN, and exec resets a caught signal to
+    its default, so in a process started with SIGINT ignored (a script's
+    ``ash scan &``) a child started after the import began with SIGINT at its
+    default. HeldInterrupt, entered around each start, sets SIG_IGN again, but
+    only the main thread can set a disposition, and the scanner pool's workers
+    start every tool of a scan with two or more scanners, the workspace's project
+    workers every tool of a workspace scan. Called on the main thread before such
+    a pool starts, this sets SIG_IGN again, and the disposition, which belongs to
+    the process, holds for the children that pool's workers start. polars is
+    imported first: its import puts the handler in place once (measured with
+    polars 1.44.2: a query afterwards leaves SIG_IGN as it is), so a first import
+    in a worker, after this, would put it back for every child started after it.
+
+    A no-op off the main thread, where no disposition can be set, and where Python
+    does not record SIGINT as ignored: a Python handler is held at each start
+    instead, and a SIGINT at its default stays at its default. So polars is
+    imported here only in a process that ignores SIGINT. A handler another native
+    library installs from a worker after this call is not undone.
+
+    A scan that runs on a thread other than the main thread is not covered, unless
+    the main thread called this before it. Nothing can be set from that thread, so
+    when polars is first imported there its handler stays in place, and the scan's
+    tools start with SIGINT at its default, exec having reset the handler. The MCP
+    server hands each scan to an executor thread and does not call this on the main
+    thread first, so a server started with SIGINT ignored (``ash mcp &``) can start
+    a scan's tools with SIGINT at its default.
+
+    A polars import that fails with any Exception (a native library that will not
+    load, a warning raised as an error, a broken install) is logged at debug and
+    does not stop the set: SIGINT is set to ignored all the same. A
+    KeyboardInterrupt or SystemExit propagates.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        return
+    if signal.getsignal(signal.SIGINT) != signal.SIG_IGN:
+        return
+    try:
+        import polars as pl  # noqa: F401 - imported for the handler its import installs
+    except Exception as exc:  # noqa: BLE001 -- the set below needs no polars
+        ASH_LOGGER.debug(
+            f"Importing polars failed ({type(exc).__name__}: {_text_of(exc)}); "
+            "SIGINT stays ignored",
+            extra=NO_MARKUP,
+        )
+
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def discard_tool_pid_once_exited(process: subprocess.Popen) -> bool:

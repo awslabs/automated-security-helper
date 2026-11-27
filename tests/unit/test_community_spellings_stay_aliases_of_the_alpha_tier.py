@@ -15,7 +15,7 @@ alias is gone, does not map, or stays silent where a warning is promised.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import MagicMock
 
 import pytest
@@ -125,9 +125,35 @@ def test_an_old_scanner_column_heading_is_refused_naming_the_new_one(
     findings = dc.check_scanner_names([page], tmp_path)
     old = [f for f in findings if "is the old heading" in str(f)]
     assert len(old) == 1, findings
-    assert str(page.relative_to(tmp_path)) in str(old[0]).replace("\\", "/")
+    # The finding names the page in the checks' "/" form (docs_checks.rel_path), on
+    # Windows too, so the expected path is spelled the same way.
+    assert page.relative_to(tmp_path).as_posix() in str(old[0])
     assert f"use '{new_heading.capitalize()}'" in str(old[0])
     assert _messages(warnings_logged) == []
+
+
+class _WindowsPath(PureWindowsPath):
+    """A Windows path that resolves to itself, so a POSIX host can run the checks'
+    ``rel_path`` on one."""
+
+    def resolve(self, strict: bool = False) -> "_WindowsPath":
+        return self
+
+
+def test_the_checks_name_a_windows_page_in_the_slash_form():
+    """A finding names its page with ``rel_path``, which spells the path with
+    slashes on every platform, while ``str()`` of a Windows path spells it with
+    backslashes: that difference is why the test above looks for the page in its
+    ``as_posix()`` form. ``PureWindowsPath`` gives the Windows spelling on any host.
+    Only a Windows run shows that the page of a real finding is spelled this way
+    there."""
+    dc = _docs_checks()
+    root = _WindowsPath("C:\\repo")
+    page = _WindowsPath("C:\\repo\\docs\\page.md")
+    assert str(page.relative_to(root)) == "docs\\page.md"
+    assert dc.rel_path(page, root) == "docs/page.md"
+    outside = _WindowsPath("D:\\elsewhere\\page.md")
+    assert dc.rel_path(outside, root) == "D:/elsewhere/page.md"
 
 
 def test_a_second_page_with_the_old_heading_is_reported_too(tmp_path):

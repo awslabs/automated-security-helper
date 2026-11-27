@@ -67,6 +67,27 @@ class TestImageLocatorNamesExactlyOneShape:
         )
         assert locator.resolved_digest == "sha256:" + "a" * 64
 
+    @pytest.mark.parametrize(
+        "digest",
+        [
+            pytest.param("latest", id="a-tag"),
+            pytest.param("sha256:abc", id="short"),
+            pytest.param("sha256:" + "A" * 64, id="uppercase"),
+            pytest.param("sha512:" + "a" * 128, id="another-algorithm"),
+            pytest.param("sha256:" + "a" * 64 + "\n", id="trailing-newline"),
+            pytest.param(" sha256:" + "a" * 64, id="padded"),
+        ],
+    )
+    def test_a_resolved_digest_is_a_sha256_digest(self, digest):
+        # The digest is pinned into the tools' argv (pulled_ref) and recorded
+        # as the scan's identity; a caller's "latest" became name@latest.
+        with pytest.raises(ValidationError, match="sha256"):
+            ImageLocator(
+                ref="repo/app:1",
+                resolved_digest=digest,
+                resolved_from="registry",
+            )
+
     def test_shown_names_the_ref_or_the_path(self):
         assert ImageLocator(ref="repo/app:1").shown() == "repo/app:1"
         assert (

@@ -33,12 +33,18 @@ Known limits
 The stub serves the shape the GraphQL query asks for; nothing here proves GitHub
 returns it. The first dependabot PR through the new trigger is the live check, and
 the workflow header names that residual.
+
+On a Windows host the script runs under Git for Windows' bash and the host's own jq,
+in ``--binary`` mode so that its lines end the way the runner's do (``_install_jq``).
+That measures the policy, not the runner: the unit tier's ubuntu legs are the ones
+that run the script under an ubuntu image's bash and jq, as the workflow does.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -190,6 +196,39 @@ case "$*" in
 esac
 """
 
+#: The jq the decision step runs here: the first one on this process's PATH.
+#: ``needs_jq`` skips the cases when there is none, and ``_install_jq`` hands the
+#: script this one, so the guard and the run read the same jq.
+JQ = shutil.which("jq")
+
+
+def _install_jq(bin_dir: Path) -> None:
+    """Put a ``jq`` in ``bin_dir`` that runs ``JQ``, the jq ``needs_jq`` found.
+
+    The script searches the short PATH ``_run`` gives it, not this process's PATH, so
+    a jq the guard found anywhere else was out of its reach. On the windows-latest
+    runner that was every case that runs the script: the guard found the image's jq,
+    and the script stopped at its first jq call with "jq: command not found" (exit
+    127), because none of the directories Git for Windows' bash reads
+    ``/usr/local/bin:/usr/bin:/bin`` as holds a jq.
+
+    A native Windows jq also ends each line it prints with CRLF unless it is given
+    ``--binary``. jq's manual: "Windows users using WSL, MSYS2, or Cygwin, should use
+    this option when using a native jq.exe, otherwise jq will turn newlines (LFs)
+    into carriage-return-then-newline (CRLF)." The script compares what jq prints
+    (``[ "$author" = "dependabot[bot]" ]``), so on Windows the wrapper passes the
+    option, and the script reads the lines the ubuntu-latest runner's jq would print.
+    """
+    assert JQ is not None, "only the cases marked needs_jq run the script"
+    binary = " --binary" if os.name == "nt" else ""
+    wrapper = bin_dir / "jq"
+    wrapper.write_text(
+        f'#!/bin/sh\nexec {shlex.quote(Path(JQ).as_posix())}{binary} "$@"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+
 
 def _run(
     tmp_path: Path,
@@ -206,8 +245,12 @@ def _run(
     stub_dir.mkdir()
     bin_dir.mkdir()
     gh = bin_dir / "gh"
-    gh.write_text(STUB_GH, encoding="utf-8")
+    # newline="\n": a text write on Windows ends each line with CRLF, and bash keeps
+    # a CR as part of the word before it, so under Git for Windows' bash the stub's
+    # `case "$*" in` would end in "in\r" and not parse.
+    gh.write_text(STUB_GH, encoding="utf-8", newline="\n")
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
+    _install_jq(bin_dir)
 
     base_pull = {
         "user": {"login": "dependabot[bot]"},
@@ -320,7 +363,7 @@ def _check(name: str, status: str, conclusion: str | None, required: bool = True
     }
 
 
-needs_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="jq is required")
+needs_jq = pytest.mark.skipif(JQ is None, reason="jq is required")
 
 
 @needs_jq
@@ -544,7 +587,11 @@ def test_commit_text_is_never_echoed_into_the_log(tmp_path):
 
 
 def test_the_decision_step_is_a_real_script():
-    """A control on the harness: the script under test is the workflow's, not empty."""
+    """A control on the harness: the script under test is the workflow's, not empty.
+
+    It does not assert a POSIX host. The cases run the script on Windows as well,
+    under Git for Windows' bash (#1116), and each of them asserts that the script
+    exited 0, so a shell that cannot run it fails every case instead of passing one.
+    """
     assert "isRequired" in _decide_script()
     assert "approve=true" in _decide_script()
-    assert os.name == "posix"

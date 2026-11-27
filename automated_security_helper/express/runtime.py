@@ -205,17 +205,21 @@ def express_supported() -> bool:
 
 
 def current_uid() -> int:
-    """This process's user id, where the platform has user ids.
+    """This process's user id, or -1 where the platform has no user ids.
 
     Express mode is posix-only by design (:func:`express_supported` is False
-    elsewhere, so no daemon, socket or ownership check is reached there). The
-    helper exists so the pure naming and file helpers that run before that
-    gate answers -- the socket key, the marker beside a socket -- do not
-    raise ``AttributeError`` on a platform without ``os.getuid``; a platform
-    without user ids reads as uid 0, and nothing is served for it.
+    elsewhere, and :func:`runtime_dir` refuses before any socket, log or
+    ownership check is reached there). The helper keeps the pure naming
+    helper (:func:`socket_key`) from raising ``AttributeError`` where
+    ``os.getuid`` is missing, so it can be called on every platform.
+
+    The stand-in is -1 because no process and no file can carry it:
+    :func:`peer_uid` reads the kernel's uid unsigned, and an owner uid is
+    never negative. Every check that compares against this value therefore
+    fails closed on such a platform. A stand-in of 0 would have been root.
     """
     getuid = getattr(os, "getuid", None)
-    return getuid() if getuid is not None else 0
+    return getuid() if getuid is not None else -1
 
 
 def _require_supported() -> None:
@@ -495,13 +499,16 @@ def _ensure_private_dir(path: Path) -> Path:
         )
     if not _has_posix_permissions():
         # Owner and mode bits are a posix model. On Windows st_uid is always 0,
-        # and os.chmod only toggles the read-only attribute, so a 0700 mode
-        # can never be taken and the directory could never pass the checks
-        # below. The directory sits under the user's own profile (an ACL'd
-        # per-user location), the link check above still ran, and express
-        # itself is unavailable there (express_supported), so this arm only
-        # keeps the helpers that run before that answer from raising.
-        return path
+        # and os.chmod only toggles the read-only attribute, so neither check
+        # below could show the directory is private. A directory that cannot
+        # be shown private is refused, like every other doubt here. No
+        # production caller gets this far on such a platform (runtime_dir
+        # refuses an unsupported one first), so this is a backstop for a
+        # direct call, never a skip.
+        raise ExpressUnavailable(
+            f"express runtime directory {path} cannot be checked for its owner "
+            "and mode on this platform; refusing to place a socket there."
+        )
     if info.st_uid != current_uid():
         raise ExpressUnavailable(
             f"express runtime directory {path} is owned by uid {info.st_uid}, not "
@@ -895,7 +902,11 @@ def peer_uid(sock: socket.socket) -> Optional[int]:
 
 
 def peer_is_this_user(sock: socket.socket, uid: Optional[int] = None) -> bool:
-    """Whether *sock*'s peer runs as this user. Unreadable reads as no."""
+    """Whether *sock*'s peer runs as this user. Unreadable reads as no.
+
+    So does every peer on a platform without user ids: :func:`current_uid`
+    is then -1, which no kernel uid equals.
+    """
     if uid is None:
         uid = current_uid()
     peer = peer_uid(sock)

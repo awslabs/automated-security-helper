@@ -87,6 +87,7 @@ from automated_security_helper.utils.subprocess_utils import (
     SPAWN_FAILURE_RETURNCODE,
     WAS_KILLED_ENDING,
     could_not_stop_sentence,
+    keep_an_ignored_sigint_ignored,
 )
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
@@ -2113,30 +2114,18 @@ class ScannerExecutor:
                             # info here and as MEDIUM in ash.sarif. Idempotent: a
                             # result with a level keeps it.
                             resolve_missing_levels(raw_results)
-                            raw_results = sanitize_sarif_paths(
-                                raw_results, self.plugin_context.source_dir
-                            )
-                            # Before suppressions, and whatever --ignore-suppressions
-                            # says: ASH's own output is not part of the scanned tree.
-                            # Most scanners are told to skip it; this catches the ones
-                            # whose tool has no such option (snyk-code) or was not
-                            # told (bandit, and any third-party scanner).
-                            drop_results_in_ash_output_dirs(
-                                raw_results,
-                                self.plugin_context,
-                                scanner_name=scanner_config_name,
-                            )
-                            # A generated file with a span sidecar (the MCP config
-                            # converter's) has its findings moved to the original
-                            # file and span before suppressions are applied, so a
-                            # suppression written against the original matches. What
-                            # is still in a converted file is then marked, so its
-                            # finding keeps its id wherever the output directory is.
-                            place_converted_results(raw_results, self.plugin_context)
                             if target_type == "image":
-                                # Before suppressions and flattening: an
-                                # image:-scoped suppression matches on these
-                                # properties, and the identity keys on them.
+                                # An image result's paths name files inside the
+                                # image. The host-tree steps below must not
+                                # touch them: sanitizing rebases any absolute
+                                # path under the source dir (a container mount
+                                # such as /src shadows an in-image prefix), the
+                                # output-dir drop compares them against host
+                                # directories, and a converter never wrote
+                                # them. Stamp the subject instead, before
+                                # suppressions and flattening: an image:-scoped
+                                # suppression matches on these properties, and
+                                # the identity keys on them.
                                 from automated_security_helper.utils.image_attribution import (
                                     mark_image_results,
                                 )
@@ -2148,6 +2137,31 @@ class ScannerExecutor:
                                         "image",
                                         None,
                                     ),
+                                )
+                            else:
+                                raw_results = sanitize_sarif_paths(
+                                    raw_results, self.plugin_context.source_dir
+                                )
+                                # Before suppressions, and whatever
+                                # --ignore-suppressions says: ASH's own output is
+                                # not part of the scanned tree. Most scanners are
+                                # told to skip it; this catches the ones whose
+                                # tool has no such option (snyk-code) or was not
+                                # told (bandit, and any third-party scanner).
+                                drop_results_in_ash_output_dirs(
+                                    raw_results,
+                                    self.plugin_context,
+                                    scanner_name=scanner_config_name,
+                                )
+                                # A generated file with a span sidecar (the MCP
+                                # config converter's) has its findings moved to
+                                # the original file and span before suppressions
+                                # are applied, so a suppression written against
+                                # the original matches. What is still in a
+                                # converted file is then marked, so its finding
+                                # keeps its id wherever the output directory is.
+                                place_converted_results(
+                                    raw_results, self.plugin_context
                                 )
                             if not self.plugin_context.ignore_suppressions:
                                 raw_results = apply_suppressions_to_sarif(
@@ -2250,19 +2264,25 @@ class ScannerExecutor:
                                     # list graded FAILED on were left out of the
                                     # per-target report, read as 0 by the summary,
                                     # and the row rolled up PASSED.
-                                    counted = ScannerSeverityCount()
-                                    for finding in raw_results["findings"]:
-                                        # The level the finding's severity names
-                                        # (_finding_severity_level): MEDIUM for one
-                                        # that states none, info for a name ASH
-                                        # cannot place, a CVSS score by its band.
-                                        counted.increment(
-                                            _finding_severity_level(
-                                                finding.get("severity")
-                                                if isinstance(finding, dict)
-                                                else None
-                                            )
+                                    from automated_security_helper.utils.count_frame import (
+                                        severity_frame,
+                                        tally_severities,
+                                    )
+
+                                    # The level each finding's severity names
+                                    # (_finding_severity_level): MEDIUM for one
+                                    # that states none, info for a name ASH
+                                    # cannot place, a CVSS score by its band.
+                                    # The counting is the frame's group-by.
+                                    levels = [
+                                        _finding_severity_level(
+                                            finding.get("severity")
+                                            if isinstance(finding, dict)
+                                            else None
                                         )
+                                        for finding in raw_results["findings"]
+                                    ]
+                                    counted = tally_severities(severity_frame(levels))
                                     container.severity_counts = counted
                                     container.finding_count = len(
                                         raw_results["findings"]
@@ -3068,6 +3088,15 @@ class ScannerExecutor:
         if total <= 1:
             ASH_LOGGER.debug("Single scanner detected, executing directly")
             return self.run_sequential(aggregated_results)
+
+        # Every tool is started on a pool worker, where the hold around its start
+        # cannot set a disposition, so an ignored SIGINT is set again here, before
+        # the pool starts (subprocess_utils.keep_an_ignored_sigint_ignored). Only
+        # the main thread can set one. A workspace's project pool does it before
+        # its workers start; a scan run on any other thread, as the MCP server
+        # runs each one, is not covered: this does nothing there, and in a process
+        # started with SIGINT ignored the tools can start with SIGINT at its default.
+        keep_an_ignored_sigint_ignored()
 
         scanner_tasks_map: Dict[str, Any] = {}
         all_scanner_names = [t[0] for t in self.scanner_tasks]

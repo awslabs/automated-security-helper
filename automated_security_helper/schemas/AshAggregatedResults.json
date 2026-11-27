@@ -1784,6 +1784,10 @@
                   "/scanners/gitleaks/options/baseline_path",
                   "/scanners/trivy/options/scanners",
                   "/scanners/trivy/options/ignore_unfixed",
+                  "/scanners/mcp-config/options/forbid_privilege_escalation",
+                  "/scanners/mcp-config/options/forbid_unpinned_runners",
+                  "/scanners/mcp-config/options/forbid_auto_approval",
+                  "/scanners/mcp-config/options/flag_env_secrets",
                   "/scanners/*/options/offline",
                   "/scanners/ferret-scan/options/max_live_bytes",
                   "/scanners/gitleaks/options/max_target_megabytes",
@@ -2511,6 +2515,10 @@
                 "/scanners/gitleaks/options/baseline_path",
                 "/scanners/trivy/options/scanners",
                 "/scanners/trivy/options/ignore_unfixed",
+                "/scanners/mcp-config/options/forbid_privilege_escalation",
+                "/scanners/mcp-config/options/forbid_unpinned_runners",
+                "/scanners/mcp-config/options/forbid_auto_approval",
+                "/scanners/mcp-config/options/flag_env_secrets",
                 "/scanners/*/options/offline",
                 "/scanners/ferret-scan/options/max_live_bytes",
                 "/scanners/gitleaks/options/max_target_megabytes",
@@ -2804,6 +2812,10 @@
               "/scanners/gitleaks/options/baseline_path",
               "/scanners/trivy/options/scanners",
               "/scanners/trivy/options/ignore_unfixed",
+              "/scanners/mcp-config/options/forbid_privilege_escalation",
+              "/scanners/mcp-config/options/forbid_unpinned_runners",
+              "/scanners/mcp-config/options/forbid_auto_approval",
+              "/scanners/mcp-config/options/flag_env_secrets",
               "/scanners/*/options/offline",
               "/scanners/ferret-scan/options/max_live_bytes",
               "/scanners/gitleaks/options/max_target_megabytes",
@@ -4394,7 +4406,7 @@
           "default": [
             "all"
           ],
-          "description": "Specific frameworks to include with Checkov. Defaults to `all`.",
+          "description": "Specific frameworks to include with Checkov. Defaults to `all`, which leaves out checkov's `github_configuration`, `gitlab_configuration` and `bitbucket_configuration` frameworks: they check the repository host's settings through its API, not files in the scanned tree. Name one of them here, with or without `all`, to run it.",
           "items": {
             "anyOf": [
               {
@@ -4521,7 +4533,7 @@
         },
         "skip_frameworks": {
           "default": [],
-          "description": "Specific frameworks to exclude with Checkov. Defaults to none.",
+          "description": "Specific frameworks to exclude with Checkov. Defaults to none, though `all` in `frameworks` leaves out `github_configuration`, `gitlab_configuration` and `bitbucket_configuration` unless `frameworks` names them.",
           "items": {
             "anyOf": [
               {
@@ -11021,6 +11033,23 @@
           ],
           "default": null,
           "title": "Resolved Digest"
+        },
+        "resolved_from": {
+          "anyOf": [
+            {
+              "enum": [
+                "engine",
+                "registry",
+                "payload"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved From"
         }
       },
       "title": "ImageLocator",
@@ -13966,7 +13995,7 @@
       "properties": {
         "allowed_command_prefixes": {
           "default": [],
-          "description": "When not empty, every stdio command must be a path that starts with one of these prefixes (MEDIUM), compared on path boundaries after the command is normalized. A bare command name such as `npx` does not start with a path prefix and is flagged. Empty turns the check off.",
+          "description": "When not empty, every stdio command must be allowed by one of these entries (MEDIUM). An entry that is a path allows the commands that start with it, compared on path boundaries after the command is normalized. An entry that is a bare name such as `npx` allows exactly that bare command, which the client finds on PATH, and no command that has a path, `./npx` included. Empty turns the check off.",
           "items": {
             "type": "string"
           },

@@ -16,10 +16,11 @@ name: ASH - Image scan against a live engine and registry
 #
 # WHAT IT DOES
 #
-# 1. Builds a tiny image from tests/test_data/images/live-engine/Dockerfile (base
-#    pinned by digest from public.ecr.aws).
-# 2. Starts a local registry container (public.ecr.aws/docker/library/registry,
-#    pinned by digest) on localhost:5000 and pushes the image to it.
+# 1. Builds a tiny image from tests/test_data/images/live-engine/Dockerfile
+#    (FROM scratch, so the build pulls no base image).
+# 2. Starts a local registry on localhost:5000 with the pinned crane
+#    (`crane registry serve`, so no registry image is pulled) and pushes the
+#    image to it.
 # 3. Scans the image BY TAG while the engine still holds it. The digest ladder's
 #    first rung (the engine's own inspect) must resolve it.
 # 4. Removes the image from the engine, then scans the same tag again. The engine
@@ -28,16 +29,33 @@ name: ASH - Image scan against a live engine and registry
 # 5. Requires, for both scans, that the report's `metadata.scan_source` is
 #    `image:<digest the registry holds>`, read independently from the registry.
 #
+# WHICH SCANNERS
+#
+# Both scans select syft and grype. grype is the one the ladder needs: the scan
+# phase resolves a tag-only reference to its digest only when a selected scanner
+# declares the registry read (Fetched.IMAGE_DIGEST in its operational facets),
+# because the digest keys finding ids and only a scanner that reports findings has
+# any. grype and trivy declare it; syft reports no findings and does not. A run that
+# selects syft alone logs "No selected scanner declares the image-digest registry
+# read" and resolves nothing, so neither rung runs and the scope stays on the
+# reference text (core/phases/scan_phase.py, utils/scanner_tool_types.py). syft stays
+# in the selection so the job still exercises its engine-delegated image argv.
+# tests/unit/utils/test_image_digest_ladder.py holds the selection to the same
+# function the scan phase asks.
+#
 # DETERMINISM
 #
-# The only network use is the two pinned pulls from public.ecr.aws and the
-# installer's pinned tool downloads. The scanner is syft, which needs no
-# vulnerability database; nothing here depends on a feed that changes between runs.
-#
-# PINNED IMAGE DIGESTS (public.ecr.aws, read 2026-11-25; the multi-platform index
-# digests, which the engine resolves to the runner's platform):
-#   public.ecr.aws/docker/library/registry:2     sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
-#   public.ecr.aws/docker/library/busybox:1.37   sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+# The network use is the installer's pinned tool downloads and the vulnerability
+# database ASH refreshes for grype before an online scan. No step pulls an image
+# from a public registry: the fixture is built FROM scratch and the registry is
+# the one crane serves. Both used to come from public.ecr.aws, which refuses an
+# anonymous pull with "Data limit exceeded" once a runner's shared egress address
+# has spent ECR Public's anonymous data quota, so the job failed on some runners
+# and passed on others. Nothing asserted below depends on what that database
+# holds: the scans pass --no-fail-on-findings, so a finding cannot fail a step, and
+# the checks read only the digest ladder's log lines and `metadata.scan_source`. A
+# scanner that cannot complete still fails its step, because ASH exits 1 for an
+# incomplete scan.
 
 on:
   pull_request:
@@ -60,7 +78,6 @@ jobs:
     permissions:
       contents: read
     env:
-      REGISTRY_IMAGE: public.ecr.aws/docker/library/registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
       IMAGE_TAG: localhost:5000/ash-live-engine:ci
     steps:
       - name: Checkout repository
@@ -71,11 +88,11 @@ jobs:
         with:
           python-version: "3.12"
           install-ash: "false"
-      - name: Install ASH and syft
+      - name: Install ASH, syft and grype
         run: |
           set -euo pipefail
           pip install .
-          ash dependencies install --tool syft
+          ash dependencies install --tool syft --tool grype
       # crane is not a scanner or reporter plugin, so `ash dependencies install` does
       # not know it. The image build installs it with this script from the same pins
       # (utils/tool_downloads.py), which verifies the archive and the executable digests.
@@ -85,16 +102,29 @@ jobs:
           mkdir -p "$RUNNER_TEMP/crane-bin"
           python3 automated_security_helper/assets/install-pinned-tool.py crane -b "$RUNNER_TEMP/crane-bin"
           echo "$RUNNER_TEMP/crane-bin" >> "$GITHUB_PATH"
+      # The registry is go-containerregistry's own (pkg/registry), served by the crane
+      # the step above installed at its pin, so starting it pulls no image. The
+      # container this step ran before came from public.ecr.aws, which refuses an
+      # anonymous pull with "Data limit exceeded" once a runner's shared egress address
+      # has spent ECR Public's anonymous data quota. crane listens on loopback only,
+      # over plain HTTP as the container did, keeps blobs in memory and logs one line
+      # per request. All three of its standard streams are redirected, so the step
+      # ends while the server keeps serving the steps below; the runner stops it at
+      # the end of the job.
       - name: Start a local registry
+        id: registry
         run: |
           set -euo pipefail
-          docker run -d --name ash-live-registry -p 127.0.0.1:5000:5000 "$REGISTRY_IMAGE"
+          echo "starting crane registry serve on 127.0.0.1:5000"
+          nohup crane registry serve --address 127.0.0.1:5000 >"$RUNNER_TEMP/crane-registry.log" 2>&1 </dev/null &
+          registry_pid=$!
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:5000/v2/ >/dev/null; then exit 0; fi
+            if ! kill -0 "$registry_pid" 2>/dev/null; then break; fi
             sleep 1
           done
           echo "the local registry did not answer" >&2
-          docker logs ash-live-registry >&2
+          cat "$RUNNER_TEMP/crane-registry.log" >&2
           exit 1
       - name: Build and push the fixture image
         run: |
@@ -106,8 +136,17 @@ jobs:
         run: |
           set -euo pipefail
           # An independent read: the registry's own answer for the tag, not ASH's.
+          # The runner's docker attaches a provenance attestation to the build, so
+          # the pushed tag names an image index. crane's registry answers with the
+          # manifest exactly as it was pushed, whatever the request accepts, so the
+          # digest it reports is the tag's. The Accept header still names all four
+          # manifest media types, sorted as
+          # .github/actions/prepull-base-image/oci_layout.py sorts them, so the read
+          # stays right against a registry that negotiates: the distribution
+          # registry answers 404 for an OCI index without the index types, and one
+          # platform's manifest for a Docker manifest list.
           digest="$(curl -fsSI \
-            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
             http://127.0.0.1:5000/v2/ash-live-engine/manifests/ci \
             | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:" {print $2}')"
           case "$digest" in
@@ -121,7 +160,7 @@ jobs:
           EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
           set -euo pipefail
-          ash scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+          ash scan --image "$IMAGE_TAG" --only-scanners syft,grype --no-fail-on-findings --log-level INFO \
             --output-dir "$RUNNER_TEMP/scan-engine" 2>&1 | tee "$RUNNER_TEMP/scan-engine.log"
           grep -F "through the local docker engine" "$RUNNER_TEMP/scan-engine.log"
           python3 .github/scripts/assert-image-scan-scope.py \
@@ -140,12 +179,17 @@ jobs:
           EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
           set -euo pipefail
-          ash scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+          ash scan --image "$IMAGE_TAG" --only-scanners syft,grype --no-fail-on-findings --log-level INFO \
             --output-dir "$RUNNER_TEMP/scan-registry" 2>&1 | tee "$RUNNER_TEMP/scan-registry.log"
           grep -F "through the registry (crane digest)" "$RUNNER_TEMP/scan-registry.log"
           python3 .github/scripts/assert-image-scan-scope.py \
             --output-dir "$RUNNER_TEMP/scan-registry" \
             --expected-digest "$EXPECTED_DIGEST"
+      - name: Show the local registry log
+        if: failure() && steps.registry.outcome == 'success'
+        run: |
+          set -euo pipefail
+          cat "$RUNNER_TEMP/crane-registry.log" >&2
       - name: Collect the scan output
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

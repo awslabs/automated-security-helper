@@ -30,7 +30,6 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
     ReportContentEmitter,
     _SEVERITY_ORDER,
     _UNLISTED_SEVERITY_PLACE,
-    _count_severity,
     _location_snippet,
     _snippet_text,
     coverage_shortfall_text,
@@ -114,32 +113,6 @@ def _sarif_model(results, *, scanners=("bandit",)) -> AshAggregatedResults:
 # --------------------------------------------------------------------------
 # Module-level helpers
 # --------------------------------------------------------------------------
-
-
-class TestCountSeverity:
-    def test_a_known_level_is_counted_under_its_lower_case_name(self):
-        counts: dict[str, int] = {}
-        for level in ("HIGH", "HIGH", "low", "Info"):
-            _count_severity(counts, level)
-        assert counts == {"high": 2, "low": 1, "info": 1}
-
-    @pytest.mark.parametrize("empty", [None, "", 0, False])
-    def test_a_missing_severity_is_counted_as_unknown(self, empty):
-        counts: dict[str, int] = {}
-        _count_severity(counts, empty)
-        assert counts == {"unknown": 1}
-
-    def test_a_sixth_name_gets_a_bucket_of_its_own(self):
-        counts = {"high": 1}
-        _count_severity(counts, "Moderate")
-        _count_severity(counts, "moderate")
-        assert counts == {"high": 1, "moderate": 2}
-
-    def test_the_insertion_order_of_the_buckets_is_the_order_first_seen(self):
-        counts: dict[str, int] = {}
-        for level in ("LOW", "CRITICAL", "LOW", "INFO"):
-            _count_severity(counts, level)
-        assert list(counts) == ["low", "critical", "info"]
 
 
 class TestParseScanTime:
