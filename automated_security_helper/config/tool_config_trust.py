@@ -1171,13 +1171,6 @@ EXTEND_DEPTH_LIMIT = 2
 #: into memory whole.
 TOOL_CONFIG_MAX_BYTES = 4 * 1024 * 1024
 
-#: The tools, by the name each scanner passes, that cannot read a config whose text
-#: starts with a UTF-8 byte order mark. gitleaks stops at the mark ("While parsing
-#: config: toml: invalid character at start of key") and exits 1, so ASH refuses
-#: such a config itself, before the tool runs, naming the file. For any other tool
-#: the mark is skipped for ASH's own parse and the tool is given the text as it is.
-_TOOLS_THAT_CANNOT_READ_A_BYTE_ORDER_MARK = frozenset({"gitleaks"})
-
 
 def _read_tool_config(tool: str, source: str, path: Path) -> str:
     """The text of the config file at ``path``, for the ``[extend]`` check.
@@ -1330,8 +1323,8 @@ def refuse_relative_extend_path(
     An empty path is skipped, as both tools skip it. Each file is read as a
     regular file of at most ``TOOL_CONFIG_MAX_BYTES``, and each absolute extended
     file is followed to the tool's own depth limit. A UTF-8 byte order mark at the
-    start of the text, which some editors save, is refused for a tool that cannot
-    read one (gitleaks), naming the file, and otherwise skipped before the parse.
+    start of the text, which some editors save, is refused, naming the file or the
+    variable: neither gitleaks nor Betterleaks can read past it.
 
     A file or text ASH cannot read or parse (missing, not a regular file, too
     large, not UTF-8, not TOML) is refused, not left to the tool, because ASH could
@@ -1340,8 +1333,7 @@ def refuse_relative_extend_path(
     than once under keys the tools read as one.
 
     Args:
-        tool: The tool's name, for the message. It also decides whether a leading
-            byte order mark is refused (``_TOOLS_THAT_CANNOT_READ_A_BYTE_ORDER_MARK``).
+        tool: The tool's name, for the message.
         source: Where the config came from (an option or variable name, or the
             path of the extended file), for the message.
         text: The config's text, when the operator gave text.
@@ -1350,7 +1342,7 @@ def refuse_relative_extend_path(
     Raises:
         ScannerError: ``extend.path`` in the config, or in a file it extends, is
             not absolute; the config or a file it extends cannot be read or
-            parsed, or starts with a byte order mark the tool cannot read; or its
+            parsed, or starts with a byte order mark; or its
             ``[extend]`` cannot be read the way the tools read it.
     """
     import tomllib
@@ -1362,17 +1354,15 @@ def refuse_relative_extend_path(
         where = repr(str(path))
     else:
         where = f"the config text in {source}"
-    # chr(0xFEFF) is the byte order mark, which tomllib reads as text before the
-    # first key. A tool that cannot read it would fail on the text it is given, so
-    # the config is refused here, naming it; otherwise only this parse skips the
-    # mark and the tool is given the text as it is.
+    # chr(0xFEFF) is the byte order mark. Neither gitleaks nor Betterleaks can read a
+    # config that starts with one: each stops at the mark ("invalid character at start
+    # of key") and exits 1. So the config is refused here, naming it, before the tool
+    # is given text it would fail on.
     if text.startswith(chr(0xFEFF)):
-        if tool in _TOOLS_THAT_CANNOT_READ_A_BYTE_ORDER_MARK:
-            raise ScannerError(
-                f"{source}: {where} starts with a UTF-8 byte order mark, which "
-                f"{tool} cannot read; remove the mark. {tool} is not run."
-            )
-        text = text[1:]
+        raise ScannerError(
+            f"{source}: {where} starts with a UTF-8 byte order mark, which "
+            f"{tool} cannot read; remove the mark. {tool} is not run."
+        )
     try:
         data = tomllib.loads(text)
     except (ValueError, RecursionError):
