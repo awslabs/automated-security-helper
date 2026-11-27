@@ -521,11 +521,13 @@ def test_an_entry_with_a_command_and_a_url_is_checked_on_both_sides() -> None:
 # The two prefix lists feed their own checks and no other. A check beyond its own
 # that took a listed command or URL as trusted would let a config hide a finding by
 # listing what the finding is about, with no denied option touched. The delivered
-# config policy relies on that: it lets a client set both lists because a list only
-# reports more (_REVIEWED_OPTIONS in
-# tests/unit/cli/mcp/test_delivered_scanner_exclusions.py). The rows above start
-# from everything off, so none of them could see one check lean on another's
-# option; every row here runs with each check that is on by default.
+# config policy relies on that: it lets a client set both lists because, against
+# the default (an empty list), a list only reports more (_REVIEWED_OPTIONS in
+# tests/unit/cli/mcp/test_delivered_scanner_exclusions.py). That is a claim about
+# the default, not about a list the operator set: a delivered config replaces the
+# operator's config instead of merging with it. The rows above start from
+# everything off, so none of them could see one check lean on another's option;
+# every row here runs with each check that is on by default.
 # ---------------------------------------------------------------------------
 
 #: The rules a prefix list exists to raise. A list may add these and nothing else.

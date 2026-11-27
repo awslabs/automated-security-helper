@@ -1414,7 +1414,10 @@ def test_a_delivered_allowlist_does_not_hide_an_unpinned_runner() -> None:
     """The planted control for the two reviewed mcp-config lists.
 
     ``_REVIEWED_OPTIONS`` lets a delivered config set ``allowed_command_prefixes`` and
-    ``remote_url_prefixes`` because a list only reports more. That holds only if no
+    ``remote_url_prefixes`` because, against their default (empty, which turns the
+    check off), a list only reports more. That is no claim about a list the operator
+    set: a delivered config replaces the operator's config instead of merging with
+    it, and this control has the operator set none. The claim holds only if no
     check but the list's own reads it: one that took a listed command or URL as
     trusted would let a client hide an unpinned ``npx`` behind an allowlist that
     names it, with no denied option touched. The scanner reads each list in one
@@ -1526,15 +1529,20 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
         "how many dependencies verify downloads at once; throughput, not findings"
     ),
     ("mcp-config", "require_local"): "off by default; on reports more",
-    # The next two rows claim that a list reports more and that no check but its own
-    # reads it. test_a_delivered_allowlist_does_not_hide_an_unpinned_runner holds that
+    # The next two rows claim that, against the default (an empty list), a list
+    # reports more, and that no check but its own reads it. They claim nothing about
+    # a list the operator set: a delivered config replaces the operator's config
+    # instead of merging with it, so a delivered list replaces the operator's.
+    # test_a_delivered_allowlist_does_not_hide_an_unpinned_runner holds the claim
     # through a delivered config, and the list rows of test_mcp_config_scanner.py
     # hold it check by check.
     ("mcp-config", "remote_url_prefixes"): (
-        "empty by default, which turns the check off; a list reports more"
+        "empty by default, which turns the check off; against that default a "
+        "list reports more"
     ),
     ("mcp-config", "allowed_command_prefixes"): (
-        "empty by default, which turns the check off; a list reports more"
+        "empty by default, which turns the check off; against that default a "
+        "list reports more"
     ),
 }
 
