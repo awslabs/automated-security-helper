@@ -1,14 +1,15 @@
-"""Skip a unit test that needs the ``cdk`` extra, unless the run says the extra must be there.
+"""Skip a unit test that needs an optional extra, unless the run says the extra must be there.
 
-A plain ``uv sync`` installs no optional extras. A test that needs the ``cdk`` extra skips
-without it and names the command that installs it, so the default local run (``uv sync``
-then ``uv run pytest``) is green.
+A plain ``uv sync`` installs no optional extras. A test that needs the ``cdk`` or the
+``symbols`` extra skips without it and names the command that installs it, so the default
+local run (``uv sync`` then ``uv run pytest``) is green.
 
 A skip that nothing checks protects nothing: CI installed no extras when the cdk-nag tests
 were first written, and a breaking cdk-nag major bump landed green. So
-``ASH_REQUIRE_CDK_EXTRA`` turns the skip into a failure, the way ``ASH_REQUIRE_SYMBOLS_EXTRA``
-does for the ``symbols`` extra in ``tests/unit/utils/test_symbol_suppressions.py``. CI's
-unit-test step sets both (``.github/actions/run-unit-tests/action.yml``), and
+``ASH_REQUIRE_CDK_EXTRA`` turns the skip into a failure, and ``ASH_REQUIRE_SYMBOLS_EXTRA``
+does the same for the ``symbols`` extra (``require_symbols_extra``, and the module-level
+gates in ``tests/unit/utils/test_symbol_suppressions.py``). CI's unit-test step sets both
+(``.github/actions/run-unit-tests/action.yml``), and
 ``tests/unit/test_unit_test_step_gates.py`` fails if it stops setting them.
 """
 
@@ -63,4 +64,42 @@ def require_cdk_extra() -> None:
     pytest.skip(
         f"needs the [cdk] extra (missing: {', '.join(missing)}); "
         "install it with `uv sync --extra cdk`"
+    )
+
+
+#: The top-level modules the ``symbols`` extra installs, one per distribution in
+#: ``[project.optional-dependencies] symbols``: tree-sitter and its four grammars.
+SYMBOLS_EXTRA_MODULES = (
+    "tree_sitter",
+    "tree_sitter_java",
+    "tree_sitter_javascript",
+    "tree_sitter_python",
+    "tree_sitter_typescript",
+)
+
+#: Set to 1, yes or true, and a missing ``symbols`` extra fails the test instead of
+#: skipping it.
+REQUIRE_SYMBOLS_EXTRA_ENV = "ASH_REQUIRE_SYMBOLS_EXTRA"
+
+
+def require_symbols_extra() -> None:
+    """Return if the ``symbols`` extra is installed; otherwise skip, or fail under the
+    CI flag.
+
+    For every test that builds a syntax tree or writes an ``.ash.lock`` entry: a lock
+    entry records digests of the file's tree-sitter parse, so binding one needs the
+    grammars as much as resolving a symbol does.
+    """
+    missing = [name for name in SYMBOLS_EXTRA_MODULES if not _installed(name)]
+    if not missing:
+        return
+    if _required(REQUIRE_SYMBOLS_EXTRA_ENV):
+        pytest.fail(
+            f"{REQUIRE_SYMBOLS_EXTRA_ENV} is set but the [symbols] extra is not "
+            f"installed (missing: {', '.join(missing)}). This test has to run here, "
+            "not skip: install the extra with `uv sync --extra symbols`."
+        )
+    pytest.skip(
+        f"needs the [symbols] extra (missing: {', '.join(missing)}); "
+        "install it with `uv sync --extra symbols`"
     )

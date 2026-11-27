@@ -401,6 +401,12 @@ _ALLOWED_SIZED_READS = {
         "_read_gitdir_record",
     ): "bounded+1 read of a gitdir record, refused over the cap",
     (
+        "utils/ash_lock.py",
+        "read_bounded",
+    ): "a locked file's bytes, read at MAX_LOCKED_FILE_BYTES + 1 from one regular "
+    "file descriptor and refused over the cap; hashed and parsed for digests, "
+    "never shown",
+    (
         "workspace/policy.py",
         "_counted_from_the_start",
     ): "the BOM-length head of the operator's policy file, re-read to re-base a "

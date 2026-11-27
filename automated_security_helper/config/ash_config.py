@@ -80,7 +80,11 @@ from automated_security_helper.utils.unknown_keys import (
     UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT,
 )
 from automated_security_helper.core.exceptions import ASHConfigUnsetVariableError
-from automated_security_helper.core.enums import ExportFormat, SandboxMode
+from automated_security_helper.core.enums import (
+    ExportFormat,
+    InvalidationScope,
+    SandboxMode,
+)
 from automated_security_helper.utils.content_databases import StalenessPolicy
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import (
@@ -2012,6 +2016,24 @@ class AshHistoryConfig(RedactedSection):
     ] = 50
 
 
+def _refuse_invalidation_scope(value: Any) -> Any:
+    """The refusal of a ``suppression_invalidation_scope`` that names no kind,
+    in the words a Literal gives. The value is not quoted."""
+    names = [f"'{kind.value}'" for kind in InvalidationScope]
+    raise PydanticCustomError(
+        "literal_error",
+        "Input should be {expected}",
+        {"expected": f"{', '.join(names[:-1])} or {names[-1]}"},
+    )
+
+
+#: ``global_settings.suppression_invalidation_scope``: a name becomes its
+#: ``InvalidationScope`` (see ``config/wire_enum.py``).
+_invalidation_scope_name = wire_enum_validator(
+    InvalidationScope, _refuse_invalidation_scope
+)
+
+
 class AshConfigGlobalSettingsSection(RedactedSection):
     # validate_default is here because `severity_threshold`'s default is derived
     # from an environment variable, and pydantic does not validate a default no
@@ -2056,6 +2078,30 @@ class AshConfigGlobalSettingsSection(RedactedSection):
             description="Global list of suppression rules. Each rule specifies findings to suppress based on rule ID, file path, and optional line numbers."
         ),
     ] = []
+
+    suppression_invalidation_scope: Annotated[
+        InvalidationScope,
+        BeforeValidator(_invalidation_scope_name),
+        Field(
+            description=(
+                "The invalidation scope `ash suppress add` records in .ash.lock "
+                "for a new symbol suppression when --invalidation-scope is not "
+                "given. 'file': a change to the code of the suppression's file "
+                "makes it stop applying until it is reviewed again. 'symbol': "
+                "only a change to the code of the suppressed definition does "
+                "(its lines, every definition bearing its name, the headers of "
+                "the definitions it sits in, the file's prelude). Applies to new "
+                ".ash.lock scopes only: a scan and `ash suppress verify` read the "
+                "kind recorded in the lock, so editing this never changes a "
+                "reviewed binding."
+            )
+        ),
+    ] = InvalidationScope.FILE
+
+    @field_serializer("suppression_invalidation_scope")
+    def _suppression_invalidation_scope_value(self, v: InvalidationScope) -> str:
+        # The name in every dump mode, as ``SandboxConfig._sandbox_mode_value``.
+        return wire_value(v)
 
     exclusions: Annotated[
         List[AshExclusion],

@@ -406,8 +406,13 @@ def test_no_other_enum_typed_field_can_come_from_a_config_file():
     walk(AshConfig, "")
 
     # sandbox.mode is the second: its string dump is pinned in
-    # tests/unit/vocab/test_phase_mode_format_vocabularies.py.
-    tested = {"output_formats", "sandbox.mode"}
+    # tests/unit/vocab/test_phase_mode_format_vocabularies.py. The third's round
+    # trips are in tests/unit/config/test_suppression_invalidation_scope_config.py.
+    tested = {
+        "output_formats",
+        "sandbox.mode",
+        "global_settings.suppression_invalidation_scope",
+    }
     assert enum_fields == tested, (
         f"enum-typed config fields without a tested string dump: "
         f"{sorted(enum_fields - tested)}"

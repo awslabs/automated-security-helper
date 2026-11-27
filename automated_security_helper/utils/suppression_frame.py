@@ -455,8 +455,15 @@ def first_match(
                 continue
             if entry.symbol is None:
                 return index
+            # The rule id picks the entry's own recorded .ash.lock scope: a
+            # scope the lock never recorded applies on no path, `ash merge`
+            # included, which never runs the config-time refusal.
             if symbol_resolver is not None and symbol_resolver.contains(
-                finding.file_path, finding.line_start, finding.line_end, entry.symbol
+                finding.file_path,
+                finding.line_start,
+                finding.line_end,
+                entry.symbol,
+                rule_id=entry.rule_id,
             ):
                 return index
         start += size

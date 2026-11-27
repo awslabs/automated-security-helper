@@ -843,6 +843,7 @@
           }),
         }),
         'severity_threshold': 'HIGH',
+        'suppression_invalidation_scope': 'file',
         'suppressions': list([
         ]),
       }),
@@ -1535,6 +1536,7 @@
           }),
         }),
         'severity_threshold': 'MEDIUM',
+        'suppression_invalidation_scope': 'file',
         'suppressions': list([
         ]),
       }),

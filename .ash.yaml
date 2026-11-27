@@ -3831,6 +3831,32 @@ global_settings:
         Test code. A fabricated 40-hex commit sha in the parametrized masking
         expectations; the test asserts how ferret pin lines are rendered, and
         the value is the ascending-digits placeholder.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: automated_security_helper/utils/ast_digest.py
+      line_start: 72
+      line_end: 72
+      reason: >-
+        False positive. POLICY_SHA256 is the pinned SHA-256 of the digest
+        policy tables, compared with the running tables so an edit that changes
+        what a digest means fails until the pin moves with it. A content
+        digest, not a secret.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_ast_digest.py
+      line_start: 469
+      line_end: 473
+      reason: >-
+        Test code. The pinned grammar fingerprints, the SHA-256 identities of
+        the tree-sitter grammar builds uv.lock pins. The test compares the
+        installed builds with them; they must stay literals to pin anything.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: tests/unit/utils/test_ast_digest.py
+      line_start: 480
+      line_end: 575
+      reason: >-
+        Test code. The golden file digests: the expected SHA-256 of each
+        sample source under the canonical form. They pin the record format, so
+        a computed value would check the code against itself. Content digests,
+        not secrets.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/mcp_config/test_json_spans.py
       reason: >-

@@ -1,22 +1,39 @@
 
  Usage: ash suppress refresh [OPTIONS] [paths]...
 
- Record a new review: re-hash locked files whose bytes changed.
+ Record a new review: re-record locked files whose code changed.
 
  Run it after reading what changed in a file and confirming its suppressions
- still hold. It prints each file whose hash changed. A locked file that no
- longer exists is reported and left as it was (exit code 1), unless
- --drop-missing removes its dead entry.
+ still hold. It re-records every suppression of each named file from the
+ code as it stands, and prints each file it re-recorded. A locked file that
+ no longer exists is reported and left as it was (exit code 1), unless
+ --drop-missing removes its dead entry, and so is a symbol-scoped
+ suppression whose symbol the file no longer defines. A file that changed
+ and cannot be parsed is left as it was (exit code 1).
+
+ --invalidation-scope converts suppressions between 'file' and 'symbol'
+ scope; recording a new kind is a review too. A version 1 entry is
+ converted to a syntax-tree entry when its file is refreshed.
 
 ┌─ Arguments ─────────────────────────────────────────────────────────────────────────────────────┐
-│   paths      <str>  Locked files to re-hash. Pass --all for every locked file.                  │
+│   paths      <str>  Locked files to record a new review of. Pass --all for every locked file.   │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
-│ --all                        Re-hash every locked file. A refresh re-approves each changed file │
-│                              it touches, so the whole-lock run is asked for explicitly.         │
-│ --drop-missing               Remove the entry of a named file that no longer exists, instead of │
-│                              leaving it and exiting 1.                                          │
-│ --source-dir          <str>  The directory the scan covers, which holds .ash.lock. Defaults to  │
-│                              the current directory.                                             │
-│ --help                       Show this message and exit.                                        │
+│ --all                                      Refresh every locked file. A refresh re-approves     │
+│                                            each changed file it touches, so the whole-lock run  │
+│                                            is asked for explicitly.                             │
+│ --drop-missing                             Remove the entry of a named file that no longer      │
+│                                            exists, and the symbol-scoped suppressions of a      │
+│                                            symbol the file no longer defines, instead of        │
+│                                            leaving them and exiting 1.                          │
+│ --invalidation-scope        <file|symbol>  Set the invalidation scope of the named files'       │
+│                                            recorded suppressions, or with --symbol of that      │
+│                                            symbol's only: 'file' or 'symbol'. Without it every  │
+│                                            suppression keeps its kind.                          │
+│ --symbol                    <str>          With --invalidation-scope, change only the           │
+│                                            suppressions of this symbol. Every suppression of    │
+│                                            the file is re-recorded either way.                  │
+│ --source-dir                <str>          The directory the scan covers, which holds           │
+│                                            .ash.lock. Defaults to the current directory.        │
+│ --help                                     Show this message and exit.                          │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘

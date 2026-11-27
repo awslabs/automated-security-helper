@@ -1,6 +1,12 @@
 from enum import Enum, IntEnum
 from typing import Iterable, Optional
 
+# Defined in utils, which ``utils/ash_lock.py`` may import and ``core`` may not
+# be imported by; re-exported here so this name keeps working.
+from automated_security_helper.utils.invalidation_scope import (
+    InvalidationScope as InvalidationScope,
+)
+
 
 class AshExitCode(IntEnum):
     """The process exit statuses ASH commands report.

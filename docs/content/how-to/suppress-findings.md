@@ -108,6 +108,27 @@ Remove them, or move their expiration dates, in your ASH configuration file.
 
 `symbol` limits a suppression to findings inside one definition in the file, named with dots from the top of the file, such as `Deployer.run_hook`. The name is exact and case-sensitive. A suppression with `symbol` keeps matching when the code around the definition moves, where a line range would not.
 
+The examples in this section and the next use this `src/deploy.py`, in which bandit reports B602 (a subprocess call with `shell=True`) inside both methods:
+
+<!-- doctest: save-as=src/deploy.py -->
+```python
+import subprocess
+
+
+class Deployer:
+    def __init__(self, manifest):
+        self.manifest = manifest
+
+    def run_hook(self, name):
+        return subprocess.call(self.manifest["hooks"][name], shell=True)
+
+    def clean(self):
+        return subprocess.call("make clean", shell=True)
+```
+
+This suppression covers the finding in `run_hook`, and the one in `clean` is still reported:
+
+<!-- doctest: save-as=.ash.yaml -->
 ```yaml
 global_settings:
   suppressions:
@@ -121,41 +142,115 @@ A symbol suppression also needs an entry for its file in `.ash.lock`; [create bo
 
 ASH finds the definition by parsing the file with tree-sitter, for Python, JavaScript, TypeScript, and Java files. The parsers are in the `symbols` extra, which is not installed by default; without it, a suppression with `symbol` matches nothing and the scan logs a warning that names the extra. The container image includes it. For the qualified-name grammar, the fail-closed rules, and the resolver's API and limits, see [Symbol resolution](../reference/symbol-resolution.md).
 
-### Lock a symbol suppression to its file {#lock}
+### Lock a symbol suppression to the code you reviewed {#lock}
 
-A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, a committed JSON file at the top of the scanned directory (`--source-dir`, usually the repository root -- the lock follows the scanned directory, wherever the config file lives), records the SHA-256 of each file a symbol suppression names, taken when the suppression was reviewed, and the `(rule_id, symbol)` scopes reviewed on it:
+A symbol suppression follows its definition when the code moves, so a definition that is rewritten would keep a review that no longer describes it. The lock prevents that. `.ash.lock`, a committed JSON file at the top of the scanned directory (`--source-dir`, usually the repository root -- the lock follows the scanned directory, wherever the config file lives), records each file a symbol suppression names as tree-sitter parsed it when the suppression was reviewed: digests of the file's syntax tree, and the `(rule_id, symbol)` scopes reviewed on it, each with an [invalidation scope](#invalidation-scope), `file` or `symbol`, that says which change makes it stop applying:
 
-- A symbol suppression the lock does not record is refused when the config is validated, by `ash scan` and by `ash config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ash suppress add` command to run, which records a new scope on an existing entry without re-hashing. The rule id is compared case-insensitively, the symbol exactly.
-- A symbol suppression's `path` must name one file. A glob or directory path cannot be hashed, so it is refused with its own message; lock each file that holds a suppressed definition with its own entry.
-- When the file's bytes no longer hash to the entry, every symbol suppression bound to that file stops applying. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
+- A symbol suppression the lock does not record is refused when the config is validated, by `ash scan` and by `ash config validate`: a file with no entry, and equally a `(rule_id, symbol)` the file's entry does not record, so locking a file for one rule does not approve suppressions added to it later. The message names the `ash suppress add` command to run, which records a new scope on an existing entry. The rule id is compared case-insensitively, the symbol exactly.
+- A symbol suppression's `path` must name one file. A glob or directory path names no single syntax tree, so it is refused with its own message; lock each file that holds a suppressed definition with its own entry.
+- When the code a suppression was reviewed against changes, the suppression stops applying: any change to the code of the file under `file` scope, a change to the code of the definition under `symbol` scope. Its findings are reported again, and the scan prints one notice that names the file, the suppressions, and the refresh command.
+- A change to layout alone, such as re-indenting, does not count; [What a change looks like to the lock](#what-counts) lists what does.
 - Line-range suppressions are not affected.
-
-The whole file is hashed, not the definition, so reformatting a definition and editing it are treated alike. The file is read as bytes, so a checkout that rewrites line endings changes the hash; refresh the lock on that checkout.
 
 Create the suppression and its lock entry together with `ash suppress add`:
 
-<!-- doctest: illustrative reason="names src/deploy.py and its Deployer.run_hook method, which the docs runner's sample project does not have" -->
 ```bash
 ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
   --reason "run_hook only runs commands from the deploy manifest"
 ```
 
-This writes the suppression to the config a scan of the current directory uses (`--config` names another YAML file) and the hash to `.ash.lock`. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression under the lock. Pass `--source-dir` to run it from another directory.
+This writes the suppression to the config a scan of the current directory uses (`--config` names another YAML file) and the file's digests to `.ash.lock`. A suppression already in the config for the same rule, file, and symbol is not written twice, which is how you bring an existing symbol suppression, such as the one above, under the lock. Pass `--source-dir` to run it from another directory. `add` refuses a file whose recorded suppressions are out of date until you review its change and refresh it.
 
 After you change a locked file, read the change, confirm the suppressions still hold, and record the review:
 
-<!-- doctest: illustrative reason="re-hashes src/deploy.py, a locked file the docs runner's sample project does not have" -->
 ```bash
 ash suppress refresh src/deploy.py   # or --all, after reviewing every change
 ```
 
-A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly with `--all`, never by leaving the paths off. A locked file that no longer exists cannot be re-hashed; `refresh` reports it and exits 1, and `ash suppress refresh --drop-missing <file>` removes the dead entry (then remove its suppressions from the config).
+A refresh records every suppression of each file it names again, from the code as it stands, so the whole-lock run is asked for explicitly with `--all`, never by leaving the paths off. A file that changed and does not parse cleanly is left as it was; `refresh` names the error and exits 1. A locked file that no longer exists cannot be recorded; `refresh` reports it and exits 1, and `ash suppress refresh --drop-missing <file>` removes the dead entry (then remove its suppressions from the config). A symbol-scoped suppression whose definition is gone from the file, renamed or deleted, is reported the same way: record it under its new name with `ash suppress add`, or remove it from the config, then refresh the file with `--drop-missing`.
 
-`ash suppress verify` exits 1 and lists every locked file that changed or is gone, and every symbol suppression the checked configs hold that the lock does not record. Run it in CI. It prints which config files it checked: the named `--config` files (repeatable for a repository with more than one), or the one config a scan of the source directory discovers; suppressions contributed by an `extends` base are not read.
+`ash suppress verify` exits 1 and lists every recorded suppression whose code changed, whose file or definition is gone, or whose changed file cannot be parsed, and every symbol suppression the checked configs hold that the lock does not record. Run it in CI. It prints which config files it checked: the named `--config` files (repeatable for a repository with more than one), or the one config a scan of the source directory discovers; suppressions contributed by an `extends` base are not read.
 
-Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new hash beside the edit it covers. The commands are the supported way to write the file. Its keys are sorted, so the same entries produce the same bytes in any order; each entry keeps the `created` stamp of its first review, `refresh` keeps it too, and a refresh that changes nothing rewrites nothing, so two independently created locks differ only in those stamps.
+`ash suppress add`, `refresh`, and `migrate` parse the files they record, so they need the `symbols` extra and refuse without it, printing the [install command](#installing-the-extra). `ash suppress verify` needs it only for a file whose bytes changed since it was recorded: an unchanged file is current by its content hash alone. A scan needs it in any case, since without it a symbol suppression matches nothing.
 
-The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning; move it with `git mv .ash/ash.lock .ash.lock` (any later `ash suppress add` or `refresh` also writes `.ash.lock` and leaves the old file for `git rm`). Reading it is deprecated since v3.9 and ends in v4.0.
+Commit `.ash.lock` with the change it belongs to, so a reviewer sees the new digests, and any change of invalidation scope, beside the edit they cover. The commands are the supported way to write the file. Its keys are sorted, so the same entries produce the same bytes in any order; each entry keeps the `created` stamp of its first review, `refresh` keeps it too, and a refresh that changes nothing rewrites nothing, so two independently created locks differ only in those stamps.
+
+The lock was first written inside the `.ash/` directory. ASH still reads that older file when `.ash.lock` does not exist, with a deprecation warning; move it with `git mv .ash/ash.lock .ash.lock` (any later `ash suppress add`, `refresh`, or `migrate` also writes `.ash.lock` and leaves the old file for `git rm`). Reading it is deprecated since v3.9 and ends in v4.0.
+
+#### Choose what makes a suppression stop applying {#invalidation-scope}
+
+Each suppression the lock records has an invalidation scope:
+
+| Scope | The suppression stops applying when |
+|---|---|
+| `file`, the default | the code of the file changes, anywhere in it |
+| `symbol` | the code of the definition changes: a token on its lines, another definition that bears its name, the header of a definition it sits in (such as a class's name, bases, and decorators), or the top of the file (a byte order mark; in Python the encoding declaration, the `#!` line, and `from __future__` imports; in JavaScript and TypeScript the `#!` line, leading comments, and directives such as `"use strict"`) |
+
+Choose by what the suppression's reason depends on. The reason given for `run_hook` above, that it only runs commands from the deploy manifest, depends on where the manifest comes from, which is code outside `run_hook`, so it keeps file scope. A reason that the definition's own lines prove can take symbol scope, such as the fixed command in `clean`:
+
+```bash
+ash suppress add B602 --symbol Deployer.clean --file src/deploy.py \
+  --reason "clean runs a fixed command" --invalidation-scope symbol
+```
+
+Symbol scope does not cover the rest of the file: imports other than `from __future__`, module-level constants, class attributes, other definitions, the code that calls the definition, and an `if` or `try` around it. A suppression whose reason rests on one of them keeps file scope. For a `subprocess.call(COMMANDS[step], shell=True)` that is safe because of what `COMMANDS` holds at the top of the module, symbol scope would leave the suppression applying after an edit to `COMMANDS`.
+
+Without `--invalidation-scope`, `add` records a new suppression with the `global_settings.suppression_invalidation_scope` of the config it writes to (`file` or `symbol`; an `extends` base is not read), or `file` when the config does not set it. A suppression the lock already records keeps its scope: `add` refuses a different `--invalidation-scope` for it, and when only the config's default differs, it keeps the recorded scope and says so. Change a recorded scope with a refresh, which reviews the file again: `ash suppress refresh --invalidation-scope symbol --symbol Deployer.run_hook src/deploy.py` would move the `run_hook` suppression to symbol scope, and without `--symbol` the option sets the scope of every suppression of the files named. A scan and `ash suppress verify` read the scope from the lock alone, so editing the config's default never changes a suppression that was already reviewed.
+
+#### What a change looks like to the lock {#what-counts}
+
+Only layout is ignored: spaces, tabs, and line breaks between tokens, a backslash that continues a Python line, and line endings (CRLF, CR, and LF read the same). Every other change counts:
+
+- a comment, so an edit that changes only a comment counts;
+- the spelling of a literal: its quote style, an f-string's spacing, a re-wrapped docstring, `0x10` written for `16`;
+- parentheses, trailing commas, and semicolons that a formatter adds or removes;
+- in JavaScript and TypeScript, whether a line break comes before a token, so moving part of a statement onto a new line counts and re-indenting it does not;
+- adding or removing a UTF-8 byte order mark.
+
+A formatter that only re-indents keeps every suppression applying; one that rewrites quotes or commas needs a refresh after you review its change. With the two suppressions above, a comment appended to `src/deploy.py` changes the file but not `clean`:
+
+<!-- doctest: run expect-exit=1 -->
+```bash
+printf '\n# Hooks are defined in the deploy manifest.\n' >> src/deploy.py
+ash suppress verify
+```
+
+```text
+stale: src/deploy.py (B602 in Deployer.run_hook); after review run `ash suppress refresh src/deploy.py`
+1 problem(s); a scan does not apply these suppressions.
+```
+
+The file-scope suppression of `run_hook` stops applying until the file is refreshed, and the symbol-scope suppression of `clean` still applies. After reviewing the change, record it:
+
+```bash
+ash suppress refresh src/deploy.py
+```
+
+#### Grammar updates {#grammar-updates}
+
+A digest depends on how the grammar of the file's language parses the file, so each entry records the grammar it was computed under: the grammar's package and version, and a fingerprint of its tables. When an upgrade of ASH or of the `symbols` extra brings a grammar whose tables differ:
+
+- a file whose bytes have not changed since it was recorded stays current;
+- a changed file cannot be compared across two grammars, so `verify` and the scan report its suppressions as stale, naming both grammar versions, until a refresh records the review under the new grammar.
+
+A grammar release with the same tables is the same grammar to the lock. Each entry also names the canonical form its digests were computed in (`ash-ast-1`); an ASH that does not compute that form reports a changed file of the entry as one it cannot check, never as current.
+
+#### Upgrading a version 1 lock {#upgrade-lock}
+
+A lock written before syntax-tree digests, a version 1 lock, records a SHA-256 of each file's bytes. ASH still reads it with that meaning: any byte change, line endings included, makes a version 1 entry stale. `ash suppress verify` passes on a version 1 entry whose file is unchanged and prints a line that names `ash suppress migrate`. The first command that writes the lock writes version 2, and leaves the version 1 entries it did not record as they were.
+
+To convert a lock:
+
+1. Run `ash suppress verify`. For each file it lists, review the change and run `ash suppress refresh <file>`, which records the review as syntax-tree digests.
+2. Run `ash suppress migrate`. It converts every version 1 entry whose file is unchanged, at file scope, which approves nothing: the bytes it reads are the bytes that were reviewed. It lists every entry it leaves (its file changed, is gone, or does not parse) and exits 0 only when no version 1 entry is left.
+
+```bash
+ash suppress migrate
+```
+
+`ash suppress add` also converts the entry it records a suppression on, while that file is unchanged. Moving a converted suppression to symbol scope is a separate review, with `refresh --invalidation-scope symbol`.
+
+Every environment that runs `ash scan` or `ash suppress` on the repository has to move together. An ASH built before version 2 locks reads only version 1 and refuses a version 2 lock: its scan stops when the config is validated (exit 3), and its `ash suppress` commands exit 1. To go back to such a build, restore the `.ash.lock` from before the upgrade as well.
 
 ### Installing the extra {#installing-the-extra}
 

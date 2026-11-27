@@ -1,35 +1,52 @@
 
  Usage: ash suppress add [OPTIONS] {rule_id}
 
- Add a symbol suppression and lock its file's content hash.
+ Add a symbol suppression and lock its file's syntax tree.
 
- Writes the suppression into the config and the hash of the file's bytes
- into .ash.lock. While the file is unchanged the suppression applies;
- after any edit to the file its findings are reported again until the change
- is reviewed and `ash suppress refresh` records it.
+ Writes the suppression into the config and digests of the file's
+ tree-sitter parse into .ash.lock. While the code is unchanged the
+ suppression applies; after a change, in the file or only in the symbol as
+ the invalidation scope says, its findings are reported again until the
+ change is reviewed and `ash suppress refresh` records it. Changes to
+ spaces, tabs and line breaks between tokens do not count; comments, string
+ literals and every other token do.
 
  A suppression already in the config for the same rule, file and symbol is
  not written twice; the lock entry is still created or completed, which is
  how an existing suppression is brought under the lock.
 
+ Needs the optional 'symbols' extra, which parses the file.
+
  Example:
      ash suppress add B602 --symbol Handler.run --file src/app.py \
-         --reason "The command is a constant."
+         --reason "The command is a constant." --invalidation-scope symbol
 
 ╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────╮
 │ *    rule_id      <str>  The rule id the suppression covers, e.g. B602. [required]               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
-│ *  --symbol              <str>  The definition the suppression covers, as a dotted qualified     │
-│                                 name such as 'MyClass.my_method'.                                │
-│                                 [required]                                                       │
-│ *  --file                <str>  The file that holds the definition, relative to the source       │
-│                                 directory. Its content hash is recorded in the lock.             │
-│                                 [required]                                                       │
-│ *  --reason              <str>  Why the finding is safe to suppress. [required]                  │
-│    --config      -c      <str>  The YAML config file to write the suppression to. Defaults to    │
-│                                 the config a scan of the source directory uses.                  │
-│    --source-dir          <str>  The directory the scan covers, which holds .ash.lock. Defaults   │
-│                                 to the current directory.                                        │
-│    --help                       Show this message and exit.                                      │
+│ *  --symbol                      <str>          The definition the suppression covers, as a      │
+│                                                 dotted qualified name such as                    │
+│                                                 'MyClass.my_method'.                             │
+│                                                 [required]                                       │
+│ *  --file                        <str>          The file that holds the definition, relative to  │
+│                                                 the source directory. Its syntax-tree digests    │
+│                                                 are recorded in the lock.                        │
+│                                                 [required]                                       │
+│ *  --reason                      <str>          Why the finding is safe to suppress. [required]  │
+│    --config              -c      <str>          The YAML config file to write the suppression    │
+│                                                 to. Defaults to the config a scan of the source  │
+│                                                 directory uses.                                  │
+│    --source-dir                  <str>          The directory the scan covers, which holds       │
+│                                                 .ash.lock. Defaults to the current directory.    │
+│    --invalidation-scope          <file|symbol>  What makes the suppression stop applying until   │
+│                                                 it is reviewed again: 'file', a change to the    │
+│                                                 code of the file, or 'symbol', a change to the   │
+│                                                 code of the definition itself. Defaults to the   │
+│                                                 config's                                         │
+│                                                 global_settings.suppression_invalidation_scope,  │
+│                                                 else 'file'. A suppression already recorded      │
+│                                                 keeps its kind; change it with `ash suppress     │
+│                                                 refresh --invalidation-scope`.                   │
+│    --help                                       Show this message and exit.                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

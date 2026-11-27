@@ -183,6 +183,7 @@ ash_config:
         enabled: false
         replace_default_denied_paths: false
     severity_threshold: MEDIUM
+    suppression_invalidation_scope: file
     suppressions: []
   honor_ignore_files: true
   mcp-resource-management:
