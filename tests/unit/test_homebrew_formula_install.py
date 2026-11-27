@@ -680,8 +680,14 @@ class TestTheInstallLeavesNoBuildPathBehind:
 #: by $ASH_STUB_RELEASE: ``with-subject`` (ASH 3.9), ``without-subject`` (an older
 #: ASH, which shows the subject-less scan's help since click reads ``--help`` before
 #: it refuses the extra argument), ``refusing`` (an older ASH that refuses the word
-#: ``fs`` with a usage error instead), and anything else, a crash.
+#: ``fs`` with a usage error instead), ``names-it-and-fails`` (an ASH that prints the
+#: usage line and then dies), and anything else, a crash. Any other command line is
+#: refused, so a probe that asks something else than ``scan fs --help`` gets no answer.
 STAND_IN_ASH_FOR_THE_PROBE = """#!/bin/sh
+if [ "$*" != "scan fs --help" ]; then
+  echo "the stand-in answers only 'scan fs --help', not '$*'" >&2
+  exit 3
+fi
 case "$ASH_STUB_RELEASE" in
   with-subject) echo "Usage: ash scan fs [OPTIONS] [PATH]"; exit 0 ;;
   without-subject) echo "Usage: ash scan [OPTIONS]"; exit 0 ;;
@@ -689,6 +695,10 @@ case "$ASH_STUB_RELEASE" in
     echo "Usage: ash scan [OPTIONS]" >&2
     echo "Error: Got unexpected extra argument (fs)" >&2
     exit 2 ;;
+  names-it-and-fails)
+    echo "Usage: ash scan fs [OPTIONS] [PATH]"
+    echo "Error: it broke after printing its usage" >&2
+    exit 1 ;;
 esac
 printf '%s\\n' 'Traceback (most recent call last):' 'MemoryError' >&2
 exit 1
@@ -759,13 +769,24 @@ class TestTheFormulaTestChoosesTheDirectoryWordFromAnAnswer:
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.strip() == word
 
-    def test_a_crashed_probe_picks_no_word_and_fails_the_test(self, tmp_path):
-        proc = self._run(tmp_path, "crashing")
+    @pytest.mark.parametrize(
+        "release, printed",
+        [
+            ("crashing", "MemoryError"),
+            # The usage line names the command, but the exit status is not 0, so the
+            # help is not an answer: the status is read before the words are.
+            ("names-it-and-fails", "it broke after printing its usage"),
+        ],
+    )
+    def test_a_probe_that_fails_picks_no_word_and_fails_the_test(
+        self, tmp_path, release, printed
+    ):
+        proc = self._run(tmp_path, release)
 
         assert proc.returncode != 0, proc.stdout
         assert proc.stdout == "", "a word was chosen by guess"
         assert "could not tell whether this ASH has 'ash scan fs'" in proc.stderr
-        assert "MemoryError" in proc.stderr
+        assert printed in proc.stderr
 
     @pytest.mark.parametrize(
         "release, said",

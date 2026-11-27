@@ -13,10 +13,10 @@ names: the pull-request scan of this repository installs the head commit, the
 required scan the base commit, and an outside caller may pin any tag, 3.8 and older
 included. So the Run ASH and Show ASH Summary Report steps ask the installed ASH for
 the new command's help, as the deploy targets do, and only an answer picks the older
-spelling: a help that does not name the command, or the usage error that refuses its
-first word. A probe that fails any other way (uvx cannot fetch the source, ASH
-crashes) says nothing about the ASH's commands, so the step fails with the end of what
-the probe printed and runs neither spelling.
+spelling: a help that does not name the command, or the usage error that refuses the
+word the command adds (``fs``, or ``results``). A probe that fails any other way (uvx
+cannot fetch the source, ASH crashes) says nothing about the ASH's commands, so the
+step fails with the end of what the probe printed and runs neither spelling.
 
 The scan step used to pass ``--source-dir .`` ahead of ``ash-args``, so a
 ``--source-dir`` in ``ash-args`` came later and named the directory scanned (click
@@ -124,6 +124,10 @@ if [ "${last:-}" = "--help" ]; then
       echo "Error: No such command 'results'." >&2; exit 2 ;;
     "no-name:--from ash-source ash scan fs"|"no-name:--from ash-source ash results report")
       echo " Usage: ash [OPTIONS]"; pad; exit 0 ;;
+    "names-and-fails:--from ash-source ash scan fs"|"names-and-fails:--from ash-source ash results report")
+      echo " Usage: ash $4 $5 [OPTIONS]"
+      echo "Error: it broke after printing its usage" >&2
+      exit 1 ;;
     "hostile:--from ash-source ash scan fs"|"hostile:--from ash-source ash results report")
       printf '%s\n' "::warning::planted by the probe" "##[warning]planted too" >&2
       exit 1 ;;
@@ -286,13 +290,27 @@ def test_the_scan_names_the_directory_the_way_its_ash_does(
     assert "Usage:" not in _output(ran)
 
 
+#: The failed probes: uvx that cannot fetch the source, and an ASH that prints the usage
+#: line, which names the command, and then dies. The exit status is not 0 in either, so
+#: neither help is an answer: the status is read before the words are.
+FAILED_PROBES = [
+    pytest.param("broken", "error: Failed to fetch the source", id="cannot-fetch"),
+    pytest.param(
+        "names-and-fails", "it broke after printing its usage", id="names-it-and-fails"
+    ),
+]
+
+
 @pytest.mark.integration
 @posix_only
-def test_the_scan_does_not_read_a_failed_probe_as_an_older_ash(tmp_path, helps):
-    """uvx that cannot fetch the source says nothing about the ASH's commands. Read as
-    an older ASH, it would scan with the older spelling on an ASH that has the new
-    one, with no word of why, and the older spelling is the one that goes in v4.0."""
-    ran = _run(tmp_path, helps, RUN_ASH, "broken", SCAN_ENV)
+@pytest.mark.parametrize("release, printed", FAILED_PROBES)
+def test_the_scan_does_not_read_a_failed_probe_as_an_older_ash(
+    tmp_path, helps, release, printed
+):
+    """A failed probe says nothing about the ASH's commands. Read as an older ASH, it
+    would scan with the older spelling on an ASH that has the new one, with no word of
+    why, and the older spelling is the one that goes in v4.0."""
+    ran = _run(tmp_path, helps, RUN_ASH, release, SCAN_ENV)
 
     assert ran.result.returncode != 0, _output(ran)
     assert ran.calls == [], ran.calls
@@ -301,7 +319,7 @@ def test_the_scan_does_not_read_a_failed_probe_as_an_older_ash(tmp_path, helps):
     assert f"{could_not_tell} 'ash scan fs'" in output
     assert "'ash scan fs --help' exited 1" in output
     # What the probe printed is the diagnosis.
-    assert "error: Failed to fetch the source" in output
+    assert printed in output
 
 
 @pytest.mark.integration
@@ -474,8 +492,11 @@ def test_the_report_uses_the_results_group_when_its_ash_has_it(
 
 @pytest.mark.integration
 @posix_only
-def test_the_report_does_not_read_a_failed_probe_as_an_older_ash(tmp_path, helps):
-    ran = _run(tmp_path, helps, REPORT, "broken", {"ASH_CONFIG": ""})
+@pytest.mark.parametrize("release, printed", FAILED_PROBES)
+def test_the_report_does_not_read_a_failed_probe_as_an_older_ash(
+    tmp_path, helps, release, printed
+):
+    ran = _run(tmp_path, helps, REPORT, release, {"ASH_CONFIG": ""})
 
     assert ran.result.returncode != 0, _output(ran)
     assert ran.calls == [], ran.calls
@@ -483,7 +504,7 @@ def test_the_report_does_not_read_a_failed_probe_as_an_older_ash(tmp_path, helps
     could_not_tell = "Could not tell whether the ASH this workflow installs has"
     assert f"{could_not_tell} 'ash results report'" in output
     assert "'ash results report --help' exited 1" in output
-    assert "error: Failed to fetch the source" in output
+    assert printed in output
 
 
 @pytest.mark.integration
