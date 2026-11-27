@@ -598,11 +598,18 @@ class TestTheCheckGivesTheSameAnswerInEveryLocale:
     @pytest.mark.parametrize("locale_name", LOCALES)
     @pytest.mark.parametrize(
         "action,name",
-        [("prepull-base-image", "dockerfile"), ("run-scan-test", "config-file")],
+        [("prepull-base-image", "dockerfile"), ("run-scan-test", "os")],
     )
     def test_the_composite_actions_input_checks(
         self, tmp_path, locale_name, action, name
     ):
+        """run-scan-test's check is read through ``os``, a free-text input.
+
+        Its first step also refuses a config-file other than ``default`` or ``alpha``
+        (fail closed since the community tier was renamed alpha), so through
+        config-file every value this test lets through was refused anyway, by that
+        check, and the locale answer could not be told apart.
+        """
         doc = _action(action)
         runs = []
         for index, character in enumerate(REFUSED_SAMPLE + ACCEPTED_CHARACTERS):
