@@ -1666,7 +1666,9 @@ def test_an_output_dir_that_is_a_file(tmp_path, run_ash, bare_path):
 #: errors (USAGE_ERROR_EXIT), since ASH in a container refuses it as a usage error.
 SANDBOX_REFUSAL_EXIT = 5
 
+#: What a refusal of a workspace scan says: its first words, and where it points.
 _WORKSPACE_MESSAGE = "./ash scans one directory and cannot run a workspace scan"
+_WORKSPACE_POINTER = "ash scan workspace <file> --mode container"
 
 #: Every refusal site in ./ash, with the code it exits with. Each cell: the arguments,
 #: what the test directory needs first, the environment (a name of a runner in
@@ -1865,6 +1867,29 @@ _ASH_SITES = {
         {},
         3,
         _WORKSPACE_MESSAGE,
+    ),
+    # The workspace subject is refused as its older options are, and points at the
+    # command that scans a workspace in a container.
+    "workspace-subject": (
+        ["scan", "workspace", "w.code-workspace"],
+        {},
+        {},
+        3,
+        _WORKSPACE_POINTER,
+    ),
+    "workspace-subject-alone": (
+        ["scan", "workspace"],
+        {},
+        {},
+        3,
+        _WORKSPACE_POINTER,
+    ),
+    "workspace-subject-in-a-quoted-argument": (
+        ["scan workspace w.code-workspace"],
+        {},
+        {},
+        3,
+        _WORKSPACE_POINTER,
     ),
     # Accepted, for contrast: the guard runner is called, so the exit is its 99.
     "sandbox-off": (["--sandbox", "off"], {}, {}, 99, None),
