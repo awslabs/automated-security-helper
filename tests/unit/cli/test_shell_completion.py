@@ -14,6 +14,8 @@ nothing else; the subject-less form (``ash scan --mo<TAB>``) stays silent, becau
 group takes no scan options of its own; ``ash scan fs --sh<TAB>`` completes the
 options of ``fs``; ``ash scan workspace --<TAB>`` completes the options of
 ``workspace``, the three only it takes among them and none that only ``fs`` takes;
+``ash results <TAB>`` offers every verb of the group, ``report``, ``diff``, ``trend``,
+``merge`` and ``inspect``, and a partial verb completes to its one match;
 ``--show-completion`` and ``--install-completion`` produce a script for a named shell.
 """
 
@@ -81,6 +83,11 @@ def _subjects() -> dict:
     return typer.main.get_command(app).commands["scan"].commands
 
 
+def _results_verbs() -> dict:
+    """The commands of ``results``, read from the real command tree."""
+    return typer.main.get_command(app).commands["results"].commands
+
+
 def test_scan_offers_its_subjects_and_nothing_else(tmp_path):
     assert _complete("ash scan ", 2, tmp_path) == ["fs", "workspace"]
 
@@ -97,6 +104,31 @@ def test_scan_offers_every_subject_the_cli_has(tmp_path):
 def test_a_partial_subject_completes(tmp_path):
     assert _complete("ash scan f", 2, tmp_path) == ["fs"]
     assert _complete("ash scan w", 2, tmp_path) == ["workspace"]
+
+
+def test_results_offers_its_verbs_and_nothing_else(tmp_path):
+    # Read from the command tree, so a verb the group gains is offered or this fails;
+    # the literal beside it keeps an empty read of the tree from passing. `diff` and
+    # `trend` belong to the group alone: no release had them at the top level.
+    offered = _complete("ash results ", 2, tmp_path)
+
+    assert set(offered) == set(_results_verbs())
+    assert set(offered) == {"report", "diff", "trend", "merge", "inspect"}
+    assert len(offered) == len(set(offered)), offered
+
+
+@pytest.mark.parametrize(
+    ("prefix", "verb"),
+    [
+        ("r", "report"),
+        ("d", "diff"),
+        ("t", "trend"),
+        ("m", "merge"),
+        ("i", "inspect"),
+    ],
+)
+def test_a_partial_results_verb_completes(tmp_path, prefix, verb):
+    assert _complete(f"ash results {prefix}", 2, tmp_path) == [verb]
 
 
 def test_the_subject_less_form_stays_silent(tmp_path):
