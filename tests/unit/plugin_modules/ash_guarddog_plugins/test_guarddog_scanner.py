@@ -1140,7 +1140,7 @@ def test_missing_offline_names_the_remedy(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.get_uv_tool_command",
-        lambda name: None,
+        lambda name, **kwargs: None,
     )
     assert scanner.validate_plugin_dependencies() is False
     reason = scanner.dependency_unavailable_reason
