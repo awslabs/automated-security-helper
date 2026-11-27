@@ -1205,7 +1205,7 @@ async def resolve_ash_workspace(
 ) -> Dict[str, Any]:
     """Resolve a VS Code workspace file into a scan plan without scanning anything.
 
-    The MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace
+    The MCP equivalent of `ash scan workspace <file> --dry-run`. Reads the workspace
     definition and every project's own ASH config, then reports which directories
     became projects, what key each was given, which scanners its config enables,
     which severity threshold it will be judged against, and which projects were
@@ -1306,7 +1306,7 @@ async def run_ash_workspace_scan(
 ) -> Dict[str, Any]:
     """Scan every project in a VS Code workspace and return the per-project verdict.
 
-    The MCP equivalent of `ash --workspace <file>`. Each project is scanned with
+    The MCP equivalent of `ash scan workspace <file>`. Each project is scanned with
     its own ASH config and its own severity threshold, a workspace policy file can
     impose a ceiling over all of them, and the results are aggregated into one
     workspace payload.
@@ -2972,8 +2972,13 @@ async def set_source_zip_finalize(
     """Verify an uploaded zip and extract it as this session's scan target.
 
     The assembled zip must hash to expected_sha256. Entries with absolute paths,
-    '..' components, or symlinks are refused before anything is extracted, and
-    the archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
+    '..' components, a NUL in the name, or symlinks are refused before anything
+    is extracted, and so is a zip with an encrypted member. On a Windows or macOS
+    server, two members whose names differ only in letter case or Unicode
+    normalization are refused too, because those systems keep them as one path.
+    A zip the server cannot read is refused as well: one that uses a zip version
+    or compression method the server does not support, or has a damaged member.
+    The archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
     entries. After this returns, call run_ash_scan() with no source_dir. Refused
     while a scan of this session runs (error_type source_delivery_busy); chunks
     of other uploads may be sent meanwhile. If this call is cancelled, the extraction
