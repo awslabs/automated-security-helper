@@ -570,9 +570,14 @@ def resolution_failed(stderr: str) -> bool:
     """Whether uv's complaint is a failed resolution, as opposed to any other failure.
 
     Only a failed resolution is an answer about the requirements. A network error, a
-    flag uv does not know and a crash say nothing about them.
+    flag uv does not know and a crash say nothing about them, and neither does uv's
+    offline mode: it also says "No solution found" for a package it could not read,
+    and adds a hint that the network was disabled.
     """
-    return "No solution found when resolving dependencies" in stderr
+    return (
+        "No solution found when resolving dependencies" in stderr
+        and "the network was disabled" not in stderr
+    )
 
 
 _BLOCKER = re.compile(

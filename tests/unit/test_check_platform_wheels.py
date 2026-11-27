@@ -117,6 +117,17 @@ NETWORK_DOWN = (
     "error: Failed to fetch: `https://pypi.org/simple/{name}/`\n"
     "  Caused by: error sending request for url (https://pypi.org/simple/{name}/)\n"
 )
+#: What uv 0.13.5 printed when it ran offline and a package was not in its cache,
+#: read on a desk: the words of a failed resolution, with a hint that the network was
+#: disabled.
+OFFLINE = (
+    "error: No solution found when resolving dependencies\n"
+    "  cause: Because {name} was not found in the cache and you require {name}, we "
+    "can conclude that your requirements are unsatisfiable.\n"
+    "\n"
+    "hint: Packages were unavailable because the network was disabled. When the "
+    "network is disabled, registry packages may only be read from the cache.\n"
+)
 BASE_PINS = {"anyio": "4.16.0", "idna": "3.11"}
 
 
@@ -604,7 +615,12 @@ class TestReadingUvsAnswers:
             "x No solution found when resolving dependencies for split "
             "(python_full_version == '3.12.*'):"
         )
-        for stderr in ("", NETWORK_DOWN.format(name="x"), "error: unexpected argument"):
+        for stderr in (
+            "",
+            NETWORK_DOWN.format(name="x"),
+            "error: unexpected argument",
+            OFFLINE.format(name="x"),
+        ):
             assert not script.resolution_failed(stderr), stderr
 
     @pytest.mark.parametrize(
@@ -728,6 +744,15 @@ class TestMeasuring:
             return script.Result(2, "", "error: unexpected argument '--frobnicate'\n")
 
         with pytest.raises(script.ResolverError, match="unexpected argument"):
+            script.measure_sets(
+                runner, "uv", {"core": ("a",)}, ("3.12",), CUTOFF, ENVIRONMENT
+            )
+
+    def test_uvs_offline_mode_is_not_a_cell_either(self, script):
+        def runner(argv, stdin, env):
+            return script.Result(1, "", OFFLINE.format(name="a"))
+
+        with pytest.raises(script.ResolverError, match="network was disabled"):
             script.measure_sets(
                 runner, "uv", {"core": ("a",)}, ("3.12",), CUTOFF, ENVIRONMENT
             )
