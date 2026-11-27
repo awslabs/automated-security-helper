@@ -425,14 +425,9 @@ def display_metrics_table(
             "_environ": environ,
         }
 
-        # Set color system based on platform and color preference
-        if use_color:
-            if platform.system().lower() == "windows":
-                console_kwargs["color_system"] = "windows"
-            else:
-                console_kwargs["color_system"] = "auto"
-        else:
-            console_kwargs["color_system"] = None
+        # "auto" lets Rich read the file the console writes to, on every
+        # platform, as utils/log.py does; None turns color off (--no-color).
+        console_kwargs["color_system"] = "auto" if use_color else None
 
         console = ash_console(**console_kwargs)
 

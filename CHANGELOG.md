@@ -209,12 +209,15 @@
   a long-running process such as the MCP server, saying one ending of the warning for a
   file no longer keeps a later resolution from saying another.
 
-- **On Windows, `--no-color` now turns color off in the scan's progress output.** The
-  scan (and a workspace scan) forced Rich's "windows" color system on every Windows run,
-  so the flag was ignored there and output redirected into a pipe or a file carried
-  escape codes. Both now use "auto" when color is on, as the logger already did, so Rich
-  checks whether the output is a terminal, and no color when `--no-color` is given.
-  Output into a pipe is plain text.
+- **On Windows, `--no-color` now turns color off in the scan's progress output and in
+  the final metrics table.** The scan (and a workspace scan) forced Rich's "windows"
+  color system on every Windows run, so the flag was ignored there and output
+  redirected into a pipe or a file carried escape codes. The scan's progress display
+  and the final metrics table did the same: the display replaced the color setting it
+  was given with "windows", and the table, which is told to use color when the display
+  has a color system, forced "windows" for itself. All of them now use "auto" when
+  color is on, as the logger already did, so Rich checks whether the output is a
+  terminal, and no color when `--no-color` is given. Output into a pipe is plain text.
 - **A stored suppression with an empty `scope` no longer applies.** A results file
   that held `{"resource_id": "X", "scope": {}}` was read with its empty scope kept as
   inert, then the entry-level `resource_id` was written into that scope, so the entry

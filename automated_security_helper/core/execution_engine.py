@@ -5,7 +5,6 @@ import os
 from datetime import datetime, timedelta, timezone
 from datetime import datetime as _DatetimeType
 from pathlib import Path
-import platform
 import time
 from typing import (
     TYPE_CHECKING,
@@ -390,9 +389,9 @@ class ScanExecutionEngine:
         # Initialize progress display with debug/verbose flags
         self.progress_display = LiveProgressDisplay(
             show_progress=show_progress,
-            color_system=(
-                "windows" if platform.system() == "Windows" else color_system
-            ),
+            # The caller's choice, on every platform: "auto" lets Rich read the
+            # file the console writes to, None turns color off (--no-color).
+            color_system=color_system,
             verbose=verbose_flag,
             debug=debug_flag,
         )
