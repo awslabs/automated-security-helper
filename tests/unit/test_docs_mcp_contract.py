@@ -447,6 +447,54 @@ def test_mcp_contract_check_can_fail(tmp_path: Path):
 
 
 @pytest.mark.unit
+def test_a_library_class_a_tool_only_catches_is_not_an_error_type(tmp_path: Path):
+    """A tool that catches ``zipfile.BadZipFile`` and answers without an
+    ``error_type`` returns no ``BadZipFile``; naming the class in an ``except``
+    clause did not make it one a page may claim. The class name a generic handler
+    returns for a builtin (``OSError``) or an exception the package defines
+    (``PackageError``) is still accepted."""
+    package = _plant_server(
+        tmp_path / "code",
+        """
+        import zipfile
+
+        mcp = object()
+
+
+        class PackageError(RuntimeError):
+            pass
+
+
+        @mcp.tool()
+        def finalize(path):
+            try:
+                return {"success": True}
+            except zipfile.BadZipFile as e:
+                return {"success": False, "error": str(e)}
+            except Exception as e:
+                return {"success": False, "error_type": type(e).__name__}
+        """,
+    )
+    page = _page(
+        tmp_path / "docs",
+        """
+        A bad archive returns `error_type` `BadZipFile`.
+
+        A failure on disk returns `error_type` `OSError`, and a refusal of the
+        package returns `error_type` `PackageError`.
+        """,
+    )
+    messages = _findings_naming(
+        _check(package, [page], tmp_path / "docs"), "BadZipFile"
+    )
+    assert len(messages) == 1, messages
+    assert ":1: [mcp-error-type] `BadZipFile` is named as an error" in messages[0]
+    rest = _check(package, [page], tmp_path / "docs")
+    assert _findings_naming(rest, "OSError") == []
+    assert _findings_naming(rest, "PackageError") == []
+
+
+@pytest.mark.unit
 def test_a_check_that_reads_nothing_fails(tmp_path: Path):
     """No error-type names and no examples is a finding, never a pass."""
     package = _plant_server(
