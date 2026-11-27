@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import ast
 import copy
+import importlib.util
 import sys
 from collections.abc import Iterable
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Any
 
@@ -1158,22 +1160,20 @@ CONSUMERS = [
     "tests/unit/test_ci_matrix_agreement.py",
     "tests/unit/test_oci_runner_ci_coverage.py",
     "tests/unit/docs/test_page_claims.py",
+    "tests/unit/test_pre_commit_hooks_manifest.py",
+    "tests/unit/test_unit_test_shards.py",
 ]
+
+#: The consumers that load the reader inside a function, when a test asks for it, so
+#: that importing the module again does not reach it. Every other consumer loads the
+#: reader as the module is imported.
+LOADS_ON_DEMAND = {"tests/unit/docs/test_page_claims.py"}
+LOADS_WHEN_IMPORTED = [path for path in CONSUMERS if path not in LOADS_ON_DEMAND]
 
 #: The one place a test loads the reader, and this file, which holds the loaders the
 #: scan below is tried on. Neither is read for a loader of its own.
 LOADER_HELPER = "tests/utils/ci_matrix_loader.py"
 THIS_FILE = Path(__file__).resolve().relative_to(REPO_ROOT).as_posix()
-
-#: The test modules that load the reader with a loader of their own today. A new one
-#: fails the scan below, and each leaves this set when it moves to load_ci_matrix(). A
-#: module named here that no longer has a loader of its own fails the scan too, so the
-#: set only shrinks.
-OWN_LOADERS = {
-    "tests/integration/docs/ci_runners/reports.py",
-    "tests/unit/test_pre_commit_hooks_manifest.py",
-    "tests/unit/test_unit_test_shards.py",
-}
 
 
 #: The two spellings by which a module names the reader: its file, and the module name
@@ -1415,6 +1415,38 @@ class TestTheByPathLoader:
         assert "from tests.utils.ci_matrix_loader import load_ci_matrix" in text
         assert not _own_loader_lines(text, relative)
 
+    @pytest.mark.parametrize("relative", LOADS_WHEN_IMPORTED)
+    def test_a_reader_that_fails_to_load_is_not_left_in_sys_modules_by_a_test_module(
+        self, relative, monkeypatch
+    ):
+        """The module is imported again, with the reader raising as it runs.
+
+        A module that registers the reader before it runs and leaves it there when it
+        raises hands the next test module a half-built reader. That module then fails
+        on a name the reader lacks, and the error that broke the load is not the one
+        reported.
+        """
+        from tests.utils.ci_matrix_loader import CI_MATRIX_NAME
+
+        original = SourceFileLoader.exec_module
+
+        def fail_the_reader(loader, module):
+            if module.__name__ == CI_MATRIX_NAME:
+                raise RuntimeError("the reader failed to load")
+            original(loader, module)
+
+        name = f"_ash_probe_{Path(relative).stem}"
+        spec = importlib.util.spec_from_file_location(name, REPO_ROOT / relative)
+        assert spec and spec.loader, f"cannot load {relative}"
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setattr(SourceFileLoader, "exec_module", fail_the_reader)
+        monkeypatch.delitem(sys.modules, CI_MATRIX_NAME, raising=False)
+        monkeypatch.setitem(sys.modules, name, module)
+        with pytest.raises(RuntimeError, match="the reader failed to load"):
+            spec.loader.exec_module(module)
+        left_behind = CI_MATRIX_NAME in sys.modules
+        assert not left_behind, f"{relative} left the unfinished reader in sys.modules"
+
     @pytest.mark.parametrize(
         "source", list(PLANTED_LOADERS.values()), ids=list(PLANTED_LOADERS)
     )
@@ -1468,29 +1500,14 @@ class TestTheByPathLoader:
         """The denominator: a walk that found none would find no loader."""
         modules = {path.relative_to(REPO_ROOT).as_posix() for path in _test_modules()}
         assert len(modules) > 1000, len(modules)
-        assert {THIS_FILE, LOADER_HELPER} <= modules
-        assert OWN_LOADERS <= modules
+        assert {THIS_FILE, LOADER_HELPER, *CONSUMERS} <= modules
 
     def test_no_test_module_loads_the_reader_with_a_loader_of_its_own(
         self, checkout_loaders
     ):
-        new = {
-            name: lines
-            for name, lines in checkout_loaders.items()
-            if name not in OWN_LOADERS
-        }
-        assert not new, (
-            f"{new} load scripts/_ci_matrix.py with a loader of their own: use "
-            "load_ci_matrix() from tests/utils/ci_matrix_loader.py"
-        )
-
-    def test_a_module_named_as_having_a_loader_of_its_own_still_has_one(
-        self, checkout_loaders
-    ):
-        gone = sorted(OWN_LOADERS - set(checkout_loaders))
-        assert not gone, (
-            f"{gone} no longer load the reader with a loader of their own: take "
-            "them out of OWN_LOADERS"
+        assert not checkout_loaders, (
+            f"{checkout_loaders} load scripts/_ci_matrix.py with a loader of their "
+            "own: use load_ci_matrix() from tests/utils/ci_matrix_loader.py"
         )
 
 
