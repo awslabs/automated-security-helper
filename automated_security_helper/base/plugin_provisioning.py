@@ -131,8 +131,9 @@ class ContentDatabase:
     # both scanners of the Trivy plugin, ``trivy-repo`` and ``trivy``.
     also_read_by: tuple[str, ...] = ()
     # The environment variable that moves the directory this database is read from,
-    # when the tool has one and ASH relies on it; None otherwise. ``cache_path`` is the
-    # default the tool reads when the variable is not set.
+    # for a row where ASH reads or sets it. None means no read has been recorded, not
+    # that the tool has no such variable. ``cache_path`` is the default the tool reads
+    # when the variable is not set.
     cache_env: str | None = None
 
     @property
@@ -363,6 +364,10 @@ _GRYPE = Provisioning(
             name="grype-db",
             scanner="grype",
             cache_path="~/.cache/grype/db",
+            # ASH sets this variable for every grype scan, so grype reads the directory
+            # ASH refreshes and checks, and reads it when it decides whether an offline
+            # scan has a database; the image sets it.
+            cache_env="GRYPE_DB_CACHE_DIR",
             max_age=GRYPE_DB_MAX_AGE,
             bound_source=(
                 "grype's own default, `time.Hour * 24 * 5` "
@@ -455,6 +460,9 @@ _OPENGREP = Provisioning(
             name="opengrep-offline-rules",
             scanner="opengrep",
             cache_path="/deps/.opengrep",
+            # The scanner names this variable as its offline rule cache and ASH reads it
+            # before an offline scan; the image sets it.
+            cache_env="OPENGREP_RULES_CACHE_DIR",
             max_age=OFFLINE_RULESET_MAX_AGE,
             bound_source=OFFLINE_RULESET_BOUND_REASON,
             bound_is_tool_default=False,
@@ -482,6 +490,9 @@ _SEMGREP = Provisioning(
             name="semgrep-offline-rules",
             scanner="semgrep",
             cache_path="/deps/.semgrep",
+            # The scanner names this variable as its offline rule cache and ASH reads it
+            # before an offline scan; the image sets it.
+            cache_env="SEMGREP_RULES_CACHE_DIR",
             max_age=OFFLINE_RULESET_MAX_AGE,
             bound_source=OFFLINE_RULESET_BOUND_REASON,
             bound_is_tool_default=False,
