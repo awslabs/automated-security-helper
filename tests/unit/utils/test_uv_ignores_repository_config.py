@@ -2120,9 +2120,10 @@ def _nbconvert(tree, tmp_path, spawns, monkeypatch):
     )
 
 
-def _dependencies_install(tree, tmp_path, spawns, monkeypatch):
-    # ``ash dependencies install`` starts a plugin's declared ``uv tool install``
-    # through run_command, which starts it through subprocess_utils.run_command.
+def _dependencies_install_command(spawns, monkeypatch, argv):
+    """What starts ``argv`` once as ``ash dependencies install`` starts a plugin's
+    declared command: through its run_command, which starts it through
+    subprocess_utils.run_command, recorded here."""
     from automated_security_helper.cli import dependencies
 
     def run_cmd(args, **kwargs):
@@ -2130,7 +2131,14 @@ def _dependencies_install(tree, tmp_path, spawns, monkeypatch):
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(subprocess_utils, "run_command", run_cmd)
-    return lambda: dependencies.run_command(["uv", "tool", "install", "bandit"])
+    return lambda: dependencies.run_command(list(argv))
+
+
+def _dependencies_install(tree, tmp_path, spawns, monkeypatch):
+    # ``ash dependencies install`` starts a plugin's declared ``uv tool install``.
+    return _dependencies_install_command(
+        spawns, monkeypatch, ["uv", "tool", "install", "bandit"]
+    )
 
 
 #: Each route that starts uv for a tool outside a scanner's run: its set-up, which
@@ -2186,6 +2194,33 @@ def test_a_scanners_run_gives_uv_no_bare_uv_python_naming_a_directory_of_the_tre
     assert ".venv" not in seen[".venv"], seen
     # Control: a version request reaches uv on the same run.
     assert seen["3.12"] == {"3.12"}, seen
+
+
+def _a_pip_install(command) -> bool:
+    return command[1:3] == ["pip", "install"]
+
+
+@pytest.mark.unit
+def test_ash_dependencies_install_names_ashs_interpreter_for_a_left_out_uv_python(
+    tree, tmp_path, spawns, monkeypatch
+):
+    # A ``uv pip`` command that names no interpreter is given ASH's own
+    # (python_child.uv_child_overrides) when the environment it gets carries none,
+    # since uv would otherwise run the python of a ``.venv`` in the directory it
+    # starts in. A UV_PYTHON of the tree that the filter leaves out is no interpreter
+    # chosen, so the command gets ASH's, not the tree's and not none.
+    monkeypatch.chdir(tree)
+    start = _dependencies_install_command(
+        spawns, monkeypatch, ["uv", "pip", "install", "x"]
+    )
+    seen = _uv_python_seen(
+        spawns, monkeypatch, ".venv/bin/python", start, _a_pip_install
+    )
+    assert seen == {sys.executable}, seen
+    # Control: a version request reaches uv on the same command, and ASH names none.
+    assert _uv_python_seen(spawns, monkeypatch, "3.12", start, _a_pip_install) == {
+        "3.12"
+    }
 
 
 # The warning a left-out uv variable is named in: once per process for each
