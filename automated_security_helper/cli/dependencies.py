@@ -115,7 +115,10 @@ from automated_security_helper.utils.subprocess_utils import (
     shown_arguments,
     usable_bin_path,
 )
-from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
+from automated_security_helper.utils.uv_tool_runner import (
+    UV_NO_CONFIG,
+    judging_uv_paths_in,
+)
 from automated_security_helper.utils.install_providers import (
     KNOWN_PROVIDERS,
     CommandKind,
@@ -896,7 +899,9 @@ def run_command(args: List[str], shell: bool = False):
     :func:`uv_child_overrides` gives it. Every command gets none of the uv path
     variables that name a path in the source tree (a shell line or a script can start
     uv in turn), judged as on every route that starts uv
-    (:func:`uv_tool_runner.without_tree_uv_files`).
+    (:func:`uv_tool_runner.without_tree_uv_files`). The judgement is of the
+    environment the command inherits, made before those overrides are added: they are
+    ASH's own values, and ASH's interpreter may lie inside the tree.
     """
     from automated_security_helper.utils.subprocess_utils import run_command as run_cmd
     from automated_security_helper.utils.subprocess_utils import run_succeeded
@@ -942,29 +947,40 @@ def run_command(args: List[str], shell: bool = False):
         # user's and the system uv.toml.
         env = snapshot_environ()
         env["UV_NO_CONFIG"] = "1"
-    # The uv child's own overrides (UV_PYTHON, UV_NO_PROJECT) for every spelling
-    # of a uv command, `<ASH python> -m uv ...` included: applied to the plain
-    # `uv ...` spelling only, a `-m uv` install resolved against another
-    # interpreter and the working directory's project.
-    uv_args = None if shell or not args else _uv_arguments(args)
-    overrides = {} if uv_args is None else uv_child_overrides(["uv", *uv_args])
-    if overrides:
-        # The declared command's UV_NO_CONFIG environment, when one was built
-        # above, extended with the uv child's own overrides.
-        env = {**(env if env is not None else snapshot_environ()), **overrides}
     # The working directory is the source tree this command installs for. A uv path
     # variable whose value names a path of that tree (relative, starting with ``~``, or
     # inside it) could send uv to a file or directory the repository supplies, so it
     # is left out, judged as the uv tool runner judges the uv commands it starts. This
     # is done for every command: one declared as a shell line can name uv, and a script
     # or another program can start uv in turn. Only uv reads these variables, so a
-    # command that starts no uv loses nothing. When nothing is dropped, ``env`` comes
-    # back as it was, so a command that inherits the environment (None) still does.
+    # command that starts no uv loses nothing. What is judged is the environment the
+    # command inherits, with the UV_NO_CONFIG added above where one was built. The uv
+    # child's own overrides below are merged in after it and are not judged: they are
+    # ASH's own values, not the operator's environment, and the UV_PYTHON among them
+    # names ASH's interpreter, which may lie inside the tree (ASH installed in the
+    # repository's own ``.venv``, say). When nothing is dropped, ``env`` comes back as
+    # it was, so a command that inherits the environment (None) still does.
     try:
         tree_roots: Tuple[Path, ...] = (Path.cwd(),)
     except OSError:
         tree_roots = ()
     env = without_tree_uv_files(env, tree_roots)
+    # The uv child's own overrides (UV_PYTHON, UV_NO_PROJECT) for every spelling
+    # of a uv command, `<ASH python> -m uv ...` included: applied to the plain
+    # `uv ...` spelling only, a `-m uv` install resolved against another
+    # interpreter and the working directory's project. They go over what the
+    # judgement above left, after it, as in ``PluginBase._run_subprocess``: they are
+    # ASH's own values, not the operator's environment, so they are not judged.
+    # The choice of interpreter is read from the environment the command gets (this
+    # process's when ``env`` is None), as ``without_tree_uv_files`` left it. A
+    # UV_PYTHON it left out counts as none chosen, so the command gets ASH's
+    # interpreter.
+    uv_args = None if shell or not args else _uv_arguments(args)
+    overrides = {} if uv_args is None else uv_child_overrides(["uv", *uv_args], env)
+    if overrides:
+        # The environment the judgement left (the declared command's UV_NO_CONFIG
+        # one, when one was built above), extended with the uv child's own overrides.
+        env = {**(env if env is not None else snapshot_environ()), **overrides}
     try:
         if not shell and runs_module_or_code(args):
             with python_child(*args[1:]) as child:
@@ -1090,8 +1106,35 @@ def _puts_color_back(command):
     return run
 
 
+def _judging_uv_paths_in_the_working_directory(command):
+    """Run *command* judging each uv command it starts against its working directory.
+
+    ``ash dependencies install`` treats its working directory as the source tree. The
+    uv commands it builds itself are judged against it in ``run_command``. The ones
+    that start through the uv tool runner (a tool's version probe, the post-install
+    sweep's ``uv tool list``, an install the runner makes) get only the roots their own
+    caller passes, and the sweep passes none. Inside :func:`judging_uv_paths_in` every
+    ``without_tree_uv_files`` judgement of the run also names the working directory,
+    so a uv path variable that names a path of it is left out of each. A working
+    directory that cannot be read is judged by none: the command refuses it itself,
+    with a usage error.
+    """
+
+    @functools.wraps(command)
+    def run(*args, **kwargs):
+        try:
+            root = Path.cwd()
+        except OSError:
+            return command(*args, **kwargs)
+        with judging_uv_paths_in(root):
+            return command(*args, **kwargs)
+
+    return run
+
+
 @dependencies_app.command(name="install")
 @_puts_color_back
+@_judging_uv_paths_in_the_working_directory
 def install_dependencies(
     ctx: typer.Context,
     # A str, not a Path: Typer makes "" Path(""), whose str() is ".", the same as

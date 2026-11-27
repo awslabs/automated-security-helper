@@ -54,6 +54,8 @@ from automated_security_helper.utils.error_text import (
 )
 from automated_security_helper.utils.uv_tool_runner import (
     spelled_forms as _spelled_forms,
+    with_no_env_file,
+    without_tree_uv_files,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, MARKUP, escape_markup
 from automated_security_helper.utils.offline_tool_env import (
@@ -2413,11 +2415,6 @@ class PluginBase(UVToolMixin, BaseModel):
             # directory, the output directory or a scanned tree, by its spelling or
             # by its real path; and a ``uv tool run`` gets ``--no-env-file``. An
             # absolute path outside those directories is the operator's and stays.
-            from automated_security_helper.utils.uv_tool_runner import (
-                with_no_env_file,
-                without_tree_uv_files,
-            )
-
             env = without_tree_uv_files(
                 env, (Path(source_dir), Path(self._require_context().output_dir))
             )
