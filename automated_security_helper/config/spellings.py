@@ -32,6 +32,14 @@ on (:func:`is_removed`), by the loader's fold of a file and by
 every release and refuse none: an entry built in code keeps loading, and so does
 a stored results file, a record of the run that wrote it.
 
+A plugin's section that the configuration does not declare is walked only for a
+scanner ASH ships whose manifest gives it no typed section, read as that scanner's
+own config class (:func:`field_at`, :func:`entry_places`). Any other (no shipped
+manifest, an off-host package, classes that do not import or disagree, a key with a
+type word or other punctuation) is not walked: an old spelling in it is not
+respelled, said or refused here, the plugin's model renames it (silently from the
+removal release), and lint does not report it.
+
 No message here carries a value. A value can be read from the environment, so
 every message names files, places in the document, and keys.
 """
@@ -219,6 +227,10 @@ class _Index:
         self.places_by_model: Dict[
             type[BaseModel], Tuple[Tuple[Tuple[str, ...], PlaceKind], ...]
         ] = {}
+        #: The section of each shipped scanner that has no typed one, by the
+        #: scanner's name, or None for one that cannot be read: found once for each
+        #: name (``_known_plugin_field``).
+        self.known_plugin_fields: Dict[str, Optional[_Field]] = {}
         #: The canonical spelling of each old one, for a model that is not known.
         self.canonical_of: Dict[str, str] = {}
         for row in rows:
@@ -274,6 +286,90 @@ def _field_map(model: type[BaseModel]) -> Dict[str, _Field]:
     return found
 
 
+def _classes_in(annotation: Any) -> List[type[BaseModel]]:
+    """Every model class an annotation names, through ``Annotated``, ``Optional``
+    and unions."""
+    if get_origin(annotation) is None:
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return [annotation]
+        return []
+    return [model for arg in get_args(annotation) for model in _classes_in(arg)]
+
+
+# An undeclared plugin section is walked only for a scanner ASH ships whose manifest
+# gives no typed section, read as that scanner's own config class. Any other (no
+# shipped manifest, an off-host package, classes that do not import or disagree, a key
+# with a type word or other punctuation) is not walked: an old spelling in it is not
+# respelled, said or refused here, the plugin's model renames it (silently from the
+# removal release), and lint does not report it.
+def _known_plugin_field(name: str) -> Optional[_Field]:
+    """The section of the shipped scanner ``name``, as a field of the scanners
+    segment, or None when the scanner has a typed section already, is off-host, or
+    has classes that cannot be read.
+
+    The section is read as the scanner's own config class: the one model its
+    ``config`` names whose ``options`` are the manifest's options model. Found once
+    for each name, a failure too. Reading it imports the scanner's plugin module,
+    which registers the scanner there; a scan still takes only the plugins its own
+    ``ash_plugin_modules`` name (``plugins.loader.scan_plugin_filter``).
+    """
+    index = _index()
+    if name not in index.known_plugin_fields:
+        index.known_plugin_fields[name] = _read_known_plugin_field(name)
+    return index.known_plugin_fields[name]
+
+
+def _read_known_plugin_field(name: str) -> Optional[_Field]:
+    # Imported here: a manifest names its plugin by data, and ``resolve_ref`` is the
+    # one place that imports it.
+    from automated_security_helper.base.plugin_manifest import resolve_ref
+    from automated_security_helper.config.plugin_module_trust import off_host_package
+    from automated_security_helper.plugin_manifests import manifest_for
+
+    manifest = manifest_for(name)
+    if manifest is None or manifest.config_section is not None:
+        return None
+    if off_host_package(manifest.plugin_module) is not None:
+        return None
+    try:
+        options = resolve_ref(manifest.options_model)
+        scanner = resolve_ref(manifest.entry_points.scanner)
+    except (ValueError, ImportError, AttributeError):
+        return None
+    scanner_fields = getattr(scanner, "model_fields", None)
+    config = scanner_fields.get("config") if isinstance(scanner_fields, dict) else None
+    if config is None:
+        return None
+    wanted = Shape("model", options)
+    configs = {
+        model
+        for model in _classes_in(config.annotation)
+        if "options" in model.model_fields
+        and _shape_of(model.model_fields["options"].annotation) == wanted
+    }
+    if len(configs) != 1:
+        return None
+    return _Field(
+        name=manifest.name,
+        written=manifest.name,
+        spellings=(manifest.name,),
+        shape=Shape("model", configs.pop()),
+    )
+
+
+def _known_plugin_sections(model: type[BaseModel]) -> Tuple[_Field, ...]:
+    """The sections ``_known_plugin_field`` reads, as fields of ``model`` when it is
+    the scanners segment: none for any other model."""
+    # Imported here: ash_config imports this module as it loads.
+    from automated_security_helper.config.ash_config import _ScannerConfigSegmentBase
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    if not issubclass(model, _ScannerConfigSegmentBase):
+        return ()
+    sections = (_known_plugin_field(manifest.name) for manifest in scanner_manifests())
+    return tuple(section for section in sections if section is not None)
+
+
 def _twins(segment: str) -> Tuple[str, ...]:
     """``segment`` with every ``-`` written as ``_``, and with every ``_`` written
     as ``-``, each one that differs from ``segment``."""
@@ -284,7 +380,9 @@ def _twins(segment: str) -> Tuple[str, ...]:
     )
 
 
-def field_at(model: type[BaseModel], segment: str) -> Optional[Tuple[_Field, str]]:
+def field_at(
+    model: type[BaseModel], segment: str, *, known_plugins: bool = False
+) -> Optional[Tuple[_Field, str]]:
     """The field of ``model`` that a key or a pointer segment names the way the
     loader reads it, with the spelling of the field that matched; None when it
     names no field.
@@ -297,6 +395,12 @@ def field_at(model: type[BaseModel], segment: str) -> Optional[Tuple[_Field, str
     to the same name (``ash_config.section_fold_key``), which a pointer reads as
     that section (``config_sources._normalize_pointer``). Two sections that fold
     alike name none.
+
+    With ``known_plugins``, the scanners segment has one more: when none of those
+    names a field, the one shipped scanner whose manifest gives it no typed section
+    and whose name folds to the same name (``_known_plugin_field``). Reading that
+    section imports the scanner's plugin module, so a reader that must import no
+    plugin, a denial, leaves the flag off.
     """
     fields = _field_map(model)
     field = fields.get(segment)
@@ -309,6 +413,7 @@ def field_at(model: type[BaseModel], segment: str) -> Optional[Tuple[_Field, str
     # Imported here: ash_config imports this module as it loads.
     from automated_security_helper.config.ash_config import (
         _PluginConfigSegment,
+        _ScannerConfigSegmentBase,
         section_fold_key,
     )
 
@@ -319,22 +424,61 @@ def field_at(model: type[BaseModel], segment: str) -> Optional[Tuple[_Field, str
     for spelling, candidate in fields.items():
         if section_fold_key(spelling) == wanted:
             folding.setdefault(candidate.name, (candidate, spelling))
-    return next(iter(folding.values())) if len(folding) == 1 else None
+    if folding:
+        return next(iter(folding.values())) if len(folding) == 1 else None
+    if known_plugins and issubclass(model, _ScannerConfigSegmentBase):
+        return _known_plugin_at(wanted)
+    return None
+
+
+def _known_plugin_at(wanted: Tuple[str, str]) -> Optional[Tuple[_Field, str]]:
+    """The section of the one shipped scanner with no typed section whose name folds
+    to ``wanted`` (``ash_config.section_fold_key``), with the scanner's name; None
+    for none or for two."""
+    # Imported here: ash_config imports this module as it loads.
+    from automated_security_helper.config.ash_config import section_fold_key
+    from automated_security_helper.plugin_manifests import scanner_manifests
+
+    names = [
+        manifest.name
+        for manifest in scanner_manifests()
+        if manifest.config_section is None and section_fold_key(manifest.name) == wanted
+    ]
+    if len(names) != 1:
+        return None
+    field = _known_plugin_field(names[0])
+    return None if field is None else (field, names[0])
+
+
+def _plugin_section_field(model: type[BaseModel], key: str) -> Optional[_Field]:
+    """The field a key of a plugin's segment names that ``_field_map`` does not:
+    another spelling of a plugin's section, or the section of a shipped scanner
+    with no typed one. None for a key of any other model."""
+    # Imported here: ash_config imports this module as it loads.
+    from automated_security_helper.config.ash_config import _PluginConfigSegment
+
+    if not issubclass(model, _PluginConfigSegment):
+        return None
+    found = field_at(model, key, known_plugins=True)
+    return None if found is None else found[0]
 
 
 def key_in(model: type[BaseModel], mapping: Dict[Any, Any], key: str) -> Optional[str]:
     """The key of ``mapping``, a mapping read as ``model``, that is the field
     ``key`` names: ``key`` itself when ``mapping`` holds it, else the one other key
-    that reads as the same field (``field_at``). None when ``mapping`` holds no
-    such key, and when it holds more than one."""
+    that reads as the same field (``field_at``, the section of a shipped scanner
+    with no typed one included). None when ``mapping`` holds no such key, and when
+    it holds more than one."""
     if key in mapping:
         return key
-    field = field_at(model, key)
+    field = field_at(model, key, known_plugins=True)
     if field is None:
         return None
     readers: List[str] = []
     for name in mapping:
-        found = field_at(model, name) if isinstance(name, str) else None
+        found = (
+            field_at(model, name, known_plugins=True) if isinstance(name, str) else None
+        )
         if found is not None and found[0] is field[0]:
             readers.append(name)
     return readers[0] if len(readers) == 1 else None
@@ -360,11 +504,12 @@ def child_model(model: type[BaseModel], key: str) -> Optional[Shape]:
 
     ``key`` matches a field as ``field_at`` reads it: it is the field's name, its
     alias, a name of its ``AliasChoices`` or an old spelling the table gives it,
-    or the ``-``/``_`` twin of one, or another spelling of a plugin's section. A
-    key the model does not declare (an extra, a typo) names no shape and is not
-    walked.
+    or the ``-``/``_`` twin of one, or another spelling of a plugin's section, or
+    the section of a shipped scanner whose manifest gives it no typed one (read as
+    that scanner's own config class). A key the model does not declare (an extra, a
+    typo) names no shape and is not walked.
     """
-    found = field_at(model, key)
+    found = field_at(model, key, known_plugins=True)
     return None if found is None else found[0].shape
 
 
@@ -383,7 +528,9 @@ def entry_places(
     whether the field holds one such model, a list of them or a dict of them.
 
     A key is the one a file writes (the alias where the field has one). The root
-    itself is the place ``()`` when it is ``model`` or a subclass.
+    itself is the place ``()`` when it is ``model`` or a subclass. Under the scanners
+    segment, the section of a shipped scanner whose manifest gives it no typed one is
+    a field too, written under the scanner's name (``_known_plugin_field``).
     """
     index = _index()
     found = index.places_by_model.get(model)
@@ -400,7 +547,7 @@ def entry_places(
         if current in above:
             return
         seen: Set[str] = set()
-        for field in _field_map(current).values():
+        for field in (*_field_map(current).values(), *_known_plugin_sections(current)):
             if field.name in seen:
                 continue
             seen.add(field.name)
@@ -535,7 +682,10 @@ class _Fold:
         """``mapping`` read as ``model``: its own old keys renamed, then the
         values of the fields it holds. ``place`` names the mapping in a message
         and ``path`` is where it stands in the document, under which a rename is
-        recorded. The same object when nothing changes."""
+        recorded. A key of a plugin's segment that is no declared field's spelling
+        is read as the section it names under another spelling, or as the section
+        of a shipped scanner that has no typed one (``field_at``). The same object
+        when nothing changes."""
         folded = mapping
         for row in rows_for(model):
             for old in row.old:
@@ -545,6 +695,8 @@ class _Fold:
         updated: Optional[Dict[Any, Any]] = None
         for key, value in folded.items():
             field = fields.get(key) if isinstance(key, str) else None
+            if field is None and isinstance(key, str):
+                field = _plugin_section_field(model, key)
             if field is None or field.shape is None:
                 continue
             respelled = self.value(value, field.shape, _join(place, key), (*path, key))
@@ -688,7 +840,7 @@ class _Fold:
         self, shape: Shape, segment: str, place: str
     ) -> Tuple[str, Optional[Shape]]:
         if shape.kind == "model":
-            found = field_at(shape.model, segment)
+            found = field_at(shape.model, segment, known_plugins=True)
             if found is None:
                 return segment, None
             field, matched = found
@@ -719,10 +871,11 @@ def fold_spellings(
     Walks from ``AshConfig`` (or ``model``) through the fields it reads, so a key
     another model declares under the same name (a content database staleness
     override's own ``expiration``) is left alone, as is anything the walk does not
-    know. The file's ``patch`` operations are part of it: each ``path`` and
-    ``from`` pointer is respelled along the model, and a value an operation adds,
-    replaces or tests is read as the model its path names (the whole
-    configuration, for the root pointer). Never changes ``document``.
+    know: the module docstring says which plugin sections it does not walk. The
+    file's ``patch`` operations are part of it: each ``path`` and ``from`` pointer
+    is respelled along the model, and a value an operation adds, replaces or tests
+    is read as the model its path names (the whole configuration, for the root
+    pointer). Never changes ``document``.
 
     Raises SpellingRefused, naming ``source``, the place and the keys, when an old
     spelling is read at or after the row's ``removed_in`` (``version`` is the
@@ -807,9 +960,10 @@ def canonical_segments(segments: Sequence[str]) -> List[str]:
     one: a denial then covers more, never less. A segment that is not an old
     spelling is kept as written, the ``-``/``_`` twin of a key and another
     spelling of a plugin's section included: ``field_at`` reads each as the field,
-    so the model stays known past it. Whether a row's old spelling is still read
-    is not asked: an operator's denial written under the old spelling keeps
-    denying both.
+    so the model stays known past it. The section of a shipped scanner that has no
+    typed one is a key the walk does not know here, since a denial imports no
+    plugin. Whether a row's old spelling is still read is not asked: an operator's
+    denial written under the old spelling keeps denying both.
     """
     index = _index()
     shape: Optional[Shape] = Shape("model", _root_model())
