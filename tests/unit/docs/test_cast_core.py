@@ -1978,13 +1978,20 @@ def test_a_home_root_token_finds_the_first_half_of_a_path_the_view_keeps_apart(
 
 def test_a_home_root_token_does_not_find_a_path_that_wraps_inside_the_root(cast):
     # The net has a limit of its own: a wrap inside the root leaves neither half
-    # holding it, so the wrap has to fall after the root.
-    text = "| /ho | FAILED |\r\n| me/builder |"
+    # holding it, so the wrap has to fall after the root. The table has one column
+    # and ASCII bars, which the view keeps between the halves.
+    text = "| /ho |\r\n| me/builder |"
     tokens = [
         cast.ForbiddenToken("home", "/home/builder"),
         cast.ForbiddenToken("home-root", "/home/"),
     ]
     assert cast.scan_text(text, tokens, "event 6") == []
+    # Drawn with box-drawing characters, the same wrap is rejoined and found.
+    drawn = f"{BAR} /ho {BAR}\r\n{BAR} me/builder {BAR}"
+    assert [hit.kind for hit in cast.scan_text(drawn, tokens, "event 6")] == [
+        "home",
+        "home-root",
+    ]
 
 
 def test_a_hit_names_its_kind_and_never_the_value(cast):
