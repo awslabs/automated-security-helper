@@ -62,7 +62,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 # detect-secrets --version``), so every scan here started the tool wherever uv could
 # reach it. The scan itself runs in ASH's worker, so the probes answer without a
 # process (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path")
 
 # Assembled at runtime so this file contains no contiguous key-shaped literal.
 # The value is AWS's own documentation placeholder. FLY002 is suppressed on
@@ -512,10 +512,22 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
 def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
     plugin_context, tmp_path, monkeypatch
 ):
-    """A user-provided scan_settings takes precedence over the baseline's."""
+    """A user-provided scan_settings takes precedence over the baseline's.
+
+    The baseline is one the operator names from outside the tree, whose
+    settings would load but for the precedence rule: a baseline found in the
+    tree sets none whatever scan_settings holds, so it could not show the rule.
+    """
     monkeypatch.chdir(tmp_path)
-    (plugin_context.source_dir / ".secrets.baseline").write_text(
-        json.dumps(baseline_document(plugins=[{"name": "AWSKeyDetector"}])),
+    named = tmp_path / "operator" / "shared.baseline"
+    named.parent.mkdir()
+    named.write_text(
+        json.dumps(
+            baseline_document(
+                plugins=[{"name": "AWSKeyDetector"}],
+                filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -523,20 +535,24 @@ def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
         context=plugin_context,
         config=DetectSecretsScannerConfig(
             options=DetectSecretsScannerConfigOptions(
+                baseline_file=str(named),
                 scan_settings=DetectSecretsScanSettings(
                     version="1.5.0",
                     plugins_used=[
                         DetectSecretsScanSettingsPluginsUsed(name="JwtTokenDetector")
                     ],
-                )
+                ),
             )
         ),
     )
 
+    assert scanner._baseline_entries_trusted()
     plugin_names = [p.name for p in scanner.config.options.scan_settings.plugins_used]
     assert plugin_names == ["JwtTokenDetector"], (
         f"the baseline overwrote explicit scan_settings; got {plugin_names}"
     )
+    filter_paths = [f.path for f in scanner.config.options.scan_settings.filters_used]
+    assert EXCLUDE_FILTER_PATH not in filter_paths, filter_paths
 
 
 @pytest.mark.unit

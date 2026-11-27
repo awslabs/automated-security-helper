@@ -44,7 +44,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 SECRET_TYPE = "AWS Access Key"  # pragma: allowlist secret
 EXCLUDE_SECRET_FILTER = "detect_secrets.filters.regex.should_exclude_secret"
@@ -75,20 +78,6 @@ READ_FAILED = "Failed to read baseline file settings"
 # Assembled at runtime so this file holds no key-shaped literal for ASH's own
 # self-scan to report. AWS's documentation placeholder.
 KEPT_SECRET = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
-
-
-@pytest.fixture(autouse=True)
-def _checkouts_below_the_temporary_directory(monkeypatch, tmp_path):
-    """Let the trust rules see only the git checkouts at or below ``tmp_path``."""
-    from automated_security_helper.config import path_trust
-    from automated_security_helper.config.sandbox_grants import is_within
-
-    real = path_trust._checkouts_holding
-    monkeypatch.setattr(
-        path_trust,
-        "_checkouts_holding",
-        lambda scan_root: [c for c in real(scan_root) if is_within(c, tmp_path)],
-    )
 
 
 def _baseline_document(results: dict | None = None) -> dict:
@@ -199,6 +188,7 @@ def _standard_baseline() -> dict:
 def _listed(warning: str, label: str) -> list[str]:
     """The names the warning lists after ``label``, up to the next group or the
     end of the sentence."""
+    assert label in warning, warning
     start = warning.index(label) + len(label)
     end = min(
         index

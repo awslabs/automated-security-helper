@@ -70,7 +70,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 
 def _context(tmp_path: Path) -> PluginContext:
