@@ -851,6 +851,20 @@ class TestRunnerLabels:
         with pytest.raises(ci.CiMatrixError, match=r"matrix\.os"):
             ci.check_runner_labels(_planted("    runs-on: ${{ matrix.os }}\n"))
 
+    @pytest.mark.parametrize(
+        "matrix_lines", ["        os: []\n", "        include: []\n"]
+    )
+    def test_a_matrix_with_no_legs_has_no_runner_to_read_and_is_refused(
+        self, matrix_lines
+    ):
+        """No leg lacks the key when there is no leg, so the key has to be named."""
+        head = "    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n"
+        lines = head + matrix_lines
+        job = _planted(lines)["jobs"]["j"]
+        assert ci.cells(job, "push") == []
+        with pytest.raises(ci.CiMatrixError, match=r"matrix\.os"):
+            ci.check_runner_labels(_planted(lines))
+
     def test_a_leg_with_no_value_for_the_key_runs_on_nothing_and_is_refused(self):
         lines = (
             "    runs-on: ${{ matrix.runner }}\n"
