@@ -2306,7 +2306,7 @@ def test_a_relative_gitleaks_config_is_checked_where_ash_anchors_it(
     source = scanner.context.source_dir
     if not mark:
         args = scanner._build_arguments(source, tmp_path / "o.sarif")
-        assert _passed_config(args).resolve() == anchored.resolve()
+        assert f"--config={anchored.as_posix()}" in args
         return
     with pytest.raises(ScannerError, match=_MARK_REFUSAL) as refused:
         scanner._build_arguments(source, tmp_path / "o.sarif")

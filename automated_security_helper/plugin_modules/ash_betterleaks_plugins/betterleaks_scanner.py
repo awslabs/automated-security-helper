@@ -225,8 +225,8 @@ _BINARY = getattr(os, "O_BINARY", 0)
 #: lists each product's two names together, which is not that order, so
 #: ``_config_env_read_name`` gives the one Betterleaks reads. When one is set, outside
 #: the scanner sandbox, ASH leaves the TOML variables and an absolute path to
-#: Betterleaks, and passes a path that is not absolute as ``--config`` anchored to the
-#: directory ASH runs in.
+#: Betterleaks, and when the path variable Betterleaks reads is not absolute, passes it
+#: as ``--config`` anchored to the directory ASH runs in.
 CONFIG_ENV_VARS = (
     "BETTERLEAKS_CONFIG",
     "BETTERLEAKS_CONFIG_TOML",
