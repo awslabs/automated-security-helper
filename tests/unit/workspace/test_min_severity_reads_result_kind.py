@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A result whose kind states no finding is not one of a project's findings.
+"""A result that states no finding is not one of a project's findings.
 
 A SARIF result of kind ``pass``, ``notApplicable`` or ``informational`` says that a
 rule passed, did not apply, or reported information only
@@ -9,7 +9,10 @@ rule passed, did not apply, or reported information only
 kinds. ASH grades level ``none`` INFO, and INFO is a finding at the ``ALL`` threshold
 and ranks as low for ``--min-severity``. Graded by its level alone, a cdk-nag rule that
 was not evaluated made a project's workspace verdict fail, and met ``--min-severity``
-with nothing to count.
+with nothing to count. A result states no finding when its kind is one of those and
+nothing in it reports a problem: its level is ``none`` or not stated, and no
+``issue_severity`` it declares is above INFO. One whose level reports a problem is a
+finding, graded as any other result is.
 
 The ``--min-severity`` answer and the actionable count are asked separately, and the
 first can be asked with no threshold at all, so each has a test of its own. Every test
@@ -78,6 +81,15 @@ def test_a_finding_beside_a_non_finding_still_meets_the_minimum():
     results = [_result("notApplicable"), _result("fail", level="warning")]
 
     assert has_finding_at_min_severity(results, "medium", "ALL") is True
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_non_finding_kind_at_level_warning_is_found_at_medium(kind):
+    """A result of such a kind whose level reports a problem is a finding, so it meets
+    the minimum, with no threshold to turn it away."""
+    assert (
+        has_finding_at_min_severity([_result(kind, level="warning")], "medium") is True
+    )
 
 
 # ---------------------------------------------------------------------------

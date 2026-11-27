@@ -1,14 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A result whose kind states no finding does not fail the exit-code gate.
+"""A result that states no finding does not fail the exit-code gate.
 
 A SARIF result of kind ``pass``, ``notApplicable`` or ``informational`` says that a
 rule passed, did not apply, or reported information only
 (``sarif_utils.NON_FINDING_KINDS``). SARIF asks for level ``none`` beside those
 kinds, which ASH grades INFO, and a threshold of ``ALL`` fails INFO. Graded by its
-level alone, the note a scan records for an image it did not scan, or a cdk-nag rule
-that was not evaluated, counted as a finding at that threshold and the scan exited 2.
+level alone, the note a scan records for an image it did not scan counted as a
+finding at that threshold and the scan exited 2. A result states no finding when its
+kind is one of those and nothing in it reports a problem: its level is ``none`` or
+not stated, and no ``issue_severity`` it declares is above INFO. A result of such a
+kind whose level or ``issue_severity`` does report a problem is a finding, graded
+as any other result is.
 
 Every test with a non-finding kind has a control that changes the kind and nothing
 else. A failing result (the default kind), and the two kinds that assert a finding a
@@ -55,11 +59,12 @@ ANY_FINDING = [pytest.param(None, id="absent"), *FINDING]
 IMAGE = "registry.example/app:1"
 
 
-def _note(kind: str | None) -> dict[str, Any]:
-    """The image-not-scanned note as reports/ash.sarif holds it, with *kind*."""
+def _note(kind: str | None, level: str = "none") -> dict[str, Any]:
+    """The image-not-scanned note as reports/ash.sarif holds it, with *kind* and
+    *level*."""
     note: dict[str, Any] = {
         "ruleId": ScanPhase.IMAGE_NOT_SCANNED_RULE_ID,
-        "level": "none",
+        "level": level,
         "message": {"text": "the image was not scanned"},
         "properties": {"image": IMAGE},
     }
@@ -68,12 +73,12 @@ def _note(kind: str | None) -> dict[str, Any]:
     return note
 
 
-def _model_note(kind: str) -> Result:
-    """The same note as the scan phase builds it, with *kind*."""
+def _model_note(kind: str, level: Level = Level.none) -> Result:
+    """The same note as the scan phase builds it, with *kind* and *level*."""
     return Result(
         ruleId=ScanPhase.IMAGE_NOT_SCANNED_RULE_ID,
         kind=Kind(kind),
-        level=Level.none,
+        level=level,
         message=Message(root=Message1(text="the image was not scanned")),
         properties=PropertyBag.model_validate({"image": IMAGE}),
     )
@@ -82,6 +87,11 @@ def _model_note(kind: str) -> Result:
 def _at_all(_scanner: object) -> str:
     """The threshold lookup of a scan in which every scanner gates at ALL."""
     return "ALL"
+
+
+def _at_medium(_scanner: object) -> str:
+    """The threshold lookup of a scan in which every scanner gates at MEDIUM."""
+    return "MEDIUM"
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +120,23 @@ def test_the_same_model_result_that_asserts_a_finding_fails_the_all_gate(kind):
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_json_result_whose_level_reports_a_problem_fails_the_medium_gate(kind):
+    """A result of a non-finding kind at level warning is graded MEDIUM, which the
+    default threshold fails."""
+    result = _note(kind, level="warning")
+
+    assert ras._result_fails_its_scanner_threshold(result, _at_medium) is True
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_model_result_whose_level_reports_a_problem_fails_the_medium_gate(kind):
+    """The same pair as a model: the level it states is the one the gate grades."""
+    result = _model_note(kind, Level.warning)
+
+    assert ras._result_fails_its_scanner_threshold(result, _at_medium) is True
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
 def test_the_min_severity_check_does_not_read_a_non_finding_as_actionable(kind):
     """The check that keeps exit 2 standing reads the same rule as the count."""
     assert (
@@ -135,8 +162,10 @@ def test_the_min_severity_check_still_reads_a_finding_as_actionable(kind):
 # ---------------------------------------------------------------------------
 
 
-def _scan_results(tmp_path, note: dict[str, Any]) -> AshAggregatedResults:
-    """Results gated at ALL, and the report this run wrote holding only *note*.
+def _scan_results(
+    tmp_path, note: dict[str, Any], threshold: str = "ALL"
+) -> AshAggregatedResults:
+    """Results gated at *threshold*, and the report this run wrote holding only *note*.
 
     The exit code counts the persisted report when the results record it as written
     by this run's SARIF reporter, so the file goes under reports/ and is recorded
@@ -146,7 +175,7 @@ def _scan_results(tmp_path, note: dict[str, Any]) -> AshAggregatedResults:
     results.ash_config = AshConfig.model_validate(
         {
             "project_name": "non-finding-kinds",
-            "global_settings": {"severity_threshold": "ALL"},
+            "global_settings": {"severity_threshold": threshold},
         }
     )
     results.sarif = SarifReport(
@@ -209,6 +238,22 @@ def test_the_same_scan_with_a_kind_that_asserts_a_finding_exits_2_at_all(
 ):
     _no_scanner_counts(monkeypatch)
     results = _scan_results(tmp_path, _note(kind))
+    opts = _opts(tmp_path)
+
+    assert ras._gating_actionable_count(results, opts, True) == 1
+    assert (
+        ras._compute_exit_code(results, opts, report_sarif_written_this_run=True) == 2
+    )
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_scan_whose_only_result_is_such_a_pair_exits_2_at_medium(
+    tmp_path, monkeypatch, kind
+):
+    """A result of a non-finding kind at level warning is a MEDIUM finding, so the scan
+    fails at the default threshold."""
+    _no_scanner_counts(monkeypatch)
+    results = _scan_results(tmp_path, _note(kind, level="warning"), "MEDIUM")
     opts = _opts(tmp_path)
 
     assert ras._gating_actionable_count(results, opts, True) == 1

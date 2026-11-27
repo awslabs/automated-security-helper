@@ -1,19 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The MCP views leave out a result whose kind states no finding, as the exit code does.
+"""The MCP views leave out a result that states no finding, as the exit code does.
 
 ``_counts_toward_exit_2`` restates ``_compute_exit_code``'s test for one result, and
 that test no longer counts a result of kind ``pass``, ``notApplicable`` or
-``informational`` (``sarif_utils.NON_FINDING_KINDS``). SARIF asks for level ``none``
-beside those kinds, which ASH grades INFO, and a threshold of ``ALL`` fails INFO. The
-actionable view still kept such a result, so a client that gated on its findings and
-counts failed a scan that exited 0, and the ``severities`` and ``scanners`` recounts
-read it as an INFO finding beside per-scanner rows that no longer count it.
+``informational`` (``sarif_utils.NON_FINDING_KINDS``) that states no finding. SARIF
+asks for level ``none`` beside those kinds, which ASH grades INFO, and a threshold of
+``ALL`` fails INFO. The actionable view still kept such a result, so a client that
+gated on its findings and counts failed a scan that exited 0, and the ``severities``
+and ``scanners`` recounts read it as an INFO finding beside per-scanner rows that no
+longer count it. A result states no finding when its kind is one of those and
+nothing in it reports a problem: its level is ``none`` or not stated, and no
+``issue_severity`` it declares is above INFO. One whose level reports a problem is a
+finding, and counts as any other result does.
 
 Every test with a non-finding kind has a control that changes the kind and nothing
-else. A result that carries a suppression in effect stays in the suppressed bucket,
-as it does in the per-scanner counts.
+else. A result that states no finding is in no bucket, suppressed or not.
 """
 
 from __future__ import annotations
@@ -112,8 +115,17 @@ def test_a_result_that_states_no_finding_does_not_count_toward_exit_2(kind):
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
-def test_the_level_of_a_result_that_states_no_finding_does_not_make_it_count(kind):
-    assert _counts_toward_exit_2(_note(kind, level="error"), "LOW") is False
+def test_the_level_of_a_result_whose_kind_says_no_finding_makes_it_count(kind):
+    """A result whose level reports a problem is a finding, whatever its kind, and is
+    graded by its level."""
+    assert _counts_toward_exit_2(_note(kind, level="error"), "LOW") is True
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_such_a_pair_counts_toward_exit_2_at_medium(kind):
+    """A result of such a kind at level warning is graded MEDIUM, which the default
+    threshold counts."""
+    assert _counts_toward_exit_2(_note(kind, level="warning"), "MEDIUM") is True
 
 
 @pytest.mark.parametrize("kind", ANY_FINDING)
@@ -215,12 +227,8 @@ def test_a_scanners_filter_counts_the_same_result_as_info_when_it_asserts_a_find
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
-def test_a_suppressed_result_that_states_no_finding_is_still_a_suppression(kind):
-    """Must-not-regress control: a suppression in effect puts a result under suppressed.
-
-    Green at the base too. The per-scanner counts keep such a result in the
-    suppressed bucket, and so does this recount.
-    """
+def test_a_suppressed_result_that_states_no_finding_is_in_no_bucket(kind):
+    """A result that states no finding counts in no figure, suppressed or not."""
     filtered = apply_content_filters(
         _sarif_only_document(_note(kind, suppressed=True)), scanners="trivy"
     )
@@ -228,4 +236,4 @@ def test_a_suppressed_result_that_states_no_finding_is_still_a_suppression(kind)
     stats = filtered["summary_stats"]
     assert stats["total"] == 1
     counts = stats["severity_counts"]
-    assert (counts["high"], counts["info"], counts["suppressed"]) == (1, 0, 1)
+    assert (counts["high"], counts["info"], counts["suppressed"]) == (1, 0, 0)

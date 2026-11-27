@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A project's finding counts leave out a result whose kind states no finding.
+"""A project's finding counts leave out a result that states no finding.
 
 The workspace verdict no longer counts a result of kind ``pass``, ``notApplicable``
 or ``informational`` (``sarif_utils.NON_FINDING_KINDS``) as actionable. SARIF gives
@@ -9,7 +9,10 @@ such a result level ``none``, which ASH grades INFO, and the counts beside the
 verdict still took it for one of the project's findings: the project's
 ``finding_count``, its ``policy_origin_finding_count``, and the per-scanner rollup of
 the unified results that sums them. A project of one real finding and one rule that
-was not evaluated read as two.
+was not evaluated read as two. A result states no finding when its kind is one of
+those and nothing in it reports a problem: its level is ``none`` or not stated, and no
+``issue_severity`` it declares is above INFO. One whose level reports a problem is a
+finding, and the counts include it.
 
 Every test with a non-finding kind has a control that changes the kind and nothing
 else. A result that carries a suppression in effect stays out of the count, as it
@@ -236,3 +239,29 @@ def test_a_scanner_with_only_such_results_still_has_its_row(tmp_path, kind):
     _run(tmp_path, plan)
 
     assert "bandit" in _rollup(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# A result of such a kind whose level reports a problem
+# ---------------------------------------------------------------------------
+
+
+def _only_a_pair(kind: str) -> dict[str, Any]:
+    """The same SARIF with the real finding taken out: bandit's one result is of *kind*
+    at level warning."""
+    sarif = _only_a_note(kind)
+    sarif["runs"][0]["results"][0]["level"] = "warning"
+    return sarif
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_result_whose_level_reports_a_problem_is_in_the_count(tmp_path, kind):
+    """A result of a non-finding kind whose level reports a problem is a finding, so the
+    project counts it."""
+    _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+    FakeOrchestrator.behaviour["api"] = {"sarif": _only_a_pair(kind)}
+
+    entry = _entry(_run(tmp_path, plan), "api")
+
+    assert entry.status is ProjectRunStatus.COMPLETED, entry.error
+    assert entry.finding_count == 1
