@@ -14,10 +14,17 @@ a suppressed finding.
 
 Two more places still treated the note as a finding. The selected-finding strip named
 its state Active, and the detail screen opened with its severity. The strip now says
-Information, except that a suppression in effect is still shown as Suppressed, and the
-detail screen's first line reads INFORMATION in the muted color the table gives it.
-Every other line of both screens is unchanged.
+Information, and the detail screen's first line reads INFORMATION in the muted color
+the table gives it. A result that states no finding reads Information on the strip,
+the table and the summary line, suppressed or not; its suppression still shows in the
+detail screen. Every other line of both screens is unchanged.
+
+A result of such a kind that reports a problem by its level contradicts its kind and
+is a finding: each finding dict carries the verdict the whole result gave, and the
+screens read it.
 """
+
+from types import SimpleNamespace
 
 import pytest
 from textual.widgets import Static
@@ -28,7 +35,9 @@ from automated_security_helper.cli.inspect.inspect_findings_app import (
     _finding_cells,
     _named_finding,
     _summary_line,
+    extract_findings,
 )
+from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.utils.ui_theme import COLORS
 
 pytestmark = pytest.mark.unit
@@ -117,11 +126,105 @@ def test_the_strip_of_a_result_that_states_a_finding_still_reads_active(kind):
     assert _strip_first_line(finding) == "B602  ·  bandit  ·  Active"
 
 
-def test_a_suppressed_note_still_reads_suppressed_on_the_strip():
-    """Control, green before and after: a suppression in effect is still shown."""
+def test_a_suppressed_note_reads_information_on_the_strip():
+    """A result that states no finding reads Information on the strip, the table and
+    the summary line, suppressed or not."""
     note = _finding(NOTE, "info", "informational", suppressed=True)
 
-    assert _strip_first_line(note) == f"{NOTE}  ·  bandit  ·  Suppressed"
+    assert _strip_first_line(note) == f"{NOTE}  ·  bandit  ·  Information"
+
+
+def test_the_severity_cell_of_a_suppressed_note_reads_information():
+    """Guard: the table already names a suppressed note by its kind."""
+    note = _finding(NOTE, "info", "informational", suppressed=True)
+
+    (cell,) = _finding_cells(note, ["severity"])
+
+    assert cell.plain == "INFORMATION"
+
+
+@pytest.mark.asyncio
+async def test_the_detail_screen_still_shows_the_suppression_of_a_note():
+    """Guard: the strip names the note Information, and its suppression is still
+    shown where the detail is."""
+    note = _finding(
+        NOTE,
+        "info",
+        "informational",
+        suppressed=True,
+        suppression_reason="accepted for this image",
+    )
+    app = FindingsExplorerApp([note])
+    async with app.run_test(size=(120, 36)) as pilot:
+        await pilot.pause()
+        app.push_screen(FindingDetailScreen(note))
+        await pilot.pause()
+        shown = [
+            getattr(widget.content, "plain", str(widget.content))
+            for widget in app.screen.query(Static)
+        ]
+
+    assert "Suppression" in shown
+    assert any("accepted for this image" in text for text in shown)
+
+
+def _pair_findings(kind):
+    """The findings ``extract_findings`` builds from a HIGH failing result and a
+    result of *kind* at level warning, which reports a problem despite its kind."""
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "t"}},
+                    "results": [
+                        {
+                            "ruleId": "B602",
+                            "level": "error",
+                            "message": {"text": "a finding"},
+                            "properties": {
+                                "scanner_details": {"tool_name": "bandit"},
+                                "issue_severity": "HIGH",
+                            },
+                        },
+                        {
+                            "ruleId": "R-PAIR",
+                            "kind": kind,
+                            "level": "warning",
+                            "message": {"text": "reports a problem despite its kind"},
+                            "properties": {
+                                "scanner_details": {"tool_name": "bandit"},
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    return extract_findings(SimpleNamespace(sarif=report))
+
+
+@pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+def test_such_a_pair_is_counted_as_active(kind):
+    findings = _pair_findings(kind)
+
+    assert _summary_line(findings).plain == "2 active  ·  1 high  ·  1 medium"
+
+
+@pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+def test_such_a_pair_reads_its_severity_in_the_table(kind):
+    pair = next(f for f in _pair_findings(kind) if f["rule_id"] == "R-PAIR")
+
+    (cell,) = _finding_cells(pair, ["severity"])
+
+    assert cell.plain == "MEDIUM"
+
+
+@pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+def test_such_a_pair_reads_active_on_the_strip(kind):
+    pair = next(f for f in _pair_findings(kind) if f["rule_id"] == "R-PAIR")
+
+    assert _strip_first_line(pair) == "R-PAIR  ·  bandit  ·  Active"
 
 
 @pytest.mark.asyncio
@@ -149,8 +252,8 @@ async def _detail_first_line(finding):
 @pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
 async def test_the_detail_screen_opens_with_information_not_the_severity(kind):
     # A severity above info, so a first line that kept the severity cannot pass for
-    # the word.
-    note = _finding(NOTE, "medium", kind)
+    # the word, and the verdict of the result stated: the result states no finding.
+    note = _finding(NOTE, "medium", kind, states_no_finding=True)
 
     first = await _detail_first_line(note)
 
