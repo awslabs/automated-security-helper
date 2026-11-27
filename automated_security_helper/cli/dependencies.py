@@ -2206,7 +2206,7 @@ def install_dependencies(
             # the flag excluded. The plugin's own check is not asked either: its
             # base answer is the same PATH probe.
             outcome.executable = _managed_executable(
-                outcome, virtualenv_target, absolute_bin_path
+                outcome, virtualenv_target, absolute_bin_path, source_dir
             )
             if outcome.command is not None:
                 system_copy = find_executable_for_scan(outcome.command, source_dir)
@@ -2811,8 +2811,25 @@ def _routed_commands(
     return routed
 
 
+def _on_search_path(directory: Path) -> bool:
+    """Whether ``directory`` is one of PATH's anchored entries, compared by real path.
+
+    A scan searches the directories PATH names and never the working directory, so
+    a relative entry (``.``, ``bin``, an empty one) names nothing a scan looks in.
+    """
+    wanted = os.path.normcase(os.path.realpath(directory))
+    return any(
+        os.path.normcase(os.path.realpath(entry)) == wanted
+        for entry in os.environ.get("PATH", "").split(os.pathsep)
+        if entry and is_anchored(entry)
+    )
+
+
 def _managed_executable(
-    outcome: "PluginInstallOutcome", virtualenv: Optional[Path], bin_dir: Path
+    outcome: "PluginInstallOutcome",
+    virtualenv: Optional[Path],
+    bin_dir: Path,
+    source_dir: Path,
 ) -> Optional[str]:
     """What runs ``outcome.command`` among the locations ASH or its providers manage.
 
@@ -2821,6 +2838,13 @@ def _managed_executable(
     directory, ASH's own environment directories, and the ASH bin directory. Never a
     bare PATH search and never ``/usr/local/bin``: a system copy does not stand in
     for what this run was asked to install.
+
+    A tool counts where a scan of ``source_dir`` would find it. A copy inside that
+    tree is passed over, as a scan passes over one it refuses, unless the operator
+    allowed in-tree tools (``in_tree_path_refusal``), and the search goes on to the
+    next directory. The virtualenv's scripts directory is searched only when PATH
+    names it, which is the one way a scan reaches it; ASH's own environment
+    directories are searched anyway.
     """
     from automated_security_helper.utils.subprocess_utils import own_environment_dirs
 
@@ -2832,12 +2856,21 @@ def _managed_executable(
         listed = _uv_tool_executable(outcome.command)
         if listed is not None:
             return listed
-    directories: List[str] = []
-    if virtualenv is not None:
-        directories.append(str(venv_scripts_dir(virtualenv)))
-    directories.extend(str(d) for d in own_environment_dirs())
-    directories.append(str(bin_dir))
-    return shutil.which(outcome.command, path=os.pathsep.join(directories))
+    directories: List[Path] = []
+    if virtualenv is not None and _on_search_path(venv_scripts_dir(virtualenv)):
+        directories.append(venv_scripts_dir(virtualenv))
+    directories.extend(own_environment_dirs())
+    directories.append(bin_dir)
+    for directory in directories:
+        found = shutil.which(outcome.command, path=str(directory))
+        if found is None:
+            continue
+        refusal = in_tree_path_refusal(
+            f"{outcome.command} at {found}", Path(found), source_dir
+        )
+        if refusal is None:
+            return found
+    return None
 
 
 def _uv_tool_executable(command: str) -> Optional[str]:
