@@ -348,7 +348,7 @@ What sharding does not do:
 
 ## Scan a multi-project workspace {#workspaces}
 
-`ash scan workspace FILE` takes a VS Code `.code-workspace` file and scans each of its
+`ash scan --workspace FILE` takes a VS Code `.code-workspace` file and scans each of its
 folders as a separate project, with that project's own configuration, in one run. Pass
 `auto` as FILE to use the only `.code-workspace` file in the current directory.
 
@@ -367,7 +367,7 @@ cat > services.code-workspace <<'EOF'
   ]
 }
 EOF
-ash scan workspace services.code-workspace --dry-run
+ash scan --workspace services.code-workspace --dry-run
 ```
 
 `--dry-run` prints the plan, one entry per project with its path, configuration, threshold,
@@ -380,7 +380,7 @@ type whose names are the same or that the config lookup reads as one, such as `c
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan workspace services.code-workspace --scanners detect-secrets
+ash scan --workspace services.code-workspace --scanners detect-secrets
 ```
 
 <!-- doctest: output -->
@@ -458,12 +458,12 @@ Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the w
 before any project runs. Exit code 4 means the workspace itself is wrong: the workspace file
 or policy file cannot be used, a project is missing, or the projects need different plugin
 modules or incompatible scanner versions. Exit code 5 is a usage error, such as an option
-that `ash scan workspace` does not take, or a `--scanners` list that names no scanner or that
+that `ash scan --workspace` does not take, or a `--scanners` list that names no scanner or that
 `--exclude-scanners` cancels:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan workspace services.code-workspace --scanners detect-secret
+ash scan --workspace services.code-workspace --scanners detect-secret
 ```
 
 `--changed-files-only` works per project, against that project's own git repository. A

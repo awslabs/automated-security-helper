@@ -196,16 +196,16 @@ ASH_PIN_PATTERNS = {
     "ash-version:": (rf"({_FORM_PREFIX['ash-version:']}v){_SEMVER}",),
 }
 
-# The first release whose CLI spells a scan of a directory `ash scan fs [PATH]`, groups
-# the commands that read stored results under `ash results`, and names the image build
-# `ash container build`. A page that pins an earlier release has to show that release's
-# spellings: a reader copies its install command and then its other commands, and an
-# earlier `ash` refuses all three (its `scan` takes no path argument and no
-# subcommand). The templates hold the newest spellings, and `render` writes the older
-# ones in the code of a page when it renders for a release before this one
-# (markdown_for_release, which uses spellings_for_release); the prose around the code is
-# never rewritten. A render for this release or a later one leaves them, so the bump that
-# cuts it moves every page at once.
+# The first release whose CLI spells a scan of a directory `ash scan fs [PATH]`, a scan
+# of a workspace file `ash scan workspace FILE`, groups the commands that read stored
+# results under `ash results`, and names the image build `ash container build`. A page
+# that pins an earlier release has to show that release's spellings: a reader copies its
+# install command and then its other commands, and an earlier `ash` refuses all of them
+# (its `scan` takes no path argument and no subcommand). The templates hold the newest
+# spellings, and `render` writes the older ones in the code of a page when it renders for
+# a release before this one (markdown_for_release, which uses spellings_for_release); the
+# prose around the code is never rewritten. A render for this release or a later one
+# leaves them, so the bump that cuts it moves every page at once.
 SUBJECTS_RELEASE = (3, 9, 0)
 
 # `ash` or `ashv3` as a command word: not the end of a longer name (`dash`, `flash`) and
@@ -230,9 +230,26 @@ _SCAN_FS = re.compile(
     rf"{_ASH_COMMAND}(?P<before_scan>{_WORD_GAP})scan{_WORD_GAP}fs(?![\w/-])(?!\.\w)"
     rf"(?:(?P<before_path>{_WORD_GAP}){_FS_PATH})?"
 )
+# `ash scan workspace`, as far as the subject: `workspace` ends where a word ends, as `fs`
+# does. An option right after it is not the file. 3.9 lets the file follow the options,
+# but 3.8's `--workspace` takes the next word as its value, so `ash scan workspace
+# --dry-run FILE` has no respelling that keeps its words in place, and it is left for the
+# checks to refuse. The file itself is not part of the match: it stays where it is.
+_SCAN_WORKSPACE = re.compile(
+    rf"{_ASH_COMMAND}(?P<before_scan>{_WORD_GAP})scan(?P<before_subject>{_WORD_GAP})"
+    rf"workspace(?![\w/-])(?!\.\w)(?!{_WORD_GAP}[-\[])"
+)
+# The verbs of `ash results` that 3.8.0 has as top-level commands. `diff` and `trend` are
+# not here: 3.8.0 has neither (it registers `scan`, `build-image`, `report`, `merge`,
+# `mcp`, `get-genai-guide`, `config`, `dependencies`, `inspect` and `plugin`), and no
+# release has had a top-level `ash diff` or `ash trend`, so `ash results diff` has no
+# older spelling to be written as. It is left as it is, and the checks refuse it beside
+# a pin before SUBJECTS_RELEASE (tests/utils/release_spellings.py). The verbs are held
+# to that module's RESULTS_VERBS_MOVED by
+# tests/unit/test_version_template_release_spellings.py.
 _RESULTS_VERB = re.compile(
     rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})results{_WORD_GAP}"
-    r"(?P<verb>report|diff|trend|merge|inspect)(?![\w-])"
+    r"(?P<verb>report|merge|inspect)(?![\w-])"
 )
 _CONTAINER_BUILD = re.compile(
     rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})container{_WORD_GAP}build(?![\w-])"
@@ -283,23 +300,45 @@ def _scan_before_the_subjects(found: "re.Match[str]") -> str:
     return f"{command}{gap}--source-dir{flag_gap}{found['path']}"
 
 
+def _workspace_before_the_subjects(found: "re.Match[str]") -> str:
+    """`ash scan workspace [FILE]` as a release before SUBJECTS_RELEASE spells it.
+
+    That release scans a workspace file with the option ``--workspace``, where 3.9 names
+    the subject and takes the file as its argument. The subject word becomes the option
+    and the file after it stays where it was, so ``ash scan workspace FILE`` is ``ash
+    scan --workspace FILE``. The words keep the gaps they had, so a command that
+    continues on the next line still does, and a list of arguments (``["ash", "scan",
+    "workspace", "f.code-workspace"]``) gets the option and its file as two items. With
+    no file after it, as when a sentence names the command, the option is written alone.
+    """
+    return (
+        f"{found['ash']}{found['before_scan']}scan{found['before_subject']}--workspace"
+    )
+
+
 def spellings_for_release(text: str, version: str) -> str:
     """``text`` with ASH's commands spelled as release ``version`` reads them.
 
     For a release before SUBJECTS_RELEASE, ``ash scan fs PATH`` becomes
     ``ash scan --source-dir PATH`` and ``ash scan fs`` with no path ``ash scan``,
-    ``ash results <verb>`` becomes ``ash <verb>``, and ``ash container build`` becomes
-    ``ash build-image``; ``ashv3`` is read as ``ash``. Inside an ``ash scan`` command,
-    ``--only-scanners`` and ``--add-scanners`` become ``--scanners``, the one flag that
-    release has for both. The entries of the hooks in ``.pre-commit-hooks.yaml``
-    (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that release ships, whole. Text
-    for SUBJECTS_RELEASE or a later release comes back unchanged, as does text for a
-    version that does not start with a release number (a branch name, a placeholder).
+    ``ash scan workspace FILE`` becomes ``ash scan --workspace FILE``,
+    ``ash results <verb>`` becomes ``ash <verb>`` for ``report``, ``merge`` and
+    ``inspect``, and ``ash container build`` becomes ``ash build-image``; ``ashv3`` is
+    read as ``ash``. ``ash results diff`` and ``ash results trend`` stay as they are:
+    that release has neither command, so there is nothing to write them as. Inside an
+    ``ash scan`` command, ``--only-scanners`` and ``--add-scanners`` become
+    ``--scanners``, the one flag that release has for both. The entries of the hooks in
+    ``.pre-commit-hooks.yaml`` (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries
+    that release ships, whole. Text for SUBJECTS_RELEASE or a later release comes back
+    unchanged, as does text for a version that does not start with a release number (a
+    branch name, a placeholder).
 
     A command is read as a shell writes it, with its words on one line or on lines
     joined by a backslash, and as a list of arguments (``["ash", "scan", "fs", "."]``).
     What follows ``fs`` is its path only when it can be one: not an option, a
-    redirection (``2>&1``), a placeholder such as ``[OPTIONS]``, or ``...``.
+    redirection (``2>&1``), a placeholder such as ``[OPTIONS]``, or ``...``. An option
+    right after ``workspace`` is not rewritten, since 3.8's ``--workspace`` would take
+    it as its value: the command stays as the template has it, for the checks to refuse.
 
     Every command in ``text`` is rewritten, so ``text`` is a command or a text made of
     commands (a snippet of the docs site). A document that has prose around its code
@@ -309,6 +348,7 @@ def spellings_for_release(text: str, version: str) -> str:
         return text
     text = _swap_hook_entries(text)
     text = _SCAN_FS.sub(_scan_before_the_subjects, text)
+    text = _SCAN_WORKSPACE.sub(_workspace_before_the_subjects, text)
     text = _SCAN_COMMAND.sub(
         lambda command: _SCANNER_SELECTION_FLAG.sub("--scanners", command[0]), text
     )

@@ -1477,7 +1477,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--changed-files-only",
             rich_help_panel="CI and sharding",
-            help="Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside --source-dir, nothing is. Not supported with --mode container, which refuses it (exit 5).",
+            help="Report only findings in files changed between --base-ref and HEAD, for example on a pull request. Scanners still scan every file; findings located in other files are dropped from every report, the summary counts and the exit code. Findings with no file location are kept. When git cannot list the changes, everything is reported; when nothing changed inside the scanned directory, nothing is. A workspace scan reads the changes of each project from that project's own repository, and skips a project where nothing changed. Not supported with --mode container, which refuses it (exit 5).",
             envvar="ASH_CHANGED_FILES_ONLY",
         ),
     ] = False,

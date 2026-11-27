@@ -335,12 +335,16 @@ def _builtin_reporters() -> list[str]:
 
 
 def _output_formats_note(_param: Any) -> str:
-    """``ash scan --output-formats``: accepted values, and which of them write a report.
+    """``--output-formats``: accepted values, and which of them write a report.
 
-    cli/scan.py checks each value with ``ExportFormat(value)`` and refuses anything
-    else, and the report phase selects a reporter whose config name equals a value
-    (``reporter_format_name``). So an ExportFormat value that names no reporter is
-    accepted and writes nothing, and a reporter whose name is not one is refused.
+    Five commands take the option: ``ash`` with no command, ``ash scan fs`` and
+    ``ash scan workspace``, which run the one scan command, and ``ash merge`` and
+    ``ash results merge``, which are the one merge command under two names. cli/scan.py
+    and cli/merge.py (``_parse_output_formats``) each check every value with
+    ``ExportFormat(value)`` and refuse anything else, and the report phase of both
+    selects a reporter whose config name equals a value (``reporter_format_name``). So
+    an ExportFormat value that names no reporter is accepted and writes nothing, and a
+    reporter whose name is not one is refused.
     """
     from automated_security_helper.core.enums import ExportFormat
 
@@ -365,21 +369,37 @@ def _output_formats_note(_param: Any) -> str:
 
 
 def _report_format_note(_param: Any) -> str:
-    """``ash report --format``: cli/report.py looks the value up among loaded reporters."""
+    """``ash report --format`` and ``ash results report --format``.
+
+    cli/report.py looks the value up among the loaded reporters. A value none of them
+    answers to is a mistyped argument, which it refuses with ``ASH_EXIT_USAGE_ERROR``,
+    not with 1, the code of a failed run. The code is read from that constant, so the
+    sentence cannot name a code the command does not exit with.
+    """
+    from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
     return (
         "Accepted values: the name of a reporter that is loaded: "
         + ", ".join(code(r) for r in _builtin_reporters())
         + ", and the reporters of any plugin module the configuration loads. "
-        "Any other value exits with code 1."
+        f"Any other value exits with code {ASH_EXIT_USAGE_ERROR}."
     )
 
 
 #: Options whose values the command checks in its own code, after click has parsed
 #: them, keyed by (command path, first long name). Their help text alone does not
-#: say what is accepted; the note is computed from the code that decides it.
+#: say what is accepted; the note is computed from the code that decides it. The path
+#: of the root command is ``()``. Every key must name an option that the walk of the
+#: click tree finds under that command: a note keyed to a path that matches no command
+#: is never written, and nothing on the page shows that it is missing.
 VALUE_NOTES = {
-    (("scan",), "--output-formats"): _output_formats_note,
+    ((), "--output-formats"): _output_formats_note,
+    (("merge",), "--output-formats"): _output_formats_note,
+    (("results", "merge"), "--output-formats"): _output_formats_note,
+    (("scan", "fs"), "--output-formats"): _output_formats_note,
+    (("scan", "workspace"), "--output-formats"): _output_formats_note,
     (("report",), "--format"): _report_format_note,
+    (("results", "report"), "--format"): _report_format_note,
 }
 
 

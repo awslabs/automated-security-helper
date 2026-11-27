@@ -414,6 +414,22 @@ class TestFilterResultsToChangedFiles:
             f"no warning named the number discarded: {warnings}"
         )
 
+    def test_the_empty_set_warning_names_the_scanned_directory_not_an_option(
+        self, tmp_path, ash_warnings
+    ):
+        """Only the single-directory scan reaches this warning, and a scan of the
+        projects of a workspace file has no ``--source-dir`` option, so the warning
+        says where the changed paths have to be in words every scan can read."""
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        results = _make_results_with_sarif([_make_result("src/app.py")])
+
+        filter_results_to_changed_files(results, set(), source_dir)
+
+        (message,) = [m for m in ash_warnings() if "changed-file set is empty" in m]
+        assert "inside the scanned directory" in message
+        assert "--source-dir" not in message
+
     def test_a_matching_changed_set_warns_about_nothing(self, tmp_path, ash_warnings):
         """The warning is for the empty-set case, not for the flag working.
 

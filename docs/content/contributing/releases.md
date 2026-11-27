@@ -129,9 +129,12 @@ A maintainer runs **Actions > ASH - Create Release > Run workflow**. The workflo
 5. commits the rest as `chore(release): <old> -> <new>` on the branch `release/v<new>`,
    pushes it, and opens a pull request with that title.
 
-The release pull request goes through the same checks and review as any other. When it
-merges, the "ASH - Tag and Publish Release" workflow, which reacts to a merged pull
-request whose title starts with `chore(release):`, does the rest:
+The release pull request goes through the same checks and review as any other. The
+release that first reads a new spelling of a command needs one more commit on the release
+branch before those checks pass: see
+[When a release changes command spellings](#when-a-release-changes-command-spellings).
+When the pull request merges, the "ASH - Tag and Publish Release" workflow, which reacts
+to a merged pull request whose title starts with `chore(release):`, does the rest:
 
 - It checks that the curated release notes, if any, are in the changelog entry, and
   refuses to publish otherwise.
@@ -142,6 +145,42 @@ It no longer moves a floating major tag: floating tags are retired (see [Tags](#
 
 It does not start the docs workflow. See [The documentation site](#the-documentation-site)
 for how a release's docs version is published.
+
+### When a release changes command spellings
+
+`cz bump` rewrites the release number in each file of `version_files`, but not the
+commands a file shows beside it. A template needs nothing more: step 3 renders it for the
+new release, and `render` writes that release's command spellings (see
+[Version-pinned pages](#version-pinned-pages)). A file in `version_files` that is not a
+template keeps the spellings it had, and the unit tests hold it to the spellings of the
+release it pins now.
+
+Most releases leave the spellings alone and need nothing more. The first release that
+reads `ash scan fs`, `ash scan workspace`, `ash results report`, `ash container build`,
+`--only-scanners` and `--add-scanners` is 3.9.0, so its release pull request fails those
+tests until three groups of files use them:
+
+- `docs/content/index.md`;
+- the two blocks of `docs/content/docs/plugins/alpha/trivy-plugin.md` that install ASH
+  from a release tag;
+- the agent plugin sources, `_base/` and `templates/` under
+  `ash-agent-plugins/agentic-coding/transpiler/`.
+
+After `cz bump` has moved the pins, on the branch `release/v<new>` that the workflow
+pushed:
+
+1. Move the commands in those files to the spellings of the new release.
+   [Migrate to scan subjects](../how-to/migrate-to-scan-subjects.md) lists each earlier
+   spelling beside its replacement. `tests/unit/test_docs_no_legacy_spellings.py` and
+   `tests/unit/test_agent_plugin_scan_spellings.py` name each line that still has one.
+2. Rebuild the generated agent plugin trees with the command below, which is the one
+   `pre_bump_hooks` runs. `cz bump` rebuilt them before the sources changed.
+3. Commit the files and the rebuilt trees to the branch, and push it.
+
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
+```bash
+uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build
+```
 
 ### The release App
 
@@ -241,6 +280,17 @@ placeholders:
 Both render as the release version at a release, so the committed page shows the same
 number in both places. They differ only on the docs site's `main` version, described
 below.
+
+A template writes each command as the newest release spells it: `ash scan fs`,
+`ash scan workspace`, `ash results report`, `ash container build` and the options
+`--only-scanners` and `--add-scanners`. A page shows the commands of the release it pins,
+so `render` respells them when it renders a template for a release before 3.9. It writes
+the spellings that release reads into the code of the page, the fenced blocks and the
+inline code spans, and leaves the prose around the code as the template wrote it. A
+render for 3.9 or a later release changes nothing but the placeholders. Two commands have
+no earlier spelling to write: `ash results diff` and `ash results trend` do not exist
+before 3.9, at the top level or under `ash results`. A page that pins an earlier release
+cannot name them, and the spelling tests fail on one that does.
 
 `scripts/version_template_manager.py generate` renders the template of each file listed
 in its `target_files` over that file. The release workflow runs it after the bump. Run
