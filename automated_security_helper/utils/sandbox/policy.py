@@ -486,11 +486,26 @@ def _checkout_top_refusal(top: Path, owner: int, effective: int) -> Optional[str
     )
 
 
-def _log_unnamed_top(top: str, reason: str) -> None:
-    """Log at debug level why ``safe_directories_for`` does not name ``top``."""
+def _log_unnamed_top(top: str, reason: str, *, refused: bool) -> None:
+    """Log why ``safe_directories_for`` does not name ``top``.
+
+    A top the owner test refused (``refused``) is logged as a warning, where an
+    operator sees it: git's own ownership check then decides about that checkout,
+    and when git refuses it, opengrep cannot list its files. A stop where the
+    platform has no user ids, so that git's own check decides from the start, is
+    logged at debug level.
+    """
     from automated_security_helper.utils.log import ASH_LOGGER
 
-    ASH_LOGGER.debug("safe_directories_for: not naming %s: %s", top, reason)
+    if refused:
+        ASH_LOGGER.warning(
+            "safe_directories_for: not naming %s: %s. If git refuses that checkout, "
+            "opengrep cannot list its files",
+            top,
+            reason,
+        )
+    else:
+        ASH_LOGGER.debug("safe_directories_for: not naming %s: %s", top, reason)
 
 
 def safe_directories_for(target: Path) -> List[str]:
@@ -520,20 +535,22 @@ def safe_directories_for(target: Path) -> List[str]:
     The first ``.git`` the walk meets, in ``target`` or above it, ends the walk,
     whether or not its top is named, and so does one git itself would pass over (a
     link that names nothing, a pipe): no parent above it is named, the conservative
-    reading. When the walk meets no ``.git``, it names nothing more. Each top left
-    unnamed is logged at debug level, with its reason in its own words: an owner, a
-    ``.git`` or a git directory that cannot be read, an owner that is neither of the
-    two users, or a top that a ``safe.directory`` entry cannot name.
+    reading. When the walk meets no ``.git``, it names nothing more. Each top the
+    test leaves unnamed is logged as a warning, with its reason in its own words: an
+    owner, a ``.git`` or a git directory that cannot be read, an owner that is
+    neither of the two users, or a top that a ``safe.directory`` entry cannot name.
+    git's own ownership check then decides about that checkout, and when git
+    refuses it, opengrep cannot list its files.
 
     Where the platform has no user ids (Windows: there is no ``os.geteuid``, and
     ``os.lstat`` reports uid 0 for every file, because the owner there is a
     security descriptor's SID, which ``st_uid`` does not carry), no ``.git`` can be
     shown to belong to either user, so none passes the test: the walk stops at the
-    first ``.git``, logs it, and names nothing more, the same reading as an owner
-    that cannot be read. git's own ownership check, which reads the owner itself,
-    then decides whether to trust the checkout's top. ``target`` is named as on
-    every platform, so there a scan of the checkout's top still names it, without
-    the test and without a log line.
+    first ``.git``, logs it at debug level, and names nothing more, the same reading
+    as an owner that cannot be read. git's own ownership check, which reads the
+    owner itself, then decides whether to trust the checkout's top. ``target`` is
+    named as on every platform, so there a scan of the checkout's top still names
+    it, without the test and without a log line.
 
     The one list both spawn paths read: ``build_scanner_policy`` stores it on the
     sandbox policy, and the scanner's unsandboxed spawn calls this function itself.
@@ -560,6 +577,7 @@ def safe_directories_for(target: Path) -> List[str]:
                     top,
                     f"the owner of {git} cannot be read on this platform (no user "
                     "ids), so git's own ownership check decides whether to trust it",
+                    refused=False,
                 )
             break
         reason = _checkout_top_refusal(parent, owner, geteuid())
@@ -569,7 +587,7 @@ def safe_directories_for(target: Path) -> List[str]:
         else:
             if target_is_top:
                 named.remove(top)
-            _log_unnamed_top(top, reason)
+            _log_unnamed_top(top, reason, refused=True)
         break
     return named
 

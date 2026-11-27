@@ -215,6 +215,38 @@ def walk_messages():
         ASH_LOGGER.setLevel(previous_level)
 
 
+@pytest.fixture
+def walk_records():
+    """The log records ASH's logger emits while a test runs, with their levels."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Capture(level=logging.DEBUG)
+    previous_level = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous_level)
+
+
+def _unnamed_top_records(records):
+    return [
+        record
+        for record in records
+        if "safe_directories_for: not naming" in record.getMessage()
+    ]
+
+
 def test_a_parent_whose_git_entry_belongs_to_another_user_is_not_named(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
@@ -832,6 +864,47 @@ def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
     refusals = [m for m in messages if "safe_directories_for: not naming" in m]
     assert refusals, messages
     assert any(".git" in m for m in refusals)
+
+
+@needs_user_ids
+def test_a_top_the_owner_test_leaves_out_is_logged_as_a_warning(
+    monkeypatch, only_staged_checkouts, walk_records
+):
+    """A top left out of the list can make git refuse the checkout, and then opengrep
+    cannot list its files, so the walk says why at warning level, where an operator
+    sees it, and says what follows."""
+    import logging
+
+    repo, sub = _checkout(only_staged_checkouts)
+    _owned_by_someone_else(monkeypatch, os.path.join(os.path.realpath(repo), ".git"))
+
+    assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
+    refusals = _unnamed_top_records(walk_records)
+    assert refusals, [record.getMessage() for record in walk_records]
+    assert all(record.levelno == logging.WARNING for record in refusals), [
+        (record.levelname, record.getMessage()) for record in refusals
+    ]
+    assert all(
+        "opengrep cannot list its files" in record.getMessage() for record in refusals
+    ), [record.getMessage() for record in refusals]
+
+
+def test_without_user_ids_the_stop_is_logged_at_debug_level(
+    monkeypatch, only_staged_checkouts, walk_records
+):
+    """Where the platform has no user ids git's own ownership check decides from the
+    start, so the walk's stop is a debug line, not a warning."""
+    import logging
+
+    _repo, sub = _checkout(only_staged_checkouts)
+    _without_user_ids(monkeypatch)
+
+    assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
+    refusals = _unnamed_top_records(walk_records)
+    assert refusals, [record.getMessage() for record in walk_records]
+    assert all(record.levelno == logging.DEBUG for record in refusals), [
+        (record.levelname, record.getMessage()) for record in refusals
+    ]
 
 
 def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(

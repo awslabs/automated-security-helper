@@ -347,9 +347,13 @@
   directory. The top is named only when it, its `.git`, what a `.git` link points at
   and, for a `.git` file, the git directory that file names each belong to the
   scanned directory's owner or to the effective uid, and a scan of the top itself
-  names it only then. Where the platform has no user ids (Windows), a top above the
-  scanned directory is never named, and git's own ownership check decides. With the
-  sandbox on, a `GIT_CONFIG_*` entry in `sandbox.environment` that could add git
+  names it only then. A top the test leaves out is logged as a warning that says
+  why. git's own ownership check then decides about that checkout, and when git
+  refuses it, opengrep cannot list the files there and fails; to have the top named,
+  give it and its `.git` to the user running ASH or to the scanned directory's
+  owner. Where the platform has no user ids (Windows), a top above the scanned
+  directory is never named, and git's own ownership check decides. With the sandbox
+  on, a `GIT_CONFIG_*` entry in `sandbox.environment` that could add git
   configuration is refused for opengrep, which is then reported MISSING with the
   entry named: `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`,
   `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`, any other `GIT_CONFIG_` name, and
