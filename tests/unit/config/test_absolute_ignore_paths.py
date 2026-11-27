@@ -242,6 +242,24 @@ def test_a_link_to_the_root_is_warned_about_as_the_root_is(
 
 
 @pytest.mark.parametrize("kind", ["ignore_path", "suppression_path"])
+def test_the_root_spelled_directly_with_a_glob_is_still_warned_about(tmp_path, kind):
+    """The control for the rows above: the root's own spelling with a glob draws the
+    warning, with the advice a link to the root gets. It did before a link to the
+    root did, and the fix for the link leaves it as it was."""
+    root = tmp_path / "root"
+    root.mkdir()
+    pattern = f"{root.resolve().as_posix()}/**"
+    config = _write(root, **{kind: pattern})
+
+    (issue,) = _lint(config, root)
+    assert f"'{pattern}'" in issue.message, issue.message
+    assert "Use '**'" in issue.message, issue.message
+    valid, (warning,) = _validate(config, root)
+    assert valid, "a scan accepts the file, so validate still calls it valid"
+    assert f"'{pattern}'" in warning and "Use '**'" in warning, warning
+
+
+@pytest.mark.parametrize("kind", ["ignore_path", "suppression_path"])
 @pytest.mark.parametrize(
     "pattern",
     [
