@@ -5,12 +5,26 @@ The snyk CLI is a Node tool and is not installed here, so
 resolving a single argument -- the module measured 31% covered, with even
 ``model_post_init`` unexecuted.
 
-Two seams are patched and nothing else: ``find_executable`` (so the binary
-reads as present without installing it) and ``_run_subprocess`` (autospec, so a
-call with the wrong signature fails the test). The subprocess double writes its
-SARIF to the path it is *told* to write to, parsed out of the ``command`` it
-receives -- so a change to the ``--sarif-file-output=`` argument breaks the
-tests rather than quietly producing a scan that finds nothing.
+Two seams are patched and nothing else, apart from the third one described
+below: ``find_executable`` (so the binary reads as present without installing
+it) and ``_run_subprocess`` (autospec, so a call with the wrong signature fails
+the test). The subprocess double writes its SARIF to the path it is *told* to
+write to, parsed out of the ``command`` it receives -- so a change to the
+``--sarif-file-output=`` argument breaks the tests rather than quietly producing
+a scan that finds nothing.
+
+The tests of the directory snyk starts in (the ``snyk_run_record`` fixture) patch
+a third seam in place of ``_run_subprocess``:
+``subprocess_utils.run_command_with_output_handling``, the function the real
+``_run_subprocess`` calls. It is needed to see the real ``cwd``: with no working
+directory given, ``_run_subprocess`` falls back to the source directory, so only
+the call it makes shows where the process would start, and what that directory
+holds at that moment. The real ``_run_subprocess`` runs, and the tests rely on
+two things it does today. It looks the function up on the module at each call,
+or the patch misses and no run is recorded. It passes ``cwd`` by keyword, and
+the fixture fails the test with a message when it does not. The tests find the
+path snyk is told to test by its place before the SARIF flag, not by a position
+in the argv, so a wrapper in front of the argv does not move it.
 """
 
 import json
@@ -2213,6 +2227,21 @@ def snyk_run_record(monkeypatch):
     runs = []
 
     def run(command, *args, **kwargs):
+        # pytest.fail, not assert: _run_subprocess records an Exception raised by
+        # this call as a failed spawn, and the test would then fail on that, with
+        # none of these messages. fail() raises a BaseException, which it does not
+        # catch.
+        if "cwd" not in kwargs:
+            pytest.fail(
+                "run_command_with_output_handling was called without a cwd "
+                f"keyword (it got {sorted(kwargs)}), so the directory snyk starts "
+                "in cannot be read: _run_subprocess no longer passes it that way"
+            )
+        if kwargs["cwd"] is None:
+            pytest.fail(
+                "run_command_with_output_handling was called with cwd=None, so "
+                "the process would start in the working directory of the test run"
+            )
         command = [str(part) for part in command]
         cwd = Path(kwargs["cwd"])
         runs.append(
