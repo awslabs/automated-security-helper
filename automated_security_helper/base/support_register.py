@@ -3,13 +3,13 @@
 This module declares, as frozen and validated data, the configurations ASH runs in
 and the level of support each one has. It also holds the one evaluator that turns a
 description of a host into the rows that match it. It reads nothing from the machine
-it runs on: a host reader fills a ``HostFacts`` value and hands it in, and a generated
-support matrix hands in facts it declares itself, so a matrix cell never describes the
+it runs on: the caller passes a ``HostFacts`` value, either one filled from a machine
+or one a support matrix declares for itself, so a matrix cell never describes the
 machine that rendered it.
 
 Four levels, ordered from best to worst:
 
-- supported: ASH works here and has nothing to say about it;
+- supported: ASH works here and the register lists no limit for it;
 - polyfilled: ASH works here through a named stand-in for something the platform or
   the runtime lacks, and the stand-in can change what a user sees;
 - degraded: ASH runs here and loses a named function;
@@ -17,21 +17,21 @@ Four levels, ordered from best to worst:
   cannot stand behind.
 
 An adaptation is the platform's own implementation of a function with no loss a user
-can see. It is declared, so the matrices list it and a test binds it to its code, but
-its level stays supported and it raises no notice.
+can see. It is declared so that a matrix can list it and a test binds it to its code,
+but its level stays supported and it is never a notice.
 
 Every fact is a token from a closed vocabulary, so a row matches exactly and an
 unexpected value reads as ``other`` or ``unknown`` instead of crashing or guessing.
-A row never matches ``unknown``, so a failed read raises nothing. A token that no row
+A row never matches ``unknown``, so a failed read matches nothing. A token that no row
 and no supported set names is "not declared": the register says nothing about it and
-raises no notice for it.
+no row matches it.
 
-Every sentence here is public text. It is ASCII, names no internal host, path or
-account, and is the one source the CLI, the scan results, the docs page and the
-generated matrices all read, so they say the same words.
+Every sentence here is public text. It is ASCII and names no internal host, path or
+account. The docs page carries the same sentences, and anything that reports a
+configuration can use them, so every report says the same words.
 
-Importing this module costs the standard library and nothing else of ASH. It is used
-when a scan starts and by the support matrices, never to print a version.
+Importing this module costs the standard library and nothing else of ASH. The version
+command must not import it, and a test holds that.
 """
 
 from __future__ import annotations
@@ -90,8 +90,8 @@ class SupportRegisterError(ValueError):
 
 UNKNOWN = "unknown"
 
-#: The facts a host reader fills, in declaration order. ``os_release`` is free text
-#: that no row matches; it is recorded in a notice so a user can see what ASH read.
+#: The facts a host description holds, in declaration order. ``os_release`` is free
+#: text that no row matches; it is kept so that a report can say what ASH read.
 FIELDS: tuple[str, ...] = (
     "os",
     "host_os",
@@ -545,8 +545,8 @@ def _translated_only(available_when: Match) -> bool:
 class UpgradePath:
     """One way to a supported configuration.
 
-    ``summary`` is one public imperative sentence with no command text: the CLI spells
-    the command at run time from its own declarations, through ``command_builder``.
+    ``summary`` is one public imperative sentence with no command text: a command is
+    built where the path is offered, through ``command_builder``.
     ``target`` is what the path changes. On this machine (same-os, container, wsl) it
     is a ``Match`` of the tokens to overlay, several tokens for one fact meaning the
     validity check runs each. Elsewhere it names the host profile, or profiles, the
@@ -568,8 +568,8 @@ class UpgradePath:
         _public(self.id, "summary", self.summary)
         if "`" in self.summary or _COMMAND_WORD.search(self.summary):
             raise SupportRegisterError(
-                f"{self.id}: a path sentence holds no command text, because the CLI "
-                "builds the command from its own declarations"
+                f"{self.id}: a path sentence holds no command text, because the "
+                "command is built where the path is offered"
             )
         if not self.docs:
             object.__setattr__(self, "docs", f"{DOCS_PAGE}#{self.id}")
@@ -633,12 +633,12 @@ class SupportRow:
     """One configuration, the level of support it has and what ASH does there.
 
     ``scope`` is ``ash`` or the config name of a scanner. ``reason`` is the one public
-    sentence the CLI prints and the docs page carries; for a scanner refusal it is the
-    text ``skipped_reason`` carries. ``cell`` is the phrase a matrix shows. ``cli`` says
-    whether the CLI writes the notice straight to stderr, past ``--quiet``: ``None``
-    means the level's default (always for unsupported, a log line otherwise). A row
-    with ``results=False`` is kept out of the scan results because it changes speed and
-    no finding.
+    sentence a notice and the docs page carry; for a scanner refusal it is the text
+    ``skipped_reason`` carries. ``cell`` is the phrase a matrix shows. ``cli`` says
+    whether a notice goes straight to stderr, past ``--quiet``: ``None`` means the
+    level's default (always for unsupported, a log line otherwise). A row with
+    ``results=False`` is kept out of the scan results because it changes speed and no
+    finding.
     """
 
     id: str
@@ -765,7 +765,7 @@ class SupportRow:
 
     @property
     def cli_on_stderr(self) -> bool:
-        """True when the CLI writes this row straight to stderr, past ``--quiet``."""
+        """True when a notice for this row goes straight to stderr, past ``--quiet``."""
         if self.notify is Notify.MATRIX:
             return False
         if self.cli is not None:
@@ -1792,12 +1792,11 @@ _PROFILES: tuple[Profile, ...] = (
 # The tokens the register says nothing about
 # ---------------------------------------------------------------------------
 
-#: A token no row covers and no supported set names. The matrices render it "not
-#: declared", the runtime raises no notice for it, and each entry says why.
+#: A token no row covers and no supported set names. A matrix renders it "not
+#: declared", no row matches it, and each entry says why.
 NOT_DECLARED: dict[tuple[str, str], str] = {
     ("libc", "musl"): (
-        "ASH does not declare support for Linux with musl libc, such as Alpine, and "
-        "raises no notice there."
+        "ASH does not declare support for Linux with musl libc, such as Alpine."
     ),
     ("wsl", "wsl1"): "ASH documents WSL 2 only and declares nothing about WSL 1.",
     ("python_build", "free-threaded"): (
@@ -1809,8 +1808,7 @@ NOT_DECLARED: dict[tuple[str, str], str] = {
         "ASH declares nothing about Python implementations other than CPython."
     ),
     ("polars_runtime", "absent"): (
-        "ASH needs a polars runtime to start, so no run reaches the register without "
-        "one."
+        "Installing ASH installs a polars runtime, and ASH cannot scan without one."
     ),
 }
 

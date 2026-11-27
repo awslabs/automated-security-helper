@@ -2,28 +2,28 @@
 
 ASH is built and tested for Linux, macOS and Windows, on x86-64 and arm64 processors, in
 several modes. Not every combination gets the same support. This page lists each
-configuration ASH has something to say about: how well it works there, what ASH does, and
+configuration that has a limit or a stand-in: how well ASH works there, what ASH does, and
 what you can change to reach a supported configuration. A configuration this page does not
-list is supported, except the few that ASH [declares nothing about](#not-declared).
+list is declared supported, except the few that ASH [declares nothing about](#not-declared).
 
-The sentences on this page are the ones ASH itself uses for these configurations, so the
-words you read here are the words ASH uses elsewhere.
+Each configuration below has one sentence that describes it. ASH declares the same
+sentence in its code, so this page and the code say the same words.
 
 ## The four levels {#levels}
 
 Every configuration has one of four levels, from best to worst:
 
-- supported: ASH works here and has nothing to say about it.
+- supported: ASH works here, and this page lists no limit for it.
 - polyfilled: ASH works here through a named stand-in for something the platform or the
   runtime lacks. The stand-in can change what you see, such as speed, an interpreter or a
-  refusal of some inputs, so ASH names it.
+  refusal of some inputs, so this page names it.
 - degraded: ASH runs here and loses a named function. The sentence for the configuration
   says what is lost.
 - unsupported: ASH refuses, skips the part that cannot work, or runs with results it
   cannot stand behind.
 
-A run that matches several configurations has the level of the worst one. The level says
-what ASH declares, and it is separate from what ASH's own CI tests: the
+A machine that matches several configurations has the level of the worst one. The level
+says what ASH declares, and it is separate from what ASH's own CI tests: the
 [install page](install.md) lists the platforms CI covers, and Intel Macs and Windows on
 arm64 are supported without being tested.
 
@@ -41,26 +41,24 @@ polars' default runtime is built for.
 
 ## What ASH says nothing about {#not-declared}
 
-ASH leaves a few things undeclared. It raises no notice for them, and it does not call
-them unsupported:
+ASH declares nothing about a few things. This page does not call them supported, and it
+does not call them unsupported:
 
-- musl Linux: ASH does not declare support for Linux with musl libc, such as Alpine, and
-  raises no notice there.
+- musl Linux: ASH does not declare support for Linux with musl libc, such as Alpine.
 - WSL 1: ASH documents WSL 2 only and declares nothing about WSL 1.
 - Free-threaded CPython: The free-threaded CPython build cannot use the stable ABI wheels
   polars' runtime ships, so installing ASH there means building polars from source, and
   ASH declares nothing about it.
 - Other Python implementations: ASH declares nothing about Python implementations other
   than CPython.
-- No polars runtime: ASH needs a polars runtime to start, so no run reaches the register
+- No polars runtime: Installing ASH installs a polars runtime, and ASH cannot scan
   without one.
 
 ## Adaptations {#adaptations}
 
 An adaptation is the platform's own implementation of a function, with no loss you can
-see. It does not change the level of a configuration and it raises no notice. These are
-listed so that the support matrices and this page agree on what ASH does differently on
-each platform:
+see. It does not change the level of a configuration. These are listed so that you can
+see what ASH does differently on each platform:
 
 - Windows executable lookup: On Windows the file that carries a tool's name is often not
   one Windows can run, so ASH looks for the .exe, .bat and .cmd wrappers that package
@@ -86,21 +84,15 @@ each platform:
 - Linux fork start: Linux starts worker processes with fork, so a worker begins with ASH's
   modules loaded; macOS and Windows start a fresh interpreter instead.
 
-## How a configuration is reported {#notices}
+## How each configuration is described {#described}
 
-Each configuration below is declared with the moment it applies. Most apply when a run
-starts, because ASH can read the facts then: the operating system, the processor, the
-Python, the mode and the wrapper. Others apply where ASH makes the decision the row is
-about, because the facts are known only there: whether a sandbox backend works, whether
-the image matches the machine, whether ignore paths are set and whether a scanner's own
-sandbox is available. A few documented limits are never raised as a notice, because ASH
-cannot see them in a run. They are listed on this page and in the support matrices only.
-
-An unsupported configuration is always shown, once per run, with the ways out that apply
-to the machine. A degraded configuration is shown as a warning, and straight on the
-console when you asked for the function that is lost. A polyfilled configuration is shown
-as one informational line that names the stand-ins in use. Every notice links to the
-section of this page that explains it.
+Each configuration below has a level, one sentence that describes it, what ASH does
+there, and the ways out. Most of them depend on facts that are known before a scan
+starts: the operating system, the processor, the Python, the mode and the wrapper. Others
+depend on facts that are known only where ASH makes the decision the configuration is
+about: whether a sandbox backend works, whether the image matches the machine, whether
+ignore paths are set and whether a scanner's own sandbox is available. A few limits are
+documented only: ASH cannot see them in a run, so this page is where they are listed.
 
 The ways out are split into two groups: on this machine, and elsewhere, which means
 another machine or another operating system. A way out is listed only where it can apply:
@@ -113,7 +105,7 @@ WSL 2 is offered from Windows only.
 This x86-64 processor lacks instructions the installed polars runtime is built for, and
 polars warns that running on it will likely crash.
 
-Level: unsupported. ASH carries on after the notice. The container image is not a way out:
+Level: unsupported. ASH carries on. The container image is not a way out:
 it runs on this machine's processor and carries the same default polars runtime. Ways out:
 [add polars' compatibility runtime](#polars-compat-runtime) where the processor has the
 compatibility runtime's instruction set, [use an arm64 build of Python](#native-arm64) when
@@ -125,7 +117,7 @@ the run is translated, [use another processor](#x86-host-with-features),
 This x86-64 processor lacks instructions even polars' compatibility runtime is built for,
 and polars warns that running on it will likely crash.
 
-Level: unsupported. ASH carries on after the notice. The compatibility runtime is already
+Level: unsupported. ASH carries on. The compatibility runtime is already
 installed here, so it cannot help. Ways out: [use an arm64 build of Python](#native-arm64)
 when the run is translated, [use another processor](#x86-host-with-features),
 [use an arm64 machine](#arm64-host) or [scan in CI](#ci-runner).
@@ -159,7 +151,7 @@ Level: degraded. ASH carries on. Ways out: [use an arm64 build of Python](#nativ
 ASH is built and tested for Linux, macOS and Windows, and this operating system is none of
 them.
 
-Level: unsupported. ASH carries on after the notice. Ways out:
+Level: unsupported. ASH carries on. Ways out:
 [use Linux or macOS](#linux-or-macos-host) or [scan in CI](#ci-runner).
 
 ### A processor that is neither x86-64 nor arm64 {#host-arch-other}
@@ -167,7 +159,7 @@ Level: unsupported. ASH carries on after the notice. Ways out:
 ASH runs on 64-bit x86 and arm64 processors, and polars, which ASH needs, publishes no
 build for this one.
 
-Level: unsupported. ASH carries on after the notice. Ways out:
+Level: unsupported. ASH carries on. Ways out:
 [use an x86-64 processor](#x86-host-with-features), [use an arm64 machine](#arm64-host) or
 [scan in CI](#ci-runner).
 
@@ -175,9 +167,9 @@ Level: unsupported. ASH carries on after the notice. Ways out:
 
 This Python version is outside the range ASH declares.
 
-Level: unsupported. The installers refuse to install ASH on such a Python, and ASH does not
-check the version again when it starts, so a scan on one carries on after the notice. Ways
-out: [use a supported Python](#supported-python), [scan in the container image](#container-image)
+Level: unsupported. The installers refuse to install ASH on such a Python, and ASH itself
+does not refuse to run on one, so a scan on one carries on. Ways out:
+[use a supported Python](#supported-python), [scan in the container image](#container-image)
 or [scan in CI](#ci-runner). The [install page](install.md) states the range.
 
 ### Nix mode on Windows {#host-mode-nix-on-windows}
@@ -193,8 +185,8 @@ Level: unsupported. ASH stops here. Ways out: [use WSL 2](#wsl2),
 The per-scanner sandbox is not applied in container mode, so the container is the only
 boundary around the scanners.
 
-Level: degraded. ASH carries on, and it tells you because you asked for a sandbox. Ways
-out: [scan in local mode with a sandbox](#mode-local-sandboxed) or, from Windows,
+Level: degraded. ASH carries on. Ways out:
+[scan in local mode with a sandbox](#mode-local-sandboxed) or, from Windows,
 [use WSL 2 with the sandbox](#wsl2-sandboxed). The scanner sandbox section of
 [Run ASH in a container](run-in-a-container.md#sandbox) describes the sandbox.
 
@@ -225,7 +217,7 @@ Ways out: [install bubblewrap](#install-bubblewrap) on Linux,
 Abstract Unix sockets and signals to processes outside the sandbox are not restricted,
 because the kernel's Landlock ABI is below 6.
 
-Level: degraded. ASH carries on and logs a warning. Ways out:
+Level: degraded. ASH carries on. Ways out:
 [use a kernel with Landlock ABI 6](#newer-kernel-landlock) or
 [install bubblewrap](#install-bubblewrap).
 
@@ -234,7 +226,7 @@ Level: degraded. ASH carries on and logs a warning. Ways out:
 Scanner caches are mounted read-only, and a tool that must write its cache gets an empty
 private one.
 
-Level: degraded. ASH carries on and logs a warning. Way out:
+Level: degraded. ASH carries on. Way out:
 [use a newer bubblewrap](#newer-bubblewrap).
 
 ### Express mode is unavailable {#host-express-unavailable}
@@ -250,7 +242,7 @@ Ways out: [use WSL 2](#wsl2) or [use Linux or macOS](#linux-or-macos-host). The
 A timed-out or cancelled scanner is ended at once with its process tree, with no graceful
 stop, and Ctrl-C does not stop a scan cooperatively.
 
-Level: degraded, and listed in the support matrices and here only. Ways out:
+Level: degraded, a documented limit. Ways out:
 [use WSL 2](#wsl2), [scan in the container image](#container-image) or
 [use Linux or macOS](#linux-or-macos-host). In container mode the scanners run in Linux, so
 this limit does not apply there.
@@ -260,14 +252,14 @@ this limit does not apply there.
 Scanner databases have no cross-process lock on Windows, so two scans at once can race on
 one.
 
-Level: degraded, and listed in the support matrices and here only. Ways out:
+Level: degraded, a documented limit. Ways out:
 [use WSL 2](#wsl2) or [scan in the container image](#container-image).
 
 ### Containers left behind on Windows {#host-windows-container-leftovers}
 
 Containers a cancelled scan leaves behind are not recorded or swept.
 
-Level: degraded, and listed in the support matrices and here only. This is the limit that
+Level: degraded, a documented limit. This is the limit that
 container mode on a Windows host trades for the missing graceful stop. Way out:
 [use WSL 2](#wsl2).
 
@@ -297,8 +289,8 @@ turned off for ASH's arguments. Ways out: [run the wrapper from PowerShell 7](#p
 The image's architecture differs from this machine's, so the engine runs it under
 emulation, which is slow.
 
-Level: degraded. ASH carries on, and it tells you because the emulation is otherwise
-unseen. Way out: [use an image for this machine's architecture](#native-image).
+Level: degraded. ASH carries on. Way out:
+[use an image for this machine's architecture](#native-image).
 
 ### Semgrep on Windows {#scanner-semgrep-windows}
 
@@ -329,9 +321,8 @@ confines the scan instead.
 
 GuardDog runs without its own kernel sandbox, because the kernel offers none here.
 
-Level: degraded. ASH carries on, and it tells you because the scan is not confined by
-GuardDog. When the scanner's options require the sandbox, the scan of that target fails
-instead. Way out: [enable Landlock](#enable-landlock).
+Level: degraded. ASH carries on. When the scanner's options require the sandbox, the scan
+of that target fails instead. Way out: [enable Landlock](#enable-landlock).
 
 ### Betterleaks with a private home directory {#scanner-betterleaks-private-home}
 
@@ -363,23 +354,23 @@ pre-commit modes. Ways out: [use WSL 2](#wsl2) or
 
 Copies of the scan input that a run leaves behind are not swept on Windows.
 
-Level: degraded, and listed in the support matrices and here only. This applies to the Snyk
+Level: degraded, a documented limit. This applies to the Snyk
 Code scanner. Ways out: [use WSL 2](#wsl2) or [scan in the container image](#container-image).
 
 ### A scanner tool with no build for this platform {#scanner-no-build}
 
-ASH downloads some scanner tools at a pinned version. When a tool has no build for the
-platform ASH runs on, the notice names the tool, its version and the platform, and the
-scanner is reported as missing. Several tools have no build for Windows on arm64, for
-example. A copy of the tool that you put on the path, and that runs, raises nothing. Ways
-out: [use WSL 2](#wsl2),
+ASH downloads some scanner tools at a pinned version. For each platform where a tool has
+no build, ASH declares one sentence: ASH has no build of that tool, at that version, for
+that platform. The scanner is reported as missing there. Several tools have no build for
+Windows on arm64, for example. The declaration is about a missing tool, so a copy of the
+tool that you put on the path, and that runs, is outside it. Ways out: [use WSL 2](#wsl2),
 [scan in the container image](#container-image) or [use Linux or macOS](#linux-or-macos-host).
 The [scanner reference](../reference/scanners.md) lists the scanners.
 
 ## Ways to a supported configuration {#ways-out}
 
-Each way out has the sentence ASH uses for it. The commands live in the guides this page
-links to, because ASH builds the command for your machine when it reports a configuration.
+Each way out has one sentence. The commands live in the guides this page links to, so the
+sentences here hold no command.
 
 ### Add polars' compatibility runtime {#polars-compat-runtime}
 
