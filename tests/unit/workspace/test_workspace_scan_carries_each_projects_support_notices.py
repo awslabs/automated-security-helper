@@ -8,7 +8,8 @@ results to the aggregator. ``WorkspaceAggregator.write`` records the notices it 
 united by id (tests/unit/workspace/test_workspace_root_unions_support_notices.py pins
 that). This file pins the other half: ``execute_workspace`` gives it what each project's
 scan recorded, in workspace-file order, so a notice that only the second project met is
-not lost.
+not lost. When two projects met one notice and read it differently, the record holds
+what both read and the warning names the projects by their names in the workspace.
 
 The control is the same workspace with no notice in any project, which writes no key.
 """
@@ -28,11 +29,14 @@ from automated_security_helper.models.asharp_model import (
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.workspace.execution import execute_workspace
 from tests.unit.models._support_notice_helpers import (
+    AGREED_CPU_FACTS,
     CPU_ID,
     POLYFILL_ID,
     SANDBOX_ID,
     cpu_notice,
+    cpu_notice_of_two_hosts,
     polyfill_notice,
+    said_about,
     sandbox_notice,
 )
 from tests.unit.workspace.test_execution import _make_workspace, _sarif, _settings
@@ -107,6 +111,30 @@ class TestTheWorkspaceResultsCarryEveryProjectsNotices:
         )
 
         assert model.metadata.support_notices == [cpu_notice()]
+
+
+class TestAWorkspaceNamesTheProjectsThatReadANoticeDifferently:
+    def test_the_log_names_the_projects_and_the_file_holds_what_both_read(
+        self, tmp_path, capture
+    ):
+        near, far = cpu_notice_of_two_hosts()
+
+        result = _workspace(tmp_path, {"api": [near], "web": [far]})
+
+        said = said_about(capture, CPU_ID)
+        assert len(said) == 1, said
+        assert "api and web" in said[0]
+        document = json.loads(result.results_path.read_text("utf-8"))
+        record = document["metadata"]["support_notices"][0]
+        assert record.get("found") is None, record
+        assert record["facts"] == AGREED_CPU_FACTS, record
+
+    def test_control_projects_that_met_a_notice_alike_say_nothing_of_it(
+        self, tmp_path, capture
+    ):
+        _workspace(tmp_path, {"api": [cpu_notice()], "web": [cpu_notice()]})
+
+        assert said_about(capture, CPU_ID) == []
 
 
 class TestAWorkspaceWhoseProjectsRecordNoNoticeWritesNoKey:

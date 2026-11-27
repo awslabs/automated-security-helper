@@ -16,9 +16,11 @@ what it holds of what the projects read is what every one of them read: the fact
 recorded alike, and the ``found`` text when they recorded the same. Two projects that
 meet one row can read different things of it (the processor flags that are missing, the
 level the processor is at), and the first project's record alone would publish its read
-as the workspace's. The writer writes no key when no project recorded one, so the
-results of a workspace on a fully supported configuration are written as they were
-before the field existed.
+as the workspace's. The writer says so when it leaves something out: one warning for
+each notice the projects did not read alike, naming the notice, the projects that
+recorded it and what the record leaves out. The writer writes no key when no project
+recorded one, so the results of a workspace on a fully supported configuration are
+written as they were before the field existed.
 
 The controls are the same file with no notice in any project, a project that holds
 none beside one that does, and projects that met a notice alike.
@@ -40,6 +42,7 @@ from tests.unit.models._support_notice_helpers import (
     cpu_notice,
     cpu_notice_of_two_hosts,
     polyfill_notice,
+    said_about,
     sandbox_notice,
 )
 
@@ -103,6 +106,21 @@ class TestEveryProjectsNoticesAreRecorded:
         assert model.metadata.support_notices[0].found is None
         assert model.metadata.support_notices[0].facts == AGREED_CPU_FACTS
 
+    def test_a_notice_two_projects_met_differently_is_named_in_the_log(
+        self, tmp_path, capture
+    ):
+        near, far = cpu_notice_of_two_hosts()
+
+        _written(tmp_path, [[near], [far]])
+
+        said = said_about(capture, CPU_ID)
+        assert len(said) == 1, said
+        # No project was added to this aggregator, so they are named by their place in
+        # the list, in workspace-file order.
+        assert "project 1 and project 2" in said[0]
+        assert "found" in said[0]
+        assert "facts.cpu_level" in said[0]
+
     def test_control_projects_that_met_a_notice_alike_record_it_whole(self, tmp_path):
         near, _ = cpu_notice_of_two_hosts()
 
@@ -111,6 +129,15 @@ class TestEveryProjectsNoticesAreRecorded:
         written = document["metadata"]["support_notices"]
         assert written == [near.model_dump(mode="json")]
         assert model.metadata.support_notices == [near]
+
+    def test_control_projects_that_met_a_notice_alike_say_nothing_of_it(
+        self, tmp_path, capture
+    ):
+        near, _ = cpu_notice_of_two_hosts()
+
+        _written(tmp_path, [[near], [near.model_copy(deep=True)]])
+
+        assert said_about(capture, CPU_ID) == []
 
     def test_the_order_is_the_workspace_file_order_of_the_projects(self, tmp_path):
         document, _ = _written(

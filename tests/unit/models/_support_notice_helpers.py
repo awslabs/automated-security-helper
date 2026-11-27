@@ -183,6 +183,19 @@ def polyfill_notice(**changes: Any) -> SupportNotice:
     return SupportNotice(**fields)
 
 
+def said_about(capture, notice_id: str) -> list[str]:
+    """The warnings of ``capture`` that name ``notice_id``, one string each.
+
+    For the outputs that combine runs and say other things too: it is what they said
+    of one notice when its runs did not read it alike.
+    """
+    return [
+        record.getMessage()
+        for record in capture.records
+        if notice_id in record.getMessage()
+    ]
+
+
 def notice_of_row(row: Any) -> SupportNotice:
     """The notice a writer builds from a support register row, as the row declares it.
 
