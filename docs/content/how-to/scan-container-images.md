@@ -311,11 +311,11 @@ integration tests run the real trivy and syft over it for layer digests and igno
 and the digest ladder against a real unix-socket daemon.
 
 One CI job (`ash-image-scan-live-engine.yml`) covers the live engine and registry. It
-builds a small image, pushes it to a local registry container (both base and registry
-images pinned by digest from the public.ecr.aws gallery), scans it by tag, and requires
-the report's scope to key on the digest the registry holds: once while the engine holds
-the image (the engine rung) and once after the image is removed from the engine (the
-registry rung).
+builds a small image `FROM scratch`, pushes it to a local registry that the pinned
+`crane` serves (`crane registry serve`), scans it by tag, and requires the report's
+scope to key on the digest the registry holds: once while the engine holds the image
+(the engine rung) and once after the image is removed from the engine (the registry
+rung). No step pulls an image from a public registry.
 
 ## Limits that remain
 
