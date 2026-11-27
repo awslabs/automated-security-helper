@@ -1291,7 +1291,9 @@ def test_a_patched_section_name_under_the_retired_name_writes_nothing(
     "value, drop_lines",
     [
         pytest.param(None, 0, id="null"),
+        pytest.param({}, 0, id="empty"),
         pytest.param({"name": "oldname"}, 0, id="only-the-name"),
+        pytest.param({"options": {}}, 0, id="only-empty-options"),
         pytest.param(
             {"options": {"retired_only_knob": 1}}, 1, id="only-an-undeclared-option"
         ),
@@ -1302,12 +1304,12 @@ def test_a_patched_section_under_the_retired_name_that_the_fold_empties_writes_n
 ):
     """The file writes enabled: false and confidence_level: high under
     oldname, and its patch adds or replaces the whole section under oldname
-    with a value that holds nothing the fold keeps: null, only the name, or
-    only an option bandit does not declare. The fold lays nothing of such a
-    value, so the operation writes nothing: bandit keeps enabled false and
-    confidence_level high, and only a dropped option is warned of. Written
-    emptied, the value replaced bandit's section, so bandit ran with its
-    default options."""
+    with a value that holds nothing the fold keeps: null, an empty section,
+    only the name, empty options, or only an option bandit does not declare.
+    The fold lays nothing of such a value, so the operation writes nothing:
+    bandit keeps enabled false and confidence_level high, and only a dropped
+    option is warned of. Written as it stood or emptied, the value replaced
+    bandit's section, so bandit ran enabled with its default options."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = _write(
         tmp_path / "patched.yaml",
@@ -1331,23 +1333,27 @@ def test_a_patched_section_under_the_retired_name_that_the_fold_empties_writes_n
 
 
 @pytest.mark.parametrize("op", ["add", "replace"])
+@pytest.mark.parametrize(
+    "value, drop_lines",
+    [
+        pytest.param({"retired_only_knob": 1}, 1, id="only-an-undeclared-option"),
+        pytest.param({}, 0, id="empty"),
+    ],
+)
 def test_patched_options_under_the_retired_name_that_the_fold_empties_write_nothing(
-    retired_oldname, tmp_path, monkeypatch, caplog, op
+    retired_oldname, tmp_path, monkeypatch, caplog, op, value, drop_lines
 ):
     """The patch adds or replaces oldname's options with only
-    retired_only_knob, an option bandit does not declare. The fold lays
-    nothing of such a value, so the operation writes nothing: bandit keeps
-    the file's confidence_level, and one warning names the drop. Written
-    emptied, the value replaced bandit's options."""
+    retired_only_knob, an option bandit does not declare, or with no option
+    at all. The fold lays nothing of such a value, so the operation writes
+    nothing: bandit keeps the file's confidence_level, and only a dropped
+    option is warned of. Written as it stood or emptied, the value replaced
+    bandit's options."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     path = _patched_file(
         tmp_path,
         "oldname",
-        {
-            "op": op,
-            "path": "/scanners/oldname/options",
-            "value": {"retired_only_knob": 1},
-        },
+        {"op": op, "path": "/scanners/oldname/options", "value": value},
     )
 
     document, lines, config = _loaded(path, caplog)
@@ -1355,7 +1361,43 @@ def test_patched_options_under_the_retired_name_that_the_fold_empties_write_noth
     options = document.data["scanners"]["bandit"]["options"]
     assert options == {"confidence_level": "high"}, options
     assert config.scanners.bandit.options.confidence_level == "high"
-    assert len(lines) == 1 and "dropped" in lines[0], lines
+    assert len(lines) == drop_lines, lines
+    assert all("dropped" in line for line in lines), lines
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+@pytest.mark.parametrize(
+    "pointer, expected",
+    [
+        pytest.param("/scanners/bandit", {}, id="the-section"),
+        pytest.param(
+            "/scanners/bandit/options",
+            {"enabled": False, "options": {}},
+            id="its-options",
+        ),
+    ],
+)
+def test_an_empty_patched_value_under_the_current_name_still_replaces(
+    retired_oldname, tmp_path, monkeypatch, caplog, op, pointer, expected
+):
+    """The control: under bandit no pointer is redirected and no fold rule
+    applies, so an empty value replaces bandit's section or its options, as
+    any add or replace does, and nothing is warned of."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _write(
+        tmp_path / "patched.yaml",
+        {
+            "scanners": {
+                "bandit": {"enabled": False, "options": {"confidence_level": "high"}}
+            },
+            "patch": [{"op": op, "path": pointer, "value": {}}],
+        },
+    )
+
+    document, lines, _ = _loaded(path, caplog)
+
+    assert document.data["scanners"]["bandit"] == expected, document.data
+    assert lines == [], lines
 
 
 def test_a_patched_section_under_the_retired_name_that_is_not_a_mapping_writes_nothing(
@@ -1618,6 +1660,75 @@ def test_an_undeclared_option_key_a_patch_reads_under_the_retired_name_leaves_no
         if reference.key and reference.resolved == "retired_only_knob"
     ]
     assert stray == [], stray
+
+
+def test_an_options_key_a_patch_reads_under_the_retired_name_goes_with_emptied_options(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The patch adds the whole section with enabled: true and an options key
+    read from the environment, ${KEY}, which reads options. Under the retired
+    name, where the options hold only retired_only_knob, an option bandit does
+    not declare, the fold's rule leaves the emptied options out of the value
+    the operation writes, and with them the key read from the environment, in
+    the configuration and in the copy the references are followed through:
+    the load records no reference for an options key bandit's section does
+    not hold. With a declared option the options and their key stay, and the
+    load records the key's reference as it does under bandit, the canonical
+    control."""
+    from automated_security_helper.config.ash_config import (
+        config_env_var_is_interpolatable,
+    )
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    # The premise: a config file may read the variable.
+    assert config_env_var_is_interpolatable(_FOLD_KEY_VAR)
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_KEY_VAR, "options")
+
+    def loaded(name, section, option):
+        folder = tmp_path / name
+        folder.mkdir()
+        path = folder / "patched.yaml"
+        path.write_text(
+            "scanners:\n  oldname:\n    enabled: false\n"
+            "patch:\n"
+            "  - op: add\n"
+            f"    path: /scanners/{section}\n"
+            "    value:\n"
+            "      enabled: true\n"
+            f"      ${{{_FOLD_KEY_VAR}}}:\n"
+            f"        {option}\n",
+            encoding="utf-8",
+        )
+        _, config = load_config_file_for_run(path)
+        return config
+
+    def options_key_references(config):
+        return sorted(
+            (tuple(map(str, reference.path)), reference.resolved)
+            for reference in (
+                *config._environment_references,
+                *config._displayed_environment_references,
+            )
+            if reference.key and reference.resolved == "options"
+        )
+
+    emptied = loaded("emptied", "oldname", "retired_only_knob: 1")
+    kept = loaded("kept", "oldname", "confidence_level: low")
+    canonical = loaded("canonical", "bandit", "confidence_level: low")
+
+    assert emptied.scanners.bandit.enabled is True
+    assert not hasattr(emptied.scanners.bandit.options, "retired_only_knob")
+    assert options_key_references(emptied) == [], options_key_references(emptied)
+    assert kept.scanners.bandit.options.confidence_level == "low"
+    assert options_key_references(canonical), options_key_references(canonical)
+    assert options_key_references(kept) == options_key_references(canonical), (
+        options_key_references(kept),
+        options_key_references(canonical),
+    )
 
 
 # A value read from the environment in a section a ``patch`` adds under the

@@ -100,10 +100,11 @@ document does not hold. An ``add`` or ``replace`` such a pointer carries to
 the serving plugin's section writes only what the fold keeps of its value:
 the section's ``name`` is dropped from it, and so is an option the serving
 plugin does not declare, with a warning that counts the options and names
-none. A value that held nothing else, a null section, a write of the
-``name`` and an ``add`` of such an option write nothing; a ``replace``,
-``remove`` or ``test`` of such an option is refused as above
-(``_through_the_retired_fold``).
+none. A value the fold lays nothing of writes nothing: a null or empty
+section, a section that is not a mapping, an empty ``options`` mapping, a
+value that held nothing else, a write of the ``name`` and an ``add`` of
+such an option. A ``replace``, ``remove`` or ``test`` of such an option is
+refused as above (``_through_the_retired_fold``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
@@ -3934,27 +3935,33 @@ def _through_the_retired_fold(
     mapping. A pointer in the retired spelling lands on the serving plugin's
     section once a file of the chain wrote it under that name, so the value
     an operation carries there would skip that fold. It is held to the same
-    rules instead: a section value loses its ``name`` and its undeclared
-    options, and an ``options`` value loses its undeclared keys. A value the
-    fold would lay nothing of writes nothing: a null section, a section that
-    is not a mapping, a section or ``options`` value that held only what the
-    fold drops (the emptied value, written, would reset what the serving
+    drop rules instead: a section value loses its ``name`` and its
+    undeclared options, and an ``options`` value loses its undeclared keys.
+    What is left then replaces what the pointer names, as any ``add`` or
+    ``replace`` does; only the drops are the fold's, which lays a section
+    over the serving one key by key. A value the fold would lay nothing of
+    writes nothing: a null or empty section, a section that is not a
+    mapping, a section or ``options`` value that held only what the fold
+    drops or nothing at all (written, it would reset what the serving
     section holds), a write of the section's ``name``, and an ``add`` of an
-    option the serving plugin does not declare. An options mapping the
-    filter empties inside a section value is left out of it. The option an
-    ``add`` names is judged as the pointer lands, so an ``add`` the pointer
-    respells onto an option the section holds (a ``-``/``_`` twin) writes
-    that option. A ``remove``,
-    ``replace`` or ``test`` of such an option is left as it is: the fold
-    dropped the option as its file was read, so the operation finds nothing
-    there, and its refusal says why (_dropped_option_clause).
+    option the serving plugin does not declare. An options mapping left
+    empty is left out of a section value, with any key that stands for it.
+    The option an ``add`` names is judged as the pointer lands, so an
+    ``add`` the pointer respells onto a declared option the section holds (a
+    ``-``/``_`` twin) writes that option; _patch_step judges it where the
+    files as written land it. A ``remove``, ``replace`` or ``test`` of an
+    undeclared option is left as it is: the fold dropped the option as its
+    file was read, or an earlier operation's value lost it here, so the
+    operation finds nothing there, and its refusal says why
+    (_dropped_option_clause).
 
     ``folds``, when given (the loader's record of the chain's folds),
     receives the options dropped here under the serving plugin's key, as the
-    fold records its own, and ``log`` prints a warning of its own. It names
-    the serving plugin, a name from the alias table, and how many options
-    were dropped, never a key a file wrote; a dropped ``name`` is not
-    logged, as the fold logs none. ``key_of`` maps a
+    fold records its own, and ``log`` prints this function's two warnings:
+    one that names the serving plugin, a name from the alias table, and
+    counts the options dropped, never a key a file wrote, and one that names
+    the serving plugin for a section value that is not a mapping. A dropped
+    ``name`` is not logged, as the fold logs none. ``key_of`` maps a
     mapping key to the key it stands for: the reference replay
     (_placed_through_patch) passes its key tokens' keys, so a token beside a
     kept key is kept with it and a token beside a dropped key goes with it.
@@ -4034,15 +4041,19 @@ def _through_the_retired_fold(
             return None
         section = {key: item for key, item in value.items() if name(key) != "name"}
         options = section.get("options")
-        if isinstance(options, dict) and options:
+        if isinstance(options, dict):
             options = kept(options)
             if options:
                 section["options"] = options
             else:
-                del section["options"]
-        if value and not section:
-            # Nothing but what the fold drops: the operation writes nothing,
-            # where the emptied value would reset the serving section.
+                # Options the fold lays nothing of go, and so does a key that
+                # stands for the options key (the reference replay's token
+                # beside an options key read from the environment).
+                for key in [key for key in section if name(key) == "options"]:
+                    del section[key]
+        if not section:
+            # Nothing the fold lays, an empty value included: the operation
+            # writes nothing, where the value would reset the serving section.
             return None
         return dict(normalized, value=section)
     if rest[0] == "name":
@@ -4050,9 +4061,10 @@ def _through_the_retired_fold(
     if rest[0] != "options":
         return normalized
     if len(rest) == 1:
-        if isinstance(value, dict) and value:
+        if isinstance(value, dict):
             value = kept(value)
             if not value:
+                # Nothing the fold lays, an empty mapping included.
                 return None
         return dict(normalized, value=value)
     if normalized["op"] == "add" and declared is not None and rest[1] not in declared:
