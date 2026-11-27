@@ -385,10 +385,6 @@ _CONTAINER_ENV_DIR = (
     "a new mode 0700 mkdtemp directory outside the source and output directories "
     "(the function refuses one inside either), the file created with O_EXCL at 0600"
 )
-_ASH_LOCK = (
-    "the repository's own .ash.lock, written by `ash suppress`: a staging file "
-    "beside it, renamed over it in one step"
-)
 _MCP_SESSION_WORKSPACE = (
     "the MCP server's workspace root: a session's workspace directory, renamed to a "
     "hidden sibling under the registry lock before it is removed; the rename moves "
@@ -398,8 +394,6 @@ _MCP_SESSION_WORKSPACE = (
 #: (module, function, kind) -> (number of such calls, where they write). Each writes
 #: outside every output directory, or is the guarded implementation itself.
 WRITES_OUTSIDE_THE_OUTPUT_DIRECTORY: Dict[Site, Tuple[int, str]] = {
-    (f"{_ASH}/utils/ash_lock.py", "AshLock.save", "write_text"): (1, _ASH_LOCK),
-    (f"{_ASH}/utils/ash_lock.py", "AshLock.save", "os.replace"): (1, _ASH_LOCK),
     # Of the two Path.open calls in `download`, this one writes: the file
     # `target.open("wb")` creates. The other is in NOT_WRITES.
     (_INSTALLER, "download", "Path.open"): (1, _INSTALLS),

@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shlex
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -239,16 +238,22 @@ class AshLock:
         return json.dumps(document, indent=2, sort_keys=True) + "\n"
 
     def save(self) -> None:
-        """Write the lock through a staged file that replaces it in one step."""
+        """Write the lock through the atomic writer other config files use.
+
+        The staging file has a random name, is created exclusively and without
+        following a link, and is renamed over the lock in one step; a failed
+        write leaves the lock as it was.
+        """
+        # Not at the top: fs_guard imports the sandbox package.
+        from automated_security_helper.utils.sandbox.fs_guard import (
+            open_for_atomic_write,
+        )
+
         path = self.path
         path.parent.mkdir(parents=True, exist_ok=True)
-        staged = path.with_name(path.name + f".{os.getpid()}.tmp")
-        try:
-            staged.write_text(self.to_text(), encoding="utf-8", newline="\n")
-            os.replace(staged, path)
-        finally:
-            if staged.exists():
-                staged.unlink()
+        # newline="": the text reaches the file as given, "\n" on every platform.
+        with open_for_atomic_write(path, encoding="utf-8", newline="") as handle:
+            handle.write(self.to_text())
 
     def bind(
         self,

@@ -471,6 +471,77 @@ class TestLockFile:
             lock.bind("src/app.py", LockScope("B602", "other"))
 
 
+def _plant_link(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symbolic links are not available here")
+
+
+class TestSaveIsStagedSafely:
+    """``save`` writes through the atomic config writer: a link is never followed."""
+
+    def test_a_normal_save_writes_the_lock_bytes(self, tmp_path):
+        root = _tree(tmp_path)
+        lock = _lock(root, LockScope("B602", "risky"))
+        written = (root / LOCK_RELATIVE_PATH).read_bytes()
+        assert written == lock.to_text().encode("utf-8")
+        assert written.endswith(b"}\n") and b"\r" not in written
+        assert AshLock.load(root).entries.keys() == {"src/app.py"}
+
+    def test_a_save_leaves_no_staging_file_beside_the_lock(self, tmp_path):
+        root = _tree(tmp_path)
+        _lock(root, LockScope("B602", "risky"))
+        assert sorted(p.name for p in root.iterdir()) == sorted(
+            [LOCK_RELATIVE_PATH, "src"]
+        )
+
+    def test_a_link_at_the_old_staging_name_is_not_followed(self, tmp_path):
+        root = _tree(tmp_path)
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"keep me\n")
+        # The name the save used to stage through: the lock's name, the pid, .tmp.
+        _plant_link(root / f"{LOCK_RELATIVE_PATH}.{os.getpid()}.tmp", victim)
+
+        lock = _lock(root, LockScope("B602", "risky"))
+
+        assert victim.read_bytes() == b"keep me\n"
+        assert (root / LOCK_RELATIVE_PATH).read_bytes() == lock.to_text().encode(
+            "utf-8"
+        )
+
+    def test_a_link_at_the_lock_name_is_replaced_not_written_through(self, tmp_path):
+        root = _tree(tmp_path)
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"keep me\n")
+        _plant_link(root / LOCK_RELATIVE_PATH, victim)
+
+        lock = _lock(root, LockScope("B602", "risky"))
+
+        assert victim.read_bytes() == b"keep me\n"
+        written = root / LOCK_RELATIVE_PATH
+        assert not written.is_symlink()
+        assert written.read_bytes() == lock.to_text().encode("utf-8")
+
+    def test_a_save_that_fails_keeps_the_existing_lock(self, tmp_path, monkeypatch):
+        root = _tree(tmp_path)
+        _lock(root, LockScope("B602", "risky"))
+        before = (root / LOCK_RELATIVE_PATH).read_bytes()
+        lock = AshLock.load(root)
+
+        def broken() -> str:
+            raise RuntimeError("serialization failed")
+
+        monkeypatch.setattr(lock, "to_text", broken)
+        with pytest.raises(RuntimeError):
+            lock.save()
+
+        assert (root / LOCK_RELATIVE_PATH).read_bytes() == before
+        assert sorted(p.name for p in root.iterdir()) == sorted(
+            [LOCK_RELATIVE_PATH, "src"]
+        )
+
+
 def _legacy_lock(root: Path) -> bytes:
     """A lock written where v3.8-era commands wrote it, .ash/ash.lock."""
     lock = _lock(root, LockScope("B602", "risky"))
