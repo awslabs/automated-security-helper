@@ -533,12 +533,23 @@ def _admits(profile: sr.Profile, row: sr.SupportRow) -> bool:
 _CHOSEN = ("run_mode", "sandbox_mode")
 
 
+def _a_run_can_have(facts: sr.HostFacts) -> bool:
+    """False for the one combination of facts no run has: the scanners on another
+    operating system than the one ASH was started on, outside container mode.
+
+    ``os`` is where the scanners run and ``host_os`` is where ASH was started. Only the
+    container image runs the scanners anywhere else, in the Linux of the container
+    engine's virtual machine on a Mac or a Windows host."""
+    return facts.run_mode == "container" or facts.os == facts.host_os
+
+
 def _witnesses(
     register: sr.Register, row: sr.SupportRow
 ) -> list[tuple[sr.Profile, sr.HostFacts]]:
     """The profile's facts overlaid with each combination of the row's match tokens
     the profile can have and with each run mode and sandbox request the profile can
-    have that the row does not name, settled, and still matching the row."""
+    have that the row does not name, settled, still matching the row, and a
+    combination a run can have."""
     found: list[tuple[sr.Profile, sr.HostFacts]] = []
     constraints = row.match.constraints()
     names = [field for field, _ in constraints]
@@ -556,7 +567,11 @@ def _witnesses(
             for pick in itertools.product(*picks):
                 overlay = {**dict(zip(names, combo)), **dict(zip(chosen, pick))}
                 facts = sr.settle(replace(profile.facts, **overlay))
-                if row.match.matches(facts) and facts not in seen:
+                if (
+                    row.match.matches(facts)
+                    and _a_run_can_have(facts)
+                    and facts not in seen
+                ):
                     seen.add(facts)
                     found.append((profile, facts))
     return found
@@ -628,6 +643,39 @@ def test_the_shipped_register_passes_the_validity_rule() -> None:
 def test_every_row_that_is_not_supported_has_a_witness_on_some_profile() -> None:
     for row in _not_supported_rows():
         assert _witnesses(sr.REGISTER, row), row.id
+
+
+def test_the_scanners_run_off_the_host_only_in_container_mode() -> None:
+    """The control for ``_a_run_can_have``: a Mac with the scanners on Linux is a run
+    only in container mode, and the witnesses of a row that names ``os`` and no run
+    mode leave out every other mode."""
+    row = _degraded(
+        id="plant.linux-scanners",
+        match=sr.Match(os=("linux",)),
+        paths=("ci-runner",),
+    )
+    witnesses = _witnesses(_with(rows=(row,)), row)
+    on_linux = {facts.run_mode for _, facts in witnesses if facts.host_os == "linux"}
+    elsewhere = [facts for _, facts in witnesses if facts.host_os != "linux"]
+    assert on_linux == {"local", "container", "precommit", "nix"}
+    assert elsewhere, "no profile has the scanners on Linux under another host"
+    assert {facts.run_mode for facts in elsewhere} == {"container"}
+    assert {facts.host_os for facts in elsewhere} == {"darwin", "windows"}
+
+
+def test_guarddogs_missing_kernel_sandbox_is_witnessed_on_every_image_host() -> None:
+    """GuardDog's own sandbox needs the kernel that runs the scanner, and a Mac or a
+    Windows host in container mode runs it in the Linux of the container engine's
+    virtual machine, a kernel that may lack Landlock as any Linux kernel may. So the
+    row has a witness there, in container mode only, and the register's rules (every
+    witness is offered a way out, every way out a row lists is offered somewhere) see
+    the way out that kernel has."""
+    row = sr.REGISTER.row("scanner.guarddog.sandbox-unavailable")
+    witnesses = _witnesses(sr.REGISTER, row)
+    assert {facts.host_os for _, facts in witnesses} == {"linux", "darwin", "windows"}
+    assert {facts.os for _, facts in witnesses} == {"linux"}
+    elsewhere = [facts for _, facts in witnesses if facts.host_os != "linux"]
+    assert {facts.run_mode for facts in elsewhere} == {"container"}
 
 
 def test_the_container_image_is_no_way_out_of_a_missing_instruction_set() -> None:
@@ -1289,14 +1337,57 @@ def test_a_derived_row_is_read_by_the_evaluator_and_valid() -> None:
 @pytest.mark.parametrize("gap", sr.ALL_PLATFORMS)
 def test_a_derived_row_leads_out_of_each_single_platform_gap(gap: str) -> None:
     """Whichever one platform a tool lacks, every way out its row offers leaves the
-    gap. WSL 2, the container image and another operating system keep the
-    processor or land on Linux with it, so for a Linux gap the way out is another
-    machine."""
+    gap, and every way out its row lists is offered on a machine that has the gap.
+    WSL 2, the container image and another operating system keep the processor or
+    land on Linux with it, so for a Linux gap the way out is another machine."""
     provisionable = tuple(pair for pair in sr.ALL_PLATFORMS if pair != gap)
     register = _with(rows=sr.no_build_rows((_pinned(provisionable=provisionable),)))
     (row,) = [r for r in register.rows if r.scope == "demo"]
     assert row.id == f"scanner.demo.no-build.{gap.replace('/', '-')}"
     assert _validity_failures(register, rows=(row,)) == []
+    assert _never_offered(register, (row,)) == []
+
+
+#: The ways out each platform's missing-build row lists. The page says the same in its
+#: section on a missing scanner build. A Mac is offered the container image only: WSL 2
+#: is offered from Windows only, and the path to Linux or macOS is offered from Windows
+#: and from other systems, where it also names the platform that lacks the build.
+_WAYS_OUT_OF_A_GAP: dict[str, tuple[str, ...]] = {
+    "darwin/amd64": ("container-image",),
+    "darwin/arm64": ("container-image",),
+    "linux/amd64": ("arm64-host",),
+    "linux/arm64": ("x86-host-with-features", "ci-runner"),
+    "windows/amd64": ("wsl2", "container-image", "linux-or-macos-host"),
+    "windows/arm64": ("wsl2", "container-image", "linux-or-macos-host"),
+}
+
+
+def test_the_table_of_ways_out_of_a_gap_names_every_platform() -> None:
+    assert set(_WAYS_OUT_OF_A_GAP) == set(sr.ALL_PLATFORMS)
+
+
+@pytest.mark.parametrize("gap", sr.ALL_PLATFORMS)
+def test_a_derived_row_lists_the_ways_out_its_platform_is_offered(gap: str) -> None:
+    provisionable = tuple(pair for pair in sr.ALL_PLATFORMS if pair != gap)
+    (row,) = sr.no_build_rows((_pinned(provisionable=provisionable),))
+    assert row.paths == _WAYS_OUT_OF_A_GAP[gap]
+
+
+def test_a_mac_gap_row_that_lists_wsl_2_and_another_system_is_flagged() -> None:
+    """The must-flag control for the check above, run on the shape a Mac's row had:
+    WSL 2 and the path to Linux or macOS are offered to Windows hosts and other
+    systems, never to a Mac, so the check names both."""
+    provisionable = tuple(pair for pair in sr.ALL_PLATFORMS if pair != "darwin/arm64")
+    (row,) = sr.no_build_rows((_pinned(provisionable=provisionable),))
+    plant = replace(
+        row,
+        id="plant.mac-gap",
+        paths=("wsl2", "container-image", "linux-or-macos-host"),
+    )
+    assert _never_offered(_with(rows=(plant,)), (plant,)) == [
+        "plant.mac-gap: wsl2",
+        "plant.mac-gap: linux-or-macos-host",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1401,6 +1492,7 @@ def test_the_rows_derived_from_the_shipped_scanners_are_valid() -> None:
     assert unallowed_gap_rows(derived) == [], UNALLOWED_GAP
     register = _with(rows=derived)
     assert _validity_failures(register, rows=derived) == []
+    assert _never_offered(register, derived) == []
 
 
 def test_a_missing_or_an_extra_derived_row_is_caught() -> None:

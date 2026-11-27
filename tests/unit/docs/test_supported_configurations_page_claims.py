@@ -154,6 +154,28 @@ def test_the_no_build_section_links_every_way_out_a_missing_build_offers() -> No
     assert [path for path in sorted(ways) if f"](#{path})" not in section] == []
 
 
+def test_the_no_build_section_says_a_mac_scans_in_the_container_image() -> None:
+    """The sentence about a Mac and the ways out the register lists for a Mac's gap are
+    one claim: the image, and only the image. WSL 2 is offered from Windows only, and
+    the path to Linux or macOS is offered from Windows and from other systems, so
+    neither leads out of a gap on a Mac."""
+    assert_on_page(PAGE, "From a Mac, scan in the container image.")
+    for gap in ("darwin/amd64", "darwin/arm64"):
+        binary = sr.PinnedBinary("demo", "demo-tool", "1.0", all_platforms_but(gap))
+        (row,) = sr.no_build_rows((binary,))
+        assert row.paths == ("container-image",), gap
+
+
+def test_the_guarddog_section_links_each_way_out_of_a_missing_kernel_sandbox() -> None:
+    """GuardDog's own sandbox needs the kernel that runs the scanner: this machine's on
+    a Linux host, and the container engine's virtual machine in container mode on any
+    other host. The row lists both ways out, and its section links both."""
+    row = sr.REGISTER.row("scanner.guarddog.sandbox-unavailable")
+    assert row.paths == ("enable-landlock", "engine-landlock")
+    section = _section(row.anchor)
+    assert [path for path in row.paths if f"](#{path})" not in section] == []
+
+
 #: The one sentence on the page that depends on which tools the scanners declare, and
 #: how many tools it needs: the page says "several".
 SEVERAL_TOOLS = "Several tools have no build for Windows on arm64, for example."
