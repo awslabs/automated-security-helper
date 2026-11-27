@@ -18,10 +18,9 @@ from typing import Any
 
 import pytest
 
-from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base import support_register as sr
-from automated_security_helper.utils import tool_downloads
 from tests.utils.scanner_enumeration import load_scanner_universe
+from tests.utils.support_gaps import all_platforms_but, pinned_binaries
 
 pytestmark = pytest.mark.unit
 
@@ -670,22 +669,7 @@ def _universe() -> tuple[type, ...]:
 
 
 def _pinned_binaries() -> list[sr.PinnedBinary]:
-    found = []
-    for cls in _universe():
-        facets: opsf.ScannerOperationalFacets = vars(cls)[opsf.OPERATIONAL_FACETS_ATTR]
-        if facets.runtime.kind is not opsf.RuntimeKind.PINNED_BINARY:
-            continue
-        key = facets.runtime.tool_versions_key
-        assert key is not None, facets.scanner_name
-        found.append(
-            sr.PinnedBinary(
-                scanner=facets.scanner_name,
-                tool=key,
-                version=tool_downloads.TOOL_VERSIONS[key],
-                provisionable=facets.platforms.provisionable,
-            )
-        )
-    return found
+    return pinned_binaries(_universe())
 
 
 def _missing_builds(
@@ -788,6 +772,31 @@ def test_no_other_platform_and_no_other_tool_has_a_missing_build_row() -> None:
         for row in sr.no_build_rows(binaries)
     }
     assert found == wanted
+
+
+def _planted_lacking(platform: str) -> sr.PinnedBinary:
+    """A pinned binary with a build for every platform but ``platform``."""
+    return sr.PinnedBinary(
+        scanner="planted",
+        tool="plantedtool",
+        version="0.0.1",
+        provisionable=all_platforms_but(platform),
+    )
+
+
+def test_a_scanner_that_loses_windows_amd64_fails_the_missing_build_row_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The must-fail control for the test above, run on the test itself: the rows still
+    match the declaration they come from, so only the allowed platforms report a scanner
+    that has lost windows/amd64. The same scanner lacking only windows/arm64 passes."""
+    loses_amd64 = _planted_lacking("windows/amd64")
+    monkeypatch.setitem(globals(), "_pinned_binaries", lambda: [loses_amd64])
+    with pytest.raises(AssertionError, match="outside ALLOWED_GAP_PLATFORMS"):
+        test_no_other_platform_and_no_other_tool_has_a_missing_build_row()
+    loses_arm64 = _planted_lacking("windows/arm64")
+    monkeypatch.setitem(globals(), "_pinned_binaries", lambda: [loses_arm64])
+    test_no_other_platform_and_no_other_tool_has_a_missing_build_row()
 
 
 def test_the_derived_rows_follow_the_scanners_platform_declaration() -> None:

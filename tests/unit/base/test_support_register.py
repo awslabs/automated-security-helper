@@ -36,9 +36,9 @@ import pytest
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base import support_register as sr
-from automated_security_helper.utils import tool_downloads
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.scanner_enumeration import load_scanner_universe
+from tests.utils.support_gaps import all_platforms_but, pinned_binaries
 
 pytestmark = pytest.mark.unit
 
@@ -60,22 +60,7 @@ def _facets(cls: type) -> opsf.ScannerOperationalFacets:
 def _pinned_binaries() -> list[sr.PinnedBinary]:
     """One record per scanner whose tool ASH downloads, from the register and the
     download table the consistency test already binds together."""
-    found = []
-    for cls in _universe():
-        facets = _facets(cls)
-        if facets.runtime.kind is not opsf.RuntimeKind.PINNED_BINARY:
-            continue
-        key = facets.runtime.tool_versions_key
-        assert key is not None, facets.scanner_name
-        found.append(
-            sr.PinnedBinary(
-                scanner=facets.scanner_name,
-                tool=key,
-                version=tool_downloads.TOOL_VERSIONS[key],
-                provisionable=facets.platforms.provisionable,
-            )
-        )
-    return sorted(found, key=lambda binary: binary.scanner)
+    return pinned_binaries(_universe())
 
 
 def _facts(**overlay: str) -> sr.HostFacts:
@@ -1427,6 +1412,23 @@ def test_a_missing_or_an_extra_derived_row_is_caught() -> None:
     assert len(_derivation_failures((not_downloaded,), every_gap)) == 5
     grown = (*_pinned_binaries(), gap)
     assert _derivation_failures(grown, sr.no_build_rows(grown)) == []
+
+
+def test_a_scanner_that_loses_windows_amd64_fails_the_derived_rows_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The must-fail control for the test above, run on the test itself. A scanner that
+    loses its windows/amd64 build to a typo gets a missing-build row for the Windows
+    most machines run. The rows still match the declaration they come from and every
+    way out still leads out, so only the allowed platforms report it. The same scanner
+    lacking only windows/arm64, the gap the shipped scanners have, passes."""
+    loses_amd64 = _pinned(provisionable=all_platforms_but("windows/amd64"))
+    monkeypatch.setitem(globals(), "_pinned_binaries", lambda: [loses_amd64])
+    with pytest.raises(AssertionError, match="outside ALLOWED_GAP_PLATFORMS"):
+        test_the_rows_derived_from_the_shipped_scanners_are_valid()
+    loses_arm64 = _pinned(provisionable=all_platforms_but("windows/arm64"))
+    monkeypatch.setitem(globals(), "_pinned_binaries", lambda: [loses_arm64])
+    test_the_rows_derived_from_the_shipped_scanners_are_valid()
 
 
 def test_a_row_and_a_path_each_link_to_one_section_of_the_page() -> None:
