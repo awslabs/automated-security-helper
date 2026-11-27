@@ -18043,6 +18043,22 @@
           },
           "description": "Summary statistics (e.g., count by severity)"
         },
+        "support_notices": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SupportNotice"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Configurations this run met that ASH supports only through a polyfill, with a loss, or not at all, each with its upgrade paths. Absent when the run's configuration is fully supported.",
+          "title": "Support Notices"
+        },
         "suppressions_ignored": {
           "anyOf": [
             {
@@ -23757,6 +23773,126 @@
       "title": "SummaryStats",
       "type": "object"
     },
+    "SupportNotice": {
+      "description": "A configuration this run met that ASH supports only through a polyfill, with a\nloss, or not at all, with the upgrade paths on offer.\n\nBuilt from a row of the support register (base/support_register.py) and the facts\nthe run matched. It carries tokens, ids and public sentences, never a host name, a\nuser name or a path on the machine that wrote it, and never the command the CLI\nbuilds for an upgrade path: results are shared.",
+      "properties": {
+        "behavior": {
+          "description": "What ASH did where the row matched: continues, skips-scanner, scanner-missing, scanner-error or refuses.",
+          "enum": [
+            "continues",
+            "skips-scanner",
+            "scanner-missing",
+            "scanner-error",
+            "refuses"
+          ],
+          "title": "Behavior",
+          "type": "string"
+        },
+        "dimension": {
+          "description": "What the row is about, for example cpu, sandbox or os.",
+          "minLength": 1,
+          "title": "Dimension",
+          "type": "string"
+        },
+        "docs": {
+          "description": "The documentation page and section that explain the row, relative to the documentation content root.",
+          "minLength": 1,
+          "title": "Docs",
+          "type": "string"
+        },
+        "facts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The tokens the row matched, by fact name, for example arch amd64 and cpu_level compat-only.",
+          "title": "Facts",
+          "type": "object"
+        },
+        "found": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What ASH read that matched the row, for example the processor flags that are missing. Null when the row has nothing to add.",
+          "title": "Found"
+        },
+        "id": {
+          "description": "The id of the support row this notice reports, for example host.cpu.below-polars-runtime. The id of a scanner's row names the scanner.",
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "level": {
+          "description": "polyfilled when ASH works through a named stand-in, degraded when it works with a named loss, unsupported when it does not support the configuration.",
+          "enum": [
+            "polyfilled",
+            "degraded",
+            "unsupported"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "message": {
+          "description": "One sentence: why the configuration is unsupported, what is lost, or what the stand-in does differently.",
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "paths": {
+          "description": "The ways to a supported configuration that can be offered here, the ones on this machine first and then the ones elsewhere. Empty when the row declares none, and for a polyfill.",
+          "items": {
+            "$ref": "#/$defs/UpgradePathNotice"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "polyfill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The id of the stand-in a polyfilled notice names. Null for the other levels.",
+          "title": "Polyfill"
+        },
+        "raised": {
+          "description": "start when ASH noticed it before the scan began, decision when it noticed it where it made the decision.",
+          "enum": [
+            "start",
+            "decision"
+          ],
+          "title": "Raised",
+          "type": "string"
+        },
+        "scope": {
+          "description": "ash for a configuration of the whole run, or the config name of the scanner the row is about.",
+          "minLength": 1,
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "scope",
+        "dimension",
+        "level",
+        "behavior",
+        "message",
+        "raised",
+        "docs"
+      ],
+      "title": "SupportNotice",
+      "type": "object"
+    },
     "Suppression": {
       "additionalProperties": false,
       "properties": {
@@ -26191,6 +26327,60 @@
         }
       },
       "title": "UnusedSuppressionsReporterConfigOptions",
+      "type": "object"
+    },
+    "UpgradePathNotice": {
+      "description": "One way out of a configuration ASH does not fully support, as a notice has it.\n\nThe id, the kind and the one sentence are the support register's upgrade path. The\ncommand the CLI builds for some paths is not recorded: it names the interpreter by\nits path under the user's home, which a shared report must not carry, so this\nrecord has no field for one and a key that tries to carry one is dropped.",
+      "properties": {
+        "docs": {
+          "description": "The documentation page and section that explain the path, relative to the documentation content root.",
+          "minLength": 1,
+          "title": "Docs",
+          "type": "string"
+        },
+        "group": {
+          "description": "this-machine for a path that changes the machine the scan runs on (a reinstall, a container, WSL), elsewhere for a path that moves the scan to another machine, another operating system or a CI runner.",
+          "enum": [
+            "this-machine",
+            "elsewhere"
+          ],
+          "title": "Group",
+          "type": "string"
+        },
+        "id": {
+          "description": "The id of the upgrade path.",
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "description": "What the path changes: same-os, container or wsl on this machine, other-os, other-host or ci-runner elsewhere.",
+          "enum": [
+            "same-os",
+            "container",
+            "wsl",
+            "other-os",
+            "other-host",
+            "ci-runner"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "summary": {
+          "description": "One sentence that says what to do. It holds no command: a command can name the interpreter by its path under the user's home, which a shared report must not carry.",
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "group",
+        "kind",
+        "summary",
+        "docs"
+      ],
+      "title": "UpgradePathNotice",
       "type": "object"
     },
     "VersionControlDetails": {
