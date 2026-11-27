@@ -586,8 +586,7 @@ def _validity_failures(
                             and found.row.dimension == row.dimension
                         ):
                             failures.append(
-                                f"{where}: path {path.id} trades it for "
-                                f"{found.row.id}"
+                                f"{where}: path {path.id} trades it for {found.row.id}"
                             )
     return failures
 
@@ -614,13 +613,15 @@ def test_the_container_image_is_no_way_out_of_a_missing_instruction_set() -> Non
     for row_id in ["host.cpu.below-polars-runtime", "host.cpu.below-polars-compat"]:
         assert "container-image" not in sr.REGISTER.row(row_id).paths, row_id
     row = sr.REGISTER.row("host.cpu.below-polars-runtime")
-    plant = replace(row, id="plant.cpu", paths=("polars-compat-runtime", "container-image"))
+    plant = replace(
+        row, id="plant.cpu", paths=("polars-compat-runtime", "container-image")
+    )
     failures = _validity_failures(_with(rows=(plant,)), rows=(plant,))
     assert failures, "a planted CPU row offering the image must fail the rule"
     assert all(f.startswith("plant.cpu on ") for f in failures), failures
-    assert any(
-        "path container-image leaves the row matching" in f for f in failures
-    ), failures
+    assert any("path container-image leaves the row matching" in f for f in failures), (
+        failures
+    )
 
 
 def test_a_path_that_trades_the_problem_for_one_of_the_same_dimension_fails() -> None:
@@ -676,13 +677,15 @@ def test_an_offered_set_with_only_same_os_paths_fails_for_an_unsupported_row() -
     """The construction rule counts a row's declared paths; the validity rule
     counts the ones offered where it matters. Both must hold."""
     row = sr.REGISTER.row("host.cpu.below-polars-runtime")
-    plant = replace(row, id="plant.same-os", paths=("polars-compat-runtime", "ci-runner"))
-    narrowed = sr.REGISTER.path("ci-runner")
-    never = replace(narrowed, id="plant-never", available_when=sr.Match(host_os=("other",)))
-    plant = replace(plant, paths=("polars-compat-runtime", "plant-never"))
-    failures = _validity_failures(
-        _with(rows=(plant,), paths=(never,)), rows=(plant,)
+    plant = replace(
+        row, id="plant.same-os", paths=("polars-compat-runtime", "ci-runner")
     )
+    narrowed = sr.REGISTER.path("ci-runner")
+    never = replace(
+        narrowed, id="plant-never", available_when=sr.Match(host_os=("other",))
+    )
+    plant = replace(plant, paths=("polars-compat-runtime", "plant-never"))
+    failures = _validity_failures(_with(rows=(plant,), paths=(never,)), rows=(plant,))
     assert any("every offered path is same-os" in f for f in failures), failures
 
 
@@ -724,7 +727,11 @@ def test_a_path_on_this_machine_keeps_every_other_fact_the_processor_included() 
     facts = _facts(arch="amd64", cpu_level="compat-only", host_os="windows")
     (after,) = sr.REGISTER.apply_path(sr.REGISTER.path("container-image"), facts)
     assert (after.arch, after.cpu_level) == ("amd64", "compat-only")
-    assert (after.run_mode, after.os, after.host_os) == ("container", "linux", "windows")
+    assert (after.run_mode, after.os, after.host_os) == (
+        "container",
+        "linux",
+        "windows",
+    )
     assert after.install_channel == "image" and after.polars_runtime == "runtime-32"
 
 
@@ -849,9 +856,14 @@ def test_the_worst_row_comes_first_and_ties_keep_declaration_order() -> None:
 def test_the_raised_rows_are_a_start_or_a_decision_never_a_matrix_row() -> None:
     windows = _facts(os="windows", host_os="windows")
     assert sr.evaluate(windows, "ash", notify=sr.Notify.START) == ()
-    assert sr.evaluate(windows, "ash", notify=(sr.Notify.START, sr.Notify.DECISION)) == ()
+    assert (
+        sr.evaluate(windows, "ash", notify=(sr.Notify.START, sr.Notify.DECISION)) == ()
+    )
     matrix = _ids(sr.evaluate(windows, "ash", notify=sr.Notify.MATRIX))
-    assert matrix == ["host.windows.no-graceful-stop", "host.windows.no-tool-database-lock"]
+    assert matrix == [
+        "host.windows.no-graceful-stop",
+        "host.windows.no-tool-database-lock",
+    ]
     decision = sr.evaluate(windows, "semgrep", notify=sr.Notify.DECISION)
     assert _ids(decision) == ["scanner.semgrep.windows"]
 
@@ -908,7 +920,9 @@ def test_the_compatibility_runtime_is_offered_where_the_environment_is_the_users
     channel: str,
 ) -> None:
     facts = _facts(arch="amd64", cpu_level="compat-only", install_channel=channel)
-    assert _offered("host.cpu.below-polars-runtime", facts)[0] == "polars-compat-runtime"
+    assert (
+        _offered("host.cpu.below-polars-runtime", facts)[0] == "polars-compat-runtime"
+    )
 
 
 def test_the_compatibility_runtime_needs_a_processor_it_can_run_on() -> None:
@@ -1032,7 +1046,9 @@ def test_a_skipped_scanner_cell_keeps_todays_refusal_text() -> None:
     assert sr.cells("semgrep", {"os": "linux"}) == "yes"
 
 
-def test_a_token_the_register_leaves_undeclared_is_not_declared_not_unsupported() -> None:
+def test_a_token_the_register_leaves_undeclared_is_not_declared_not_unsupported() -> (
+    None
+):
     assert sr.cells("ash", {"libc": "musl"}) == "not declared"
     assert sr.cells("ash", {"wsl": "wsl1"}) == "not declared"
     assert sr.cells("ash", {"python_build": "free-threaded"}) == "not declared"
@@ -1050,7 +1066,11 @@ def test_a_cell_never_reads_the_machine_that_renders_it() -> None:
     same everywhere: it takes no host reading, and a raising one is never called."""
     import inspect
 
-    assert list(inspect.signature(sr.cells).parameters) == ["scope", "overlay", "register"]
+    assert list(inspect.signature(sr.cells).parameters) == [
+        "scope",
+        "overlay",
+        "register",
+    ]
     assert sr.cells("ash", {"cpu_level": "compat-only"}) == sr.cells(
         "ash", {"cpu_level": "compat-only"}
     )
@@ -1118,7 +1138,9 @@ _ONLY_WINDOWS_ARM64_MISSING = tuple(
 )
 
 
-def test_a_derived_row_whose_way_out_lands_on_another_missing_build_fails_the_rule() -> None:
+def test_a_derived_row_whose_way_out_lands_on_another_missing_build_fails_the_rule() -> (
+    None
+):
     """With no linux/arm64 build either, WSL 2 and the image on an arm64 machine
     run the same missing build, so those paths trade one gap for another."""
     register = _with(rows=sr.no_build_rows((_pinned(),)))
@@ -1141,7 +1163,10 @@ def test_a_derived_row_is_read_by_the_evaluator_and_valid() -> None:
         "container-image",
         "linux-or-macos-host",
     ]
-    assert register.cells("demo", {"os": "windows", "host_os": "windows", "arch": "arm64"}) == "no asset"
+    assert (
+        register.cells("demo", {"os": "windows", "host_os": "windows", "arch": "arm64"})
+        == "no asset"
+    )
     assert register.refusal("demo", "windows") is None
     derived = tuple(r for r in register.rows if r.scope == "demo")
     assert _validity_failures(register, rows=derived) == []
@@ -1196,7 +1221,9 @@ def test_rows_share_a_section_only_where_they_say_the_same_thing() -> None:
     from collections import Counter
 
     anchors = Counter(
-        row.anchor for row in sr.REGISTER.rows if row.level is not sr.SupportLevel.SUPPORTED
+        row.anchor
+        for row in sr.REGISTER.rows
+        if row.level is not sr.SupportLevel.SUPPORTED
     )
     shared = {a: n for a, n in anchors.items() if n > 1}
     assert shared == {"scanner-windows-ignore-paths": 4}, shared
@@ -1238,7 +1265,9 @@ def _unbound(sites: list[tuple[str, str]]) -> list[str]:
 
 
 def _code_sites() -> list[tuple[str, str]]:
-    sites = [(f"polyfill {p.id}", s) for p in sr.REGISTER.polyfills for s in p.code_sites]
+    sites = [
+        (f"polyfill {p.id}", s) for p in sr.REGISTER.polyfills for s in p.code_sites
+    ]
     sites += [(f"row {r.id}", s) for r in sr.REGISTER.rows for s in r.code_sites]
     return sites
 
@@ -1255,7 +1284,9 @@ def test_the_site_reader_sees_a_definition_and_refuses_one_that_is_not_there() -
         / "detect_secrets_scanner.py"
     )
     assert "DetectSecretsScanner._ensure_fork_multiprocessing" in _definitions(scanner)
-    assert _unbound([("planted", "automated_security_helper/utils/atomic_write.py:nope")])
+    assert _unbound(
+        [("planted", "automated_security_helper/utils/atomic_write.py:nope")]
+    )
     assert _unbound([("planted", "automated_security_helper/utils/no_such_file.py:x")])
 
 
@@ -1266,7 +1297,9 @@ def test_every_declared_code_site_is_a_definition_in_a_file_of_the_tree() -> Non
 
 
 def test_every_adaptation_is_bound_to_the_code_that_implements_it() -> None:
-    adaptations = [p for p in sr.REGISTER.polyfills if p.kind is sr.PolyfillKind.ADAPTATION]
+    adaptations = [
+        p for p in sr.REGISTER.polyfills if p.kind is sr.PolyfillKind.ADAPTATION
+    ]
     assert len(adaptations) == 9
     assert [p.id for p in adaptations if not p.code_sites] == []
 
@@ -1337,7 +1370,9 @@ def _recorded_skip(tmp_path: Path, name: str, hook: Any) -> str | None:
     return result.scanner_results[name].skipped_reason
 
 
-def test_the_register_declares_a_skip_row_for_each_scanner_that_refuses_a_platform() -> None:
+def test_the_register_declares_a_skip_row_for_each_scanner_that_refuses_a_platform() -> (
+    None
+):
     from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 
     base = ScannerPluginBase.unsupported_platform_reason
@@ -1441,7 +1476,9 @@ def _flat(text: str) -> str:
 
 def _row_and_path_anchors() -> set[str]:
     rows = {
-        row.anchor for row in sr.REGISTER.rows if row.level is not sr.SupportLevel.SUPPORTED
+        row.anchor
+        for row in sr.REGISTER.rows
+        if row.level is not sr.SupportLevel.SUPPORTED
     }
     return rows | {sr.NO_BUILD_ANCHOR} | {path.id for path in sr.REGISTER.paths}
 

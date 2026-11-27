@@ -31,17 +31,13 @@ def _facts(**overlay: str) -> sr.HostFacts:
     return sr.settle(replace(sr.REFERENCE_FACTS, **overlay))
 
 
-def _raised(
-    facts: sr.HostFacts, scope: str = "ash"
-) -> list[tuple[str, str, str]]:
+def _raised(facts: sr.HostFacts, scope: str = "ash") -> list[tuple[str, str, str]]:
     """The rows a run raises, at start or at a decision, worst first."""
     found = sr.evaluate(facts, scope, notify=(sr.Notify.START, sr.Notify.DECISION))
     return [(e.row.id, e.row.level.value, e.row.behavior.value) for e in found]
 
 
-def _offered(
-    facts: sr.HostFacts, row_id: str, scope: str = "ash"
-) -> list[str] | None:
+def _offered(facts: sr.HostFacts, row_id: str, scope: str = "ash") -> list[str] | None:
     """The ids of the paths offered for ``row_id`` on ``facts``, or None when the
     row does not match."""
     for found in sr.evaluate(facts, scope):
@@ -181,9 +177,17 @@ CASES: list[tuple[str, dict[str, str], list[tuple[str, str, str]]]] = [
         },
         [BWRAP_CACHES],
     ),
-    ("express asked for on windows", {**WINDOWS, "express_requested": "yes"}, [EXPRESS]),
+    (
+        "express asked for on windows",
+        {**WINDOWS, "express_requested": "yes"},
+        [EXPRESS],
+    ),
     ("nix mode on windows", {**WINDOWS, "run_mode": "nix"}, [NIX]),
-    ("the powershell 5.1 wrapper", {**WINDOWS, "shell": "powershell-5"}, [POWERSHELL_5]),
+    (
+        "the powershell 5.1 wrapper",
+        {**WINDOWS, "shell": "powershell-5"},
+        [POWERSHELL_5],
+    ),
     ("the git bash wrapper", {**WINDOWS, "shell": "msys-wrapper"}, [MSYS]),
     (
         "container mode with an image of another architecture",
@@ -382,10 +386,14 @@ def test_the_container_image_is_offered_nowhere_for_a_missing_instruction_set() 
     for level in ["compat-only", "below-compat"]:
         for host in [{}, MACOS, WINDOWS]:
             facts = _facts(arch="amd64", cpu_level=level, **host)
-            cpu_rows = [e for e in sr.evaluate(facts, "ash") if e.row.dimension == "cpu"]
+            cpu_rows = [
+                e for e in sr.evaluate(facts, "ash") if e.row.dimension == "cpu"
+            ]
             assert cpu_rows, (level, host)
             for found in cpu_rows:
-                assert "container-image" not in [p.id for p in found.paths], found.row.id
+                assert "container-image" not in [p.id for p in found.paths], (
+                    found.row.id
+                )
 
 
 def test_only_the_paths_the_cli_spells_as_a_command_name_a_builder() -> None:
@@ -405,7 +413,9 @@ def test_only_the_paths_the_cli_spells_as_a_command_name_a_builder() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_windows_amd64_local_raises_nothing_at_start_and_two_skips_at_decisions() -> None:
+def test_windows_amd64_local_raises_nothing_at_start_and_two_skips_at_decisions() -> (
+    None
+):
     facts = _facts(**WINDOWS, arch="amd64")
     assert sr.evaluate(facts, "ash", notify=sr.Notify.START) == ()
     assert sr.evaluate(facts, "ash", notify=sr.Notify.DECISION) == ()
@@ -431,7 +441,9 @@ def test_the_matrix_only_windows_rows_are_never_raised() -> None:
     assert _raised(facts, "snyk-code") == []
 
 
-def test_windows_container_mode_meets_the_container_limit_and_not_the_windows_ones() -> None:
+def test_windows_container_mode_meets_the_container_limit_and_not_the_windows_ones() -> (
+    None
+):
     container = _facts(os="linux", host_os="windows", run_mode="container")
     found = [e.row.id for e in sr.evaluate(container, "ash")]
     assert found == ["host.windows.container-leftovers"]
@@ -484,7 +496,10 @@ def test_guarddog_under_sandbox_exec_and_betterleaks_are_polyfilled() -> None:
     assert _raised(facts, "betterleaks") == [
         ("scanner.betterleaks.private-home", "polyfilled", "continues")
     ]
-    assert _raised(_facts(sandbox_mode="auto", sandbox_backend="bwrap"), "betterleaks") == []
+    assert (
+        _raised(_facts(sandbox_mode="auto", sandbox_backend="bwrap"), "betterleaks")
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -574,37 +589,285 @@ _SANDBOX_PATHS = ("install-bubblewrap", "wsl2-sandboxed", "sandbox-capable-host"
 
 # (id, level, behavior, notify, dimension, shown on stderr, paths)
 DECLARED: list[tuple[str, str, str, str, str, bool, tuple[str, ...]]] = [
-    ("host.cpu.below-polars-runtime", "unsupported", "continues", "start", "cpu", True, _CPU_PATHS),
-    ("host.cpu.below-polars-compat", "unsupported", "continues", "start", "cpu", True, _CPU_PATHS),
-    ("host.cpu.polars-compat-runtime", "polyfilled", "continues", "start", "cpu", False, ()),
-    ("host.translation.rosetta", "degraded", "continues", "start", "translation", True, ("native-arm64",)),
-    ("host.translation.x64-on-arm64", "degraded", "continues", "start", "translation", True, ("native-arm64", "wsl2")),
-    ("host.os.other", "unsupported", "continues", "start", "os", True, ("linux-or-macos-host", "ci-runner")),
-    ("host.arch.other", "unsupported", "continues", "start", "arch", True, ("x86-host-with-features", "arm64-host", "ci-runner")),
-    ("host.python.outside-requires", "unsupported", "continues", "start", "python", True, ("supported-python", "container-image", "ci-runner")),
-    ("host.mode.nix-on-windows", "unsupported", "refuses", "start", "run mode", True, ("wsl2", "container-image", "mode-local")),
-    ("host.sandbox.not-applied-in-container", "degraded", "continues", "start", "sandbox", True, ("mode-local-sandboxed", "wsl2-sandboxed")),
-    ("host.sandbox.unavailable-auto", "unsupported", "scanner-missing", "decision", "sandbox", True, _SANDBOX_PATHS),
-    ("host.sandbox.unavailable-named", "unsupported", "scanner-error", "decision", "sandbox", True, _SANDBOX_PATHS),
-    ("host.sandbox.landlock-below-6", "degraded", "continues", "decision", "sandbox", False, ("newer-kernel-landlock", "install-bubblewrap")),
-    ("host.sandbox.bwrap-caches-read-only", "degraded", "continues", "decision", "sandbox", False, ("newer-bubblewrap",)),
-    ("host.express.unavailable", "degraded", "continues", "start", "express", True, ("wsl2", "linux-or-macos-host")),
-    ("host.windows.no-graceful-stop", "degraded", "continues", "matrix", "os", False, _HERE),
-    ("host.windows.no-tool-database-lock", "degraded", "continues", "matrix", "os", False, ("wsl2", "container-image")),
-    ("host.windows.container-leftovers", "degraded", "continues", "matrix", "container leftovers", False, ("wsl2",)),
-    ("host.shell.powershell-5", "polyfilled", "continues", "start", "shell", False, ("pwsh7",)),
-    ("host.shell.msys", "polyfilled", "continues", "start", "shell", False, ("pwsh7", "wsl2")),
-    ("host.container.image-arch-mismatch", "degraded", "continues", "decision", "container image", True, ("native-image",)),
-    ("scanner.semgrep.windows", "unsupported", "skips-scanner", "decision", "os", True, _HERE),
-    ("scanner.guarddog.windows", "unsupported", "skips-scanner", "decision", "os", True, _HERE),
-    ("scanner.guarddog.sandbox-replaced", "polyfilled", "continues", "decision", "tool sandbox", False, ()),
-    ("scanner.guarddog.sandbox-unavailable", "degraded", "continues", "decision", "tool sandbox", True, ("enable-landlock",)),
-    ("scanner.betterleaks.private-home", "polyfilled", "continues", "decision", "sandbox", False, ()),
-    ("scanner.trivy.windows-ignore-paths", "degraded", "continues", "decision", "ignore paths", False, ("wsl2", "container-image")),
-    ("scanner.trivy-repo.windows-ignore-paths", "degraded", "continues", "decision", "ignore paths", False, ("wsl2", "container-image")),
-    ("scanner.checkov.windows-ignore-paths", "degraded", "continues", "decision", "ignore paths", False, ("wsl2", "container-image")),
-    ("scanner.ferret-scan.windows-ignore-paths", "degraded", "continues", "decision", "ignore paths", False, ("wsl2", "container-image")),
-    ("scanner.snyk-code.windows-leftovers", "degraded", "continues", "matrix", "os", False, ("wsl2", "container-image")),
+    (
+        "host.cpu.below-polars-runtime",
+        "unsupported",
+        "continues",
+        "start",
+        "cpu",
+        True,
+        _CPU_PATHS,
+    ),
+    (
+        "host.cpu.below-polars-compat",
+        "unsupported",
+        "continues",
+        "start",
+        "cpu",
+        True,
+        _CPU_PATHS,
+    ),
+    (
+        "host.cpu.polars-compat-runtime",
+        "polyfilled",
+        "continues",
+        "start",
+        "cpu",
+        False,
+        (),
+    ),
+    (
+        "host.translation.rosetta",
+        "degraded",
+        "continues",
+        "start",
+        "translation",
+        True,
+        ("native-arm64",),
+    ),
+    (
+        "host.translation.x64-on-arm64",
+        "degraded",
+        "continues",
+        "start",
+        "translation",
+        True,
+        ("native-arm64", "wsl2"),
+    ),
+    (
+        "host.os.other",
+        "unsupported",
+        "continues",
+        "start",
+        "os",
+        True,
+        ("linux-or-macos-host", "ci-runner"),
+    ),
+    (
+        "host.arch.other",
+        "unsupported",
+        "continues",
+        "start",
+        "arch",
+        True,
+        ("x86-host-with-features", "arm64-host", "ci-runner"),
+    ),
+    (
+        "host.python.outside-requires",
+        "unsupported",
+        "continues",
+        "start",
+        "python",
+        True,
+        ("supported-python", "container-image", "ci-runner"),
+    ),
+    (
+        "host.mode.nix-on-windows",
+        "unsupported",
+        "refuses",
+        "start",
+        "run mode",
+        True,
+        ("wsl2", "container-image", "mode-local"),
+    ),
+    (
+        "host.sandbox.not-applied-in-container",
+        "degraded",
+        "continues",
+        "start",
+        "sandbox",
+        True,
+        ("mode-local-sandboxed", "wsl2-sandboxed"),
+    ),
+    (
+        "host.sandbox.unavailable-auto",
+        "unsupported",
+        "scanner-missing",
+        "decision",
+        "sandbox",
+        True,
+        _SANDBOX_PATHS,
+    ),
+    (
+        "host.sandbox.unavailable-named",
+        "unsupported",
+        "scanner-error",
+        "decision",
+        "sandbox",
+        True,
+        _SANDBOX_PATHS,
+    ),
+    (
+        "host.sandbox.landlock-below-6",
+        "degraded",
+        "continues",
+        "decision",
+        "sandbox",
+        False,
+        ("newer-kernel-landlock", "install-bubblewrap"),
+    ),
+    (
+        "host.sandbox.bwrap-caches-read-only",
+        "degraded",
+        "continues",
+        "decision",
+        "sandbox",
+        False,
+        ("newer-bubblewrap",),
+    ),
+    (
+        "host.express.unavailable",
+        "degraded",
+        "continues",
+        "start",
+        "express",
+        True,
+        ("wsl2", "linux-or-macos-host"),
+    ),
+    (
+        "host.windows.no-graceful-stop",
+        "degraded",
+        "continues",
+        "matrix",
+        "os",
+        False,
+        _HERE,
+    ),
+    (
+        "host.windows.no-tool-database-lock",
+        "degraded",
+        "continues",
+        "matrix",
+        "os",
+        False,
+        ("wsl2", "container-image"),
+    ),
+    (
+        "host.windows.container-leftovers",
+        "degraded",
+        "continues",
+        "matrix",
+        "container leftovers",
+        False,
+        ("wsl2",),
+    ),
+    (
+        "host.shell.powershell-5",
+        "polyfilled",
+        "continues",
+        "start",
+        "shell",
+        False,
+        ("pwsh7",),
+    ),
+    (
+        "host.shell.msys",
+        "polyfilled",
+        "continues",
+        "start",
+        "shell",
+        False,
+        ("pwsh7", "wsl2"),
+    ),
+    (
+        "host.container.image-arch-mismatch",
+        "degraded",
+        "continues",
+        "decision",
+        "container image",
+        True,
+        ("native-image",),
+    ),
+    (
+        "scanner.semgrep.windows",
+        "unsupported",
+        "skips-scanner",
+        "decision",
+        "os",
+        True,
+        _HERE,
+    ),
+    (
+        "scanner.guarddog.windows",
+        "unsupported",
+        "skips-scanner",
+        "decision",
+        "os",
+        True,
+        _HERE,
+    ),
+    (
+        "scanner.guarddog.sandbox-replaced",
+        "polyfilled",
+        "continues",
+        "decision",
+        "tool sandbox",
+        False,
+        (),
+    ),
+    (
+        "scanner.guarddog.sandbox-unavailable",
+        "degraded",
+        "continues",
+        "decision",
+        "tool sandbox",
+        True,
+        ("enable-landlock",),
+    ),
+    (
+        "scanner.betterleaks.private-home",
+        "polyfilled",
+        "continues",
+        "decision",
+        "sandbox",
+        False,
+        (),
+    ),
+    (
+        "scanner.trivy.windows-ignore-paths",
+        "degraded",
+        "continues",
+        "decision",
+        "ignore paths",
+        False,
+        ("wsl2", "container-image"),
+    ),
+    (
+        "scanner.trivy-repo.windows-ignore-paths",
+        "degraded",
+        "continues",
+        "decision",
+        "ignore paths",
+        False,
+        ("wsl2", "container-image"),
+    ),
+    (
+        "scanner.checkov.windows-ignore-paths",
+        "degraded",
+        "continues",
+        "decision",
+        "ignore paths",
+        False,
+        ("wsl2", "container-image"),
+    ),
+    (
+        "scanner.ferret-scan.windows-ignore-paths",
+        "degraded",
+        "continues",
+        "decision",
+        "ignore paths",
+        False,
+        ("wsl2", "container-image"),
+    ),
+    (
+        "scanner.snyk-code.windows-leftovers",
+        "degraded",
+        "continues",
+        "matrix",
+        "os",
+        False,
+        ("wsl2", "container-image"),
+    ),
 ]
 
 
@@ -718,11 +981,14 @@ def test_a_non_ascii_character_appears_in_no_sentence_the_register_holds() -> No
         for path in sr.REGISTER.paths:
             yield path.id, (path.summary,)
         for polyfill in sr.REGISTER.polyfills:
-            yield polyfill.id, (
-                polyfill.name,
-                polyfill.cell,
-                polyfill.stands_in_for,
-                polyfill.difference or "",
+            yield (
+                polyfill.id,
+                (
+                    polyfill.name,
+                    polyfill.cell,
+                    polyfill.stands_in_for,
+                    polyfill.difference or "",
+                ),
             )
         for key, reason in sr.REGISTER.not_declared.items():
             yield str(key), (reason,)

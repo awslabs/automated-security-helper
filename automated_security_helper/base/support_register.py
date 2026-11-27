@@ -412,9 +412,7 @@ class Match:
     def constraints(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
         """The fields this match constrains, with their tokens, in field order."""
         return tuple(
-            (name, getattr(self, name))
-            for name in MATCH_FIELDS
-            if getattr(self, name)
+            (name, getattr(self, name)) for name in MATCH_FIELDS if getattr(self, name)
         )
 
     def is_empty(self) -> bool:
@@ -423,7 +421,9 @@ class Match:
 
     def matches(self, facts: HostFacts) -> bool:
         """True when every constrained fact holds one of the tokens."""
-        return all(getattr(facts, name) in tokens for name, tokens in self.constraints())
+        return all(
+            getattr(facts, name) in tokens for name, tokens in self.constraints()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +511,9 @@ class Polyfill:
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not _SLUG.fullmatch(self.id):
-            raise SupportRegisterError(f"polyfill id {self.id!r} is not a lowercase slug")
+            raise SupportRegisterError(
+                f"polyfill id {self.id!r} is not a lowercase slug"
+            )
         _public(self.id, "name", self.name)
         _public(self.id, "cell", self.cell, CELL_LIMIT)
         _public(self.id, "stands_in_for", self.stands_in_for)
@@ -658,7 +660,9 @@ class SupportRow:
 
     def __post_init__(self) -> None:
         if not isinstance(self.id, str) or not _ID.fullmatch(self.id):
-            raise SupportRegisterError(f"row id {self.id!r} is not a lowercase dotted id")
+            raise SupportRegisterError(
+                f"row id {self.id!r} is not a lowercase dotted id"
+            )
         if not isinstance(self.scope, str) or not _SLUG.fullmatch(self.scope):
             raise SupportRegisterError(f"{self.id}: scope {self.scope!r} is not a slug")
         _public(self.id, "reason", self.reason)
@@ -697,7 +701,10 @@ class SupportRow:
                 raise SupportRegisterError(
                     f"{self.id}: a supported row loses nothing and offers no paths"
                 )
-            if self.notify is not Notify.MATRIX or self.behavior is not Behavior.CONTINUES:
+            if (
+                self.notify is not Notify.MATRIX
+                or self.behavior is not Behavior.CONTINUES
+            ):
                 raise SupportRegisterError(
                     f"{self.id}: a supported row only continues and is listed in the "
                     "matrices (notify matrix)"
@@ -1131,9 +1138,10 @@ class Register:
 # The polyfills and the adaptations
 # ---------------------------------------------------------------------------
 
-if tuple(f.name for f in fields(HostFacts)) != FIELDS or tuple(
-    f.name for f in fields(Match)
-) != MATCH_FIELDS:
+if (
+    tuple(f.name for f in fields(HostFacts)) != FIELDS
+    or tuple(f.name for f in fields(Match)) != MATCH_FIELDS
+):
     raise SupportRegisterError("the facts and the match must name the same dimensions")
 
 _STAND_INS: tuple[Polyfill, ...] = (
@@ -1214,7 +1222,9 @@ _ADAPTATIONS: tuple[Polyfill, ...] = (
             "managers write beside it."
         ),
         difference=None,
-        code_sites=(f"{_PACKAGE}/utils/subprocess_utils.py:_executable_candidate_names",),
+        code_sites=(
+            f"{_PACKAGE}/utils/subprocess_utils.py:_executable_candidate_names",
+        ),
     ),
     Polyfill(
         id="windows-command-line-bounds",
