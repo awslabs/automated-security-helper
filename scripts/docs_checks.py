@@ -5089,6 +5089,26 @@ def validate_with_outside_modules(
 
 
 _CHILD_RESULT = "ash-docs-checks-result:"
+#: The names the child validator takes from this process's environment, when set:
+#: what an import needs, and what a Windows Python needs from a parent that builds its
+#: environment. SYSTEMROOT lets the interpreter start. PROCESSOR_ARCHITECTURE (and
+#: PROCESSOR_ARCHITEW6432 under WOW64) is where ``platform.machine()`` reads the CPU
+#: type on a Windows Python 3.11: without it the answer is "", polars' import-time CPU
+#: check then reads no CPU flags and raises "unknown feature flag: 'sse3'", and no
+#: block whose modules import ASH could be validated there. The Windows names are the
+#: ones the test suite's child builders carry (WINDOWS_CHILD_START_NAMES in
+#: tests/utils/helpers.py). None of them holds a credential.
+_CHILD_ENVIRONMENT_NAMES = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "VIRTUAL_ENV",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_ARCHITEW6432",
+)
 #: Run as ``python -I -c``: loads this file by path and validates one block with the
 #: modules it loads, then prints the problems as one JSON line.
 _CHILD_VALIDATOR = f"""
@@ -5155,12 +5175,13 @@ def _outside_module_problems(
         if not on_page and not any(_module_exists(n.split(".")[0]) for n in modules):
             return None
         # The page's code runs here, so it gets a private HOME and none of the
-        # caller's credentials or tokens: only what an import needs.
+        # caller's credentials or tokens: only what an import needs, and what a
+        # Windows Python needs to start (_CHILD_ENVIRONMENT_NAMES).
         home = Path(scratch) / "home"
         home.mkdir()
         environment = {
             name: os.environ[name]
-            for name in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
+            for name in _CHILD_ENVIRONMENT_NAMES
             if name in os.environ
         }
         environment.update(

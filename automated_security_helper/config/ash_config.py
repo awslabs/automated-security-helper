@@ -1433,6 +1433,21 @@ class RuntimeOverridesConfig(RedactedSection):
         "/scanners/gitleaks/options/baseline_path",
         "/scanners/trivy/options/scanners",
         "/scanners/trivy/options/ignore_unfixed",
+        # And mcp-config's checks: each of these, set false, drops a whole kind of
+        # finding (privilege escalation, unpinned package runners, auto-approved
+        # tool calls, literal secrets in env). Its require_local and its two
+        # prefix lists are not listed. Against the default (require_local off,
+        # both lists empty) each of them only adds findings. Against what an
+        # operator set it does not hold: a client's file replaces the operator's
+        # config for a scan instead of merging with it (config_sources.py: sources
+        # are never merged; client_config_policy.py: a client's file replaces the
+        # profile rather than overlaying it), so a delivered list replaces the
+        # operator's list. A workspace scan layers the other way, and there the
+        # operator's list replaces the project's (workspace/resolver.py).
+        "/scanners/mcp-config/options/forbid_privilege_escalation",
+        "/scanners/mcp-config/options/forbid_unpinned_runners",
+        "/scanners/mcp-config/options/forbid_auto_approval",
+        "/scanners/mcp-config/options/flag_env_secrets",
         # Options that can leave findings out without naming them. A scanner
         # set offline runs on whatever data is cached, and npm audit keeps no
         # advisory data: offline it skips the advisory request, reports none
@@ -2721,6 +2736,19 @@ class AshConfig(RedactedSection):
     # environment. Redaction state only: nothing records or serializes it, and
     # the refusals built from _environment_values do not read it.
     _override_values: Tuple[str, ...] = PrivateAttr(default=())
+    # The list options a ``+=`` override started from its appended items in a
+    # section no plugin ASH ships reads, so with no default added, set by
+    # resolve_config.apply_config_overrides: each as (the keys the append landed
+    # on, the key as logged, the section as logged), redacted. The model
+    # apply_config_overrides rebuilds from this one and a copy of it keep them; a
+    # model validated from a dump does not. A later application of overrides keeps
+    # them too, except an entry that one of its replacing overrides lands on or
+    # above. reporter_section reads them to name such a list when it gives a
+    # reporter that sends findings off the host its section. Nothing records or
+    # serializes it.
+    _lists_started_from_appended_items: Tuple[Tuple[Tuple[str, ...], str, str], ...] = (
+        PrivateAttr(default=())
+    )
     # How the files wrote each of those values and keys
     # (config_validator.EnvironmentRewrite). The record of this config, in a
     # results file and anything sent from it, keeps the reference as the file

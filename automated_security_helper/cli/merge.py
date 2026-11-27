@@ -2631,15 +2631,25 @@ def apply_operator_overrides(
     recorded no config is left without one, so
     :func:`_resolve_require_scanner_completion` still passes over it.
 
+    The lowest-indexed shard's record is the one :func:`merge_shard_results` takes
+    the merged report's config from, so its application is the merge's own
+    configuration and the one that names a ``+=`` with no default to add to
+    (``warn_unread_appends``). Another shard's record is not the configuration the
+    merge runs with, and a list it lacks can be one the merged config holds, so its
+    application says nothing.
+
     Raises:
         ASHConfigValidationError: If an override cannot be applied.
     """
     if not config_overrides:
         return
+    merged_from = _in_index_order(loaded)[0][1] if loaded else None
     for _, results in loaded:
         if results.ash_config is not None:
             results.ash_config = apply_config_overrides(
-                results.ash_config, list(config_overrides)
+                results.ash_config,
+                list(config_overrides),
+                warn_unread_appends=results is merged_from,
             )
 
 
@@ -3405,7 +3415,12 @@ def merge_command(
             loaded, require_scanner_completion=require_completion
         )
         if merged.ash_config is None:
-            merged.ash_config = apply_config_overrides(AshConfig(), overrides)
+            # The merge's own configuration when no shard recorded one, so it names
+            # an append with no default to add to, as the lowest-indexed shard's
+            # application does; merge_shard_results refuses such a shard today.
+            merged.ash_config = apply_config_overrides(
+                AshConfig(), overrides, warn_unread_appends=True
+            )
         warn_on_ignored_operator_verdict_settings(
             trusted_config, merged.ash_config, cli_verdict
         )
