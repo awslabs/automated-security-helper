@@ -39,6 +39,7 @@ from hypothesis import strategies as st
 from automated_security_helper.utils import finding_clusters as module
 from tests.unit.models._flat_vulnerability_helpers import flat_with_severity
 from tests.unit.utils import finding_clusters_reference as reference
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = pytest.mark.unit
 
@@ -484,7 +485,7 @@ def test_importing_the_module_does_not_load_polars():
         "print('polars' in sys.modules)"
     )
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", probe],
+        [sys.executable, "-I", "-B", "-c", importing_this_checkout(probe)],
         capture_output=True,
         text=True,
         check=True,
