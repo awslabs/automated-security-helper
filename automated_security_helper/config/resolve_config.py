@@ -791,9 +791,15 @@ def _removed_from_a_list(
         return resolved_keys, parsed_value, REMOVE
     untyped = _is_in_an_untyped_plugin_section(resolved_keys)
     if held is None and untyped:
-        row = _row_of_the_shipped_plugin_reading(
-            config_dict[resolved_keys[0]], resolved_keys
-        )
+        # The append makes the override's section before it asks which shipped
+        # plugin reads it, and a removal makes nothing it does not find: asked
+        # of the segment as the append's walk leaves it, the two choose alike.
+        # The copy holds the section; the document is written only below, when
+        # the row gives the option a default.
+        segment = config_dict[resolved_keys[0]]
+        if isinstance(segment, dict) and resolved_keys[1] not in segment:
+            segment = {**segment, resolved_keys[1]: {}}
+        row = _row_of_the_shipped_plugin_reading(segment, resolved_keys)
         default = None if row is None else row.get(tuple(resolved_keys[2:]))
         if default is not None:
             # Copied, as the append copies the table's.
