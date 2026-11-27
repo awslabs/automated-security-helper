@@ -705,12 +705,6 @@ def is_json_file(path: Path) -> bool:
     return Path(path).name.lower().endswith(".json")
 
 
-def is_in_ash_directory(path: Path) -> bool:
-    """Whether a config at `path` is in a ``.ash/`` directory, which the canonical
-    file is not: it belongs to the root above ``.ash/``."""
-    return Path(path).parent.name == ".ash"
-
-
 #: Windows' ERROR_CANT_RESOLVE_FILENAME: what a symbolic link that leads back to
 #: itself raises there, in place of the ELOOP a POSIX kernel gives.
 _WINERROR_CANT_RESOLVE_FILENAME = 1921
@@ -1380,11 +1374,19 @@ class ConfigSource:
     read discovery makes itself (the pyproject read) compares the identity while
     the inode is still in use; a read the caller makes later compares a
     (device, inode) pair that a recycled inode number could match.
+
+    ``in_ash_subdirectory`` says whether discovery found the file in the ``.ash/``
+    subdirectory of the directory it searched, rather than in that directory
+    itself. Such a file belongs to the directory above ``.ash/``, and its canonical
+    file is there (``canonical_path_for``). Discovery sets it from the candidate
+    that matched, never from a directory's name, so a searched directory that is
+    itself named ``.ash`` keeps its own files.
     """
 
     path: Path
     kind: str
     identity: Optional[FileIdentity] = None
+    in_ash_subdirectory: bool = False
 
     @property
     def label(self) -> str:
@@ -1935,9 +1937,18 @@ def _existing_candidates(
     if _name_exists(canonical):
         candidates.append(ConfigSource(canonical, SOURCE_KIND_CANONICAL))
     for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in (search_dir / name, dot_ash / name):
+        for candidate, in_ash_subdirectory in (
+            (search_dir / name, False),
+            (dot_ash / name, True),
+        ):
             if candidate != canonical and _name_exists(candidate):
-                candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
+                candidates.append(
+                    ConfigSource(
+                        candidate,
+                        SOURCE_KIND_DEDICATED,
+                        in_ash_subdirectory=in_ash_subdirectory,
+                    )
+                )
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
         if _name_exists(candidate):
@@ -2101,21 +2112,24 @@ def _is_a_legacy_location(source: ConfigSource) -> bool:
 def canonical_path_for(source: ConfigSource) -> Path:
     """The canonical config file of the scan root ``source`` was found in.
 
-    A file in ``.ash/`` belongs to the root above ``.ash/``; every other source
-    was found at the root itself.
+    A file discovery found in the ``.ash/`` subdirectory
+    (``ConfigSource.in_ash_subdirectory``) belongs to the root above ``.ash/``;
+    every other source was found at the root itself, a root that is itself named
+    ``.ash`` included.
     """
     parent = source.path.parent
-    root = parent.parent if is_in_ash_directory(source.path) else parent
+    root = parent.parent if source.in_ash_subdirectory else parent
     return root / ASH_CANONICAL_CONFIG_FILE_NAME
 
 
-def legacy_move_caveats(path: Path, subject: str) -> List[str]:
-    """What else a config at `path` needs, beyond a new name, to be read as the
+def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
+    """What else the config ``source`` needs, beyond a new name, to be read as the
     canonical file the way it is read now. Each is one sentence without its final
     period; `subject` names the file in it, as "this file" or as its label.
 
-    The canonical file is read as YAML whatever the file was, and a file in
-    ``.ash/`` moves to the root above it:
+    The canonical file is read as YAML whatever the file was, and a file discovery
+    found in ``.ash/`` (``ConfigSource.in_ash_subdirectory``) moves to the root
+    above it:
 
     * a relative ``extends`` path is read from the directory of the file that
       names it, so one in a file that leaves ``.ash/`` must be rewritten;
@@ -2123,28 +2137,31 @@ def legacy_move_caveats(path: Path, subject: str) -> List[str]:
       only spaces between tokens, so it refuses a tab anywhere in the file; a
       tab inside a JSON string is refused by JSON itself, so every tab of a JSON
       file that loads is between tokens;
-    * a TOML string that starts with ``${`` is a reference to the environment,
-      and a YAML value is one only when it is written without quotes or is tagged
-      ``!ENV``.
+    * a TOML string that starts with ``${`` is a reference to the environment. In
+      YAML a quoted value is one only when it is tagged ``!ENV``, and an unquoted
+      value ends at a space followed by ``#`` and is refused when it holds a ``:``
+      followed by a space or sits inside ``[...]`` or ``{...}``; the value tagged
+      ``!ENV`` with the TOML string's quotes kept is read as TOML reads it.
 
     A ``pyproject.toml`` table is edited where it is and has none.
     """
     caveats: List[str] = []
-    if is_in_ash_directory(path):
+    if source.in_ash_subdirectory:
         caveats.append(
             "A relative extends path is read from the file's own directory, so "
             f"rewrite any in {subject} for the scan root before you move it"
         )
-    if is_json_file(path):
+    if is_json_file(source.path):
         caveats.append(
             f"Replace each tab character in {subject} with spaces before you move "
             f"it: {ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, which refuses "
             "a tab (the parse error gives the tab's line and column)"
         )
-    if is_toml_file(path) and not is_pyproject(path):
+    if is_toml_file(source.path) and not is_pyproject(source.path):
         caveats.append(
-            "Write a value that starts with ${ without quotes in YAML (or tag it "
-            "!ENV), or it is read as literal text, not from the environment"
+            f"In the YAML, put !ENV in front of each value from {subject} that "
+            "starts with ${ and keep its quotes: a quoted value without the tag "
+            "is read as literal text, not from the environment"
         )
     return caveats
 
@@ -2164,7 +2181,7 @@ def _legacy_location_warning(source: ConfigSource) -> str:
     else:
         remedy = f"move this file to {canonical}"
     caveats = "".join(
-        f" {caveat}." for caveat in legacy_move_caveats(source.path, "this file")
+        f" {caveat}." for caveat in legacy_move_caveats(source, "this file")
     )
     return (
         f"ASH is reading its configuration from {source.label}, a deprecated "

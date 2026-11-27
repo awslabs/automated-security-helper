@@ -905,7 +905,7 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
                 "new file somewhere else"
             )
         # What else the file needs to be read from the target as it is read now.
-        caveats = legacy_move_caveats(selected.path, selected.label)
+        caveats = legacy_move_caveats(selected, selected.label)
         advice = ". ".join([advice, *caveats])
     return (
         f"ASH already reads its configuration from {selected.label}, and "
