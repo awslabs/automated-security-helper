@@ -415,6 +415,9 @@
   scanner's results directory instead of below checkov's working directory, the
   filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
+- A saved image archive whose `manifest.json` or `index.json` is a link, and a saved
+  image or OCI layout whose record is JSON nested too deeply to parse, now name no digest
+  instead of raising; their ids key on the payload path.
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.
