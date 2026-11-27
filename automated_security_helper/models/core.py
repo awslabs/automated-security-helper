@@ -30,8 +30,11 @@ from pydantic import (
 )
 from datetime import datetime, date
 
-from automated_security_helper.config.spellings import check_spellings, renamed_field
 from automated_security_helper.models.frame_model import RankEncoded
+from automated_security_helper.models.spelling_table import (
+    check_spellings,
+    renamed_field,
+)
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     ignore_path_pattern,
@@ -50,19 +53,20 @@ if TYPE_CHECKING:
 
 
 #: The model the spelling table's row for ``expires`` names, by its dotted path
-#: (config/spellings.py): the table cannot name the class, since this module
+#: (models/spelling_table.py): the table cannot name the class, since this module
 #: imports it to declare the field.
 _ENTRY_MODEL = "automated_security_helper.models.core.IgnorePathWithReason"
 
 #: What an entry setting both expiration spellings to different values records
 #: under TOLERATE_STORED_CONFIG (IgnorePathWithReason._one_expiration_spelling).
-#: The table builds the same text for the row (``spellings.disagreement_note``).
+#: The table builds the same text for the row
+#: (``spelling_table.disagreement_note``).
 BOTH_EXPIRATION_SPELLINGS_NOTE = "both expiration spellings, disagreeing"
 
 #: The deprecation a config read under the ``expiration`` spelling gets.
 #: ``expires`` is the canonical spelling; ``expiration`` is the accepted
 #: alternative until ASH v4 removes it. The table builds the same text for the
-#: row (``spellings.deprecation_message``), and a test pins the two equal.
+#: row (``spelling_table.deprecation_message``), and a test pins the two equal.
 EXPIRATION_SPELLING_DEPRECATION = (
     "The 'expiration' key is a deprecated spelling of 'expires' and will be "
     "removed in ASH v4; write 'expires'."
@@ -281,7 +285,7 @@ class IgnorePathWithReason(RedactedSection):
             # "expires" is the canonical spelling (the one written, stored and
             # documented); "expiration", the field's earlier name, is accepted
             # as a deprecated alias until ASH v4 removes it. The table in
-            # config/spellings.py holds the old spelling and the release, and
+            # models/spelling_table.py holds the old spelling and the release, and
             # renamed_field reads it from there: the name itself is the first
             # choice, so no populate_by_name is needed.
             description=(
@@ -331,7 +335,7 @@ class IgnorePathWithReason(RedactedSection):
 
         Reading the ``expiration`` spelling at all is deprecated: ``expires`` is
         canonical and the alias is removed in ASH v4, a release the table in
-        ``config/spellings.py`` holds. The rule is that table's
+        ``models/spelling_table.py`` holds. The rule is that table's
         (``check_spellings``), shared with the loader's fold of each file, which
         reads the same row.
         """

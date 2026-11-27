@@ -71,6 +71,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigUnparsedError,
 )
+from automated_security_helper.models import spelling_table
 from automated_security_helper.models.core import (
     IGNORE_PATH_LISTS,
     AshSuppression,
@@ -132,8 +133,8 @@ class LintCategory(str, Enum):
     SUPPRESSION_MULTILINE_REASON = "suppression-multiline-reason"
     SUPPRESSION_SYMBOL = "suppression-symbol"
     # An entry written with a deprecated spelling of a renamed field, a row of
-    # the table in spellings.py (``expiration`` for ``expires``); the alias still
-    # loads until the release the row names.
+    # the table in models/spelling_table.py (``expiration`` for ``expires``); the
+    # alias still loads until the release the row names.
     DEPRECATED_SPELLING = "deprecated-spelling"
     IGNORE_PATH_ISSUE = "ignore-path-issue"
     LEGACY_NAME_VARIANT = "legacy-name-variant"
@@ -2034,9 +2035,9 @@ class ConfigLinter:
                 )
 
             # Check: a deprecated spelling of a renamed key (the table in
-            # spellings.py: `expiration` for `expires`). The alias still loads
-            # until the release its row names; the message names only the key,
-            # never the file's value.
+            # models/spelling_table.py: `expiration` for `expires`). The alias
+            # still loads until the release its row names; the message names only
+            # the key, never the file's value.
             result.issues.extend(
                 cls._deprecated_spelling_issues(
                     AshSuppression,
@@ -2228,7 +2229,7 @@ class ConfigLinter:
         (a key read from the environment by its reference), and its issue is the
         walks' own: INFO, not fixable.
         """
-        for row in spellings.ROWS:
+        for row in spelling_table.ROWS:
             model = spellings.row_model(row)
             if not issubclass(model, IgnorePathWithReason):
                 continue
@@ -3089,7 +3090,7 @@ class ConfigLinter:
         one of the two keys out. A message names the keys and never a value.
         """
         references = result.file_references
-        for row in spellings.ROWS:
+        for row in spelling_table.ROWS:
             model = spellings.row_model(row)
             if issubclass(model, IgnorePathWithReason):
                 continue
@@ -3165,7 +3166,7 @@ class ConfigLinter:
         which the lint reports as a conflict, since a rename would drop one of
         the two.
         """
-        for row in spellings.ROWS:
+        for row in spelling_table.ROWS:
             model = spellings.row_model(row)
             if issubclass(model, IgnorePathWithReason):
                 continue
@@ -3214,9 +3215,9 @@ class ConfigLinter:
         environment is ``<value>``. The canonical form it is compared with is
         the schema's own name, and is named as it is.
 
-        An old spelling of a renamed key (a row of the table in ``spellings.py``)
-        is reported too, at every place the table puts its model, the root
-        mapping included (``_check_table_spellings``).
+        An old spelling of a renamed key (a row of the table in
+        ``models/spelling_table.py``) is reported too, at every place the table
+        puts its model, the root mapping included (``_check_table_spellings``).
         """
         # Lazy import to avoid pulling the full config-segment graph on
         # module import.
@@ -3404,8 +3405,8 @@ class ConfigLinter:
         """Rename a legacy name to its canonical form.
 
         An issue about an old spelling of a renamed key (a row of the table in
-        ``spellings.py``) is found by the walk that raised it, at any place the
-        table puts the key's model, the root mapping included
+        ``models/spelling_table.py``) is found by the walk that raised it, at any
+        place the table puts the key's model, the root mapping included
         (``_rename_old_spelling``). Any other issue is a section's snake/kebab
         variant: ``issue.path`` is ``"<segment>.<legacy-key>"``, and the
         corresponding canonical form is the kebab↔snake swap of

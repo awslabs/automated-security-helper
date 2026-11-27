@@ -278,6 +278,7 @@ from automated_security_helper.config.patch_ops import (
     VALUE_WRITING_OPS,
 )
 from automated_security_helper.config import spellings
+from automated_security_helper.models import spelling_table
 from automated_security_helper.config.plugin_section_names import (
     PLUGIN_SEGMENT_KEYS,
     AmbiguousPluginSpellings,
@@ -535,8 +536,8 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
     because every alias declared anywhere under `AshConfig` is its field name
     with '_' replaced by '-'; that held for 9 of 9 aliases across 75 models when
     this was written, walking `model_fields` from `AshConfig` down. An old
-    spelling of a renamed key (the table in ``config/spellings.py``) is not a
-    twin of its field's name, and the table is the only place it is named: a
+    spelling of a renamed key (the table in ``models/spelling_table.py``) is not
+    a twin of its field's name, and the table is the only place it is named: a
     reader that pairs a field with the keys it is written under reads
     ``spellings.field_spellings``, which holds both (``_declared_top_level_fields``).
 
@@ -559,8 +560,8 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
 
 _TOP_LEVEL_FIELDS_BY_FOLD: "Dict[str, Tuple[str, FrozenSet[str]]] | None" = None
 
-#: The spelling table (``spellings.ROWS``) the map above was built from: a table
-#: that is replaced is read again.
+#: The spelling table (``spelling_table.ROWS``) the map above was built from: a
+#: table that is replaced is read again.
 _TOP_LEVEL_FIELDS_ROWS: "Tuple[spellings.SpellingRow, ...] | None" = None
 
 
@@ -572,7 +573,7 @@ def _declared_top_level_fields() -> Dict[str, Tuple[str, FrozenSet[str]]]:
     as twins). Built once for one table; read from the model's fields, so a
     field added later is covered without being listed."""
     global _TOP_LEVEL_FIELDS_BY_FOLD, _TOP_LEVEL_FIELDS_ROWS
-    rows = spellings.ROWS
+    rows = spelling_table.ROWS
     if _TOP_LEVEL_FIELDS_BY_FOLD is None or _TOP_LEVEL_FIELDS_ROWS is not rows:
         # Imported here: this module is imported while ash_config loads.
         from automated_security_helper.config.ash_config import AshConfig
@@ -3042,7 +3043,7 @@ class ResolvedConfigDocument:
         default_factory=dict
     )
     #: One line for each file of ``chain`` and each old spelling of a renamed key
-    #: (the table in ``config/spellings.py``) it writes, naming the file: the
+    #: (the table in ``models/spelling_table.py``) it writes, naming the file: the
     #: deprecation, said once wherever in the file the spelling is written, a
     #: ``patch`` pointer or an operation's value included. A caller that builds a
     #: configuration from the document adds them to its resolution warnings
@@ -5060,7 +5061,7 @@ def _resolve(
     # before the spelling fold below.
     state.documents.setdefault(real, copy.deepcopy(data))
 
-    # Each old spelling of a renamed key (the table in config/spellings.py) the
+    # Each old spelling of a renamed key (the table in models/spelling_table.py) the
     # file writes, as a key, in a `patch` pointer or in an operation's value, is
     # the canonical one from here on: before the references are paired and
     # before it is merged or patched, so a base and the file that extends it
