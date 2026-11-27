@@ -715,6 +715,151 @@ def test_a_bare_name_matches_as_written_and_a_path_matches_normalized(row) -> No
 
 
 # ---------------------------------------------------------------------------
+# A bare name and the entry's own env. A client starts the server with the entry's
+# ``env`` and looks a bare command up on the PATH that env carries (on Windows with
+# the PATHEXT it carries), so an entry that sets either one chooses the program the
+# listed name runs. The name then allows nothing for that entry, and its command is
+# refused like any command no listed entry allows, with the same finding and text.
+# Windows reads variable names without case, so ``Path`` is ``PATH`` here too, and a
+# name that only contains PATH (``NODE_PATH``) is another variable. A command that
+# has a path is judged by the path entries as before. The entry model has no
+# ``cwd`` field, so the rule reads no working directory.
+# ---------------------------------------------------------------------------
+
+#: An env that sets the PATH a client looks a bare command up on.
+PATH_SET = {"PATH": "/tmp/shims:/usr/bin"}
+
+LISTED_COMMANDS_WITH_ENV = [
+    ListedCommand("path-in-env", stdio("npx", env=PATH_SET), BARE_NAME, False),
+    ListedCommand(
+        "pathext-in-env", stdio("npx", env={"PATHEXT": ".CMD;.EXE"}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "path-spelled-Path", stdio("npx", env={"Path": r"C:\shims"}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "path-in-lower-case", stdio("npx", env={"path": "/tmp/shims"}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "pathext-spelled-PathExt",
+        stdio("npx", env={"PathExt": ".CMD"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "path-beside-other-names",
+        stdio("npx", env={"LOG_LEVEL": "debug", "PATH": "/tmp/shims"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "path-and-pathext",
+        stdio("npx", env={"PATH": "/tmp/shims", "PATHEXT": ".CMD"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand("an-empty-value", stdio("npx", env={"PATH": ""}), BARE_NAME, False),
+    ListedCommand(
+        "a-reference-to-the-inherited-value",
+        stdio("npx", env={"PATH": "${PATH}"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "a-pinned-package",
+        stdio("npx", "-y", "pkg@1.2.3", env=PATH_SET),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "a-path-entry-listed-beside-the-name",
+        stdio("npx", env=PATH_SET),
+        ["npx", "/opt/mcp"],
+        False,
+    ),
+    ListedCommand(
+        "a-second-bare-name", stdio("uvx", env=PATH_SET), ["npx", "uvx"], False
+    ),
+    ListedCommand("no-env", stdio("npx"), BARE_NAME, True),
+    ListedCommand("an-empty-env", stdio("npx", env={}), BARE_NAME, True),
+    ListedCommand(
+        "env-without-either-name",
+        stdio("npx", env={"NODE_ENV": "production", "LOG_LEVEL": "debug"}),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand(
+        "names-that-only-contain-path",
+        stdio("npx", env={"NODE_PATH": "/x", "PYTHONPATH": "/y", "MANPATH": "/z"}),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand(
+        "a-path-command-under-a-path-entry",
+        stdio("/opt/mcp/server", env=PATH_SET),
+        ["npx", "/opt/mcp"],
+        True,
+    ),
+    ListedCommand(
+        "a-path-command-outside-every-entry",
+        stdio("/usr/bin/node", env=PATH_SET),
+        ["npx", "/opt/mcp"],
+        False,
+    ),
+]
+
+
+@pytest.mark.parametrize("row", LISTED_COMMANDS_WITH_ENV, ids=lambda row: row.name)
+def test_a_bare_name_allows_its_command_only_while_env_leaves_the_lookup_alone(
+    row,
+) -> None:
+    """A listed bare name passes its command unless the entry's env sets PATH or PATHEXT.
+
+    An env that sets neither name, an empty env and a missing one leave the name
+    allowing its command. A key that is PATH or PATHEXT in any letter case takes the
+    allowance away, whatever its value is and whatever else the list holds. A name
+    that only contains PATH leaves it alone, and a command that has a path is judged
+    by the path entries whatever its env holds.
+    """
+    found = rules(row.server, allowed_command_prefixes=row.listed)
+    assert found == ([] if row.allowed else [RULE_COMMAND_PREFIX])
+
+
+def test_an_overridden_bare_name_is_refused_like_an_unlisted_command() -> None:
+    """The refusal has the rule, text and pointer it has for a command no entry lists.
+
+    The same entry is checked under a list that names its command and under one that
+    names another program. Both give the one finding, so the text does not change for
+    this case.
+    """
+    text = json.dumps({"mcpServers": {"s": stdio("npx", env=PATH_SET)}}, indent=2)
+    (entry,) = parse_mcp_config_text(text, ".mcp.json")
+    unlisted = evaluate_entry(entry, options(allowed_command_prefixes=["/opt/mcp"]))
+    assert [found.rule_id for found in unlisted] == [RULE_COMMAND_PREFIX]
+    named = evaluate_entry(entry, options(allowed_command_prefixes=BARE_NAME))
+    assert named == unlisted
+
+
+def test_an_empty_list_checks_nothing_whatever_env_sets() -> None:
+    """With no list the check is off, so an env that sets PATH adds no finding."""
+    assert rules(stdio("npx", env=PATH_SET), allowed_command_prefixes=[]) == []
+
+
+def test_an_env_that_sets_the_lookup_adds_the_prefix_finding_and_no_other() -> None:
+    """Beside every default check, the refusal is the one finding the env adds.
+
+    A pinned `npx` with a PATH in its env is quiet under the defaults. A list that
+    names `npx` then adds the command-prefix finding at the command and moves nothing
+    else.
+    """
+    server = stdio("npx", "-y", "pkg@1.2.3", env=PATH_SET)
+    assert findings(".mcp.json", server) == []
+    assert findings(".mcp.json", server, allowed_command_prefixes=BARE_NAME) == [
+        (RULE_COMMAND_PREFIX, "/mcpServers/s/command")
+    ]
+
+
+# ---------------------------------------------------------------------------
 # flag_env_secrets
 # ---------------------------------------------------------------------------
 
