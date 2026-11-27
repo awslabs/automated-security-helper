@@ -1993,13 +1993,19 @@ def _model_of_resolved_document(document):
     with no overrides, which is what :func:`_load_config_file` reaches through
     the load), run on a document already resolved, so a caller
     that parsed the file builds its model from that read and does not read the
-    file again. Refusals are swallowed as :func:`_load_config_file` swallows
-    them: the scan inside words them.
+    file again. The deprecation lines the document's fold said join the model's
+    resolution warnings, as the load adds them. Refusals are swallowed as
+    :func:`_load_config_file` swallows them: the scan inside words them.
     """
-    from automated_security_helper.config.resolve_config import build_config
+    from automated_security_helper.config.resolve_config import (
+        _add_spelling_lines,
+        build_config,
+    )
 
     try:
-        return build_config(document.data)
+        config = build_config(document.data)
+        _add_spelling_lines(config, document.spelling_warnings)
+        return config
     except Exception:
         return None
 
@@ -2028,12 +2034,15 @@ def _model_or_refusal_of_resolved_document(
     )
     from automated_security_helper.config.resolve_config import (
         ConfigFileRefused,
+        _add_spelling_lines,
         build_config,
         lint_hint,
     )
 
     try:
-        return build_config(document.data), None
+        config = build_config(document.data)
+        _add_spelling_lines(config, document.spelling_warnings)
+        return config, None
     except ValidationError as e:
         # The wording of resolve_config.load_config_file's file refusal, from
         # the same pieces, so the gate's refusal and a local scan's read alike.

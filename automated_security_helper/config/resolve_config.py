@@ -1091,28 +1091,15 @@ def _entry_warn_context(
     return context, warned
 
 
-def build_config(
-    data: Any,
-    config_overrides: Optional[List[str]] = None,
-    spelling_warnings: Sequence[str] = (),
-) -> AshConfig:
+def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> AshConfig:
     """The AshConfig a scan builds from a resolved document.
 
     Strict validation, then ``--config-overrides``. Raises pydantic's
     ValidationError for the document and ASHConfigValidationError for an
     override; see ``load_config_file``, which every config file goes through.
-
-    ``spelling_warnings`` are the lines the document's fold said
-    (``ResolvedConfigDocument.spelling_warnings``): the deprecation of each old
-    key spelling its files wrote, naming the file. They join the config's
-    resolution warnings whether or not unknown entry keys are fatal, because the
-    entries the model validates carry the canonical spelling by then.
     """
     context, warned = _entry_warn_context(data, config_overrides)
     config = AshConfig.model_validate(data, strict=True, context=context)
-    if spelling_warnings:
-        # Before the overrides are applied, like the entry warnings below.
-        config._resolution_warnings.extend(spelling_warnings)
     if warned:
         # Logged where every other resolution warning is (the orchestrator
         # reads _resolution_warnings). Extended before the overrides are
@@ -1121,6 +1108,21 @@ def build_config(
     if config_overrides:
         config = apply_config_overrides(config, config_overrides)
     return config
+
+
+def _add_spelling_lines(config: AshConfig, lines: Sequence[str]) -> None:
+    """Add to ``config``'s resolution warnings each of ``lines`` it does not hold:
+    the deprecations a document's fold said
+    (``ResolvedConfigDocument.spelling_warnings``), each naming the file that
+    wrote the old spelling.
+
+    The entries the model validates carry the canonical spelling by then, so the
+    model says nothing about an old one. A line joins the warnings whether or not
+    unknown entry keys are fatal, and is said once whichever path delivers it.
+    """
+    for line in lines:
+        if line not in config._resolution_warnings:
+            config._resolution_warnings.append(line)
 
 
 class ConfigFileRefused(ASHConfigValidationError):
@@ -1578,9 +1580,9 @@ def load_config_file(
         # error is still raised rather than replaced by the overlay's content.
         data = _layered_over(data, overlay)
     try:
-        return document, build_config(
-            data, config_overrides, spelling_warnings=document.spelling_warnings
-        )
+        config = build_config(data, config_overrides)
+        _add_spelling_lines(config, document.spelling_warnings)
+        return document, config
     except ValidationError as e:
         if _has_a_client_file(document):
             # A chain that holds a file an MCP client supplied, by any name on
@@ -5807,9 +5809,6 @@ def validate_config_document(
             ) from None
         refused = _client_validation_error(config_path, e, why=unquoted)
     else:
-        # The fold's lines first, as build_config adds them: the entries the
-        # model validated carry the canonical spelling by now.
-        config._resolution_warnings.extend(document.spelling_warnings)
         if warned:
             config._resolution_warnings.extend(warned)
         return config
@@ -5843,7 +5842,9 @@ def _load_single_config_file(
         refuse_env=refuse_env,
         anchor_relative_paths=anchor_relative_paths,
     )
-    return validate_config_document(document, config_path)
+    config = validate_config_document(document, config_path)
+    _add_spelling_lines(config, document.spelling_warnings)
+    return config
 
 
 def split_config_override(override: str) -> Tuple[str, str]:
