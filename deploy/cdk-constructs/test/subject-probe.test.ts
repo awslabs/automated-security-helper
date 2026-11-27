@@ -50,7 +50,8 @@ import { ASHInstallMode, ASHSeverityThreshold } from '../src';
  *     click gives (exit 5, "Got unexpected extra argument (fs)" and "No such command
  *     'results'") instead of showing help;
  *   - `crashing`: both probes die with a traceback and exit 1;
- *   - `unexplained-exit`: both probes exit 5 with an error that names neither word.
+ *   - `unexplained-exit`: both probes exit 5 with an error that does not name `fs` or
+ *     `results`.
  * The help it prints runs to thousands of lines, so a probe that stopped reading
  * early would leave the stand-in writing into a closed pipe. Every other call is
  * recorded, one line per call, and exits `ASH_STUB_EXIT`.
@@ -359,9 +360,9 @@ describe('the generated buildspecs name the subject on an ASH that has one', () 
 
 describe('a probe that does not answer is not read as an older ASH', () => {
   // The older spelling is for an ASH that says it lacks the command. A probe that
-  // crashed, or exited with an error that names neither word, says nothing about the
-  // ASH. Read as an older one, it would run commands that an ASH 3.9 prints
-  // deprecation lines for and drops in v4.0, and would do so without a word.
+  // crashed, or exited with an error that does not name `fs` or `results`, says
+  // nothing about the ASH. Read as an older one, it would run commands that an ASH
+  // 3.9 prints deprecation lines for and drops in v4.0, and would do so without a word.
   const commands: [string, string, string][] = [
     ['the unsharded scan', UNSHARDED, 'ash scan fs'],
     ['a shard', SHARD, 'ash scan fs'],
