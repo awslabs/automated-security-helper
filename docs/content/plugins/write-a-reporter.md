@@ -301,4 +301,4 @@ A repository that names an endpoint in its `.ash.yaml` then changes nothing. A r
 
 ## Workspace scans
 
-In a workspace scan (`ash scan --workspace`), ASH asks each reporter what to do with several projects through its `workspace_behaviour` class variable. The default, `ReporterWorkspaceBehaviour.PER_PROJECT`, writes the report once per project, under each project's own output directory, and no workspace-level file. Set `MERGED` only if your reporter handles results with one SARIF run per project. [Scale to large repositories](../how-to/scale-large-repos.md) covers workspace scans.
+In a workspace scan (`ash scan workspace`), ASH asks each reporter what to do with several projects through its `workspace_behaviour` class variable. The default, `ReporterWorkspaceBehaviour.PER_PROJECT`, writes the report once per project, under each project's own output directory, and no workspace-level file. Set `MERGED` only if your reporter handles results with one SARIF run per project. [Scale to large repositories](../how-to/scale-large-repos.md) covers workspace scans.

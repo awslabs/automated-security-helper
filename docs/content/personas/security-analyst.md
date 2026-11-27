@@ -68,7 +68,7 @@ Two built-in combiners produce one result from several scans:
   runners, recomputing the verdict and every report over all of them, and
   refuses mismatched shards rather than merging a hole into the results
   ([Split a scan across runners](../how-to/scale-large-repos.md#sharding)).
-- `--workspace` scans the folders of a `.code-workspace` file as separate
+- `ash scan workspace` scans the folders of a `.code-workspace` file as separate
   projects in one run: per-project reports for the systems that want one
   repository per report, plus combined reports and a combined results file
   whose `workspace` member lists each project's status and counts

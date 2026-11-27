@@ -147,7 +147,7 @@ mount its output directory through a link, whatever the sandbox mode. Pass --out
 a directory that is not a link, or replace the link with a directory.
 ```
 
-In an `ash --workspace` scan, a link at `projects` or `.workspace-spool` stops the whole
+In an `ash scan workspace` scan, a link at `projects` or `.workspace-spool` stops the whole
 run this way before any project starts. A link at `projects/<project>` fails only that
 project, logged as `Project '<project>' was not scanned:` and the same refusal. The other
 projects still run, and the run exits 1, or 2 when another project has actionable

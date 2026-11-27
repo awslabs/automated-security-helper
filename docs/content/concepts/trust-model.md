@@ -48,7 +48,7 @@ mkdir -p ../ws/api
 printf 'global_settings:\n  severity_threshold: LOW\n' > ../ws/api/.ash.yaml
 printf '{"folders": [{"path": "api"}]}\n' > ../ws/project.code-workspace
 printf 'global_settings:\n  severity_threshold: HIGH\n' > ../operator.yaml
-ash scan --workspace ../ws/project.code-workspace --config ../operator.yaml --dry-run > ../plan.txt
+ash scan workspace ../ws/project.code-workspace --config ../operator.yaml --dry-run > ../plan.txt
 grep -F '(the fields it sets are final)' ../plan.txt
 grep -E 'threshold: +HIGH' ../plan.txt
 ```
@@ -139,7 +139,7 @@ The mark shows up in:
 
 The GitHub code scanning SARIF leaves suppressed findings out by default, and the Markdown and text summaries show only counts, so the mark is not visible there. Syft's SBOM components get an `ash:clientSuppliedExclusion` property instead. Each exclusion taken out of a scanner's options is also logged as a warning and recorded in the results as a `config_warning` validation checkpoint.
 
-ASH marks entries only in MCP-client files and, in an `ash --workspace` scan, in a workspace policy file under the MCP workspace root, whose entries are also checked against the runtime-override policy as each project gets them. The MCP workspace tools do not use such a policy file at all ([Workspace scans over MCP](../how-to/scale-large-repos.md#workspaces-mcp)). Only ASH sets the mark: a `client_supplied` value written in a config file, or set with `--config-overrides`, is ignored. In a CLI scan, a repository's own suppressions look the same as yours.
+ASH marks entries only in MCP-client files and, in an `ash scan workspace` scan, in a workspace policy file under the MCP workspace root, whose entries are also checked against the runtime-override policy as each project gets them. The MCP workspace tools do not use such a policy file at all ([Workspace scans over MCP](../how-to/scale-large-repos.md#workspaces-mcp)). Only ASH sets the mark: a `client_supplied` value written in a config file, or set with `--config-overrides`, is ignored. In a CLI scan, a repository's own suppressions look the same as yours.
 
 ## What the trust model does not protect against {#not-protected}
 

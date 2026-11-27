@@ -14409,8 +14409,8 @@ _LINKED_OUTPUT_SENTENCES = [
     (
         OUTPUT_FILES,
         (
-            "In an `ash --workspace` scan, a link at `projects` or `.workspace-spool` "
-            "stops the whole run this way before any project starts."
+            "In an `ash scan workspace` scan, a link at `projects` or "
+            "`.workspace-spool` stops the whole run this way before any project starts."
         ),
     ),
     (
