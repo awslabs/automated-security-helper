@@ -109,27 +109,59 @@ def test_root_value_options():
     )
 
 
+# A command under `results` or `container` is named by its words: the group takes none
+# of these options itself, so a wrapper hands them to the command the group's words
+# name. 4.0 removed the top-level report and merge, so these rows are where a wrapper's
+# -Config, -Verbose and the rest reach them now.
 EXPECTED_OPTION_SUBCOMMANDS = {
-    "--quiet": ("scan", "mcp", "container"),
-    "--no-color": ("scan", "mcp", "container"),
+    "--quiet": ("scan", "mcp", "container build"),
+    "--no-color": (
+        "scan",
+        "results report",
+        "results merge",
+        "mcp",
+        "container build",
+    ),
     "--progress": ("scan",),
     "--no-progress": ("scan",),
     "--show-summary": ("scan",),
     "--no-show-summary": ("scan",),
-    "--fail-on-findings": ("scan",),
-    "--no-fail-on-findings": ("scan",),
-    "--verbose": ("scan", "mcp", "container"),
-    "--debug": ("scan", "mcp", "container"),
-    "--offline": ("scan", "container"),
-    "--config": ("scan", "container"),
+    "--fail-on-findings": ("scan", "results merge"),
+    "--no-fail-on-findings": ("scan", "results merge"),
+    "--verbose": (
+        "scan",
+        "results report",
+        "results merge",
+        "mcp",
+        "container build",
+    ),
+    "--debug": ("scan", "results report", "results merge", "mcp", "container build"),
+    "--offline": ("scan", "container build"),
+    "--config": (
+        "scan",
+        "results report",
+        "results merge",
+        "results inspect findings",
+        "container build",
+    ),
     "--scanners": ("scan",),
     "--exclude-scanners": ("scan",),
-    "--ignore-suppressions": ("scan",),
+    "--ignore-suppressions": ("scan", "results merge"),
 }
 
 
 def test_which_subcommands_take_each_forwarded_option():
     assert dict(contract().option_subcommands) == EXPECTED_OPTION_SUBCOMMANDS
+
+
+def test_the_routed_groups_and_their_commands():
+    # Each group the options go through, with its own commands in the CLI's order:
+    # how far a wrapper reads a command's words (`results inspect findings`).
+    assert contract().routed_groups == (
+        ("results", ("report", "diff", "trend", "merge", "inspect")),
+        ("results inspect", ("sarif-fields", "findings")),
+        ("container", ("build",)),
+    )
 
 
 def test_the_forwarded_option_list_is_in_the_table_order():
@@ -224,3 +256,4 @@ def test_takers_names_an_unknown_option():
     with pytest.raises(KeyError):
         contract().takers("--not-an-option")
     assert contract().takers("--progress") == ("scan",)
+    assert "results report" in contract().takers("--config")

@@ -333,14 +333,16 @@ _COMMAND_POSITION = [
     pytest.param(["--config", "config"], True, id="a-config-file-named-config"),
     pytest.param(["-f", "merge"], True, id="a-short-option-value"),
     pytest.param(["-Pf", "plugin"], True, id="a-value-after-clustered-short-options"),
+    # 4.0 removed the top-level report, merge, inspect and build-image, so the words
+    # that name a command that is not a scan are `results ...` and `container build`.
     pytest.param(
-        ["-Pfplugin", "inspect"], False, id="a-value-attached-to-clustered-options"
+        ["-Pfplugin", "results"], False, id="a-value-attached-to-clustered-options"
     ),
-    pytest.param(["--config=config", "inspect"], False, id="an-attached-value"),
+    pytest.param(["--config=config", "results"], False, id="an-attached-value"),
     pytest.param(["scan"], True, id="scan"),
-    pytest.param(["report"], False, id="report-takes-none"),
-    pytest.param(["build-image"], False, id="build-image-takes-none"),
-    pytest.param(["--quiet", "merge"], False, id="a-command-after-a-flag"),
+    pytest.param(["results", "report"], False, id="results-report-takes-none"),
+    pytest.param(["container", "build"], False, id="container-build-takes-none"),
+    pytest.param(["--quiet", "results", "merge"], False, id="a-command-after-a-flag"),
     pytest.param(["scan", "--config", "inspect"], True, id="a-later-word-names-one"),
     pytest.param(["get-genai-guide"], False, id="get-genai-guide-takes-none"),
 ]
@@ -1861,7 +1863,7 @@ class TestThePowerShellEntrypoint:
         still runs, so the assertion is that no run call was recorded."""
         absent = str(tmp_path / "absent.yaml")
 
-        for words in (["report"], []):
+        for words in (["results", "report"], []):
             root = tmp_path / ("-".join(words) or "scan")
             result = _invoke_ash(
                 pwsh,

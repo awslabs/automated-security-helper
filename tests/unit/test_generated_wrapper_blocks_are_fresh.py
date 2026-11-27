@@ -72,8 +72,14 @@ def test_every_block_has_its_markers_in_its_file(generator):
         (
             "utils/ash_helpers.ps1",
             "ps1-option-subcommands",
-            "'--ignore-suppressions'  = 'scan'\n",
-            "'--ignore-suppressions'  = 'scan container'\n",
+            "'--ignore-suppressions'  = @('scan', 'results merge')\n",
+            "'--ignore-suppressions'  = @('scan', 'container build')\n",
+        ),
+        (
+            "utils/ash_helpers.ps1",
+            "ps1-routed-groups",
+            "'container'        = @('build')\n",
+            "'container'        = @('build', 'run')\n",
         ),
         (
             "utils/ash_helpers.ps1",
@@ -132,11 +138,12 @@ def test_regenerating_a_perturbed_copy_restores_the_committed_text(generator, tm
     root = _copy_of_the_wrappers(tmp_path, generator)
     path = root / "utils" / "ash_helpers.ps1"
     text = path.read_text(encoding="utf-8")
-    # The --offline row, named with its key: --config holds the same list.
-    anchor = "'--offline'              = 'scan container'\n"
+    # The --offline row, named with its key: another row may hold the same list.
+    anchor = "'--offline'              = @('scan', 'container build')\n"
     assert text.count(anchor) == 1, f"the perturbation's anchor is gone: {anchor!r}"
     path.write_text(
-        text.replace(anchor, "'--offline'              = 'scan'\n"), encoding="utf-8"
+        text.replace(anchor, "'--offline'              = @('scan')\n"),
+        encoding="utf-8",
     )
     assert generator.check(root)
 
@@ -174,9 +181,9 @@ def test_regenerating_keeps_each_files_own_line_endings(generator, tmp_path, end
     root = _copy_of_the_wrappers(tmp_path, generator)
     path = root / "utils" / "ash_helpers.ps1"
     text = path.read_text(encoding="utf-8")
-    anchor = "'--offline'              = 'scan container'\n"
+    anchor = "'--offline'              = @('scan', 'container build')\n"
     assert text.count(anchor) == 1, f"the perturbation's anchor is gone: {anchor!r}"
-    stale = text.replace(anchor, "'--offline'              = 'scan'\n").replace(
+    stale = text.replace(anchor, "'--offline'              = @('scan')\n").replace(
         "\n", ending
     )
     with path.open("w", encoding="utf-8", newline="") as handle:

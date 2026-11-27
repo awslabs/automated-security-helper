@@ -10,8 +10,9 @@ Usage:
 
 The PowerShell host wrapper exists for hosts with no Python, so it carries written-out
 copies of the ``ashx`` CLI's own surface: the subcommand names, the root options that
-take a value, which subcommands take the options the wrapper adds, the runner discovery
-order. This script computes those from the real typer app and container mode's
+take a value, which commands take the options the wrapper adds and the groups whose
+words name them, the runner discovery order. This script computes those from the real
+typer app and container mode's
 constants (``automated_security_helper/interactions/wrapper_contract.py``) and writes
 them between marker comments inside the wrapper, in its own syntax (v4 removed the
 ``./ash`` bash wrapper, which had blocks of its own, and its renderers with it)::
@@ -84,11 +85,23 @@ def ps_root_value_options(contract) -> list[str]:
 
 
 def ps_option_subcommands(contract) -> list[str]:
+    # The takers are a list each, since a command under a group is named by its words
+    # (`results report`), which a space-separated string could not hold.
     width = max(len(f"'{option}'") for option, _ in contract.option_subcommands) + 2
     lines = ["$ashOptionSubcommands = @{"]
     for option, takers in contract.option_subcommands:
         key = f"'{option}'"
-        lines.append(f"    {key:<{width}}= '{' '.join(takers)}'")
+        lines.append(f"    {key:<{width}}= {_ps_list(takers)}")
+    lines.append("}")
+    return lines
+
+
+def ps_routed_groups(contract) -> list[str]:
+    width = max(len(f"'{group}'") for group, _ in contract.routed_groups) + 2
+    lines = ["$ashRoutedGroups = @{"]
+    for group, commands in contract.routed_groups:
+        key = f"'{group}'"
+        lines.append(f"    {key:<{width}}= {_ps_list(commands)}")
     lines.append("}")
     return lines
 
@@ -140,6 +153,7 @@ BLOCKS: dict[str, list[tuple[str, Renderer]]] = {
         ("ps1-subcommands", ps_subcommands),
         ("ps1-root-value-options", ps_root_value_options),
         ("ps1-option-subcommands", ps_option_subcommands),
+        ("ps1-routed-groups", ps_routed_groups),
         ("ps1-runner-discovery", ps_runner_discovery),
         ("ps1-build-target-completer", ps_build_target_completer),
         ("ps1-exit-codes", ps_exit_codes),

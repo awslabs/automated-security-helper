@@ -5,8 +5,9 @@
 
 ``utils/ash_helpers.ps1`` (``Invoke-ASH``) exists for hosts with no Python, so it
 cannot ask the CLI anything at run time. It carries written-out tables of the CLI's own
-surface: the subcommand names, which root options take a value, which subcommands take
-the options the wrapper adds, the order in which OCI runners are looked for, the CI
+surface: the subcommand names, which root options take a value, which commands take
+the options the wrapper adds and the groups whose words name those commands
+(``results report``), the order in which OCI runners are looked for, the CI
 runner markers passed into the container, the image build targets, the image-name
 pattern and the refusal and usage-error exit codes. Those tables are the part of the
 wrapper that drifts when the CLI changes. Every field of the contract is rendered into
@@ -71,10 +72,14 @@ WRAPPER_FORWARDED_OPTIONS: tuple[str, ...] = (
     "--ignore-suppressions",
 )
 
-#: The subcommands that are groups handing the options typed before them to one of
-#: their commands (AshTyperGroup._options_for_subcommand), so `ashx --quiet container
-#: build` passes `--quiet` on to `build`: such a group takes what that command takes.
-OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
+#: The subcommands that are groups whose own commands take the options a wrapper adds.
+#: The group takes none of them itself (`ashx container --quiet build` is a usage
+#: error), so a wrapper puts them after the command the group's words name: `container
+#: build`, `results report`, `results inspect findings`. `ashx --quiet container build`
+#: hands the root's `--quiet` to `build` the same way (AshTyperGroup
+#: ._options_for_subcommand). Under the other groups (config, dependencies, plugin,
+#: suppress, express) the options a wrapper adds go to no command.
+OPTION_ROUTING_GROUPS: tuple[str, ...] = ("results", "container")
 
 
 def _options(command: Any) -> set[str]:
@@ -85,13 +90,39 @@ def _options(command: Any) -> set[str]:
     return found
 
 
-def _taken_options(name: str, command: Any) -> set[str]:
-    """The options the subcommand *name* takes when the wrapper hands it one: its own,
-    or for a group in OPTION_ROUTING_GROUPS those of the command the options go to."""
-    leaf = OPTION_ROUTING_GROUPS.get(name)
-    if leaf is not None:
-        return _options(command.commands[leaf])
-    return _options(command)
+def _commands_under(words: str, command: Any) -> list[tuple[str, Any]]:
+    """The command *words* names, or, for a group, every command under it (nested
+    groups included), each with the words that name it from the root, in CLI order."""
+    subcommands = getattr(command, "commands", None)
+    if not subcommands:
+        return [(words, command)]
+    return [
+        found
+        for name, subcommand in subcommands.items()
+        for found in _commands_under(f"{words} {name}", subcommand)
+    ]
+
+
+def _groups_under(words: str, command: Any) -> list[tuple[str, tuple[str, ...]]]:
+    """The group *words* names and each group under it, with the names of its own
+    commands, in CLI order: how far a command's words go (`results`, then `inspect`,
+    then `findings`)."""
+    subcommands = getattr(command, "commands", None)
+    if not subcommands:
+        return []
+    found = [(words, tuple(subcommands))]
+    for name, subcommand in subcommands.items():
+        found += _groups_under(f"{words} {name}", subcommand)
+    return found
+
+
+def _receivers(name: str, command: Any) -> list[tuple[str, Any]]:
+    """The commands a wrapper hands its options to under the subcommand *name*, each
+    with its words: *name* itself, or every command under a group in
+    OPTION_ROUTING_GROUPS."""
+    if name in OPTION_ROUTING_GROUPS:
+        return _commands_under(name, command)
+    return [(name, command)]
 
 
 @dataclass(frozen=True)
@@ -104,8 +135,13 @@ class WrapperContract:
     sandbox_subcommands: tuple[str, ...]
     #: The root options that take a value, long spellings then short, sorted.
     root_value_options: tuple[str, ...]
-    #: For each wrapper-forwarded option, the subcommands that declare it, in order.
+    #: For each wrapper-forwarded option, the commands that declare it, in order: a
+    #: subcommand by its name, a command under a group in OPTION_ROUTING_GROUPS by its
+    #: words (`results report`).
     option_subcommands: tuple[tuple[str, tuple[str, ...]], ...]
+    #: The groups in OPTION_ROUTING_GROUPS and the groups under them, each with the
+    #: names of its own commands, in the CLI's order.
+    routed_groups: tuple[tuple[str, tuple[str, ...]], ...]
     #: The order OCI runners are looked for when none is named.
     runner_order: tuple[str, ...]
     #: The image stages a wrapper accepts for its build-target parameter.
@@ -139,12 +175,15 @@ def contract() -> WrapperContract:
     commands = dict(root.commands)
     subcommands = tuple(commands)
 
+    receivers = [
+        receiver
+        for name, command in commands.items()
+        for receiver in _receivers(name, command)
+    ]
     forwarded = []
     for option in WRAPPER_FORWARDED_OPTIONS:
         takers = tuple(
-            name
-            for name, command in commands.items()
-            if option in _taken_options(name, command)
+            words for words, command in receivers if option in _options(command)
         )
         forwarded.append((option, takers))
 
@@ -164,6 +203,12 @@ def contract() -> WrapperContract:
         ),
         root_value_options=tuple(value_options),
         option_subcommands=tuple(forwarded),
+        routed_groups=tuple(
+            group
+            for name, command in commands.items()
+            if name in OPTION_ROUTING_GROUPS
+            for group in _groups_under(name, command)
+        ),
         runner_order=tuple(rac._OCI_RUNNER_CANDIDATES),
         build_targets=tuple(sorted(target.value for target in BuildTarget)),
         image_name_pattern=rac._IMAGE_NAME_PATTERN.pattern,

@@ -344,7 +344,8 @@ class AshTyperGroup(TyperGroup):
     subcommand. The root takes the scan's options so that a bare ``ash`` scans; with
     a subcommand, its callback returns without scanning, and the options were parsed
     and then dropped: ``ash --source-dir /elsewhere scan`` scanned the working
-    directory, and ``ash --output-dir out report`` read the default output directory.
+    directory, and ``ash --output-dir out results report`` read the default output
+    directory. Under a group the options go to the command the group's words name.
 
     This class carries the error-code and option-forwarding behavior only. The
     lazy subcommand resolution lives on ``AshRootTyperGroup`` below, which is the
@@ -433,8 +434,9 @@ class AshTyperGroup(TyperGroup):
                 # an option the subcommand is also given directly resolves to that
                 # later value, and a repeatable one collects both.
                 spelled = self._options_for_subcommand(ctx)
-                # Under a nested group (`ash container build`) the options go
-                # after the leaf's name, where the leaf parses them.
+                # Under a nested group (`ash container build`, `ash results
+                # inspect findings`) the options go after the leaf's name, past
+                # every group's word, where the leaf parses them.
                 skip = ctx.meta.pop("ash.leaf_name_tokens", 0)
                 ctx.args = [*ctx.args[:skip], *spelled, *ctx.args[skip:]]
             return super().invoke(ctx)
@@ -468,16 +470,22 @@ class AshTyperGroup(TyperGroup):
             # Not a command; super().invoke reports it as one.
             return []
         leaf_args = ctx.args
-        if hasattr(command, "get_command") and ctx.args:
-            # A nested group: the options belong to the leaf it names.
-            leaf = command.get_command(ctx, ctx.args[0])
-            if leaf is not None:
-                # The refusal below names what the operator would type: the
-                # group takes no options, so 'ash container --force' is itself a
-                # usage error and its help does not list the leaf's options.
-                name = f"{name} {ctx.args[0]}"
-                command, leaf_args = leaf, ctx.args[1:]
-                ctx.meta["ash.leaf_name_tokens"] = 1
+        depth = 0
+        while hasattr(command, "get_command") and leaf_args:
+            # A nested group: the options belong to the command its words name,
+            # however many groups deep: `ash --config c.yaml results inspect
+            # findings` hands --config to findings, under inspect under results.
+            leaf = command.get_command(ctx, leaf_args[0])
+            if leaf is None:
+                break
+            # The refusal below names what the operator would type: a group takes
+            # no options, so 'ash container --force' is itself a usage error and
+            # its help does not list the leaf's options.
+            name = f"{name} {leaf_args[0]}"
+            command, leaf_args = leaf, leaf_args[1:]
+            depth += 1
+        if depth:
+            ctx.meta["ash.leaf_name_tokens"] = depth
         if _asks_for_help(command, ctx, leaf_args):
             # The subcommand prints its help and exits; nothing given here is used.
             return []
