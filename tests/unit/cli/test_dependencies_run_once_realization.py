@@ -1,0 +1,169 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""A run-once realization counts as done only after it has run and succeeded.
+
+``--providers nix`` realizes the repository flake's whole toolchain with one command
+for the run (``nix develop``), and that one run serves every tool that routes to it.
+A plugin after the first is told "Already realized" only where the realization ran
+and exited 0. Where it failed, the next plugin that routes to nix runs it again, and
+each plugin reports its own result instead of the later ones being reported as
+verified because an earlier attempt was made.
+"""
+
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from automated_security_helper.cli import dependencies as dependencies_module
+from automated_security_helper.utils import subprocess_utils
+from tests.unit.cli.dependencies_install_support import build_scene, run_install
+
+pytestmark = pytest.mark.unit
+
+#: Where the lookup says nix is. It is only ever an argv element: the runner here is
+#: a recorder, so nothing starts it.
+FAKE_NIX = os.path.join(os.sep, "nix", "bin", "nix")
+
+
+def _scanner(name, declared=None):
+    """A fake scanner whose tool nix can serve (the install-package facet has a nix
+    row for it), declared as a plain ``uv tool install`` with no interpreter request,
+    which nix would refuse."""
+    fake = MagicMock()
+    fake.config = SimpleNamespace(name=name)
+    fake.command = name
+    fake.use_uv_tool = False
+    fake.external_executables = ()
+    fake.runs_in_ash_interpreter = False
+    fake.get_installation_commands.return_value = (
+        declared if declared is not None else [["uv", "tool", "install", name]]
+    )
+    return fake
+
+
+def _factory(fake):
+    return lambda **_kwargs: fake
+
+
+def _scene(monkeypatch, tmp_path, scanners, nix_exits):
+    """The run with ``scanners`` installed in order, as ``build_scene`` installs one.
+
+    The n-th run of the nix command exits ``nix_exits[n]``, and the last code
+    repeats after that.
+    """
+    ran = []
+
+    def on_run(cmd):
+        if cmd[0] != FAKE_NIX:
+            return 0
+        ran.append(cmd)
+        return nix_exits[min(len(ran), len(nix_exits)) - 1]
+
+    scene = build_scene(
+        monkeypatch, tmp_path, find_on_path=lambda c: f"/x/{c}", on_run=on_run
+    )
+    monkeypatch.setattr(
+        dependencies_module,
+        "ash_plugin_manager",
+        SimpleNamespace(
+            plugin_modules=lambda kind: (
+                [_factory(fake) for fake in scanners] if kind == "scanner" else []
+            )
+        ),
+    )
+    real_find_executable = subprocess_utils.find_executable
+    monkeypatch.setattr(
+        subprocess_utils,
+        "find_executable",
+        lambda command: FAKE_NIX if command == "nix" else real_find_executable(command),
+    )
+    monkeypatch.setenv("ASH_NIX_FLAKE_REF", "github:example/flake")
+    return scene
+
+
+def _nix_runs(scene):
+    return [argv for argv in scene.argvs if argv[0] == FAKE_NIX]
+
+
+def _status_of(scene, plugin):
+    """The Status cell of ``plugin``'s row in the results table."""
+    for line in scene.text.splitlines():
+        cells = [cell.strip() for cell in line.replace("│", "|").split("|")]
+        if plugin in cells:
+            return cells[6]
+    raise AssertionError(f"no results row for {plugin}:\n{scene.text}")
+
+
+def test_a_realization_that_failed_is_run_again_for_the_next_plugin(
+    tmp_path, monkeypatch
+):
+    scene = _scene(
+        monkeypatch, tmp_path, [_scanner("bandit"), _scanner("checkov")], nix_exits=[1]
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 1, scene.text
+    assert len(_nix_runs(scene)) == 2, scene.argvs
+    assert "Already realized" not in scene.text, scene.text
+    assert _status_of(scene, "bandit") == "FAILED", scene.text
+    assert _status_of(scene, "checkov") == "FAILED", scene.text
+
+
+def test_the_next_plugin_realizes_what_the_first_attempt_could_not(
+    tmp_path, monkeypatch
+):
+    scene = _scene(
+        monkeypatch,
+        tmp_path,
+        [_scanner("bandit"), _scanner("checkov")],
+        nix_exits=[1, 0],
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 1, scene.text
+    assert len(_nix_runs(scene)) == 2, scene.argvs
+    assert "Already realized" not in scene.text, scene.text
+    assert _status_of(scene, "bandit") == "FAILED", scene.text
+    assert _status_of(scene, "checkov") == "INSTALLED", scene.text
+
+
+def test_a_realization_that_succeeded_is_not_run_again(tmp_path, monkeypatch):
+    """The control: after a success the second plugin is served by the first
+    plugin's run, and is said to be."""
+    scene = _scene(
+        monkeypatch, tmp_path, [_scanner("bandit"), _scanner("checkov")], nix_exits=[0]
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert len(_nix_runs(scene)) == 1, scene.argvs
+    assert "Already realized by nix earlier in this run: checkov" in scene.text
+    assert _status_of(scene, "bandit") == "INSTALLED", scene.text
+    assert _status_of(scene, "checkov") == "VERIFIED PRESENT", scene.text
+
+
+def test_one_plugins_commands_realize_it_once(tmp_path, monkeypatch):
+    """Two install commands of one plugin that both route to nix are served by one
+    run of it."""
+    scanner = _scanner(
+        "bandit",
+        declared=[
+            ["uv", "tool", "install", "bandit"],
+            ["uv", "tool", "install", "--with", "pbr", "bandit"],
+        ],
+    )
+    scene = _scene(monkeypatch, tmp_path, [scanner], nix_exits=[0])
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert len(_nix_runs(scene)) == 1, scene.argvs
+    assert _status_of(scene, "bandit") == "INSTALLED", scene.text

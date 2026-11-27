@@ -4,10 +4,12 @@
 """``--binary-path <scanner>=<path>``: force a binary, never run it.
 
 The flag bypasses binary detection for one scanner: its install commands are not
-run, the path is validated (absolute, exists, a regular executable file, not a
-symlink, outside the scanned tree), recorded with its SHA-256 in the install-receipt
-store, and the verdict resolves the scanner to it by a file check. ASH hashes the
-file and never executes it; the forced file here writes a marker if it is ever run.
+run (and the plugin is not asked for them, so one that cannot produce them does not
+fail the run), the path is validated (absolute, exists, a regular executable file,
+not a symlink, outside the scanned tree), recorded with its SHA-256 in the
+install-receipt store, and the verdict resolves the scanner to it by a file check.
+ASH hashes the file and never executes it; the forced file here writes a marker if
+it is ever run.
 """
 
 from __future__ import annotations
@@ -331,3 +333,72 @@ def test_every_bad_entry_is_listed_in_one_refusal(
     text = " ".join(scene.text.split())
     assert scene.result.exit_code == 2, scene.text
     assert "the path is not absolute" in text and "nosuch is not a plugin" in text, text
+
+
+def _the_installed_scanner():
+    """The one fake scanner ``build_scene`` installed, so a test can change it."""
+    from automated_security_helper.cli import dependencies as dependencies_module
+
+    return dependencies_module.ash_plugin_manager.plugin_modules("scanner")[0]()
+
+
+def test_a_forced_scanner_is_not_asked_what_to_install(
+    tmp_path, monkeypatch, forced_file, src_tree
+):
+    """The forced binary replaces the install, so a plugin that cannot say what to
+    install has nothing to fail: the force is counted and the run exits 0."""
+    binary, marker = forced_file
+    scene = _scene(monkeypatch, tmp_path, src_tree, find_on_path=lambda c: None)
+    scanner = _the_installed_scanner()
+    scanner.get_installation_commands.side_effect = RuntimeError("no install plan")
+
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", f"checkov={binary}")
+
+    text = " ".join(scene.text.split())
+    assert scene.result.exit_code == 0, scene.text
+    assert "FORCED (--binary-path)" in text, text
+    assert "Error getting installation commands" not in text, text
+    assert scanner.get_installation_commands.call_count == 0
+    assert scene.calls == [], scene.calls
+    assert not marker.exists(), "the forced binary was executed"
+
+
+def test_a_recorded_force_is_not_asked_what_to_install_either(
+    tmp_path, monkeypatch, forced_file, src_tree
+):
+    binary, marker = forced_file
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+    run_install(scene, monkeypatch, tmp_path, "--binary-path", f"checkov={binary}")
+    assert scene.result.exit_code == 0, scene.text
+
+    scene = _scene(monkeypatch, tmp_path, src_tree, find_on_path=lambda c: None)
+    scanner = _the_installed_scanner()
+    scanner.get_installation_commands.side_effect = RuntimeError("no install plan")
+    run_install(scene, monkeypatch, tmp_path)
+
+    text = " ".join(scene.text.split())
+    assert scene.result.exit_code == 0, scene.text
+    assert "FORCED (recorded --binary-path)" in text, text
+    assert "Error getting installation commands" not in text, text
+    assert scanner.get_installation_commands.call_count == 0
+    assert scene.calls == [], scene.calls
+    assert not marker.exists(), "the forced binary was executed"
+
+
+def test_an_unforced_scanner_that_cannot_say_what_to_install_still_fails(
+    tmp_path, monkeypatch, src_tree
+):
+    """The control: with no force, the same plugin error is the run's failure."""
+    scene = _scene(monkeypatch, tmp_path, src_tree)
+    scanner = _the_installed_scanner()
+    scanner.get_installation_commands.side_effect = RuntimeError("no install plan")
+
+    run_install(scene, monkeypatch, tmp_path)
+
+    text = " ".join(scene.text.split())
+    assert scene.result.exit_code == 1, scene.text
+    assert (
+        "Error getting installation commands for plugin checkov: no install plan"
+        in text
+    ), text
+    assert scene.calls == [], scene.calls
