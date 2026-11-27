@@ -218,10 +218,17 @@ end `ash scan` with exit 0 before any scanner starts (`--help`, `--version` and
 `--generate-cli-skeleton`), `--baseline`, which leaves known findings out of the
 verdict, `--ash-config-from-host` and the three `--config-*-from-*` options container
 mode passes to the scan inside it, which replace or mark the base configuration,
-`--ash-plugin-modules`, `--offline-semgrep-rulesets`, `--allow-in-tree-tools`, and
-the options it passes itself.
-`GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list. A
-refused option is not dropped: the scan reports an error outcome on every pull
+`--ash-plugin-modules`, `--offline-semgrep-rulesets` (a container-mode setting
+with no effect of its own in the local mode the gate scans in, reserved with
+`--offline`), `--allow-in-tree-tools`, `--honor-ignore-files` and
+`--no-honor-ignore-files` (each becomes a configuration override, which outranks the
+configuration the gate passes, so a pull request's ignore files could otherwise decide
+what the scanners that read them see), `--offline` and `--no-offline` (offline mode
+changes which rules and checks some scanners run, and the gate decides it through
+`ash_offline_mode`), and the options it passes itself.
+`GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list of long
+spellings, and `GATE_OWNED_SHORT_OPTIONS` there adds `-c`, the short form of `--config`,
+which is matched by prefix. A refused option is not dropped: the scan reports an error outcome on every pull
 request, and any approval the gate gave is revoked, until the option is removed.
 
 **The clone is not shallow.** CodeCommit does not reliably permit fetching an

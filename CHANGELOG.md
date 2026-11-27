@@ -197,8 +197,16 @@
   `--config-file-from-another-checkout`). `--baseline` is reserved because the reports
   and the exit code then count only findings not in the saved results file;
   `--allow-in-tree-tools` because it lets tools found in the pull request's clone run;
-  and `--ash-plugin-modules` and `--offline-semgrep-rulesets` because they load plugin
-  code and choose semgrep's rule sets. A deployment that sets one of them in
+  and `--ash-plugin-modules` because it loads plugin code. `--offline-semgrep-rulesets`
+  is reserved with `--offline`: it is read only on the container-mode path, so it has
+  no effect of its own in the local mode the gate scans in. `--honor-ignore-files`,
+  `--no-honor-ignore-files`, `--offline` and `--no-offline` are reserved as well.
+  `ash scan` turns either `honor-ignore-files` spelling into a configuration override,
+  which outranks the configuration the gate passes, so extra args could change what the
+  scanners that read a pull request's ignore files see. `--offline` sets
+  `ASH_OFFLINE`, which makes some scanners drop a registry ruleset for the baked one
+  and trivy leave out its Terraform checks; the gate decides offline mode through
+  `ash_offline_mode`. A deployment that sets one of them in
   `ash_scan_extra_args` reports an error on every pull request until it is removed. The
   two drift tests that guessed which options matter are replaced by one that reads
   every option `ash scan` declares and requires each to be reserved or listed with the

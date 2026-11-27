@@ -170,7 +170,7 @@ def test_the_flag_is_not_switchable_by_configuration(gate, monkeypatch, tmp_path
     it is named after.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
-    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--verbose")
 
     gate.run_scan(tmp_path / "src", "low", True)
 
@@ -213,7 +213,7 @@ def test_a_refusal_names_the_offending_token(gate, monkeypatch, tmp_path):
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
     monkeypatch.setenv(
-        "ASH_SCAN_EXTRA_ARGS", "--offline --no-fail-on-incomplete-scanners"
+        "ASH_SCAN_EXTRA_ARGS", "--verbose --no-fail-on-incomplete-scanners"
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -385,7 +385,11 @@ _NARROWING_OPTIONS_WITH_VALUES = [
     (
         "--offline-semgrep-rulesets",
         "p/none",
-        "chooses the rule sets semgrep runs with, so it can leave rules out",
+        (
+            "names semgrep's rule sets for offline mode and is read only on the "
+            "container-mode path, so it has no effect of its own in local mode; "
+            "reserved with --offline"
+        ),
     ),
 ]
 
@@ -419,6 +423,32 @@ _NARROWING_FLAGS = [
     (
         "--no-allow-stale-content-db",
         "the other polarity, which overrides the config's staleness settings",
+    ),
+    (
+        "--honor-ignore-files",
+        (
+            "becomes a config override that outranks the gate's --config, so extra "
+            "args could set the operator's honor_ignore_files value"
+        ),
+    ),
+    (
+        "--no-honor-ignore-files",
+        (
+            "the other polarity, a config override of the same kind, so extra args "
+            "could set the operator's honor_ignore_files value to false"
+        ),
+    ),
+    (
+        "--offline",
+        (
+            "sets ASH_OFFLINE: grep-based scanners swap a registry ruleset for the "
+            "baked cache and trivy drops its Terraform checks; the gate decides "
+            "offline mode through ash_offline_mode"
+        ),
+    ),
+    (
+        "--no-offline",
+        "the other polarity, refused so the pair is decided in one place",
     ),
     (
         "--config-from-scanned-repository",
@@ -489,6 +519,39 @@ def test_no_reserved_flag_can_be_set_from_extra_args(
         gate.run_scan(tmp_path / "src", "low", True)
 
     assert not captured, f"{flag} was honored: {why}"
+
+
+@pytest.mark.parametrize(
+    "extra, offending",
+    [
+        ("--honor-ignore-files", "--honor-ignore-files"),
+        ("--no-honor-ignore-files", "--no-honor-ignore-files"),
+        ("--verbose --honor-ignore-files", "--honor-ignore-files"),
+        ("--offline", "--offline"),
+        ("--no-offline", "--no-offline"),
+        ("--output-formats html --offline", "--offline"),
+    ],
+)
+def test_the_operator_owned_scan_settings_are_refused_like_the_other_reserved_options(
+    gate, monkeypatch, tmp_path, extra, offending
+):
+    """--honor-ignore-files and --offline, with their negations, are refused.
+
+    ``ash scan`` turns the first pair into a ``--config-overrides`` entry, which outranks the
+    ``--config`` this gate passes, and ``--offline`` sets ``ASH_OFFLINE``, which swaps rulesets
+    and drops checks in some scanners. Both were once passed through on reasons that did not
+    hold against the code. The refusal is the same as for every other reserved option: a
+    RuntimeError naming the token and the variable, and no scan.
+    """
+    captured = _capture_argv(gate, monkeypatch, tmp_path)
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", extra)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    message = str(excinfo.value)
+    assert offending in message and "ASH_SCAN_EXTRA_ARGS" in message, message
+    assert not captured, f"{extra} reached the scan: {captured}"
 
 
 @pytest.mark.parametrize(
@@ -649,25 +712,11 @@ _PASSTHROUGH_OPTIONS = {
         "shows one row per duplicate cluster in the human-readable reports and adds "
         "deduplicated counts beside the per-scanner counts; findings are not dropped"
     ),
-    # Documented in the gate module as checked rather than assumed.
-    "--offline": (
-        "passes --offline to the tools and keeps going; the npm, pnpm and yarn audit "
-        "scanners still run and still report a status the completeness gate covers"
-    ),
-    "--no-offline": "the default polarity of --offline",
     "--strategy": "runs the selected scanners in parallel or in sequence; the selection is unchanged",
     "--ignore-suppressions": (
         "makes suppressed findings actionable, so it can only report more findings"
     ),
     "--no-ignore-suppressions": "ASH's own default",
-    "--no-honor-ignore-files": (
-        "scans the files .gitignore and .ignore match too, so it can only widen the "
-        "scan set"
-    ),
-    "--honor-ignore-files": (
-        "the polarity a run with no operator config already takes (the option defaults "
-        "to unset, which prefers the config); it restates that default"
-    ),
     "--sandbox": (
         "runs scanner subprocesses in an OS sandbox, and a scanner whose sandbox cannot "
         "be set up is graded as refused or missing, which the completeness gate covers; "
@@ -803,6 +852,9 @@ def test_every_option_ash_scan_declares_is_decided():
         (["--shard-index", "0"], "shard_index", 0),
         (["--shard-count", "4"], "shard_count", 4),
         (["--use-existing"], "use_existing", True),
+        (["--honor-ignore-files"], "honor_ignore_files", True),
+        (["--no-honor-ignore-files"], "honor_ignore_files", False),
+        (["--offline"], "offline", True),
         (["--allow-stale-content-db"], "allow_stale_content_db", True),
         (["--no-allow-stale-content-db"], "allow_stale_content_db", False),
         (["--version"], "version", True),
@@ -913,21 +965,18 @@ def test_a_benign_extra_arg_is_still_passed_through(gate, monkeypatch, tmp_path)
 
     The extras here were chosen for being unable to narrow the verdict, which
     ``--scanners bandit`` -- what this test used to offer as its example of a benign arg -- is
-    not. ``--offline`` does not drop the npm/pnpm/yarn audit scanners; it passes ``--offline``
-    through to the tool and keeps going, so each of them still runs and still reports a status
-    that ``--fail-on-incomplete-scanners`` covers. ``--output-formats`` decides which report
-    files get written and is read by nothing that computes the exit code.
-
-    An operator whose Lambda has no egress needs ``--offline``, so a guard that refused it
-    would fail closed on a correct deployment.
+    not, and neither is ``--offline``, which this test once offered: it changes which rules and
+    checks some scanners run, so the gate reserves it. ``--verbose`` and ``--output-formats``
+    decide how much is printed and which report files get written, and are read by nothing
+    that computes the exit code.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
-    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline --output-formats html")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--verbose --output-formats html")
 
     gate.run_scan(tmp_path / "src", "low", True)
 
     argv = captured[0]
-    assert "--offline" in argv and "--output-formats" in argv and "html" in argv, argv
+    assert "--verbose" in argv and "--output-formats" in argv and "html" in argv, argv
 
 
 def test_the_gates_own_options_are_resolved_last(gate, monkeypatch, tmp_path):
@@ -943,12 +992,12 @@ def test_the_gates_own_options_are_resolved_last(gate, monkeypatch, tmp_path):
     gate passes no ``--scanners`` of its own for the ordering to favour.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
-    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline --output-formats html")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--verbose --output-formats html")
 
     gate.run_scan(tmp_path / "src", "medium", False)
 
     argv = captured[0]
-    last_extra = max(argv.index("--offline"), argv.index("html"))
+    last_extra = max(argv.index("--verbose"), argv.index("html"))
     for owned in (
         "--source-dir",
         "--output-dir",
