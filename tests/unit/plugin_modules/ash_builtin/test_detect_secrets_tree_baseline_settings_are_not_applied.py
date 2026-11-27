@@ -42,6 +42,16 @@ SECRET_TYPE = "AWS Access Key"  # pragma: allowlist secret
 EXCLUDE_SECRET_FILTER = "detect_secrets.filters.regex.should_exclude_secret"
 EXCLUDE_LINE_FILTER = "detect_secrets.filters.regex.should_exclude_line"
 NOT_APPLIED = "plugins and filters were not applied"
+# What the scan runs instead, and what a baseline has to be for its settings to
+# apply; the warning says both, whichever way the baseline was not taken.
+WHAT_RUNS = (
+    "the scan runs the plugins the configuration names, or the default plugins "
+    "when it names none, with the configuration's own filters"
+)
+WHAT_APPLIES = (
+    "apply only when the baseline file is outside the scanned tree and any git "
+    "checkout that holds the scan root, and the operator's own settings name it"
+)
 READ_FAILED = "Failed to read baseline file settings"
 # Assembled at runtime so this file holds no key-shaped literal for ASH's own
 # self-scan to report. AWS's documentation placeholder.
@@ -147,6 +157,11 @@ def _assert_the_baselines_settings_were_not_applied(
     assert len(warnings) == 1, warnings
     assert "Base64HighEntropyString" in warnings[0]
     assert EXCLUDE_SECRET_FILTER in warnings[0]
+    assert WHAT_RUNS in warnings[0]
+    assert WHAT_APPLIES in warnings[0]
+    # The scan does not always run the default plugins: it runs the ones the
+    # configuration names, so the warning must not claim the defaults.
+    assert "the scan uses the default plugins" not in warnings[0]
 
 
 def test_a_baseline_in_the_tree_leaves_the_default_plugins_and_filters(
@@ -203,6 +218,9 @@ def test_a_found_baseline_under_a_scan_root_that_does_not_hold_the_source(
         scanner = _scanner(tmp_path, monkeypatch, scanned_root=elsewhere)
 
     assert not scanner._baseline_from_option
+    # The premise: no checkout reason speaks against the tree's own baseline,
+    # so only the "a found baseline is the repository's" rule refuses it.
+    assert scanner._baseline_checkout_reason() is None
     assert scanner._baseline_entries_trusted() is False
     _assert_the_baselines_settings_were_not_applied(scanner, defaults, caplog)
 
@@ -316,6 +334,35 @@ def test_a_baseline_whose_settings_are_not_lists_still_marks_its_candidates(
     reason to drop the baseline: a ``plugins_used`` or ``filters_used`` that is
     a number or a flag leaves the parsed document in place and its ``results``
     still mark, with no read failure reported."""
+    pinned = DetectSecretsScanSettings(
+        plugins_used=[DetectSecretsScanSettingsPluginsUsed(name="AWSKeyDetector")]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner = _scanner_over_a_marking_baseline(
+            tmp_path, monkeypatch, settings={key: value}, scan_settings=pinned
+        )
+
+    assert not any(READ_FAILED in record.getMessage() for record in caplog.records)
+    assert scanner._baseline_document is not None
+    report = _scan_with_the_candidate_found(scanner, tmp_path, monkeypatch)
+    (result,) = report.runs[0].results
+    assert result.suppressions
+
+
+@pytest.mark.parametrize("key", ["plugins_used", "filters_used"])
+@pytest.mark.parametrize(
+    "value",
+    [["AWSKeyDetector"], [1], [None], [["x"]]],
+    ids=["string-entry", "number-entry", "null-entry", "list-entry"],
+)
+def test_a_baseline_whose_settings_hold_entries_that_are_not_mappings_still_marks(
+    tmp_path, monkeypatch, caplog, key, value
+):
+    """A list whose entries are not mappings is still a list: the entry is
+    skipped, the constructor returns, no read failure is reported and the
+    baseline's ``results`` still mark. The repository chooses these entries, so
+    a raise here would let it keep the scanner out of the run."""
     pinned = DetectSecretsScanSettings(
         plugins_used=[DetectSecretsScanSettingsPluginsUsed(name="AWSKeyDetector")]
     )
@@ -514,3 +561,106 @@ def test_the_warning_hides_a_baseline_path_read_from_the_environment(
     for printed in (target, target.resolve()):
         assert str(printed) not in warning
         assert printed.as_posix() not in warning
+
+
+def test_the_warning_hides_an_environment_value_that_is_part_of_a_found_baselines_path(
+    tmp_path, monkeypatch, caplog
+):
+    """A baseline the scan found is not written as ``baseline_file``, so the
+    path-spelling needles add nothing: the environment values themselves are
+    what hides the part of the path an operator read from the environment (a
+    checkout directory, say), in both spellings of the directory."""
+    (tmp_path / ".secrets.baseline").write_text(
+        json.dumps(_baseline_document()), encoding="utf-8"
+    )
+    values = tuple(dict.fromkeys((str(tmp_path), str(tmp_path.resolve()))))
+    monkeypatch.setattr(
+        DetectSecretsScanner, "_environment_values", lambda self: values
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner = _scanner(tmp_path, monkeypatch)
+
+    assert scanner._baseline_in_use()
+    (warning,) = _not_applied_warnings(caplog)
+    for value in values:
+        assert value not in warning
+    assert ".secrets.baseline" in warning
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"version": "1.5.0", "results": {}},
+        {"version": "1.5.0", "results": {}, "plugins_used": [], "filters_used": []},
+    ],
+    ids=["no-settings-keys", "empty-lists"],
+)
+def test_a_baseline_that_lists_no_plugin_and_no_filter_draws_no_warning(
+    tmp_path, monkeypatch, caplog, document
+):
+    """There is nothing to say was not applied, so nothing is said."""
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        scanner = _scanner(tmp_path, monkeypatch)
+
+    assert scanner._baseline_in_use()
+    assert scanner._baseline_document is not None
+    assert _not_applied_warnings(caplog) == []
+
+
+def test_the_warning_says_what_the_scan_runs_when_the_configuration_names_plugins(
+    tmp_path, monkeypatch, caplog
+):
+    """A configuration that names plugins keeps them: the scan does not fall
+    back to the defaults, and the warning does not say it does."""
+    (tmp_path / ".secrets.baseline").write_text(
+        json.dumps(_baseline_document()), encoding="utf-8"
+    )
+    pinned = DetectSecretsScanSettings(
+        plugins_used=[DetectSecretsScanSettingsPluginsUsed(name="JwtTokenDetector")]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        scanner = _scanner(tmp_path, monkeypatch, scan_settings=pinned)
+
+    assert _plugin_names(scanner) == {"JwtTokenDetector"}
+    (warning,) = _not_applied_warnings(caplog)
+    assert WHAT_RUNS in warning
+    assert WHAT_APPLIES in warning
+    assert "the scan uses the default plugins" not in warning
+
+
+def test_the_warning_is_text_that_markup_does_not_read(tmp_path, monkeypatch, caplog):
+    """A plugin name is the repository's text. The record is logged as text,
+    so a name that looks like a markup tag is printed as written."""
+    document = _baseline_document()
+    document["plugins_used"] = [{"name": "[bold]Styled[/bold]"}]
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        _scanner(tmp_path, monkeypatch)
+
+    (record,) = [r for r in caplog.records if NOT_APPLIED in r.getMessage()]
+    assert getattr(record, "markup", None) is False
+    assert "[bold]Styled[/bold]" in record.getMessage()
+
+
+def test_the_warning_is_one_line_whatever_a_name_holds(tmp_path, monkeypatch, caplog):
+    """A newline in a plugin name or a filter path would start a line the
+    repository chose. The warning is one record on one line, the newline shown
+    as an escape."""
+    document = _baseline_document()
+    document["plugins_used"] = [{"name": "First\n2026-01-01 00:00:00 INFO forged"}]
+    document["filters_used"] = [{"path": "second\r\nforged.filter"}]
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        _scanner(tmp_path, monkeypatch)
+
+    (warning,) = _not_applied_warnings(caplog)
+    assert "\n" not in warning
+    assert "\r" not in warning
+    assert "First\\x0a2026-01-01" in warning
+    assert "second\\x0d\\x0aforged.filter" in warning

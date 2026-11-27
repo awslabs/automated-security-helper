@@ -27,6 +27,8 @@ from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
+_BASELINE_FILTER_PATH = "detect_secrets.filters.regex.should_exclude_secret"
+
 
 @pytest.fixture(autouse=True)
 def _fresh_warnings():
@@ -1443,13 +1445,14 @@ def test_an_option_naming_the_work_product_baseline_beside_a_repository_config(
     # What the scan runs with: the default plugins, none of the baseline's.
     assert "StandIn" not in _plugin_names(options), _plugin_names(options)
     assert "AWSKeyDetector" in _plugin_names(options), _plugin_names(options)
-    assert _BASELINE_FILTER_PATH not in _filter_paths(options), _filter_paths(options)
+    assert _BASELINE_FILTER_PATH not in _option_filter_paths(options), (
+        _option_filter_paths(options)
+    )
 
 
-_BASELINE_FILTER_PATH = "detect_secrets.filters.regex.should_exclude_secret"
-
-
-def _filter_paths(options) -> list:
+def _option_filter_paths(options) -> list:
+    """The filter paths of the scanner's options model (not the settings dict
+    ``_filter_paths`` below reads)."""
     return [item.path for item in options.scan_settings.filters_used]
 
 
@@ -1503,7 +1506,9 @@ def test_a_relative_baseline_option_names_the_scanned_trees_file(tmp_path, monke
     # named it: it sets no plugins or filters.
     assert "MarkerA" not in _plugin_names(options), _plugin_names(options)
     assert "AWSKeyDetector" in _plugin_names(options), _plugin_names(options)
-    assert _BASELINE_FILTER_PATH not in _filter_paths(options), _filter_paths(options)
+    assert _BASELINE_FILTER_PATH not in _option_filter_paths(options), (
+        _option_filter_paths(options)
+    )
 
 
 @pytest.mark.unit
@@ -1532,7 +1537,9 @@ def test_a_discovered_baseline_is_found_in_the_scanned_tree_not_the_cwd(
     # plugins run and none of its filters apply.
     assert "MarkerA" not in _plugin_names(options), _plugin_names(options)
     assert "AWSKeyDetector" in _plugin_names(options), _plugin_names(options)
-    assert _BASELINE_FILTER_PATH not in _filter_paths(options), _filter_paths(options)
+    assert _BASELINE_FILTER_PATH not in _option_filter_paths(options), (
+        _option_filter_paths(options)
+    )
 
 
 @pytest.mark.unit
@@ -1554,7 +1561,10 @@ def test_a_relative_repo_baseline_reaching_a_work_product_from_the_cwd_is_refuse
         "      baseline_file: derived.baseline\n",
     )
     monkeypatch.chdir(layout["work"])
-    options = _detect_secrets_options(layout)
+    scanner = _detect_secrets_built(layout)
+    options = scanner.config.options
+    assert not scanner._baseline_in_use()
+    assert scanner._baseline_document is None
     assert "MarkerProduct" not in _plugin_names(options), _plugin_names(options)
     assert (
         options.baseline_file is None
@@ -1575,7 +1585,10 @@ def test_a_discovered_baseline_linking_to_a_work_product_is_refused(
     derived.write_text(_baseline_json())
     (layout["source"] / ".secrets.baseline").symlink_to(derived)
     monkeypatch.chdir(layout["source"])
-    options = _detect_secrets_options(layout)
+    scanner = _detect_secrets_built(layout)
+    options = scanner.config.options
+    assert not scanner._baseline_in_use()
+    assert scanner._baseline_document is None
     assert options.baseline_file is None, options.baseline_file
     assert "StandIn" not in _plugin_names(options), _plugin_names(options)
 
