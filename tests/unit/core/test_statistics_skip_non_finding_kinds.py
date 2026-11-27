@@ -11,8 +11,10 @@ was not evaluated was an INFO finding of cdk-nag. It showed in the scanner's row
 the summary totals and, under a threshold of ``ALL``, in the Actionable column that
 the exit code's in-memory count reads.
 
-A suppression on such a result is still a suppression, as the flat findings count it,
-so only the severity buckets and what is read from them change.
+A result states no finding when its kind is one of those and nothing in it reports a
+problem: its level is ``none`` or not stated, and no ``issue_severity`` it declares is
+above INFO. Such a result counts in no figure, suppressed or not. One whose level
+reports a problem is a finding and is counted by its level.
 
 Every test with a non-finding kind has a control that changes the kind and nothing
 else. A failing result (the default kind), and the two kinds that assert a finding a
@@ -49,19 +51,21 @@ AshAggregatedResults.model_rebuild()
 
 # Sorted, so every pytest-xdist worker collects the same ids in the same order.
 NON_FINDING = sorted(NON_FINDING_KINDS)
-# The kinds that assert a finding.
+# The kinds that assert a finding. A result that states no kind is a failing one.
 FINDING = ["fail", "open", "review"]
+ANY_FINDING = [pytest.param(None, id="absent"), *FINDING]
 
 # (suppressed, critical, high, medium, low, info)
 ONE_MEDIUM = (0, 0, 0, 1, 0, 0)
 ONE_MEDIUM_AND_ONE_INFO = (0, 0, 0, 1, 0, 1)
+TWO_MEDIUM = (0, 0, 0, 2, 0, 0)
 
 
-def _result(kind: str, level: str, *, suppressed: bool = False) -> Result:
-    """A result of the scanner cdk-nag, with *kind* and *level*."""
+def _result(kind: str | None, level: str, *, suppressed: bool = False) -> Result:
+    """A result of the scanner cdk-nag, with *kind* (none leaves it out) and *level*."""
+    stated = {} if kind is None else {"kind": Kind(kind)}
     return Result(
         ruleId="AwsSolutions-IAM4",
-        kind=Kind(kind),
         level=Level(level),
         message=Message(text="a message"),
         properties=PropertyBag(scanner_name="cdk-nag"),
@@ -70,6 +74,7 @@ def _result(kind: str, level: str, *, suppressed: bool = False) -> Result:
             if suppressed
             else None
         ),
+        **stated,
     )
 
 
@@ -106,7 +111,7 @@ def test_a_result_that_states_no_finding_is_in_no_severity_count(kind):
     assert _counts(model) == ONE_MEDIUM
 
 
-@pytest.mark.parametrize("kind", FINDING)
+@pytest.mark.parametrize("kind", ANY_FINDING)
 def test_the_same_result_that_asserts_a_finding_is_counted_as_info(kind):
     model = _model(_result(kind, "none"), _result("fail", "warning"))
 
@@ -114,10 +119,20 @@ def test_the_same_result_that_asserts_a_finding_is_counted_as_info(kind):
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
-def test_a_suppressed_result_that_states_no_finding_is_still_a_suppression(kind):
+def test_a_suppressed_result_that_states_no_finding_is_in_no_count(kind):
+    """A result that states no finding counts in no figure, suppressed or not."""
     model = _model(_result(kind, "none", suppressed=True), _result("fail", "warning"))
 
-    assert _counts(model) == (1, 0, 0, 1, 0, 0)
+    assert _counts(model) == ONE_MEDIUM
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_result_whose_level_reports_a_problem_is_counted_by_its_level(kind):
+    """A result of such a kind at level warning is a MEDIUM finding, as any result at
+    that level is."""
+    model = _model(_result(kind, "warning"), _result("fail", "warning"))
+
+    assert _counts(model) == TWO_MEDIUM
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
@@ -129,10 +144,23 @@ def test_the_scanner_row_counts_no_non_finding_at_all(kind):
     assert (row["info"], row["total"], row["actionable"]) == (0, 1, 1)
 
 
-@pytest.mark.parametrize("kind", FINDING)
+@pytest.mark.parametrize("kind", ANY_FINDING)
 def test_the_same_row_counts_a_result_that_asserts_a_finding_at_all(kind):
     model = _model(_result(kind, "none"), _result("fail", "warning"), threshold="ALL")
 
     row = ScannerStatisticsCalculator.extract_scanner_statistics(model)["cdk-nag"]
 
     assert (row["info"], row["total"], row["actionable"]) == (1, 2, 2)
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_the_sarif_count_check_holds_with_results_that_state_no_finding(kind):
+    """The check compares findings with findings: a result that states no finding is in
+    neither count, suppressed or not."""
+    model = _model(
+        _result("fail", "warning"),
+        _result(kind, "none"),
+        _result(kind, "none", suppressed=True),
+    )
+
+    assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True

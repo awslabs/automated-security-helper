@@ -227,6 +227,19 @@ def test_a_scanners_filter_counts_the_same_result_as_info_when_it_asserts_a_find
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
+def test_the_recount_puts_such_a_pair_in_its_level_bucket(kind):
+    """A result of such a kind at level warning is a MEDIUM finding, so the recount
+    puts it in the medium bucket and in the total."""
+    filtered = apply_content_filters(
+        _sarif_only_document(_note(kind, level="warning")), scanners="trivy"
+    )
+
+    stats = filtered["summary_stats"]
+    assert stats["total"] == 2
+    assert stats["severity_counts"]["medium"] == 1
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
 def test_a_suppressed_result_that_states_no_finding_is_in_no_bucket(kind):
     """A result that states no finding counts in no figure, suppressed or not."""
     filtered = apply_content_filters(

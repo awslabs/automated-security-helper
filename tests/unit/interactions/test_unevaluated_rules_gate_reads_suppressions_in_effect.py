@@ -11,6 +11,9 @@ read left in ``run_ash_scan.py`` after the exit code's count and the
 suppression whose ``state`` is ``rejected`` or ``underReview`` has not taken
 effect (SARIF 3.35.4) and was never an approval, so a rule whose only suppression
 a reviewer rejected was quieted and the scan exited 0 over a rule that never ran.
+
+A suppression in effect on a not-evaluated result still quiets its rule, though that
+result states no finding and so counts in no suppressed figure.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     State,
     Suppression,
 )
+from automated_security_helper.utils.sarif_utils import get_severity_metrics_from_sarif
 
 from tests.unit.interactions.test_exit_code_unevaluated_rules import (
     _exit_code,
@@ -82,3 +86,18 @@ def test_a_suppression_in_effect_still_quiets_the_rule(tmp_path, state):
 
     assert unevaluated_rules(model) == []
     assert _exit_code(tmp_path, model) == 0
+
+
+def test_a_suppressed_not_evaluated_result_quiets_the_rule_and_counts_nowhere():
+    """The check for rules that were not evaluated reads the suppression in effect on
+    every result, so an accepted suppression quiets the rule. The result states no
+    finding, so it counts in no suppressed figure."""
+    model = _model(
+        _sarif(
+            [_notification("AwsSolutions-EC26")],
+            results=[_thrown("AwsSolutions-EC26", State.accepted)],
+        )
+    )
+
+    assert unevaluated_rules(model) == []
+    assert get_severity_metrics_from_sarif(model.sarif, None).suppressed == 0
