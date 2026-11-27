@@ -1666,6 +1666,19 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+#: What breaks an HTTP exchange, wherever in it: no connection, no answer in time, a
+#: dropped connection and, because a read raises them when a body ends early or the TLS
+#: stream breaks, the errors of http.client and ssl. ``urllib_transport`` makes each a
+#: TransientError, in the request and in the read of an error answer's body alike.
+_EXCHANGE_ERRORS = (
+    urllib.error.URLError,
+    TimeoutError,
+    ConnectionError,
+    http.client.HTTPException,
+    ssl.SSLError,
+)
+
+
 def urllib_transport(
     method: str,
     url: str,
@@ -1673,7 +1686,11 @@ def urllib_transport(
     body: bytes | None,
     max_bytes: int | None,
 ) -> Response:
-    """One HTTP exchange; never follows a redirect and never re-sends a header."""
+    """One HTTP exchange; never follows a redirect and never re-sends a header.
+
+    A break anywhere in it (``_EXCHANGE_ERRORS``), the read of an error answer's body
+    included, is raised as a TransientError.
+    """
     request = urllib.request.Request(url, data=body, method=method)
     for name, value in headers.items():
         # Unredirected: the header is sent to this URL only.
@@ -1688,19 +1705,19 @@ def urllib_transport(
                 data,
             )
     except urllib.error.HTTPError as err:
-        data = err.read(65536) if err.fp is not None else b""
+        # An error status is an answer, and its body is read inside this handler, where
+        # the clause below does not see a raise, so a read that breaks is mapped here.
+        try:
+            data = err.read(65536) if err.fp is not None else b""
+        except _EXCHANGE_ERRORS as broken:
+            raise TransientError(
+                f"{method} {urllib.parse.urlsplit(url).path}: HTTP {err.code}, and "
+                f"its body could not be read: {broken}"
+            ) from broken
         return Response(
             err.code, {k.lower(): v for k, v in (err.headers or {}).items()}, data
         )
-    except (
-        urllib.error.URLError,
-        TimeoutError,
-        ConnectionError,
-        # read() raises these when a body ends early or the TLS stream breaks, and the
-        # clauses above do not name either.
-        http.client.HTTPException,
-        ssl.SSLError,
-    ) as err:
+    except _EXCHANGE_ERRORS as err:
         raise TransientError(
             f"{method} {urllib.parse.urlsplit(url).path}: {err}"
         ) from err
@@ -2103,11 +2120,14 @@ def build_publish_body(
     sleep: Callable[[float], None],
     log: Callable[[str], None],
     notes: list[str],
+    notices: list[str],
 ) -> tuple[str, dict]:
     """The comment body for the run as it is now, and the run object it was read from.
 
-    ``notes`` collects what was left undone because the time budget ran out, and says
-    when a job still read unfinished at the last read of the job list.
+    ``notes`` collects what was left undone because the time budget ran out.
+    ``notices`` collects what the reader should know and the budget did not cause: that
+    a job still read unfinished after the last read of the job list, so the table may
+    be out of date.
     """
     run = client.get_json(f"/repos/{repo}/actions/runs/{run_id}")
     if not isinstance(run, dict):
@@ -2175,9 +2195,12 @@ def build_publish_body(
             jobs = read_jobs()
         else:
             # Every re-read is spent, and the last one can still show an unfinished job.
+            # Nothing the time budget did leaves it so, so this is a notice of its own
+            # and not one of the budget's notes.
             if unfinished():
-                notes.append(
-                    "a job still read unfinished after the last read of the job list"
+                notices.append(
+                    "the table may be out of date: a job still read unfinished after "
+                    "the last read of the job list"
                 )
         if not read_runner_facts(client, repo, jobs, facts, {}, log):
             notes.append("the remaining runner headers were not read")
@@ -2265,7 +2288,9 @@ def publish(
     Never fails: every error becomes a warning annotation and a return of 0, because the
     table is a view and must not change what a run concludes. The whole call has
     ``budget_seconds`` of wall-clock time (see PUBLISH_BUDGET_SECONDS); what the budget
-    cut short is named in one warning annotation.
+    cut short is named in one warning annotation, and a table that may be out of date,
+    because a job still read unfinished after the last read of the job list, in a
+    warning of its own.
     """
     client.start_budget(budget_seconds)
 
@@ -2284,6 +2309,7 @@ def publish(
                 warning(f"could not write the job summary: {err}")
 
     notes: list[str] = []
+    notices: list[str] = []
     try:
         body, run = build_publish_body(
             client,
@@ -2296,6 +2322,7 @@ def publish(
             sleep=sleep,
             log=log,
             notes=notes,
+            notices=notices,
         )
     except Exception as err:  # noqa: BLE001 - a view never fails the run, whatever broke
         warning(f"could not build the matrix table: {err}")
@@ -2319,6 +2346,8 @@ def publish(
             )
         except Exception as err:  # noqa: BLE001 - the same
             warning(f"could not write the comment: {err}")
+    for notice in notices:
+        warning(notice)
     if notes:
         warning("too little of the time budget was left, so " + "; ".join(notes))
     return 0

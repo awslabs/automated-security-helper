@@ -48,13 +48,16 @@ import base64
 import copy
 import http.client
 import importlib.util
+import io
 import itertools
 import json
 import re
 import ssl
 import sys
+import urllib.error
 import urllib.parse
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -923,6 +926,58 @@ class _Opener:
         return _Reply(answer, self._make_error if failing else None)
 
 
+class _BrokenBody(io.BytesIO):
+    """The body of an error answer whose every read fails, the way a body that ends
+    early or a broken TLS stream fails one."""
+
+    def __init__(self, make_error):
+        super().__init__()
+        self._make_error = make_error
+
+    def read(self, size=-1):
+        raise self._make_error()
+
+
+class _ErrorStatusOpener:
+    """Stands in for the opener ``urllib_transport`` builds, as ``_Opener`` does. A request
+    for one of the ``failing`` paths gets the error status ``status``, which urllib raises
+    as an HTTPError with headers and the body ``make_body()`` makes; every other request
+    is answered from a FakeAPI."""
+
+    def __init__(self, api: FakeAPI, failing: set[str], status: int, make_body):
+        self._api = api
+        self._failing = failing
+        self._status = status
+        self._make_body = make_body
+
+    def open(self, request, timeout=None):
+        url = request.full_url
+        if urllib.parse.urlsplit(url).path in self._failing:
+            headers = http.client.HTTPMessage()
+            headers["Content-Type"] = "application/json"
+            raise urllib.error.HTTPError(
+                url,
+                self._status,
+                http.client.responses[self._status],
+                headers,
+                self._make_body(),
+            )
+        return _Reply(self._api(request.get_method(), url, {}, request.data, None))
+
+
+#: An error status with a body, then a read of that body that breaks. A 404 is what the
+#: logs request of a job whose log has expired answers, a 502 a proxy that failed; read()
+#: raises IncompleteRead when a body ends early and SSLError when the TLS stream breaks.
+_BROKEN_ERROR_ANSWERS = [
+    pytest.param(status, make_error, id=f"{status}-{name}")
+    for status in (404, 502)
+    for name, make_error in (
+        ("IncompleteRead", lambda: http.client.IncompleteRead(b"")),
+        ("SSLError", lambda: ssl.SSLError("bad record mac")),
+    )
+]
+
+
 class TestTheClient:
     def test_a_log_is_fetched_from_its_redirect_without_the_token(self):
         api = FakeAPI()
@@ -1002,6 +1057,41 @@ class TestTheClient:
             _client(api, sleeps).send_json("POST", path, {"body": "x"})
         assert raised.value.status == 403
         assert len(api.calls) == 1 and sleeps == []
+
+    LOGS = f"https://api.github.com/repos/{REPO}/actions/jobs/7/logs"
+
+    @pytest.mark.parametrize(("status", "make_error"), _BROKEN_ERROR_ANSWERS)
+    def test_an_error_answer_whose_body_read_breaks_is_a_transient_error(
+        self, monkeypatch, status, make_error
+    ):
+        """urllib raises an error status as an HTTPError, and the transport reads that
+        error's body inside its handler, so a read that broke there left the transport as
+        it was raised: neither IncompleteRead nor SSLError is a TransientError, and no
+        caller catches either. Read on an answer that is not an error, the same two
+        already became a TransientError."""
+        failing = {urllib.parse.urlsplit(self.LOGS).path}
+        opener = _ErrorStatusOpener(
+            FakeAPI(), failing, status, lambda: _BrokenBody(make_error)
+        )
+        monkeypatch.setattr(m.urllib.request, "build_opener", lambda *handlers: opener)
+        with pytest.raises(m.TransientError):
+            m.urllib_transport("GET", self.LOGS, {"User-Agent": "t"}, None, None)
+
+    @pytest.mark.parametrize("status", [404, 502])
+    def test_control_an_error_answer_whose_body_reads_comes_back_with_its_status(
+        self, monkeypatch, status
+    ):
+        """The same error answer, with a body that reads, is a Response with its status,
+        its headers and its body, as it was before the change and is after it."""
+        body = b'{"message": "x"}'
+        failing = {urllib.parse.urlsplit(self.LOGS).path}
+        opener = _ErrorStatusOpener(
+            FakeAPI(), failing, status, lambda: io.BytesIO(body)
+        )
+        monkeypatch.setattr(m.urllib.request, "build_opener", lambda *handlers: opener)
+        response = m.urllib_transport("GET", self.LOGS, {"User-Agent": "t"}, None, None)
+        assert (response.status, response.body) == (status, body)
+        assert response.headers.get("content-type") == "application/json"
 
 
 class TestTheOneComment:
@@ -1206,6 +1296,47 @@ def _marked(number: int, attempt: int, comment_id: int = 77) -> dict:
         "body": body,
         "user": {"login": m.BOT_LOGIN, "type": "Bot"},
     }
+
+
+#: The warning the final link gives when a job still reads unfinished after the last read
+#: of the job list. The time budget does not cause that, so the warning does not say so.
+_STALE_TABLE_WARNING = (
+    "the table may be out of date: a job still read unfinished after the last read of "
+    "the job list"
+)
+#: What the time budget cut short, in its one warning: a clause for each cut, in order.
+_NO_HEADERS_WARNING = (
+    "too little of the time budget was left, so the remaining runner headers were not "
+    "read"
+)
+_NO_SETTLE_READ_NOR_HEADERS_WARNING = (
+    "too little of the time budget was left, so the job list was not read again while a "
+    "job still read unfinished; the remaining runner headers were not read"
+)
+
+
+def _client_that_runs_short(
+    api: _Publish, clock: _Clock, *, at_read: int | None
+) -> m.GitHubClient:
+    """A client for ``api``'s fake, on a ``clock`` that stands still until the job list
+    is read for the ``at_read``-th time. That read moves it on to leave half the write
+    reserve of the budget: too little to read a runner header, enough to write the
+    comment. With ``at_read`` None the clock never moves."""
+    jobs_path = f"/repos/{REPO}/actions/runs/{COMPLETED}/jobs"
+    reads = 0
+
+    def transport(method, url, headers, body, max_bytes):
+        nonlocal reads
+        if urllib.parse.urlsplit(url).path == jobs_path:
+            reads += 1
+            if reads == at_read:
+                clock.now = client.deadline - m.WRITE_RESERVE_SECONDS / 2
+        return api.api(method, url, headers, body, max_bytes)
+
+    client = m.GitHubClient(
+        "t0ken", transport=transport, sleep=lambda seconds: None, clock=clock
+    )
+    return client
 
 
 class TestThePublish:
@@ -1416,28 +1547,72 @@ class TestThePublish:
         assert _table_icons(api.posted_body())[m.RUNNING.icon] >= 1
 
     @pytest.mark.parametrize(
-        ("other", "shown"),
-        [("success", "unknown"), ("failure", "failure"), ("cancelled", "cancelled")],
+        ("other", "shown", "short_of_time", "warnings"),
+        [
+            pytest.param(
+                "success",
+                "unknown",
+                False,
+                [_STALE_TABLE_WARNING],
+                id="success-unknown",
+            ),
+            pytest.param(
+                "failure",
+                "failure",
+                False,
+                [_STALE_TABLE_WARNING],
+                id="failure-failure",
+            ),
+            pytest.param(
+                "cancelled",
+                "cancelled",
+                False,
+                [_STALE_TABLE_WARNING],
+                id="cancelled-cancelled",
+            ),
+            pytest.param(
+                "success",
+                "unknown",
+                True,
+                [_STALE_TABLE_WARNING, _NO_HEADERS_WARNING],
+                id="success-unknown-headers-out-of-time",
+            ),
+        ],
     )
     def test_a_job_that_never_finishes_leaves_only_a_success_unknown(
-        self, tmp_path, other, shown
+        self, tmp_path, other, shown, short_of_time, warnings
     ):
         """A job still unfinished at the last read could end any way, so the header does
         not call the run a success; a failed or cancelled job elsewhere still decides
-        the conclusion, and a note says why. Before this change the first case read
-        ``completed: success`` while that job's cell was drawn running."""
+        the conclusion, and a warning says the table may be out of date. Before this
+        change the first case read ``completed: success`` while that job's cell was drawn
+        running.
+
+        The time budget is not what leaves that job unfinished, so its warning is one of
+        its own and does not say that too little of the budget was left. Before this
+        change it did, as a clause of the budget's warning, with nearly the whole budget
+        left. In the last case the last read of the job list also leaves less of the
+        budget than the write reserve, so the runner headers go unread: that one is the
+        budget's doing, and its warning keeps the budget's sentence. The clock stands
+        still but for that, and the warnings are compared whole, with their count, in any
+        order."""
         jobs = [
             dict(j, status="completed", conclusion="success") for j in _jobs(COMPLETED)
         ]
         jobs[0] = dict(jobs[0], status="in_progress", conclusion=None)
         jobs[1] = dict(jobs[1], conclusion=other)
         api = _Publish(tmp_path, reads=[jobs + _post_jobs(COMPLETED)])
-        assert api.publish(final=True) == 0
+        client = _client_that_runs_short(
+            api, _Clock(), at_read=1 + m.SETTLE_READS if short_of_time else None
+        )
+        assert api.publish(final=True, client=client) == 0
         body = api.posted_body()
         assert f"**`completed: {shown}`**" in body
         assert "completed: success" not in body
         assert api.sleeps == [m.SETTLE_SECONDS] * m.SETTLE_READS
-        assert any("still read unfinished" in warning for warning in api.warnings)
+        if short_of_time:
+            assert api.requests_under("/logs") == []
+        assert sorted(api.warnings) == sorted(warnings)
 
     def test_an_intermediate_link_does_not_wait_for_a_running_job(self, tmp_path):
         done = _jobs(COMPLETED) + _post_jobs(COMPLETED)
@@ -1505,6 +1680,48 @@ class TestThePublish:
         assert api.summary_text().startswith(m.MARKER)
         assert any("could not read the runner header" in line for line in api.logs)
         assert api.warnings == []
+
+    @pytest.mark.parametrize(("status", "make_error"), _BROKEN_ERROR_ANSWERS)
+    def test_a_log_request_whose_error_answer_breaks_mid_body_costs_only_its_header(
+        self, tmp_path, monkeypatch, status, make_error
+    ):
+        """The logs request of a job can answer an error status with a body (the 404 of
+        a log that has expired, a 502), which urllib raises as an HTTPError, and the read
+        of that body can break as well. Before this change the break left the transport
+        as it was raised, read_runner_facts let it through, and the publish ended at
+        "could not build the matrix table" with no comment. Now it costs the one label
+        whose log was asked for: that label's row shows no environment, every other label
+        keeps its header, and the comment is written with no warning."""
+        label = "ubuntu-24.04-arm"
+        failing = {
+            f"/repos/{REPO}/actions/jobs/{job['id']}/logs"
+            for job in _jobs(COMPLETED)
+            if m.label_of(job) == label
+        }
+        api = _Publish(tmp_path)
+        opener = _ErrorStatusOpener(
+            api.api, failing, status, lambda: _BrokenBody(make_error)
+        )
+        monkeypatch.setattr(m.urllib.request, "build_opener", lambda *handlers: opener)
+        client = m.GitHubClient(
+            "t0ken", transport=m.urllib_transport, sleep=lambda seconds: None
+        )
+        assert api.publish(final=True, client=client) == 0
+        assert api.api.count("POST", f"/repos/{REPO}/issues/1209/comments") == 1
+        assert api.warnings == []
+        lost = [
+            line
+            for line in api.logs
+            if line.startswith("could not read the runner header for ")
+        ]
+        assert len(lost) == 1, lost
+        assert lost[0].startswith(f"could not read the runner header for {label}: ")
+        body = api.posted_body()
+        assert f"| {m.code(label)} | – | – | – | " in body
+        # Every label but that one read the same captured header, so its image cell is
+        # drawn once a label.
+        image = f"| {m.code('ubuntu-24.04-arm')} {m.code('20261116.188.1')} |"
+        assert body.count(image) == TestTheTimeBudget._labels() - 1
 
     def test_a_write_to_the_summary_that_fails_is_a_warning_too(self, tmp_path):
         api = _Publish(tmp_path)
@@ -1674,7 +1891,11 @@ class TestTheTimeBudget:
     def test_the_settle_stops_when_less_time_is_left_than_one_wait_and_says_so_once(
         self, tmp_path
     ):
-        """Without the check the settle slept three times whatever the time left."""
+        """Without the check the settle slept three times whatever the time left. With
+        less left than one wait, the job list is not read again, and the runner headers
+        go unread as well, because no more than the write reserve is left: the one
+        warning names both cuts, and is compared whole. The clock stands still, so the
+        text does not depend on how fast the publish runs."""
         done = _jobs(COMPLETED) + _post_jobs(COMPLETED)
         stuck = [
             dict(j, status="in_progress", conclusion=None)
@@ -1683,10 +1904,14 @@ class TestTheTimeBudget:
             for j in done
         ]
         api = _Publish(tmp_path, reads=[stuck])
-        assert api.publish(final=True, budget_seconds=m.SETTLE_SECONDS - 2) == 0
+        client = self._client(api.api, [], _Clock())
+        assert (
+            api.publish(final=True, client=client, budget_seconds=m.SETTLE_SECONDS - 2)
+            == 0
+        )
         assert api.sleeps == []
         assert len(api.requests_under(f"/actions/runs/{COMPLETED}/jobs")) == 1
-        assert len(api.warnings) == 1 and "job list" in api.warnings[0]
+        assert api.warnings == [_NO_SETTLE_READ_NOR_HEADERS_WARNING]
 
     def _timed(self, api, clock, step=0.0, jump_on_logs=0.0):
         """A client on ``clock`` whose every transport call moves the clock by ``step``,
@@ -1813,6 +2038,251 @@ _CHECKOUT_REF = (
     "|| github.sha }}"
 )
 
+#: One token of an expression's body: a quoted string literal (single quotes, ``''`` for
+#: a quote inside one), a name, or any other one character. Whitespace, line breaks
+#: included, only separates tokens. A quote that no quote closes is a character of its
+#: own, so what follows it is read as operands.
+_EXPRESSION_TOKEN = re.compile(
+    r"\s+|(?P<literal>'(?:[^']|'')*')|(?P<name>[A-Za-z_][A-Za-z0-9_-]*)|(?P<other>.)",
+    re.DOTALL,
+)
+
+
+def _expressions(text: str) -> list[tuple[str, str]]:
+    """Each ``${{ ... }}`` span of ``text`` with its body, found the way GitHub finds
+    them: a span ends at the first ``}}`` outside a quoted string literal and may cross
+    line breaks, and a span with no end runs to the end of the text."""
+    found = []
+    start = text.find("${{")
+    while start >= 0:
+        in_literal = False
+        body_end = end = len(text)
+        for index in range(start + 3, len(text) - 1):
+            if text[index] == "'":
+                in_literal = not in_literal
+            elif not in_literal and text.startswith("}}", index):
+                body_end, end = index, index + 2
+                break
+        found.append((text[start:end], text[start + 3 : body_end]))
+        start = text.find("${{", end)
+    return found
+
+
+def _reads_the_token_or_secrets(body: str) -> bool:
+    """Whether an expression's body reads the ``secrets`` context in any form, or the
+    ``github`` context's token: ``github.token``, ``github['token']``, the filter
+    ``github.*``, an index whose key is not one string literal, or the whole context as
+    a value (``toJSON(github)``, ``github`` passed to any function). A name after a
+    ``.`` is a property, not a context; a word inside a string literal is no name at
+    all; context and property names match in any letter case. The other properties of
+    ``github`` (``event``, ``sha``, ``repository`` and the rest) are not the token."""
+    tokens = [
+        (match.lastgroup, match.group())
+        for match in _EXPRESSION_TOKEN.finditer(body)
+        if match.lastgroup is not None
+    ]
+
+    def at(position: int) -> tuple[str | None, str]:
+        return tokens[position] if position < len(tokens) else ("end", "")
+
+    for index, (kind, text) in enumerate(tokens):
+        if kind != "name" or (index > 0 and tokens[index - 1] == ("other", ".")):
+            continue
+        context = text.lower()
+        if context == "secrets":
+            return True
+        if context != "github":
+            continue
+        after = at(index + 1)
+        if after == ("other", "."):
+            key_kind, key = at(index + 2)
+            if key_kind != "name" or key.lower() == "token":
+                return True
+        elif after == ("other", "["):
+            key_kind, key = at(index + 2)
+            if key_kind != "literal" or at(index + 3) != ("other", "]"):
+                return True
+            if key[1:-1].replace("''", "'").lower() == "token":
+                return True
+        else:
+            return True
+    return False
+
+
+def _expression_reads_of_the_token_or_secrets(text: str) -> list[str]:
+    """The ``${{ ... }}`` spans of ``text`` that read the token or the secrets, each
+    whole and in order; ``_reads_the_token_or_secrets`` says what reads them. A text with
+    no ``${{`` has none."""
+    return [
+        span for span, body in _expressions(text) if _reads_the_token_or_secrets(body)
+    ]
+
+
+def _strings_in(node: Any, path: tuple = ()) -> Iterator[tuple[tuple, str, bool]]:
+    """Each string in ``node`` at any depth, with the keys and indices that lead to it
+    and whether it is a key: the keys and values of a mapping and the items of a
+    list."""
+    if isinstance(node, str):
+        yield path, node, False
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(key, str):
+                yield (*path, key), key, True
+            yield from _strings_in(value, (*path, key))
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            yield from _strings_in(item, (*path, index))
+
+
+def _path_text(path: tuple) -> str:
+    """``("with", "token")`` written ``with.token``, and an index written ``[0]``."""
+    text = ""
+    for part in path:
+        if isinstance(part, int):
+            text += f"[{part}]"
+        else:
+            text += f".{part}" if text else str(part)
+    return text
+
+
+def _place_in_job(job: dict, path: tuple, is_key: bool) -> str:
+    """Where ``path`` leads in a job, for a failure message: the step it is in (its
+    index, then its name, its uses or its id) or the job itself, then the rest of it."""
+    where, rest = "job", path
+    steps = job.get("steps")
+    if len(path) > 1 and path[0] == "steps" and isinstance(steps, list):
+        step = steps[path[1]]
+        label = next(
+            (
+                str(step[key])
+                for key in ("name", "uses", "id")
+                if isinstance(step, dict) and step.get(key)
+            ),
+            "",
+        )
+        where = f"step {path[1]} ({label})" if label else f"step {path[1]}"
+        rest = path[2:]
+    text = _path_text(rest) + (" (a key)" if is_key else "")
+    return f"{where}, {text}" if text else where
+
+
+def _assert_no_workflow_level_expression(workflow: dict) -> None:
+    """No workflow-level ``env`` name or value, and nothing in ``defaults``, holds an
+    expression, whatever it would read, and no workflow-level env name is GITHUB_TOKEN.
+    A workflow-level value reaches every step of every job, the links' checkout, setup
+    and install steps included, so the check fails closed: a read it did not foresee
+    would reach all of them. Each problem names its place and its span, so a failure
+    prints no env mapping."""
+    env = workflow.get("env")
+    names = set(env) if isinstance(env, dict) else set()
+    assert "GITHUB_TOKEN" not in names, "the workflow-level env names GITHUB_TOKEN"
+    problems = [
+        f"workflow-level {place}, {_path_text(path)}: {span}"
+        for place in ("env", "defaults")
+        for path, text, _ in _strings_in(workflow.get(place))
+        for span, _ in _expressions(text)
+    ]
+    assert not problems, "\n".join(problems)
+
+
+def _assert_no_link_reads_the_token_or_a_secret(workflow: dict) -> None:
+    """Every string of each link job, keys and values at any depth, its steps included,
+    holds no expression that reads the token or the secrets
+    (``_expression_reads_of_the_token_or_secrets``), but one: the publish step's
+    ``env.GITHUB_TOKEN``, the read the token is for, and that one only while it is
+    exactly ``_PUBLISH_STEP_ENV_VALUE``. No job-level key is ``secrets`` in any letter
+    case either, because ``secrets: inherit`` hands a called workflow every secret with
+    no expression at all.
+
+    The check's limit: it reads what a ``${{ }}`` hands a step. A bare ``if:`` condition,
+    written without ``${{``, is evaluated as an expression too, but it carries no ``${{``
+    and gives the step no value, only whether it runs, so the check does not read it.
+
+    Each problem is one line that names the link, the step (or the job) and the
+    offending span, so a failure prints no env mapping."""
+    problems = []
+    for link in LINKS:
+        job = workflow["jobs"][link]
+        steps = job.get("steps")
+        token_place = (
+            ("steps", len(steps) - 1, "env", "GITHUB_TOKEN")
+            if isinstance(steps, list)
+            else None
+        )
+        problems.extend(
+            f"{link}, job, {key} (a key): it hands a called workflow every secret"
+            for key in job
+            if isinstance(key, str) and key.lower() == "secrets"
+        )
+        for path, text, is_key in _strings_in(job):
+            if not is_key and path == token_place and text == _PUBLISH_STEP_ENV_VALUE:
+                continue
+            problems.extend(
+                f"{link}, {_place_in_job(job, path, is_key)}: {span}"
+                for span in _expression_reads_of_the_token_or_secrets(text)
+            )
+    assert not problems, "\n".join(problems)
+
+
+def _plant(node: Any, path: tuple, value: Any) -> None:
+    """Set ``value`` at ``path`` in ``node``, making each mapping on the way that is not
+    there yet."""
+    *head, last = path
+    for key in head:
+        node = node[key] if isinstance(key, int) else node.setdefault(key, {})
+    node[last] = value
+
+
+def _flagged(text: str, name: str, spans: list[str] | None = None):
+    """A text the helper must flag, and the spans it must return: the whole text, unless
+    others are named."""
+    return pytest.param(text, [text] if spans is None else spans, id=name)
+
+
+#: Each reads the secrets, the github context's token, or the whole github context.
+_READS_OF_THE_TOKEN_OR_A_SECRET = [
+    _flagged("${{ toJSON(github) }}", "the-github-context-passed-to-a-function"),
+    _flagged("${{ github }}", "the-github-context-alone"),
+    _flagged("${{ toJSON(secrets) }}", "every-secret"),
+    _flagged("${{ secrets['NAME'] }}", "a-secret-by-index"),
+    _flagged("${{ secrets.NAME }}", "a-secret-by-property"),
+    _flagged("${{ SECRETS.name }}", "the-secrets-context-in-capitals"),
+    _flagged("${{ github.token }}", "the-token"),
+    _flagged("${{ github['token'] }}", "the-token-by-index"),
+    _flagged('${{ github["TOKEN"] }}', "the-token-by-a-double-quoted-index"),
+    _flagged("${{ GitHub.Token }}", "the-token-in-mixed-case"),
+    _flagged("${{ github[format('{0}', 'token')] }}", "a-computed-index"),
+    _flagged("${{ github.* }}", "the-object-filter"),
+    _flagged("${{ fromJSON(toJSON(github)).token }}", "the-token-through-toJSON"),
+    _flagged("${{ toJSON(\n  github) }}", "split-across-a-line-break"),
+    _flagged("${{\n  secrets.NAME\n}}", "delimiters-on-lines-of-their-own"),
+    _flagged(
+        "${{ github.sha }}-${{ github.token }}",
+        "the-second-of-two-expressions",
+        ["${{ github.token }}"],
+    ),
+]
+
+#: Each reads neither: a plain value, a property of github that is not the token, a
+#: word inside a string literal, and the two names as properties of another context.
+_READS_OF_NEITHER = [
+    pytest.param("160", id="a-plain-value"),
+    pytest.param("${{ github.event.pull_request.base.sha }}", id="an-event-property"),
+    pytest.param("${{ github.sha }}", id="the-sha"),
+    pytest.param("${{ github.repository }}", id="the-repository"),
+    pytest.param("${{ github['sha'] }}", id="the-sha-by-index"),
+    pytest.param(
+        "${{ github.event.repository.default_branch || 'main' }}",
+        id="a-property-or-a-literal",
+    ),
+    pytest.param("${{ format('{0}', 'github.token') }}", id="the-token-in-a-literal"),
+    pytest.param(
+        "${{ 'it''s github.token' }}", id="the-token-in-a-literal-with-an-escaped-quote"
+    ),
+    pytest.param("${{ steps.secrets.outputs.github }}", id="both-names-as-properties"),
+    pytest.param(_CHECKOUT_REF, id="the-links-checkout-ref"),
+]
+
 
 class TestTheLiveLinks:
     """The four publishing jobs, as ash-unified-ci.yml really declares them."""
@@ -1935,39 +2405,134 @@ class TestTheLiveLinks:
     def test_the_token_reaches_only_the_publish_step_and_no_run_reads_an_expression(
         self,
     ):
-        jobs = _unified()["jobs"]
+        """The exact pins of each link's publish step, then the walk of every string of
+        each link for a read of the token or the secrets
+        (``_assert_no_link_reads_the_token_or_a_secret``, and its limit). Before the walk
+        two substring checks stood here, "secrets" on the job and "github.token" on the
+        other steps, and ``${{ toJSON(github) }}``, ``${{ github['token'] }}`` and
+        ``${{ SECRETS.X }}`` passed both."""
+        workflow = _unified()
         for link in LINKS:
-            job = jobs[link]
-            assert "env" not in job and "secrets" not in str(job), link
+            job = workflow["jobs"][link]
+            assert "env" not in job, link
             *others, publish_step = job["steps"]
             assert set(publish_step["env"]) == {"GITHUB_TOKEN"}, link
             assert publish_step["env"]["GITHUB_TOKEN"] == _PUBLISH_STEP_ENV_VALUE, link
             assert PUBLISH_COMMAND in publish_step["run"], link
             for step in others:
                 assert "GITHUB_TOKEN" not in str(step), link
-                assert "github.token" not in str(step), link
             for step in job["steps"]:
                 assert "${{" not in str(step.get("run", "")), link
+        _assert_no_link_reads_the_token_or_a_secret(workflow)
 
     def test_no_workflow_level_env_or_default_hands_the_token_or_a_secret_to_a_link(
         self,
     ):
         """A workflow-level ``env`` reaches every step of every job, the links' checkout
         and install steps included, and ``defaults`` shapes every ``run`` step. The token
-        belongs to the publish step alone, as the test above pins for each job, so it
-        and the secrets stay out of both. The names are read as a set and each value on
-        its own, so a failure prints no whole mapping."""
+        belongs to the publish step alone, as the test above pins for each job, so no
+        workflow-level value may hold an expression at all, and the env may not name
+        GITHUB_TOKEN (``_assert_no_workflow_level_expression``). Before this change each
+        value was matched against the substrings "github.token" and "secrets.", which
+        ``${{ toJSON(github) }}`` and ``${{ secrets['NAME'] }}`` both passed."""
+        _assert_no_workflow_level_expression(_unified())
+
+    @pytest.mark.parametrize(("text", "spans"), _READS_OF_THE_TOKEN_OR_A_SECRET)
+    def test_control_the_helper_flags_each_read_of_the_token_or_a_secret(
+        self, text, spans
+    ):
+        """The function the link check calls, on each shape a read can take; most of
+        them passed the substring checks it replaces."""
+        assert _expression_reads_of_the_token_or_secrets(text) == spans
+
+    @pytest.mark.parametrize("text", _READS_OF_NEITHER)
+    def test_control_the_helper_passes_what_reads_neither(self, text):
+        assert _expression_reads_of_the_token_or_secrets(text) == []
+
+    @pytest.mark.parametrize(
+        ("path", "value"),
+        [
+            pytest.param(
+                ("env", "GITHUB_CONTEXT"),
+                "${{ toJSON(github) }}",
+                id="env-the-github-context",
+            ),
+            pytest.param(("env", "ANY"), "${{ github.sha }}", id="env-any-expression"),
+            pytest.param(
+                ("defaults", "run", "working-directory"),
+                "${{ github.workspace }}",
+                id="defaults-any-expression",
+            ),
+            pytest.param(
+                ("env", "GITHUB_TOKEN"), "a literal", id="env-named-GITHUB_TOKEN"
+            ),
+        ],
+    )
+    def test_control_the_workflow_level_check_fails_on_a_planted_value(
+        self, path, value
+    ):
+        """The real workflow, with one value planted where the check reads, fails it,
+        and the failure names the place and the span. The second plant reads nothing the
+        link check would refuse: at the workflow level any expression fails."""
         workflow = _unified()
-        env = workflow.get("env") or {}
-        names = set(env)
-        assert "GITHUB_TOKEN" not in names
-        for name in sorted(names):
-            value = str(env[name])
-            assert "github.token" not in value, name
-            assert "secrets." not in value, name
-        defaults = str(workflow.get("defaults") or {})
-        assert "github.token" not in defaults
-        assert "secrets." not in defaults
+        _plant(workflow, path, value)
+        with pytest.raises(AssertionError) as raised:
+            _assert_no_workflow_level_expression(workflow)
+        named = [path[-1], value] if "${{" in value else [path[-1]]
+        for part in named:
+            assert part in str(raised.value), part
+
+    @pytest.mark.parametrize(
+        ("link", "path", "value"),
+        [
+            pytest.param(
+                LINKS[0],
+                ("steps", 0, "with", "token"),
+                "${{ github['token'] }}",
+                id="checkout-step-with-token-by-index",
+            ),
+            pytest.param(
+                LINKS[-1],
+                ("container", "credentials", "password"),
+                "${{ Secrets.X }}",
+                id="job-level-Secrets-X",
+            ),
+            pytest.param(
+                LINKS[1],
+                ("steps", 3, "env", "GITHUB_CONTEXT"),
+                "${{ toJSON(github) }}",
+                id="install-step-env-the-github-context",
+            ),
+            pytest.param(
+                LINKS[2],
+                ("steps", -1, "env", "EVERY_SECRET"),
+                "${{ toJSON(secrets) }}",
+                id="publish-step-env-every-secret",
+            ),
+            pytest.param(
+                LINKS[-1],
+                ("steps", -1, "env", "GITHUB_TOKEN"),
+                "${{ GitHub['Token'] }}",
+                id="publish-step-token-not-in-its-pinned-form",
+            ),
+            pytest.param(
+                LINKS[0], ("Secrets",), "inherit", id="job-level-Secrets-inherit"
+            ),
+        ],
+    )
+    def test_control_the_link_check_fails_on_a_planted_read(self, link, path, value):
+        """The real workflow, with one read planted in one link, fails the check, and
+        the failure names the link, the step the read is in and its span (or the key)."""
+        workflow = _unified()
+        job = workflow["jobs"][link]
+        _plant(job, path, value)
+        with pytest.raises(AssertionError) as raised:
+            _assert_no_link_reads_the_token_or_a_secret(workflow)
+        named = [link, value if "${{" in value else path[-1]]
+        if path[0] == "steps":
+            named.append(str(job["steps"][path[1]]["name"]))
+        for part in named:
+            assert part in str(raised.value), part
 
     def test_every_action_is_pinned_to_a_full_commit_sha(self):
         jobs = _unified()["jobs"]

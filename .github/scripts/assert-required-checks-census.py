@@ -124,22 +124,22 @@ _UNGATED: dict[str, str] = {
     "matrix-comment-checks": (
         "the first link of the matrix comment chain, which renders what the gated jobs "
         "did into the pull request's comment. It runs only for a pull request from this "
-        "repository (its `if:`), so on every other run it reads `skipped`, which the "
-        "gate refuses; its result says whether the view was written, never whether "
-        "code passed."
+        "repository (its `if:`). A gated job may not carry such a condition: it would "
+        "skip the job on a run that was not cancelled, a skip the gate's own condition "
+        "cannot see, and tests/unit/test_required_checks_census.py refuses it. Its "
+        "result says whether the view was written, never whether code passed."
     ),
     "matrix-comment-scans": (
         "the second link of the matrix comment chain: it needs the first link and the "
         "scan jobs. It runs only for a pull request from this repository (its `if:`), "
-        "so on every other run it reads `skipped`, which the gate refuses; its result "
+        "a condition no gated job may carry (see matrix-comment-checks). Its result "
         "says whether the view was written, never whether code passed."
     ),
     "matrix-comment-tiers": (
         "the third link of the matrix comment chain: it needs the second link and the "
         "install and unit jobs. It runs only for a pull request from this repository "
-        "(its `if:`), so on every other run it reads `skipped`, which the gate "
-        "refuses; its result says whether the view was written, never whether code "
-        "passed."
+        "(its `if:`), a condition no gated job may carry (see matrix-comment-checks). "
+        "Its result says whether the view was written, never whether code passed."
     ),
     "matrix-comment": (
         "the last link of the matrix comment chain: it needs the gate itself and every "

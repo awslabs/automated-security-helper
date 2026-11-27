@@ -3508,11 +3508,13 @@ jobs:
   # below the job's, so a hung step fails instead of the job reaching its timeout. None of
   # these jobs is in the gate's `needs`: their result says whether the view was written,
   # never whether the code passed. The first three also run only for a pull request from
-  # this repository (their `if:`), so on every other run they read `skipped`, which the
-  # gate refuses, and the last needs `required-checks` itself, so it could not be in its
-  # `needs` in any case. The census script names them in its `_UNGATED` map. The
-  # pull-request comment has no earlier "pending" version, because writing one before any
-  # job finished would need a runner of its own at the start of every run.
+  # this repository (their `if:`), and no gated job may carry such a condition: it would
+  # skip the job on a run that was not cancelled, a skip the gate's own condition cannot
+  # see, so tests/unit/test_required_checks_census.py refuses it. The last needs
+  # `required-checks` itself, so it could not be in its `needs` in any case. The census
+  # script names them in its `_UNGATED` map. The pull-request comment has no earlier
+  # "pending" version, because writing one before any job finished would need a runner of
+  # its own at the start of every run.
   #
   # A job added to this workflow must join the `needs` of one link below. The tests that
   # read this file (tests/unit/test_unified_ci_matrix_comment.py) fail until it does. The
