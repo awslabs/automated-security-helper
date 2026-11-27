@@ -170,11 +170,17 @@ def test_a_pins_with_requirements_are_the_scanners_with_dependencies(
 
 
 def python_upper_bound(text: str) -> Optional[str]:
-    """The ``X.Y`` in a ``<X.Y`` bound, whether it is written in a request such as
-    ``>=3.10,<3.14`` or in a marker such as ``python_version < '3.14'``; None when
-    the text has no strict upper bound."""
-    match = re.search(r"(?<![<>=!~])<\s*'?(\d+\.\d+)", text)
-    return match.group(1) if match else None
+    """The ``X.Y`` of the smallest ``<X.Y`` bound in *text*, written as a request
+    (``>=3.10,<3.14``) or as a marker (``python_version < '3.14'``); the bounds are
+    compared as numbers. None when the text has no strict upper bound."""
+    bounds = [
+        (int(major), int(minor))
+        for major, minor in re.findall(r"(?<![<>=!~])<\s*'?(\d+)\.(\d+)", text)
+    ]
+    if not bounds:
+        return None
+    major, minor = min(bounds)
+    return f"{major}.{minor}"
 
 
 @pytest.mark.parametrize(
@@ -203,15 +209,10 @@ def derived_python_bound(
     facet: opsf.RuntimeCompatFacet, constraint: Optional[str]
 ) -> Optional[str]:
     """The upper bound of the interpreter request a scanner with the compatibility
-    rows *facet* and the tool constraint *constraint* hands to ``uv``."""
-    bounds = {
-        python_upper_bound(row.runtime_request)
-        for row in facet.rows
-        if row.runtime is opsf.RuntimeName.PYTHON
-        and row.resolution is opsf.CompatResolution.PIN
-    } - {None}
-    assert len(bounds) <= 1, bounds
-    return next(iter(bounds), None)
+    rows *facet* and the tool constraint *constraint* hands to ``uv``: the request the
+    installer derives, read for its smallest bound."""
+    request = facet.pin_request(opsf.RuntimeName.PYTHON, constraint)
+    return python_upper_bound(request or "")
 
 
 def _pin_row(request: str, tool_versions: str = "") -> opsf.RuntimeCompatRow:
