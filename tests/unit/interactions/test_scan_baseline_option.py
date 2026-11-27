@@ -75,14 +75,39 @@ def test_baseline_hard_linked_into_the_scanned_tree_is_refused(tmp_path):
 @pytest.mark.parametrize(
     "arguments",
     [
-        ["--mode", "container"],
-        ["--mode", "nix"],
-        ["--workspace", "workspace.yaml"],
-        ["--shard-index", "0", "--shard-count", "2"],
-        ["--phases", "convert"],
+        pytest.param(["--mode", "container"], id="container"),
+        pytest.param(["--mode", "nix"], id="nix"),
+        pytest.param(["--shard-index", "0", "--shard-count", "2"], id="shards"),
+        pytest.param(["--phases", "convert"], id="phases"),
     ],
 )
 def test_baseline_refuses_unsupported_scan_scopes(tmp_path, arguments):
+    source = tmp_path / "source"
+    source.mkdir()
+    response = CliRunner().invoke(
+        app,
+        [
+            "scan",
+            "fs",
+            str(source),
+            "--baseline",
+            str(tmp_path / "baseline.json"),
+            *arguments,
+        ],
+    )
+    assert response.exit_code == 5
+    assert "--baseline" in response.output
+    assert "not supported" in response.output
+
+
+def test_baseline_refuses_a_workspace_given_through_the_legacy_option(tmp_path):
+    """``--baseline`` with the deprecated ``--workspace`` option is still refused.
+
+    The subject is the legacy spelling. ``ash scan --workspace FILE`` is deprecated and
+    removed in ASH v4.0, and until then it keeps the refusal it always gave a baseline.
+    ``ash scan workspace FILE`` is the command that replaces it, and ``--baseline``
+    belongs to ``ash scan fs``, so this case drives the older form on purpose.
+    """
     source = tmp_path / "source"
     source.mkdir()
     response = CliRunner().invoke(
@@ -93,7 +118,8 @@ def test_baseline_refuses_unsupported_scan_scopes(tmp_path, arguments):
             str(source),
             "--baseline",
             str(tmp_path / "baseline.json"),
-            *arguments,
+            "--workspace",
+            "workspace.yaml",
         ],
     )
     assert response.exit_code == 5
