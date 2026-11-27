@@ -523,12 +523,10 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 "(scanners.syft.options.sdist_harvest.enabled)"
             )
             return []
-        if not options["syft_enabled"]:
-            ASH_LOGGER.debug(
-                "sdist lockfile harvest is skipped: the syft scanner is disabled, "
-                "and the harvest exists to complete the SBOM it produces"
-            )
-            return []
+        # With syft off nothing is fetched, but each package the harvest would
+        # have covered is still named in a skip record: grype and trivy read the
+        # harvested lockfiles, so their input is incomplete and that is visible.
+        syft_off = not options["syft_enabled"]
         lockfile_names = list(cast(Iterable[str], options["lockfiles"]))
         lock_files = self._lockfiles_in_scan_set(lockfile_names)
         if not lock_files:
@@ -543,9 +541,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             int(cast(Union[int, str], options["max_sdist_mb"])) * 1024 * 1024
         )
         offline = is_offline_mode() or bool(options["syft_offline"])
-        cache_root = self._cache_root(options["cache_dir"])
+        cache_root = None if syft_off else self._cache_root(options["cache_dir"])
         run_private_cache: Optional[tempfile.TemporaryDirectory] = None
-        if cache_root is None:
+        if cache_root is None and not syft_off:
             # No usable persistent root (_cache_root said why): cache in a
             # private directory of this run alone, which no repository content
             # can pre-fill, and remove it with the run.
@@ -553,7 +551,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             cache_root = Path(run_private_cache.name)
         ignore_paths = self._ignore_paths_skipping_harvest()
 
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        if not syft_off:
+            self.results_dir.mkdir(parents=True, exist_ok=True)
         results: List[Path] = []
         sources: Dict[Path, str] = {}
         # cause -> [(lock display, "name version (sha prefix)"), ...]; one
@@ -586,7 +585,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 try:
                     handle = self.open_source_file(lock_file)
                 except TreeInputRefused as refused:
-                    self.record_refused_input(refused)
+                    if not syft_off:
+                        self.record_refused_input(refused)
                     continue
                 from automated_security_helper.utils.scanned_tree import (
                     relative_display,
@@ -598,7 +598,8 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 try:
                     flagged = flagged_packages_in_uv_lock(lock_bytes, display)
                 except ValueError as error:
-                    self.record_failed_input(lock_file, str(error), kind="input")
+                    if not syft_off:
+                        self.record_failed_input(lock_file, str(error), kind="input")
                     continue
                 if not flagged:
                     ASH_LOGGER.debug(
@@ -608,6 +609,14 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                     )
                     continue
                 for package in flagged:
+                    if syft_off or cache_root is None:
+                        skip(
+                            package,
+                            "the syft scanner is disabled (scanners.syft.enabled), "
+                            "so its pinned sdist was not fetched and grype and "
+                            "trivy do not see the packages it embeds",
+                        )
+                        continue
                     try:
                         self._harvest_one(
                             package,
