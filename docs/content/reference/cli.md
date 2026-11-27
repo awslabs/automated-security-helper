@@ -1148,9 +1148,9 @@ Run it after reading what changed in a file and confirming its suppressions
 still hold. It re-records every suppression of each named file from the
 code as it stands, and prints each file it re-recorded. A locked file that
 no longer exists is reported and left as it was (exit code 1), unless
---drop-missing removes its dead entry, and so is a symbol-scoped
-suppression whose symbol the file no longer defines. A file that changed
-and cannot be parsed is left as it was (exit code 1).
+--drop-missing removes its dead entry, and so is the lock's record of a
+symbol the file no longer defines. A file that changed and cannot be parsed
+is left as it was (exit code 1).
 
 --invalidation-scope converts suppressions between 'file' and 'symbol'
 scope; recording a new kind is a review too. A version 1 entry is
@@ -1169,7 +1169,7 @@ ash suppress refresh [OPTIONS] [paths]...
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Refresh every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
-| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, and the symbol-scoped suppressions of a symbol the file no longer defines, instead of leaving them and exiting 1. |
+| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, and the lock's record of a symbol the file no longer defines, instead of leaving them and exiting 1. The config's suppression is not removed: rename or remove it, or the next scan refuses the config. |
 | <a id="suppress-refresh--invalidation-scope"></a>`--invalidation-scope` | one of `file`, `symbol` | not set |  | Set the invalidation scope of the named files' recorded suppressions, or with --symbol of that symbol's only: 'file' or 'symbol'. Without it every suppression keeps its kind. |
 | <a id="suppress-refresh--symbol"></a>`--symbol` | text | not set |  | With --invalidation-scope, change only the suppressions of this symbol. Every suppression of the file is re-recorded either way. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |

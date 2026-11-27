@@ -7,9 +7,9 @@
  still hold. It re-records every suppression of each named file from the
  code as it stands, and prints each file it re-recorded. A locked file that
  no longer exists is reported and left as it was (exit code 1), unless
- --drop-missing removes its dead entry, and so is a symbol-scoped
- suppression whose symbol the file no longer defines. A file that changed
- and cannot be parsed is left as it was (exit code 1).
+ --drop-missing removes its dead entry, and so is the lock's record of a
+ symbol the file no longer defines. A file that changed and cannot be parsed
+ is left as it was (exit code 1).
 
  --invalidation-scope converts suppressions between 'file' and 'symbol'
  scope; recording a new kind is a review too. A version 1 entry is
@@ -23,9 +23,11 @@
 │                                            each changed file it touches, so the whole-lock run  │
 │                                            is asked for explicitly.                             │
 │ --drop-missing                             Remove the entry of a named file that no longer      │
-│                                            exists, and the symbol-scoped suppressions of a      │
-│                                            symbol the file no longer defines, instead of        │
-│                                            leaving them and exiting 1.                          │
+│                                            exists, and the lock's record of a symbol the file   │
+│                                            no longer defines, instead of leaving them and       │
+│                                            exiting 1. The config's suppression is not removed:  │
+│                                            rename or remove it, or the next scan refuses the    │
+│                                            config.                                              │
 │ --invalidation-scope        <file|symbol>  Set the invalidation scope of the named files'       │
 │                                            recorded suppressions, or with --symbol of that      │
 │                                            symbol's only: 'file' or 'symbol'. Without it every  │
