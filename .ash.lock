@@ -154,6 +154,10 @@
         {
           "rule_id": "SECRET-BASIC-AUTH-CREDENTIALS",
           "symbol": "mask_secrets_in_sarif_report"
+        },
+        {
+          "rule_id": "SECRET-SECRET-KEYWORD",
+          "symbol": "_mask_bandit_password_secret"
         }
       ],
       "sha256": "6585f8d5439168a9f1c6d8535979c75cbce83dbf8c142290d9c5843bc9a071e9"
