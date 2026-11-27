@@ -936,3 +936,85 @@ def test_a_literal_destination_the_operator_wrote_is_shown_as_written(
     assert _options(result).get("findings_scope", _ABSENT) == (
         "operator-literal-scope"
     ), result
+
+
+# A destination value is shown by the reference its own mark carries, wherever
+# the load put it:
+#   1. AWS_Region: the confinement matches an option name with its case kept,
+#      so the load leaves this spelling as the checkout wrote it, and the
+#      reference the checkout's file wrote there still describes it.
+#   2. the settle writes the operator's value under the checkout's spelling of
+#      the section, while the operator's reference names the operator's own
+#      spelling: the copy is shown by the reference its value carries.
+#   3. a set member has no position for a reference to name: it is shown by
+#      the reference its value carries.
+_AWS_REGION_CASE_VARIANT = "AWS_Region: ${ASH_TEST_GETCFG_VALUE}\n"
+
+
+def test_a_case_variant_of_a_destination_name_keeps_its_reference(
+    tmp_path, monkeypatch
+):
+    """A file in another checkout writes ``AWS_Region``, which is no spelling of
+    the ``aws_region`` option the confinement replaces, so the load keeps the
+    value where it was read. The reference the file wrote there still describes
+    it: the answer shows the reference, and the value is nowhere."""
+    body = _section(_AWS_REGION_CASE_VARIANT)
+
+    result = _named_from_elsewhere(tmp_path, monkeypatch, body)
+
+    assert _VALUE not in json.dumps(result, default=str), result
+    assert _options(result)["AWS_Region"] == _FROM_THE_VARIABLE, result
+
+
+def test_a_settled_option_is_shown_by_the_operators_reference_under_the_checkouts_spelling(
+    tmp_path, monkeypatch
+):
+    """The operator's file (ASH_CONFIG, outside every checkout) reads
+    findings_scope from a variable. The checkout's file spells the section
+    ``AwsSecurityHub`` and writes its own findings_scope, which the load leaves
+    out. The file is inside the searched tree, so the answer is not marked, and
+    the operator's value sits under the checkout's spelling: it is shown by the
+    operator's reference there."""
+    monkeypatch.setenv(_OPERATOR_SCOPE_VAR, _OPERATOR_SCOPE_VALUE)
+    operator = tmp_path / "operator"
+    operator.mkdir()
+    operators_file = operator / "ash.yaml"
+    operators_file.write_text(
+        _section("findings_scope: ${ASH_TEST_OPERATOR_SCOPE}\n"), encoding="utf-8"
+    )
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    named = checkout / ".ash.yaml"
+    named.write_text(
+        "reporters:\n  AwsSecurityHub:\n    options:\n"
+        "      findings_scope: repo-scope\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(checkout)
+    monkeypatch.setenv("ASH_CONFIG", str(operators_file))
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+
+    result = mcp_get_config(config_path=str(named), search_dir=str(checkout))
+
+    assert _OPERATOR_SCOPE_VALUE not in json.dumps(result, default=str), result
+    shown = result["reporters"]["AwsSecurityHub"]["options"]["findings_scope"]
+    assert shown == _OPERATOR_SCOPE_REFERENCE, result
+
+
+def test_a_set_member_the_operator_read_from_the_environment_is_shown_by_reference(
+    tmp_path, monkeypatch
+):
+    """The operator's file writes findings_scope as a ``!!set`` whose one member
+    is a reference. The load gives the section that set, and the answer shows the
+    member as the reference: the value is nowhere."""
+    monkeypatch.setenv(_OPERATOR_SCOPE_VAR, _OPERATOR_SCOPE_VALUE)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("findings_scope: !!set\n  ? ${ASH_TEST_OPERATOR_SCOPE}\n"),
+        _section("archive_resolved_findings: true\n"),
+    )
+
+    assert _OPERATOR_SCOPE_VALUE not in json.dumps(result, default=str), result
+    assert _options(result)["findings_scope"] == {_OPERATOR_SCOPE_REFERENCE}, result
