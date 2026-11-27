@@ -1375,9 +1375,15 @@ class TestGeneratedFixture:
 
 
 class TestScanCommand:
-    def test_the_command_uses_the_workspace_flag(self, tmp_path):
+    def test_the_command_uses_the_workspace_subject(self, tmp_path):
         command = gate.build_scan_command(tmp_path / "w.code-workspace", tmp_path / "o")
-        assert "--workspace" in command
+        start = command.index("scan")
+        assert command[start : start + 3] == [
+            "scan",
+            "workspace",
+            str(tmp_path / "w.code-workspace"),
+        ]
+        assert "--workspace" not in command
         assert "--source-dir" not in command
 
     def test_the_command_runs_the_working_tree_not_an_installed_copy(self, tmp_path):

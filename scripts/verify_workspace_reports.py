@@ -271,7 +271,7 @@ def run_scan(definition: Path, output_dir: Path, timeout: float):
         "-m",
         "automated_security_helper.cli.main",
         "scan",
-        "--workspace",
+        "workspace",
         str(definition),
         "--output-dir",
         str(output_dir),

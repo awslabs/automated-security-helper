@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Page claims for ``ash diff``: the compare-scans section and where the personas route.
+"""Page claims for ``ash results diff``: the compare-scans section, where the personas
+route, and the results page that says the command has no top-level spelling.
 
 Each test quotes the sentence a page makes with ``assert_on_page`` and then probes the
 code that makes it true, so a change to either half fails here. The group list in
@@ -17,16 +18,29 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.unit.docs.test_page_claims import assert_on_page
 
 pytestmark = pytest.mark.unit
 
 EXPORT_REPORTS = "how-to/export-reports.md"
 MCP_TOOLS = "reference/mcp-tools.md"
+READ_RESULTS = "how-to/read-results.md"
 
 _GROUPS_SENTENCE = (
     "The JSON groups are `new`, `absent_after`, `moved`, `severity_changed`, "
     "`suppression_changed`, and `warnings`."
+)
+
+#: read-results.md (the results group): the two verbs that are new in 3.9, and the
+#: three that were top-level commands before.
+_DIFF_AND_TREND_HAVE_NO_OLD_SPELLING = (
+    "`ash results diff` and `ash results trend` are new in 3.9 and have no top-level "
+    "spelling."
+)
+_THE_OLD_SPELLINGS_STILL_WORK = (
+    "The old top-level spellings (`ash report`, `ash merge` and `ash inspect`) still "
+    "work in 3.9."
 )
 
 
@@ -247,3 +261,25 @@ def test_the_sdlc_review_row_names_both_comparisons():
 
     assert callable(mcp_diff_scan_results)
     assert CliRunner().invoke(app, ["results", "diff", "--help"]).exit_code == 0
+
+
+def test_diff_and_trend_are_spelled_only_under_results():
+    """read-results.md (the results group).
+
+    ``diff`` and ``trend`` are new in 3.9, so there is no ``ash diff`` or ``ash trend``
+    to move from: both are unknown commands at the top level and run under ``results``.
+    The three verbs that were top-level commands in 3.8 still run there.
+    """
+    assert_on_page(READ_RESULTS, _DIFF_AND_TREND_HAVE_NO_OLD_SPELLING)
+    assert_on_page(READ_RESULTS, _THE_OLD_SPELLINGS_STILL_WORK)
+    runner = CliRunner()
+
+    for verb in ("diff", "trend"):
+        under_results = runner.invoke(app, ["results", verb, "--help"])
+        top_level = runner.invoke(app, [verb, "--help"])
+        assert under_results.exit_code == 0, under_results.output
+        assert top_level.exit_code == ASH_EXIT_USAGE_ERROR, top_level.output
+        assert f"No such command '{verb}'" in top_level.output, top_level.output
+    for verb in ("report", "merge", "inspect"):
+        still_works = runner.invoke(app, [verb, "--help"])
+        assert still_works.exit_code == 0, still_works.output

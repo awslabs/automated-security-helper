@@ -161,7 +161,7 @@ Every parameter is optional and can be passed by keyword. Unless the table says 
 | `custom_build_arg` | `None` | Container mode only. |
 | `ash_plugin_modules` | `None` | Plugin modules to load. This is an operator source: ASH imports every module it names ([Who may load a module](../plugins/index.md#who-may-load-a-module)). |
 | `container_network` | `'bridge'` | Container mode only: the network the scan container uses when the scan is online. |
-| `workspace_plan` | `None` | A workspace scan, which `--workspace` builds the plan for. |
+| `workspace_plan` | `None` | A workspace scan, which `ash scan workspace` builds the plan for. |
 | `allow_missing_projects` | `False` | For a workspace scan. |
 | `config_base_gate` | `None` | Used by the MCP server; see below. |
 | `untrusted_config` | `False` | Used by the MCP server; see below. |

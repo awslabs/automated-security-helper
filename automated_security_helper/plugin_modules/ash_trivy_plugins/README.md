@@ -58,10 +58,10 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Scan current directory
-uv run ash scan fs --scanners trivy-repo
+uv run ash scan fs --only-scanners trivy-repo
 
 # Scan specific directory
-uv run ash scan fs /path/to/project --scanners trivy-repo
+uv run ash scan fs /path/to/project --only-scanners trivy-repo
 ```
 
 ## Configuration Options
@@ -154,7 +154,7 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
 # Use Trivy alongside other ASH scanners
-uv run ash scan fs --scanners trivy-repo,bandit,semgrep
+uv run ash scan fs --only-scanners trivy-repo,bandit,semgrep
 ```
 
 ## Output Integration
@@ -217,7 +217,7 @@ Enable verbose logging to troubleshoot issues:
 
 <!-- doctest: illustrative reason="runs a scan that needs trivy installed on the host" -->
 ```bash
-uv run ash scan fs --scanners trivy-repo --log-level DEBUG
+uv run ash scan fs --only-scanners trivy-repo --log-level DEBUG
 ```
 
 ## Integration Examples
@@ -232,7 +232,7 @@ repos:
     hooks:
       - id: ash-trivy
         name: ASH Trivy Security Scan
-        entry: uv run ash scan fs --scanners trivy-repo --mode precommit
+        entry: uv run ash scan fs --add-scanners trivy-repo --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -244,7 +244,7 @@ repos:
 # GitHub Actions example
 - name: Security Scan with Trivy
   run: |
-    uv run ash scan fs --scanners trivy-repo --output-format sarif
+    uv run ash scan fs --only-scanners trivy-repo --output-format sarif
     # Upload SARIF to GitHub Security tab
     gh api repos/${{ github.repository }}/code-scanning/sarifs \
       --method POST --field sarif=@.ash/ash_output/reports/results.sarif

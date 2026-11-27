@@ -1887,8 +1887,8 @@ def test_ash_merge_takes_no_aws_reporter_setting_from_its_config_file(
     assert_on_page(
         SCALE_LARGE_REPOS,
         "The AWS reporters send the merged findings only with their `enabled` and "
-        "destination options in `ash merge`'s `--config-overrides`, not from a config "
-        "file",
+        "destination options in `ash results merge`'s `--config-overrides`, not from "
+        "a config file",
     )
     output = _stored_scan(tmp_path)
     config = _s3_config_file(tmp_path)
@@ -14409,8 +14409,8 @@ _LINKED_OUTPUT_SENTENCES = [
     (
         OUTPUT_FILES,
         (
-            "In an `ash --workspace` scan, a link at `projects` or `.workspace-spool` "
-            "stops the whole run this way before any project starts."
+            "In an `ash scan workspace` scan, a link at `projects` or "
+            "`.workspace-spool` stops the whole run this way before any project starts."
         ),
     ),
     (
@@ -15306,8 +15306,8 @@ _READING_A_RECORD_SENTENCES = [
         SCALE_LARGE_REPOS,
         (
             "A value the shards' configuration read from the environment is recorded as "
-            "its reference, and `ash merge` does not read the environment for it: a "
-            "field that takes a fixed choice, a boolean, or a number, such as "
+            "its reference, and `ash results merge` does not read the environment for "
+            "it: a field that takes a fixed choice, a boolean, or a number, such as "
             "`severity_threshold`, cannot hold the reference, so the merge exits 3 "
             "naming the field until you supply it with `--config-overrides` or in the "
             "file `--config` names"

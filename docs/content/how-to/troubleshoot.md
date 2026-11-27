@@ -467,15 +467,18 @@ which. See [Configuration trust model](../concepts/trust-model.md).
 
 ### The scan exits 4
 
-Cause: a workspace scan (`--workspace`) could not start, or a workspace option was used
-without one. The message names the problem. The causes are:
+Cause: a workspace scan (`ash scan workspace FILE`) could not start, or a workspace option
+was used without one. The message names the problem. The causes are:
 
 - the workspace file is missing or is not valid JSON;
-- `--workspace auto` finds more than one workspace file;
+- `ash scan workspace auto` finds more than one workspace file;
 - a project path contains `..`, or a project directory does not exist;
-- `--source-dir` is given with `--workspace`;
+- `--source-dir` is given with `--workspace`, the deprecated spelling of a workspace scan.
+  `ash scan workspace` takes no `--source-dir` and refuses it with exit code 5;
 - `--dry-run`, `--allow-missing-projects`, or `--workspace-config` is given without
-  `--workspace`.
+  `--workspace` to the deprecated `ash scan` with no subject. The message says to run
+  `ash scan workspace FILE`. `ash scan fs` takes none of them and refuses them with exit
+  code 5.
 
 Fix: correct the workspace file or the command line, or pass `--allow-missing-projects`
 to skip projects that do not exist. See [Scale to large repositories](scale-large-repos.md).
@@ -495,7 +498,7 @@ ERROR (3) /home/me/out/reports is a symlink. ...
 Cause: the output directory, a directory on the way to it inside the scanned
 directory, or something ASH writes inside it, such as `reports`, is a symbolic link.
 ASH clears and writes its output directory, so it does not do that through a link. This
-check applies whether or not the sandbox is on. In an `ash --workspace` scan, a link at
+check applies whether or not the sandbox is on. In an `ash scan workspace` scan, a link at
 `projects/<project>` fails only that project, and a link at `projects` or
 `.workspace-spool` stops the whole run. [Output files](../reference/output-files.md#links)
 lists every path ASH checks.

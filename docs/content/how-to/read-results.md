@@ -241,14 +241,16 @@ detect-secrets FAILED 1
 
 The commands that work on results a scan already wrote, and run no scan themselves, live
 under one noun: `ash results report`, `ash results diff`, `ash results trend`,
-`ash results merge` and `ash results inspect`. Each takes the same options and behaves the
-same as the top-level command it replaces.
+`ash results merge` and `ash results inspect`. `ash results report`, `ash results merge`
+and `ash results inspect` take the same options and behave the same as the top-level
+commands they replace. `ash results diff` and `ash results trend` are new in 3.9 and have
+no top-level spelling.
 
-The old top-level spellings (`ash report`, `ash diff`, `ash trend`, `ash merge` and
-`ash inspect`) still work in 3.9. Each prints one `DeprecationWarning` line on standard
-error that names its replacement, and all five are removed in 4.0. They no longer appear in
-`ash --help`. Standard output, exit codes and options are unchanged, so a script that reads
-them keeps working while you move it to the new spelling.
+The old top-level spellings (`ash report`, `ash merge` and `ash inspect`) still work in
+3.9. Each prints one `DeprecationWarning` line on standard error that names its
+replacement, and all three are removed in 4.0. They no longer appear in `ash --help`.
+Standard output, exit codes and options are unchanged, so a script that reads them keeps
+working while you move it to the new spelling.
 [Move to the scan subjects](migrate-to-scan-subjects.md) lists every spelling that moved.
 
 ## Print a report in the terminal with `ash results report` {#print-a-report-in-the-terminal-with-ash-report}

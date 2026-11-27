@@ -105,7 +105,7 @@ ash scan --scanners detect-secrets --shard-index 0 --shard-count 2 --output-dir 
 ash scan --scanners detect-secrets --shard-index 1 --shard-count 2 --output-dir ../shard-1 --no-fail-on-findings
 ```
 
-`--scanners` narrows what a shard runs, not how the scanners are split, so detect-secrets
+`--only-scanners` narrows what a shard runs, not how the scanners are split, so detect-secrets
 runs only on the shard it is dealt to, and the other shard runs no scanner. Each shard
 records its share in `metadata.shard`:
 
@@ -171,10 +171,10 @@ It refuses to merge, and exits 1, when a shard index is missing or repeated, the
 disagree about the count, two shards ran the same scanner, the shards split different sets
 of scanners, a results file is not from a sharded scan, a `--results` directory holds no
 results file, or a shard owned scanners and completed none of them. A shard that owned only
-scanners that `--scanners` or `--exclude-scanners` left out counts as complete. It warns,
-without refusing, when a scanner ran on no shard although a shard's selection asked for
-it: the jobs of the matrix were given different `--scanners`, `--exclude-scanners`, or
-configuration, and the shard that owned the scanner did not select it.
+scanners that `--only-scanners` or `--exclude-scanners` left out counts as complete. It
+warns, without refusing, when a scanner ran on no shard although a shard's selection asked
+for it: the jobs of the matrix were given different `--only-scanners`, `--exclude-scanners`,
+or configuration, and the shard that owned the scanner did not select it.
 
 ### Sharding in GitHub Actions {#sharding-github}
 
@@ -342,13 +342,14 @@ What sharding does not do:
 
 - It does not split files. Each shard scans the whole tree.
 - It does not balance by run time.
-- It does not combine with workspace scans (the scan exits 1) and is not available over MCP.
+- It does not combine with workspace scans: `ash scan workspace` takes no `--shard-index`
+  or `--shard-count`, and the scan exits 5. It is not available over MCP.
 - `ash merge` does not remove duplicate findings that two scanners report for the same
   problem, and keeps the software bill of materials of one shard only.
 
 ## Scan a multi-project workspace {#workspaces}
 
-`ash scan --workspace FILE` takes a VS Code `.code-workspace` file and scans each of its
+`ash scan workspace FILE` takes a VS Code `.code-workspace` file and scans each of its
 folders as a separate project, with that project's own configuration, in one run. Pass
 `auto` as FILE to use the only `.code-workspace` file in the current directory.
 
@@ -367,7 +368,7 @@ cat > services.code-workspace <<'EOF'
   ]
 }
 EOF
-ash scan --workspace services.code-workspace --dry-run
+ash scan workspace services.code-workspace --dry-run
 ```
 
 `--dry-run` prints the plan, one entry per project with its path, configuration, threshold,
@@ -380,7 +381,7 @@ type whose names are the same or that the config lookup reads as one, such as `c
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --workspace services.code-workspace --scanners detect-secrets
+ash scan workspace services.code-workspace --scanners detect-secrets
 ```
 
 <!-- doctest: output -->
@@ -457,13 +458,15 @@ The exit code is the most severe of the projects' results, ranked 3, then 2, the
 Codes 4 and 5 are not part of that ranking: ASH gives them when it refuses the workspace
 before any project runs. Exit code 4 means the workspace itself is wrong: the workspace file
 or policy file cannot be used, a project is missing, or the projects need different plugin
-modules or incompatible scanner versions. Exit code 5 is a usage error, such as an option
-that `ash scan --workspace` does not take, or a `--scanners` list that names no scanner or that
+modules or incompatible scanner versions. The deprecated `--workspace` option and
+`--source-dir` together also exit 4; `ash scan workspace` takes no `--source-dir`, so it
+exits 5 instead. Exit code 5 is a usage error, such as an option that `ash scan workspace`
+does not take, or an `--only-scanners` list that names no scanner or that
 `--exclude-scanners` cancels:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --workspace services.code-workspace --scanners detect-secret
+ash scan workspace services.code-workspace --scanners detect-secret
 ```
 
 `--changed-files-only` works per project, against that project's own git repository. A
