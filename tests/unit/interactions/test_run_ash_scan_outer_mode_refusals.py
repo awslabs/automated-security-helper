@@ -712,9 +712,11 @@ def test_the_inner_nix_command_line_names_the_workspace_and_its_policy(tmp_path)
 
     argv = ras._nix_inner_argv(opts)
 
-    assert argv[argv.index("--workspace") + 1] == str(plan.workspace_file)
+    # The definition is the argument of the `workspace` subject, not the option it
+    # was before, and no directory is named: the workspace root is the plan's.
+    assert argv[:3] == ["scan", "workspace", str(plan.workspace_file)]
+    assert "--workspace" not in argv
     assert argv[argv.index("--workspace-config") + 1] == plan.workspace_config_source
     assert "--allow-missing-projects" in argv
-    # Mutually exclusive with --workspace on the CLI.
     assert "--source-dir" not in argv
     assert argv[argv.index("--output-dir") + 1] == str(opts.output_dir)

@@ -572,7 +572,9 @@ def test_a_workspace_scan_names_ash_config_whatever_the_workspace_root_holds(
     )
     one_directory = _inner_arguments(_run_command(layout["source"], layout["out"]))
 
-    assert _value_after(workspace, "--workspace") == "/src/ws.yaml"
+    # The definition is the argument of the `workspace` subject, not an option.
+    assert workspace[:3] == ["scan", "workspace", "/src/ws.yaml"]
+    assert "--workspace" not in workspace
     named = _value_after(workspace, rac.ASH_CONFIG_FROM_HOST_FLAG)
     assert named is not None and named.startswith(rac.CONTAINER_ENV_CONFIG_ROOT)
     assert _value_after(workspace, "--config") == named, workspace
