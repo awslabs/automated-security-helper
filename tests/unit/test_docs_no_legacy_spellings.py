@@ -7,9 +7,11 @@ release, with a deprecation line on every run, until ASH 4.0 removes it:
 
 * ``ash scan fs [PATH]`` replaces bare ``ash [options]`` and ``ash scan [options]``
   with no subject, and the PATH argument replaces ``--source-dir``;
+* ``ash scan workspace FILE`` replaces ``--workspace FILE`` on bare ``ash`` and on
+  ``ash scan`` with no subject;
 * ``--only-scanners`` and ``--add-scanners`` replace ``--scanners``;
-* ``ash results <verb>`` replaces ``ash report``, ``ash diff``, ``ash trend``,
-  ``ash merge`` and ``ash inspect``;
+* ``ash results <verb>`` replaces ``ash report``, ``ash merge`` and ``ash inspect``;
+  ``ash diff`` and ``ash trend`` never shipped, and are read as wrong spellings too;
 * ``ash container build`` replaces ``ash build-image``.
 
 The pages and templates were moved to the new spellings by hand, and nothing kept
@@ -43,14 +45,14 @@ What is allowed, and why
 * A page whose subject is the old spelling, named in ``ABOUT_THE_OLD_SPELLINGS`` with
   its reason. No history page is among them: CHANGELOG.md and the release notes are
   outside docs/content, and the docs checks treat them as history already.
-* The workspace, image and git scans, until their subject exists. ``ash scan
-  workspace``, ``ash scan image`` and ``ash scan git`` are not commands yet: those
-  scans are ``ash scan --workspace``, ``--image``, ``--image-archive``,
-  ``--image-layout`` and ``--source-git``, and ``ash --workspace``. A command that
-  carries one of those options may have no subject (``SUBJECT_OPTIONS``). It is still
-  held to the other deprecations: ``--source-dir`` and ``--scanners`` are refused
-  beside it. The day a subject lands, its option leaves ``SUBJECT_OPTIONS`` and the
-  pages that use it fail here until they move.
+* The image and git scans, until their subject exists. ``ash scan image`` and ``ash
+  scan git`` are not commands yet: those scans are ``ash scan --image``,
+  ``--image-archive``, ``--image-layout`` and ``--source-git``. A command that carries
+  one of those options may have no subject (``SUBJECT_OPTIONS``). It is still held to
+  the other deprecations: ``--source-dir`` and ``--scanners`` are refused beside it. The
+  day a subject lands, its option leaves ``SUBJECT_OPTIONS`` and the pages that use it
+  fail here until they move. The workspace scan's did when ``ash scan workspace``
+  arrived, so a page gives that scan as ``ash scan workspace FILE``.
 * A command a page gives in a deprecated spelling on purpose, named in
   ``NAMED_ON_PURPOSE`` with the page and the reason: what an older release runs, or
   an example of how the old spelling fails. The entry is the command's text, so a
@@ -89,7 +91,7 @@ SUBJECTS = SCAN_SUBJECTS
 #: The scan options that choose something other than a directory. Their subject is not
 #: a command yet, so a page spells those scans without one (see the docstring).
 SUBJECT_OPTIONS = frozenset(
-    {"--workspace", "--image", "--image-archive", "--image-layout", "--source-git"}
+    {"--image", "--image-archive", "--image-layout", "--source-git"}
 )
 
 #: The top-level commands that moved: ``ash results <verb>`` and ``ash container build``.
@@ -335,10 +337,10 @@ def test_a_page_or_template_gives_no_command_in_a_deprecated_spelling(rel):
     assert not problems, (
         f"{rel} gives a command in a spelling ASH 3.9 deprecates, so a reader who "
         "copies it gets a deprecation line on every run and a command that stops "
-        "working in 4.0. Spell it as 3.9 does (`ash scan fs [PATH]`, `--only-scanners`, "
-        "`ash results <verb>`, `ash container build`), or, for a scan of a workspace, "
-        "an image or a git repository, with the option that chooses it:\n  "
-        + "\n  ".join(problems)
+        "working in 4.0. Spell it as 3.9 does (`ash scan fs [PATH]`, "
+        "`ash scan workspace FILE`, `--only-scanners`, `ash results <verb>`, "
+        "`ash container build`), or, for a scan of an image or a git repository, with "
+        "the option that chooses it:\n  " + "\n  ".join(problems)
     )
 
 
@@ -411,6 +413,10 @@ ROWS = [
     (_page("ash scan --source-dir . --only-scanners x"), [NO_SUBJECT, "--source-dir"]),
     (_page("ash --source-dir . scan fs"), [BARE_WITH_OPTIONS, "--source-dir"]),
     (_page("ash --source-dir . config get"), [BARE_WITH_OPTIONS, "--source-dir"]),
+    (_page("ash scan --workspace w.code-workspace"), [NO_SUBJECT]),
+    (_page("ash --workspace w.code-workspace --dry-run"), [BARE_WITH_OPTIONS]),
+    (_page("ash scan workspace w.code-workspace --scanners x"), ["--scanners"]),
+    (_page("ash scan workspace w.code-workspace --source-dir ."), ["--source-dir"]),
     (_page("ash report --format json"), ["ash report"]),
     (_page("```", "ash merge", "```"), ["ash merge"]),
     (_page("ash diff before.json after.json"), ["ash diff"]),
@@ -448,6 +454,9 @@ ROWS = [
     (_page("ASH_SCANNERS is read as --scanners."), []),
     (_page("ash scan --exclude-scanners bandit"), [NO_SUBJECT]),
     (_page("ash scan fs . --exclude-scanners bandit"), []),
+    (_page("ash scan workspace services.code-workspace --only-scanners x"), []),
+    (_page("ash scan workspace auto --dry-run"), []),
+    (_page('cmd = ["ash", "scan", "workspace", "w.code-workspace", "--dry-run"]'), []),
     # A command named in prose, or in a quoted message.
     (_page("The `ash scan` group has one subject, `fs`."), []),
     (_page("Press `ash scan <TAB>` to see the subjects."), []),
@@ -456,14 +465,11 @@ ROWS = [
     (_page("See [ash scan](#scan) for the codes."), []),
     (_page("automated-security-helper and ash.yaml and .ash/ash_output"), []),
     # The scans that have no subject yet.
-    (_page("ash scan --workspace services.code-workspace --only-scanners x"), []),
-    (_page("ash --workspace services.code-workspace"), []),
     (_page("ash scan --image alpine:3 --only-scanners trivy-image"), []),
     (_page("ash scan --image-archive app.tar"), []),
     (_page("ash scan --image-layout ./app-layout/"), []),
     (_page("ash scan --source-git https://example.com/r.git"), []),
     # ... which are still held to the other deprecations.
-    (_page("ash scan --workspace w.code-workspace --scanners x"), ["--scanners"]),
     (_page("ash scan --image alpine:3 --source-dir ."), ["--source-dir"]),
 ]
 

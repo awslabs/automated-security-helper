@@ -12,6 +12,8 @@ What is pinned:
   example the page gives of one that is refused; the options that belong to a workspace
   scan, which ``ash scan fs`` refuses; what ``ash scan workspace`` refuses; and the
   workspace file that the page's example names.
+- how-to/migrate-to-scan-subjects.md: the workspace scan without its subject, the three
+  variables that name what a scan scans, and the ``--scanners`` row.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from automated_security_helper.cli import scan_group
 from automated_security_helper.cli.main import app
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.workspace import WorkspaceExitCode
@@ -32,6 +35,8 @@ from tests.unit.docs.test_page_claims import (
 )
 
 pytestmark = pytest.mark.unit
+
+MIGRATE = "how-to/migrate-to-scan-subjects.md"
 
 #: scale-large-repos.md (What sharding does not do).
 _SHARDS_DO_NOT_COMBINE_WITH_A_WORKSPACE = (
@@ -78,6 +83,46 @@ _THE_WORKSPACE_SUBJECT_REFUSES = (
     "not define, such as `--source-dir` or a shard option."
 )
 
+#: migrate-to-scan-subjects.md: the workspace scan, and the deprecated forms of it.
+_THE_WORKSPACE_ROW = (
+    "| `ash scan --workspace project.code-workspace` | "
+    "`ash scan workspace project.code-workspace` | "
+    "`ash --workspace project.code-workspace` moves the same way. "
+    "`--workspace-config`, `--allow-missing-projects` and `--dry-run` go with the "
+    "subject: `ash scan fs` does not take them. |"
+)
+_A_WORKSPACE_SCAN_WITHOUT_ITS_SUBJECT = (
+    "A workspace scan reached without its subject, `ash scan --workspace "
+    "project.code-workspace` or `ash --workspace project.code-workspace`, still runs "
+    "in 3.9 and prints one deprecation line that names `ash scan workspace <file>`."
+)
+
+#: migrate-to-scan-subjects.md: the variables that name what a scan scans.
+_THE_VARIABLES = (
+    "`ASH_SOURCE_DIR` still names the directory to scan when you give no path "
+    "argument, and `ASH_WORKSPACE` and `ASH_WORKSPACE_CONFIG` still name the file and "
+    "the policy file of a workspace scan when you give no file argument and no "
+    "`--workspace-config`."
+)
+_THE_VARIABLES_ARE_TOLD = (
+    "A scan that reads one of them that way prints one deprecation line for it, as "
+    "`--source-dir` does, and ASH 4.0 stops reading them for a scan. The argument, or "
+    "`--workspace-config`, takes its place and prints no line."
+)
+
+#: migrate-to-scan-subjects.md: `--scanners`, whose line names no removal release.
+_THE_SCANNERS_ROW = (
+    "| `ash scan fs --scanners bandit,semgrep` | "
+    "`ash scan fs --only-scanners bandit,semgrep` | `--only-scanners` states the whole "
+    "selection, and `--add-scanners` adds scanners to the mode's default set. "
+    "`ASH_SCANNERS` is deprecated with `--scanners`. `--scanners` keeps its behavior "
+    "and prints one `DeprecationWarning:` line that names no removal release. |"
+)
+_THE_SCANNERS_LINE_NAMES_NO_RELEASE = (
+    "ASH 4.0 removes the old spellings, and their deprecation lines say so, except the "
+    "line for `--scanners` and `ASH_SCANNERS`, which names no removal release."
+)
+
 
 def _invoke(args: list[str]):
     return CliRunner().invoke(app, args, prog_name="ash")
@@ -87,10 +132,14 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
+def _deprecation_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("Deprecated:")]
+
+
 @pytest.fixture(autouse=True)
 def _in_an_empty_directory(tmp_path, monkeypatch):
     """The working directory holds nothing, and no variable of the host names a file,
-    a directory, a shard or a policy."""
+    a directory, a shard, a policy or a scanner selection."""
     monkeypatch.chdir(tmp_path)
     for name in (
         "ASH_SOURCE_DIR",
@@ -100,8 +149,25 @@ def _in_an_empty_directory(tmp_path, monkeypatch):
         "ASH_WORKSPACE_CONFIG",
         "ASH_SHARD_INDEX",
         "ASH_SHARD_COUNT",
+        "ASH_SCANNERS",
+        "ASH_EXCLUDED_SCANNERS",
+        "ASH_MODE",
+        "ASH_IN_CONTAINER",
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    """Stands in for the engine behind the subjects, so that no scan can start, and
+    records what it was handed."""
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        scan_group,
+        "run_ash_scan_cli_command",
+        lambda *args, **kwargs: calls.append(kwargs),
+    )
+    return calls
 
 
 def _workspace(root: Path) -> Path:
@@ -236,3 +302,115 @@ def test_the_workspace_subject_takes_no_directory(tmp_path, monkeypatch):
     assert dry_run.exit_code == WorkspaceExitCode.SUCCESS, dry_run.output
     assert deprecated.exit_code == WorkspaceExitCode.WORKSPACE_ERROR, deprecated.output
     assert "ASH_SOURCE_DIR" in deprecated.output, deprecated.output
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [pytest.param(["scan"], id="scan"), pytest.param([], id="bare-ash")],
+)
+def test_a_workspace_scan_without_its_subject_names_the_subject(tmp_path, prefix):
+    """migrate-to-scan-subjects.md (Old and new spellings).
+
+    ``ash scan --workspace FILE`` and ``ash --workspace FILE`` still run, each printing
+    one deprecation line that names ``ash scan workspace <file>``, and the subject
+    prints none. A dry run shows the plan and scans nothing.
+    """
+    assert_on_page(MIGRATE, _THE_WORKSPACE_ROW)
+    assert_on_page(MIGRATE, _A_WORKSPACE_SCAN_WITHOUT_ITS_SUBJECT)
+    workspace = _workspace(tmp_path)
+
+    deprecated = _invoke([*prefix, "--workspace", str(workspace), "--dry-run"])
+    subject = _invoke(["scan", "workspace", str(workspace), "--dry-run"])
+
+    assert deprecated.exit_code == WorkspaceExitCode.SUCCESS, deprecated.output
+    assert subject.exit_code == WorkspaceExitCode.SUCCESS, subject.output
+    (line,) = _deprecation_lines(deprecated.stderr)
+    assert "ash scan workspace <file>" in line, line
+    assert _deprecation_lines(subject.stderr) == [], subject.stderr
+
+
+def test_the_variables_that_name_what_to_scan_are_told_once_each(engine, monkeypatch):
+    """migrate-to-scan-subjects.md (below the table).
+
+    A scan that reads ``ASH_SOURCE_DIR``, ``ASH_WORKSPACE`` or ``ASH_WORKSPACE_CONFIG``
+    for what the command line left out prints one line for each variable it reads. A
+    scan that is given the path, the file or the option prints none.
+    """
+    assert_on_page(MIGRATE, _THE_VARIABLES)
+    assert_on_page(MIGRATE, _THE_VARIABLES_ARE_TOLD)
+    monkeypatch.setenv("ASH_SOURCE_DIR", "/from/env")
+    monkeypatch.setenv("ASH_WORKSPACE", "dev.code-workspace")
+    monkeypatch.setenv("ASH_WORKSPACE_CONFIG", "policy.yaml")
+
+    directory = _invoke(["scan", "fs"])
+    workspace = _invoke(["scan", "workspace"])
+    given = [
+        _invoke(["scan", "fs", "given"]),
+        _invoke(
+            [
+                "scan",
+                "workspace",
+                "given.code-workspace",
+                "--workspace-config",
+                "given.yaml",
+            ]
+        ),
+    ]
+
+    (directory_line,) = _deprecation_lines(directory.stderr)
+    assert "ASH_SOURCE_DIR" in directory_line, directory_line
+    file_line, policy_line = _deprecation_lines(workspace.stderr)
+    assert "`ASH_WORKSPACE` " in file_line, file_line
+    assert "`ASH_WORKSPACE_CONFIG` " in policy_line, policy_line
+    for result in given:
+        assert result.exit_code == 0, result.output
+        assert _deprecation_lines(result.stderr) == [], result.stderr
+
+
+def test_the_scanners_option_prints_one_line_that_names_no_removal_release(
+    tmp_path, monkeypatch
+):
+    """migrate-to-scan-subjects.md (the introduction and the ``--scanners`` row).
+
+    ``--scanners`` still selects what it did and prints one ``DeprecationWarning:``
+    line that names ``--only-scanners`` and ``--add-scanners`` and no release.
+    """
+    from automated_security_helper.cli import scan as scan_module
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    assert_on_page(MIGRATE, _THE_SCANNERS_ROW)
+    assert_on_page(MIGRATE, _THE_SCANNERS_LINE_NAMES_NO_RELEASE)
+    monkeypatch.setenv("COLUMNS", "400")
+    monkeypatch.setenv("NO_COLOR", "1")
+    forwarded: dict = {}
+
+    def fake_run_ash_scan(**kwargs):
+        forwarded.update(kwargs)
+        return AshAggregatedResults()
+
+    monkeypatch.setattr(scan_module, "run_ash_scan", fake_run_ash_scan)
+    source = tmp_path / "src"
+    source.mkdir()
+
+    result = _invoke(
+        [
+            "scan",
+            "fs",
+            str(source),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--no-progress",
+            "--scanners",
+            "bandit",
+        ]
+    )
+
+    lines = [
+        line
+        for line in result.output.splitlines()
+        if line.startswith("DeprecationWarning:")
+    ]
+    assert len(lines) == 1, result.output
+    assert "--only-scanners" in lines[0] and "--add-scanners" in lines[0], lines[0]
+    assert "4.0" not in lines[0], lines[0]
+    assert forwarded["scanners"] == ["bandit"], forwarded
