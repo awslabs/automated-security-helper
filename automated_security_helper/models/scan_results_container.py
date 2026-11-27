@@ -91,7 +91,8 @@ class ScanResultsContainer(BaseModel):
     # Two plain strings, assigned together by ``record_error_reason`` and never
     # appended to, for the reason the fields above give: the ``exclude_unset``
     # per-target dump is the report ``core.unified_metrics`` reads them from. Not a
-    # ``core.exceptions.FailureReason``: this package does not import ``core``.
+    # ``core.exceptions.FailureReason``: this package does not import
+    # ``core.exceptions``.
     error_reason: str | None = None
     error_reason_code: str | None = None
     # The content databases whose staleness turned a clean result into ERROR, under

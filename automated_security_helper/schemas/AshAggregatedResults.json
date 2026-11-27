@@ -21260,7 +21260,7 @@
             }
           ],
           "default": null,
-          "description": "Why the scanner is ERROR, in one short sentence that names no path: its tool timed out, could not be started, or exited with a code the scanner does not accept; ASH could not record, read or grade what it returned; no rule was evaluated against its targets, or it failed on some of them. Set on an ERROR row whose cause was recorded, and None on every other row, including an ERROR row of a results file written before reasons were recorded.",
+          "description": "Why the scanner is ERROR, in one short sentence that names no path. Recorded by the scan or derived for an ERROR row, and None on every other row, including an ERROR row of a results file written before reasons were recorded.",
           "title": "Error Reason"
         },
         "error_reason_code": {
