@@ -365,12 +365,20 @@ def _output_formats_note(_param: Any) -> str:
 
 
 def _report_format_note(_param: Any) -> str:
-    """``ash report --format``: cli/report.py looks the value up among loaded reporters."""
+    """``ash report --format`` and ``ash results report --format``.
+
+    cli/report.py looks the value up among the loaded reporters. A value none of them
+    answers to is a mistyped argument, which it refuses with ``ASH_EXIT_USAGE_ERROR``,
+    not with 1, the code of a failed run. The code is read from that constant, so the
+    sentence cannot name a code the command does not exit with.
+    """
+    from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
     return (
         "Accepted values: the name of a reporter that is loaded: "
         + ", ".join(code(r) for r in _builtin_reporters())
         + ", and the reporters of any plugin module the configuration loads. "
-        "Any other value exits with code 1."
+        f"Any other value exits with code {ASH_EXIT_USAGE_ERROR}."
     )
 
 
@@ -380,6 +388,7 @@ def _report_format_note(_param: Any) -> str:
 VALUE_NOTES = {
     (("scan",), "--output-formats"): _output_formats_note,
     (("report",), "--format"): _report_format_note,
+    (("results", "report"), "--format"): _report_format_note,
 }
 
 
