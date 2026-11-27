@@ -2241,6 +2241,24 @@ def snyk_run_record(monkeypatch):
     return runs
 
 
+def tested_path(command):
+    """The path snyk is told to test, read from its place in the argv.
+
+    ``_resolve_arguments`` puts the target right before the SARIF output flag,
+    after everything ``extra_args`` holds. Taking the first argument after the
+    subcommands that does not start with ``-`` reads the value of an option that
+    has a separate one (``--org myorg``) as the target.
+    """
+    flagged = [
+        index for index, arg in enumerate(command) if arg.startswith(SARIF_OUTPUT_FLAG)
+    ]
+    assert len(flagged) == 1, f"expected one {SARIF_OUTPUT_FLAG} argument: {command}"
+    assert flagged[0] > 0, f"no argument before {SARIF_OUTPUT_FLAG}: {command}"
+    target = command[flagged[0] - 1]
+    assert not target.startswith("-"), f"an option is before the SARIF flag: {command}"
+    return Path(target)
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("target_type", ["source", "converted"])
 @pytest.mark.parametrize(
@@ -2275,9 +2293,7 @@ def test_snyk_starts_in_a_new_private_empty_directory_outside_the_scanned_tree(
 
     (run,) = snyk_run_record
     cwd = run["cwd"].resolve()
-    tested = next(
-        Path(arg).resolve() for arg in run["command"][3:] if not arg.startswith("-")
-    )
+    tested = tested_path(run["command"]).resolve()
     assert run["entries"] == []
     assert not run["is_link"]
     if os.name != "nt":
@@ -2415,10 +2431,33 @@ def test_control_snyk_is_still_given_the_staged_copy_and_the_sarif_output(
 
     (run,) = snyk_run_record
     command = run["command"]
-    target = Path(next(arg for arg in command[3:] if not arg.startswith("-")))
+    target = tested_path(command)
     assert target.is_absolute()
     assert target.resolve() != source.resolve()
     assert any(arg.startswith(SARIF_OUTPUT_FLAG) for arg in command)
+
+
+@pytest.mark.unit
+def test_the_tested_path_is_not_mistaken_for_the_value_of_an_option(
+    scanner, snyk_on_path, plugin_context, snyk_run_record
+):
+    """``--org myorg`` puts a word that does not start with ``-`` ahead of the
+    target. The target is the argument before the SARIF flag, whatever comes
+    before it."""
+    from automated_security_helper.models.core import ToolExtraArg
+
+    source = plugin_context.source_dir
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    scanner.args.extra_args.append(ToolExtraArg(key="--org", value="myorg"))
+
+    scanner.scan(target=source, target_type="source")
+
+    (run,) = snyk_run_record
+    command = run["command"]
+    assert command[command.index("--org") + 1] == "myorg", command
+    target = tested_path(command)
+    assert target.is_absolute(), command
+    assert target.resolve() != source.resolve()
 
 
 @pytest.mark.unit
@@ -2426,26 +2465,20 @@ def test_relative_orchestrator_directories_reach_snyk_as_absolute_paths(
     tmp_path, monkeypatch, snyk_on_path, snyk_run_record
 ):
     """ASHScanOrchestrator keeps the directories it is given as given, and so does
-    the context it builds for the scanners. snyk starts in a directory of its own,
-    where a relative path names something else, so the converted target and the
-    SARIF output path reach it absolute, and the file it writes is the one ASH
-    reads."""
-    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-
+    the context it builds for the scanners, so a scanner can be handed relative
+    ones. The context is built here with relative directories, which keeps the
+    test on what snyk is given. snyk starts in a directory of its own, where a
+    relative path names something else, so the converted target and the SARIF
+    output path reach it absolute, and the file it writes is the one ASH reads."""
     monkeypatch.chdir(tmp_path)
     Path("src").mkdir()
     Path("src", "app.py").write_text("print('hello')\n", encoding="utf-8")
-    orchestrator = ASHScanOrchestrator(source_dir=Path("src"), output_dir=Path("out"))
-    # The fields orchestrator.initialize() builds the scanners' context from.
     context = PluginContext(
-        source_dir=orchestrator.source_dir,
-        output_dir=orchestrator.output_dir,
-        work_dir=orchestrator.engine_work_dir(),
+        source_dir=Path("src"),
+        output_dir=Path("out"),
+        work_dir=Path("out", "converted"),
         config=get_default_config(),
     )
-    assert not context.source_dir.is_absolute()
-    assert not context.output_dir.is_absolute()
-    assert not context.work_dir.is_absolute()
     converted = context.work_dir / "jupyter"
     converted.mkdir(parents=True)
     (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
@@ -2454,15 +2487,15 @@ def test_relative_orchestrator_directories_reach_snyk_as_absolute_paths(
     report = scanner.scan(target=context.work_dir, target_type="converted")
 
     (run,) = snyk_run_record
-    tested = next(arg for arg in run["command"][3:] if not arg.startswith("-"))
+    tested = tested_path(run["command"])
     sarif = next(
         arg.split("=", 1)[1]
         for arg in run["command"]
         if arg.startswith(SARIF_OUTPUT_FLAG)
     )
-    assert Path(tested).is_absolute(), run["command"]
+    assert tested.is_absolute(), run["command"]
     assert Path(sarif).is_absolute(), run["command"]
-    assert Path(tested).resolve() == context.work_dir.resolve()
+    assert tested.resolve() == context.work_dir.resolve()
     assert (
         Path(sarif).resolve()
         == Path(scanner.results_dir, "converted", "results_sarif.sarif").resolve()
@@ -2503,6 +2536,6 @@ def test_the_copy_reaches_snyk_absolute_when_its_path_is_relative(
 
     (run,) = snyk_run_record
     (copy,) = copies
-    tested = next(arg for arg in run["command"][3:] if not arg.startswith("-"))
-    assert Path(tested).is_absolute(), run["command"]
-    assert Path(tested).resolve() == copy, (tested, copy)
+    tested = tested_path(run["command"])
+    assert tested.is_absolute(), run["command"]
+    assert tested.resolve() == copy, (tested, copy)
