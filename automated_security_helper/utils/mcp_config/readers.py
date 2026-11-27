@@ -145,6 +145,17 @@ def _string_map(value: Any) -> Dict[str, str]:
     return out
 
 
+def _key_names(value: Any) -> List[str]:
+    """Every key of a table, whatever its value; ``[]`` when ``value`` is not a table.
+
+    :func:`_string_map` drops a key whose value has no text form (null, a list, a
+    table, a date), so the names are read from the table itself.
+    """
+    if not isinstance(value, dict):
+        return []
+    return [str(key) for key in value]
+
+
 def _entry(
     fmt: McpConfigFormat,
     source_file: str,
@@ -188,6 +199,7 @@ def _entry(
         if isinstance(args, list)
         else [],
         env=_string_map(raw.get("env")),
+        env_names=_key_names(raw.get("env")),
         url=url,
         url_pointer=url_pointer,
         transport=transport,
