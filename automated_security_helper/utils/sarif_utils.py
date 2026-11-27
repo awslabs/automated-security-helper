@@ -1063,17 +1063,26 @@ def get_severity_metrics_from_sarif(
         tally_severities,
     )
 
-    kinds = [
-        SUPPRESSED
-        if is_result_suppressed(result)
-        # result_severity reads issue_severity first and the level after it,
-        # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
-        # result with an explicit null level was counted "info" here while the
-        # gate graded it MEDIUM, so the per-scanner row disagreed with the exit
-        # code.
-        else _resolve_result_severity(result)
-        for result in sarif_report.get_all_results()
-    ]
+    kinds: List[str] = []
+    for result in sarif_report.get_all_results():
+        suppressed = is_result_suppressed(result)
+        # A result whose kind states no finding (pass, notApplicable,
+        # informational) is in no bucket, as in the statistics calculator's
+        # per-scanner read: SARIF gives it level none, which grades INFO, and
+        # the row then said an INFO finding where the summary built from the same
+        # SARIF said none. A suppression in effect still counts it as suppressed.
+        if is_not_a_finding(result) and not suppressed:
+            continue
+        kinds.append(
+            SUPPRESSED
+            if suppressed
+            # result_severity reads issue_severity first and the level after it,
+            # and a missing level as MISSING_SARIF_LEVEL, as every gate does. A
+            # result with an explicit null level was counted "info" here while
+            # the gate graded it MEDIUM, so the per-scanner row disagreed with
+            # the exit code.
+            else _resolve_result_severity(result)
+        )
     return tally_severities(severity_frame(kinds))
 
 
