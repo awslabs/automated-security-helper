@@ -58,6 +58,61 @@ def test_scan_subject_value_options_are_the_ones_the_root_does_not_take():
     assert contract().scan_subject_value_options == ("--archive", "--cli-json-input")
 
 
+def test_scan_other_source_options_are_the_ones_that_name_a_source_but_the_directory():
+    # A clone, the three image options, and the document that can name any of them. A
+    # scan that carries one is left to ASH_SOURCE_DIR instead of being given a PATH.
+    assert contract().scan_other_source_options == (
+        "--cli-json-input",
+        "--image",
+        "--image-archive",
+        "--image-layout",
+        "--source-git",
+    )
+
+
+def _string_tuples(source: str) -> list[tuple[str, ...]]:
+    """Every tuple of string literals in *source*, in the order they are written."""
+    import ast
+    import textwrap
+
+    return [
+        tuple(element.value for element in node.elts)
+        for node in ast.walk(ast.parse(textwrap.dedent(source)))
+        if isinstance(node, ast.Tuple)
+        and node.elts
+        and all(
+            isinstance(element, ast.Constant) and isinstance(element.value, str)
+            for element in node.elts
+        )
+    ]
+
+
+def test_the_other_source_parameters_are_the_clis_own_list_and_the_document():
+    """The CLI counts ASH_SOURCE_DIR as the only name of the directory unless one of four
+    parameters is given (`from_variable_alone`, a tuple inside the fs command). The
+    wrappers leave exactly those scans to the variable, and the document that can name
+    any of them, so the contract's list is the CLI's list and one more."""
+    from automated_security_helper.cli.scan_group import run_ash_scan_fs_cli_command
+    from automated_security_helper.interactions.wrapper_contract import (
+        SCAN_OTHER_SOURCE_PARAMETERS,
+    )
+
+    # The control: a list that differs is read as the list it is, so an agreement below
+    # is not the extraction finding nothing.
+    assert _string_tuples("for n in ('source_git', 'image', 'x'): pass") == [
+        ("source_git", "image", "x")
+    ]
+    found = [
+        names
+        for names in _string_tuples(inspect.getsource(run_ash_scan_fs_cli_command))
+        if "source_git" in names
+    ]
+
+    assert len(found) == 1, found
+    assert set(found[0]) | {"cli_json_input"} == set(SCAN_OTHER_SOURCE_PARAMETERS)
+    assert "cli_json_input" not in found[0]
+
+
 def test_only_scan_takes_sandbox():
     assert contract().sandbox_subcommands == ("scan",)
 

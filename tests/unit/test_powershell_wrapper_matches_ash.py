@@ -2668,6 +2668,103 @@ def test_a_form_with_no_scan_subject_is_still_given_the_variable(
     assert _run_env(run).get("ASH_SOURCE_DIR") == "/src", run
 
 
+_CLONE = "https://example.com/org/repo.git"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    [
+        pytest.param(
+            f"-AshArgs 'scan fs --source-git {_CLONE}'",
+            ["scan", "fs", *SANDBOX_OFF, "--source-git", _CLONE],
+            id="a-clone",
+        ),
+        pytest.param(
+            f"-AshArgs 'scan fs --source-git={_CLONE}'",
+            ["scan", "fs", *SANDBOX_OFF, f"--source-git={_CLONE}"],
+            id="a-clone-with-its-value-attached",
+        ),
+        pytest.param(
+            f"-AshArgs 'scan --source-git {_CLONE} fs'",
+            ["scan", *SANDBOX_OFF, "--source-git", _CLONE, "fs"],
+            id="a-clone-before-the-subject",
+        ),
+        pytest.param(
+            f"-AshArgs '--source-git {_CLONE} scan fs'",
+            ["--source-git", _CLONE, "scan", "fs", *SANDBOX_OFF],
+            id="a-clone-before-scan",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image app:1'",
+            ["scan", "fs", *SANDBOX_OFF, "--image", "app:1"],
+            id="an-image",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image=app:1'",
+            ["scan", "fs", *SANDBOX_OFF, "--image=app:1"],
+            id="an-image-with-its-value-attached",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image-archive image.tar'",
+            ["scan", "fs", *SANDBOX_OFF, "--image-archive", "image.tar"],
+            id="a-saved-image",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --image-layout layout'",
+            ["scan", "fs", *SANDBOX_OFF, "--image-layout", "layout"],
+            id="an-image-layout",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --cli-json-input scan.json'",
+            ["scan", "fs", *SANDBOX_OFF, "--cli-json-input", "scan.json"],
+            id="a-document-that-can-name-either",
+        ),
+    ],
+)
+def test_a_scan_that_names_another_source_keeps_the_variable_and_gets_no_path(
+    tmp_path, invocation, expected
+):
+    """The CLI inside refuses a PATH beside a clone, and it does not count the variable
+    as the only name of the directory when a clone, an image or a document is named, so
+    it prints no line about it. Such a scan is told its directory by the variable, as it
+    was before the mount became a PATH argument: a clone replaces it, and `/src` is not
+    among the scan's words."""
+    result, calls = _invoke(
+        tmp_path, f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {invocation}"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == expected, run
+    assert "/src" not in _inner_ash_args(run), run
+    assert _run_env(run).get("ASH_SOURCE_DIR") == "/src", run
+
+
+@pytest.mark.integration
+def test_the_value_of_another_option_spelled_like_an_image_option_is_not_that_option(
+    tmp_path,
+):
+    """The word after a value option is its value, whatever it spells: here ``--image``
+    is the value of --output-formats, so the scan is still a scan of the directory and
+    is given it as its PATH argument."""
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out "
+        "-AshArgs 'scan fs --output-formats --image'",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == [
+        "scan",
+        "fs",
+        "/src",
+        *SANDBOX_OFF,
+        "--output-formats",
+        "--image",
+    ], run
+    assert "ASH_SOURCE_DIR" not in _run_env(run), run
+
+
 @pytest.mark.integration
 def test_output_format_sets_no_variable_ash_does_not_read(tmp_path):
     """-OutputFormat put ASH_OUTPUT_FORMAT into the container, and ASH reads no such

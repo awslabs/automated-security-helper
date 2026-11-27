@@ -395,10 +395,15 @@ ASH_GROUP_LEAF_TAKERS="results:report=report results:merge=merge results:inspect
 # is not an option or an option's value names one, and the word after that is the
 # directory to scan (forward_word, below). ASH_SCAN_VALUE_OPTIONS are options a
 # subject takes a value for that the root does not, so the word after one is not
-# the directory; ASH_ROOT_OPTIONS is every long option, for the completion function.
+# the directory; ASH_SCAN_OTHER_SOURCE_OPTIONS are the options that name a source
+# other than the directory (a clone, an image, a document that can name either), so a
+# scan that has one is not given the directory as its PATH argument
+# (detect_subcommand, below); ASH_ROOT_OPTIONS is every long option, for the
+# completion function.
 # BEGIN generated: sh-scan-subjects (scripts/generate_wrapper_tables.py)
 ASH_SCAN_SUBJECTS="fs workspace"
 ASH_SCAN_VALUE_OPTIONS="--archive --cli-json-input"
+ASH_SCAN_OTHER_SOURCE_OPTIONS="--cli-json-input --image --image-archive --image-layout --source-git"
 ASH_ROOT_OPTIONS="--add-scanners --all-enabled-plugins --all-enabled-scanners --allow-in-tree-tools --allow-missing-projects --allow-stale-content-db --annotate-duplicates --archive --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build --build-target --changed-files-only --cleanup --cli-json-input --color --compact-report --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --debug --dry-run --exclude-scanners --express --fail-on-findings --fail-on-incomplete-scanners --fold-duplicates --force --format --formats --full --generate-cli-skeleton --git-depth --git-ref --honor-ignore-files --ignore-suppressions --image --image-archive --image-layout --inspect --log-level --min-severity --mode --no-allow-stale-content-db --no-build --no-cleanup --no-color --no-express --no-fail-on-findings --no-fail-on-incomplete-scanners --no-honor-ignore-files --no-ignore-suppressions --no-inspect --no-offline --no-progress --no-quiet --no-run --no-show-summary --no-simple --no-use-existing --oci --oci-runner --offline --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --progress --python-based-plugins-only --python-based-scanners-only --python-only --quiet --require-scanner-selection --run --runner --sandbox --scanners --shard-count --shard-index --show-completion --show-summary --simple --source-dir --source-git --staged --strategy --use-existing --verbose --version --workspace --workspace-config"
 # END generated: sh-scan-subjects
 # The bash completion function `./ash --show-completion` prints, for hosts with no
@@ -472,14 +477,30 @@ ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --git-depth --git-ref --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --source-git --strategy --workspace --workspace-config -c -f -g -o -u"
 # END generated: sh-root-value-options
 
+# Sets OTHER_SOURCE_AT to the index $2 when the word $1, with any `=value` cut off, is
+# an option that names a source other than the directory
+# (ASH_SCAN_OTHER_SOURCE_OPTIONS), and nothing has set it yet. detect_subcommand calls
+# it for every word that is not an option's value, so `--image=app:1` and `--image
+# app:1` are the same word to it.
+note_other_source_option() {
+  if ((OTHER_SOURCE_AT >= 0)); then
+    return 0
+  fi
+  if [[ " ${ASH_SCAN_OTHER_SOURCE_OPTIONS} " == *" ${1%%=*} "* ]]; then
+    OTHER_SOURCE_AT=$2
+  fi
+}
+
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
 # with its index in SUBCOMMAND_AT (-1 and "" when none is named), not counting
 # the value of a root option, which can be a command's name (`--phases
 # inspect`, `--config config`). Walks the words the refusals checked and the
 # scan is given. When that subcommand is scan, the words after it are read once
 # more: the subject (ASH_SCAN_SUBJECTS) is in SUBJECT, with its index in SUBJECT_AT,
-# the word after it that names a path is at SUBJECT_PATH_AT, and the first --archive
-# option is at ARCHIVE_AT (each "" or -1 when there is none). These are read from
+# the word after it that names a path is at SUBJECT_PATH_AT, the first --archive
+# option is at ARCHIVE_AT, and the first option that names a source other than the
+# directory (ASH_SCAN_OTHER_SOURCE_OPTIONS, before the subject or after it) is at
+# OTHER_SOURCE_AT (each "" or -1 when there is none). These are read from
 # ASH_ARG_WORDS, as the argument loop's words were split, so a scan named inside one
 # quoted argument (`./ash "scan workspace f"`) is read as it is when its words are
 # given one by one. SCAN_SUBJECT is the subject the argument loop read as it went.
@@ -490,6 +511,7 @@ detect_subcommand() {
   SUBJECT_AT=-1
   SUBJECT_PATH_AT=-1
   ARCHIVE_AT=-1
+  OTHER_SOURCE_AT=-1
   SUBJECT_WORD_SEEN="NO"
   SKIP_VALUE="NO"
   for ((ASH_WORD_AT = 0; ASH_WORD_AT < ${#ASH_ARG_WORDS[@]}; ASH_WORD_AT++)); do
@@ -498,6 +520,7 @@ detect_subcommand() {
       SKIP_VALUE="NO"
       continue
     fi
+    note_other_source_option "${ASH_WORD}" "${ASH_WORD_AT}"
     if [[ " ${ASH_SUBCOMMANDS} " == *" ${ASH_WORD} "* ]]; then
       SUBCOMMAND="${ASH_WORD}"
       SUBCOMMAND_AT=${ASH_WORD_AT}
@@ -535,6 +558,7 @@ detect_subcommand() {
       SKIP_VALUE="NO"
       continue
     fi
+    note_other_source_option "${ASH_WORD}" "${ASH_WORD_AT}"
     if [[ "${ASH_WORD}" = "--archive" || "${ASH_WORD}" == --archive=* ]]; then
       if ((ARCHIVE_AT < 0)); then
         ARCHIVE_AT=${ASH_WORD_AT}
@@ -2269,10 +2293,14 @@ else
       # `./ash --scanners bandit`) names its directory that way, since that form
       # refuses a PATH. A scan whose words already hold a path after the subject (one
       # typed inside a single quoted argument) is left as it was typed, with the
-      # variable.
+      # variable. So is a scan that names a source other than the directory
+      # (ASH_SCAN_OTHER_SOURCE_OPTIONS: a clone, an image, or a --cli-json-input
+      # document, which can name either): the scan inside refuses a PATH beside a
+      # clone, and it does not count the variable as the only name of the directory
+      # then, so it prints no line about it.
       SOURCE_DIR_RUN_ARGS=(-e "ASH_SOURCE_DIR=/src")
       SOURCE_PATH_ADDED="NO"
-      if [[ "${SUBCOMMAND}" = "scan" && "${SUBJECT}" = "fs" ]] && ((SUBJECT_PATH_AT < 0)); then
+      if [[ "${SUBCOMMAND}" = "scan" && "${SUBJECT}" = "fs" ]] && ((SUBJECT_PATH_AT < 0 && OTHER_SOURCE_AT < 0)); then
         AFTER_SUBJECT_AT=$((SUBJECT_AT + 1))
         ASH_ARG_WORDS=(
           "${ASH_ARG_WORDS[@]:0:AFTER_SUBJECT_AT}"
@@ -2326,7 +2354,8 @@ else
       # option given before a subcommand on to it only when it takes the option, and
       # only scan takes --source-dir. scan, report and merge read the variables;
       # anything set on the command line still wins over them. `scan fs` is given the
-      # source directory as its PATH argument instead (SOURCE_DIR_RUN_ARGS, above).
+      # source directory as its PATH argument instead (SOURCE_DIR_RUN_ARGS, above),
+      # unless it names another source.
       # The image name is quoted, here and in the build, as is the build target that
       # names its default: either is the caller's value, and unquoted, a value with
       # spaces gave the runner options of its own (`-e ASH_CONFIG=...`) or gave the

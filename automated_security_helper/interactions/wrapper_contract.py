@@ -79,6 +79,22 @@ CONTAINER_MODE_SUBCOMMANDS: tuple[str, ...] = ("scan", "build-image", "container
 #: build` passes `--quiet` on to `build`: such a group takes what that command takes.
 OPTION_ROUTING_GROUPS: dict[str, str] = {"container": "build"}
 
+#: The parameters of the scan's subjects that name where the source is instead of the
+#: directory a wrapper mounts: a clone and the three image options, and the structured
+#: input, whose document can name any of them where a wrapper cannot read it. A wrapper
+#: gives `scan fs` its directory as the PATH argument, and the CLI refuses a PATH beside
+#: a clone, so a scan that carries one of these is left to the variable that told it
+#: its directory before. The first four are the ones the CLI itself leaves out when it
+#: decides that the variable alone names the directory (`from_variable_alone` in
+#: cli/scan_group.py); tests/unit/test_wrapper_contract_spec.py holds them to that list.
+SCAN_OTHER_SOURCE_PARAMETERS: tuple[str, ...] = (
+    "source_git",
+    "image",
+    "image_archive",
+    "image_layout",
+    "cli_json_input",
+)
+
 
 def _options(command: Any) -> set[str]:
     """The options a command declares itself, not those of commands nested under it."""
@@ -118,6 +134,10 @@ class WrapperContract:
     scan_subjects: tuple[str, ...]
     #: The options a subject of ``scan`` takes a value for that the root does not.
     scan_subject_value_options: tuple[str, ...]
+    #: The long options of the scan's subjects that name a source other than the
+    #: directory, or carry a document that can (:data:`SCAN_OTHER_SOURCE_PARAMETERS`),
+    #: sorted. A scan with one is not given the directory as its PATH argument.
+    scan_other_source_options: tuple[str, ...]
     #: Every long option of the root and of the scan's subjects, sorted: what a
     #: shell completion offers after a dash.
     root_options: tuple[str, ...]
@@ -213,6 +233,18 @@ def contract() -> WrapperContract:
     subject_value_options = sorted(
         value_options_of(subject_params) - set(value_options)
     )
+    # Options that name the source somewhere other than the directory, and the document
+    # option that can: a scan that has one keeps the variable as the name of its
+    # directory instead of being given a PATH argument.
+    other_source_options = sorted(
+        {
+            spelling
+            for param in subject_params
+            if param.param_type_name == "option"
+            and param.name in SCAN_OTHER_SOURCE_PARAMETERS
+            for spelling in param.opts
+        }
+    )
     all_options = sorted(
         {
             spelling
@@ -230,6 +262,7 @@ def contract() -> WrapperContract:
         subcommands=subcommands,
         scan_subjects=scan_subjects,
         scan_subject_value_options=tuple(subject_value_options),
+        scan_other_source_options=tuple(other_source_options),
         root_options=tuple(all_options),
         sandbox_subcommands=tuple(
             name

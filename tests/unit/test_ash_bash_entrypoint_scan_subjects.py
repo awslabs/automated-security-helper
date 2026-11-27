@@ -8,8 +8,10 @@ after the subject as its own source directory, mounts it, and does not forward i
 host path means nothing inside the container, where the scan is given the mount as
 ``/src``, the PATH argument of the subject, and no ASH_SOURCE_DIR. The forms that name no
 subject keep the variable: it is the only way they are told the directory, and a typed
-path is refused by the form with no subject. ``--source-dir`` still names the directory,
-with one deprecation line on stderr.
+path is refused by the form with no subject. So does a scan that names a clone, an
+image or a ``--cli-json-input`` document: the CLI refuses a PATH beside a clone, and
+does not count the variable as the only name of the directory then. ``--source-dir``
+still names the directory, with one deprecation line on stderr.
 
 ``ash scan workspace <file>`` names no directory: the entrypoint mounts one, so it
 refuses the subject, and the older ``--workspace`` and ``--workspace-config`` spellings
@@ -266,6 +268,105 @@ def test_a_path_typed_inside_one_quoted_argument_is_left_as_typed(runner, tmp_pa
 
     assert _inner_argv(run_argv) == ["ash", "scan", "fs", *SANDBOX_OFF, "project"]
     assert "ASH_SOURCE_DIR=/src" in run_argv, run_argv
+
+
+CLONE = "https://example.com/org/repo.git"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("words", "inner"),
+    [
+        pytest.param(
+            ["scan", "fs", "--source-git", CLONE],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--source-git", CLONE],
+            id="a-clone",
+        ),
+        pytest.param(
+            ["scan", "fs", f"--source-git={CLONE}"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, f"--source-git={CLONE}"],
+            id="a-clone-with-its-value-attached",
+        ),
+        pytest.param(
+            ["scan", "--source-git", CLONE, "fs"],
+            ["ash", "scan", *SANDBOX_OFF, "--source-git", CLONE, "fs"],
+            id="a-clone-before-the-subject",
+        ),
+        pytest.param(
+            ["--source-git", CLONE, "scan", "fs"],
+            ["ash", "--source-git", CLONE, "scan", "fs", *SANDBOX_OFF],
+            id="a-clone-before-scan",
+        ),
+        pytest.param(
+            [f"scan fs --source-git {CLONE}"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--source-git", CLONE],
+            id="a-clone-in-one-quoted-argument",
+        ),
+        pytest.param(
+            ["scan", "fs", "--image", "app:1"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--image", "app:1"],
+            id="an-image",
+        ),
+        pytest.param(
+            ["scan", "fs", "--image=app:1"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--image=app:1"],
+            id="an-image-with-its-value-attached",
+        ),
+        pytest.param(
+            ["scan", "fs", "--image-archive", "image.tar"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--image-archive", "image.tar"],
+            id="a-saved-image",
+        ),
+        pytest.param(
+            ["scan", "fs", "--image-layout", "layout"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--image-layout", "layout"],
+            id="an-image-layout",
+        ),
+        pytest.param(
+            ["scan", "fs", "--cli-json-input", "scan.json"],
+            ["ash", "scan", "fs", *SANDBOX_OFF, "--cli-json-input", "scan.json"],
+            id="a-document-that-can-name-either",
+        ),
+    ],
+)
+def test_a_scan_that_names_another_source_keeps_the_variable_and_gets_no_path(
+    runner, tmp_path, words, inner
+):
+    """The CLI inside refuses a PATH beside a clone, and it does not count the variable
+    as the only name of the directory when a clone, an image or a document is named, so
+    it prints no line about it. Such a scan is told its directory by the variable, as it
+    was before the mount became a PATH argument: a clone replaces it, and `/src` is not
+    among the scan's words."""
+    result = _ash(runner, tmp_path, *words)
+    run_argv = _run_argv(result)
+
+    assert _inner_argv(run_argv) == inner
+    assert "/src" not in _inner_argv(run_argv), run_argv
+    assert "ASH_SOURCE_DIR=/src" in run_argv, run_argv
+    assert "Deprecated" not in result.stderr, result.stderr
+
+
+@pytest.mark.integration
+def test_the_value_of_another_option_spelled_like_an_image_option_is_not_that_option(
+    runner, tmp_path
+):
+    """The word after a value option is its value, whatever it spells: here ``--image``
+    is the value of --output-formats, so the scan is still a scan of the directory and
+    is given it as its PATH argument."""
+    run_argv = _run_argv(
+        _ash(runner, tmp_path, "scan", "fs", "--output-formats", "--image")
+    )
+
+    assert _inner_argv(run_argv) == [
+        "ash",
+        "scan",
+        "fs",
+        "/src",
+        *SANDBOX_OFF,
+        "--output-formats",
+        "--image",
+    ]
+    assert "ASH_SOURCE_DIR=/src" not in run_argv, run_argv
 
 
 @pytest.mark.integration
@@ -623,7 +724,8 @@ def _table(name):
 @pytest.mark.unit
 def test_the_scan_tables_are_the_clis():
     """The subjects the entrypoint reads a PATH after, the value options that are not
-    the root's, and the options the completion offers, held to the real commands."""
+    the root's, the options that name another source, and the options the completion
+    offers, held to the real commands."""
     import typer.main
 
     from automated_security_helper.cli.main import app
@@ -651,8 +753,21 @@ def test_the_scan_tables_are_the_clis():
         if spelling.startswith("--")
     } - {"--install-completion"}  # the wrapper has no shell to install into
 
+    # The options that name a source other than the directory, or a document that can:
+    # written out here, and each held to being a real option of the CLI, so a rename
+    # fails this and not only the table.
+    other_source = {
+        "--cli-json-input",
+        "--image",
+        "--image-archive",
+        "--image-layout",
+        "--source-git",
+    }
+
     assert _table("ASH_SCAN_SUBJECTS") == set(subjects)
     assert _table("ASH_SCAN_VALUE_OPTIONS") == subject_value
+    assert _table("ASH_SCAN_OTHER_SOURCE_OPTIONS") == other_source
+    assert other_source <= every_long_option
     assert _table("ASH_ROOT_OPTIONS") == every_long_option
 
 

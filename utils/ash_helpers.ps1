@@ -123,7 +123,9 @@ function Invoke-ASH {
     passed through unchanged. ASH's source and output directories reach the
     container as `ASH_SOURCE_DIR` and `ASH_OUTPUT_DIR`, so a subcommand such as
     `report` can come first; `scan fs` is given the source directory as its PATH
-    argument, `/src`, instead. A workspace scan is refused with exit 3, before anything
+    argument, `/src`, instead, unless it names a clone (`--source-git`), an image
+    (`--image`, `--image-archive`, `--image-layout`) or a `--cli-json-input` document,
+    which keep the variable. A workspace scan is refused with exit 3, before anything
     is built, whether it is asked for with `scan workspace` or with `--workspace` or
     `--workspace-config`: Invoke-ASH mounts the one directory it scans. Run `ash scan
     workspace <file> --mode container` for a workspace scan. A `--archive` among the
@@ -888,6 +890,7 @@ function Invoke-ASH {
         # BEGIN generated: ps1-scan-subjects (scripts/generate_wrapper_tables.py)
         $ashScanSubjects = @('fs', 'workspace')
         $ashScanValueOptions = @('--archive', '--cli-json-input')
+        $ashScanOtherSourceOptions = @('--cli-json-input', '--image', '--image-archive', '--image-layout', '--source-git')
         # END generated: ps1-scan-subjects
         # The root ash options that take a value, ASH_ROOT_VALUE_OPTIONS in ./ash. A value
         # can be a subcommand's name (`--phases report`, `--source-dir report`), so the
@@ -917,11 +920,18 @@ function Invoke-ASH {
         $subcommandAt = -1
         $subcommand = ''
         $skipValue = $false
+        # Whether a word that is not an option's value is an option that names a source
+        # other than the directory, in front of the subcommand or after it (`--image=x`
+        # is the same word as `--image x`).
+        $scanNamesOtherSource = $false
         for ($i = 0; $i -lt $forwardedAshArgs.Count; $i++) {
             $word = $forwardedAshArgs[$i]
             if ($skipValue) {
                 $skipValue = $false
                 continue
+            }
+            if (($word -creplace '=.*$', '') -cin $ashScanOtherSourceOptions) {
+                $scanNamesOtherSource = $true
             }
             if ($word -cin $ashSubcommands) {
                 $subcommandAt = $i
@@ -959,6 +969,9 @@ function Invoke-ASH {
                 if ($skipValue) {
                     $skipValue = $false
                     continue
+                }
+                if (($word -creplace '=.*$', '') -cin $ashScanOtherSourceOptions) {
+                    $scanNamesOtherSource = $true
                 }
                 if ($word -ceq '--archive' -or $word -clike '--archive=*') {
                     $global:LASTEXITCODE = $refusalExitCode
@@ -1839,11 +1852,16 @@ function Invoke-ASH {
         # before: report and merge read it, config reads it as the variable of its own
         # --source-dir, and the form with no subject (`Invoke-ASH -AshArgs scan`, no
         # subcommand at all) names its directory that way, since that form refuses a
-        # PATH. The subject is at $scanSubjectAt in $forwardedAshArgs, and what
-        # Invoke-ASH added after the command word moved it by the difference in length.
+        # PATH. So does a scan that names a source other than the directory
+        # ($ashScanOtherSourceOptions: a clone, an image, or a --cli-json-input document,
+        # which can name either): the scan inside refuses a PATH beside a clone, and it
+        # does not count the variable as the only name of the directory then, so it
+        # prints no line about it. The subject is at $scanSubjectAt in $forwardedAshArgs,
+        # and what Invoke-ASH added after the command word moved it by the difference in
+        # length.
         $sourceDirEnv = @('-e', 'ASH_SOURCE_DIR=/src')
         $sourcePathAdded = $false
-        if ($subcommand -ceq 'scan' -and $scanSubject -ceq 'fs') {
+        if ($subcommand -ceq 'scan' -and $scanSubject -ceq 'fs' -and -not $scanNamesOtherSource) {
             $scanSubjectInArguments = $scanSubjectAt + ($ashArguments.Count - $forwardedAshArgs.Count)
             $ashArguments.Insert($scanSubjectInArguments + 1, '/src')
             $sourceDirEnv = @()

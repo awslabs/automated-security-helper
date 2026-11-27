@@ -110,6 +110,7 @@ def ps_scan_subjects(contract) -> list[str]:
     return [
         f"$ashScanSubjects = {_ps_list(contract.scan_subjects)}",
         f"$ashScanValueOptions = {_ps_list(contract.scan_subject_value_options)}",
+        f"$ashScanOtherSourceOptions = {_ps_list(contract.scan_other_source_options)}",
     ]
 
 
@@ -236,6 +237,7 @@ def sh_scan_subjects(contract) -> list[str]:
     return [
         f'ASH_SCAN_SUBJECTS="{_sh_words(contract.scan_subjects)}"',
         f'ASH_SCAN_VALUE_OPTIONS="{_sh_words(contract.scan_subject_value_options)}"',
+        f'ASH_SCAN_OTHER_SOURCE_OPTIONS="{_sh_words(contract.scan_other_source_options)}"',
         f'ASH_ROOT_OPTIONS="{_sh_words(contract.root_options)}"',
     ]
 

@@ -156,6 +156,32 @@ def test_the_scan_subjects_and_their_value_options_are_the_real_ones():
     assert subject_value_options == {"--archive", "--cli-json-input"}
 
 
+def test_the_options_that_name_another_source_are_the_real_ones():
+    """A scan that names a clone, an image or a ``--cli-json-input`` document is not
+    given the mounted directory as its PATH argument: the CLI refuses a PATH beside a
+    clone, and it does not count ASH_SOURCE_DIR as the only name of the directory then.
+    The wrapper finds those scans from this list, written out here as well so a
+    rename in the CLI fails this and not only the table."""
+    root = typer.main.get_command(app)
+    subjects = root.commands["scan"].commands
+    declared = {
+        spelling
+        for subject in subjects.values()
+        for param in subject.params
+        if param.param_type_name == "option"
+        for spelling in param.opts
+    }
+    other_source = {
+        "--cli-json-input",
+        "--image",
+        "--image-archive",
+        "--image-layout",
+        "--source-git",
+    }
+    assert set(_ps1_list("ashScanOtherSourceOptions")) == other_source
+    assert other_source <= declared
+
+
 def test_the_completer_offers_what_the_wrapper_parses():
     """The argument completer is generated from the parser's tables: it names every
     subcommand, every subject and the option that takes a value."""
