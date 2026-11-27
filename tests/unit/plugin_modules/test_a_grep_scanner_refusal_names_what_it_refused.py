@@ -141,6 +141,7 @@ class TestEachSetterRecordsItsOwnCode:
     def test_configured_rules_inside_the_scanned_tree_are_a_refused_option(
         self, name, offline, tmp_path, monkeypatch
     ):
+        (tmp_path / "source").mkdir(exist_ok=True)
         inside = tmp_path / "source" / "rules.yml"
         inside.write_text("rules: []\n", encoding="utf-8")
         scanner = _scanner(
