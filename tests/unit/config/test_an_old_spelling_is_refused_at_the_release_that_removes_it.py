@@ -6,8 +6,12 @@ running version decides, so the 4.0 release refuses it with no edit to the
 models. A results file a scan already wrote is a record and keeps loading at
 every version.
 
-Red at the base: at 4.0 a config, a base it extends, and an entry validated
-outside the loader all still loaded the old spelling.
+A ``patch`` op is part of its file: a pointer or an op's value that names the
+old spelling is refused at 4.0 as a key is, naming the file.
+
+Red at the base: at 4.0 a config, a base it extends, an op's value and an entry
+validated outside the loader all still loaded the old spelling, and a pointer in
+it failed to apply without naming either spelling.
 """
 
 from pathlib import Path
@@ -87,6 +91,65 @@ def test_a_base_writing_the_old_spelling_is_refused_naming_the_base(
 
     message = str(refused.value)
     assert "org.yaml" in message
+    assert "'expiration'" in message
+    assert "'expires'" in message
+
+
+def _child_patching(tmp_path: Path, ops: Any) -> Path:
+    """A file whose ``patch`` ops run over a base written in the new spelling."""
+    _write(
+        tmp_path / "cfg" / "org.yaml",
+        {"global_settings": {"suppressions": [{**_ENTRY, "expires": "2099-01-01"}]}},
+    )
+    return _write(tmp_path / "cfg" / "repo.yaml", {"extends": "org.yaml", "patch": ops})
+
+
+def test_a_patch_pointer_in_the_old_spelling_is_refused_at_the_removal_release(
+    tmp_path: Path, running
+) -> None:
+    running(REMOVAL_RELEASE)
+    child = _child_patching(
+        tmp_path,
+        [
+            {
+                "op": "replace",
+                "path": "/global_settings/suppressions/0/expiration",
+                "value": "2199-12-31",
+            }
+        ],
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert "repo.yaml" in message
+    assert "'expiration'" in message
+    assert "'expires'" in message
+
+
+def test_a_patch_ops_value_in_the_old_spelling_is_refused_at_the_removal_release(
+    tmp_path: Path, running
+) -> None:
+    running(REMOVAL_RELEASE)
+    child = _child_patching(
+        tmp_path,
+        [
+            {
+                "op": "add",
+                "path": "/global_settings/suppressions/-",
+                "value": {**_ENTRY, "path": "src/other.py", "expiration": "2099-02-02"},
+            }
+        ],
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert "repo.yaml" in message
+    # Refused by the file's fold, which names the op, not by the entry model.
+    assert "patch[0]" in message
     assert "'expiration'" in message
     assert "'expires'" in message
 

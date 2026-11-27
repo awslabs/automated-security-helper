@@ -170,3 +170,84 @@ def test_a_denial_of_the_expiry_leaves_the_entrys_other_keys_open(denial: str) -
 
     assert patched.global_settings.suppressions[0].reason == "re-reviewed"
     assert patched.global_settings.suppressions[0].expires == "2099-01-01"
+
+
+GLOB_DENIAL = "/**/expiration"
+
+
+def _glob_profile() -> AshConfig:
+    """A profile whose one denial, replacing the defaults, is ``/**/expiration``.
+
+    It holds a suppression and a content-database staleness override. The
+    override's ``expiration`` is that model's own key, not an old spelling: the
+    spelling table names a model for each row, and a glob names none.
+    """
+    return AshConfig.model_validate(
+        {
+            "project_name": "renamed-key-denials",
+            "content_db_staleness_overrides": [
+                {
+                    "database": "grype-db",
+                    "policy": "warn",
+                    "expiration": "2099-01-01",
+                    "reason": "upstream paused",
+                }
+            ],
+            "global_settings": {
+                "suppressions": [
+                    {
+                        "rule_id": "B101",
+                        "path": "src/app.py",
+                        "reason": "reviewed",
+                        "expires": "2099-01-01",
+                    }
+                ],
+                "mcp": {
+                    "runtime_overrides": {
+                        "enabled": True,
+                        "replace_default_denied_paths": True,
+                        "allowed_paths": [
+                            "/global_settings/**",
+                            "/content_db_staleness_overrides/**",
+                        ],
+                        "denied_paths": [GLOB_DENIAL],
+                    }
+                },
+            },
+        }
+    )
+
+
+def test_a_glob_denial_keeps_denying_a_model_whose_own_key_is_the_old_spelling() -> (
+    None
+):
+    """The guard: the spellings a denial is matched under are added to the ones
+    it had, never put in their place, so a glob that named a staleness
+    override's ``expiration`` still names it."""
+    base = _glob_profile()
+    op = {
+        "op": "replace",
+        "path": "/content_db_staleness_overrides/0/expiration",
+        "value": "2199-12-31",
+    }
+
+    with pytest.raises(RuntimePatchDeniedError) as refused:
+        _patch(base, [op])
+
+    assert f"denied_paths entry {GLOB_DENIAL!r}" in refused.value.rule
+
+
+def test_a_glob_denial_in_the_old_spelling_also_stops_the_canonical_one() -> None:
+    """Under a glob no model is known, so every row's spellings apply: the
+    denial can refuse more than before, never less."""
+    base = _glob_profile()
+    op = {
+        "op": "replace",
+        "path": "/global_settings/suppressions/0/expires",
+        "value": "2199-12-31",
+    }
+
+    with pytest.raises(RuntimePatchDeniedError) as refused:
+        _patch(base, [op])
+
+    assert f"denied_paths entry {GLOB_DENIAL!r}" in refused.value.rule

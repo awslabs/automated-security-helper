@@ -4,17 +4,21 @@ The loader folds a file's old spellings (``expiration`` for ``expires``) onto
 the canonical key before it layers the file over another. So:
 
 * the deprecation is said once per file and spelling, naming the file, rather
-  than once per entry with no file;
+  than once per entry with no file, and whether or not unknown entry keys are
+  fatal;
 * a file that writes both spellings with different values is refused naming
   that file, whichever file of the chain it is;
 * a ``patch`` pointer in either spelling reaches the key the merged document
-  holds, so a child and its base can each be written in either spelling;
+  holds, so a child and its base can each be written in either spelling, and a
+  pointer or an op's value in the old spelling is said like any other key;
 * a key that is canonical in another model (a content database staleness
   override's ``expiration``) is left as written.
 
-Red at the base: three entries gave three unnamed lines; a disagreement in a
-base was refused naming the extending file; a pointer in the other spelling
-than the base's failed to apply.
+Red at the base: three entries gave three unnamed lines, and
+``fail_on_unknown_keys: true`` gave none; a disagreement in a base was refused
+naming the extending file; a pointer in the other spelling than the base's
+failed to apply; an op's value was read by the entry model alone, with an
+unnamed line, and refused without naming the op.
 """
 
 from pathlib import Path
@@ -241,6 +245,111 @@ def test_a_childs_patch_in_the_bases_own_old_spelling_still_applies(
     config = AshConfig.from_file(child)
 
     assert config.global_settings.suppressions[0].expires == "2199-12-31"
+
+
+def test_a_patch_pointer_in_the_old_spelling_says_the_deprecation_for_its_file(
+    tmp_path: Path,
+) -> None:
+    child = _child_patching(
+        tmp_path,
+        _suppression(expires="2099-01-01"),
+        [
+            {
+                "op": "replace",
+                "path": "/global_settings/suppressions/0/expiration",
+                "value": "2199-12-31",
+            }
+        ],
+    )
+
+    config = AshConfig.from_file(child)
+
+    lines = _deprecation_lines(config)
+    assert len(lines) == 1, lines
+    assert "repo.yaml" in lines[0], lines
+    assert config.global_settings.suppressions[0].expires == "2199-12-31"
+
+
+def _added_suppression(**expiry: str) -> Dict[str, Any]:
+    """An entry a ``patch`` op adds, at a path no other entry holds."""
+    return {"rule_id": "B101", "path": "src/other.py", "reason": "reviewed", **expiry}
+
+
+def test_a_patch_ops_value_is_folded_saying_the_deprecation_for_its_file(
+    tmp_path: Path,
+) -> None:
+    """The keys inside an op's value are the file's own keys too."""
+    child = _child_patching(
+        tmp_path,
+        _suppression(expires="2099-01-01"),
+        [
+            {
+                "op": "add",
+                "path": "/global_settings/suppressions/-",
+                "value": _added_suppression(expiration="2099-02-02"),
+            }
+        ],
+    )
+
+    config = AshConfig.from_file(child)
+
+    lines = _deprecation_lines(config)
+    assert len(lines) == 1, lines
+    assert "repo.yaml" in lines[0], lines
+    assert [s.expires for s in config.global_settings.suppressions] == [
+        "2099-01-01",
+        "2099-02-02",
+    ]
+
+
+def test_a_patch_ops_value_with_disagreeing_spellings_is_refused_naming_the_op(
+    tmp_path: Path,
+) -> None:
+    child = _child_patching(
+        tmp_path,
+        _suppression(expires="2099-01-01"),
+        [
+            {
+                "op": "add",
+                "path": "/global_settings/suppressions/-",
+                "value": _added_suppression(
+                    expires="2099-02-02", expiration="2098-02-02"
+                ),
+            }
+        ],
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert "repo.yaml" in message
+    assert "patch[0]" in message
+    assert "expires" in message
+    assert "expiration" in message
+
+
+def test_the_deprecation_is_said_when_unknown_entry_keys_are_fatal(
+    tmp_path: Path,
+) -> None:
+    """``fail_on_unknown_keys: true`` refuses a key the entry does not know. An
+    old spelling is a key it knows, and its line is said either way."""
+    config = _write(
+        tmp_path / "cfg" / "only.yaml",
+        {
+            "fail_on_unknown_keys": True,
+            "global_settings": {
+                "suppressions": [_suppression(expiration="2099-01-01")],
+            },
+        },
+    )
+
+    loaded = AshConfig.from_file(config)
+
+    lines = _deprecation_lines(loaded)
+    assert len(lines) == 1, lines
+    assert "only.yaml" in lines[0], lines
+    assert loaded.global_settings.suppressions[0].expires == "2099-01-01"
 
 
 def test_a_staleness_overrides_expiration_is_its_own_canonical_key(

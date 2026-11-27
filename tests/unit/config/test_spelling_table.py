@@ -256,6 +256,34 @@ def test_the_removal_release_is_compared_with_the_running_version(
     assert spellings.is_removed(_expires_row()) is True
 
 
+@pytest.mark.parametrize(
+    "version,status",
+    [
+        ("3.99.0", "live"),
+        ("4.0.0rc1", "removed"),
+        ("4.0.0", "removed"),
+        ("unknown", "live"),
+    ],
+)
+def test_a_rows_status_is_read_from_its_removal_release(
+    version: str, status: str
+) -> None:
+    """Live: the old spelling is read, with a line. Removed: it is refused."""
+    assert _expires_row().status(version) == status
+
+
+def test_a_rows_status_is_read_at_the_running_version(monkeypatch) -> None:
+    monkeypatch.setattr(automated_security_helper, "__version__", "4.0.0")
+
+    assert _expires_row().status() == "removed"
+
+
+def test_a_row_with_no_removal_release_stays_live(monkeypatch) -> None:
+    row = _with_row(monkeypatch, model=ROOT, canonical="project_name", old=("name",))
+
+    assert row.status("99.0.0") == "live"
+
+
 def test_at_the_running_version_the_old_spelling_loads_until_its_removal() -> None:
     """Fails the day the version reaches a row's release while the model still
     reads its old spelling, or before that day if the model stops early."""
@@ -384,6 +412,143 @@ def test_the_fold_leaves_a_staleness_overrides_own_expiration_key() -> None:
 
     assert folded.document == document
     assert folded.warnings == ()
+
+
+def _patching(*ops: Dict[str, Any]) -> Dict[str, Any]:
+    return {"patch": list(ops)}
+
+
+def test_the_fold_respells_a_patch_pointer_along_the_model() -> None:
+    folded = spellings.fold_spellings(
+        _patching(
+            {
+                "op": "move",
+                "from": "/global_settings/suppressions/0/expiration",
+                "path": "/global_settings/suppressions/1/expiration",
+            }
+        ),
+        SOURCE,
+    )
+
+    (op,) = folded.document["patch"]
+    assert op["from"] == "/global_settings/suppressions/0/expires"
+    assert op["path"] == "/global_settings/suppressions/1/expires"
+    assert folded.warnings == (f"Config {SOURCE}: {EXPIRATION_SPELLING_DEPRECATION}",)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        # canonical in its own model
+        "/content_db_staleness_overrides/0/expiration",
+        # a key the model does not declare is not walked
+        "/not_a_setting/0/expiration",
+    ],
+)
+def test_the_fold_leaves_a_pointer_the_table_does_not_name(path: str) -> None:
+    document = _patching({"op": "replace", "path": path, "value": "2099-01-01"})
+
+    folded = spellings.fold_spellings(document, SOURCE)
+
+    assert folded.document == document
+    assert folded.warnings == ()
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ("/global_settings/suppressions/-", _entry(expiration="2099-01-01")),
+        ("/global_settings/suppressions/0", _entry(expiration="2099-01-01")),
+        ("/global_settings/suppressions", [_entry(expiration="2099-01-01")]),
+        (
+            "/global_settings",
+            {"suppressions": [_entry(expiration="2099-01-01")]},
+        ),
+    ],
+    ids=["append", "index", "list", "mapping"],
+)
+def test_the_fold_reads_an_ops_value_as_the_model_its_path_names(
+    path: str, value: Any
+) -> None:
+    folded = spellings.fold_spellings(
+        _patching({"op": "add", "path": path, "value": value}), SOURCE
+    )
+
+    (op,) = folded.document["patch"]
+    assert "expiration" not in repr(op["value"])
+    assert "'expires': '2099-01-01'" in repr(op["value"])
+    assert len(folded.warnings) == 1
+
+
+def test_the_fold_refuses_an_ops_value_with_disagreeing_spellings() -> None:
+    with pytest.raises(spellings.SpellingRefused) as refused:
+        spellings.fold_spellings(
+            _patching(
+                {
+                    "op": "add",
+                    "path": "/global_settings/suppressions/-",
+                    "value": _entry(expires="2099-01-01", expiration="2098-12-31"),
+                }
+            ),
+            SOURCE,
+        )
+
+    message = str(refused.value)
+    assert SOURCE in message
+    assert "patch[0]" in message
+    assert "2099" not in message
+    assert "2098" not in message
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        {
+            "op": "replace",
+            "path": "/global_settings/suppressions/0/expiration",
+            "value": "2099-01-01",
+        },
+        {
+            "op": "add",
+            "path": "/global_settings/suppressions/-",
+            "value": _entry(expiration="2099-01-01"),
+        },
+    ],
+    ids=["pointer", "value"],
+)
+def test_a_removed_rows_old_spelling_is_refused_in_a_patch_op(
+    op: Dict[str, Any],
+) -> None:
+    with pytest.raises(spellings.SpellingRefused) as refused:
+        spellings.fold_spellings(_patching(op), SOURCE, version="4.0.0")
+
+    message = str(refused.value)
+    assert SOURCE in message
+    assert "patch[0]" in message
+    assert "'expiration'" in message
+    assert "'expires'" in message
+
+
+def test_the_written_view_respells_a_patch_op_alike() -> None:
+    """The as-written ops pair with the folded ones: same pointers, same keys."""
+    written = spellings.fold_written_spellings(
+        _patching(
+            {
+                "op": "add",
+                "path": "/global_settings/suppressions/0/expiration",
+                "value": "${EXPIRY}",
+            },
+            {
+                "op": "add",
+                "path": "/global_settings/suppressions/-",
+                "value": _entry(expiration="${EXPIRY}"),
+            },
+        )
+    )
+
+    first, second = written["patch"]
+    assert first["path"] == "/global_settings/suppressions/0/expires"
+    assert second["value"] == _entry(expires="${EXPIRY}")
 
 
 def test_the_written_view_is_folded_alike_with_no_line_and_no_refusal() -> None:
