@@ -580,6 +580,43 @@ def test_planted_an_na_cell_whose_column_is_now_populated_fails(
     assert "fixture-lint.tags declared n/a" in " ".join(_row(report, 1).details)
 
 
+def test_planted_an_unconfirmed_facet_cell_turns_row_one_red_as_a_fixture_owed(
+    fixture_manifest, transcripts_copy
+) -> None:
+    """Honest ignorance blocks promotion: a facet cell declared UNCONFIRMED is a
+    fixture owed, and the row names it instead of reading green over a cell nobody
+    has read (the control test holds the fully-read register green)."""
+    from ash_fixture_plugin.scanner import FixtureScanner
+
+    from automated_security_helper.base.scanner_facets import FacetDecl, FacetState
+
+    original = FixtureScanner.facets
+    FixtureScanner.facets = original.model_copy(
+        update={
+            "tags": FacetDecl(
+                state=FacetState.UNCONFIRMED,
+                reason="the fixture's tags column was never read at a real run",
+            )
+        }
+    )
+    try:
+        report = _verify(fixture_manifest, transcripts_copy)
+    finally:
+        FixtureScanner.facets = original
+    _expect(report, r1=RED)
+    assert report.verdict == "fail" and report.exit_code == EXIT_FAIL
+    details = " ".join(_row(report, 1).details)
+    assert "[fixture-lint.tags] fixture owed" in details
+    # the verdict itself still says "owed", the gate's vocabulary, not FAIL
+    owed = next(v for v in report.verdicts if v.facet == "tags")
+    assert owed.outcome == "owed"
+    assert not any(
+        "fixture owed" in detail
+        for detail in _row(report, 1).details
+        if "tags" not in detail
+    )
+
+
 def test_planted_a_transcript_that_cannot_be_read_as_results_leaves_mapped_cells_corpusless(
     fixture_manifest, transcripts_copy
 ) -> None:

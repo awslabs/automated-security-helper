@@ -817,6 +817,7 @@ def client_file_denials(
     all_delivered: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
     moved_exclusions: bool = False,
+    filled: Optional[Mapping[Path, Sequence[Any]]] = None,
 ) -> List[Tuple[Path, List[Any]]]:
     """(file, denials) for each client-delivered file in ``documents`` that sets a denied field.
 
@@ -838,6 +839,17 @@ def client_file_denials(
     (``client_scanner_exclusions.moved_exclusion_pointers``,
     ``runtime_patch.config_document_denials``). A caller whose files are not
     resolved that way leaves it off and refuses them as written.
+
+    A session's client-patched profile copy holds each value its profile read
+    from the environment as the reference text, and a scan's load fills the
+    operator's value in for it before the model is built. ``filled`` is what that
+    load recorded for each document (``ResolvedConfigDocument.filled_references``,
+    from ``resolve_config``): the documents are the filled ones, and a leaf that
+    holds such a value is the operator's own, not one the client chose. A copy
+    with nothing recorded (the documents a check reads before the scan, the
+    validator and the workspace resolver) is filled here the same way, from the
+    references ``rules.base`` read, and judged as filled, so every judge of a
+    copy applies one rule (``_filled_copy``).
 
     Raises:
         ASHConfigPolicyUnreadableError: A file is delivered and ``rules`` are
@@ -871,29 +883,72 @@ def client_file_denials(
             # The placeholder policy and empty base of unreadable rules would
             # judge this file against defaults the server does not hold.
             _refuse_unreadable(rules, delivered=True)
+        patched = session_config_was_patched(path)
+        # The document as the scan's load made it, with the references it read
+        # the operator's values for: those are the leaves the operator wrote.
+        own, judged = (
+            _filled_copy(path, document, rules.base, filled)
+            if patched
+            else ((), document)
+        )
         denials = [
             denial
             for denial in config_document_denials(
-                document,
+                judged,
                 allowlist=rules.policy,
                 config=rules.base,
                 exempt=exempt,
-                moved=moved_exclusion_pointers(document) if moved_exclusions else (),
+                moved=moved_exclusion_pointers(judged) if moved_exclusions else (),
                 inert=INERT_PATHS,
-                repeats_trusted=session_config_was_patched(path),
+                repeats_trusted=patched,
+                own_references=own,
+                document_path=path,
             )
-            if not _writes_plugin_default(document, denial, rules.base)
-            and not _writes_a_tightening(document, denial)
+            if not _writes_plugin_default(judged, denial, rules.base)
+            and not _writes_a_tightening(judged, denial)
         ]
         # Always: the restrict-only check only adds refusals, and an operator's
         # own list may deny one sandbox key (replace_default_denied_paths) and
         # leave the others to this check.
         denials.extend(
-            _widenings(_with_own_patch(document, rules.base), rules.base, root)
+            _widenings(_with_own_patch(judged, rules.base), rules.base, root)
         )
         if denials:
             found.append((_as_reached(path, names), denials))
     return found
+
+
+def _filled_copy(
+    path: Path,
+    document: Any,
+    base: AshConfig,
+    filled: Optional[Mapping[Path, Sequence[Any]]],
+) -> Tuple[Sequence[Any], Any]:
+    """(the references that are ``document``'s own, ``document`` as it is judged),
+    for ``document``, the copy of a profile a client patched, read from ``path``.
+
+    A load that filled the copy from the operator's profile recorded what it read
+    (``filled``, by the document's path), and the documents it hands on are the
+    filled ones, so those references are the copy's own. A copy with no record is
+    filled here from the references ``base`` (the trusted profile's config) read,
+    as the load fills it (``environment_record.fill_environment_references``):
+    where the copy holds exactly the reference text the profile wrote, at the
+    place it wrote it, it gets the operator's value, and nothing else is read.
+    Each reference that was read is stamped as ``path``'s own.
+    """
+    from automated_security_helper.config.environment_record import (
+        fill_environment_references,
+    )
+
+    recorded = None if filled is None else filled.get(path)
+    if recorded is not None:
+        return tuple(recorded), document
+    references = tuple(getattr(base, "_environment_references", None) or ())
+    if not references:
+        return (), document
+    placed: List[Any] = []
+    judged = fill_environment_references(document, references, placed=placed)
+    return tuple(reference.read_in(path) for reference in placed), judged
 
 
 def _as_reached(path: Path, names: Optional[Mapping[Path, Sequence[Path]]]) -> Path:
@@ -1297,6 +1352,7 @@ def apply_client_config_rules(
     all_delivered: bool = False,
     client_overrides: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
+    filled: Optional[Mapping[Path, Sequence[Any]]] = None,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
@@ -1316,6 +1372,9 @@ def apply_client_config_rules(
     against the same allowlist (``cli/mcp/workspace._gate_client_overrides``).
     ``names`` gives the paths each file of ``documents`` was reached by
     (``ResolvedConfigDocument.names``): a file is delivered when any of them is.
+    ``filled`` gives, for each file of ``documents`` the load filled from the
+    operator's profile, the references it read
+    (``ResolvedConfigDocument.filled_references``; see ``client_file_denials``).
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         strip_client_scanner_exclusions,
@@ -1356,6 +1415,7 @@ def apply_client_config_rules(
         all_delivered=all_delivered,
         names=names,
         moved_exclusions=True,
+        filled=filled,
     )
     if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (

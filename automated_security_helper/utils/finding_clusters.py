@@ -46,9 +46,11 @@ the first class whose required columns it carries:
     start) and share at least one CWE. Both sides must carry a CWE: no CWE, no
     cluster. A row that names a package is a dependency finding and never
     joins this class (an advisory that is not a CVE has no package key, and
-    the location class knows neither the advisory nor the package). Overlap is not transitive, so a cluster is a connected component
-    of the overlap relation; a chain A-B-C joins A and C even when they do not
-    overlap one another. That is order independent, which a sweep is not.
+    the location class knows neither the advisory nor the package). Overlap is
+    not transitive, so a cluster is a connected component of the overlap
+    relation; a chain A-B-C joins A and C even when they do not overlap one
+    another. The components come from a sort and sweep per file and CWE, which
+    finds every component and does not depend on input order.
     The chaining is bounded by a split guard: two rows of one scanner and
     rule id are one finding only when they overlap each other directly, so a
     cluster never folds two findings of the same scanner and rule id that are
@@ -77,6 +79,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import relative_path
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.severity_ladder import SEVERITIES
 
 CLASS_PACKAGE = "package"
@@ -166,27 +169,118 @@ def _package_key(row: FlatVulnerability) -> Optional[Tuple[Any, ...]]:
     return (CLASS_PACKAGE, cve.upper(), package, where)
 
 
-def _package_copies(
-    rows: Sequence[FlatVulnerability], members: List[int]
-) -> List[List[int]]:
-    """Split one package key group into clusters of one copy each."""
-    per_scanner: Dict[str, int] = {}
-    for i in members:
-        scanner = rows[i].scanner or ""
-        per_scanner[scanner] = per_scanner.get(scanner, 0) + 1
-    if max(per_scanner.values()) == 1:
-        return [members]
-    by_version: Dict[str, List[int]] = {}
-    for i in members:
-        version = _text(rows[i].package_version)
-        if version is not None:
-            by_version.setdefault(version, []).append(i)
-    lanes: List[List[int]] = []
-    for lane in by_version.values():
-        scanners = [rows[i].scanner or "" for i in lane]
-        if len(set(scanners)) == len(scanners):
-            lanes.append(lane)
-    return lanes
+_PART_COLUMNS = ("p1", "p2", "p3", "p4", "p5")
+
+
+def _key_parts(key: Tuple[Any, ...]) -> Tuple[Optional[str], ...]:
+    """A package or IaC key as five text cells, equal exactly when the keys are.
+
+    The class is a column of its own, so a package key's unused cells and an IaC
+    key's never meet. A CWE set is its sorted ``CWE-<n>`` names joined by commas
+    (empty for none; an IaC key with no CWE names a rule instead).
+    """
+    if key[0] == CLASS_PACKAGE:
+        _, cve, package, where = key
+        return (cve, package, where, None, None)
+    _, resource, resource_type, where, cwes, rule = key
+    return (resource, resource_type, where, ",".join(cwes), rule)
+
+
+def _key_schema() -> Dict[str, Any]:
+    """The declared columns of the key-class frame :func:`_key_groups` builds."""
+    import polars as pl
+
+    names = ("i", "project", "cls", *_PART_COLUMNS, "scanner", "version")
+    integers = ("i", "project")
+    return {n: pl.Int64 if n in integers else pl.String for n in names}
+
+
+def _key_columns() -> Dict[str, List[Any]]:
+    """The columns :func:`_key_groups` fills, each an empty list, in order."""
+    return {
+        "i": [],
+        "project": [],
+        "cls": [],
+        **{name: [] for name in _PART_COLUMNS},
+        "scanner": [],
+        "version": [],
+    }
+
+
+def _key_frame(columns: Dict[str, List[Any]]) -> Any:
+    """The key-class frame over *columns* (one list per declared column)."""
+    import polars as pl
+
+    return pl.DataFrame(columns, schema=_key_schema())
+
+
+def _key_groups(
+    rows: Sequence[FlatVulnerability],
+    keyed: Sequence[Tuple[int, Tuple[Any, ...]]],
+    projects: Optional[Sequence[Any]],
+) -> List[Tuple[str, List[int]]]:
+    """The package and IaC clusters of the keyed rows, as (class, members) pairs.
+
+    Rows group by class and key (and by project when *projects* names each row's),
+    and a group of one makes no cluster. An IaC group is one cluster. A package
+    group is split into copies when one scanner reports two or more rows under
+    its key: those rows are distinct copies, so the group clusters by installed
+    version instead, a version lane holding each scanner at most once and at
+    least two rows (a row with no version clusters with nothing). A group with
+    no repeated scanner stays whole. Members are positions in *rows*, ascending.
+    """
+    if not keyed:
+        return []
+    import polars as pl
+
+    columns = _key_columns()
+    codes: Dict[Any, int] = {}
+    for index, key in keyed:
+        row = rows[index]
+        columns["i"].append(index)
+        columns["project"].append(
+            0 if projects is None else codes.setdefault(projects[index], len(codes))
+        )
+        columns["cls"].append(key[0])
+        for name, part in zip(_PART_COLUMNS, _key_parts(key), strict=True):
+            columns[name].append(wire(part))
+        columns["scanner"].append(wire(row.scanner or ""))
+        columns["version"].append(wire(_text(row.package_version)))
+    frame = _key_frame(columns)
+    group = ["project", "cls", *_PART_COLUMNS]
+    sized = (
+        frame.lazy()
+        .filter(pl.len().over(group) >= 2)
+        .with_columns((pl.len().over([*group, "scanner"]) > 1).alias("repeats"))
+        .with_columns(
+            (
+                (pl.col("cls") == CLASS_PACKAGE) & pl.col("repeats").any().over(group)
+            ).alias("copies")
+        )
+    )
+    whole_query = (
+        sized.filter(~pl.col("copies"))
+        .group_by(group, maintain_order=True)
+        .agg(pl.col("i"))
+    )
+    lanes_query = (
+        sized.filter(pl.col("copies") & pl.col("version").is_not_null())
+        .group_by([*group, "version"], maintain_order=True)
+        .agg(
+            pl.col("i"),
+            pl.len().alias("rows"),
+            pl.col("scanner").n_unique().alias("scanners"),
+        )
+        .filter((pl.col("rows") == pl.col("scanners")) & (pl.col("rows") >= 2))
+    )
+    whole, lanes = pl.collect_all([whole_query, lanes_query])
+    return [
+        (finding_class, members)
+        for part in (whole, lanes)
+        for finding_class, members in zip(
+            part["cls"].to_list(), part["i"].to_list(), strict=True
+        )
+    ]
 
 
 def _iac_key(row: FlatVulnerability) -> Optional[Tuple[Any, ...]]:
@@ -223,32 +317,56 @@ def _span(row: FlatVulnerability) -> Optional[Tuple[str, int, int, frozenset[str
 
 def _location_groups(
     spans: Dict[int, Tuple[str, int, int, frozenset[str]]],
+    projects: Optional[Sequence[Any]] = None,
 ) -> List[List[int]]:
-    """Connected components of the overlap relation, per file, ascending."""
-    by_file: Dict[str, List[int]] = {}
-    for index, span in spans.items():
-        by_file.setdefault(span[0], []).append(index)
-    groups: List[List[int]] = []
-    for indexes in by_file.values():
-        parent = {i: i for i in indexes}
+    """Connected components of the overlap relation, per file, ascending.
 
-        def find(i: int) -> int:
-            while parent[i] != i:
-                parent[i] = parent[parent[i]]
-                i = parent[i]
-            return i
+    Two rows are joined when they share a file and a CWE and their line ranges
+    overlap, ends inclusive. Within one file and one CWE, rows sorted by start
+    overlap exactly when a row starts at or before the largest end seen so far,
+    so each such run of rows (an island, found by a sweep on the host over
+    Python ints, which need no ranking) is a chain, and a row carrying several
+    CWEs joins its chains across them. When *projects* names each row's project
+    (indexed like the rows the spans' positions point into), a file of one
+    project never meets the same file of another. Each component's members are
+    ascending and the components are ordered by their first member.
+    """
+    if not spans:
+        return []
+    scopes: Dict[Tuple[Any, str, str], List[Tuple[int, int, int]]] = {}
+    for index, (path, start, end, cwes) in spans.items():
+        project = None if projects is None else projects[index]
+        for cwe in cwes:
+            scopes.setdefault((project, path, cwe), []).append((start, end, index))
+    chains: List[List[int]] = []
+    for scoped in scopes.values():
+        # The sort is stable, so rows with equal starts keep their first-seen order.
+        scoped.sort(key=lambda row: row[0])
+        island: List[int] = []
+        reach = 0
+        for start, end, index in scoped:
+            if island and start > reach:
+                chains.append(island)
+                island = []
+            reach = end if not island else max(reach, end)
+            island.append(index)
+        chains.append(island)
+    parent = {i: i for i in spans}
 
-        for pos, a in enumerate(indexes):
-            _, a_start, a_end, a_cwes = spans[a]
-            for b in indexes[pos + 1 :]:
-                _, b_start, b_end, b_cwes = spans[b]
-                if a_start <= b_end and b_start <= a_end and a_cwes & b_cwes:
-                    parent[find(a)] = find(b)
-        components: Dict[int, List[int]] = {}
-        for i in sorted(indexes):
-            components.setdefault(find(i), []).append(i)
-        groups.extend(components.values())
-    return groups
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for chain in chains:
+        root = find(chain[0])
+        for i in chain[1:]:
+            parent[find(i)] = root
+    components: Dict[int, List[int]] = {}
+    for i in sorted(spans):
+        components.setdefault(find(i), []).append(i)
+    return sorted(components.values())
 
 
 def _overlaps(
@@ -362,36 +480,30 @@ def _build(
     )
 
 
-def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
-    """The clusters of *rows*, each of two or more members, in a fixed order.
-
-    Ordered by the position of each cluster's first member. Pure: *rows* is not
-    changed, and shuffling it yields the same clusters (the same ids, primaries
-    and sources) with positions that follow the shuffle.
-    """
-    clusters: List[FindingCluster] = []
-    grouped: Dict[Tuple[Any, ...], List[int]] = {}
+def _clusters(
+    rows: Sequence[FlatVulnerability], by_project: bool
+) -> List[FindingCluster]:
+    """The clusters of *rows*; with *by_project*, none spans two projects."""
+    if not rows:
+        return []
+    projects = [row.workspace_project for row in rows] if by_project else None
+    keyed: List[Tuple[int, Tuple[Any, ...]]] = []
     unclaimed: Dict[int, Tuple[str, int, int, frozenset[str]]] = {}
     for index, row in enumerate(rows):
         key = _package_key(row) or _iac_key(row)
         if key is not None:
-            grouped.setdefault(key, []).append(index)
+            keyed.append((index, key))
             continue
         if _text(row.package_name) is not None:
             continue
         span = _span(row)
         if span is not None:
             unclaimed[index] = span
-    for key, members in grouped.items():
-        if len(members) < 2:
-            continue
-        copies = (
-            _package_copies(rows, members) if key[0] == CLASS_PACKAGE else [members]
-        )
-        for copy in copies:
-            if len(copy) > 1:
-                clusters.append(_build(rows, key[0], copy))
-    for group in _location_groups(unclaimed):
+    clusters = [
+        _build(rows, finding_class, members)
+        for finding_class, members in _key_groups(rows, keyed, projects)
+    ]
+    for group in _location_groups(unclaimed, projects):
         for members in _location_split_guard(rows, unclaimed, group):
             if len(members) > 1:
                 clusters.append(_build(rows, CLASS_LOCATION, members))
@@ -399,10 +511,21 @@ def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
     return clusters
 
 
-def assign_clusters(rows: Sequence[FlatVulnerability]) -> List[ClusterAssignment]:
-    """One :class:`ClusterAssignment` per row of *rows*, in input order."""
+def cluster_findings(rows: Sequence[FlatVulnerability]) -> List[FindingCluster]:
+    """The clusters of *rows*, each of two or more members, in a fixed order.
+
+    Ordered by the position of each cluster's first member. Pure: *rows* is not
+    changed, and shuffling it yields the same clusters (the same ids, primaries
+    and sources) with positions that follow the shuffle.
+    """
+    return _clusters(rows, by_project=False)
+
+
+def _assignments(
+    rows: Sequence[FlatVulnerability], clusters: Iterable[FindingCluster]
+) -> List[ClusterAssignment]:
     assignments = [ClusterAssignment() for _ in rows]
-    for cluster in cluster_findings(rows):
+    for cluster in clusters:
         primary_id = rows[cluster.primary].id
         for index in cluster.members:
             is_primary = index == cluster.primary
@@ -415,6 +538,11 @@ def assign_clusters(rows: Sequence[FlatVulnerability]) -> List[ClusterAssignment
                 duplicate_sources=cluster.sources if is_primary else (),
             )
     return assignments
+
+
+def assign_clusters(rows: Sequence[FlatVulnerability]) -> List[ClusterAssignment]:
+    """One :class:`ClusterAssignment` per row of *rows*, in input order."""
+    return _assignments(rows, cluster_findings(rows))
 
 
 #: The flat-report columns the annotation adds, in this order, after every other
@@ -463,18 +591,7 @@ def assign_clusters_by_project(
     package path; they are two findings, not one, so clusters never span
     projects. A single-directory scan has one group and is the plain call.
     """
-    groups: Dict[Optional[str], List[int]] = {}
-    for index, row in enumerate(rows):
-        groups.setdefault(row.workspace_project, []).append(index)
-    if len(groups) <= 1:
-        return assign_clusters(rows)
-    assignments = [ClusterAssignment() for _ in rows]
-    for indexes in groups.values():
-        for index, assigned in zip(
-            indexes, assign_clusters([rows[i] for i in indexes]), strict=True
-        ):
-            assignments[index] = assigned
-    return assignments
+    return _assignments(rows, clusters_by_project(rows))
 
 
 def fold_enabled(model: Any) -> bool:
@@ -494,26 +611,7 @@ def clusters_by_project(rows: Sequence[FlatVulnerability]) -> List[FindingCluste
     slice, so the clusters read directly against the full list. Clusters never
     span projects, as for :func:`assign_clusters_by_project`.
     """
-    groups: Dict[Optional[str], List[int]] = {}
-    for index, row in enumerate(rows):
-        groups.setdefault(row.workspace_project, []).append(index)
-    if len(groups) <= 1:
-        return cluster_findings(rows)
-    clusters: List[FindingCluster] = []
-    for indexes in groups.values():
-        for found in cluster_findings([rows[i] for i in indexes]):
-            clusters.append(
-                FindingCluster(
-                    cluster_id=found.cluster_id,
-                    finding_class=found.finding_class,
-                    foldable=found.foldable,
-                    members=tuple(indexes[m] for m in found.members),
-                    primary=indexes[found.primary],
-                    sources=found.sources,
-                )
-            )
-    clusters.sort(key=lambda c: c.members[0])
-    return clusters
+    return _clusters(rows, by_project=True)
 
 
 def fold_positions(

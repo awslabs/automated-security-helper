@@ -85,6 +85,10 @@
 # name: test_image_archive_upload_and_finalize[finalize_not_a_tar]
   dict({
     'client_messages': list([
+      list([
+        'error',
+        'Image archive is not a tar archive: <TMP>/workspaces/session-image/image/image-4.tar',
+      ]),
     ]),
     'result': dict({
       'error': 'Image archive is not a tar archive: <TMP>/workspaces/session-image/image/image-4.tar',
@@ -97,6 +101,10 @@
 # name: test_image_archive_upload_and_finalize[finalize_sha256_mismatch]
   dict({
     'client_messages': list([
+      list([
+        'error',
+        'sha256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got 22752a9225b4f72a6d8a24bcfd88c9995bf2d549184632954d75a0de15b7e718',
+      ]),
     ]),
     'result': dict({
       'error': 'sha256 mismatch: expected 0000000000000000000000000000000000000000000000000000000000000000, got 22752a9225b4f72a6d8a24bcfd88c9995bf2d549184632954d75a0de15b7e718',
@@ -109,6 +117,10 @@
 # name: test_image_archive_upload_and_finalize[finalize_unknown_upload]
   dict({
     'client_messages': list([
+      list([
+        'error',
+        "no finalized upload for upload_id='never-uploaded' (did the last chunk arrive with last=True?)",
+      ]),
     ]),
     'result': dict({
       'error': "no finalized upload for upload_id='never-uploaded' (did the last chunk arrive with last=True?)",
@@ -153,6 +165,10 @@
 # name: test_set_source_image[empty_ref]
   dict({
     'client_messages': list([
+      list([
+        'error',
+        'image_ref names no reference: it is empty or whitespace',
+      ]),
     ]),
     'result': dict({
       'error': 'image_ref names no reference: it is empty or whitespace',
@@ -181,6 +197,10 @@
 # name: test_set_source_image[option_like_ref]
   dict({
     'client_messages': list([
+      list([
+        'error',
+        "image_ref cannot start with '-': a reference never does, and the value would read as an option where the ref is used",
+      ]),
     ]),
     'result': dict({
       'error': "image_ref cannot start with '-': a reference never does, and the value would read as an option where the ref is used",
@@ -193,6 +213,10 @@
 # name: test_set_source_image[ref_with_whitespace]
   dict({
     'client_messages': list([
+      list([
+        'error',
+        'image_ref carries whitespace or a control character, which no registry reference grammar allows',
+      ]),
     ]),
     'result': dict({
       'error': 'image_ref carries whitespace or a control character, which no registry reference grammar allows',

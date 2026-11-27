@@ -38,6 +38,7 @@ from automated_security_helper.utils.error_text import (
     validation_errors_in,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.scanner_tool_types import result_scanner_name
 from automated_security_helper.utils.severity_ladder import (
     SUPPRESSED_COUNT_KEY,
@@ -70,6 +71,10 @@ _logger = ASH_LOGGER
 # the MCP progress and summary views assembled in this module.
 SEVERITY_TALLY_BUCKETS = (*_LADDER_BUCKETS, SUPPRESSED_COUNT_KEY)
 UNKNOWN_SEVERITY = "unknown"
+
+
+#: Every bucket ``empty_severity_counts`` names, as a set for the membership test.
+SEVERITY_BUCKET_NAMES = frozenset((*SEVERITY_TALLY_BUCKETS, UNKNOWN_SEVERITY))
 
 
 def empty_severity_counts() -> Dict[str, int]:
@@ -1387,29 +1392,24 @@ def _add_aggregated_scanner_progress(
     """
     from automated_security_helper.utils.sarif_utils import is_result_suppressed
 
-    findings = []
-
-    # The findings of the SARIF, each with the scanner that reported it. A
-    # result with a suppression in effect is graded ``suppressed``, as the
-    # completed view grades it (_completed_findings_summary): it is in that
-    # bucket and not in its severity or in the count.
+    # The scanner and the bucket of each finding of the SARIF. A result with a
+    # suppression in effect is graded ``suppressed``, as the completed view
+    # grades it (_completed_findings_summary): it is in that bucket and not in
+    # its severity or in the count.
+    finding_scanners: List[str] = []
+    finding_buckets: List[str] = []
     for run, result in _sarif_run_results(results.get("sarif")):
-        findings.append(
-            {
-                "id": result.get("ruleId", "unknown"),
-                "severity": (
-                    "suppressed"
-                    if is_result_suppressed(result)
-                    else result_severity(result)
-                ),
-                # The scanner the result names, as every other reader of the
-                # aggregated SARIF attributes it (sarif_utils). The run's tool is
-                # the fallback only: ASH writes one run for all its scanners, so
-                # the driver name there is ASH's, and matched against a scanner
-                # name it found nothing.
-                "scanner": result_scanner_name(result) or _run_driver_name(run),
-            }
+        severity = (
+            "suppressed" if is_result_suppressed(result) else result_severity(result)
         )
+        # The scanner the result names, as every other reader of the aggregated
+        # SARIF attributes it (sarif_utils). The run's tool is the fallback
+        # only: ASH writes one run for all its scanners, so the driver name
+        # there is ASH's, and matched against a scanner name it found nothing.
+        finding_scanners.append(
+            cast(str, wire(result_scanner_name(result) or _run_driver_name(run)))
+        )
+        finding_buckets.append(_severity_bucket(severity))
 
     scanner_results = results.get("scanner_results") or {}
     for scanner_name, scanner_info in scanner_results.items():
@@ -1419,10 +1419,16 @@ def _add_aggregated_scanner_progress(
                 f"{type(scanner_info).__name__}"
             )
 
+    # Each scanner's findings, counted by bucket in one pass over the frame. A
+    # row finds its findings by its exact name: this path does not fold case, as
+    # the statistics calculator does.
+    tallies = _bucket_counts_by_scanner(finding_scanners, finding_buckets)
+
     # Create scanner progress objects for each completed scanner
     for scanner_name, scanner_info in scanner_results.items():
-        # Filter findings for this scanner
-        scanner_findings = [f for f in findings if f.get("scanner") == scanner_name]
+        scanner_tally = (
+            tallies.get(wire(scanner_name)) if isinstance(scanner_name, str) else None
+        )
 
         # What the document recorded for the scanner, read as the per-target
         # path reads a document (_counts_of_document): a count the results
@@ -1483,8 +1489,15 @@ def _add_aggregated_scanner_progress(
                 # under unknown, as the per-target file puts it.
                 counts[UNKNOWN_SEVERITY] += recorded_count - graded
             source_progress.severity_counts = counts
-        elif scanner_findings:
-            source_progress.update_findings(scanner_findings)
+        elif scanner_tally:
+            # The tally of update_findings: every bucket, the count the
+            # non-suppressed sum.
+            tallied = empty_severity_counts()
+            tallied.update(scanner_tally)
+            source_progress.severity_counts = tallied
+            source_progress.finding_count = sum(
+                value for bucket, value in tallied.items() if bucket != "suppressed"
+            )
             # A recorded count the results do not account for stays the count
             # (the per-target path keeps it too) with the rest under unknown;
             # a count below the results is the results' to raise.
@@ -1507,6 +1520,34 @@ def _add_aggregated_scanner_progress(
         # and the time of this poll is not that. mark_completed and mark_failed
         # wrote it as the end_time, and left the duration unset.
         scan_progress.add_scanner_progress(source_progress)
+
+
+def _bucket_counts_by_scanner(
+    scanners: List[str], buckets: List[str]
+) -> Dict[str, Dict[str, int]]:
+    """The findings of each scanner counted by bucket, from one grouped frame.
+
+    ``scanners`` holds each finding's scanner name through ``wire`` and
+    ``buckets`` its bucket (``_severity_bucket``). The result is keyed by the
+    wired name; a scanner with no finding is not in it.
+    """
+    if not scanners:
+        return {}
+    import polars as pl
+
+    from automated_security_helper.utils.frame_ops import ordered_counts
+
+    counted = ordered_counts(
+        pl.DataFrame(
+            {"scanner": scanners, "bucket": buckets},
+            schema={"scanner": pl.String, "bucket": pl.String},
+        ),
+        ["scanner", "bucket"],
+    )
+    tallies: Dict[str, Dict[str, int]] = {}
+    for scanner, bucket, count in counted.iter_rows():
+        tallies.setdefault(scanner, {})[bucket] = count
+    return tallies
 
 
 def _run_driver_name(run: Dict[str, Any]) -> str:
@@ -2030,14 +2071,20 @@ def extract_findings_summary(findings: List[Dict[str, Any]]) -> Dict[str, int]:
     summary = empty_severity_counts()
 
     for finding in findings:
-        severity = str(finding.get("severity") or "").lower()
-        # An unrecognized or missing severity goes to the catch-all rather than
-        # being dropped, so sum(summary.values()) == len(findings) always holds.
-        if severity not in summary:
-            severity = UNKNOWN_SEVERITY
-        summary[severity] += 1
+        summary[_severity_bucket(finding.get("severity"))] += 1
 
     return summary
+
+
+def _severity_bucket(severity: Any) -> str:
+    """The bucket of ``empty_severity_counts`` a finding's severity is counted in.
+
+    The severity is read as its lowercase text. An unrecognized or missing one goes
+    to the catch-all rather than being dropped, so the buckets always sum to the
+    number of findings.
+    """
+    bucket = str(severity or "").lower()
+    return bucket if bucket in SEVERITY_BUCKET_NAMES else UNKNOWN_SEVERITY
 
 
 def validate_output_directory(output_dir: Path) -> Tuple[bool, Optional[str]]:

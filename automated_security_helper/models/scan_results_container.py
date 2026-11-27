@@ -52,6 +52,8 @@ class ScanResultsContainer(BaseModel):
         ),
     ] = None
     target: Path | None = None
+    # ``image`` is a TargetType member (models/vocab), so the enum carries all
+    # three wire spellings and pydantic coerces the text forms.
     target_type: TargetType | None = None
     # The tool's own exit code, or None for a scanner whose tool never ran: a
     # MISSING row, or one whose scan started no tool. The executor assigns it

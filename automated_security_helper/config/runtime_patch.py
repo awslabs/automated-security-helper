@@ -42,6 +42,7 @@ import json
 import re
 import secrets
 from dataclasses import replace
+from pathlib import Path
 from typing import (
     AbstractSet,
     Any,
@@ -70,6 +71,8 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    EnvironmentReference,
+    _bare,
     with_environment_values_shown,
 )
 from automated_security_helper.config.patch_ops import (
@@ -860,6 +863,77 @@ def _as_json(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
+def _dump_keys_at(dump: Dict[str, Any], pointer: str) -> Optional[Tuple[str, ...]]:
+    """The keys of ``dump`` that ``pointer`` names, each matched as config merging
+    matches a key ('-' and '_' read as one: ``_resolve_dict_key``), which is where
+    ``client_config_policy._set_at`` writes it.
+
+    The last key may be one ``dump`` does not hold yet. None when a parent is
+    missing or is not a mapping, and for the root pointer, which has no key.
+    """
+    from automated_security_helper.config.config_sources import _resolve_dict_key
+
+    segments = _path_segments(pointer)
+    if not segments:
+        return None
+    keys: List[str] = []
+    node: Any = dump
+    for segment in segments[:-1]:
+        if not isinstance(node, dict):
+            return None
+        key = _resolve_dict_key(node, segment)
+        if key not in node:
+            return None
+        keys.append(key)
+        node = node[key]
+    if not isinstance(node, dict):
+        return None
+    keys.append(_resolve_dict_key(node, segments[-1]))
+    return tuple(keys)
+
+
+def _model_reads_leaf_as(
+    config: AshConfig,
+    dump: Dict[str, Any],
+    pointer: str,
+    value: Any,
+    trusted_value: Any,
+    plugin_keys: PluginKeys,
+) -> bool:
+    """Whether the model reads ``value``, written at ``pointer``, as ``trusted_value``.
+
+    ``dump`` is the dump of ``config``, and ``trusted_value`` what ``config`` has
+    at ``pointer`` (``_trusted_value``). A copy of ``dump`` with a copy of
+    ``value`` at ``pointer`` and nothing else changed is validated as a config
+    file is loaded (strict), dumped, and read at ``pointer`` as ``_trusted_value``
+    reads ``config``. A leaf the document writes in another serialization (an
+    entry without the keys the model defaults, a spelling the model normalizes)
+    reads as it does, while nothing else the document holds can decide this
+    leaf: not a second spelling of its field, not a key the model drops, not
+    reference text in another field.
+
+    Anything that goes wrong leaves the leaf a change, so nothing raised here
+    reaches the caller: a place ``dump`` has no parent for, a value the model
+    refuses, a plugin lookup that raises on the trial.
+    """
+    from automated_security_helper.config.config_validator import validated_with
+
+    try:
+        keys = _dump_keys_at(dump, pointer)
+        if keys is None:
+            return False
+        trial = validated_with(config, dump, keys, value, strict=True)
+        if trial is None:
+            return False
+        validated, validated_dump = trial
+        present, read = _trusted_value(
+            validated, _as_json(validated_dump), pointer, plugin_keys
+        )
+        return present and _same_json_value(trusted_value, read)
+    except Exception:  # noqa: BLE001 -- a leaf that cannot be read as the model reads it is a change
+        return False
+
+
 def _covered(patterns: Sequence[str], pointer: str, plugin_keys: PluginKeys) -> bool:
     """Whether ``pointer`` is at or under one of ``patterns``, under every spelling."""
     return bool(pointer) and any(
@@ -867,6 +941,20 @@ def _covered(patterns: Sequence[str], pointer: str, plugin_keys: PluginKeys) -> 
         or _match_segments(_subtree_pattern(pattern), _path_segments(target))
         for each in patterns
         for pattern, target in _denial_spellings(each, pointer, plugin_keys)
+    )
+
+
+def _same_place(known: str, pointer: str, plugin_keys: PluginKeys) -> bool:
+    """Whether ``known`` and ``pointer`` name one place, under every spelling a denial reads.
+
+    Equal as pointers, not as a pattern and not as a subtree: ``known`` neither
+    covers ``pointer`` from above nor lies below it, and a glob character in a
+    key is that character. The spellings are ``_denial_spellings``'s, so a plugin
+    section is the same place under any key its plugin lookup reads as one.
+    """
+    return any(
+        _path_segments(left) == _path_segments(right)
+        for left, right in _denial_spellings(known, pointer, plugin_keys)
     )
 
 
@@ -915,6 +1003,8 @@ def config_document_denials(
     inert: Sequence[str] = (),
     repeats_trusted: bool = False,
     moved: Sequence[str] = (),
+    own_references: Sequence[EnvironmentReference] = (),
+    document_path: Optional[Path] = None,
 ) -> List[DocumentDenial]:
     """The fields ``document`` sets that ``allowlist``'s denials refuse.
 
@@ -935,6 +1025,31 @@ def config_document_denials(
     dump, so it has every key of ASH's schema. A ``patch`` op is refused whatever
     it writes.
 
+    With ``repeats_trusted``, a leaf the document writes in another serialization
+    than ``config``'s dump (an entry without the keys the model defaults, a
+    spelling the model normalizes) is not a change either when the model reads it
+    as the trusted value. Each such leaf is judged alone: ``config``'s dump with
+    only this leaf's value placed at its pointer is validated as a config file is
+    loaded, and read back there (``_model_reads_leaf_as``). Another spelling of
+    the field, a key the model drops and reference text in another field cannot
+    decide it, and a leaf the model cannot read that way is refused.
+
+    A leaf ``config`` read from the environment gets neither exemption, since a
+    document that repeated the value would learn, from the absence of a refusal,
+    that a guess was right. The exception, with ``repeats_trusted``, is a leaf the
+    document holds as the operator's own reference. ``own_references`` are the
+    references a copy of the operator's profile was filled from, each at the
+    place the fill read it (``environment_record.fill_environment_references``;
+    ``ResolvedConfigDocument.filled_references``), so the document holds the
+    operator's value there and not one it chose. A reference counts only when
+    ``document_path`` is given and the reference's ``origin`` names that
+    document; any other is ignored. The leaf is the operator's own reference when
+    ``config`` recorded exactly one reference text at its place and the
+    document's references at exactly that pointer, in the document's keys, have
+    that text and no other. Two texts at one place, a reference at another place
+    or under another spelling of the section, and a reference inside a list entry
+    never qualify, and the leaf stays refused.
+
     A write at or under a pattern in ``exempt`` is not checked against
     ``denied_paths``, though value patterns still apply to it. A write at or
     under a pattern in ``inert`` is not checked at all: it names a field with no
@@ -953,40 +1068,18 @@ def config_document_denials(
         if config is not None
         else None
     )
-    # The leaves the trusted config read from the environment: never exempt by
-    # equality, since a document that repeats such a value would learn, from
-    # the absence of a refusal, that the value was right.
-    environment_pointers = (
-        _environment_read_pointers(config, dump)
+    # The leaves the trusted config read from the environment, with the text its
+    # files wrote at each: never exempt by equality, since a document that
+    # repeats such a value would learn, from the absence of a refusal, that the
+    # value was right. Unless the document holds the operator's own reference
+    # there (``_holds_the_operators_reference``).
+    environment_texts = (
+        _environment_read_texts(config, dump)
         if config is not None and dump is not None
-        else []
+        else {}
     )
-    # A client-patched copy is the trusted profile written whole, so a leaf it
-    # repeats can differ from ``dump`` only in how it is written: a defaulted key
-    # the writer left out, a spelling the model normalizes. Such a leaf is also
-    # compared as the model reads the whole document (validated, then dumped as
-    # ``dump`` is), so a repeat in another serialization is not a change, while a
-    # value the client changed still differs after validation. Read once, on the
-    # first leaf that needs it (``read_tried``); a document the model refuses
-    # leaves ``read`` None and gets no exemption.
-    read: Optional[Tuple[AshConfig, Dict[str, Any]]] = None
-    read_tried = False
-
-    def as_read(pointer: str) -> Tuple[bool, Any]:
-        nonlocal read, read_tried
-        if not read_tried:
-            read_tried = True
-            try:
-                validated = AshConfig.model_validate(document)
-                read = (
-                    validated,
-                    _as_json(validated.model_dump(mode="json", by_alias=True)),
-                )
-            except Exception:  # noqa: BLE001 -- an unreadable copy is compared as written
-                read = None
-        if read is None:
-            return False, None
-        return _trusted_value(read[0], read[1], pointer, plugin_keys)
+    environment_pointers = list(environment_texts)
+    own_texts = _own_reference_texts(own_references, document_path)
 
     denials: List[DocumentDenial] = []
     for key, op, kind in _document_writes(document):
@@ -1027,61 +1120,142 @@ def config_document_denials(
             present, value = _trusted_value(config, dump, path, plugin_keys)
             # A leaf whose trusted value came from the environment gets no
             # exemption in either comparison: an equal value there is the one
-            # oracle a denied field must not answer.
+            # oracle a denied field must not answer. Unless the document holds
+            # the operator's own reference there, whose value the fill put in
+            # and the document did not choose.
             environment_read = kind != "key" and _covered(
                 environment_pointers, path, plugin_keys
             )
-            # Both comparisons are of JSON values (_same_json_value): Python's
-            # == says True == 1 and 1 == 1.0, which exempted a write that
-            # changes a denied leaf's type.
-            if (
-                present
-                and not environment_read
-                and (
-                    (kind == "key" and repeats_trusted)
-                    or (
-                        kind != "key" and _same_json_value(value, _as_json(op["value"]))
-                    )
+            withheld = environment_read and not (
+                repeats_trusted
+                and _holds_the_operators_reference(
+                    path, environment_texts, own_texts, plugin_keys
                 )
-            ):
-                continue
-            if present and not environment_read and kind != "key" and repeats_trusted:
-                read_present, read_value = as_read(path)
-                if read_present and _same_json_value(value, read_value):
+            )
+            if present and not withheld:
+                # Both comparisons are of JSON values (_same_json_value):
+                # Python's == says True == 1 and 1 == 1.0, which exempted a
+                # write that changes a denied leaf's type.
+                if kind == "key":
+                    unchanged = repeats_trusted
+                else:
+                    unchanged = _same_json_value(value, _as_json(op["value"])) or (
+                        repeats_trusted
+                        and _model_reads_leaf_as(
+                            config, dump, path, op["value"], value, plugin_keys
+                        )
+                    )
+                if unchanged:
                     continue
         denials.append(DocumentDenial(key, path, reason, kind == "patch"))
     return denials
 
 
-def _environment_read_pointers(config: AshConfig, dump: Dict[str, Any]) -> List[str]:
+def _text_written(record: Any) -> str:
+    """The text ``record`` (a rewrite or a reference) says its file wrote, as
+    ``environment_record._bare`` gives it: the reference alone (``${VAR}`` or
+    ``${VAR:default}``) with no ``!ENV`` tag, or the text without the tag where
+    it starts with no reference."""
+    written = getattr(record, "written", "")
+    return _bare(written) if isinstance(written, str) else ""
+
+
+def _environment_read_texts(
+    config: AshConfig, dump: Dict[str, Any]
+) -> Dict[str, Tuple[str, ...]]:
     """The JSON pointers, in ``dump``'s keys, of the values ``config``'s files read
-    from the environment: the leaves ``config_document_denials``' repeat
-    exemption never applies to.
+    from the environment, each with the distinct texts the files wrote there: the
+    leaves ``config_document_denials``' repeat exemption never applies to, and
+    what could stand for the operator's own reference at each.
 
     From the record's value rewrites (``_written_references``) and the
     references the load kept (``_environment_references``), each placed in the
     dump as a runtime patch's pointers name it (config_validator.dumped_path). A
-    reference with no place in the dump names no leaf.
+    reference with no place in the dump names no leaf. A base and the file that
+    extends it can both read one field, each with its own text.
     """
     from automated_security_helper.config.config_validator import dumped_path
 
-    paths: List[Tuple[Any, ...]] = []
+    found: List[Tuple[Tuple[Any, ...], str]] = []
     for rewrite in getattr(config, "_written_references", None) or []:
         if getattr(rewrite, "kind", None) == "value":
-            paths.append(tuple(rewrite.path))
+            found.append((tuple(rewrite.path), _text_written(rewrite)))
     for reference in getattr(config, "_environment_references", None) or ():
         if not getattr(reference, "key", False):
-            paths.append(tuple(getattr(reference, "path", ()) or ()))
-    pointers: List[str] = []
-    for path in paths:
+            found.append(
+                (tuple(getattr(reference, "path", ()) or ()), _text_written(reference))
+            )
+    texts: Dict[str, List[str]] = {}
+    for path, text in found:
         if not path:
             continue
         at = dumped_path(config, dump, path)
         if at:
-            pointers.append(
-                "/" + "/".join(_escape_pointer_segment(str(segment)) for segment in at)
+            pointer = "/" + "/".join(
+                _escape_pointer_segment(str(segment)) for segment in at
             )
-    return list(dict.fromkeys(pointers))
+            here = texts.setdefault(pointer, [])
+            if text not in here:
+                here.append(text)
+    return {pointer: tuple(here) for pointer, here in texts.items()}
+
+
+def _own_reference_texts(
+    references: Sequence[EnvironmentReference], document_path: Optional[Path]
+) -> Dict[str, Set[str]]:
+    """The texts of the ``references`` that are ``document_path``'s own, by pointer.
+
+    A reference is a document's own when its ``origin`` names the document
+    (``EnvironmentReference.read_in``): the fill put the operator's value into
+    that document at the place it read the reference. With no ``document_path``,
+    or a reference of any other document or of none, nothing counts. Each
+    pointer is the reference's own path in the document's keys (a list index
+    included), written as the document's leaves are
+    (``_document_writes``), so it is compared as it stands; a key's reference
+    names a mapping, not a value, and is left out.
+    """
+    texts: Dict[str, Set[str]] = {}
+    if document_path is None:
+        return texts
+    for reference in references:
+        origin = getattr(reference, "origin", None)
+        if not (isinstance(origin, tuple) and origin and origin[0] == document_path):
+            continue
+        path = tuple(getattr(reference, "path", ()) or ())
+        if getattr(reference, "key", False) or not path:
+            continue
+        pointer = "/" + "/".join(_escape_pointer_segment(str(s)) for s in path)
+        texts.setdefault(pointer, set()).add(_text_written(reference))
+    return texts
+
+
+def _holds_the_operators_reference(
+    pointer: str,
+    environment_texts: Mapping[str, Sequence[str]],
+    own_texts: Mapping[str, AbstractSet[str]],
+    plugin_keys: PluginKeys,
+) -> bool:
+    """Whether the document's leaf at ``pointer`` is the operator's own reference.
+
+    The trusted config's files wrote exactly one reference text at the place
+    ``pointer`` names (``environment_texts``, matched as pointers are equal under
+    every spelling a denial reads: not a pointer above it, nor one below it), and
+    the document's own references at exactly ``pointer`` (``own_texts``) wrote
+    that text and no other. The leaf then holds the value the fill read for that
+    reference, which is the operator's. A place with two texts (a base and the
+    file that extends it each read the field) or none, and a place the document's
+    references name under another spelling, never qualify.
+    """
+    own = own_texts.get(pointer)
+    if not own:
+        return False
+    trusted = {
+        text
+        for known, texts in environment_texts.items()
+        if _same_place(known, pointer, plugin_keys)
+        for text in texts
+    }
+    return len(trusted) == 1 and own == trusted
 
 
 def _built_in_reporter_names() -> frozenset:
