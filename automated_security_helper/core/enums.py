@@ -1,6 +1,12 @@
 from enum import Enum, IntEnum
 from typing import Iterable, Optional
 
+# Defined in utils, which ``utils/ash_lock.py`` may import and ``core`` may not
+# be imported by; re-exported here so this name keeps working.
+from automated_security_helper.utils.invalidation_scope import (
+    InvalidationScope as InvalidationScope,
+)
+
 
 class AshExitCode(IntEnum):
     """The process exit statuses ASH commands report.
@@ -41,24 +47,6 @@ class ThresholdSource(str, Enum):
     GLOBAL = "global"
     CONFIG = "config"
     UNAVAILABLE = "unavailable"
-
-    def __str__(self) -> str:
-        return self.value
-
-
-class InvalidationScope(str, Enum):
-    """What makes a recorded symbol suppression stop applying (``.ash.lock``).
-
-    ``FILE``: any change to the code of the suppression's file. ``SYMBOL``: a
-    change to the code of the suppressed definition itself (its lines, every
-    definition bearing its name, the headers of the definitions it sits in, and
-    the file's prelude). Layout between tokens is never a change. Each recorded
-    scope carries one; ``ash suppress add --invalidation-scope`` chooses it for
-    a new scope, ``ash suppress refresh --invalidation-scope`` converts one.
-    """
-
-    FILE = "file"
-    SYMBOL = "symbol"
 
     def __str__(self) -> str:
         return self.value

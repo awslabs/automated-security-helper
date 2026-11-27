@@ -97,7 +97,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from automated_security_helper.core.enums import InvalidationScope
+from automated_security_helper.utils.invalidation_scope import InvalidationScope
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.ast_digest import ALGORITHM, DigestUnavailable
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
