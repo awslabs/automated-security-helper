@@ -892,7 +892,7 @@ def test_an_extends_base_that_does_not_parse_is_refused_without_its_text(
 
 
 def test_a_merge_config_that_does_not_parse_is_refused_without_its_text(world, ash_log):
-    """ash merge reads --config through the same loader, and refuses it in the
+    """ash results merge reads --config through the same loader, and refuses it in the
     formatter's words."""
     canary = _canary()
     results = world.write(world.root / "results.json", "{}")

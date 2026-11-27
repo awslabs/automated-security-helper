@@ -3,7 +3,7 @@
 
 """Every command that loads a config's plugin modules refuses an import failure.
 
-``ash report``, ``ash dependencies install`` and ``ash plugin list`` each load
+``ash results report``, ``ash dependencies install`` and ``ash plugin list`` each load
 the configuration's plugin modules through ``load_plugins``; a configured
 module that fails to import refuses each of them with exit 3 and the refusal's
 composed text, as the scan is refused. These cells exist because each command's

@@ -13,7 +13,7 @@ format, as JSON writes a newline as \\n.
 
 PyYAML writes a value holding a newline as a block of lines, the next one
 starting with what followed the newline, and folds a long value at a space, so
-ash.yaml, the S3 reporter's YAML and ``ash report --format yaml`` quote any
+ash.yaml, the S3 reporter's YAML and ``ash results report --format yaml`` quote any
 value that could start a line with a CI command. The JSON writers encode the
 newline; their cells show it.
 """

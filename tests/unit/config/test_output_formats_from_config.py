@@ -136,7 +136,7 @@ class TestTheConfigKeepsTheValue:
         assert valid, errors
 
     def test_the_scan_results_record_it(self):
-        """``ash merge`` reads the scan's config back from the results file."""
+        """``ash results merge`` reads the scan's config back from the results file."""
         model = AshAggregatedResults(
             ash_config=AshConfig(project_name="p", output_formats=["sarif"])
         )

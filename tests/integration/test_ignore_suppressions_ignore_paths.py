@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan --ignore-suppressions`` end to end: ignore paths are lifted for every scanner.
+"""``ash scan fs --ignore-suppressions`` end to end: ignore paths are lifted for every scanner.
 
 The fixture's app.py carries a bandit finding and a detect-secrets finding, and
 the repository's config lists app.py under ``ignore_paths``. Without the flag

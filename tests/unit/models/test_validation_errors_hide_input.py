@@ -400,8 +400,8 @@ def test_a_client_s_refused_patch_does_not_show_the_profile(tmp_path, monkeypatc
 
 
 def test_ash_report_does_not_show_a_section_it_cannot_build(tmp_path, ash_log):
-    """``ash report`` builds the reporter from a section its options model refuses:
-    neither the command's output nor any log record holds the value, the debug
+    """``ash results report`` builds the reporter from a section its options model
+    refuses: neither the command's output nor any log record holds the value, the debug
     lines that show an override, a plugin's section or the plugin context
     included, since they name keys and never values."""
     from typer.testing import CliRunner

@@ -315,7 +315,7 @@ def _stored_results(output: Path) -> None:
 
 
 def _report_s3_in_the_checkout(tmp_path: Path, endpoint: str, overrides: List[str]):
-    """`ash report --format s3 --config .ash.yaml`, run in the checkout,
+    """`ash results report --format s3 --config .ash.yaml`, run in the checkout,
     where that file turns S3 on and aims it at the repository's bucket."""
     source = _source_tree(tmp_path, _repository_enables("s3"))
     output = tmp_path / "out"
@@ -738,7 +738,7 @@ def _get_findings_targets(bodies: List[tuple]) -> List[str]:
 
 #: (the decoy file, the spelling the operator's overrides use, the --format
 #: spelling). In the first, the repository's payload is under the reporter's own
-#: name and --format names it, the spelling ``ash report`` looks the section up
+#: name and --format names it, the spelling ``ash results report`` looks the section up
 #: by: ``--format AWS-Security-Hub`` would find the decoy's spelling, where the
 #: operator's overrides are, whatever the confinement does. The second mirrors
 #: it: the payload is under another spelling, last, the overrides are under the
@@ -810,8 +810,8 @@ def _report_security_hub(tmp_path, endpoint, source, format_spelling, overrides)
 def test_a_decoy_section_does_not_reach_ash_report_either(
     tmp_path, security_hub_with_stored_findings, shape, operator_archives
 ):
-    """`ash report` in the checkout, with a decoy file as its --config, on results
-    the reporter imports and, when the operator turns it on, archives.
+    """`ash results report` in the checkout, with a decoy file as its --config, on
+    results the reporter imports and, when the operator turns it on, archives.
 
     The first run gives a finding as the reporter writes it. The second runs
     with two stored ACTIVE findings built from it, one of the operator's scope
@@ -846,7 +846,7 @@ def test_a_decoy_section_does_not_reach_ash_report_either(
 
     assert result.returncode == 0, (result.stdout, result.stderr)
     # The reporter ran and imported, every finding under the operator's scope.
-    # `ash report` skips the dependency check (DescribeHub), so the first call
+    # `ash results report` skips the dependency check (DescribeHub), so the first call
     # is report()'s own account lookup.
     assert ("sts", "GetCallerIdentity") in requests, (requests, result.stderr)
     imported = _findings_imported(bodies)
@@ -875,7 +875,7 @@ def test_a_decoy_section_does_not_reach_ash_report_either(
 def test_a_mirrored_decoy_does_not_turn_on_archiving_in_ash_report(
     tmp_path, security_hub_with_stored_findings
 ):
-    """`ash report` with the mirrored decoy as its --config, and the operator's
+    """`ash results report` with the mirrored decoy as its --config, and the operator's
     overrides under the payload's own spelling, setting the scope and not archiving.
 
     The overrides put the operator's scope in the payload's section, so the
@@ -886,7 +886,7 @@ def test_a_mirrored_decoy_does_not_turn_on_archiving_in_ash_report(
     place of the repository's.
 
     An ASH_CONFIG cell, like the scan's, would not reach this: with ASH_CONFIG set
-    and no --config, `ash report` reads the operator's file and never the decoy.
+    and no --config, `ash results report` reads the operator's file and never the decoy.
 
     Needs the Security Hub import and a scan's scan_source and
     changed_files_only metadata (see the module docstring).

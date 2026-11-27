@@ -327,7 +327,7 @@ def test_an_invalid_ash_config_file_stops_the_scan_with_exit_3(project, text):
 
 
 def test_the_plugin_context_is_logged_without_its_config(project, caplog):
-    """`ash scan --debug` logs the plugin context without its resolved config, so
+    """`ash scan fs --debug` logs the plugin context without its resolved config, so
     no value the config read from the environment reaches the console or
     ash.log."""
     from automated_security_helper.base.plugin_context import PluginContext

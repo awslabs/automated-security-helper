@@ -179,7 +179,7 @@ def test_a_clean_dockerfile_passes(fixture_copy, tmp_path):
 def test_enabling_in_the_project_config_runs_it_without_a_selection(
     fixture_copy, tmp_path
 ):
-    """No --scanners at all: the listed module and the project config run hadolint.
+    """No scanner option at all: the listed module and the project config run hadolint.
 
     Every other scanner is switched off in the same file so the run does not
     depend on which other tools this machine has.

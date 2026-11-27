@@ -8,12 +8,12 @@ from, and the environment spelling of ``--config``. Were naming a file that is
 not there to leave every run on the built-in defaults, which drop the file's
 suppressions and settings, the run would report success: the scan would exit 0,
 ``ash config validate`` would call a valid ``--config`` file valid although a
-scan with the same environment would not use it, and ``ash report`` would exit 1
+scan with the same environment would not use it, and ``ash results report`` would exit 1
 for a reason that had nothing to do with the configuration.
 
 Each refuses with exit 3. The message names ASH_CONFIG and the path, in the
-words a scan uses (``default_config.get_default_config``). ``ash report`` refuses
-a ``--config`` that does not exist the same way, as the config commands do. An
+words a scan uses (``default_config.get_default_config``). ``ash results report``
+refuses a ``--config`` that does not exist the same way, as the config commands do. An
 empty ASH_CONFIG counts as unset, and one of only whitespace is refused.
 """
 

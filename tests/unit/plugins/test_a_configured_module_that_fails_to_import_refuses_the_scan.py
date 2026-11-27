@@ -259,7 +259,7 @@ def test_requesting_only_the_broken_modules_scanner_refuses_in_the_refusals_word
 def test_the_default_selection_refuses_with_the_built_ins_disabled(
     plugin_packages, tmp_path
 ):
-    """No --scanners at all: the refusal is selection-independent, so the
+    """No scanner option at all: the refusal is selection-independent, so the
     default selection exits 3 like every other shape. Every built-in scanner is
     disabled in the config, so even the fail-open state would select nothing
     and no real tool can start."""

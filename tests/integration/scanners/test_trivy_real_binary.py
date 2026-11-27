@@ -18,7 +18,7 @@ What is covered here and nowhere else:
   negatives (six, ms) and the off-by-default misconfiguration scanner still report
   nothing;
 * ASH's output directory inside the target is skipped by trivy itself;
-* ``ash scan --scanners trivy`` end to end, online and offline: the content
+* ``ash scan fs --add-scanners trivy`` end to end, online and offline: the content
   database record, the offline flags, a stale database failing the scan (and
   passing under ``--allow-stale-content-db``), and an offline scan with no
   database at all reported MISSING;

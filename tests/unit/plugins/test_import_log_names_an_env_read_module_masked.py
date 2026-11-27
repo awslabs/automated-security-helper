@@ -6,8 +6,8 @@
 ``load_additional_plugin_modules`` logs each module it imports (``Importing
 additional plugin module: ...``) and names an env-read entry by its label. For
 an ``ash_plugin_modules`` entry the config read from the environment, the label
-keeps the variable's value off the console and out of ash.log of ``ash
-report``, ``ash dependencies install`` and ``ash merge`` -- the leak class the
+keeps the variable's value off the console and out of ash.log of ``ash results
+report``, ``ash dependencies install`` and ``ash results merge`` -- the leak class the
 engine's INFO line already masks. ``load_plugins`` already builds the shown map
 for its
 refusal; these cells pin that the import lines read it too.

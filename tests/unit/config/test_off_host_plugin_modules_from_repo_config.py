@@ -889,7 +889,7 @@ for cls in sorted(ash_plugin_manager.plugin_modules("reporter"), key=plugin_conf
             if plugin_config_key(cls) == "asff":
                 # The offline export refuses to run without these four options
                 # (it reads no AWS state to fill them in), so it gets what an
-                # `ash report --format asff` is given.
+                # `ash results report --format asff` is given.
                 options = reporter.config.options
                 options.account_id = "123456789012"
                 options.aws_region = "us-east-1"

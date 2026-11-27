@@ -8,7 +8,7 @@ The defect
 bandit, checkov and semgrep ran ``uv tool run --from <spec> <tool> --version`` from
 ``model_post_init``, which resolves the tool and downloads it when uv's cache lacks
 it. The scan phase constructs every registered scanner before it applies
-``--scanners`` (scan_phase.py), and ``ash plugin list`` constructs them all as well,
+``--add-scanners`` (scan_phase.py), and ``ash plugin list`` constructs them all as well,
 so a scan of one scanner probed all three, online unless ASH_OFFLINE was set, and so
 did every test that built a real scanner. The jupyter converter had the same probe
 and had been given its own way out (probe only once a notebook needs nbconvert).
@@ -27,8 +27,8 @@ with every process start refused and recorded (an audit hook sees
 probe recorded, and must start nothing and leave no new thread behind. The plugins
 that had the probe must then run it once, on their first dependency check, and the
 SARIF reader must run it for a plugin whose check never ran. A real
-``ash scan --scanners bandit`` in a child interpreter, with a stand-in ``uv`` that
-records its calls (first on PATH, and the uv ASH's lookup finds; see
+``ash scan fs --add-scanners bandit`` in a child interpreter, with a stand-in ``uv``
+that records its calls (first on PATH, and the uv ASH's lookup finds; see
 tests/utils/stand_in_uv.py), must ask about bandit and about nothing else.
 """
 

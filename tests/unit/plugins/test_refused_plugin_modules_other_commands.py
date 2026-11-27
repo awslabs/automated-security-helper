@@ -3,12 +3,12 @@
 
 """Commands other than a scan refuse a plugin module outside the namespace too.
 
-``ash plugin list``, ``ash dependencies install``, ``ash report`` and ``ash merge``
-import the plugin modules their config names through ``load_plugins``. A name
-outside ASH's plugin namespace (see ``plugins/loader.py``) refuses each of them
-with exit code 3, as it refuses a scan, before anything is imported or written:
-``ash merge`` checks the config carried by the shard results before it writes the
-merged results file. It imports only the entries of that config which the
+``ash plugin list``, ``ash dependencies install``, ``ash results report`` and
+``ash results merge`` import the plugin modules their config names through
+``load_plugins``. A name outside ASH's plugin namespace (see ``plugins/loader.py``)
+refuses each of them with exit code 3, as it refuses a scan, before anything is imported
+or written: ``ash results merge`` checks the config carried by the shard results before
+it writes the merged results file. It imports only the entries of that config which the
 operator's own config also names (``config/plugin_module_trust.py``), so a merge
 test that needs a module imported names it in both, as an operator merging the
 shards would; a name outside the namespace is refused whichever config names it.
@@ -21,7 +21,7 @@ and the namespace rule is the one under test.
 
 Each command is stubbed past the point it should stop at, so that if the refusal
 regressed the test fails without doing the command's work: ``dependencies install``
-would otherwise download and install tools, and ``merge`` would run reporters.
+would otherwise download and install tools, and ``results merge`` would run reporters.
 HOME and the AWS settings point at nothing for the same reason.
 """
 

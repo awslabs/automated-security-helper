@@ -200,7 +200,7 @@ def test_a_handler_on_ash_survives_an_ash_command(cleanup, tmp_path, monkeypatch
     )
 
     # The control: the command's get_logger ran.
-    assert calls, "ash report did not set up its logger"
+    assert calls, "ash results report did not set up its logger"
     assert host in ash.logger.handlers
 
 

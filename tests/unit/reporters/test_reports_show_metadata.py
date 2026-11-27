@@ -5,7 +5,7 @@
 
 A results file carries its metadata as free text: the project name and the tool
 version are plain strings, and the metadata model allows extra fields, which a
-report's metadata section prints as they come. ``ash report`` with no
+report's metadata section prints as they come. ``ash results report`` with no
 ``--output-dir`` renders a results file under ``.ash/ash_output`` of the
 directory it runs in, and a repository can commit that file, so each of those
 values can be the repository's text. The text, Markdown and HTML reports print
@@ -15,7 +15,7 @@ sections. Each place shows the value on one line, as ``shown_on_one_line`` write
 it: a control character is a visible escape, and a CI command form is broken.
 
 One cell per place, one cell per report and field for the whole document, and
-one that renders a committed results file through ``ash report`` to a pipe.
+one that renders a committed results file through ``ash results report`` to a pipe.
 """
 
 import html
@@ -226,7 +226,7 @@ def test_a_committed_results_file_reports_its_metadata_shown(
     fmt, tmp_path, monkeypatch
 ):
     """The hostile project name and version pass the model's validation, so a
-    committed results file can carry them; ``ash report`` shows them."""
+    committed results file can carry them; ``ash results report`` shows them."""
     model = AshAggregatedResults(ash_config=get_default_config())
     model.metadata.project_name = _probe("PROJECT")
     model.metadata.tool_version = _probe("VERSION")

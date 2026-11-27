@@ -160,7 +160,7 @@ print(json.dumps({
 }))
 """
 
-# ``ash report``: resolves --config, loads the config's plugin modules, and runs
+# ``ash results report``: resolves --config, loads the config's plugin modules, and runs
 # the reporter --format names, printing what it returns.
 _REPORT = """
 import json, os, sys
@@ -590,7 +590,7 @@ def test_an_operator_can_have_such_a_file_refused_with_denied_paths(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# ash report
+# ash results report
 # ---------------------------------------------------------------------------
 
 

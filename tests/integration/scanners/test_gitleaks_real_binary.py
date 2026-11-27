@@ -17,7 +17,7 @@ What is covered here and nowhere else:
 * the fixture repo's own ``.gitleaks.toml`` allowlist and ``.gitleaksignore``
   fingerprint hide nothing from ASH, though gitleaks run on its own honors both
   (the positive control), and an operator's config file still applies;
-* a full ``ash scan --scanners gitleaks`` -- CRITICAL findings, no secret value
+* a full ``ash scan fs --add-scanners gitleaks`` -- CRITICAL findings, no secret value
   in any file ASH writes, ASH's output directory excluded, line-pinned and
   symbol-scoped suppressions, a broken config failing the run, and an
   enabled-but-missing binary failing the completeness gate;

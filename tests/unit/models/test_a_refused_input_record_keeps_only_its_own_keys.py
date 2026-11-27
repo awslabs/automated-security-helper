@@ -4,11 +4,11 @@
 """A refused-input record keeps only the keys its model defines.
 
 RefusedInputInfo (path, member, reason) took any other key it was given, so a key
-in a results file ASH reads back (``ash report``, a shard given to ``ash merge``,
-``ash scan --use-existing``) went into every record and report written from it.
-No ASH writer sets another key: the two places that make a record, a converter's
-refusal (``ConverterPluginBase``) and the archive converter's partial extraction,
-set those three. Such a key is dropped, and each of those three readers, and
+in a results file ASH reads back (``ash results report``, a shard given to
+``ash results merge``, ``ash scan fs --use-existing``) went into every record and report
+written from it. No ASH writer sets another key: the two places that make a record, a
+converter's refusal (``ConverterPluginBase``) and the archive converter's partial
+extraction, set those three. Such a key is dropped, and each of those three readers, and
 the MCP server's get_scan_results, logs one warning that says how many keys were
 dropped and from which file, naming neither a key nor its value: both come from
 the file.

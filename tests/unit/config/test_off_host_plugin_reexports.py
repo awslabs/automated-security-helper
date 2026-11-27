@@ -511,8 +511,8 @@ def test_a_config_with_no_untrusted_file_selects_what_its_own_modules_load():
     assert drop_untrusted_off_host_plugins(AshConfig(), plugins, [SNYK]) == plugins
 
 
-# ``ash report``: resolves --config, loads the config's plugin modules, and looks
-# up the reporter --format names.
+# ``ash results report``: resolves --config, loads the config's plugin modules, and
+# looks up the reporter --format names.
 _REPORT = """
 import json, os, sys
 

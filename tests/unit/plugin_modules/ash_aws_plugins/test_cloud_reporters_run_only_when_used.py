@@ -7,8 +7,8 @@ The AWS reporters' dependency checks contact AWS (Security Hub calls
 
 * a scan whose operator enabled Security Hub but asked for other formats
   (``-f sarif``) neither checks nor runs it;
-* ``ash report --format <cloud reporter>`` refuses a reporter the operator did not
-  enable, and runs one they did;
+* ``ash results report --format <cloud reporter>`` refuses a reporter the operator did
+  not enable, and runs one they did;
 * workspace reporting does not check a per-project reporter, which it does not
   run at workspace level.
 
@@ -339,7 +339,8 @@ class TestReportCommand:
         self.capsys = capsys
 
     def _report(self, output_dir, *extra, report_format="aws-security-hub"):
-        """``ash report``, run as ``CliRunner.invoke`` runs it, read with ``capsys``.
+        """``ash results report``, run as ``CliRunner.invoke`` runs it, read with
+        ``capsys``.
 
         Not through ``CliRunner``: a record logged during ``invoke`` while pytest's
         live logging is on reassigns ``sys.stdout``, which finalizes the runner's own
@@ -388,8 +389,8 @@ class TestReportCommand:
     def _plugin_config(root):
         """An operator config that names the AWS plugin module and sets nothing else.
 
-        ``ash report`` loads the plugin modules the config names, as a scan does,
-        so without one the AWS reporters are not there to refuse or run.
+        ``ash results report`` loads the plugin modules the config names, as a scan
+        does, so without one the AWS reporters are not there to refuse or run.
         """
         path = root / "operator" / "ash-aws.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -421,7 +422,7 @@ class TestReportCommand:
     ):
         """Control: the operator's override turns it on.
 
-        ``ash report`` runs the reporter's dependency check first, as a scan
+        ``ash results report`` runs the reporter's dependency check first, as a scan
         does. Every request here is refused: Security Hub's DescribeHub refusal
         is tolerated (the check goes on), and the override names the account, so
         the check needs no STS lookup and passes without a successful call.
@@ -477,7 +478,7 @@ class TestReportCommand:
     ):
         """A config file does not turn it on, whatever its section says.
 
-        Stored results do not record which tree was scanned, so ash report takes
+        Stored results do not record which tree was scanned, so ash results report takes
         whether an off-host reporter runs from --config-overrides only
         (tests/unit/cli/test_report_config_file_does_not_send_off_host.py).
         """
@@ -502,7 +503,7 @@ class TestReportCommand:
         pytest's live logging writes during an invoke swaps sys.stdout under
         CliRunner, which then fails reading its own closed output stream.
 
-        ``ash report`` runs the reporter's dependency check first, as a scan
+        ``ash results report`` runs the reporter's dependency check first, as a scan
         does, and S3's check needs an identity: STS GetCallerIdentity is
         answered here (HeadBucket's refusal is tolerated by the check), so the
         command gets as far as the upload, which every other request refuses.
@@ -554,7 +555,7 @@ class TestReportCommand:
 
 @pytest.mark.unit
 class TestMergeCommand:
-    """``ash merge`` sends merged findings off the host only on the operator's ``--config-overrides``.
+    """``ash results merge`` sends merged findings off the host only on the operator's ``--config-overrides``.
 
     Neither the shards' recorded config nor a ``--config`` file turns an off-host
     reporter on or aims it: the shards do not record which tree was scanned, so
@@ -855,7 +856,8 @@ def test_the_aws_reporter_names_are_output_formats_of_the_aws_plugin_module():
     the AWS plugin module is loaded and the reporter is enabled. ExportFormat has
     a member per name, and AWS_PLUGIN_MODULE_FORMATS marks them as the formats a
     run has a reporter for only when ``ash_plugin_modules`` loads that module,
-    which is how ``ash scan --help`` and ``ash report --help`` list them apart.
+    which is how ``ash scan fs --help`` and ``ash results report --help`` list them
+    apart.
     """
     from automated_security_helper.core.enums import (
         AWS_PLUGIN_MODULE_FORMATS,

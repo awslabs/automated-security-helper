@@ -5,7 +5,7 @@
 
 A config file with an expiration that is not a YYYY-MM-DD date is refused when
 it loads, but a configuration kept from a results file keeps the date as
-written, and ``ash merge`` applies that configuration to the shards' findings.
+written, and ``ash results merge`` applies that configuration to the shards' findings.
 The entry does not apply, with a warning; the warning, the debug line for an
 expired entry, and the scan-start notice name the entry by where it is
 (``global_settings.ignore_paths[0]``), not by its date or its path: both are
@@ -160,7 +160,7 @@ def test_the_scan_start_notice_does_not_quote_the_date():
     _assert_no_value(text)
 
 
-# ash merge, end to end: a 1-of-1 shard whose stored configuration keeps an
+# ash results merge, end to end: a 1-of-1 shard whose stored configuration keeps an
 # ignore path with such a date.
 
 
