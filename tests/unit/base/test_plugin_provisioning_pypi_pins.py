@@ -16,6 +16,7 @@ importable and the new rows fail one by one where the names do not exist.
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import re
 from datetime import timedelta
@@ -340,15 +341,77 @@ def test_a_pin_adds_no_release_pin_to_the_tool_table() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_only_the_trivy_database_names_a_cache_variable() -> None:
+def test_each_database_names_the_cache_variable_ash_relies_on() -> None:
+    """grype's, semgrep's and opengrep's rows named none while ASH reads or sets all
+    three variables, so a later unit that read the field would have stated that the
+    tool has no variable to move its cache."""
     rows = [(db.name, db.cache_env) for db in prov.content_databases()]
 
     assert rows == [
-        ("grype-db", None),
+        ("grype-db", "GRYPE_DB_CACHE_DIR"),
         ("trivy-db", "TRIVY_CACHE_DIR"),
-        ("semgrep-offline-rules", None),
-        ("opengrep-offline-rules", None),
+        ("semgrep-offline-rules", "SEMGREP_RULES_CACHE_DIR"),
+        ("opengrep-offline-rules", "OPENGREP_RULES_CACHE_DIR"),
     ]
+
+
+def _string_constants(path: Path) -> set[str]:
+    """Every string literal a module holds, read from its syntax tree: a name in a
+    comment, or inside a longer message, is not one."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return {
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+
+def _scanner_module(scanner: str) -> Path:
+    """The file of the module that holds a scanner's class, from its manifest."""
+    manifests = {m.name: m for m in scanner_manifests()}
+    assert scanner in manifests, scanner
+    module = manifests[scanner].entry_points.scanner.split(":")[0]
+    return _ROOT / (module.replace(".", "/") + ".py")
+
+
+def _image_sets(dockerfile: str, variable: str) -> bool:
+    """Whether the image sets the variable with an ``ENV`` line of its own."""
+    return bool(re.search(rf"^ENV {variable}=", dockerfile, flags=re.MULTILINE))
+
+
+def test_the_readers_see_a_planted_variable_and_not_a_mention(tmp_path: Path) -> None:
+    module = tmp_path / "scanner.py"
+    module.write_text(
+        "# A_VARIABLE is only named in this comment.\n"
+        'value = environ.get("B_VARIABLE")\n'
+        'message = "set C_VARIABLE to move it"\n',
+        encoding="utf-8",
+    )
+    dockerfile = "ENV A_VARIABLE=1\n# ENV B_VARIABLE=2\nRUN echo ENV C_VARIABLE=3\n"
+
+    constants = _string_constants(module)
+
+    assert "B_VARIABLE" in constants
+    assert "A_VARIABLE" not in constants and "C_VARIABLE" not in constants
+    assert _image_sets(dockerfile, "A_VARIABLE")
+    assert not _image_sets(dockerfile, "B_VARIABLE")
+    assert not _image_sets(dockerfile, "C_VARIABLE")
+
+
+@pytest.mark.parametrize(
+    "database", ["grype-db", "semgrep-offline-rules", "opengrep-offline-rules"]
+)
+def test_a_cache_variable_is_one_the_scanner_names_and_the_image_sets(
+    database: str,
+) -> None:
+    """The scanner reads the variable (grype sets it for its child as well) and the
+    Dockerfile sets it, so the register records a fact the code holds."""
+    row = next(db for db in prov.content_databases() if db.name == database)
+    dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert row.cache_env is not None, database
+    assert row.cache_env in _string_constants(_scanner_module(row.scanner)), database
+    assert _image_sets(dockerfile, row.cache_env), database
 
 
 def test_a_database_may_leave_its_cache_variable_out() -> None:
