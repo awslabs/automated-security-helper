@@ -1491,6 +1491,9 @@ def test_the_self_test_fails_when_the_comparison_flags_everything(monkeypatch):
 TRAILERS_COMMAND = "python3 .github/scripts/check-snapshot-trailers.py"
 RATCHET_COMMAND = "python3 .github/scripts/check-illustrative-ratchet.py"
 SELF_TEST_COMMAND = f"{RATCHET_COMMAND} --self-test"
+#: What the ``if:`` of the ratchet step may be: nothing, or the condition that keeps a
+#: failed earlier step from skipping it. Any other condition filters the events it runs on.
+RATCHET_STEP_CONDITIONS = (None, "${{ !cancelled() }}", "!cancelled()")
 
 
 def _ratchet_step_problems(workflow: dict) -> list[str]:
@@ -1511,12 +1514,17 @@ def _ratchet_step_problems(workflow: dict) -> list[str]:
     if len(ratchets) != 1:
         return [*problems, f"{len(ratchets)} steps run the ratchet; one must"]
     index = ratchets[0]
-    problems += [
-        f"the ratchet step sets `{key}:`; it is for every event the job runs on, "
-        "and a failure of it fails the job"
-        for key in ("if", "continue-on-error")
-        if key in steps[index]
-    ]
+    if "continue-on-error" in steps[index]:
+        problems.append(
+            "the ratchet step sets `continue-on-error:`, so a failure of it cannot fail "
+            "the job"
+        )
+    if steps[index].get("if") not in RATCHET_STEP_CONDITIONS:
+        problems.append(
+            f"the ratchet step has the condition `{steps[index]['if']}`: it is for every "
+            "event the job runs on, and the one condition that may stand there is "
+            "`!cancelled()`, which keeps an earlier failed step from skipping it"
+        )
     if not trailers or index < trailers[0]:
         problems.append("the ratchet step does not come after the trailer step")
     lines = [line.strip() for line in runs[index].splitlines()]
@@ -1593,10 +1601,15 @@ def test_the_snapshot_trailers_job_runs_the_ratchet_after_its_trailer_step():
 
 
 @pytest.mark.unit
-def test_a_ratchet_step_of_the_shape_the_job_needs_has_no_problem():
-    """The control for the cases below: the check that finds a problem in each of them
+@pytest.mark.parametrize(
+    "step",
+    [{}, {"if": "${{ !cancelled() }}"}],
+    ids=["no condition", "runs after an earlier failure"],
+)
+def test_a_ratchet_step_of_the_shape_the_job_needs_has_no_problem(step):
+    """The controls for the cases below: the check that finds a problem in each of them
     finds none here."""
-    assert _ratchet_step_problems(_workflow()) == []
+    assert _ratchet_step_problems(_workflow(step=step)) == []
 
 
 @pytest.mark.unit
