@@ -822,7 +822,7 @@ class TestTheFlag:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(tmp_path),
                     "--output-dir",
                     str(tmp_path / "out"),

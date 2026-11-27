@@ -676,11 +676,11 @@ class TestInAFreshProcess:
         output_dir = tmp_path / "out"
         argv = [
             "scan",
-            "--source-dir",
+            "fs",
             str(checkout),
             "--output-dir",
             str(output_dir),
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--no-progress",
             "--no-fail-on-incomplete-scanners",
