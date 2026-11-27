@@ -2383,12 +2383,12 @@ class TestTheWrappersListsAreTheClis:
         """ASH_DASH_O_IS_THE_SUBCOMMANDS names the commands after which ./ash forwards
         -o as the command's own option instead of taking it as its runner: every
         command that defines a -o of its own (on itself or a command under it) that
-        is not the CLI's alias of --oci-runner. scan's -o is that alias, so -o after
-        scan stays the runner, as it does with no command and after a command that
-        defines no -o at all (the containerized CLI would refuse it there). Derived
-        from the click commands, as the other lists are, so a command that gains a
-        non-runner -o fails here until the list names it, instead of having its -o
-        eaten as the runner."""
+        is not the CLI's alias of --oci-runner. scan's -o is that alias on each of its
+        subjects, so -o after scan stays the runner, as it does with no command and
+        after a command that defines no -o at all (the containerized CLI would refuse
+        it there). Derived from the click commands, as the other lists are, so a
+        command that gains a non-runner -o fails here until the list names it,
+        instead of having its -o eaten as the runner."""
         root = self._root()
         dash_o_is_the_commands = {
             name
@@ -2402,7 +2402,12 @@ class TestTheWrappersListsAreTheClis:
         assert (
             self._bash_list("ASH_DASH_O_IS_THE_SUBCOMMANDS") == dash_o_is_the_commands
         )
-        # The runner's side of the rule: scan's own -o is the runtime alias.
+        # The runner's side of the rule: the -o of each scan subject is the runtime
+        # alias. Every subject takes the engine's options, so there is one alias for
+        # each subject the group names. The subjects are read from the group's own
+        # table, so a subject it gains is counted without an edit here.
+        from automated_security_helper.cli.scan_group import SUBJECTS
+
         scan_dash_o = [
             option
             for option in self._options_under(root.commands["scan"])
@@ -2410,7 +2415,7 @@ class TestTheWrappersListsAreTheClis:
         ]
         assert [
             set(option.opts) >= {"-o", "--oci-runner"} for option in scan_dash_o
-        ] == [True], scan_dash_o
+        ] == [True] * len(SUBJECTS), scan_dash_o
 
 
 @pytest.mark.unit
