@@ -168,6 +168,12 @@
 
 ### Fixes
 
+- **The `mcp-config` scanner no longer lets a bare name in
+  `allowed_command_prefixes` allow a command whose own `env` sets `PATH` or
+  `PATHEXT`.** A client looks a bare command up on the `PATH` of the entry's `env`, so
+  such an entry chooses the program the listed name runs. The command is now reported
+  like any command no listed entry allows. The key is compared without case, and an
+  entry with no `env`, or one that sets neither name, is unchanged.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

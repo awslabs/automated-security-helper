@@ -312,8 +312,9 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "commands that start with it, compared on path boundaries after "
                 "the command is normalized. An entry that is a bare name such as "
                 "`npx` allows exactly that bare command, which the client finds "
-                "on PATH, and no command that has a path, `./npx` included. "
-                "Empty turns the check off."
+                "on PATH, and no command that has a path, `./npx` included. A "
+                "bare name allows nothing for an entry whose `env` sets PATH or "
+                "PATHEXT, in any letter case. Empty turns the check off."
             ),
         ),
     ] = []
@@ -609,12 +610,27 @@ def _is_bare_name(text: str) -> bool:
     return "/" not in text.replace("\\", "/")
 
 
-def _path_prefix_matches(command: str, prefix: str) -> bool:
+#: The variables a client reads, from the entry's own ``env``, to find a bare command.
+_LOOKUP_ENV_NAMES = frozenset({"PATH", "PATHEXT"})
+
+
+def _env_sets_the_lookup(env: Dict[str, str]) -> bool:
+    """Whether ``env`` sets PATH or PATHEXT, compared without case."""
+    return any(key.upper() in _LOOKUP_ENV_NAMES for key in env)
+
+
+def _path_prefix_matches(
+    command: str, prefix: str, env: Optional[Dict[str, str]] = None
+) -> bool:
     """Whether the listed ``prefix`` allows ``command``, as the config wrote it.
 
     A prefix that is a bare name (``npx``) names the program a client finds on
     PATH. It allows exactly that bare command and no command that carries a path,
-    and the two are compared as written. A command that carries a path is a file
+    and the two are compared as written. A client looks the name up on the PATH
+    (and on Windows the PATHEXT) of the entry's own ``env``, so an entry whose
+    ``env`` sets either one chooses the program, and the name allows nothing for
+    it. The entry model has no ``cwd`` field, so no working directory is read. A
+    command that carries a path is a file
     the scanned repository can ship, and normalizing it first would turn ``./npx``
     and ``x/../npx`` into ``npx``. Any other prefix is a path: the command is
     normalized, then it must equal the prefix or lie under it, on a path boundary.
@@ -624,7 +640,7 @@ def _path_prefix_matches(command: str, prefix: str) -> bool:
     if normalized_prefix == ".":
         return False
     if _is_bare_name(prefix):
-        return command == prefix
+        return command == prefix and not _env_sets_the_lookup(env or {})
     path = _normalized_command_path(command)
     if path == normalized_prefix:
         return True
@@ -642,7 +658,9 @@ def check_command_prefix(
     """A declared command must be allowed by a listed entry, a bare name or a path."""
     if not prefixes or entry.command is None:
         return []
-    if any(_path_prefix_matches(entry.command, prefix) for prefix in prefixes):
+    if any(
+        _path_prefix_matches(entry.command, prefix, entry.env) for prefix in prefixes
+    ):
         return []
     return [
         PolicyFinding(
