@@ -132,6 +132,18 @@ export interface GateRunOptions {
    * Default 1.
    */
   readonly invocations?: number;
+  /**
+   * Whether an `ash` exists at all. Default `true`. `false` leaves the stand-in out of
+   * the handler's PATH, and the host's PATH with it, so starting any `ash` raises
+   * FileNotFoundError, as it does in an image that lacks one.
+   */
+  readonly ashInstalled?: boolean;
+  /**
+   * Replaces the handler's `PROBE_TIMEOUT_SECONDS`, so a probe that hangs ends in the
+   * seconds a test can wait and not in the bound the function ships with. Default: the
+   * handler's own.
+   */
+  readonly probeTimeoutSeconds?: number;
 }
 
 /**
@@ -164,13 +176,20 @@ export type AshScanHelp = 'listed' | 'missing' | 'coloured' | 'fails';
  * - `first-probe-crashes`: the first help probe the stand-in is asked, whichever it is,
  *   dies with a traceback, and every later one answers as an ASH with the subject. A
  *   transient failure, for a handler that stays warm between pull requests.
+ * - `noisy-probe-failure`: `ash scan fs --help` prints 25 numbered lines ("probe line
+ *   01" to "probe line 25") on stdout and an error line on stderr, and exits 1. What the
+ *   function log keeps of it is the last twenty lines of the two together.
+ * - `probe-hangs`: `ash scan fs --help` says it started, on stdout and on stderr, and
+ *   then never answers.
  */
 export type AshRelease =
   | 'with-subject'
   | 'without-subject'
   | 'without-subject-refusing'
   | 'new-spellings-crash'
-  | 'first-probe-crashes';
+  | 'first-probe-crashes'
+  | 'noisy-probe-failure'
+  | 'probe-hangs';
 
 let cachedPython: string | undefined;
 
@@ -278,7 +297,7 @@ export const fakeAshScript = (
   scanHelp: AshScanHelp = 'listed',
   release: AshRelease = 'with-subject',
 ) => `#!${python}
-import json, os, sys
+import json, os, sys, time
 
 argv = sys.argv[1:]
 CREDENTIAL_VARIABLES = ${JSON.stringify(CREDENTIAL_VARIABLES)}
@@ -308,6 +327,22 @@ def crash():
     sys.exit(1)
 
 
+def noisy_failure():
+    """Die as a probe that prints a great deal does: 25 numbered lines, then an error."""
+    for number in range(1, 26):
+        print("probe line %02d" % number)
+    print("Error: the noisy probe failed", file=sys.stderr)
+    sys.exit(1)
+
+
+def hang():
+    """Never answer: say that it started, on both streams, then wait far past any bound."""
+    print("probe started", flush=True)
+    print("probe still waiting", file=sys.stderr, flush=True)
+    time.sleep(600)
+    sys.exit(1)
+
+
 def probes_asked_before_this_one():
     """How many help probes this stand-in was asked before the one now answering."""
     try:
@@ -331,6 +366,10 @@ if SCAN_FS_PROBE or SCAN_PROBE or MERGE_PROBE:
         kind = "crash" if probes_asked_before_this_one() == 0 else "with-subject"
     if kind == "crash" or (kind == "new-spellings-crash" and not SCAN_PROBE):
         crash()
+    if kind == "noisy-probe-failure" and SCAN_FS_PROBE:
+        noisy_failure()
+    if kind == "probe-hangs" and SCAN_FS_PROBE:
+        hang()
     if SCAN_FS_PROBE and kind == "without-subject-refusing":
         print("Usage: ash scan [OPTIONS]", file=sys.stderr)
         print("Try 'ash scan --help' for help.", file=sys.stderr)
@@ -389,6 +428,9 @@ const DRIVER = `import importlib.util, json, os, sys
 spec = importlib.util.spec_from_file_location("ash_gate_handler", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+# Module-level settings a test replaces, such as the probe's time bound.
+for name, value in json.loads(sys.argv[5]).items():
+    setattr(module, name, value)
 event = json.loads(sys.argv[2])
 outcomes = []
 # One module for every event, as a warm execution environment has it: what the
@@ -466,26 +508,40 @@ export function runGateHandler(options: GateRunOptions): GateRun {
 
     fs.writeFileSync(path.join(pythonPath, 'boto3', '__init__.py'), FAKE_BOTO3(boto3Log, options.ssmValue));
     fs.writeFileSync(path.join(bin, 'git'), FAKE_GIT(python, gitLog, repo), { mode: 0o755 });
-    fs.writeFileSync(
-      path.join(bin, 'ash'),
-      fakeAshScript(
-        python,
-        ashLog,
-        options.ashExit ?? 0,
-        options.ashScanHelp ?? 'listed',
-        options.ashRelease ?? 'with-subject',
-      ),
-      { mode: 0o755 },
-    );
+    const ashInstalled = options.ashInstalled ?? true;
+    if (ashInstalled) {
+      fs.writeFileSync(
+        path.join(bin, 'ash'),
+        fakeAshScript(
+          python,
+          ashLog,
+          options.ashExit ?? 0,
+          options.ashScanHelp ?? 'listed',
+          options.ashRelease ?? 'with-subject',
+        ),
+        { mode: 0o755 },
+      );
+    }
     const handlerFile = path.join(dir, 'ash_gate_handler.py');
     fs.writeFileSync(handlerFile, CODECOMMIT_GATE_HANDLER);
     const driver = path.join(dir, 'driver.py');
     fs.writeFileSync(driver, DRIVER);
 
-    const searchPath = `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+    // Without an ash, the host's PATH stays out too: a host that has one (a busybox
+    // `ash` is a shell) would answer the probe, and the case is a PATH that has none.
+    const searchPath = ashInstalled ? `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}` : bin;
+    const overrides: Record<string, number> =
+      options.probeTimeoutSeconds === undefined ? {} : { PROBE_TIMEOUT_SECONDS: options.probeTimeoutSeconds };
     const result = spawnSync(
       python,
-      [driver, handlerFile, JSON.stringify(PULL_REQUEST_EVENT), resultFile, String(options.invocations ?? 1)],
+      [
+        driver,
+        handlerFile,
+        JSON.stringify(PULL_REQUEST_EVENT),
+        resultFile,
+        String(options.invocations ?? 1),
+        JSON.stringify(overrides),
+      ],
       {
         encoding: 'utf-8',
         // A minimal environment, so nothing from the developer's shell or the CI

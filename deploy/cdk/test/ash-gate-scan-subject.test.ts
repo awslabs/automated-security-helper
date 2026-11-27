@@ -121,6 +121,67 @@ describe('a probe that does not answer', () => {
     expect(run.stderr).toContain('MemoryError');
   });
 
+  test('the log keeps the last twenty lines of its standard output and standard error together', () => {
+    // 25 numbered lines on stdout, then one line on stderr: the last twenty of the
+    // 26 are lines 7 to 25 and the error line, so lines 1 to 6 are not in the log.
+    const run = runGateHandler({ env: gateEnvironment(), ashExit: 0, ashRelease: 'noisy-probe-failure' });
+
+    expect(scans(run)).toEqual([]);
+    expect(run.stderr).toContain('ash scan fs --help exited 1');
+    expect(run.stderr).toContain('Error: the noisy probe failed');
+    for (let number = 7; number <= 25; number++) {
+      expect(run.stderr).toContain(`probe line ${String(number).padStart(2, '0')}`);
+    }
+    for (let number = 1; number <= 6; number++) {
+      expect(run.stderr).not.toContain(`probe line ${String(number).padStart(2, '0')}`);
+    }
+  });
+
+  test('a probe that never answers is ended, and the scan is refused with a comment and a REVOKE', () => {
+    // Without a bound the function's own timeout would end the invocation with no
+    // comment, and an APPROVE from an earlier commit would still stand.
+    const run = runGateHandler({
+      env: gateEnvironment({ ApprovalGate: 'true' }),
+      ashExit: 0,
+      ashRelease: 'probe-hangs',
+      probeTimeoutSeconds: 1,
+    });
+
+    expect(scans(run)).toEqual([]);
+    expect(run.outcome).toEqual({ error: expect.stringContaining('RuntimeError') });
+    const votes = run.boto3.filter((call) => call.method === 'update_pull_request_approval_state');
+    expect(votes.map((call) => call.kwargs?.approvalState)).toEqual(['REVOKE']);
+    const comments = run.boto3.filter((call) => call.method === 'post_comment_for_pull_request');
+    expect(comments.map((call) => String(call.kwargs?.content))).toEqual([
+      expect.stringContaining('did not answer in 1 seconds'),
+    ]);
+    // What it had printed before it stopped answering is in the log.
+    expect(run.stderr).toContain('ash scan fs --help did not answer in 1 seconds');
+    expect(run.stderr).toContain('probe started');
+    expect(run.stderr).toContain('probe still waiting');
+  });
+
+  test('an ash that cannot be started refuses the scan with a comment and a REVOKE', () => {
+    // Starting the probe raises FileNotFoundError, not RuntimeError. Left to escape, it
+    // failed the invocation with nothing on the pull request and an earlier APPROVE
+    // standing, which the Terraform gate's handler never does.
+    const run = runGateHandler({
+      env: gateEnvironment({ ApprovalGate: 'true' }),
+      ashExit: 0,
+      ashInstalled: false,
+    });
+
+    expect(run.ash).toEqual([]);
+    expect(run.outcome).toEqual({ error: expect.stringContaining('RuntimeError') });
+    const votes = run.boto3.filter((call) => call.method === 'update_pull_request_approval_state');
+    expect(votes.map((call) => call.kwargs?.approvalState)).toEqual(['REVOKE']);
+    const comments = run.boto3.filter((call) => call.method === 'post_comment_for_pull_request');
+    expect(comments.map((call) => String(call.kwargs?.content))).toEqual([
+      expect.stringContaining('could not be started'),
+    ]);
+    expect(run.stderr).toContain('ash scan fs --help could not be started');
+  });
+
   test('a probe that crashed is asked again by the next pull request, and that answer stands', () => {
     // The first probe the stand-in is asked crashes; every later one answers as an ASH
     // with the subject. A handler that read the crash as "no subject" would remember
@@ -166,5 +227,24 @@ describe('the log of the spelling chosen', () => {
     expect(chosen).toHaveLength(1);
     expect(chosen[0]).toContain(spelling);
     expect(chosen[0]).toContain(reason);
+  });
+
+  test('a warm environment logs the spelling it uses for every pull request, not only the first', () => {
+    const run = runGateHandler({
+      env: gateEnvironment(),
+      ashExit: 0,
+      ashRelease: 'with-subject',
+      invocations: 2,
+    });
+
+    const chosen = run.stderr.split('\n').filter((line) => line.startsWith('ash-gate: scanning with'));
+    expect(chosen).toHaveLength(2);
+    for (const line of chosen) {
+      expect(line).toContain("'ash scan fs PATH'");
+      expect(line).toContain("its help names 'scan fs'");
+    }
+    // The second pull request did not ask: its line says whose answer it uses.
+    expect(chosen[0]).not.toContain('asked by an earlier scan');
+    expect(chosen[1]).toContain('asked by an earlier scan');
   });
 });

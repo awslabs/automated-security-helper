@@ -801,6 +801,13 @@ exec "$@"
  * and the next scan in the warm execution environment asks again. The spelling chosen
  * and why, or what a failed probe printed, go to the function's log on stderr.
  *
+ * A probe is bounded in time (`PROBE_TIMEOUT_SECONDS`), and one that cannot be started
+ * is refused the same way, so a hung or missing `ash` ends in a comment and a REVOKE
+ * too. Without the bound, the function's own timeout would end the invocation with no
+ * comment and an approval from an earlier, cleaner commit still standing. What a failed
+ * probe printed is its last twenty lines, standard output then standard error. Every
+ * scan logs the spelling it uses and why; one that reuses an earlier answer says so.
+ *
  * WHAT THIS COSTS: with an `AshVersion` of v3.7.1 or older the gate refuses every
  * pull request until it is deployed with an `AshVersion` whose `ash scan` has the
  * option.
@@ -1011,6 +1018,14 @@ SUBJECT_REFUSED = re.compile(
     r"(unexpected extra arguments?|no such command)[^\\n]*\\bfs\\b", re.IGNORECASE)
 _completeness_flag_found = None
 _scan_has_subject = None
+# What the probe said about that choice, kept so every scan in a warm execution
+# environment logs the spelling it uses and why, not only the first.
+_scan_spelling_why = None
+# How long one help probe may run before it counts as one that did not answer, and how
+# many of the last lines of a failed probe's output the log keeps. See
+# ash-container-scripts.ts.
+PROBE_TIMEOUT_SECONDS = 120
+PROBE_LOG_LINES = 20
 
 
 def _note(message):
@@ -1018,20 +1033,53 @@ def _note(message):
     print("ash-gate: " + message, file=sys.stderr)
 
 
+def _stream_text(value):
+    """What a stopped probe left on one stream: text, bytes or nothing."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return value or ""
+
+
 def _help_text(argv, scan_env):
-    """argv's exit status, help and stderr, plain: colour off, a wide terminal, no ANSI."""
+    """argv's exit status, help and stderr, plain: colour off, a wide terminal, no ANSI.
+
+    A probe that cannot be started, or does not answer within PROBE_TIMEOUT_SECONDS,
+    refuses the scan as one that fails does: a RuntimeError, which the handler comments
+    onto the pull request and answers with a REVOKE. Nothing is remembered of it.
+    """
     env = dict(scan_env, COLUMNS="200", NO_COLOR="1")
     env.pop("FORCE_COLOR", None)
-    probe = _run(argv, env=env)
+    asked = " ".join(argv)
+    try:
+        probe = _run(argv, env=env, timeout=PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as expired:
+        _probe_failed(argv, "did not answer in %d seconds" % PROBE_TIMEOUT_SECONDS,
+                      _stream_text(expired.stdout), _stream_text(expired.stderr))
+        raise RuntimeError(
+            "'%s' did not answer in %d seconds, so this image's ASH could not be checked "
+            "for how it names a directory or for %s. Refusing to scan; the next scan asks "
+            "again." % (asked, PROBE_TIMEOUT_SECONDS, COMPLETENESS_FLAG))
+    except OSError as exc:
+        _probe_failed(argv, "could not be started (%s)" % exc, "", "")
+        raise RuntimeError(
+            "'%s' could not be started (%s), so this image's ASH could not be checked for "
+            "how it names a directory or for %s. Refusing to scan; the next scan asks "
+            "again." % (asked, exc, COMPLETENESS_FLAG))
     ansi = r"\\x1b\\[[0-9;]*m"
     return (probe.returncode, re.sub(ansi, "", probe.stdout or ""),
             re.sub(ansi, "", probe.stderr or ""))
 
 
-def _probe_failed(probe_argv, status, output):
-    """What a probe that did not answer printed, in the function's log."""
-    _note("%s exited %d; the end of its output: %s"
-          % (" ".join(probe_argv), status, output.strip()[-2000:]))
+def _probe_failed(probe_argv, outcome, stdout, stderr):
+    """What a probe that did not answer printed, in the function's log.
+
+    The last PROBE_LOG_LINES lines of its standard output followed by its standard
+    error, as a shell step that reads the probe with 2>&1 prints them.
+    """
+    lines = (stdout + "\\n" + stderr).strip().splitlines()
+    _note("%s %s; the last %d lines of its output:\\n%s"
+          % (" ".join(probe_argv), outcome, PROBE_LOG_LINES,
+             "\\n".join(lines[-PROBE_LOG_LINES:])))
 
 
 def _ask_subject(scan_env):
@@ -1054,28 +1102,36 @@ def _ask_subject(scan_env):
     if refusal:
         return False, help_text, "%s exited %d refusing the word 'fs' (%s)" % (
             asked, status, refusal.group(0))
-    _probe_failed(probe_argv, status, errors or help_text)
+    _probe_failed(probe_argv, "exited %d" % status, help_text, errors)
     raise RuntimeError("'ash scan fs --help' exited %d without saying it has no 'fs' subject, so "
                        "this image's ASH could not be checked for how it names a directory or "
                        "for %s. Refusing to scan; the next scan asks again." % (status, COMPLETENESS_FLAG))
 
 
 def _check_completeness_flag(scan_env):
-    """Refuse an ASH that cannot fail an incomplete scan. Returns whether it has 'scan fs'."""
-    global _completeness_flag_found, _scan_has_subject
-    if _completeness_flag_found is None:
+    """Refuse an ASH that cannot fail an incomplete scan. Returns whether it has 'scan fs'.
+
+    The spelling in use and why are logged on every call, not only on the one that
+    asked: a warm execution environment scans many pull requests on one answer.
+    """
+    global _completeness_flag_found, _scan_has_subject, _scan_spelling_why
+    asked_now = _completeness_flag_found is None
+    if asked_now:
         has_subject, help_text, why = _ask_subject(scan_env)
         if not has_subject:
             probe_argv = ["ash", "scan", "--help"]
             status, help_text, errors = _help_text(probe_argv, scan_env)
             if status != 0:
-                _probe_failed(probe_argv, status, errors or help_text)
+                _probe_failed(probe_argv, "exited %d" % status, help_text, errors)
                 raise RuntimeError("'ash scan --help' exited %d, so this image's ASH could not be "
                                    "checked for %s. Refusing to scan." % (status, COMPLETENESS_FLAG))
         _completeness_flag_found = COMPLETENESS_FLAG in help_text
         _scan_has_subject = has_subject
-        _note("scanning with %s: %s" % (
-            "'ash scan fs PATH'" if has_subject else "'ash scan --source-dir PATH'", why))
+        _scan_spelling_why = why
+    _note("scanning with %s: %s%s" % (
+        "'ash scan fs PATH'" if _scan_has_subject else "'ash scan --source-dir PATH'",
+        _scan_spelling_why,
+        "" if asked_now else " (asked by an earlier scan in this environment)"))
     if not _completeness_flag_found:
         raise RuntimeError(
             "The ASH in this image has no %s option, so a scan whose scanners never ran "
