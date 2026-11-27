@@ -1145,6 +1145,18 @@ def declared_runtime_compat(scanner_class: type) -> Optional[RuntimeCompatFacet]
     return None
 
 
+def serves_container_images(scanner_class: type) -> bool:
+    """Whether *scanner_class* declares container-image targets.
+
+    :func:`serves_asset_kind` for ``AssetKind.CONTAINER_IMAGE``, under a name
+    that needs no ``AssetKind``: the helpers in ``utils`` ask this, because the
+    layer order keeps them from importing ``core``, where ``AssetKind`` lives
+    (tests/unit/test_layer_dag_boundaries.py). No declaration means no claim.
+    """
+    facets = declared_operational_facets(scanner_class)
+    return facets is not None and TargetKind.CONTAINER_IMAGE in facets.targets.kinds
+
+
 def serves_asset_kind(scanner_class: type, kind: "AssetKind") -> bool:
     """Whether *scanner_class* declares that it scans assets of *kind*.
 
@@ -1161,9 +1173,9 @@ def serves_asset_kind(scanner_class: type, kind: "AssetKind") -> bool:
     """
     from automated_security_helper.core.asset import AssetKind
 
-    facets = declared_operational_facets(scanner_class)
     if kind == AssetKind.CONTAINER_IMAGE:
-        return facets is not None and TargetKind.CONTAINER_IMAGE in facets.targets.kinds
+        return serves_container_images(scanner_class)
+    facets = declared_operational_facets(scanner_class)
     if facets is None:
         return True
     return any(k in FILESYSTEM_SIDE_KINDS for k in facets.targets.kinds)

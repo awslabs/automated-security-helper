@@ -27,7 +27,7 @@ Example usage:
     ```
 """
 
-from typing import Dict, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Any, Iterator, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.core import status_order
@@ -52,6 +52,9 @@ from automated_security_helper.utils.severity_ladder import (
     resolve_scanner_threshold,
     severity_fails_threshold,
 )
+
+if TYPE_CHECKING:
+    from automated_security_helper.utils.count_frame import SeverityCountsByName
 
 #: The levels a target report can record it was graded against
 #: (``ScanResultsContainer.scanner_severity_threshold``, written by the executor).
@@ -132,9 +135,10 @@ class ScannerStatisticsCalculator:
         # 3. Scanner results (scanners that have status information)
         from automated_security_helper.utils.log import ASH_LOGGER
 
-        sarif_scanner_names = ScannerStatisticsCalculator._get_scanner_names_from_sarif(
-            asharp_model
-        )
+        # One walk of the SARIF gives every name and every name's counts; the
+        # names come back in the order the walk first met each spelling.
+        sarif_counts = ScannerStatisticsCalculator.sarif_counts_by_scanner(asharp_model)
+        sarif_scanner_names = sarif_counts.names
         # Only an entry shaped as the processor writes one, a mapping of target
         # reports with at least one serialized container among them
         # (``_is_report_shaped``), names a scanner. additional_reports is a
@@ -192,8 +196,8 @@ class ScannerStatisticsCalculator:
         # Extract statistics for each scanner
         for scanner_name in scanner_names:
             suppressed, critical, high, medium, low, info = (
-                ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
-                    asharp_model, scanner_name
+                ScannerStatisticsCalculator._with_dict_counts(
+                    asharp_model, scanner_name, sarif_counts.for_name(scanner_name)
                 )
             )
 
@@ -438,46 +442,113 @@ class ScannerStatisticsCalculator:
             asharp_model: The AshAggregatedResults model containing SARIF data
 
         Returns:
-            List of unique scanner names found in the SARIF data
+            List of unique scanner names found in the SARIF data, each exact
+            spelling once, in the order the SARIF first names it
         """
         from automated_security_helper.utils.log import ASH_LOGGER
 
-        scanner_names = set()
-        total_results = 0
-        results_with_scanner_name = 0
-
-        if asharp_model.sarif and asharp_model.sarif.runs:
-            for run_idx, run in enumerate(asharp_model.sarif.runs):
-                if not run.results:
-                    ASH_LOGGER.debug(f"SARIF run {run_idx} has no results")
-                    continue
-
-                run_results = len(run.results)
-                total_results += run_results
-                ASH_LOGGER.debug(f"SARIF run {run_idx} has {run_results} results")
-
-                for result_idx, result in enumerate(run.results):
-                    scanner_name = (
-                        ScannerStatisticsCalculator._get_scanner_name_from_result(
-                            result
-                        )
-                    )
-                    if scanner_name:
-                        scanner_names.add(scanner_name)
-                        results_with_scanner_name += 1
-                    else:
-                        ASH_LOGGER.debug(
-                            f"Result {result_idx} in run {run_idx} has no scanner_name"
-                        )
-
-        scanner_list = list(scanner_names)
+        scanner_list = ScannerStatisticsCalculator.sarif_counts_by_scanner(
+            asharp_model
+        ).names
         ASH_LOGGER.debug("SARIF Scanner Discovery:")
-        ASH_LOGGER.debug(f"   Total SARIF results: {total_results}")
-        ASH_LOGGER.debug(f"   Results with scanner_name: {results_with_scanner_name}")
         ASH_LOGGER.debug(f"   Unique scanners found: {len(scanner_list)}")
         ASH_LOGGER.debug(f"   Scanner names: {sorted(scanner_list)}")
 
         return scanner_list
+
+    @staticmethod
+    def _sarif_name_kinds(
+        asharp_model: AshAggregatedResults, only: Optional[str] = None
+    ) -> Iterator[Tuple[str, str]]:
+        """The SARIF's one walk: ``(scanner name, kind)`` for each named result.
+
+        Results that name no scanner are skipped. The kind is ``"suppressed"`` for a
+        result with a suppression in effect, otherwise its resolved severity.
+        *only*, when given, keeps the results whose name matches it case-insensitively,
+        and the two per-result readings are made for those alone.
+        """
+        from automated_security_helper.utils.count_frame import SUPPRESSED
+        from automated_security_helper.utils.sarif_utils import (
+            _resolve_result_severity,
+            is_result_suppressed,
+        )
+
+        if not asharp_model.sarif:
+            return
+        for result in asharp_model.sarif.get_all_results():
+            result_scanner = ScannerStatisticsCalculator._get_scanner_name_from_result(
+                result
+            )
+            if not result_scanner:
+                continue
+            if only is not None and result_scanner.lower() != only.lower():
+                continue
+
+            # Suppressed means a suppression IN EFFECT: one whose state is
+            # rejected or underReview (SARIF 3.35.4) hides nothing, so its
+            # finding is counted under its severity, as the exit code, the
+            # flat finding and the workspace verdict count it.
+            yield (
+                result_scanner,
+                SUPPRESSED
+                if is_result_suppressed(result)
+                else _resolve_result_severity(result),
+            )
+
+    @staticmethod
+    def sarif_counts_by_scanner(
+        asharp_model: AshAggregatedResults,
+    ) -> "SeverityCountsByName":
+        """The SARIF's severity counts for every scanner name, from one walk.
+
+        ``.names`` lists each exact spelling once, in the order the SARIF first
+        names it; ``.for_name(name)`` is the SARIF share of what
+        ``extract_sarif_counts_for_scanner`` answers for *name* (the dict-result
+        counts are added by the caller).
+        """
+        from automated_security_helper.utils.count_frame import (
+            severity_counts_by_name,
+        )
+
+        return severity_counts_by_name(
+            ScannerStatisticsCalculator._sarif_name_kinds(asharp_model)
+        )
+
+    @staticmethod
+    def _with_dict_counts(
+        asharp_model: AshAggregatedResults,
+        scanner_name: str,
+        counts: ScannerSeverityCount,
+    ) -> Tuple[int, int, int, int, int, int]:
+        """*counts* plus the counts recorded on *scanner_name*'s dict-result reports.
+
+        A scanner that returned a dict (``severity_counts`` or a ``findings``
+        list) instead of SARIF has findings the merged SARIF never holds: the
+        executor graded its row from the counts it read, and
+        ScanResultProcessor keeps those counts on the per-target report beside
+        the dict. Added here, whatever the SARIF holds, so the summary, the
+        scanner row and the exit code see the findings the row was graded on:
+        a scanner can return SARIF for one target and a dict for another, and
+        reading the dict counts only when the SARIF held nothing dropped that
+        dict target's findings whenever a sibling target had one SARIF result.
+        Only a report that still carries a dict ``raw_results`` is read: the
+        processor drops ``raw_results`` from a SARIF report's entry, and that
+        report's findings are in the SARIF above, so nothing is counted twice.
+        """
+        dict_counts = ScannerStatisticsCalculator._dict_result_counts(
+            asharp_model, scanner_name
+        )
+        for field in SEVERITY_COUNT_FIELDS:
+            setattr(counts, field, getattr(counts, field) + getattr(dict_counts, field))
+
+        return (
+            counts.suppressed,
+            counts.critical,
+            counts.high,
+            counts.medium,
+            counts.low,
+            counts.info,
+        )
 
     @staticmethod
     def extract_sarif_counts_for_scanner(
@@ -515,66 +586,26 @@ class ScannerStatisticsCalculator:
             - (default) -> info
         """
         from automated_security_helper.utils.count_frame import (
-            SUPPRESSED,
             severity_frame,
             tally_severities,
-        )
-        from automated_security_helper.utils.sarif_utils import (
-            _resolve_result_severity,
-            is_result_suppressed,
         )
 
         counts = ScannerSeverityCount()
 
         # The walk, the scanner match and the two per-result readings are the SARIF
-        # tree's and stay here; the counting is utils.count_frame's group-by.
-        kinds = []
-        if asharp_model.sarif:
-            for result in asharp_model.sarif.get_all_results():
-                result_scanner = (
-                    ScannerStatisticsCalculator._get_scanner_name_from_result(result)
-                )
-                if not (
-                    result_scanner and result_scanner.lower() == scanner_name.lower()
-                ):
-                    continue
-
-                # Suppressed means a suppression IN EFFECT: one whose state is
-                # rejected or underReview (SARIF 3.35.4) hides nothing, so its
-                # finding is counted under its severity, as the exit code, the
-                # flat finding and the workspace verdict count it.
-                kinds.append(
-                    SUPPRESSED
-                    if is_result_suppressed(result)
-                    else _resolve_result_severity(result)
-                )
+        # tree's and stay in ``_sarif_name_kinds``; the counting is
+        # utils.count_frame's group-by. Asked for one name, it reads that name's
+        # results alone; ``extract_scanner_statistics`` asks for every name's at once.
+        kinds = [
+            kind
+            for _, kind in ScannerStatisticsCalculator._sarif_name_kinds(
+                asharp_model, only=scanner_name
+            )
+        ]
         tally_severities(severity_frame(kinds), counts)
 
-        # A scanner that returned a dict (``severity_counts`` or a ``findings``
-        # list) instead of SARIF has findings the merged SARIF never holds: the
-        # executor graded its row from the counts it read, and
-        # ScanResultProcessor keeps those counts on the per-target report beside
-        # the dict. Added here, whatever the SARIF holds, so the summary, the
-        # scanner row and the exit code see the findings the row was graded on:
-        # a scanner can return SARIF for one target and a dict for another, and
-        # reading the dict counts only when the SARIF held nothing dropped that
-        # dict target's findings whenever a sibling target had one SARIF result.
-        # Only a report that still carries a dict ``raw_results`` is read: the
-        # processor drops ``raw_results`` from a SARIF report's entry, and that
-        # report's findings are in the SARIF above, so nothing is counted twice.
-        dict_counts = ScannerStatisticsCalculator._dict_result_counts(
-            asharp_model, scanner_name
-        )
-        for field in SEVERITY_COUNT_FIELDS:
-            setattr(counts, field, getattr(counts, field) + getattr(dict_counts, field))
-
-        return (
-            counts.suppressed,
-            counts.critical,
-            counts.high,
-            counts.medium,
-            counts.low,
-            counts.info,
+        return ScannerStatisticsCalculator._with_dict_counts(
+            asharp_model, scanner_name, counts
         )
 
     @staticmethod

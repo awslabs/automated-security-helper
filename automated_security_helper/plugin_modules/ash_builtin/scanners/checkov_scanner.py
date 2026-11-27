@@ -4,6 +4,7 @@ import logging
 import os
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import (
     Annotated,
@@ -13,6 +14,7 @@ from typing import (
     Iterable,
     List,
     Literal,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -40,7 +42,11 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.base.uv_tool_mixin import _tool_name
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    _restore_uv_route,
+    tool_name,
+)
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
@@ -58,7 +64,7 @@ from automated_security_helper.utils.link_exclusions import (
     ignored_entries,
     walked_files,
 )
-from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.plugin_modules.ash_builtin.scanners import (
     checkov_vcs_frameworks,
@@ -115,9 +121,12 @@ CheckFrameworks = Literal[
 # CI_SERVER_URL/CI_JOB_TOKEN in GitLab CI) and write fetched config caches under
 # cwd rather than scanning repository files. They are skipped unless explicitly
 # requested (_process_config_options), and their remote fetches are disabled
-# for offline scans (_execute_scan). Rather than hardcoding the vendor list,
-# the environment variables are derived from the skip set by checkov's naming
-# rule (checkov_vcs_frameworks has the rule and its measurements).
+# for offline scans (_execute_scan), which then warn for each one that runs.
+# Each one's API token reaches checkov only when that framework runs in an
+# online scan (_without_unused_vcs_tokens). Rather than hardcoding the vendor
+# list, the environment variables are derived from the skip set by checkov's
+# naming rule, and the token variables, which follow none, are a measured table
+# (checkov_vcs_frameworks has the rule, the table and their measurements).
 #
 # The skip set is the measured floor and does NOT follow the CheckFrameworks
 # mirror: the mirror tracks the newest checkov, while checkov ends the run with
@@ -147,14 +156,79 @@ _CHECKOV_UNSAFE_SKIP_PATH_CHARS = frozenset("()")
 # write to, so the scan stopped with a PermissionError (``/gitlab_conf``) and
 # checkov exited 2. Writing into the scanned tree is what moving the working
 # directory avoided. Each directory goes under the scanner's results directory
-# instead, unless the operator named one. checkov joins the value to its
-# working directory with ``os.path.join``, so an absolute path is used as it
-# is. The variables and their default directory names are derived from the
-# skip set above by checkov's naming rule (checkov_vcs_frameworks has the rule
-# and its measurements).
+# instead, unless the operator named one, and what an earlier run left in it is
+# removed before checkov starts (CheckovScanner._remove_earlier_vcs_conf).
+# checkov joins the value to its working directory with ``os.path.join``, so an
+# absolute path is used as it is. The variables and their default directory
+# names are derived from the skip set above by checkov's naming rule
+# (checkov_vcs_frameworks has the rule and its measurements).
 _CHECKOV_VCS_CONF_DIR_ENV = dict(
     checkov_vcs_frameworks.vcs_conf_dir_env_vars(_VCS_CONFIGURATION_FRAMEWORKS)
 )
+
+# The directory below a target's results directory that holds the conf
+# directories ASH names. A directory of its own, because checkov's GitHub
+# framework removes its directory when it exists.
+_VCS_CONF_ROOT_NAME = "vcs-config"
+
+# The variable each VCS configuration framework in the skip set reads its API
+# token from (checkov_vcs_frameworks.VCS_TOKEN_ENV_VARS has the measurements).
+# checkov reads all three when it starts, whichever frameworks run, so a token
+# reaches checkov only for a framework that runs in an online scan
+# (_without_unused_vcs_tokens). A framework added to the skip set without an
+# entry there fails at import, so its token is never passed through unnoticed.
+_CHECKOV_VCS_TOKEN_ENV = {
+    framework: checkov_vcs_frameworks.VCS_TOKEN_ENV_VARS[framework]
+    for framework in _VCS_CONFIGURATION_FRAMEWORKS
+}
+
+
+def _vcs_frameworks_that_run(
+    frameworks: Sequence[str], skip_frameworks: Sequence[str]
+) -> Tuple[str, ...]:
+    """The VCS configuration frameworks checkov runs, given the frameworks it reads
+    and the ones it skips: each one ``frameworks`` names, or every one when it
+    names ``all``, less those ``skip_frameworks`` names."""
+    return tuple(
+        framework
+        for framework in _VCS_CONFIGURATION_FRAMEWORKS
+        if ("all" in frameworks or framework in frameworks)
+        and framework not in skip_frameworks
+    )
+
+
+def _ash_named_vcs_conf_dirs(
+    results_dir: Path, environment: Mapping[str, str]
+) -> dict[str, Path]:
+    """The conf directory ASH names below ``results_dir`` for each VCS
+    configuration framework whose variable ``environment`` does not set, keyed by
+    the variable (see ``_CHECKOV_VCS_CONF_DIR_ENV``). A variable the operator set
+    keeps its value, and its directory is not ASH's."""
+    conf_root = results_dir.joinpath(_VCS_CONF_ROOT_NAME)
+    return {
+        variable: conf_root.joinpath(name)
+        for variable, name in _CHECKOV_VCS_CONF_DIR_ENV.items()
+        if variable not in environment
+    }
+
+
+def _without_unused_vcs_tokens(
+    environment: Mapping[str, str], frameworks_run: Sequence[str], offline: bool
+) -> dict[str, str]:
+    """``environment`` without the API token of each VCS configuration framework
+    that cannot use it: every one in an offline scan, which fetches nothing, and
+    in an online scan each one that does not run (``frameworks_run`` is the set
+    ``_vcs_frameworks_that_run`` gives). A framework that runs online keeps its
+    token. Names are compared without case, as Windows reads them, so a variable
+    spelled in another case is left out with the token it names."""
+    unused = {
+        variable.upper()
+        for framework, variable in _CHECKOV_VCS_TOKEN_ENV.items()
+        if offline or framework not in frameworks_run
+    }
+    return {
+        name: value for name, value in environment.items() if name.upper() not in unused
+    }
 
 
 def _known_ignore_skip_pattern(entry: str) -> str:
@@ -450,22 +524,26 @@ def rewrite_checkov_paths(
 #: The checkov frameworks whose records name the infrastructure resource a check
 #: was run on. Every checkov record has a ``resource`` field, and what it holds
 #: depends on the runner, so a framework is listed here only after its records
-#: were read (checkov 3.4.10):
+#: were read (checkov 3.4.10) and its ids were found to name one resource in a
+#: file:
 #:
-#: - terraform ``aws_db_instance.this``, terraform_plan
-#:   ``module.db.aws_db_instance.this``, terraform_json ``aws_s3_bucket.data``
-#: - cloudformation ``AWS::S3::Bucket.Bucket``
-#: - kubernetes ``Deployment.shop.web``
-#: - arm ``Microsoft.Storage/storageAccounts.stdemo``, bicep
-#:   ``Microsoft.Storage/storageAccounts.st``
+#: - terraform ``aws_db_instance.this`` (the type and name), terraform_plan
+#:   ``module.db.aws_db_instance.this`` (the resource address)
+#: - cloudformation ``AWS::S3::Bucket.Bucket`` (the type and logical id)
+#: - kubernetes ``Deployment.shop.web`` (the kind, namespace and name)
+#: - bicep ``Microsoft.Storage/storageAccounts.st`` (the type and the symbolic
+#:   name, which the parser keys a file's resources by, a nested one under its
+#:   parent's name)
+#:
+#: Even for these, a record names no resource when its file's records give its
+#: id at more than one line range: two resources then share the id
+#: (:func:`checkov_resources`).
 _RESOURCE_FRAMEWORKS = frozenset(
     {
         "terraform",
         "terraform_plan",
-        "terraform_json",
         "cloudformation",
         "kubernetes",
-        "arm",
         "bicep",
     }
 )
@@ -476,6 +554,14 @@ _RESOURCE_FRAMEWORKS = frozenset(
 #: that is in neither, so a new framework is classified by reading its records
 #: rather than taking whatever its ``resource`` field holds.
 _NO_RESOURCE_FRAMEWORKS = {
+    "terraform_json": "an id without the resource type: a Python check's record "
+    "names resource.<name>, the kind of block and the name, so two resources of "
+    "different types with one name share it, and a graph check's record names "
+    "the same resource <type>.<name>",
+    "arm": "an id that two resources can share with no line range to tell them "
+    "apart: a name built from a parameter that has no default stays the template "
+    "expression, every resource of a one-line template is at line 1, and a graph "
+    "check gives a resource lines two above its other records",
     "secrets": "a hash of the secret (a SHA-1, or commit:hash), which must not "  # pragma: allowlist secret
     "become a resource id",
     "dockerfile": "the Dockerfile path, or the path and instruction "
@@ -573,10 +659,16 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
     is one of :data:`_RESOURCE_FRAMEWORKS` and None otherwise, so a key's entries
     still count every record that has it.
 
+    An entry is None as well when its file's records give its resource at more
+    than one line range. Every check on one resource gives that resource's
+    lines, so such an id is shared by two resources, and a suppression scoped to
+    it would cover the findings of both. Neither is given it; a suppression for
+    them is scoped by path and lines instead.
+
     Read before :func:`rewrite_checkov_paths` changes the report's paths: the
     keys are checkov's own spelling, which is what its SARIF URIs hold.
     """
-    return _record_values(
+    found = _record_values(
         json_report,
         lambda record, named: (
             record.get("resource")
@@ -586,6 +678,26 @@ def checkov_resources(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]
             else None
         ),
     )
+    shared = _resources_at_more_than_one_place(found)
+    if not shared:
+        return found
+    return {
+        key: [None if (key[1], value) in shared else value for value in values]
+        for key, values in found.items()
+    }
+
+
+def _resources_at_more_than_one_place(
+    found: dict[_RecordKey, List[Optional[str]]],
+) -> set[Tuple[str, str]]:
+    """The ``(file, resource)`` pairs that the records give at two or more line
+    ranges, the file and the lines as a key spells them."""
+    places: dict[Tuple[str, str], set[Tuple[int, int]]] = {}
+    for (_rule, uri, start, end), resources in found.items():
+        for resource in resources:
+            if resource is not None:
+                places.setdefault((uri, resource), set()).add((start, end))
+    return {pair for pair, lines in places.items() if len(lines) > 1}
 
 
 def checkov_guidelines(json_report: Any) -> dict[_RecordKey, List[Optional[str]]]:
@@ -800,13 +912,25 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
     frameworks: Annotated[
         List[CheckFrameworks],
         Field(
-            description="Specific frameworks to include with Checkov. Defaults to `all`."
+            description=(
+                "Specific frameworks to include with Checkov. Defaults to `all`, "
+                "which leaves out checkov's `github_configuration`, "
+                "`gitlab_configuration` and `bitbucket_configuration` frameworks: "
+                "they check the repository host's settings through its API, not "
+                "files in the scanned tree. Name one of them here, with or "
+                "without `all`, to run it."
+            )
         ),
     ] = ["all"]
     skip_frameworks: Annotated[
         List[CheckFrameworks],
         Field(
-            description="Specific frameworks to exclude with Checkov. Defaults to none."
+            description=(
+                "Specific frameworks to exclude with Checkov. Defaults to none, "
+                "though `all` in `frameworks` leaves out `github_configuration`, "
+                "`gitlab_configuration` and `bitbucket_configuration` unless "
+                "`frameworks` names them."
+            )
         ),
     ] = []
     skip_ash_output_dir: Annotated[
@@ -967,8 +1091,8 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             state=FacetState.NA,
             reason="the side report has a fixed_definition key and it is null "
             "on every record read: 34 of 34 across terraform, cloudformation, "
-            "kubernetes and dockerfile (checkov 3.4.5, an offline desk run "
-            "beside the committed fixture), so no run ASH makes has shown "
+            "kubernetes and dockerfile (checkov 3.4.5, an offline run beside "
+            "the committed fixture), so no run ASH makes has shown "
             "a fix state to map; a populated record would redeclare it",
         ),
         remediation_text=FacetDecl(
@@ -1031,15 +1155,21 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     "--skip-download; utils/content_databases.py "
                     "SCANNERS_WITHOUT_CONTENT_DATABASE['checkov']"
                 ),
-                #: Design E5, measured 2026-11-24 on a desk lane: checkov 3.4.7 (the
-                #: pinned version) on one two-resource Terraform fixture, env -i, no
-                #: platform API key, the desk online. With --skip-download and without
-                #: it, both runs reported the same 10 failed checks (same check ids and
-                #: resources, empty set difference both ways), so the sandbox/online
-                #: difference named in sandbox_tension did not show for this fixture
-                #: and configuration. Not measured: why (the fetch path was not
-                #: traced), a run with a platform API key, other frameworks.
-                unconfirmed=None,
+                #: Design E5, measured 2026-11-24: checkov 3.4.7 (the pinned version)
+                #: on one two-resource Terraform fixture, both runs unsandboxed under
+                #: env -i, with network access and no platform API key. With
+                #: --skip-download and without it, both runs reported the same 10
+                #: failed checks (same check ids and resources, empty set difference
+                #: both ways), so without a key the difference named in
+                #: sandbox_tension did not show for this fixture and configuration.
+                #: Not measured: why (the fetch path was not traced), other
+                #: frameworks, and a run with a platform API key, which is the open
+                #: question below.
+                unconfirmed=(
+                    "with a platform API key set, whether a sandboxed and an "
+                    "unsandboxed online run differ; one differential run with a key "
+                    "settles it (design E5)"
+                ),
             ),
             output=opsf.OutputFacet(
                 native_formats=(opsf.OutputFormat.SARIF,),
@@ -1288,6 +1418,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     # _subprocess_cwd chose it: the results are rewritten against it, not
     # against the root it is normally equal to (see _read_results_file).
     _checkov_cwd: Optional[Path] = PrivateAttr(default=None)
+    # The VCS configuration frameworks the command line _process_config_options
+    # builds runs, read by an offline scan to say what each one checks
+    # (_warn_offline_vcs_frameworks).
+    _vcs_frameworks_run: Tuple[str, ...] = PrivateAttr(default=())
 
     def model_post_init(self, context):
         if self.config is None:
@@ -1360,7 +1494,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             # call of the mixin does: without it a scanner offline by its
             # options probed PyPI online while its run and install were offline.
             resolved = get_uv_tool_command(
-                _tool_name(self),
+                tool_name(self),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1400,12 +1534,20 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # scan went through uv, whose install had just failed. And a dependency
         # declared satisfied is recorded as such, as the branches above record it.
         resolved = get_uv_tool_command(
-            _tool_name(self),
+            tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
         if resolved is None:
             return False
+        if resolved[:1] == ["uv"]:
+            _restore_uv_route(self)
+        elif self.use_uv_tool:
+            # Off uv for the resolver's binary, which runs unverified and with no
+            # version read: the uv probe's answer names another environment. A
+            # re-validation already on a direct route keeps the record that route
+            # made.
+            _record_direct_route_version(self, None)
         self.use_uv_tool = resolved[:1] == ["uv"]
         self.dependencies_satisfied = True
         return True
@@ -1424,13 +1566,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         )
 
         if resolved[:1] == ["uv"]:
+            _restore_uv_route(self)
             self.use_uv_tool = True
             self.dependencies_satisfied = True
             return True
         executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
-            _tool_name(self),
+            tool_name(self),
             None,
             self._get_tool_version_constraint(),
             uv_executable=None,
@@ -1452,6 +1595,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 f"({checked.detail}); running it anyway.",
                 level=logging.WARNING,
             )
+        _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
@@ -1600,19 +1744,26 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # names the resource of each record (attach_checkov_resources).
         for item in dict.fromkeys([*self.config.options.additional_formats, "json"]):
             self.args.extra_args.append(ToolExtraArg(key="--output", value=item))
-        frameworks = list(self.config.options.frameworks)
+        # An empty list is read as checkov reads it, as all: checkov's parser gives
+        # --framework no default, and its normalization sets ['all'] when none is
+        # given (checkov 3.3.26 common/util/ext_argument_parser.py:248 and
+        # main.py:248-250). So it is passed as all is, with the config file's
+        # frameworks in its place and the VCS configuration frameworks left out
+        # (below); passed as nothing, it ran all three.
+        frameworks = list(self.config.options.frameworks) or ["all"]
         file_frameworks = file_values.get("framework")
         if isinstance(file_frameworks, str):
             file_frameworks = [file_frameworks]
-        if (
-            frameworks == ["all"]
-            and isinstance(file_frameworks, list)
-            and file_frameworks
+        file_names_frameworks = (
+            isinstance(file_frameworks, list)
+            and bool(file_frameworks)
             and all(isinstance(item, str) for item in file_frameworks)
-        ):
-            # The option is at its default and the operator's file names the
-            # frameworks: the file's would have been overridden by the default
-            # on the command line, so the file's are passed instead.
+        )
+        if frameworks == ["all"] and file_names_frameworks:
+            # The option is at its default, or empty and read as it, and the
+            # operator's file names the frameworks: the file's would have been
+            # overridden by the default on the command line, so the file's are
+            # passed instead.
             frameworks = list(file_frameworks)
         for item in frameworks:
             self.args.extra_args.append(ToolExtraArg(key="--framework", value=item))
@@ -1642,6 +1793,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--skip-framework", value=item)
             )
+        # The frameworks checkov reads are the command line's: it always names at
+        # least one, since an empty list is passed as all (above).
+        self._vcs_frameworks_run = _vcs_frameworks_that_run(frameworks, skip_frameworks)
         file_skips = file_values.get("skip-path")
         if isinstance(file_skips, str):
             file_skips = [file_skips]
@@ -1849,28 +2003,113 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             )
         finally:
             self.args.extra_args = original_extra_args
-        subprocess_env = self._vcs_conf_environment(target_results_dir)
+        # The environment checkov runs with: the host's, with a conf directory
+        # below the results directory for each VCS configuration framework whose
+        # variable the operator did not set. One read of the host's environment
+        # decides both which directories are ASH's and what checkov inherits.
+        subprocess_env = snapshot_environ()
+        ash_named = _ash_named_vcs_conf_dirs(target_results_dir, subprocess_env)
+        self._remove_earlier_vcs_conf(
+            target_results_dir.joinpath(_VCS_CONF_ROOT_NAME), ash_named.values()
+        )
+        subprocess_env.update(
+            (variable, str(conf_dir)) for variable, conf_dir in ash_named.items()
+        )
+        # checkov reads each VCS configuration framework's API token when it
+        # starts, whether or not the framework runs (checkov_vcs_frameworks has the
+        # measurements), so a token it cannot use is not handed to it: offline,
+        # where nothing is fetched, or for a framework that does not run.
+        kept = _without_unused_vcs_tokens(
+            subprocess_env, self._vcs_frameworks_run, offline
+        )
+        left_out = {name.upper() for name in subprocess_env if name not in kept}
+        for framework, variable in _CHECKOV_VCS_TOKEN_ENV.items():
+            if variable.upper() in left_out:
+                ASH_LOGGER.debug(
+                    f"Not passing {variable} to checkov: its {framework} framework "
+                    + (
+                        "fetches nothing in an offline scan."
+                        if offline
+                        else "does not run in this scan."
+                    )
+                )
+        subprocess_env = kept
         if offline:
             # The VCS configuration frameworks fetch remote platform settings
             # over the network; an offline scan turns those fetches off even
             # when the operator enabled such a framework explicitly.
             for fetch_var in _VCS_CONFIG_FETCH_ENV_VARS:
                 subprocess_env[fetch_var] = "False"
+            self._warn_offline_vcs_frameworks(ash_named)
         return _directory_as_one_token(final_args), results_file, subprocess_env
 
-    def _vcs_conf_environment(self, results_dir: Path) -> dict[str, str]:
-        """The environment checkov runs with: the host's, with a conf directory
-        under ``results_dir`` for each VCS configuration framework whose variable
-        the operator did not set (see ``_CHECKOV_VCS_CONF_DIR_ENV``).
+    def _remove_earlier_vcs_conf(
+        self, conf_root: Path, conf_dirs: Iterable[Path]
+    ) -> None:
+        """Remove what an earlier run left in the conf directories ASH names.
 
-        The directories are below a ``vcs-config`` directory of their own, because
-        checkov's GitHub framework removes its directory when it exists.
+        checkov's GitLab and Bitbucket frameworks check the files their directory
+        holds, and write one only when its fetch returns data (``persist_all_confs``
+        and the ``persist_*`` methods it calls; each runner scans the directory
+        after them; read at checkov 3.3.26). So a file an earlier run fetched was
+        checked again and reported as this scan's: in an offline scan, which
+        fetches nothing, and online when a fetch returns nothing. GitHub's
+        framework removes its own directory. A directory the operator named is
+        not passed here and is left as it is.
+
+        Nothing is removed through a link: a ``vcs-config`` or conf directory that
+        is a link, or a file in the place of one, is removed itself.
         """
-        environment = snapshot_environ()
-        conf_root = results_dir.joinpath("vcs-config")
-        for variable, name in _CHECKOV_VCS_CONF_DIR_ENV.items():
-            environment.setdefault(variable, str(conf_root.joinpath(name)))
-        return environment
+        conf_dirs = list(conf_dirs)
+        if not conf_dirs:
+            return
+        if conf_root.is_symlink() or (conf_root.exists() and not conf_root.is_dir()):
+            # Every directory ASH names is below it, so removing it removes them.
+            conf_dirs = [conf_root]
+        for conf_dir in conf_dirs:
+            try:
+                if conf_dir.is_symlink() or not conf_dir.is_dir():
+                    conf_dir.unlink(missing_ok=True)
+                else:
+                    shutil.rmtree(conf_dir)
+            except OSError as error:
+                ASH_LOGGER.warning(
+                    "Could not remove what an earlier checkov run left in a VCS "
+                    "configuration framework's conf directory: "
+                    f"{error_text(error, self._environment_values())}. That "
+                    "framework may report those settings as this scan's.",
+                    extra=NO_MARKUP,
+                )
+
+    def _warn_offline_vcs_frameworks(self, ash_named: Mapping[str, Path]) -> None:
+        """Say what each VCS configuration framework that runs reads offline.
+
+        An offline scan turns its fetch of the repository host's settings off
+        (``_VCS_CONFIG_FETCH_ENV_VARS``), so the framework checks only the files
+        already in its conf directory. The scan said nothing about it, and the
+        framework read as clean on an empty directory, or reported an earlier
+        run's settings as current on one that held them.
+        """
+        for framework in self._vcs_frameworks_run:
+            ((variable, _),) = checkov_vcs_frameworks.vcs_conf_dir_env_vars(
+                (framework,)
+            )
+            if variable in ash_named:
+                ASH_LOGGER.warning(
+                    f"checkov's {framework} framework runs in this offline scan, "
+                    "which does not fetch the repository host's settings it "
+                    "checks, so it reports nothing: ASH empties the directory it "
+                    f"reads ({variable}, below the results directory) before "
+                    "each run. Run online to check those settings, or set "
+                    f"{variable} to a directory of settings fetched earlier."
+                )
+            else:
+                ASH_LOGGER.warning(
+                    f"checkov's {framework} framework runs in this offline scan, "
+                    "which does not fetch the repository host's settings it "
+                    "checks: it checks the files already in the directory "
+                    f"{variable} names, which may be older than this scan."
+                )
 
     def _ignore_skip_patterns(
         self, target: Path, global_ignore_paths: List[IgnorePathWithReason] | None

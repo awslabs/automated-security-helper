@@ -12,23 +12,37 @@ file and never executes it; the forced file here writes a marker if it is ever r
 
 from __future__ import annotations
 
+import os
+import sys
+
 import pytest
 
 from automated_security_helper.utils.install_providers import read_forced_binaries
 from tests.unit.cli.dependencies_install_support import build_scene, run_install
+from tests.utils.stand_ins import write_stand_in
 
 pytestmark = pytest.mark.unit
+
+#: An absolute path that names nothing: ``/nonexistent/checkov`` on POSIX. On
+#: Windows a path with a root and no drive is relative to the current drive, and
+#: from Python 3.13 ``os.path.isabs`` says so, so the path is anchored on a drive
+#: there; otherwise it is refused as not absolute before it is looked for.
+MISSING_ABSOLUTE = os.path.abspath(os.path.join(os.sep, "nonexistent", "checkov"))
 
 
 @pytest.fixture
 def forced_file(tmp_path):
-    """An executable file that touches a marker if it is ever executed."""
+    """An executable file that creates a marker if it is ever executed.
+
+    In the form the host starts (``tests/utils/stand_ins.py``): the script on POSIX,
+    a ``checkov.bat`` launcher for it on Windows, where a shebang script is no
+    program and so no binary to force. The path is the file a start names.
+    """
     marker = tmp_path / "FORCED-BINARY-WAS-RUN"
     elsewhere = tmp_path / "tools"
     elsewhere.mkdir()
-    binary = elsewhere / "checkov"
-    binary.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    binary.chmod(0o755)
+    source = f"open({str(marker)!r}, 'w').close()\n"
+    binary = write_stand_in(elsewhere, "checkov", source).files[-1]
     return binary, marker
 
 
@@ -92,6 +106,14 @@ def test_an_empty_path_erases_the_record(tmp_path, monkeypatch, forced_file, src
     assert "checkov" not in read_forced_binaries()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "POSIX permission bits: Windows keeps no execute permission, so a file there "
+        "cannot stop being executable at its path; the sweep's file check is measured "
+        "on Windows by test_the_sweep_rejects_a_content_replacement_at_the_forced_path"
+    ),
+)
 def test_the_sweep_resolves_to_a_forced_path_that_stays_usable(
     tmp_path, monkeypatch, forced_file, src_tree
 ):
@@ -201,7 +223,12 @@ def test_an_alias_cased_erase_key_erases_the_record(
         ("checkov", "is not <scanner>=<absolute path>"),
         ("=/usr/bin/true", "is not <scanner>=<absolute path>"),
         ("checkov=relative/checkov", "the path is not absolute"),
-        ("checkov=/nonexistent/checkov", "the path does not exist"),
+        # The id is the POSIX spelling on every host, so the case keeps one name.
+        pytest.param(
+            f"checkov={MISSING_ABSOLUTE}",
+            "the path does not exist",
+            id="checkov=/nonexistent/checkov-the path does not exist",
+        ),
     ],
 )
 def test_malformed_relative_and_missing_entries_are_each_refused(
@@ -220,6 +247,8 @@ def test_a_non_executable_file_and_a_symlink_are_refused(
     tmp_path, monkeypatch, forced_file, src_tree
 ):
     binary, _ = forced_file
+    # Not executable on POSIX by its mode bits, and on Windows by its name, which no
+    # program carries there.
     plain = tmp_path / "tools" / "plain"
     plain.write_text("x")
     plain.chmod(0o644)
