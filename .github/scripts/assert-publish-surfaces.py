@@ -509,7 +509,7 @@ ALLOWLIST: tuple[Entry, ...] = (
         reason=(
             "Debugging evidence from a failed run of the live-engine image scan "
             "check (`if: failure()`, 7-day retention): the scan output and logs of "
-            "scanning a busybox-based fixture image built from this repository's "
+            "scanning a fixture image built FROM scratch from this repository's "
             "own public Dockerfile. Findings and logs about a public fixture, not a "
             "wheel, image, binary or bundle this project distributes."
         ),

@@ -3213,12 +3213,14 @@ _MAX_IMAGE_REF_CHARS = 512
 #: Source-scheme words the scanner tools read as "not a registry reference":
 #: handed one schemeless (a declared-remote daemon hands grype and syft the
 #: ref as written), the tool reads a LOCAL PATH or another store instead of a
-#: registry, so a remote client could name server files with them. A real
-#: repository that happens to carry one of these names is still reachable
-#: spelled in full (``docker.io/library/docker:latest``).
+#: registry, so a remote client could name server files with them. ``purl``
+#: and ``cpe`` are grype's own input prefixes: it reads them as inputs of its
+#: own, not as an image. A real repository that happens to carry one of these
+#: names is still reachable spelled in full (``docker.io/library/docker:latest``).
 _TOOL_SOURCE_SCHEMES = frozenset(
     {
         "containerd",
+        "cpe",
         "dir",
         "docker",
         "docker-archive",
@@ -3227,6 +3229,7 @@ _TOOL_SOURCE_SCHEMES = frozenset(
         "oci-archive",
         "oci-dir",
         "podman",
+        "purl",
         "registry",
         "sbom",
         "singularity",
@@ -3299,37 +3302,60 @@ def validate_image_ref(image_ref: str) -> str:
 #: operator. Comma- or whitespace-separated ``host[:port]`` entries, compared
 #: case-insensitively with a ``:443`` suffix dropped on both sides; bare
 #: Docker Hub references (``alpine:3``) resolve against ``docker.io``, so Hub
-#: must be listed to allow them. Unset or empty means no reference is
-#: allowed: scanning a reference makes the SERVER's tools reach that registry
-#: -- any host a ref can spell, internal addresses included -- through the
-#: server's own network, daemon store and registry credentials, which is the
-#: exact reach ``ASH_MCP_GIT_ALLOWED_HOSTS`` closes for the git channel. The
-#: direct payload shapes (the archive upload) need no registry and are not
-#: gated.
+#: must be listed to allow them. Docker Hub's legacy host ``index.docker.io``
+#: reads as ``docker.io``, in an entry and in a reference alike. Unset or
+#: empty means no reference is allowed: scanning a reference makes the
+#: SERVER's tools reach that registry -- any host a ref can spell, internal
+#: addresses included -- through the server's own network, daemon store and
+#: registry credentials, which is the exact reach ``ASH_MCP_GIT_ALLOWED_HOSTS``
+#: closes for the git channel. The direct payload shapes (the archive upload)
+#: need no registry and are not gated.
 ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV = "ASH_MCP_IMAGE_ALLOWED_REGISTRIES"
+
+#: Docker Hub as every registry reading here names it, and the legacy host the
+#: image tools read as the same registry.
+_HUB_REGISTRY = "docker.io"
+_HUB_LEGACY_HOST = "index.docker.io"
+
+
+def _registry_spelling(host: str) -> str:
+    """*host* in the one spelling registries are compared in.
+
+    Lower-cased, without a trailing ``.`` and without a default ``:443``, and
+    with Docker Hub's legacy host ``index.docker.io`` read as ``docker.io``, as
+    the image tools read it. A reference and a list entry that name one
+    registry then compare equal whichever spelling each uses.
+    """
+    host = host.lower().rstrip(".").removesuffix(":443")
+    return _HUB_REGISTRY if host == _HUB_LEGACY_HOST else host
 
 
 def image_ref_registry(ref: str) -> str:
     """The registry host[:port] *ref* resolves against, lower-cased.
 
-    The distribution rule: the text before the first ``/`` is a registry only
-    when it holds a ``.`` or a ``:`` or is ``localhost``; everything else --
+    The reading the image tools give a reference: the text before the first
+    ``/`` is a registry host when it holds a ``.`` or a ``:``, is
+    ``localhost`` or holds an uppercase letter -- a repository path is
+    lowercase only (``utils/image_reference``), so ``Intranet/app:1`` names the
+    host ``Intranet`` and cannot be a Docker Hub namespace. Everything else --
     a bare ``alpine:3``, a namespaced ``team/app`` -- resolves against Docker
     Hub (``docker.io``). A default ``:443`` is dropped so one spelling
-    matches.
+    matches, and Docker Hub's legacy host ``index.docker.io`` reads as
+    ``docker.io``.
     """
     first, slash, _ = ref.partition("/")
-    if slash and ("." in first or ":" in first or first.lower() == "localhost"):
-        host = first.lower().rstrip(".")
-        return host.removesuffix(":443")
-    return "docker.io"
+    if slash and (
+        "." in first or ":" in first or first == "localhost" or first != first.lower()
+    ):
+        return _registry_spelling(first)
+    return _HUB_REGISTRY
 
 
 def image_registry_allowed(ref: str) -> bool:
     """Whether the operator's list admits *ref*'s registry; empty admits none."""
     raw = os.environ.get(ASH_MCP_IMAGE_ALLOWED_REGISTRIES_ENV, "")
     entries = {
-        entry.strip().lower().rstrip(".").removesuffix(":443")
+        _registry_spelling(entry.strip())
         for entry in raw.replace(",", " ").split()
         if entry.strip()
     }
