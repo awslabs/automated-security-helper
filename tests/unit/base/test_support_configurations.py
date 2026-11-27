@@ -409,7 +409,7 @@ def test_only_the_paths_the_cli_spells_as_a_command_name_a_builder() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Windows, local: no notice at start, the skips at their decisions
+# Windows, local: nothing at start, the skips at their decisions
 # ---------------------------------------------------------------------------
 
 
@@ -532,8 +532,14 @@ def _pinned_binaries() -> list[sr.PinnedBinary]:
     return found
 
 
-def test_windows_arm64_native_raises_a_missing_build_for_five_tools() -> None:
-    binaries = _pinned_binaries()
+def test_windows_arm64_raises_a_missing_build_for_each_tool_without_one() -> None:
+    planted = sr.PinnedBinary(
+        scanner="planted",
+        tool="plantedtool",
+        version="0.0.1",
+        provisionable=("linux/amd64",),
+    )
+    binaries = [*_pinned_binaries(), planted]
     register = sr.REGISTER.extended(rows=sr.no_build_rows(binaries))
     facts = _facts(**WINDOWS, arch="arm64")
     missing = {}
@@ -542,7 +548,13 @@ def test_windows_arm64_native_raises_a_missing_build_for_five_tools() -> None:
         if found:
             (only,) = found
             missing[binary.scanner] = only
-    assert sorted(missing) == ["grype", "hadolint", "opengrep", "trivy", "trivy-repo"]
+    lacking = sorted(
+        binary.scanner
+        for binary in binaries
+        if binary.provisionable and "windows/arm64" not in binary.provisionable
+    )
+    assert "planted" in lacking, "the planted tool has no windows/arm64 build"
+    assert sorted(missing) == lacking
     for scanner, found in missing.items():
         binary = next(b for b in binaries if b.scanner == scanner)
         assert found.row.behavior is sr.Behavior.SCANNER_MISSING
@@ -559,9 +571,20 @@ def test_windows_arm64_native_raises_a_missing_build_for_five_tools() -> None:
 
 
 def test_no_other_platform_and_no_other_tool_has_a_missing_build_row() -> None:
-    rows = sr.no_build_rows(_pinned_binaries())
-    assert len(rows) == 5
-    assert {row.id.rpartition(".")[2] for row in rows} == {"windows-arm64"}
+    binaries = _pinned_binaries()
+    assert binaries, "the scanner universe holds no pinned binary"
+    wanted = {
+        (binary.scanner, pair)
+        for binary in binaries
+        if binary.provisionable
+        for pair in sr.ALL_PLATFORMS
+        if pair not in binary.provisionable
+    }
+    found = {
+        (row.scope, row.id.rpartition(".")[2].replace("-", "/", 1))
+        for row in sr.no_build_rows(binaries)
+    }
+    assert found == wanted
 
 
 def test_the_derived_rows_follow_the_scanners_platform_declaration() -> None:
@@ -945,7 +968,7 @@ def test_the_five_stand_ins_say_what_a_user_can_see() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_processor_without_the_instructions_continues_after_the_notice() -> None:
+def test_a_processor_without_the_instructions_is_declared_to_continue() -> None:
     for row_id in ["host.cpu.below-polars-runtime", "host.cpu.below-polars-compat"]:
         assert sr.REGISTER.row(row_id).behavior is sr.Behavior.CONTINUES
 
@@ -955,7 +978,7 @@ def test_a_translated_run_is_degraded_and_not_unsupported() -> None:
         assert sr.REGISTER.row(row_id).level is sr.SupportLevel.DEGRADED
 
 
-def test_another_operating_system_or_processor_continues_after_the_notice() -> None:
+def test_another_operating_system_or_processor_is_declared_to_continue() -> None:
     for row_id in ["host.os.other", "host.arch.other"]:
         assert sr.REGISTER.row(row_id).behavior is sr.Behavior.CONTINUES
 

@@ -27,6 +27,7 @@ import json
 import re
 import subprocess  # nosec B404 - fixed argv, sys.executable, no shell
 import sys
+from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -249,8 +250,8 @@ def test_a_path_naming_an_unknown_profile_is_refused() -> None:
 
 
 def test_an_unsupported_row_with_only_same_os_paths_is_refused() -> None:
-    """Her words ask for options on other systems: a container, WSL, another OS,
-    another host or a CI runner."""
+    """An unsupported row offers at least one way out on another system: a container,
+    WSL, another OS, another host or a CI runner."""
     assert sr.REGISTER.path("polars-compat-runtime").kind is sr.PathKind.SAME_OS
     with pytest.raises(sr.SupportRegisterError, match="same-os"):
         _with(rows=(_row(paths=("polars-compat-runtime",)),))
@@ -351,8 +352,8 @@ def test_a_path_target_matches_the_kind_of_path() -> None:
     ],
 )
 def test_a_path_sentence_holds_no_command_text(summary: str) -> None:
-    """The CLI builds the command at run time from the Typer app, and a
-    generated cell refuses command text, so the sentence carries none."""
+    """The command is built where the path is offered, and a generated cell refuses
+    command text, so the sentence carries none."""
     with pytest.raises(sr.SupportRegisterError):
         _path(summary=summary)
 
@@ -487,7 +488,7 @@ def test_dropping_a_not_declared_entry_fails_the_totality_rule() -> None:
     assert _totality_failures(register) == ["libc=musl"]
 
 
-def test_not_declared_starts_with_the_four_the_design_names_and_says_why() -> None:
+def test_not_declared_names_the_four_tokens_and_says_why() -> None:
     declared = sr.REGISTER.not_declared
     for key in [
         ("libc", "musl"),
@@ -502,7 +503,7 @@ def test_not_declared_starts_with_the_four_the_design_names_and_says_why() -> No
 
 
 def test_not_declared_is_never_shown_as_unsupported() -> None:
-    """A token the register is silent on raises no notice and is not a level."""
+    """A token the register is silent on matches no row and is not a level."""
     for field, token in sr.REGISTER.not_declared:
         facts = _facts(**{field: token})
         assert sr.evaluate(facts, "ash") == (), (field, token)
@@ -811,7 +812,7 @@ def test_the_reference_environment_raises_nothing_in_any_scope(scope: str) -> No
 
 @pytest.mark.parametrize("scope", _scopes())
 def test_a_host_nothing_could_be_read_from_raises_nothing(scope: str) -> None:
-    """Every reader failure answers ``unknown``, and ``unknown`` raises no notice."""
+    """Every reader failure answers ``unknown``, and ``unknown`` matches no row."""
     assert sr.evaluate(sr.HostFacts(), scope) == ()
 
 
@@ -1062,7 +1063,7 @@ def test_a_cell_overlay_with_a_bad_token_is_refused() -> None:
 
 
 def test_a_cell_never_reads_the_machine_that_renders_it() -> None:
-    """The matrices call ``cells`` on declared facts, so the same call answers the
+    """A matrix calls ``cells`` on declared facts, so the same call answers the
     same everywhere: it takes no host reading, and a raising one is never called."""
     import inspect
 
@@ -1184,29 +1185,75 @@ def test_every_path_is_offered_by_some_row_and_every_polyfill_is_named() -> None
     assert {p.id for p in sr.REGISTER.polyfills} == named
 
 
+def _unshipped_scopes(register: sr.Register, shipped: set[str]) -> list[str]:
+    """The scanner scopes ``register`` has rows for that ASH does not ship."""
+    return sorted({row.scope for row in register.rows} - {"ash"} - shipped)
+
+
 def test_every_scope_but_ash_is_a_scanner_ash_ships() -> None:
     shipped = {_facets(cls).scanner_name for cls in _universe()}
-    assert len(shipped) == 23, sorted(shipped)
     scopes = {row.scope for row in sr.REGISTER.rows} - {"ash"}
-    assert scopes <= shipped, sorted(scopes - shipped)
+    assert shipped and scopes, "nothing to compare"
+    assert _unshipped_scopes(sr.REGISTER, shipped) == []
+
+
+def test_a_row_for_a_scanner_that_is_not_shipped_is_named() -> None:
+    """The must-fail control for the rule above, and the check that the rule follows
+    the roster: the same row passes once its scanner is shipped."""
+    register = _with(rows=(_row(id="scanner.ghost.other", scope="ghost"),))
+    shipped = {_facets(cls).scanner_name for cls in _universe()}
+    assert _unshipped_scopes(register, shipped) == ["ghost"]
+    assert _unshipped_scopes(register, shipped | {"ghost"}) == []
+
+
+def _derivation_failures(
+    binaries: Sequence[sr.PinnedBinary], rows: Iterable[sr.SupportRow]
+) -> list[str]:
+    """How ``rows`` differ from what the scanners' own platform declarations call for:
+    one row for each platform a tool ASH downloads has no build for, and no other."""
+    wanted = {
+        f"scanner.{binary.scanner}.no-build.{pair.replace('/', '-')}"
+        for binary in binaries
+        if binary.provisionable
+        for pair in sr.ALL_PLATFORMS
+        if pair not in binary.provisionable
+    }
+    found = {row.id for row in rows}
+    return [f"missing {row_id}" for row_id in sorted(wanted - found)] + [
+        f"extra {row_id}" for row_id in sorted(found - wanted)
+    ]
 
 
 def test_the_rows_derived_from_the_shipped_scanners_are_valid() -> None:
-    """Every pinned binary gets a row for each platform it has no build for, today
-    the five tools with no windows/arm64 asset, and each row's paths lead out."""
+    """Every pinned binary gets a row for each platform it has no build for and for
+    no other, and each row's paths lead out."""
     binaries = _pinned_binaries()
-    assert len(binaries) == 10, [b.scanner for b in binaries]
+    assert binaries, "the scanner universe holds no pinned binary"
     derived = sr.no_build_rows(binaries)
-    assert {row.scope for row in derived} == {
-        "grype",
-        "hadolint",
-        "opengrep",
-        "trivy",
-        "trivy-repo",
-    }
-    assert {row.id.rpartition(".")[2] for row in derived} == {"windows-arm64"}
+    assert _derivation_failures(binaries, derived) == []
     register = _with(rows=derived)
     assert _validity_failures(register, rows=derived) == []
+
+
+def test_a_missing_or_an_extra_derived_row_is_caught() -> None:
+    """The must-fail control for the check above, and the check that it follows the
+    roster: a scanner added with a gap gets its row and the check stays green."""
+    gap = _pinned(provisionable=_ONLY_WINDOWS_ARM64_MISSING)
+    assert _derivation_failures((gap,), sr.no_build_rows((gap,))) == []
+    assert _derivation_failures((gap,), ()) == [
+        "missing scanner.demo.no-build.windows-arm64"
+    ]
+    every_gap = sr.no_build_rows((_pinned(),))
+    assert _derivation_failures((gap,), every_gap) == [
+        "extra scanner.demo.no-build.darwin-amd64",
+        "extra scanner.demo.no-build.darwin-arm64",
+        "extra scanner.demo.no-build.linux-arm64",
+        "extra scanner.demo.no-build.windows-amd64",
+    ]
+    not_downloaded = _pinned(provisionable=())
+    assert len(_derivation_failures((not_downloaded,), every_gap)) == 5
+    grown = (*_pinned_binaries(), gap)
+    assert _derivation_failures(grown, sr.no_build_rows(grown)) == []
 
 
 def test_a_row_and_a_path_each_link_to_one_section_of_the_page() -> None:
@@ -1381,7 +1428,7 @@ def test_the_register_declares_a_skip_row_for_each_scanner_that_refuses_a_platfo
         for cls in _universe()
         if cls.unsupported_platform_reason is not base  # type: ignore[attr-defined]
     }
-    assert overriding == {"semgrep", "guarddog"}
+    assert SKIPPING, "the register declares no skip row"
     assert overriding == {row.scope for row in SKIPPING}
 
 
@@ -1448,7 +1495,7 @@ def test_the_register_imports_the_standard_library_and_nothing_of_ash() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The page says what the CLI says
+# The page carries what the register declares
 # ---------------------------------------------------------------------------
 
 _ANCHOR = re.compile(r"\{#([a-z0-9-]+)\}")
@@ -1459,7 +1506,7 @@ SECTION_ANCHORS = frozenset(
         "supported",
         "not-declared",
         "adaptations",
-        "notices",
+        "described",
         "configurations",
         "ways-out",
     }
@@ -1494,7 +1541,7 @@ def test_every_section_of_the_page_is_a_row_a_path_or_a_named_part() -> None:
     assert SECTION_ANCHORS <= anchors, sorted(SECTION_ANCHORS - anchors)
 
 
-def test_the_page_carries_the_sentences_the_cli_prints() -> None:
+def test_the_page_carries_the_sentence_of_every_row_and_way_out() -> None:
     page = _flat(_page())
     missing = []
     for row in sr.REGISTER.rows:
