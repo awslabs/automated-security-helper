@@ -807,11 +807,12 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
         1,
         "nothing: the urllib opener's opener.open(url, ...), a network call",
     ),
-    # `zf.open(info)` opens a zip member for reading; the detector cannot read the
-    # mode of an open() whose first argument is not a literal.
-    (f"{_ASH}/cli/mcp/source_delivery.py", "_finalize_zip_upload", "Path.open"): (
+    # `archive.open(info)` opens a zip member for reading (the head of a refused
+    # symlink's target, for both the MCP upload and `ash scan fs --archive`); the
+    # detector cannot read the mode of an open() whose first argument is not a literal.
+    (f"{_ASH}/utils/source_archive.py", "_link_refused", "Path.open"): (
         1,
-        "nothing: it reads a member of the uploaded zip",
+        "nothing: it reads a member of the source archive",
     ),
     # `tarfile.open(archive, "r:")` reads a saved image's member names to pick the
     # stereoscope scheme; the detector cannot read the mode of a tarfile.open().
