@@ -843,6 +843,12 @@ class TestMeasuring:
             ("2.0", "1!0.5"),
             ("1.0+a", "1.0+b"),
             ("1.0+b", "1.0+1"),
+            ("1.0+1", "1.0+2"),
+            ("1.0", "1.0+a"),
+            ("1.0a1", "1.0a2"),
+            ("1.0.dev1", "1.0.dev2"),
+            ("1.0a1.dev1", "1.0a1"),
+            ("1.0.post1.dev1", "1.0.post1"),
         ],
     )
     def test_versions_are_ordered_the_way_pep_440_orders_them(
@@ -857,7 +863,20 @@ class TestMeasuring:
         assert set(cells.values()) == {"ok"}
 
     @pytest.mark.parametrize(
-        "spelled,other", [("1.0", "1.0.0"), ("1.0.0", "1.0"), ("1.0a1", "1.0alpha1")]
+        "spelled,other",
+        [
+            ("1.0", "1.0.0"),
+            ("1.0.0", "1.0"),
+            ("1.0a1", "1.0alpha1"),
+            ("1.0b1", "1.0beta1"),
+            ("1.0rc1", "1.0c1"),
+            ("1.0rc1", "1.0preview1"),
+            ("1.0rc1", "1.0RC1"),
+            ("1.0.post1", "1.0-1"),
+            ("1.0.post1", "1.0rev1"),
+            ("1.0.dev1", "1.0dev1"),
+            ("1.0", "v1.0"),
+        ],
     )
     def test_one_version_spelled_two_ways_is_not_a_backtrack(
         self, script, spelled, other
