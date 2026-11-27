@@ -516,8 +516,9 @@ class PluginInstallOutcome:
     # Commands no permitted ``--providers`` entry could serve; each is also in
     # ``errors`` with the refusal text, so the run fails and says why.
     commands_refused: int = 0
-    # Install commands not run because ``--binary-path`` forced this scanner's
-    # binary; ``forced_binary`` is the path it forced.
+    # Marks a plugin whose install ``--binary-path`` replaced with a force of this
+    # scanner's binary (1 when it did): its install commands are neither asked for
+    # nor run. ``forced_binary`` is the path it forced.
     commands_forced: int = 0
     forced_binary: Optional[str] = None
     # The force came from the record an earlier --binary-path run wrote, not from
@@ -2028,6 +2029,30 @@ def install_dependencies(
                     f"{escape(error_text(e, environment_values))}[/bold red]"
                 )
                 outcome.errors.append(error_text(e, environment_values))
+
+            # --binary-path forces this scanner's binary -- from this run's flag,
+            # or from the record an earlier run wrote: nothing is installed for
+            # it, and the sweep below resolves it to the forced file by a file
+            # check. The forced binary is never run. Decided before the plugin is
+            # asked what to install, as _plugin_runtime_requests does: its install
+            # commands are not run, so a plugin that cannot produce them has no
+            # failure to report.
+            forced = all_forced.get(plugin_name)
+            if forced is not None:
+                outcome.commands_forced = 1
+                outcome.forced_binary = str(forced.path)
+                outcome.forced_recorded = plugin_name not in forced_by_plugin
+                recorded_note = (
+                    " (recorded by an earlier --binary-path run)"
+                    if outcome.forced_recorded
+                    else ""
+                )
+                print(
+                    f"Forced binary for {escape(plugin_name)}{recorded_note}: "
+                    f"{escape(str(forced.path))}; its install commands are not run"
+                )
+                continue
+
             try:
                 # Read whole, and checked, inside the try: a list that is None, an
                 # iterable that raises while iterated, or an argv with an element
@@ -2043,27 +2068,6 @@ def install_dependencies(
                     f"{escape(error_text(e, environment_values))}[/bold red]"
                 )
                 outcome.errors.append(error_text(e, environment_values))
-                continue
-
-            # --binary-path forces this scanner's binary -- from this run's flag,
-            # or from the record an earlier run wrote: nothing is installed for
-            # it, and the sweep below resolves it to the forced file by a file
-            # check. The forced binary is never run.
-            forced = all_forced.get(plugin_name)
-            if forced is not None:
-                outcome.commands_forced = len(commands) or 1
-                outcome.forced_binary = str(forced.path)
-                outcome.forced_recorded = plugin_name not in forced_by_plugin
-                recorded_note = (
-                    " (recorded by an earlier --binary-path run)"
-                    if outcome.forced_recorded
-                    else ""
-                )
-                print(
-                    f"Forced binary for {escape(plugin_name)}{recorded_note}: "
-                    f"{escape(str(forced.path))}; its {outcome.commands_forced} "
-                    "install command(s) are not run"
-                )
                 continue
 
             commands = _routed_commands(
