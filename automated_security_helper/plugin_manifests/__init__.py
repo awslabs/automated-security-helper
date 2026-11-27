@@ -212,12 +212,26 @@ def plugin_config_sections(
 #: shipped plugin packages and holds this table equal to their options models, so a
 #: list option added to one of them, or a default changed, fails that test until
 #: the table follows.
+#:
+#: Every shipped plugin whose section is untyped has a row, and an empty row means
+#: the plugin has no list option. The row is also how ``--config-overrides`` knows
+#: that a plugin ASH ships reads a section: a ``+=`` on an option of a section with
+#: no row warns that no plugin reads it, which would be false for a shipped plugin
+#: that has no list option. The same test holds the plugins named here equal to the
+#: shipped plugins whose section is untyped, so a plugin added without a row fails
+#: it as well.
 UNTYPED_LIST_OPTION_DEFAULTS: Mapping[
     str, Mapping[str, Mapping[tuple[str, ...], tuple[Any, ...]]]
 ] = MappingProxyType(
     {
+        "converters": MappingProxyType(
+            {
+                "sdist-lock-harvester": MappingProxyType({}),
+            }
+        ),
         "reporters": MappingProxyType(
             {
+                "aws-security-hub": MappingProxyType({}),
                 "bedrock-summary-reporter": MappingProxyType(
                     {
                         ("options", "compliance_frameworks"): (),
@@ -232,10 +246,13 @@ UNTYPED_LIST_OPTION_DEFAULTS: Mapping[
                         ),
                     }
                 ),
+                "cloudwatch-logs": MappingProxyType({}),
+                "s3": MappingProxyType({}),
             }
         ),
         "scanners": MappingProxyType(
             {
+                "betterleaks": MappingProxyType({}),
                 "ferret-scan": MappingProxyType({("options", "exclude_patterns"): ()}),
                 "guarddog": MappingProxyType(
                     {
@@ -252,6 +269,8 @@ UNTYPED_LIST_OPTION_DEFAULTS: Mapping[
                         ("options", "rules"): (),
                     }
                 ),
+                "hadolint": MappingProxyType({}),
+                "snyk-code": MappingProxyType({}),
                 "trivy-repo": MappingProxyType(
                     {
                         ("options", "scanners"): (

@@ -883,6 +883,25 @@ class TestAppendOntoAnUntypedPluginOption:
         with pytest.raises(ValidationError):
             _plugin_config_class(_BEDROCK).model_validate(section)
 
+    def test_an_append_to_a_plugin_with_no_list_option_is_not_warned_of(self, caplog):
+        """A shipped plugin with no list option at all (the S3 reporter) has an empty
+        row in the defaults table, so the section is read by a plugin ASH ships: the
+        append is applied with no warning that no plugin reads it, and the plugin's
+        own options model decides about the value when the plugin loads."""
+        key = "reporters.s3.options.bucket_name"
+        unread = "reporters.acme-findings-exporter.options.destinations"
+        warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
+        assert key not in warned, "control: no earlier append has warned of the key"
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(AshConfig(), [f"{key}+=appended-bucket"])
+            apply_config_overrides(AshConfig(), [f'{unread}+=["x"]'])
+
+        section = config.get_plugin_config("reporter", "s3")
+        assert section == {"options": {"bucket_name": ["appended-bucket"]}}
+        assert _warnings_naming(caplog, key) == []
+        assert len(_warnings_naming(caplog, unread)) == 1, "control: the capture works"
+
     def test_the_same_option_set_with_equals_is_accepted(self):
         config = apply_config_overrides(
             AshConfig(), [f"reporters.{_BEDROCK}.options.aws_region=us-east-1"]

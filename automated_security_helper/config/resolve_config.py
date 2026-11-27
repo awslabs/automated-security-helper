@@ -499,8 +499,8 @@ def _row_of_the_shipped_plugin_reading(
 
     Only the plugins ASH ships are asked: a plugin from a module outside ASH is
     known when that module loads, after the overrides are applied. A shipped plugin
-    with no list option has no row, so a section of its own reads here as no
-    plugin's.
+    with no list option has an empty row, so a ``+=`` on one of its options gets no
+    warning and is left to the plugin's own options model.
     """
     claims = plugin_section_claims(segment)
     for plugin, row in UNTYPED_LIST_OPTION_DEFAULTS.get(resolved_keys[0], {}).items():

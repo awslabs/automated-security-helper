@@ -331,6 +331,14 @@ def _table_rows(table) -> dict[_Row, tuple]:
     }
 
 
+def _table_plugins(table) -> set[tuple[str, str]]:
+    """``(segment, plugin)`` for every plugin the table names, one whose row is empty
+    included: ``_table_rows`` has no entry for it."""
+    return {
+        (segment, plugin) for segment, plugins in table.items() for plugin in plugins
+    }
+
+
 def _shipped_plugin_packages() -> list:
     """The plugin packages ASH ships: ``ash_builtin`` and each ``ash_*_plugins``
     package under ``plugin_modules``, found by walking it, together with every
@@ -373,24 +381,40 @@ def _list_defaults(
             yield from _list_defaults(type(default), (*path, key))
 
 
-def _declared_rows() -> dict[_Row, tuple]:
-    """The rows the plugins' own option models give: every list option of every
-    shipped plugin whose section is not a typed field of its segment."""
-    rows: dict[_Row, tuple] = {}
+def _untyped_plugin_classes() -> list[tuple[str, str, type]]:
+    """``(segment, plugin name, plugin class)`` for every plugin the shipped packages
+    list whose section is not a typed field of its segment, one with no list option
+    included."""
+    found: list[tuple[str, str, type]] = []
     for package in _shipped_plugin_packages():
         for segment, attribute in _PLUGIN_LISTS.items():
             for plugin_class in getattr(package, attribute, None) or ():
                 plugin = plugin_config_key(plugin_class)
                 if folded_section_name(plugin) in declared_section_names(segment):
                     continue
-                config_class = _config_class(plugin_class)
-                options_class = (
-                    _options_class(config_class) if config_class is not None else None
-                )
-                if options_class is None:
-                    continue
-                for path, items in _list_defaults(options_class, ("options",)):
-                    rows[(segment, plugin, path)] = items
+                found.append((segment, plugin, plugin_class))
+    return found
+
+
+def _declared_plugins() -> set[tuple[str, str]]:
+    """``(segment, plugin)`` for every shipped plugin whose section is not a typed
+    field of its segment, whether or not it has a list option."""
+    return {(segment, plugin) for segment, plugin, _ in _untyped_plugin_classes()}
+
+
+def _declared_rows() -> dict[_Row, tuple]:
+    """The rows the plugins' own option models give: every list option of every
+    shipped plugin whose section is not a typed field of its segment."""
+    rows: dict[_Row, tuple] = {}
+    for segment, plugin, plugin_class in _untyped_plugin_classes():
+        config_class = _config_class(plugin_class)
+        options_class = (
+            _options_class(config_class) if config_class is not None else None
+        )
+        if options_class is None:
+            continue
+        for path, items in _list_defaults(options_class, ("options",)):
+            rows[(segment, plugin, path)] = items
     return rows
 
 
@@ -405,11 +429,27 @@ def test_the_walk_reaches_the_plugin_packages_it_is_meant_to_read():
 
 def test_the_untyped_list_option_table_is_what_the_plugins_declare():
     """``resolve_config`` imports no plugin package, so the list defaults it adds a
-    ``+=`` to are mirrored as data; this holds them equal to the option models."""
-    table = _table_rows(_untyped_list_option_table())
+    ``+=`` to are mirrored as data; this holds them equal to the option models. It
+    holds the plugins the table names equal to the shipped plugins whose section
+    the config does not type as well, those with no list option included: the rows
+    alone cannot name a plugin whose row is empty."""
+    untyped_table = _untyped_list_option_table()
+    table = _table_rows(untyped_table)
     declared = _declared_rows()
 
     assert declared, "control: the walk found no list option of an untyped plugin"
+    listed_plugins = _table_plugins(untyped_table)
+    declared_plugins = _declared_plugins()
+    unlisted = sorted(declared_plugins - listed_plugins)
+    unshipped = sorted(listed_plugins - declared_plugins)
+    assert (unlisted, unshipped) == ([], []), (
+        "UNTYPED_LIST_OPTION_DEFAULTS and the shipped plugins disagree about which "
+        "plugins have a section the config does not type, each of which needs a "
+        "row, empty when it has no list option: plugins with no row "
+        f"{unlisted}, rows for plugins that are not shipped or have a typed "
+        f"section {unshipped}"
+    )
+
     missing = sorted(declared.keys() - table.keys())
     extra = sorted(table.keys() - declared.keys())
     changed = sorted(
