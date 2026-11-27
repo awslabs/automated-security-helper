@@ -37,6 +37,7 @@ from __future__ import annotations
 import importlib.util
 import logging
 import pathlib
+import subprocess
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -88,7 +89,7 @@ def _record(gate, monkeypatch, tmp_path, answers) -> tuple[list, list]:
     scans: list[list[str]] = []
     probes: list[list[str]] = []
 
-    def _fake_run(argv, cwd=None, env=None):
+    def _fake_run(argv, cwd=None, env=None, timeout=None):
         reply = answers(list(argv))
         if reply is not None:
             probes.append(list(argv))
@@ -313,8 +314,20 @@ def test_a_subject_probe_that_crashes_is_not_read_as_an_older_ash(
         ),
         # Names the word, but is not a usage error about it.
         SimpleNamespace(returncode=1, stdout="", stderr="OSError: /mnt/fs is full\n"),
+        # Prints the usage line, which names the command, and then dies: the status is
+        # read before the words are.
+        SimpleNamespace(
+            returncode=1,
+            stdout="Usage: ash scan fs [OPTIONS] [PATH]\n",
+            stderr="Error: it broke after printing its usage\n",
+        ),
     ],
-    ids=["names-no-word", "an-unrelated-usage-error", "names-fs-in-a-path"],
+    ids=[
+        "names-no-word",
+        "an-unrelated-usage-error",
+        "names-fs-in-a-path",
+        "names-the-command-and-fails",
+    ],
 )
 def test_a_refusal_that_does_not_say_fs_is_unknown_is_not_an_older_ash(
     gate, monkeypatch, tmp_path, refusal
@@ -433,3 +446,149 @@ def test_what_a_failed_probe_printed_is_logged(gate, monkeypatch, tmp_path, capl
         "ash scan fs --help exited 1" in message and "MemoryError" in message
         for message in failures
     ), failures
+
+
+def _noisy(stderr: str) -> SimpleNamespace:
+    """A probe that prints 25 numbered lines on stdout, then dies with *stderr*."""
+    lines = "".join(f"probe line {number:02d}\n" for number in range(1, 26))
+    return SimpleNamespace(returncode=1, stdout=lines, stderr=stderr)
+
+
+@pytest.mark.parametrize(
+    "stderr, shown, hidden",
+    [
+        # Lines 6 to 25 are the last twenty of the 25.
+        ("", range(6, 26), range(1, 6)),
+        # The log reads stdout and then stderr, so the error line is one of the twenty
+        # and line 6 drops out with the first five.
+        ("Error: the noisy probe failed\n", range(7, 26), range(1, 7)),
+    ],
+    ids=["stdout-only", "stdout-then-stderr"],
+)
+def test_a_failed_probe_logs_the_last_twenty_lines_of_its_output(
+    gate, monkeypatch, tmp_path, caplog, stderr, shown, hidden
+):
+    _record(
+        gate,
+        monkeypatch,
+        tmp_path,
+        lambda argv: _noisy(stderr) if argv == FS_PROBE else None,
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError):
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    for number in shown:
+        assert f"probe line {number:02d}" in logged, (number, logged)
+    for number in hidden:
+        assert f"probe line {number:02d}" not in logged, (number, logged)
+    if stderr:
+        assert stderr.strip() in logged, logged
+
+
+def test_the_probes_are_bounded_in_time_and_the_scan_is_not(
+    gate, monkeypatch, tmp_path
+):
+    """A probe that hangs is the gate's to end, with a comment and a REVOKE; the
+    function's own timeout would end it with neither. The scan keeps no bound of its
+    own, since the function's timeout is the only one a scan can have."""
+    calls: list[tuple[list[str], float | None]] = []
+
+    def _fake_run(argv, cwd=None, env=None, timeout=None):
+        calls.append((list(argv), timeout))
+        reply = answer(list(argv), RELEASE_WITH_SUBJECT)
+        if reply is not None:
+            return reply
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(gate, "_run", _fake_run)
+    monkeypatch.setattr(gate, "WORK_ROOT", tmp_path / "ash-gate")
+    monkeypatch.delenv("ASH_SCAN_EXTRA_ARGS", raising=False)
+
+    gate.run_scan(tmp_path / "src", "low", True)
+
+    assert gate.PROBE_TIMEOUT_SECONDS > 0
+    assert [timeout for argv, timeout in calls if argv == FS_PROBE] == [
+        gate.PROBE_TIMEOUT_SECONDS
+    ], calls
+    scans = [timeout for argv, timeout in calls if argv[3:4] != ["--help"]]
+    assert scans == [None], calls
+
+
+def test_a_probe_that_does_not_answer_in_time_refuses_and_is_asked_again(
+    gate, monkeypatch, tmp_path, caplog
+):
+    """The timeout is a refusal like a crash is: no spelling is chosen, nothing is
+    remembered, and the next scan in the warm environment asks again."""
+    asked = {"fs_probes": 0}
+
+    def answers(argv):
+        if argv == FS_PROBE:
+            asked["fs_probes"] += 1
+            if asked["fs_probes"] == 1:
+                raise subprocess.TimeoutExpired(
+                    argv,
+                    gate.PROBE_TIMEOUT_SECONDS,
+                    output=b"probe started\n",
+                    stderr=b"probe still waiting\n",
+                )
+        return answer(argv, RELEASE_WITH_SUBJECT)
+
+    scans, _ = _record(gate, monkeypatch, tmp_path, answers)
+    source = tmp_path / "src"
+
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(
+            RuntimeError,
+            match=f"did not answer in {gate.PROBE_TIMEOUT_SECONDS} seconds",
+        ),
+    ):
+        gate.run_scan(source, "low", True)
+
+    assert scans == [], scans
+    # What the stopped probe had printed is in the log, bytes decoded.
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "ash scan fs --help did not answer in" in logged, logged
+    assert "probe started" in logged and "probe still waiting" in logged, logged
+
+    gate.run_scan(source, "low", True)
+    assert [argv[:4] for argv in scans] == [["ash", "scan", "fs", str(source)]], scans
+    gate.run_scan(source, "low", True)
+    assert asked["fs_probes"] == 2, asked
+    assert len(scans) == 2, scans
+
+
+@pytest.mark.parametrize(
+    "release, spelling, reason",
+    [
+        (RELEASE_WITH_SUBJECT, "'ash scan fs PATH'", "its help names 'scan fs'"),
+        (
+            RELEASE_WITHOUT_SUBJECT,
+            "'ash scan --source-dir PATH'",
+            "its help does not name 'scan fs'",
+        ),
+    ],
+)
+def test_every_scan_logs_the_spelling_it_uses_and_why(
+    gate, monkeypatch, tmp_path, caplog, release, spelling, reason
+):
+    """A warm execution environment scans many pull requests on one answer, and the
+    log of each says which spelling it ran with, not only the first."""
+    _record(gate, monkeypatch, tmp_path, _as_release(release))
+
+    with caplog.at_level(logging.INFO):
+        gate.run_scan(tmp_path / "src", "low", True)
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    chosen = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("scanning with")
+    ]
+    assert len(chosen) == 2, chosen
+    for message in chosen:
+        assert spelling in message and reason in message, message
+    assert "asked by an earlier scan" not in chosen[0], chosen[0]
+    assert "asked by an earlier scan" in chosen[1], chosen[1]

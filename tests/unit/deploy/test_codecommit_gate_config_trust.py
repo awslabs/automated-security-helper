@@ -136,7 +136,7 @@ class _ScanCapture:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
 
-    def __call__(self, argv, cwd=None, env=None):
+    def __call__(self, argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
         probe = answer(argv)
         if probe is not None:

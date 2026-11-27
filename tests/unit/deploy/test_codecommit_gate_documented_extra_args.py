@@ -86,7 +86,7 @@ def test_the_example_gate_reaches_ash_scan(monkeypatch, tmp_path):
     gate = _load_gate()
     captured: list[list[str]] = []
 
-    def run(argv, cwd=None, env=None):
+    def run(argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
         reply = answer(argv)
         if reply is not None:

@@ -432,7 +432,7 @@ def _gate_runner(captured: list[list[str]], release: str):
     they are not recorded.
     """
 
-    def run(argv, cwd=None, env=None):
+    def run(argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
         reply = answer(argv, release)
         if reply is not None:

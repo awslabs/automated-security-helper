@@ -261,7 +261,7 @@ def test_run_scan_passes_the_redirected_environment(gate, monkeypatch, tmp_path)
     """
     captured: List[Dict[str, Any]] = []
 
-    def _fake_run(argv, cwd=None, env=None):
+    def _fake_run(argv, cwd=None, env=None, timeout=None):
         reply = answer(argv)
         if reply is not None:
             # The gate's probes of the image's options, answered as this tree's ASH;
@@ -599,7 +599,7 @@ def test_an_offline_refusal_reaches_the_pull_request_and_revokes(
     monkeypatch.setattr(
         gate,
         "_run",
-        lambda argv, cwd=None, env=None: pytest.fail(
+        lambda argv, cwd=None, env=None, timeout=None: pytest.fail(
             f"the scan ran with an unreachable offline database: {argv}"
         ),
     )

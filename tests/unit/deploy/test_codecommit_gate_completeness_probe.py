@@ -91,7 +91,7 @@ class _Ash:
         self.probes: List[Dict[str, Any]] = []
         self.scans: List[List[str]] = []
 
-    def __call__(self, argv, cwd=None, env=None):
+    def __call__(self, argv, cwd=None, env=None, timeout=None):
         argv = list(argv)
         if argv in (["ash", "scan", "--help"], ["ash", "scan", "fs", "--help"]):
             self.probes.append(dict(env or {}))
