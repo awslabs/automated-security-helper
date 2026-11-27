@@ -29,11 +29,19 @@ native, and two run the real lookup. Python applies PATHEXT to a command with a
 directory part, as the scan's PATH entries are read, from 3.12; before it such a path
 is checked as written, so those two tests run from 3.12.
 
+A PATH entry can name the scripts directory in a spelling that a real path keeps apart
+from the directory's own: another letter case on a case-insensitive volume (the macOS
+default), or a bind mount at another path. A scan finds the tool through that entry as
+it is spelled, so the sweep counts it too: it takes two paths for one directory when
+their device and inode agree. The test that puts such a variant on PATH emulates the
+volume where it can, with a link and a ``realpath`` that keeps the variant as written;
+the one beside it runs only where the volume folds case.
+
 The run says which copy it counted (the "Resolved to" cell) and which it set aside as
 a system tool (an "Ignoring" line). One file is never both, however each lookup spells
 its path: a PATH entry that names the scripts directory through a link, or, on
-Windows, forward slashes against backslashes. A different copy on PATH is still set
-aside.
+Windows, forward slashes against backslashes. A hard link of the counted copy on PATH
+is the same file under a second name. A different copy on PATH is still set aside.
 """
 
 from __future__ import annotations
@@ -177,6 +185,37 @@ def _working_directory_first(monkeypatch) -> None:
         return real_which(cmd, mode, os.curdir + os.pathsep + path)
 
     monkeypatch.setattr(shutil, "which", which)
+
+
+def _volume_folds_case(directory: Path) -> bool:
+    """Whether the volume under ``directory`` gives one file two spellings that differ
+    in letter case: the default macOS volume does, and Linux's usual ones do not."""
+    (directory / "Case-Probe").write_bytes(b"")
+    return (directory / "case-probe").exists()
+
+
+def _realpath_keeps_the_spelling_of(monkeypatch, variant: Path) -> None:
+    """Make ``os.path.realpath`` answer for ``variant`` as it does on a volume that
+    folds letter case.
+
+    posixpath's ``realpath`` replaces symbolic links and keeps every other component as
+    it is written, so on such a volume a path spelled in another case comes back in that
+    case. Here ``variant`` is a link, which a volume that tells cases apart resolves:
+    a path at or under it is returned as written, after ``os.path.abspath``, and every
+    other path goes to the real function.
+    """
+    real_realpath = os.path.realpath
+    written = os.path.abspath(variant)
+
+    def realpath(path, *args, **kwargs):
+        spelled = os.path.abspath(path)
+        if isinstance(spelled, str) and (
+            spelled == written or spelled.startswith(written + os.sep)
+        ):
+            return spelled
+        return real_realpath(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
 
 
 #: The suffixes CPython's Windows ``shutil.which`` adds to a name, in order.
@@ -423,6 +462,78 @@ def test_a_copy_counted_through_another_name_for_the_scripts_directory_is_not_ig
     assert _ignored_files(scene.text) == [], scene.text
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="a link needs a privilege on Windows, and normcase folds case there already",
+)
+def test_a_path_entry_spelling_the_scripts_directory_in_another_case_counts_when_realpath_keeps_it(
+    tmp_path, monkeypatch
+):
+    """PATH names the scripts directory in another letter case. A real path keeps the
+    case a component is written in, so on a volume that folds case the entry and the
+    directory have two real paths, and ``normcase`` changes neither off Windows. A scan
+    reads the entry as spelled and runs the tool there, so the sweep counts it, and
+    does not report the file it counted as a system tool it set aside.
+
+    Emulated where the volume tells cases apart: the variant is a link to the
+    directory, and ``os.path.realpath`` keeps a path at or under it as written. The
+    next test runs the same input on a volume that folds case, with nothing replaced."""
+    if _volume_folds_case(tmp_path):
+        pytest.skip("this volume folds case; the next test runs this input unemulated")
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    venv = tmp_path / "venv"
+    scripts = _venv_holding_the_tool(venv)
+    variant = scripts.with_name(scripts.name.swapcase())
+    variant.symlink_to(scripts, target_is_directory=True)
+    _realpath_keeps_the_spelling_of(monkeypatch, variant)
+    _on_path_first(monkeypatch, str(variant))
+
+    run_install(
+        scene,
+        monkeypatch,
+        tmp_path,
+        "--virtualenv-path",
+        str(venv),
+        "--no-inherit-system-tools",
+    )
+
+    assert scene.result.exit_code == 0, scene.text
+    assert os.path.samefile(_resolved_to(scene.text), _launcher(scripts)), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="normcase folds case on Windows already"
+)
+def test_a_path_entry_spelling_the_scripts_directory_in_another_case_counts_on_a_case_insensitive_volume(
+    tmp_path, monkeypatch
+):
+    """The same input as the test before it, with nothing emulated: no link, and the
+    real ``os.path.realpath``. It runs only where the volume under ``tmp_path`` folds
+    case, which is the default macOS volume, and skips elsewhere."""
+    if not _volume_folds_case(tmp_path):
+        pytest.skip(
+            "this volume tells cases apart; the test before this one emulates it"
+        )
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    venv = tmp_path / "venv"
+    scripts = _venv_holding_the_tool(venv)
+    _on_path_first(monkeypatch, str(scripts.with_name(scripts.name.swapcase())))
+
+    run_install(
+        scene,
+        monkeypatch,
+        tmp_path,
+        "--virtualenv-path",
+        str(venv),
+        "--no-inherit-system-tools",
+    )
+
+    assert scene.result.exit_code == 0, scene.text
+    assert os.path.samefile(_resolved_to(scene.text), _launcher(scripts)), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
+
+
 def test_a_different_copy_on_path_outside_the_managed_directories_is_still_ignored(
     tmp_path, monkeypatch
 ):
@@ -442,6 +553,26 @@ def test_a_different_copy_on_path_outside_the_managed_directories_is_still_ignor
     assert [_real(file) for file in _ignored_files(scene.text)] == [
         _real(_launcher(system_dir))
     ], scene.text
+
+
+def test_a_hard_link_of_the_counted_copy_on_path_is_not_ignored(tmp_path, monkeypatch):
+    """The control's scene, with one difference: the copy on PATH is a hard link of the
+    counted one. A scan finds the tool under the link's name and the sweep counts it
+    under its own, two paths whose real paths differ for one file, so it is
+    ``os.path.samefile`` that tells the run it set nothing aside. A different file under
+    the same name, which the control keeps, is set aside."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    bin_dir = _bin_directory_holding_the_tool(tmp_path)
+    system_dir = tmp_path / "system-bin"
+    system_dir.mkdir()
+    os.link(_launcher(bin_dir), system_dir / _launcher(bin_dir).name)
+    _on_path_first(monkeypatch, str(system_dir))
+
+    run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert os.path.samefile(_resolved_to(scene.text), _launcher(bin_dir)), scene.text
+    assert _ignored_files(scene.text) == [], scene.text
 
 
 @MODES
