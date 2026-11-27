@@ -12,7 +12,8 @@ and its committed transcripts, with no tool run and no network:
    every facet cell of the register agrees with what the transcripts observably carry
    (declared-mapped observed non-empty, declared-N/A empty), judged by
    :func:`~automated_security_helper.base.facet_conformance.judge`, the same function
-   the register consistency gate uses.
+   the register consistency gate uses. A cell declared UNCONFIRMED is a fixture owed
+   and reddens this row: honest-ignorance states must be resolved to promote.
 2. **Operational declarations complete.** The operational register row has no
    unconfirmed cell: honest-ignorance states must be resolved to promote.
 3. **Live cell.** The live-tool cell is green on every platform the manifest
@@ -965,7 +966,12 @@ def _row_facets(
                     corpus_hint=current_hint if mapped else every_hint,
                 )
                 verdicts.append(verdict)
-                if verdict.outcome == "FAIL":
+                # An "owed" verdict (a declared-UNCONFIRMED cell) blocks promotion
+                # like a FAIL: honest-ignorance states must be resolved to promote
+                # (the register consistency gate lists a fixture owed without
+                # failing; this bar names it on the row so it cannot read green
+                # over a cell nobody has read).
+                if verdict.outcome in ("FAIL", "owed"):
                     problems.append(f"[{name}.{facet}] {verdict.detail}")
     status = RowStatus.RED if problems else RowStatus.GREEN
     return (

@@ -375,11 +375,12 @@ class MCPSession(BaseModel):
         refreshed it, or holds a claim, so a session this returns True for is
         recreated empty by its next ``session_for``.
 
-        What a client bound to the session lives outside this object: a delivered
-        tree in ``source_delivery`` and a selected profile in ``profile_registry``,
-        both keyed by the session id. ``holds_binding`` answers for those two
-        stores (:func:`_session_holds_a_binding`); the caller passes it in so that
-        a loop over many sessions imports them once.
+        What a client bound to the session lives outside this object: a
+        delivered tree or image locator in ``source_delivery`` and a selected
+        profile in ``config.session_profiles``, each keyed by the session id.
+        ``holds_binding`` answers for those stores
+        (:func:`_session_holds_a_binding`); the caller passes it in so that a
+        loop over many sessions imports them once.
         """
         if self._last_handed_out > cutoff:
             return False
@@ -418,9 +419,9 @@ IDLE_SESSION_SECONDS = 300.0
 def _session_holds_a_binding() -> Callable[[str], bool]:
     """The test ``MCPSession.is_idle_since`` uses for what a client bound.
 
-    Looks up the delivered source directory and the selected profile by session
-    id. Returned as a function so the two imports happen once per caller and not
-    once per session.
+    Looks up the delivered source directory, the delivered image locator and
+    the selected profile by session id. Returned as a function so the imports
+    happen once per caller and not once per session.
     """
     from automated_security_helper.config.session_profiles import (
         session_has_binding,

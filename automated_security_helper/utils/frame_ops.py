@@ -3,9 +3,9 @@
 
 """Operations on frames that several modules spell the same way.
 
-``frame_text`` carries single cells, ``frame_model`` (when it lands) builds
-frames; this module is the operations between them: an ordered count, a stable
-top-N, a within-group occurrence number.
+``frame_text`` carries single cells, ``frame_model`` builds frames; this module
+is the operations between them: an ordered count, a stable top-N, a
+within-group occurrence number.
 
 polars is imported inside each function, never at module scope, so importing
 this module costs what importing ``frame_text`` does and a module on the models'

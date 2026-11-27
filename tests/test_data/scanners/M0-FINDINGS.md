@@ -2,7 +2,7 @@
 
 Unit M0 of the facets program. Each answer below
 quotes the captured fixture committed beside it. Runs were performed on
-2026-11-24 on a disposable lane with these tool versions: trivy 0.76.2 and
+2026-11-24 with these tool versions: trivy 0.76.2 and
 opengrep 2.0.0 (binaries verified against the sha256 digests in
 `automated_security_helper/utils/tool_downloads.py`), cfn-lint 1.61.0,
 bandit 1.9.4, cfn-nag 0.8.10 (gem version pinned by `CFN_NAG_GEM_VERSION`).
@@ -33,12 +33,11 @@ default run (misconfig is in its default scanner set).
 
 ## (b) cfn-nag: the logical id is a structured SARIF field, one result per id — SETTLED (recapture)
 
-### The first M0 run FATALed
+### On Homebrew portable-ruby, every scan FATALs
 
-cfn-nag 0.8.10 is a Ruby gem. The run host has no system
-Ruby; the gem installed cleanly on a Homebrew portable-ruby 3.4.5 in the lane,
-but every scan of the valid template `cfn_nag/m0_fixture_bucket.yaml` failed
-before producing findings. The JSON output, verbatim:
+cfn-nag 0.8.10 is a Ruby gem. It installed cleanly on a Homebrew portable-ruby
+3.4.5, but every scan of the valid template `cfn_nag/m0_fixture_bucket.yaml`
+failed before producing findings. The JSON output, verbatim:
 
 ```text
 "violations": [
@@ -56,13 +55,13 @@ before producing findings. The JSON output, verbatim:
 
 The SARIF output for the same run parses but carries 0 results, exits 1 and
 writes nothing to stderr (`captured/cfn_nag-0.8.10-fatal-psych-portable-ruby-*`).
-The first reading was a cfn-nag incompatibility with Ruby 3.4's Psych. The
-recapture below shows that reading was wrong.
+This is not a cfn-nag incompatibility with Ruby 3.4's Psych: the recapture below
+shows that the Ruby build decides whether the scan FATALs, not the Ruby version.
 
-### Recapture (2026-11-24, a Linux x86_64 dev host, a disposable lane removed after the pull)
+### Recapture (2026-11-24, Linux x86_64)
 
-The user's fix was a Ruby version constraint ("we can just put a ruby version
-constraint when running cfn-nag"). Measured, the constraint is not the cause:
+A Ruby version constraint was considered as the fix. Measured, the Ruby version
+is not the variable; the build is:
 
 | Ruby | Build | cfn-nag 0.8.10 on `m0_fixture_bucket.yaml` |
 |---|---|---|
@@ -78,19 +77,19 @@ build: cfn-nag pins `psych ~> 3`, so the gem-installed psych 3.3.4 loads next
 to the Ruby's own Psych. On a portable-ruby bottle the interpreter's Psych is
 linked into the `ruby` binary, its `Psych::Parser` (which defines
 `_native_parse`) is already loaded, and psych 3.3.4's `parser.rb` expects the C
-extension to define a public `parse`. Observed in the lane: the loaded
+extension to define a public `parse`. On a portable-ruby bottle the loaded
 `Psych::Parser` had public methods `[:external_encoding=, :handler, :handler=,
-:mark]` and private `[:_native_parse, :initialize]`, and `strings`-level grep of
-the gem's `psych.so` found 0 occurrences of `_native_parse`. That mechanism is
-this lane's reading of the evidence; the measured fact is the table above.
+:mark]` and private `[:_native_parse, :initialize]`, and a `strings`-level grep
+of the gem's `psych.so` found 0 occurrences of `_native_parse`. That mechanism
+is a reading of this evidence; the measured fact is the table above.
 
-Lane details: gems were fetched from rubygems.org by exact version (the 18
+Install details: gems were fetched from rubygems.org by exact version (the 18
 versions `gem install cfn-nag -v 0.8.10` resolved) and installed with
 `gem install --local` in dependency order, `GEM_HOME` per Ruby, `env -i`. Ruby
 3.1.7 took `multi_json` 1.15.0 because 1.21.2 requires Ruby 3.2 or later. Ruby
 3.4.5 needed its own gem directory on `GEM_PATH` for `bigdecimal` (a bundled gem
-there). The source builds used libyaml 0.2.5 and OpenSSL 3.0.15 built into the
-lane.
+there). The source builds used libyaml 0.2.5 and OpenSSL 3.0.15, each built for
+them.
 
 Answer to question (b), quoted from `captured/cfn_nag-0.8.10-m0.sarif`
 (`cfn_nag_scan --output-format sarif`), first of three results:
@@ -171,7 +170,7 @@ and a D (mappable-but-dropped) state exists behind the `--format json` choice.
 ## (e) snyk-code characterization fixture — UNCONFIRMED (run not performed)
 
 The `pytest -k snyk tests/unit/characterization` run did not happen. What the
-checkout itself shows, statically, at this branch's base:
+tree showed, statically, on 2026-11-24:
 
 - `tests/unit/characterization/` contains `_snyk_code_double.py` (a tool
   double) and only one test module (`test_harness_confinement.py`); no snyk
@@ -189,10 +188,10 @@ resolution until `tests/unit/characterization/fixtures/snyk/results.sarif` is
 committed; whether such a test is collected at all, and the committed tool
 fixture itself, both remain to be produced by a rerun of this item.
 
-## (f) Cells read at the bytes by the facet-mapping sweep (2026-11-25)
+## (f) Further cells read from tool output (2026-11-25)
 
-Run in a disposable lane on a Linux x86_64 dev host, removed after the pull. Tool versions as
-named; every tool ran offline over the one-file inputs described.
+Run on Linux x86_64. Tool versions as named; every tool ran offline over the
+one-file inputs described.
 
 - **trivy 0.76.2, `fs --scanners misconfig` in JSON and SARIF over four inputs**
   (sha256 of the release asset checked against the pin in `tool_downloads.py`).

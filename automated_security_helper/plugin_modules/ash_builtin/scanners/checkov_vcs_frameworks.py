@@ -7,9 +7,10 @@ checkov's ``--framework all`` set includes frameworks that audit a remote VCS
 platform's settings through its API (reaching for tokens such as
 ``CI_SERVER_URL``/``CI_JOB_TOKEN`` in GitLab CI) and write the fetched
 configuration below checkov's working directory instead of reading files in the
-scanned tree. ASH treats those frameworks specially in two ways: it leaves them
-out of default scans, and it points their cache directories below the scanner's
-results directory.
+scanned tree. ASH treats those frameworks specially in three ways: it leaves them
+out of default scans, it points their cache directories below the scanner's
+results directory, and it passes each one's API token to checkov only when that
+framework runs in an online scan (``VCS_TOKEN_ENV_VARS``).
 
 The skip set is the measured floor below, not a list derived from the
 ``CheckFrameworks`` mirror of checkov's registry. checkov ends the run with
@@ -41,7 +42,7 @@ whose ``*_configuration`` names differ from the floor fails there until the
 set (and the constraint) is decided.
 """
 
-from typing import Iterable, Tuple
+from typing import Iterable, Mapping, Tuple
 
 VCS_CONFIGURATION_SUFFIX = "_configuration"
 
@@ -52,6 +53,31 @@ KNOWN_VCS_CONFIGURATION_FRAMEWORKS: Tuple[str, ...] = (
     "github_configuration",
     "gitlab_configuration",
 )
+
+# The variable each floor framework's DAL reads its API token from. The three
+# names share no pattern, so each one is measured rather than derived. Read at
+# checkov 3.3.26, and the same at 3.4.11: ``discover()`` sets ``self.token`` from
+# ``os.getenv('APP_PASSWORD', '')`` (bitbucket/dal.py:31),
+# ``os.getenv('GITHUB_TOKEN', '')`` (github/dal.py:47) and
+# ``os.getenv('CI_JOB_TOKEN', '')`` (gitlab/dal.py:33). ``BaseVCSDAL.__init__``
+# calls ``discover()`` (common/vcs/base_vcs_dal.py:34), and each runner builds its
+# DAL in its own ``__init__`` (bitbucket/runner.py:19, github/runner.py:20,
+# gitlab/runner.py:18), which checkov runs for all three when ``checkov.main`` is
+# imported (main.py:118, :119 and :121), so the token is read whichever
+# frameworks the scan runs. The DAL sends it only from its requests
+# (base_vcs_dal.py:85-92 and :111-119, bitbucket/dal.py:39-45), which a runner
+# reaches only when its framework runs (``prepare_data``, then
+# ``persist_all_confs`` behind the fetch toggle below).
+#
+# Bitbucket's DAL also reads ``BITBUCKET_USERNAME`` (bitbucket/dal.py:36), the user
+# its token is sent with. It is not listed: it holds no secret, and checkov's
+# terraform module loader reads it too, for Bitbucket module downloads
+# (terraform/module_loading/loaders/bitbucket_access_token_loader.py:15).
+VCS_TOKEN_ENV_VARS: Mapping[str, str] = {
+    "bitbucket_configuration": "APP_PASSWORD",
+    "github_configuration": "GITHUB_TOKEN",
+    "gitlab_configuration": "CI_JOB_TOKEN",
+}
 
 
 def vcs_vendor(framework: str) -> str:

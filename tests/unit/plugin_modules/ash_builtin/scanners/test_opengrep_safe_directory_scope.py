@@ -10,6 +10,12 @@ filesystem root). One list, computed from the scan target, reaches the unsandbox
 child and the sandboxed one; no environment variable carries it, so an inherited value
 cannot choose entries. A ``GIT_CONFIG_*`` entry in the operator's environment list is
 refused for this scanner, which writes that block itself.
+
+Where the platform has no user ids (Windows: no ``os.geteuid``, and ``os.lstat``
+reports uid 0 for every file), no ``.git`` can be shown to belong to either user, so
+no parent is named and git's own ownership check decides about the checkout's top.
+The tests that pin the owner rule need user ids; the ``without_user_ids`` tests pin
+the other reading on every platform by taking ``os.geteuid`` away.
 """
 
 import os
@@ -36,6 +42,14 @@ pytestmark = pytest.mark.unit
 
 _REAL_LEXISTS = os.path.lexists
 _REAL_LSTAT = os.lstat
+
+#: The owner rule compares uids, so the tests that pin it need a platform that has
+#: them. Without user ids the walk names no parent; the ``without_user_ids`` tests
+#: below pin that reading on every platform.
+needs_user_ids = pytest.mark.skipif(
+    not hasattr(os, "geteuid"),
+    reason="no user ids here: the walk names no parent (the without_user_ids tests)",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -136,6 +150,41 @@ def _checkout(tmp_path):
     return repo, sub
 
 
+def _checkout_top(repo):
+    """The entry a staged checkout's top adds after the target's: one where the
+    platform has user ids and the ``.git`` is the test user's, none without them."""
+    return [os.path.realpath(repo)] if hasattr(os, "geteuid") else []
+
+
+def _without_user_ids(monkeypatch):
+    """The platform as Windows presents it to the walk: no ``os.geteuid``."""
+    monkeypatch.delattr(os, "geteuid", raising=False)
+
+
+@pytest.fixture
+def walk_messages():
+    """The debug lines ASH's logger prints while a test runs."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    messages = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            messages.append(record.getMessage())
+
+    handler = _Capture(level=logging.DEBUG)
+    previous_level = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield messages
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous_level)
+
+
 def test_a_parent_whose_git_entry_belongs_to_another_user_is_not_named(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
@@ -149,6 +198,7 @@ def test_a_parent_whose_git_entry_belongs_to_another_user_is_not_named(
         assert _named(env) == [os.path.realpath(sub)], name
 
 
+@needs_user_ids
 def test_a_parent_whose_git_entry_belongs_to_the_scan_targets_owner_is_named(
     test_plugin_context, only_staged_checkouts
 ):
@@ -161,6 +211,7 @@ def test_a_parent_whose_git_entry_belongs_to_the_scan_targets_owner_is_named(
         assert _named(env) == [os.path.realpath(sub), os.path.realpath(repo)], name
 
 
+@needs_user_ids
 def test_a_parent_git_entry_owned_by_the_effective_uid_is_named_for_a_foreign_target(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
@@ -301,7 +352,7 @@ def test_the_policy_carries_the_validated_list(only_staged_checkouts):
 
     assert policy.safe_directories == (
         os.path.realpath(sub),
-        os.path.realpath(repo),
+        *_checkout_top(repo),
     )
 
 
@@ -380,4 +431,44 @@ def test_an_ambient_git_config_variable_never_reaches_the_sandboxed_child(
     assert "GIT_CONFIG_PARAMETERS" not in child
     assert "GIT_CONFIG_GLOBAL" not in child
     assert "GIT_CONFIG" not in child
-    assert _named(child) == [os.path.realpath(sub), os.path.realpath(repo)]
+    assert _named(child) == [os.path.realpath(sub), *_checkout_top(repo)]
+
+
+def test_without_user_ids_the_checkout_top_is_left_to_gits_own_check(
+    test_plugin_context, monkeypatch, only_staged_checkouts, walk_messages
+):
+    """No ``os.geteuid`` (Windows): the ``.git`` above the target cannot be shown to
+    belong to either user, so neither spawn path names the top, and the walk logs
+    the entry it stopped at. Before, the walk called ``os.geteuid`` there and the
+    scan raised ``AttributeError``."""
+    repo, sub = _checkout(only_staged_checkouts)
+    _without_user_ids(monkeypatch)
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+
+    for name, env in envs.items():
+        assert _named(env) == [os.path.realpath(sub)], name
+    refusals = [m for m in walk_messages if "safe_directories_for: not naming" in m]
+    assert refusals, walk_messages
+    assert all("cannot be read on this platform" in m for m in refusals), refusals
+    git_entry = os.path.join(os.path.realpath(repo), ".git")
+    assert any(git_entry in m for m in refusals), refusals
+
+
+def test_without_user_ids_a_scan_of_the_checkout_top_still_names_it(
+    test_plugin_context, monkeypatch, only_staged_checkouts, walk_messages
+):
+    """The scanned directory is named on every platform: a scan pointed at the
+    checkout's top names it on both spawn paths without user ids, and the walk
+    logs no refusal for the directory it named."""
+    repo, _sub = _checkout(only_staged_checkouts)
+    _without_user_ids(monkeypatch)
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, repo), repo)
+
+    for name, env in envs.items():
+        assert _named(env) == [os.path.realpath(repo)], name
+    refusals = [m for m in walk_messages if "safe_directories_for: not naming" in m]
+    assert not refusals, refusals

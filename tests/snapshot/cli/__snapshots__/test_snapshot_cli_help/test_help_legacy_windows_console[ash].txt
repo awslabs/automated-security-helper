@@ -151,11 +151,13 @@
 │                                                              default in ASH v4.                 │
 │                                                              [env var: ASH_STAGED]              │
 │ --image                     <str>                            Scan a container image named by    │
-│                                                              reference (registry/repo[:tag])    │
-│                                                              instead of a source directory. ASH │
-│                                                              fetches nothing itself: the image  │
-│                                                              is prepared by a container engine  │
-│                                                              or the scanner tools' own registry │
+│                                                              reference (registry/repo,          │
+│                                                              optionally followed by :tag,       │
+│                                                              @sha256:digest or both) instead of │
+│                                                              a source directory. ASH fetches    │
+│                                                              nothing itself: the image is       │
+│                                                              prepared by a container engine or  │
+│                                                              the scanner tools' own registry    │
 │                                                              clients. Repeat it, or give a      │
 │                                                              comma list, to scan several        │
 │                                                              images: each is its own scan, with │
@@ -242,14 +244,19 @@
 │                                                                  default. Sets                  │
 │                                                                  `global_settings.deduplicatio… │
 │ --fold-duplicates                                                Show one row per duplicate     │
-│                                                                  cluster in the HTML, Markdown  │
-│                                                                  and text reports, with a note  │
-│                                                                  naming the other scanners that │
-│                                                                  reported it, and add           │
-│                                                                  deduplicated counts beside the │
-│                                                                  per-scanner counts. Only the   │
-│                                                                  same CVE and package, or the   │
-│                                                                  same line and CWE, fold.       │
+│                                                                  cluster in the human-readable  │
+│                                                                  reports (HTML, Markdown, text, │
+│                                                                  and the Bedrock summary), with │
+│                                                                  a note naming the other        │
+│                                                                  scanners that reported it, and │
+│                                                                  add deduplicated counts beside │
+│                                                                  the per-scanner counts.        │
+│                                                                  Findings fold when they share  │
+│                                                                  a CVE and package, or when     │
+│                                                                  overlapping lines share a CWE; │
+│                                                                  line overlaps chain, so two    │
+│                                                                  findings can fold through a    │
+│                                                                  third that overlaps both.      │
 │                                                                  Finding ids, SARIF,            │
 │                                                                  per-scanner counts,            │
 │                                                                  suppressions, baselines, the   │

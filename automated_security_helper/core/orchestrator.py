@@ -593,6 +593,13 @@ class ASHScanOrchestrator(BaseModel):
     # that scan's state, so a second scan takes a new instance.
     _scan_executed: bool = PrivateAttr(default=False)
 
+    # The report id of the history record this scan appended, None until
+    # _record_history appends one. Read by _discard_recorded_history when a
+    # cancel escapes the write step after the record: the record says the run
+    # completed, and a run a cancel takes back must not stay a point in
+    # ``ash trend``.
+    _recorded_history_id: Optional[str] = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def _reject_conflicting_config_inputs(self) -> "ASHScanOrchestrator":
         """Refuse a pre-resolved config alongside the inputs to resolution.
@@ -733,6 +740,16 @@ class ASHScanOrchestrator(BaseModel):
                 "Using the configuration supplied by the caller; skipping resolution"
             )
             config = self.resolved_config
+            # The branch below refuses an unrecorded symbol suppression inside
+            # resolve_scan_config; a caller-resolved config (a workspace
+            # project's) skips that resolution, so the same refusal runs here,
+            # against the same lock root a scan's resolver reads
+            # (sarif_utils._symbol_resolver_for loads self.source_dir's lock).
+            # Both branches of this if therefore refuse before any scan work.
+            global_settings = getattr(config, "global_settings", None)
+            refuse_unlocked_symbol_suppressions(
+                getattr(global_settings, "suppressions", None) or [], self.source_dir
+            )
             if self.severity_threshold_restriction is not None:
                 # The restriction below rewrites thresholds in place. The caller
                 # keeps this object, and a workspace hands the same one to more
@@ -1722,6 +1739,12 @@ class ASHScanOrchestrator(BaseModel):
         try:
             self._write_results_file(phases, results)
         except BaseException:
+            # A cancel can escape the write step after _record_history appended
+            # the run's record (an interrupt in its tail; a check added after
+            # the record later): the caller's ``results`` is never bound when
+            # this frame raises, so the record is taken back here. A write that
+            # ended before the record recorded nothing, and this is a no-op.
+            self._discard_recorded_history()
             if settle_on_success:
                 self.settle_previous_results(restore=True)
             raise
@@ -1796,14 +1819,43 @@ class ASHScanOrchestrator(BaseModel):
         """Append the run to the output directory's history when the config asks.
 
         Off unless ``global_settings.history.enabled``. Never raises: recording
-        logs its own failures (utils/scan_history).
+        logs its own failures (utils/scan_history). The record's id is kept on
+        the instance, so a cancel that escapes the write step after this point
+        can take the record back (``_discard_recorded_history``).
         """
         from automated_security_helper.utils.scan_history import record_run_if_enabled
 
         global_settings = getattr(self.config, "global_settings", None)
-        record_run_if_enabled(
+        recorded = record_run_if_enabled(
             getattr(global_settings, "history", None), results, self._output_path
         )
+        if recorded is not None:
+            # The record is named "<report_id>.json" (utils/scan_history).
+            self._recorded_history_id = recorded.stem
+
+    def _discard_recorded_history(self) -> None:
+        """Remove the history record this scan appended, if any. Never raises.
+
+        For a cancel that lands after ``_record_history``: the record says the
+        run completed, and ``ash trend`` would show the taken-back run as a
+        point. A scan that recorded nothing (history off, a shard) has nothing
+        to remove, and the id is cleared so the record of one run is never
+        removed twice.
+        """
+        report_id, self._recorded_history_id = self._recorded_history_id, None
+        if report_id is None:
+            return
+        try:
+            from automated_security_helper.utils.scan_history import (
+                discard_run_record,
+            )
+
+            discard_run_record(self._output_path, report_id)
+        except Exception as exc:  # noqa: BLE001 - runs while a cancel propagates
+            ASH_LOGGER.debug(
+                f"Could not discard the taken-back run's record in "
+                f"{self.output_dir}: {exc}"
+            )
 
     def settle_previous_results(self, restore: bool) -> None:
         """Put the previous results back, or drop them. Never raises.
