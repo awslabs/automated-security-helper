@@ -285,13 +285,18 @@ def test_no_gate_owned_option_can_be_set_from_extra_args(
 #: because a scanner that was never selected is recorded SKIPPED rather than MISSING and
 #: SKIPPED is on the completeness allowlist.
 #:
-#: The value in each pair is one that would do damage, not a placeholder, and the
-#: positive controls below resolve the same value through the real CLI for every
-#: pair but ``--mode``, ``--phases`` and ``--config-overrides``; for
-#: ``--cli-json-input`` they resolve a document of the same kind. Without that, a typo
-#: in the frozenset would leave this table green while the hole stayed open: the
-#: refusal would fire on a spelling ASH does not accept, and the spelling ASH does
-#: accept would sail past.
+#: The value in each pair is one that would do damage, not a placeholder, and
+#: ``test_a_reserved_option_would_really_have_narrowed_the_scan`` resolves the same value
+#: through the real CLI for the pairs in its own table, which is not this one. A pair
+#: here whose value names a file that does not exist is resolved by a different test, and
+#: must not be added to that table: ``--cli-json-input``'s ``selection.json`` by
+#: ``test_a_cli_json_input_document_would_really_have_set_the_selection``, which writes a
+#: document of the same kind, and ``--baseline``, ``--ash-config-from-host`` and the
+#: values of the hidden container options by no resolver at all, because their refusal
+#: does not depend on the value. What keeps a typo in the frozenset from leaving this
+#: table green while the hole stays open is
+#: ``test_every_option_ash_scan_declares_is_decided``, which reads every spelling off the
+#: real click command.
 _NARROWING_OPTIONS_WITH_VALUES = [
     ("--scanners", "bandit", "scans one scanner and reports the other nine as SKIPPED"),
     (
@@ -352,6 +357,36 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "selection.json",
         "the document it names can set the scanner selection, as --only-scanners does",
     ),
+    (
+        "--baseline",
+        "main-results.json",
+        "leaves findings already in a saved results file out of the reports and the exit code",
+    ),
+    (
+        "--ash-config-from-host",
+        "base.yaml",
+        "becomes ASH_CONFIG, the base configuration the scan reads beneath the gate's --config",
+    ),
+    (
+        "--config-file-from-scanned-repository",
+        "ash.yaml",
+        "container plumbing that marks how a config file is trusted; no use in extra args",
+    ),
+    (
+        "--config-file-from-another-checkout",
+        "ash.yaml",
+        "container plumbing that marks how a config file is trusted; no use in extra args",
+    ),
+    (
+        "--ash-plugin-modules",
+        "some_module",
+        "imports a module of plugins and subscribers that can change what is reported",
+    ),
+    (
+        "--offline-semgrep-rulesets",
+        "p/none",
+        "chooses the rule sets semgrep runs with, so it can leave rules out",
+    ),
 ]
 
 #: The same class, spelled as flags that take no value. ``--full`` and its aliases are ASH's
@@ -384,6 +419,14 @@ _NARROWING_FLAGS = [
     (
         "--no-allow-stale-content-db",
         "the other polarity, which overrides the config's staleness settings",
+    ),
+    (
+        "--config-from-scanned-repository",
+        "container plumbing that marks how the config is trusted; no use in extra args",
+    ),
+    (
+        "--allow-in-tree-tools",
+        "lets tools found inside the pull request's clone run instead of reading missing",
     ),
     ("--help", "prints the help and exits 0 before any scanner runs"),
     ("--version", "prints the version and exits 0 before any scanner runs"),
@@ -552,101 +595,146 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     )
 
 
-#: Options whose spellings name scanners and which the gate deliberately leaves to
-#: ASH_SCAN_EXTRA_ARGS, keyed by click parameter name, each with the reason it cannot
-#: narrow a scan. Every other option whose spelling names scanners must be reserved;
-#: ``test_every_option_that_names_scanners_is_reserved`` holds that.
-_SCANNER_OPTIONS_NOT_RESERVED = {
-    "require_scanner_selection": (
+_CONTAINER_MODE_ONLY = (
+    "a container-mode option: ash scan reads it to build or run the container, and "
+    "this gate's --mode is reserved, so the gate always scans in local mode where it "
+    "has no part in what is scanned or the exit code"
+)
+
+_PRESENTATION = (
+    "changes how output is written or how much of it, and is not an input to which "
+    "findings count or to the exit code"
+)
+
+#: Every spelling ``ash scan`` declares that the gate leaves to ASH_SCAN_EXTRA_ARGS, with
+#: the reason it cannot change what is scanned or the exit code. A spelling is either
+#: here or in ``GATE_OWNED_SCAN_OPTIONS`` / ``GATE_OWNED_SHORT_OPTIONS``, never both and
+#: never neither: ``test_every_option_ash_scan_declares_is_decided`` holds that, so an
+#: option ASH adds fails CI until it is placed. A reason is a claim about the CLI at the
+#: time of writing; read the option's help text in ``cli/scan.py`` before relying on it.
+_PASSTHROUGH_OPTIONS = {
+    # Output and diagnostics, listed in the gate module as deliberately absent.
+    "--format": _PRESENTATION,
+    "--formats": _PRESENTATION,
+    "--output-format": _PRESENTATION,
+    "--output-formats": _PRESENTATION,
+    "-f": _PRESENTATION,
+    "--progress": _PRESENTATION,
+    "--no-progress": _PRESENTATION,
+    "-p": _PRESENTATION,
+    "-P": _PRESENTATION,
+    "--cleanup": "removes the work directory after the scan; the verdict is already computed",
+    "--no-cleanup": "keeps the work directory after the scan; the verdict is already computed",
+    "--inspect": _PRESENTATION,
+    "--no-inspect": _PRESENTATION,
+    "--verbose": _PRESENTATION,
+    "-v": _PRESENTATION,
+    "--debug": _PRESENTATION,
+    "-d": _PRESENTATION,
+    "--quiet": _PRESENTATION,
+    "--no-quiet": _PRESENTATION,
+    "--log-level": _PRESENTATION,
+    "--color": _PRESENTATION,
+    "--no-color": _PRESENTATION,
+    "--show-summary": _PRESENTATION,
+    "--no-show-summary": _PRESENTATION,
+    "--simple": _PRESENTATION,
+    "--no-simple": _PRESENTATION,
+    "--compact-report": _PRESENTATION,
+    "--annotate-duplicates": (
+        "adds columns to the CSV and flat-JSON reports; rows, counts, suppressions and "
+        "baselines are unchanged"
+    ),
+    "--fold-duplicates": (
+        "shows one row per duplicate cluster in the human-readable reports and adds "
+        "deduplicated counts beside the per-scanner counts; findings are not dropped"
+    ),
+    # Documented in the gate module as checked rather than assumed.
+    "--offline": (
+        "passes --offline to the tools and keeps going; the npm, pnpm and yarn audit "
+        "scanners still run and still report a status the completeness gate covers"
+    ),
+    "--no-offline": "the default polarity of --offline",
+    "--strategy": "runs the selected scanners in parallel or in sequence; the selection is unchanged",
+    "--ignore-suppressions": (
+        "makes suppressed findings actionable, so it can only report more findings"
+    ),
+    "--no-ignore-suppressions": "ASH's own default",
+    "--no-honor-ignore-files": (
+        "scans the files .gitignore and .ignore match too, so it can only widen the "
+        "scan set"
+    ),
+    "--honor-ignore-files": (
+        "the polarity a run with no operator config already takes (the option defaults "
+        "to unset, which prefers the config); it restates that default"
+    ),
+    "--sandbox": (
+        "runs scanner subprocesses in an OS sandbox, and a scanner whose sandbox cannot "
+        "be set up is graded as refused or missing, which the completeness gate covers; "
+        "it cannot select fewer scanners"
+    ),
+    "--express": (
+        "chooses between the resident daemon and a cold in-process run of the same "
+        "scan, which ASH already picks by itself when its socket exists"
+    ),
+    "--no-express": "forces the cold in-process run of the same scan",
+    "--require-scanner-selection": (
         "hidden; container mode passes it to the scan it starts, and it only refuses "
         "a scan whose settled default_scanners differs from the JSON document it is "
         "given, or a document it cannot read, so it can stop a scan but cannot narrow "
         "one"
     ),
+    "--staged": (
+        "ash scan refuses it outside --mode precommit (_refuse_staged_outside_precommit_mode), "
+        "and --mode is reserved"
+    ),
+    # Replace the source directory or need workspace mode, and the gate always passes
+    # --source-dir.
+    "--workspace": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    "--workspace-config": "the policy file of a workspace scan, which --workspace is reserved against",
+    "--allow-missing-projects": "workspace mode only, and a workspace scan is not reachable",
+    "--dry-run": "workspace mode only, and a workspace scan is not reachable",
+    "--image": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    "--image-archive": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    "--image-layout": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    # Container-mode options.
+    "--build": _CONTAINER_MODE_ONLY,
+    "--no-build": _CONTAINER_MODE_ONLY,
+    "-b": _CONTAINER_MODE_ONLY,
+    "-B": _CONTAINER_MODE_ONLY,
+    "--run": _CONTAINER_MODE_ONLY,
+    "--no-run": _CONTAINER_MODE_ONLY,
+    "-r": _CONTAINER_MODE_ONLY,
+    "-R": _CONTAINER_MODE_ONLY,
+    "--force": _CONTAINER_MODE_ONLY,
+    "--oci": _CONTAINER_MODE_ONLY,
+    "--oci-runner": _CONTAINER_MODE_ONLY,
+    "--runner": _CONTAINER_MODE_ONLY,
+    "-o": _CONTAINER_MODE_ONLY,
+    "--build-target": _CONTAINER_MODE_ONLY,
+    "--container-uid": _CONTAINER_MODE_ONLY,
+    "-u": _CONTAINER_MODE_ONLY,
+    "--container-gid": _CONTAINER_MODE_ONLY,
+    "-g": _CONTAINER_MODE_ONLY,
+    "--ash-revision-to-install": _CONTAINER_MODE_ONLY,
+    "--custom-containerfile": _CONTAINER_MODE_ONLY,
+    "--custom-build-arg": _CONTAINER_MODE_ONLY,
 }
 
 
-def test_every_option_that_names_scanners_is_reserved():
-    """Every option whose spelling names scanners is refused by the gate or exempted.
+def test_every_option_ash_scan_declares_is_decided():
+    """Every spelling ``ash scan`` declares is reserved by the gate or listed here.
 
-    GATE_OWNED_SCAN_OPTIONS is a literal while the CLI keeps growing, so an
-    option that chooses scanners can arrive without an entry here.
-    ``--only-scanners`` states the whole selection, and ``--add-scanners`` means what
-    ``--scanners`` means, so in the local mode the gate scans in, with no
-    ``default_scanners.only`` in the config, the scanners it names are the whole
-    selection; both are reserved for the reason ``--scanners`` is.
-    ``test_every_reserved_spelling_is_one_the_cli_actually_accepts`` cannot see a
-    missing entry: it checks that every reserved spelling is a real option, not that
-    every real option that chooses scanners is reserved.
-
-    So the parameters with a spelling that names scanners are read off the real click
-    command, and every spelling of each, aliases and the other half of a boolean pair
-    included, has to be reserved, unless the parameter is in
-    ``_SCANNER_OPTIONS_NOT_RESERVED`` with the reason it cannot narrow a scan.
-
-    What this does NOT catch is an option that changes the selection under a name with
-    no "scanner" in it. ``--mode``, ``--phases``, ``--config`` and the shard options
-    are of that kind; they are reserved and the refusal tables above hold them, but a
-    new option spelled that way would pass here. An option click handles before the
-    scan function runs, ``--cli-json-input`` among them, is held by
-    ``test_every_option_handled_before_the_scan_runs_is_reserved`` instead.
-    """
-    import typer.main
-
-    from automated_security_helper.cli.main import app
-
-    scan_command = typer.main.get_command(app).commands["scan"]
-    naming_scanners = {}
-    for param in scan_command.params:
-        spellings = {*param.opts, *param.secondary_opts}
-        if any("scanner" in spelling for spelling in spellings):
-            naming_scanners[param.name] = spellings
-
-    # Controls on the rule itself. It has to find the selection options already known,
-    # or a rule that matched nothing would pass every check below; and an exemption
-    # that names no current option is a stale entry, not a decision.
-    known = {
-        "scanners",
-        "exclude_scanners",
-        "only_scanners",
-        "add_scanners",
-        "python_based_plugins_only",
-    }
-    assert known <= set(naming_scanners), sorted(naming_scanners)
-    stale = sorted(set(_SCANNER_OPTIONS_NOT_RESERVED) - set(naming_scanners))
-    assert not stale, f"these exemptions name no option that names scanners: {stale}"
-
-    gate_module = _load_gate()
-    reserved = (
-        gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
-    )
-    unreserved = sorted(
-        spelling
-        for name, spellings in naming_scanners.items()
-        if name not in _SCANNER_OPTIONS_NOT_RESERVED
-        for spelling in spellings
-        if spelling not in reserved
-    )
-    assert not unreserved, (
-        "these options choose scanners and ASH_SCAN_EXTRA_ARGS can set them, so the "
-        f"environment would decide what the gate scans: {unreserved}. Add every "
-        "spelling to GATE_OWNED_SCAN_OPTIONS, or, if the option cannot narrow a scan, "
-        "name it in _SCANNER_OPTIONS_NOT_RESERVED with the reason."
-    )
-
-
-def test_every_option_handled_before_the_scan_runs_is_reserved():
-    """Options click handles itself, which the scan function never sees, are reserved.
-
-    ``--help`` and ``--generate-cli-skeleton`` print and end the command with exit 0,
-    and ``--cli-json-input`` reads a document that can supply any parameter the
-    command line does not set, apart from hidden ones, ``--express`` and the options
-    of this kind. None of the three reaches the scan function (click's
-    ``expose_value=False``), and none has "scanner" in its spelling, so
-    ``test_every_option_that_names_scanners_is_reserved`` cannot see them. Exit 0 is
-    the outcome this gate reads as a pass, and a document can set the scanner
-    selection, so every option of this kind is reserved. They are read off the real
-    click command, so one added the same way fails here until the gate reserves it.
+    ``GATE_OWNED_SCAN_OPTIONS`` is a literal while the CLI keeps growing. Two earlier
+    tests tried to catch a new option by a heuristic, one on a spelling that names
+    scanners and one on ``expose_value=False``, and each missed whole classes
+    (``--ash-config-from-host``, ``--baseline`` and ``--allow-in-tree-tools`` among
+    them). This one has no heuristic: every spelling that
+    ``scan_command.get_params(ctx)`` returns, hidden options and the other half of a
+    boolean pair included, must be in the gate's reserved set or in
+    ``_PASSTHROUGH_OPTIONS`` with the reason it cannot change what is scanned or the
+    exit code. An option ASH adds therefore fails this test until someone decides
+    which side it belongs on.
     """
     import typer.main
 
@@ -655,31 +743,49 @@ def test_every_option_handled_before_the_scan_runs_is_reserved():
     scan_command = typer.main.get_command(app).commands["scan"]
     # Resilient parsing, under which the eager callbacks return without acting.
     ctx = scan_command.make_context("scan", [], resilient_parsing=True)
-    not_exposed = {
-        param.name: {*param.opts, *param.secondary_opts}
+    declared = {
+        spelling
         for param in scan_command.get_params(ctx)
-        if not param.expose_value
+        for spelling in (*param.opts, *param.secondary_opts)
     }
 
-    # Control on the rule: it has to find the three options this test was written for.
-    expected = {"help", "cli_json_input", "generate_cli_skeleton"}
-    assert expected <= set(not_exposed), sorted(not_exposed)
+    # Controls on the enumeration itself: a rule that read nothing would pass every
+    # check below. It has to find options of each kind this test exists for.
+    for spelling in (
+        "--scanners",
+        "--help",
+        "--cli-json-input",
+        "--ash-config-from-host",
+        "--no-allow-stale-content-db",
+        "--baseline",
+        "--allow-in-tree-tools",
+    ):
+        assert spelling in declared, f"the enumeration missed {spelling}"
 
     gate_module = _load_gate()
     reserved = (
         gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
     )
-    unreserved = sorted(
-        spelling
-        for spellings in not_exposed.values()
-        for spelling in spellings
-        if spelling not in reserved
+    passthrough = set(_PASSTHROUGH_OPTIONS)
+
+    undecided = sorted(declared - reserved - passthrough)
+    assert not undecided, (
+        "ash scan declares these options and the gate neither reserves them nor "
+        f"lists them in _PASSTHROUGH_OPTIONS: {undecided}. Decide each one: add it to "
+        "GATE_OWNED_SCAN_OPTIONS if it can change what is scanned or the exit code, "
+        "or to _PASSTHROUGH_OPTIONS with the reason it cannot."
     )
-    assert not unreserved, (
-        "these options are handled before the scan function runs and "
-        f"ASH_SCAN_EXTRA_ARGS can set them: {unreserved}. Add every spelling to "
-        "GATE_OWNED_SCAN_OPTIONS."
+
+    both = sorted(reserved & passthrough)
+    assert not both, f"these spellings are both reserved and passed through: {both}"
+
+    stale = sorted(passthrough - declared)
+    assert not stale, (
+        f"these passthrough entries name no option ash scan declares: {stale}"
     )
+
+    for spelling, reason in _PASSTHROUGH_OPTIONS.items():
+        assert reason.strip(), f"{spelling} is passed through with no reason"
 
 
 @pytest.mark.parametrize(

@@ -185,10 +185,25 @@
   clean scan against a content database older than its declared bound passes instead
   of failing. Set `content_db_staleness` in the base config to make that choice. A
   deployment that sets one of these options in `ash_scan_extra_args` reports an error
-  on every pull request until it is removed. Two unit tests now read the `ash scan`
-  options and fail when an option whose spelling names scanners, or one that click
-  handles before the scan function runs, is not reserved by the gate; the first
-  exempts an option it lists with the reason it cannot narrow a scan.
+  on every pull request until it is removed. A unit test reads every `ash scan`
+  option and fails when one is neither reserved by the gate nor listed with the reason
+  it cannot narrow a scan.
+- **The Terraform CodeCommit gate also reserves the options that replace the base
+  configuration, load code, or leave findings out of the verdict.** `--ash-config-from-host`
+  sets the base configuration under the gate's own `--config`, so a base holding
+  `default_scanners.only` or suppressions narrowed the scan; it is reserved with the
+  three other options container mode passes to the scan inside it
+  (`--config-from-scanned-repository`, `--config-file-from-scanned-repository` and
+  `--config-file-from-another-checkout`). `--baseline` is reserved because the reports
+  and the exit code then count only findings not in the saved results file;
+  `--allow-in-tree-tools` because it lets tools found in the pull request's clone run;
+  and `--ash-plugin-modules` and `--offline-semgrep-rulesets` because they load plugin
+  code and choose semgrep's rule sets. A deployment that sets one of them in
+  `ash_scan_extra_args` reports an error on every pull request until it is removed. The
+  two drift tests that guessed which options matter are replaced by one that reads
+  every option `ash scan` declares and requires each to be reserved or listed with the
+  reason it cannot change what is scanned or the exit code, so an option ASH adds fails
+  the test until someone decides.
 
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or

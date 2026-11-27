@@ -216,13 +216,14 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
 #: options that take a value, --min-severity among them.
 #:
-#: The set itself is a literal, so it can fall behind the CLI. Two tests in
-#: tests/unit/deploy/test_codecommit_gate_fails_closed.py read the real click command
-#: and fail when it gains an option this set misses:
-#: test_every_option_that_names_scanners_is_reserved, for an option whose spelling
-#: names scanners (unless the test exempts it with the reason it cannot narrow a
-#: scan), and test_every_option_handled_before_the_scan_runs_is_reserved, for one
-#: that click handles before the scan function is called.
+#: The set itself is a literal, so it can fall behind the CLI. One test in
+#: tests/unit/deploy/test_codecommit_gate_fails_closed.py closes that:
+#: test_every_option_ash_scan_declares_is_decided reads every spelling off the real
+#: click command and requires each to be either in this set (or
+#: GATE_OWNED_SHORT_OPTIONS) or in that file's _PASSTHROUGH_OPTIONS table with the
+#: reason it cannot change what is scanned or the exit code. The prose above names the
+#: kinds of option left to the operator; that table is the list, and an option ASH
+#: adds fails the test until someone decides which side it is on.
 GATE_OWNED_SCAN_OPTIONS = frozenset(
     {
         # Passed by this gate, so a repeat here would resolve last and win.
@@ -294,6 +295,33 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # options click handles itself. So a document can set the scanner selection
         # the way --only-scanners does.
         "--cli-json-input",
+        # Report only findings that are not in a saved results file: the reports, the
+        # summary and the exit code count only new findings, the same mechanism
+        # --changed-files-only is refused for.
+        "--baseline",
+        # Hidden options container mode passes to the scan inside the container, and
+        # which an operator has no use for in extra args. --ash-config-from-host is set
+        # as ASH_CONFIG, so the file it names is the BASE configuration the scan reads
+        # beneath this gate's own --config: the same hole --config and
+        # --config-overrides are reserved for, since a base holding
+        # default_scanners.only, ignore_paths or suppressions narrows the scan. The
+        # other three mark which files of the config chain the scanned repository
+        # wrote or that sit in another checkout, which changes how that chain is
+        # trusted.
+        "--ash-config-from-host",
+        "--config-from-scanned-repository",
+        "--config-file-from-scanned-repository",
+        "--config-file-from-another-checkout",
+        # Lets scanners and other tools found inside the scanned directory, which is the
+        # pull request's clone, run. Off by default so that such a tool is treated as
+        # missing; nothing here can know that the Lambda's tool lookup never reaches
+        # the clone, so the gate does not let extra args turn it on.
+        "--allow-in-tree-tools",
+        # --ash-plugin-modules imports Python modules that hold scanners, reporters or
+        # event subscribers, which can change what a scan reports. --offline-semgrep-rulesets
+        # chooses the rule sets semgrep runs with, so it can leave rules out.
+        "--ash-plugin-modules",
+        "--offline-semgrep-rulesets",
     }
 )
 

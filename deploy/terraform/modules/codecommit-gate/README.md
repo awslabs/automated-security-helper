@@ -215,7 +215,11 @@ selection, the shard options, `--config`, `--config-overrides` and
 `--cli-json-input`, the content-database staleness flags `--allow-stale-content-db`
 and `--no-allow-stale-content-db`, `--phases`, `--use-existing`, the options that
 end `ash scan` with exit 0 before any scanner starts (`--help`, `--version` and
-`--generate-cli-skeleton`), and the options it passes itself.
+`--generate-cli-skeleton`), `--baseline`, which leaves known findings out of the
+verdict, `--ash-config-from-host` and the three `--config-*-from-*` options container
+mode passes to the scan inside it, which replace or mark the base configuration,
+`--ash-plugin-modules`, `--offline-semgrep-rulesets`, `--allow-in-tree-tools`, and
+the options it passes itself.
 `GATE_OWNED_SCAN_OPTIONS` in `files/ash_pr_gate.py` is the full list. A
 refused option is not dropped: the scan reports an error outcome on every pull
 request, and any approval the gate gave is revoked, until the option is removed.
