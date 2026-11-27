@@ -768,6 +768,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 provisionable=(),
                 note="the Node.js toolchain is the user's; ASH installs none of it",
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.ASH_WHEEL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="npm's own critical/high/moderate/low/info scale is mapped (npm_audit_scanner.py severity tables)",

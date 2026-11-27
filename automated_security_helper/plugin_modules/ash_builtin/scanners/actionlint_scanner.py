@@ -1406,6 +1406,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="actionlint",
+                version_check=("actionlint", "--version"),
+                dockerfile_note=(
+                    "# actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and",
+                    "# grype.",
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="ASH's own table plus an untrusted-input regex raise",
