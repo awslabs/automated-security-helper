@@ -376,11 +376,24 @@ def _alpha_modules_in_the_dockerfile() -> list[set[str]]:
 
 
 def test_the_alpha_module_list_reader_has_a_positive_and_a_negative_control() -> None:
-    assert re.findall(
-        r'^ARG ASH_ALPHA_PLUGIN_MODULES="([^"]*)"',
-        'ARG ASH_ALPHA_PLUGIN_MODULES="a,b"\n# ARG ASH_ALPHA_PLUGIN_MODULES="c"\n',
-        flags=re.MULTILINE,
-    ) == ["a,b"]
+    """The control runs through the reader itself, so a change to its pattern or to
+    the way it splits a list is seen here."""
+    planted = (
+        'ARG ASH_ALPHA_PLUGIN_MODULES="a,b"\n'
+        '# ARG ASH_ALPHA_PLUGIN_MODULES="c"\n'
+        'ARG ASH_ALPHA_PLUGIN_MODULES="d,,e"\n'
+        'ARG ASH_ALPHA_PLUGIN_MODULES=""\n'
+        'ARG ASH_ALPHA_PLUGIN_MODULES_OTHER="f"\n'
+        'RUN echo "ARG ASH_ALPHA_PLUGIN_MODULES=g"\n'
+    )
+
+    assert _alpha_modules_in_the_dockerfile(planted) == [
+        {"a", "b"},
+        {"d", "e"},
+        set(),
+    ]
+    assert _alpha_modules_in_the_dockerfile("RUN true\n") == []
+    assert _alpha_modules_in_the_dockerfile("") == []
 
 
 def test_the_image_loads_the_alpha_modules_of_the_scanners_that_bring_a_tool() -> None:
