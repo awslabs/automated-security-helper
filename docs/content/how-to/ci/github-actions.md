@@ -231,7 +231,8 @@ directory, `--no-progress`, the fail-on-findings choice, `--build-target ci`, `-
 and `--config` when a config is set; `--verbose` unless `verbose` is `false`;
 `--changed-files-only` and `--base-ref` when `changed-files-only` is `true`; and then
 `ash-args`. The directory is `.`, the checkout, unless `ash-args` holds a `--source-dir`,
-which names the directory instead. The scan is `ash scan --source-dir <directory>`.
+which names the directory instead. It scans that directory as `ash scan --source-dir <directory>`
+does.
 
 After the scan, whether it passed or failed, the scan job appends `ash.summary.md` to the
 job summary and uploads the artifact `ash_output`, kept for 7 days. The artifact holds
