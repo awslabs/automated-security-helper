@@ -932,7 +932,7 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             self._plugin_log(
                 f"{not_scanned}. Not running the tool.",
                 target_type=image_target_type,
-                level=logging.INFO,
+                level=logging.WARNING,
                 append_to_stream="stderr",
             )
             self._post_scan(target=anchor, target_type=image_target_type)
