@@ -551,7 +551,9 @@ def write_blocks(
 
     Returns one ``WriteResult`` per file, the template first. Every file is read and
     checked before the first is written, so a refusal leaves both as they were, and a
-    file whose blocks are already current is not touched.
+    file whose blocks are already current is not touched. The two writes are not one
+    atomic step: if the second fails (a full disk, a permission error), the first stays
+    written and the next run finishes the pair.
     """
     names = sorted(bodies)
     plan = []
