@@ -2285,15 +2285,20 @@ jobs:
           # The directory. ASH 3.9 scans one as `ash scan fs DIR`, and prints a
           # deprecation line for bare `ash` and for --source-dir; both go in ASH
           # v4.0. ash-version can name an older ASH, which has no `fs` subject, so
-          # this ASH is asked first, as the deploy targets ask theirs. Only an ASH
-          # with the subject prints `scan fs` in that help: an older one shows the
-          # subject-less scan's help there, since click reads --help before it
-          # refuses the extra word. The probe names the scan's config as the scan
-          # does, though --help reads none. The help is read whole into a variable,
-          # with color off, so no pipe is closed early and no style code falls
-          # between the words, and it is not printed. Without the subject, or when
-          # the probe fails, the scan takes the older spelling, which then reports
-          # what is wrong.
+          # this ASH is asked first, as the deploy targets ask theirs, and only an
+          # answer picks a spelling. Only an ASH with the subject prints `scan fs`
+          # in that help: an older one shows the subject-less scan's help there,
+          # since click reads --help before it refuses the extra word, and a help
+          # that does not name it picks the older spelling, as does the usage error
+          # that refuses the word `fs`. A probe that fails any other way (uvx cannot
+          # fetch the source, ASH crashes) says nothing about the ASH's commands, so
+          # the step fails with the end of what the probe printed and neither
+          # spelling runs. The probe names the scan's config as the scan does,
+          # though --help reads none. The help is read whole into a variable, with
+          # color off, so no pipe is closed early and no style code falls between
+          # the words. It is printed only when the probe fails, and then through
+          # one_line, a line at a time. The step says which spelling it chose and
+          # why, on stderr.
           #
           # This step used to pass --source-dir . ahead of ash-args, so a
           # --source-dir in ash-args came later and named the directory scanned,
@@ -2303,8 +2308,30 @@ jobs:
           # spellings. On the new one a name that starts with a dash is given as
           # ./NAME, the same directory, so it is not read as an option.
           fs_help_status=0
-          fs_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>/dev/null)" || fs_help_status=$?
-          if [ "${fs_help_status}" -eq 0 ] && [[ "${fs_help}" == *"scan fs"* ]]; then
+          fs_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || fs_help_status=$?
+          case "${fs_help_status}:${fs_help}" in
+            0:*"scan fs"*)
+              scan_has_subject=yes
+              echo "ash: scanning with 'ash scan fs': its help names 'scan fs'" >&2
+              ;;
+            0:*)
+              scan_has_subject=no
+              echo "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name 'scan fs', as an ASH older than 3.9 answers" >&2
+              ;;
+            *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*)
+              scan_has_subject=no
+              echo "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does" >&2
+              ;;
+            *)
+              echo "::error::Could not tell whether the ASH this workflow installs has 'ash scan fs': 'ash scan fs --help' exited $(one_line "${fs_help_status}") without saying it refused 'fs', so no spelling is chosen by guess. The end of its output follows." >&2
+              probe_tail="$(printf '%s\n' "${fs_help}" | tail -n 20)"
+              while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
+                printf '%s\n' "$(one_line "${probe_line}")" >&2
+              done <<<"${probe_tail}"
+              exit 1
+              ;;
+          esac
+          if [ "${scan_has_subject}" = yes ]; then
             case "${scan_dir}" in
               -*) scan_path="./${scan_dir}" ;;
               *) scan_path="${scan_dir}" ;;
@@ -2374,6 +2401,8 @@ jobs:
           ASH_CONFIG: ${{ steps.config-ref-files.outputs.path || steps.inputs.outputs.config }}
           ASH_OUTPUT_DIR: ${{ steps.inputs.outputs.output_dir }}
         run: |-
+          # Every value a workflow command below prints goes through one_line.
+          . "${RUNNER_TEMP}/ash-one-line.sh"
           # No --reinstall here. The Run ASH step above already installed this exact
           # source, so re-forcing a download makes the report step do a second git
           # fetch it does not need - and if the ref has disappeared in the meantime
@@ -2383,14 +2412,40 @@ jobs:
           # ASH 3.9 renders saved results with `ash results report`; the top-level
           # `ash report` still works there but prints a deprecation line, and goes
           # in ASH v4.0. ash-version can name an older ASH, which has no `results`,
-          # so this ASH is asked first, as the Run ASH step asks it about `scan fs`:
-          # only an ASH that has the command prints `results report` in its help.
-          # The probe names the report's config as the report does, though --help
-          # reads none. Without the command, or when the probe fails, the report
-          # takes the older spelling.
+          # so this ASH is asked first, as the Run ASH step asks it about `scan fs`,
+          # and only an answer picks a spelling: only an ASH that has the command
+          # prints `results report` in its help. A help that does not name it picks
+          # the older spelling, as does the usage error that refuses the word
+          # `results`. A probe that fails any other way says nothing about the ASH's
+          # commands, so the step fails with the end of what the probe printed and
+          # neither spelling runs. The probe names the report's config as the report
+          # does, though --help reads none. The step says which spelling it chose
+          # and why, on stderr.
           report_help_status=0
-          report_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>/dev/null)" || report_help_status=$?
-          if [ "${report_help_status}" -eq 0 ] && [[ "${report_help}" == *"results report"* ]]; then
+          report_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || report_help_status=$?
+          case "${report_help_status}:${report_help}" in
+            0:*"results report"*)
+              report_has_results=yes
+              echo "ash: reporting with 'ash results report': its help names 'results report'" >&2
+              ;;
+            0:*)
+              report_has_results=no
+              echo "ash: reporting with the older spelling: the help of 'ash results report --help' does not name 'results report', as an ASH older than 3.9 answers" >&2
+              ;;
+            *:*"unexpected extra argument"*"results"*|*:*"No such command"*"results"*)
+              report_has_results=no
+              echo "ash: reporting with the older spelling: this ASH refused the word 'results', as an ASH older than 3.9 does" >&2
+              ;;
+            *)
+              echo "::error::Could not tell whether the ASH this workflow installs has 'ash results report': 'ash results report --help' exited $(one_line "${report_help_status}") without saying it refused 'results', so no spelling is chosen by guess. The end of its output follows." >&2
+              probe_tail="$(printf '%s\n' "${report_help}" | tail -n 20)"
+              while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
+                printf '%s\n' "$(one_line "${probe_line}")" >&2
+              done <<<"${probe_tail}"
+              exit 1
+              ;;
+          esac
+          if [ "${report_has_results}" = yes ]; then
             uvx --from "${ASH_UVX_SOURCE}" ash \
               results report --output-dir "${ASH_OUTPUT_DIR}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"}
           else

@@ -12,8 +12,11 @@ they go in ASH v4.0. run-ash-security-scan.yml installs the ASH that ``ash-versi
 names: the pull-request scan of this repository installs the head commit, the
 required scan the base commit, and an outside caller may pin any tag, 3.8 and older
 included. So the Run ASH and Show ASH Summary Report steps ask the installed ASH for
-the new command's help, as the deploy targets do, and run the older spelling when
-that help does not name the command.
+the new command's help, as the deploy targets do, and only an answer picks the older
+spelling: a help that does not name the command, or the usage error that refuses its
+first word. A probe that fails any other way (uvx cannot fetch the source, ASH
+crashes) says nothing about the ASH's commands, so the step fails with the end of what
+the probe printed and runs neither spelling.
 
 The scan step used to pass ``--source-dir .`` ahead of ``ash-args``, so a
 ``--source-dir`` in ``ash-args`` came later and named the directory scanned (click
@@ -31,12 +34,18 @@ would and records every other call:
   ``ash results report --help``, padded to thousands of lines;
 * ``3.8`` prints the subject-less scan's help for ``ash scan fs --help``, as click
   shows a command's help before it refuses the extra word, and has no ``results``;
-* ``broken`` exits non-zero with nothing on stdout, as uvx does when it cannot
-  install the source.
+* ``refusing`` is an older ASH that refuses the word with click's usage error
+  instead (exit 2), and has no ``results`` either;
+* ``no-name`` exits 0 with a help that names neither command;
+* ``broken`` exits non-zero with only an error on stderr, as uvx does when it cannot
+  install the source;
+* ``hostile`` exits non-zero and prints lines that would be workflow commands.
 
-1. The scan runs ``ash scan fs .`` on 3.9 and ``ash --source-dir .`` otherwise, with
-   the same options after the directory on both, for each value the step's env
-   selects a flag from; its exit status is the step's.
+1. The scan runs ``ash scan fs .`` on 3.9 and ``ash --source-dir .`` on the releases
+   that answer without the subject, with the same options after the directory on
+   both, for each value the step's env selects a flag from; its exit status is the
+   step's. On ``broken`` and ``hostile`` the step fails with the probe's last lines
+   and runs no scan.
 2. A ``--source-dir`` in ``ash-args``, written either way, is the directory on both;
    one that is another option's value is left as that value; one with no word after
    it is passed on, for ASH to refuse; a directory whose name starts with a dash is
@@ -44,10 +53,14 @@ would and records every other call:
 3. The 3.9 command line, run through this tree's CLI with the scan engine stubbed,
    scans that directory and prints no deprecation line.
 4. The report runs ``ash results report`` on 3.9 and ``ash --output-dir ... report``
-   otherwise, and its exit status is the step's.
+   on the releases that answer without ``results``, and its exit status is the step's.
+   On ``broken`` and ``hostile`` the step fails and runs no report.
 5. The probes run with colour off, name the config their step's command names, run
-   without ``--reinstall``, print nothing, and do not run at all for an ``ash-args``
-   the step refuses.
+   without ``--reinstall``, do not print the help they read, and do not run at all
+   for an ``ash-args`` the step refuses.
+6. Each step says on stderr which spelling it chose and why, and what a failed probe
+   printed goes through ``one_line`` a line at a time, so no line of it is read as a
+   workflow command.
 
 What it does not cover
 ----------------------
@@ -70,7 +83,7 @@ from typer.testing import CliRunner
 from automated_security_helper.cli import scan_group
 from automated_security_helper.cli.main import app
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
-from tests.utils.workflow_one_line import write_helper
+from tests.utils.workflow_one_line import command_lines, write_helper
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "run-ash-security-scan.yml"
@@ -104,6 +117,16 @@ if [ "${last:-}" = "--help" ]; then
     "3.8:--from ash-source ash scan fs") echo " Usage: ash scan [OPTIONS]"; pad; exit 0 ;;
     "3.8:--from ash-source ash results report")
       echo "Error: No such command 'results'." >&2; exit 2 ;;
+    "refusing:--from ash-source ash scan fs")
+      printf '%s\n' "Usage: ash scan [OPTIONS]" "Error: Got unexpected extra argument (fs)" >&2
+      exit 2 ;;
+    "refusing:--from ash-source ash results report")
+      echo "Error: No such command 'results'." >&2; exit 2 ;;
+    "no-name:--from ash-source ash scan fs"|"no-name:--from ash-source ash results report")
+      echo " Usage: ash [OPTIONS]"; pad; exit 0 ;;
+    "hostile:--from ash-source ash scan fs"|"hostile:--from ash-source ash results report")
+      printf '%s\n' "::warning::planted by the probe" "##[warning]planted too" >&2
+      exit 1 ;;
   esac
   echo "error: Failed to fetch the source" >&2
   exit 1
@@ -248,7 +271,8 @@ def test_this_trees_help_names_both_commands():
     [
         ("3.9", ["scan", "fs", "."]),
         ("3.8", ["--source-dir", "."]),
-        ("broken", ["--source-dir", "."]),
+        ("refusing", ["--source-dir", "."]),
+        ("no-name", ["--source-dir", "."]),
     ],
 )
 def test_the_scan_names_the_directory_the_way_its_ash_does(
@@ -260,6 +284,24 @@ def test_the_scan_names_the_directory_the_way_its_ash_does(
     assert ran.calls == [[*UVX_SCAN, *head, *OWN_OPTIONS]], _output(ran)
     # The help the probe read is not printed into the step's log.
     assert "Usage:" not in _output(ran)
+
+
+@pytest.mark.integration
+@posix_only
+def test_the_scan_does_not_read_a_failed_probe_as_an_older_ash(tmp_path, helps):
+    """uvx that cannot fetch the source says nothing about the ASH's commands. Read as
+    an older ASH, it would scan with the older spelling on an ASH that has the new
+    one, with no word of why, and the older spelling is the one that goes in v4.0."""
+    ran = _run(tmp_path, helps, RUN_ASH, "broken", SCAN_ENV)
+
+    assert ran.result.returncode != 0, _output(ran)
+    assert ran.calls == [], ran.calls
+    output = _output(ran)
+    could_not_tell = "Could not tell whether the ASH this workflow installs has"
+    assert f"{could_not_tell} 'ash scan fs'" in output
+    assert "'ash scan fs --help' exited 1" in output
+    # What the probe printed is the diagnosis.
+    assert "error: Failed to fetch the source" in output
 
 
 @pytest.mark.integration
@@ -411,7 +453,8 @@ def test_a_source_dir_with_no_directory_is_still_refused(
     [
         ("3.9", ["results", "report", "--output-dir", "out"]),
         ("3.8", ["--output-dir", "out", "report"]),
-        ("broken", ["--output-dir", "out", "report"]),
+        ("refusing", ["--output-dir", "out", "report"]),
+        ("no-name", ["--output-dir", "out", "report"]),
     ],
 )
 @pytest.mark.parametrize(
@@ -427,6 +470,46 @@ def test_the_report_uses_the_results_group_when_its_ash_has_it(
     assert ran.result.returncode == 0, _output(ran)
     assert ran.calls == [["--from", "ash-source", "ash", *words, *config_words]]
     assert "Usage:" not in _output(ran)
+
+
+@pytest.mark.integration
+@posix_only
+def test_the_report_does_not_read_a_failed_probe_as_an_older_ash(tmp_path, helps):
+    ran = _run(tmp_path, helps, REPORT, "broken", {"ASH_CONFIG": ""})
+
+    assert ran.result.returncode != 0, _output(ran)
+    assert ran.calls == [], ran.calls
+    output = _output(ran)
+    could_not_tell = "Could not tell whether the ASH this workflow installs has"
+    assert f"{could_not_tell} 'ash results report'" in output
+    assert "'ash results report --help' exited 1" in output
+    assert "error: Failed to fetch the source" in output
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "step, env",
+    [(RUN_ASH, SCAN_ENV), (REPORT, {"ASH_CONFIG": ""})],
+    ids=["scan", "report"],
+)
+def test_what_a_failed_probe_printed_is_not_read_as_a_workflow_command(
+    tmp_path, helps, step, env
+):
+    """The tail of a failed probe is shown a line at a time through one_line: a line the
+    probe printed that starts with `::`, or holds `##[`, would otherwise be the
+    runner's to act on, and it comes from the installed ASH, which loads the scanned
+    repository's config before it reads --help."""
+    ran = _run(tmp_path, helps, step, "hostile", env)
+
+    assert ran.result.returncode != 0, _output(ran)
+    assert ran.calls == [], ran.calls
+    output = _output(ran)
+    # Shown, not dropped.
+    assert "planted by the probe" in output and "planted too" in output
+    # The one workflow command is the step's own error.
+    (own,) = command_lines(output)
+    assert own.startswith("::error::Could not tell whether the ASH"), own
 
 
 @pytest.mark.integration
@@ -471,3 +554,68 @@ def test_an_ash_args_the_step_refuses_starts_no_probe(tmp_path, helps):
 
     assert ran.result.returncode != 0, _output(ran)
     assert ran.probes == [] and ran.calls == []
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "step, env, release, said",
+    [
+        (
+            RUN_ASH,
+            SCAN_ENV,
+            "3.9",
+            "scanning with 'ash scan fs': its help names 'scan fs'",
+        ),
+        (
+            RUN_ASH,
+            SCAN_ENV,
+            "3.8",
+            (
+                "scanning with the older spelling: the help of 'ash scan fs --help' "
+                "does not name 'scan fs'"
+            ),
+        ),
+        (
+            RUN_ASH,
+            SCAN_ENV,
+            "refusing",
+            "scanning with the older spelling: this ASH refused the word 'fs'",
+        ),
+        (
+            REPORT,
+            {"ASH_CONFIG": ""},
+            "3.9",
+            "reporting with 'ash results report': its help names 'results report'",
+        ),
+        (
+            REPORT,
+            {"ASH_CONFIG": ""},
+            "no-name",
+            (
+                "reporting with the older spelling: the help of "
+                "'ash results report --help' does not name 'results report'"
+            ),
+        ),
+        (
+            REPORT,
+            {"ASH_CONFIG": ""},
+            "3.8",
+            "reporting with the older spelling: this ASH refused the word 'results'",
+        ),
+    ],
+    ids=[
+        "scan-3.9",
+        "scan-3.8",
+        "scan-refusing",
+        "report-3.9",
+        "report-no-name",
+        "report-3.8",
+    ],
+)
+def test_the_steps_say_which_spelling_they_chose_and_why(
+    tmp_path, helps, step, env, release, said
+):
+    ran = _run(tmp_path, helps, step, release, env)
+
+    assert f"ash: {said}" in ran.result.stderr, _output(ran)
