@@ -715,8 +715,9 @@ def test_a_retired_name_patch_adds_a_left_out_limit_where_the_files_wrote_it(
     does without the trust rules. The limit is then the extending file's own
     write, which its confine hook leaves out, so the scan keeps the
     operator's, 256. Judged where the document lands it, the dashed add was
-    dropped as an option detect-secrets does not declare, and the test
-    refused the file. The declared spelling is the control."""
+    dropped as an option detect-secrets does not declare, with a warning
+    that said so, and the test refused the file. No warning says it was
+    dropped now. The declared spelling is the control."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -738,6 +739,7 @@ def test_a_retired_name_patch_adds_a_left_out_limit_where_the_files_wrote_it(
     assert any(
         f"Ignoring {OPTION}" in message for message in _about_the_limit(messages)
     ), messages
+    assert not [m for m in messages if "does not declare" in m], messages
 
 
 @pytest.mark.parametrize("op", ["replace", "add"])
