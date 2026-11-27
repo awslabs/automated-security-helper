@@ -187,7 +187,7 @@ from automated_security_helper.config.config_validator import (
     placed_at_appends,
     redact_values,
 )
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_PYPROJECT_FILE_NAME,

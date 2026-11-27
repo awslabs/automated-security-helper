@@ -66,7 +66,7 @@ from automated_security_helper.config.environment_record import (
     with_environment_values_shown,
     written_without_tag,
 )
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigUnparsedError,

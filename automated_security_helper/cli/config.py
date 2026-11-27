@@ -20,7 +20,7 @@ import yaml
 import typer
 from pydantic import ValidationError
 
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.console import (
     ash_console,

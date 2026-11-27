@@ -58,7 +58,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.config.plugin_sections import build_segment
 from automated_security_helper.config.spellings import check_spellings
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.config.wire_enum import (
     wire_enum_validator,
     wire_value,

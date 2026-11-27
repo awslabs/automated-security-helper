@@ -5,8 +5,8 @@ the options and flags it may carry, so it can only name what the program
 registers (a test walks this list against the real command tree) and a rename is
 one edit. Only registered commands are listed.
 
-This module sits below the command line: the loader, the models and lint read it,
-and the command line imports them, so it imports nothing from the package but
+This module sits below the command line: the loader and lint read it, and the
+command line imports them, so it imports nothing from the package but
 ``utils/terminal_text.py``, which imports nothing from it.
 
 A command is built by :func:`render_command`. It returns the line only when every

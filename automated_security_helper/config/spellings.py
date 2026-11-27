@@ -64,7 +64,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, ValidationInfo
 from pydantic_core import PydanticUndefined
 
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.utils.unknown_keys import tolerated_notes, warned_notes
 
 #: The key a config file holds its ``patch`` operations under

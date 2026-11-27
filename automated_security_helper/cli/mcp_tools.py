@@ -35,7 +35,7 @@ from typing import (
     cast,
 )
 
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.vocab import Severity
 from automated_security_helper.core.resource_management.scan_registry import (
