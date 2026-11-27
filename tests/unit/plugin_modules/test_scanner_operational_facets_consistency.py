@@ -45,6 +45,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from tests.unit.base.test_image_register import dockerfile_stages
 from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
@@ -1174,6 +1175,55 @@ def test_a_release_asset_note_is_the_comment_above_its_version_argument(
     assert image.version_check == (image.tool, "--version"), name
 
 
+#: The stage the pinned tools are installed in. ``ci`` and ``non-root`` are built on
+#: it. ``uv-reqs`` builds the wheel and installs only uv, so a tool installed in that
+#: stage is not in the image.
+_TOOL_STAGE = "core"
+
+
+def stage_installs(text: str, stage: str, tool: str) -> bool:
+    """Whether a line of *stage* in the Dockerfile *text* installs *tool* with the
+    pinned-tool installer."""
+    return f"install-pinned-tool {tool} -b " in text
+
+
+def test_the_install_reader_has_controls_for_a_comment_and_for_another_stage() -> None:
+    planted = (
+        "FROM base AS builder\n"
+        "RUN with-retry 'install-pinned-tool only-in-builder -b /usr/local/bin'\n"
+        "FROM base AS core\n"
+        "RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'\n"
+        "# RUN with-retry 'install-pinned-tool commented -b /usr/local/bin'\n"
+        "  # RUN with-retry 'install-pinned-tool indented -b /usr/local/bin'\n"
+        "RUN with-retry 'install-pinned-tool grype -b /usr/local/bin' && \\\n"
+        "    with-retry 'install-pinned-tool crane -b /usr/local/bin'\n"
+        "RUN with-retry 'install-pinned-tool syft-extra -b /usr/local/bin'\n"
+    )
+
+    for tool in ("syft", "grype", "crane", "syft-extra"):
+        assert stage_installs(planted, "core", tool), tool
+    # A commented line is not an install, and neither is a line of another stage.
+    for tool in ("commented", "indented", "only-in-builder", "syft-extr"):
+        assert not stage_installs(planted, "core", tool), tool
+    assert stage_installs(planted, "builder", "only-in-builder")
+    assert not stage_installs(planted, "builder", "syft")
+    assert not stage_installs(planted, "missing", "syft")
+
+
+def test_ci_and_non_root_are_built_on_the_stage_that_installs_the_tools() -> None:
+    built_on = {
+        name.lower(): base
+        for base, name in re.findall(
+            r"^FROM\s+(?:--\S+\s+)*(\S+)\s+AS\s+(\S+)\s*$",
+            _DOCKERFILE_TEXT,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    }
+
+    assert built_on["ci"] == _TOOL_STAGE
+    assert built_on["non-root"] == _TOOL_STAGE
+
+
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
 def test_a_release_asset_is_installed_by_the_pinned_tool_installer_and_no_other_is(
     cls,
@@ -1182,9 +1232,14 @@ def test_a_release_asset_is_installed_by_the_pinned_tool_installer_and_no_other_
     key = facets.runtime.tool_versions_key
 
     if facets.image.route is opsf.ImageRoute.RELEASE_ASSET:
-        assert f"install-pinned-tool {facets.image.tool} -b " in _DOCKERFILE_TEXT
+        assert stage_installs(_DOCKERFILE_TEXT, _TOOL_STAGE, facets.image.tool)
     elif facets.image.route is opsf.ImageRoute.DEPENDENCIES_INSTALL and key:
-        assert f"install-pinned-tool {key} -b " not in _DOCKERFILE_TEXT, (
+        installed_in = [
+            stage
+            for stage in dockerfile_stages(_DOCKERFILE_TEXT)
+            if stage_installs(_DOCKERFILE_TEXT, stage, key)
+        ]
+        assert installed_in == [], (
             f"{facets.scanner_name} gets the pinned {key} from dependencies install"
         )
 
