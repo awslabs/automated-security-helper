@@ -3091,9 +3091,11 @@ class ScannerExecutor:
 
         # Every tool is started on a pool worker, where the hold around its start
         # cannot set a disposition, so an ignored SIGINT is set again here, before
-        # the pool starts (subprocess_utils.keep_an_ignored_sigint_ignored). Off
-        # the main thread, as on a workspace's project worker, this does nothing:
-        # the project pool sets it before its workers start.
+        # the pool starts (subprocess_utils.keep_an_ignored_sigint_ignored). Only
+        # the main thread can set one. A workspace's project pool does it before
+        # its workers start; a scan run on any other thread, as the MCP server
+        # runs each one, is not covered: this does nothing there, and in a process
+        # started with SIGINT ignored the tools can start with SIGINT at its default.
         keep_an_ignored_sigint_ignored()
 
         scanner_tasks_map: Dict[str, Any] = {}
