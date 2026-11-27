@@ -17,8 +17,16 @@ and filters, the warning it logs, and the candidates it marks.
 The warning names what the baseline lists that the scan does not run as listed:
 a plugin that does not run, a plugin that runs with other parameters (judged
 against the parameters detect-secrets itself gives the plugin by default, so a
-standard baseline's ``limit: 4.5`` is no difference), and a filter that does not
-apply. A baseline that lists nothing of that kind is reported at INFO.
+standard baseline's ``limit: 4.5`` is no difference), a filter that does not
+apply, and a filter that runs with other parameters. A plugin or a filter the
+baseline lists twice counts as its last entry. A baseline whose plugins and
+filters all run as listed is reported at INFO, and one that lists no plugin and
+no filter is not reported at all.
+
+The warning's advice for keeping a baseline's exclusions is to copy the entries
+of its ``filters_used`` into ``scan_settings.filters_used``. It does not point at
+``global_settings.ignore_paths``, whose entries are globs with a reason that drop
+every scanner's findings under their path.
 """
 
 from __future__ import annotations
@@ -77,6 +85,13 @@ NOT_APPLIED_FILTERS = "filters that do not apply: "
 OTHER_FILTER_PARAMETERS = "filters that run with other parameters: "
 # What the INFO line says of a baseline that lists nothing the scan does not run.
 SAME_AS_THE_RUN = "lists no plugin or filter that the scan does not run as listed"
+# The warning's advice for keeping a baseline's exclusions: a copy of its filters,
+# and what listing a filter does to the defaults.
+HOW_TO_KEEP_EXCLUSIONS = (
+    "copy the entries you rely on from its filters_used into "
+    "scan_settings.filters_used; once any filter is listed there, "
+    "detect-secrets' default filters no longer apply unless you list them too"
+)
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )
@@ -409,8 +424,9 @@ def test_a_baseline_whose_settings_are_not_lists_still_marks_its_candidates(
     """A tree baseline's settings are never applied, so their shape is not a
     reason to drop the baseline: a ``plugins_used`` or ``filters_used`` that is
     a number or a flag leaves the parsed document in place and its ``results``
-    still mark, with no read failure reported. No plugins are named, so the
-    settings block is reached: the value would have been read as a list there."""
+    still mark, with no read failure reported. The settings block does not read
+    a tree baseline's settings, so only the warning reads the value, and it
+    takes a list only when it is one."""
     with caplog.at_level(logging.WARNING):
         scanner = _scanner_over_a_marking_baseline(
             tmp_path, monkeypatch, settings={key: value}
@@ -432,11 +448,12 @@ def test_a_baseline_whose_settings_are_not_lists_still_marks_its_candidates(
 def test_a_baseline_whose_settings_hold_entries_that_are_not_mappings_still_marks(
     tmp_path, monkeypatch, caplog, key, value
 ):
-    """A list whose entries are not mappings is still a list: the entry is
-    skipped, the constructor returns, no read failure is reported and the
+    """A list whose entries are not mappings is still a list: the warning skips
+    the entry, the constructor returns, no read failure is reported and the
     baseline's ``results`` still mark. The repository chooses these entries, so
-    a raise here would let it keep the scanner out of the run. No plugins are
-    named, so the settings block is reached."""
+    a raise here would let it keep the scanner out of the run. The settings
+    block does not read a tree baseline's settings, so only the warning meets
+    the entries."""
     with caplog.at_level(logging.WARNING):
         scanner = _scanner_over_a_marking_baseline(
             tmp_path, monkeypatch, settings={key: value}
@@ -1022,6 +1039,27 @@ def test_the_warning_says_what_the_scan_runs_when_the_configuration_names_plugin
         "Base64HighEntropyString",
         "KeywordDetector",
     ]
+
+
+def test_the_warning_advises_copying_filters_used_and_not_global_ignore_paths(
+    tmp_path, monkeypatch, caplog
+):
+    """The advice for keeping a baseline's exclusions is a copy of its filters,
+    the same filters with the same patterns, and it says what listing a filter
+    does to detect-secrets' default filters. It does not send the exclusions to
+    ``global_settings.ignore_paths``: those entries are globs with a reason, and
+    each drops the findings of every scanner under its path, which is more than
+    the baseline's regular expressions did for detect-secrets alone."""
+    (tmp_path / ".secrets.baseline").write_text(
+        json.dumps(_baseline_document()), encoding="utf-8"
+    )
+
+    with caplog.at_level(logging.WARNING):
+        _scanner(tmp_path, monkeypatch)
+
+    (warning,) = _not_applied_warnings(caplog)
+    assert HOW_TO_KEEP_EXCLUSIONS in warning
+    assert "ignore_paths" not in warning
 
 
 def test_the_warning_is_text_that_markup_does_not_read(tmp_path, monkeypatch, caplog):
