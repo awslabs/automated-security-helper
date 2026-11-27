@@ -168,9 +168,6 @@ global_settings:
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: tests/unit/interactions/test_a_leftover_is_removed_only_through_its_own_runtime.py
       reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
-    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
-      path: tests/unit/utils/test_ash_install.py
-      reason: "False positive. A URL with a made-up user name and password, used to check that ASH refuses or redacts credentials in a URL."
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/cdk-constructs/test/git-ref.test.ts
       reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
@@ -199,9 +196,6 @@ global_settings:
       path: tests/unit/plugin_modules/ash_builtin/test_cfn_nag_public_policy_rules.py
       reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
-      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_hatch_build_records_commit.py
       reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
@@ -215,9 +209,6 @@ global_settings:
       reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_a_scan_set_is_reused_only_for_its_own_tree.py
-      reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: tests/unit/utils/test_ash_install.py
       reason: "False positive. Expected ids and digests in a test (commit ids, hashes, generated ids). A long hex string is what the detector looks for, and none is a credential."
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_base_ref.py
@@ -635,11 +626,6 @@ global_settings:
         The RUN constant holds the sequential 32-hex placeholder run id the
         outcome-record fixture uses.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
-      reason: >-
-        _COMMIT = "0123456789abcdef0123456789abcdef01234567", the placeholder
-        commit id in the detect-secrets scanner's own behavior tests.
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_evidence.py
       reason: >-
         The HEAD constant holds the sequential 40-hex placeholder head commit
@@ -677,11 +663,6 @@ global_settings:
         The sequential placeholder commit id, once whole and once truncated to 39
         hex digits as the negative control of the pin check under test.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: tests/unit/utils/test_ash_install.py
-      reason: >-
-        COMMIT = "0123456789abcdef0123456789abcdef01234567", the placeholder
-        commit id in the install fixtures.
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_base_ref.py
       reason: >-
         The sequential 40-hex placeholder commit id, the "a full commit id"
@@ -718,24 +699,6 @@ global_settings:
         The flagged value is an adversarial fixture ssh URL, on a reserved example
         domain, built to prove the host check is not confused by an encoded slash
         in the userinfo. Not a credential.
-    - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
-      path: tests/unit/utils/test_ash_install.py
-      reason: >-
-        The flagged value is a fixture https URL with a placeholder user and token
-        in its userinfo: the input of the URL-redaction parametrization. The test
-        asserts the userinfo is STRIPPED from the URL, so the literal exists to
-        prove redaction.
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: automated_security_helper/utils/scanner_names.py
-      reason: >-
-        The match is '"detect-secrets": "SECRETS"' in the scanner-name-to-tool-type
-        table: a scanner NAME mapped to the classification label SECRETS. Names,
-        not values.
-    - rule_id: SECRET-SECRET-KEYWORD
-      path: automated_security_helper/utils/scanner_tool_types.py
-      reason: >-
-        SECRETS_TOOL_TYPE = "SECRETS" is the tool-type classification label the
-        scanner inventory uses. A category name, not a value.
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/cdk/test/ash-container-scripts.test.ts
       reason: >-
@@ -981,13 +944,6 @@ global_settings:
         "/tmp" appears in PRUNED, the tuple of mount points the in-container
         permission walk skips. A list of paths excluded from a find, not a
         writable temp path this process uses.
-    - rule_id: B108
-      path: tests/unit/deploy/test_deploy_pipeline_config_source.py
-      reason: >-
-        CDK_CONFIG_PATH = "/tmp/ash-config/.ash.yaml" is the value the CDK
-        projects give ASH_CONFIG inside the container; the comment above it
-        records that each test moves it into its own directory, so no shared /tmp
-        file is written by the tests.
     - rule_id: B108
       path: tests/unit/test_container_permissions_probe_covers_the_image.py
       reason: >-
