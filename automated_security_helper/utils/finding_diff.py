@@ -362,6 +362,9 @@ SIDE_SPEC = FrameSpec(
         "registry reads on the host; the diff never joins on it",
         "requires_exact_identity_match": "a gating policy flag the pair "
         "consumer applies on the host (see match_findings' docstring)",
+        "is_finding": "a reading of result_kind, which is not a column here; "
+        "unique_findings leaves the rows that state no finding out before a side "
+        "is built",
     },
 )
 
