@@ -32,6 +32,7 @@ from automated_security_helper.core.constants import (
     ASH_DEFAULT_CONFIG_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
@@ -45,6 +46,13 @@ LEGACY_LOCATIONS = [
     for location in (name, f".ash/{name}")
     if location != ASH_CANONICAL_CONFIG_FILE_NAME
 ] + list(ASH_RC_FILE_NAMES)
+
+# The legacy locations written in TOML, and the rest. The canonical file is read
+# as YAML, so a TOML file cannot be moved there.
+TOML_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".toml")]
+OTHER_LEGACY = [
+    location for location in LEGACY_LOCATIONS if location not in TOML_LEGACY
+]
 
 # The ashrc names include TOML and JSON files, so each location is written in
 # the language its name says.
@@ -96,6 +104,12 @@ def test_every_legacy_location_is_listed():
     assert ".ash.yml" in LEGACY_LOCATIONS
     assert ".ashrc.yaml" in LEGACY_LOCATIONS
     assert ASH_CANONICAL_CONFIG_FILE_NAME not in LEGACY_LOCATIONS
+
+
+def test_the_toml_legacy_locations_are_there_to_test():
+    """The parametrized tests below have cases, and the two lists split the whole."""
+    assert TOML_LEGACY == [".ashrc.toml", "ashrc.toml"]
+    assert sorted(TOML_LEGACY + OTHER_LEGACY) == sorted(LEGACY_LOCATIONS)
 
 
 class TestCanonicalIsFirst:
@@ -198,3 +212,40 @@ class TestWarnings:
         [warning] = discovery_warnings(discover_config_source(tmp_path))
         # A file under .ash/ is moved to the root above .ash/, not into .ash/.
         assert (tmp_path / ".ash.yaml").as_posix() in warning
+
+    @pytest.mark.parametrize("legacy", TOML_LEGACY)
+    def test_a_toml_legacy_file_is_to_be_rewritten_as_yaml_not_moved(
+        self, tmp_path, legacy
+    ):
+        _write(tmp_path, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(tmp_path))
+        canonical = (tmp_path / ".ash.yaml").as_posix()
+        assert f"rewrite this file as YAML in {canonical}" in warning, warning
+        assert "renaming the TOML file is not enough" in warning, warning
+        assert "move this file to" not in warning, warning
+
+    @pytest.mark.parametrize("legacy", OTHER_LEGACY)
+    def test_a_yaml_or_json_legacy_file_keeps_the_advice_to_move_it(
+        self, tmp_path, legacy
+    ):
+        _write(tmp_path, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(tmp_path))
+        canonical = (tmp_path / ".ash.yaml").as_posix()
+        assert warning.endswith(f"move this file to {canonical}."), warning
+
+
+class TestAMovedTomlFileIsRefused:
+    """Why the advice above is not "rename it": `.ash.yaml` is parsed as YAML."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            'project_name = "x"\n\n[global_settings]\nseverity_threshold = "HIGH"\n',
+            '[global_settings]\nseverity_threshold = "HIGH"\n',
+        ],
+        ids=["key_first", "table_first"],
+    )
+    def test_toml_text_in_the_canonical_file_is_refused(self, tmp_path, text):
+        (tmp_path / ".ash.yaml").write_text(text, encoding="utf-8")
+        with pytest.raises(ASHConfigValidationError):
+            resolve_config(source_dir=tmp_path)

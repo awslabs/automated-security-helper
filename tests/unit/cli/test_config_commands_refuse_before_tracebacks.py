@@ -33,6 +33,7 @@ from automated_security_helper.config.config_linter import (
     LintResult,
     LintSeverity,
 )
+from automated_security_helper.core.constants import ASH_RC_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from tests.utils.wizard_script import script_wizard
 
@@ -122,6 +123,49 @@ def test_init_still_refuses_a_new_file_beside_the_one_ash_reads(tmp_path, monkey
 
     assert result.exit_code == 1, result.output
     assert "ASH already reads its configuration from" in result.output, result.output
+
+
+TOML_RC_NAMES = [name for name in ASH_RC_FILE_NAMES if name.endswith(".toml")]
+
+
+def test_the_toml_rc_names_are_there_to_test():
+    """The parametrized test below has cases."""
+    assert TOML_RC_NAMES == [".ashrc.toml", "ashrc.toml"]
+
+
+@pytest.mark.parametrize("name", TOML_RC_NAMES)
+def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
+    tmp_path, monkeypatch, name
+):
+    """`.ash.yaml` is read as YAML, so the advice to move a TOML file there sent
+    the user to a file every later scan refused with exit 3."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / name).write_text('project_name = "old"\n', encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert "as YAML in .ash.yaml and delete the TOML file" in result.output, (
+        result.output
+    )
+    assert "renaming the TOML file is not enough" in result.output, result.output
+    assert "Move " not in result.output, result.output
+    assert not (tmp_path / ".ash.yaml").exists()
+
+
+def test_init_beside_a_pyproject_table_keeps_its_own_advice(tmp_path, monkeypatch):
+    """A pyproject.toml table is a TOML file too, and is edited where it is."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ash]\nproject_name = "d"\n', encoding="utf-8"
+    )
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert "or pass --config to write the new file somewhere else" in result.output
+    assert "as YAML" not in result.output, result.output
+    assert "Move " not in result.output, result.output
 
 
 def test_init_writes_the_config_when_dot_ash_is_a_regular_file(tmp_path):
