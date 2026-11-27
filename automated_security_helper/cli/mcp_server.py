@@ -2975,7 +2975,7 @@ async def set_source_zip_finalize(
     '..' components, a NUL in the name, or symlinks are refused before anything
     is extracted, and so is a zip with an encrypted member. On a Windows or macOS
     server, two members whose names differ only in letter case or Unicode
-    normalization are refused too, because those systems keep them as one path.
+    normalization are refused too: ASH reads them as one path.
     A zip the server cannot read is refused as well: one that uses a zip version
     or compression method the server does not support, or has a damaged member.
     The archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
