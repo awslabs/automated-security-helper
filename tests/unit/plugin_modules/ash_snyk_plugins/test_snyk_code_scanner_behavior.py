@@ -2563,8 +2563,9 @@ def test_snyk_starts_in_the_tree_and_warns_when_no_private_directory_is_outside_
     assert_new_private_empty_directory(run)
     assert context.source_dir.resolve() in cwd.parents
     assert temp.resolve() in cwd.parents
-    (warning,) = warnings_naming(caplog, run["cwd"].parent)
-    assert "inside the scanned tree" in warning, warning
+    made = run["cwd"].parent
+    (warning,) = warnings_naming(caplog, made)
+    assert f"{made.as_posix()}, inside the scanned tree" in warning, warning
     for passed_over in (temp, context.output_dir):
         entry = f"{passed_over.resolve().as_posix()}: inside the scanned tree"
         assert entry in warning, warning
