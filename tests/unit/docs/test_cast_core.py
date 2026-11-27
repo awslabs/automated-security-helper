@@ -9,7 +9,9 @@ every rule it holds is checked here on planted input:
   know, and a writer whose output reads back equal;
 * the storyboard loader: schema 1, unknown keys refused, scene ids unique, scene starts
   as running sums, a 30 to 60 s total, caption copy rules counted by the loader's own
-  counter, and a read-only command allowlist limited to paths inside the project;
+  counter, a read-only command allowlist limited to paths inside the project, and the
+  YAML that PyYAML would resolve silently (anchors, aliases, merge keys and a key given
+  twice in one mapping) refused by file, line and name;
 * the retimer: the same input gives the same events, the scene totals are the
   storyboard's whatever the machine speed, output is shortened and never stretched, and
   a scene that does not fit its duration is refused;
@@ -605,6 +607,148 @@ def test_a_missing_or_malformed_storyboard_file_is_refused_by_name(cast, tmp_pat
 def test_a_storyboard_must_be_a_mapping(cast, bad):
     with pytest.raises(cast.StoryboardError, match="must be a mapping"):
         _parse(cast, bad)
+
+
+# PyYAML accepts anchors, aliases and merge keys, and keeps the last of a key given
+# twice. Schema 1 has no use for the first three, and the fourth would replace a caption
+# written twice in a scene without a word, so the loader refuses all four, by file, line
+# and name, before the schema sees the data.
+
+BOARD_NAME = "board.cast.yaml"
+COMMITTED_STORYBOARD = (
+    SCRIPTS.parent / "docs" / "journeys" / "getting-started-local.cast.yaml"
+)
+VERSION_CAPTION = 'caption: "Check the install"'
+INSTALL_CAPTION = 'caption: "Install from a release tag"'
+
+
+def _board(tmp_path, *edits):
+    """The design storyboard with each (old, new) edit applied, written to a file.
+
+    Returns the path and the text. An edit must match exactly once, so a mistake in the
+    test fails here instead of planting nothing.
+    """
+    text = DESIGN_STORYBOARD
+    for old, new in edits:
+        assert text.count(old) == 1, f"the planted edit {old!r} must match once"
+        text = text.replace(old, new)
+    path = tmp_path / BOARD_NAME
+    path.write_text(text, encoding="utf-8")
+    return path, text
+
+
+def _lines(text, needle):
+    """The 1-based numbers of the lines of ``text`` that hold ``needle``."""
+    return [n for n, line in enumerate(text.splitlines(), 1) if needle in line]
+
+
+def _refused(cast, path):
+    """The message of the StoryboardError that loading ``path`` raises."""
+    with pytest.raises(cast.StoryboardError) as caught:
+        cast.load_storyboard(path, JOURNEY_IDS)
+    return str(caught.value)
+
+
+def test_a_yaml_anchor_is_refused_by_file_line_and_name(cast, tmp_path):
+    anchored = VERSION_CAPTION.replace("caption: ", "caption: &cap ")
+    path, text = _board(tmp_path, (VERSION_CAPTION, anchored))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '&cap')[0]}: ")
+    assert "the YAML anchor &cap is not part of storyboard schema 1" in message
+
+
+def test_a_yaml_alias_is_refused_by_file_line_and_name(cast, tmp_path):
+    path, text = _board(tmp_path, (VERSION_CAPTION, "caption: *cap"))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '*cap')[0]}: ")
+    assert "the YAML alias *cap is not part of storyboard schema 1" in message
+
+
+def test_an_anchor_and_its_alias_are_refused_at_the_anchor(cast, tmp_path):
+    """The way anchors are used: one scene's caption reused in another scene."""
+    path, text = _board(
+        tmp_path,
+        (INSTALL_CAPTION, INSTALL_CAPTION.replace("caption: ", "caption: &cap ")),
+        (VERSION_CAPTION, "caption: *cap"),
+    )
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '&cap')[0]}: ")
+    assert "the YAML anchor &cap" in message
+
+
+def test_a_yaml_merge_key_is_refused_by_file_line_and_key(cast, tmp_path):
+    merged = "{id: version, <<: {" + VERSION_CAPTION + "}"
+    path, text = _board(tmp_path, ("{id: version, " + VERSION_CAPTION, merged))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '<<')[0]}: ")
+    assert "the YAML merge key '<<' is not part of storyboard schema 1" in message
+
+
+def test_a_caption_given_twice_in_a_scene_is_refused(cast, tmp_path):
+    """The later caption would replace the first, so the loader names both lines."""
+    again = 'caption: "Check it again"'
+    path, text = _board(tmp_path, ("block: version, ", f"block: version, {again}, "))
+    message = _refused(cast, path)
+    first, second = _lines(text, VERSION_CAPTION)[0], _lines(text, again)[0]
+    assert second == first + 1
+    assert message.startswith(f"{path}: line {second}: ")
+    assert "the key 'caption' is given twice in scenes[1]" in message
+    assert f"(first on line {first})" in message
+
+
+def test_a_repeated_top_level_key_is_refused_even_when_equal(cast, tmp_path):
+    repeated = "poster_scene: scan\n"
+    path, text = _board(tmp_path, (repeated, repeated * 2))
+    message = _refused(cast, path)
+    first, second = _lines(text, "poster_scene:")
+    assert message.startswith(f"{path}: line {second}: ")
+    assert "the key 'poster_scene' is given twice at the top level" in message
+    assert f"(first on line {first})" in message
+
+
+def test_a_repeated_key_in_a_nested_mapping_is_refused(cast, tmp_path):
+    path, text = _board(tmp_path, ("rows: 30,", "rows: 30, rows: 24,"))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, 'rows: 24')[0]}: ")
+    assert "the key 'rows' is given twice in terminal" in message
+
+
+def test_text_that_only_looks_like_a_yaml_feature_is_data(cast, tmp_path):
+    """Must-not-flag: a quoted ``&x``, ``*x`` or ``<<``, an ``&`` or ``*`` inside a
+    plain word, and a comment that names all three are data and comments, not features.
+    """
+    shown = 'expect_screen: ["awslabs/automated-security-helper v"]'
+    entries = [
+        '"awslabs/automated-security-helper v"',
+        '"&bandit"',
+        "'*bandit'",
+        '"<<"',
+        "'<<'",
+        "x&y",
+        "2*3",
+    ]
+    path, _text = _board(
+        tmp_path,
+        (shown, "expect_screen: [" + ", ".join(entries) + "]"),
+        ("schema: 1\n", "# a comment may say &a, *a and <<:\nschema: 1\n"),
+    )
+    board = cast.load_storyboard(path, JOURNEY_IDS)
+    assert board.scene("version").expect_screen == (
+        "awslabs/automated-security-helper v",
+        "&bandit",
+        "*bandit",
+        "<<",
+        "<<",
+        "x&y",
+        "2*3",
+    )
+
+
+def test_the_committed_storyboard_loads_through_the_strict_loader(cast):
+    """Must-not-flag: the real file has no anchor, alias, merge key or repeated key."""
+    board = cast.load_storyboard(COMMITTED_STORYBOARD, JOURNEY_IDS)
+    assert board.journey == "docs/journeys/getting-started-local.journey.yaml"
+    assert board.scenes
 
 
 @pytest.mark.parametrize(
