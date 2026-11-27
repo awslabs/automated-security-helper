@@ -3871,12 +3871,12 @@ global_settings:
     # The sdist-lock harvester writes a provenance manifest beside each lockfile it
     # extracts, and detect-secrets' hex detector reports the sdist's sha256 digest
     # in it. That digest is the pin uv.lock carries, a content hash and not a
-    # secret. A secret rule may not be suppressed by a directory glob
-    # (tests/unit/config/test_no_directory_glob_secret_suppressions.py), so each
+    # secret. A secret rule may not be suppressed by a directory glob, so each
     # manifest the self-scan reports is named in its own entries, each pinned to the
-    # digest line. HarvestManifest.to_json writes the digest on line 6, and
-    # tests/unit/config/test_harvest_manifest_suppressions_pin_the_digest_line.py
-    # fails and names the line to use if that moves.
+    # digest line. HarvestManifest.to_json writes the digest on line 6. The test
+    # file that refuses such a glob
+    # (tests/unit/config/test_no_directory_glob_secret_suppressions.py) checks
+    # these entries: it fails and names the line to use if that moves.
     #
     # A manifest is reported by the path the scan that wrote it gives it, and a
     # glob-free path matches only itself, so each package version has two entries,
@@ -3892,12 +3892,12 @@ global_settings:
     #     its absolute path (_finding_uri in the detect-secrets scanner): only the
     #     source directory is stripped from a reported path (_normalize_sarif_uri in
     #     automated_security_helper/utils/sarif_utils.py).
-    # That test also fails when a manifest has an entry for one spelling and not the
-    # other. `ash config validate` and `ash config lint` warn that each /out path is
-    # absolute and matches nothing. It does match: it is the path the container scan
-    # reports, so the warning is expected (validate exits 0 with it) and the entries
-    # stay. An output directory other than these two is not covered: the manual
-    # pre-commit hook writes to .ash/ash_output_precommit_local.
+    # That test file also fails when a manifest has an entry for one spelling and not
+    # the other. `ash config validate` and `ash config lint` warn that each /out path
+    # is absolute and matches nothing. It does match: it is the path the container
+    # scan reports, so the warning is expected (validate exits 0 with it) and the
+    # entries stay. An output directory other than these two is not covered: the
+    # manual pre-commit hook writes to .ash/ash_output_precommit_local.
     #
     # Taking a new version of a package named here, or a newly harvested package:
     # the required self-scan reads this file from the pull request's base commit,
