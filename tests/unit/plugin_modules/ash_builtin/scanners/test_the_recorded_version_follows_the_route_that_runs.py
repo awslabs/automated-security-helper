@@ -299,6 +299,18 @@ RESOLVER_SCANNERS = pytest.mark.parametrize(
     ids=["checkov", "cfn-lint"],
 )
 
+#: uv named the ways the uv the resolver probes can be found: by its path, and as a
+#: Windows executable in any letter case.
+UV_NAMED_BY_PATH = pytest.mark.parametrize(
+    "uv",
+    ["/opt/uv/bin/uv", "C:\\Users\\me\\.local\\bin\\uv.exe", "C:/tools/UV.EXE"],
+    ids=["posix-path", "windows-exe", "upper-case-exe"],
+)
+
+
+def _never_verified(*args, **kwargs):
+    pytest.fail("a uv answer is not verified as the tool")
+
 
 @RESOLVER_SCANNERS
 def test_a_resolved_binary_after_a_failed_install_leaves_no_probe_version(
@@ -365,20 +377,97 @@ def test_a_binary_accepted_on_path_records_its_own_answer_over_the_probes(
 
 
 @RESOLVER_SCANNERS
-def test_accepting_the_uv_form_takes_the_old_version_with_the_route(
-    tmp_path, make, module, tool
-):
+def test_accepting_the_uv_form_keeps_the_uv_routes_record(tmp_path, make, module, tool):
+    """``_accept_binary_on_path`` is called only from the uv-absent branch of
+    ``validate_plugin_dependencies``, entered only while ``use_uv_tool`` is True:
+    ``_validate_uv_tool_availability`` answers True at once for a scanner off uv.
+    A uv answer there leaves the uv route as it is, the version the uv probe
+    recorded and a probe still owed included."""
     scanner = make(tmp_path)
-    scanner.use_uv_tool = False
-    scanner._deferred_tool_version_probe = None
-    scanner.tool_version = "1.2.3"
+    scanner.use_uv_tool = True
+    scanner.tool_version = "3.4.5"
+    scanner._deferred_tool_version_probe = (tool, None)
 
-    assert scanner._accept_binary_on_path(["uv", "tool", "run", tool]) is True
+    with patch(VERIFY, side_effect=_never_verified):
+        assert scanner._accept_binary_on_path(["uv", "tool", "run", tool]) is True
 
     assert scanner.use_uv_tool is True
-    assert scanner.tool_version is None
-    assert scanner._deferred_tool_version_probe is not None
-    assert scanner._deferred_tool_version_probe[0] == tool
+    assert scanner.tool_version == "3.4.5"
+    assert scanner._deferred_tool_version_probe == (tool, None)
+    assert scanner.dependencies_satisfied is True
+
+
+@RESOLVER_SCANNERS
+@UV_NAMED_BY_PATH
+@pytest.mark.parametrize(
+    ("version", "owed"),
+    [("9.9.9", False), (None, True)],
+    ids=["probe-answered", "probe-owed"],
+)
+def test_a_uv_answer_named_by_path_after_a_failed_install_keeps_the_uv_record(
+    tmp_path, monkeypatch, make, module, tool, uv, version, owed
+):
+    """After uv's install of the tool failed, a resolver answer that names uv by
+    its path is still the uv route: the version the uv probe recorded and a probe
+    still owed both stay, so the SARIF step names the release uv runs.
+
+    Fails at the base: the answer was compared with the bare word ``uv``, so the
+    route left uv and both records were cleared."""
+    scanner = make(tmp_path)
+    scanner.use_uv_tool = True
+    scanner.tool_version = version
+    scanner._deferred_tool_version_probe = (tool, None) if owed else None
+    cls = type(scanner)
+    monkeypatch.setattr(cls, "resolve_deferred_tool_version", lambda self: None)
+    monkeypatch.setattr(cls, "_validate_uv_tool_availability", lambda self: True)
+    monkeypatch.setattr(
+        cls, "_get_tool_installation_info", lambda self: {"available": False}
+    )
+    monkeypatch.setattr(cls, "_install_uv_tool", lambda self, **kwargs: False)
+    monkeypatch.setattr(
+        module,
+        "get_uv_tool_command",
+        lambda *args, **kwargs: [uv, "tool", "run", tool],
+    )
+
+    with patch(VERIFY, side_effect=_never_verified):
+        assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version == version
+    assert scanner._deferred_tool_version_probe == ((tool, None) if owed else None)
+    assert scanner.dependencies_satisfied is True
+
+
+@RESOLVER_SCANNERS
+@UV_NAMED_BY_PATH
+def test_a_uv_answer_named_by_path_with_uv_unavailable_is_not_verified_as_the_tool(
+    tmp_path, monkeypatch, make, module, tool, uv
+):
+    """The runner reported uv unavailable while the resolver's own probe ran uv.
+    An answer that names uv by its path is the uv route there too: it is not
+    verified as the tool, and the uv route keeps the version the uv probe
+    recorded.
+
+    Fails at the base: the uv path was handed to the verifier as the tool."""
+    scanner = make(tmp_path)
+    scanner.use_uv_tool = True
+    scanner.tool_version = "9.9.9"
+    cls = type(scanner)
+    monkeypatch.setattr(cls, "resolve_deferred_tool_version", lambda self: None)
+    monkeypatch.setattr(cls, "_validate_uv_tool_availability", lambda self: False)
+    monkeypatch.setattr(
+        module,
+        "get_uv_tool_command",
+        lambda *args, **kwargs: [uv, "tool", "run", tool],
+    )
+
+    with patch(VERIFY, side_effect=_never_verified):
+        assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.tool_version == "9.9.9"
+    assert scanner.dependencies_satisfied is True
 
 
 class _NoUvRunner:

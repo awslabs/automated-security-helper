@@ -14,7 +14,8 @@ through uv so the verified copy never runs.
 At the bytes today:
 
 * checkov (checkov_scanner.py) and cfn-lint (cfn_lint_scanner.py) carry the
-  flip (``use_uv_tool = resolved[:1] == ["uv"]``) and consult the record;
+  flip (``uses_uv = is_uv_form(resolved)``, then ``use_uv_tool = uses_uv``) and
+  consult the record;
 * bandit (bandit_scanner.py) routes its fallback through
   ``_take_resolved_command`` -- a uv answer keeps the route, so no flip, but
   the cold probe is paid -- and consults the record;
@@ -56,7 +57,7 @@ HONORING = (BanditScanner, CheckovScanner, CfnLintScanner)
 
 #: The spellings of the fallback shape: a route re-pointed from the resolver's
 #: answer, or bandit's route-keeping wrapper around the same cold probe.
-_FALLBACK_MARKS = ('use_uv_tool = resolved[:1] == ["uv"]', "_take_resolved_command")
+_FALLBACK_MARKS = ("uses_uv = is_uv_form(resolved)", "_take_resolved_command")
 
 
 def test_every_honoring_scanner_consults_the_record():
