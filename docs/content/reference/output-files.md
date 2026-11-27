@@ -53,7 +53,7 @@ with every built-in scanner installed:
 | `ash_aggregated_results.json` | the scan engine | Every result of the scan in one document. See [below](#aggregated-results). |
 | `ash-ignore-report.txt` | the scan set step | The ignore rules that shaped the scan set: the text of each `.gitignore` and `.ignore` ASH found, and ASH's built-in rules (`.git` and `**/cdk.out/asset.*` left out, `**/*.template.json` kept). |
 | `ash-scan-set-files-list.txt` | the scan set step | The files ASH selected, one absolute path per line. Scanners that walk the source directory themselves can read more; see [Coverage](coverage.md#what-decides-the-files). |
-| `analysis/` | `ash scan --inspect` | The SARIF field analysis. Empty otherwise. |
+| `analysis/` | `ash scan fs --inspect` | The SARIF field analysis. Empty otherwise. |
 | `converted/` | the converters | `archive/` holds a directory per `.zip`, `.tar`, or `.gz` file with the members ASH extracted; `jupyter/` holds each notebook converted to a script, named after the notebook's path and ending in `-converted.py` for a Python notebook (see [Converted files](coverage.md#converted-files)). Empty when there was nothing to convert. |
 | `reports/` | the reporters | One file per enabled reporter, named `ash.<extension>`. See [below](#reports). |
 | `scanners/<name>/<target>/` | each scanner | `ASH.ScanResults.json` and the tool's own output for one target: `source` for the source directory, `converted` for `converted/`. See [below](#per-scanner-results). |
@@ -86,14 +86,14 @@ rewritten. For example, after a scan of the sample project:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --scanners detect-secrets
+ash scan fs --only-scanners detect-secrets
 ```
 
 a scan that names a scanner ASH does not have is refused:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --scanners not-a-scanner
+ash scan fs --only-scanners not-a-scanner
 ```
 
 and the first scan's results are still there:
@@ -115,7 +115,7 @@ results were put back, `get_scan_progress` returns `output_holds_previous_result
 and the tools that read results from the directory, such as `get_scan_results`, answer
 that the scan is not complete.
 
-`ash scan --use-existing` runs only the report phase: it writes `reports/` again from the
+`ash scan fs --use-existing` runs only the report phase: it writes `reports/` again from the
 `ash_aggregated_results.json` already in the output directory, rewrites
 `metadata.summary_stats` in that file, leaves `scanners/` and the other files in place,
 and exits with the verdict of the stored results.
@@ -139,7 +139,7 @@ It also refuses an output directory below the source directory whose real path, 
 every link resolved, is outside the source directory.
 
 The check runs before anything is written or deleted, in every run mode and whatever
-the sandbox mode, and also in `ash report` and `ash merge`. The command exits 3:
+the sandbox mode, and also in `ash results report` and `ash results merge`. The command exits 3:
 
 ```text
 ERROR (3) The output directory /work/out-link is a symlink. ASH does not write to, clear or
@@ -167,13 +167,13 @@ Remove the link and run ASH again.
 ```
 
 This applies to scans in every run mode, including `--use-existing` and workspace scans,
-and to `ash merge`. `ash merge` prints the same text after `Refusing to write reports:`.
-`ash report` prints its report instead of writing it, and refuses a link only at a file
+and to `ash results merge`. `ash results merge` prints the same text after `Refusing to write reports:`.
+`ash results report` prints its report instead of writing it, and refuses a link only at a file
 the reporter writes beside it.
 
 ## `ash_aggregated_results.json` {#aggregated-results}
 
-The scan engine writes this file, not a reporter, and every reporter and `ash report`
+The scan engine writes this file, not a reporter, and every reporter and `ash results report`
 reads it. Its JSON schema is
 [`AshAggregatedResults.json`](https://github.com/awslabs/automated-security-helper/blob/main/automated_security_helper/schemas/AshAggregatedResults.json).
 
@@ -200,7 +200,7 @@ lines is `app.py|B602|*|*`. Entries that set package or symbol fields have more 
 `tool_version` (the ASH version), `summary_stats`, `validation_summary`,
 `execution_discrepancy_report`, `shard` (set by `--shard-index`), `expected_scanners`,
 `requested_scanners_not_run` (the names in `--scanners` or `ASH_SCANNERS` that matched no
-scanner, or `null` when every name matched or no list was given; `ash merge` records the
+scanner, or `null` when every name matched or no list was given; `ash results merge` records the
 names of all the shards), `plugin_load_errors` (plugin groups that failed to import), and
 `changed_files_only`
 (`true` when `--changed-files-only` filtered the findings, `false` on a full scan,
@@ -208,7 +208,7 @@ including one that fell back to a full scan).
 
 `report_id` is unique to each scan: `ASH-`, the scan's start as a UTC date and time, and
 12 random hexadecimal digits, such as `ASH-20261011180835-deff7bedfe39`. Reports rendered
-again from saved results, by `ash report` or `--use-existing`, keep it. `ash merge` gives
+again from saved results, by `ash results report` or `--use-existing`, keep it. `ash results merge` gives
 the merged results an id of the same shape, computed from the shards' ids, so merging the
 same shards again gives the same id. A workspace scan's combined results have an id of
 the form `ASH-WORKSPACE-<workspace file name>-<date and time>-<hex digits>`.
@@ -228,7 +228,7 @@ Each `scanner_results` row has:
 | `severity_counts`, `finding_count`, `actionable_finding_count`, `suppressed_finding_count` | The counts the summary table shows. |
 | `duration` | How long the scanner ran, in seconds. |
 | `dependencies_satisfied` | `false` on a `MISSING` row. |
-| `excluded` | `true` when the run left the scanner out: `--scanners`, `--exclude-scanners`, `enabled: false`, `--python-only`, the shard split, or a platform it does not support. |
+| `excluded` | `true` when the run left the scanner out: `--only-scanners`, `--exclude-scanners`, `enabled: false`, `--python-only`, the shard split, or a platform it does not support. |
 | `exit_code` | The tool's exit code, the highest over the targets it ran on, or `null` when no tool ran: a `MISSING` or excluded scanner, one that had nothing to scan, or one that started no tool for its targets. |
 | `missing_reason` | On a `MISSING` row, why: the tool that was not found and where ASH looked, what the scanner's own dependency check reported, that the tool was found only inside the scanned directory, which ASH does not run unless you allow it (see [Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory)), or that the scanner could not be sandboxed. `null` otherwise. |
 | `skipped_reason` | On a `SKIPPED` row, why: the option that left it out, such as `not named by --scanners`, or what it had nothing to scan, such as `no CloudFormation template in the scanned files`. `null` otherwise. |
@@ -310,7 +310,7 @@ scan of the sample project:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --scanners detect-secrets --no-progress
+ash scan fs --only-scanners detect-secrets --no-progress
 ```
 
 ```python

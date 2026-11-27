@@ -1951,7 +1951,10 @@ def test_a_built_image_job_with_a_matrix_prints_once_per_entry():
                 ),
             )
         ],
-        [("      ash scan --mode local", "      echo scan --mode local")],
+        # The page pins a release and spells the scan as that release reads it
+        # (scripts/version_template_manager.py spellings_for_release), so the change
+        # is to the command word only.
+        [("      ash scan ", "      echo scan ")],
         [
             ("  script:\n    - ash_exit=0\n    - >-\n", "  script: >-\n"),
             ('    - echo "$ash_exit" > ash-exit-code.txt\n', ""),
@@ -3161,9 +3164,10 @@ def test_a_scan_workflow_uv_call_with_another_source_is_refused(run, named):
     assert named in message and UV_CALL_REFUSAL in message, message
 
 
-@pytest.mark.parametrize("option,expected", [("--from", 7), ("--with", 5)])
+@pytest.mark.parametrize("option,expected", [("--from", 8), ("--with", 5)])
 def test_each_uv_call_of_the_real_scan_workflow_is_read(option, expected):
-    """The control for the rule above: the real workflow's seven uvx calls and five
+    """The control for the rule above: the real workflow's eight uvx calls (the Run
+    ASH step's `ash scan fs --help` question to the ASH it installed is one) and five
     uv run calls each pass it, and each is refused once its source names a
     release."""
     rewrite_called = _api("rewrite", "rewrite_called_workflow")

@@ -98,7 +98,7 @@ scanners:
 
 ```bash
 # Example command line usage
-ash scan --ash-plugin-modules my_plugin
+ash scan fs --ash-plugin-modules my_plugin
 ```
 ````
 

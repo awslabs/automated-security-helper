@@ -4,7 +4,7 @@ ASH runs a set of third-party security scanners over one directory, collects wha
 
 ## Phases
 
-A scan runs up to three phases, always in this order: convert, scan, and report. `--phases` runs a subset of them, and `ash report` renders reports again from an existing results file without scanning.
+A scan runs up to three phases, always in this order: convert, scan, and report. `--phases` runs a subset of them, and `ash results report` renders reports again from an existing results file without scanning.
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
     report -.-> inspect[Inspect phase, optional<br/>analysis/]
 ```
 
-The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it with `ash scan --inspect`. Naming `inspect` in `--phases` replaces the default phase list, so include the other phases there as well. It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
+The dotted arrow marks the optional inspect phase, which runs after the report phase only when you ask for it with `ash scan fs --inspect`. Naming `inspect` in `--phases` replaces the default phase list, so include the other phases there as well. It analyzes the SARIF fields of the finished scan and writes the result to `analysis/` in the output directory. It does not scan anything.
 
 In the convert phase, converters turn files that scanners cannot read into files they can. Two converters ship with ASH:
 
@@ -33,14 +33,14 @@ In the scan phase, each selected scanner runs its tool against each target and p
 
 In the report phase, ASH applies suppressions once more to the merged SARIF, recomputes the counts, and runs every enabled reporter. Each reporter writes its file under `reports/`, named `ash.<extension>`. A reporter that fails logs an error and writes nothing; it does not change the exit code.
 
-Where the scan runs is a separate choice, the run mode. `local` (the default) runs the scanners installed on the host. `container` builds an image and runs the same scan inside it. `nix` runs it inside `nix develop`, which supplies pinned scanner binaries, and always scans offline. `precommit` is a local scan of a fixed set of fast scanners (bandit, detect-secrets, checkov, cdk-nag, and npm-audit, plus any you name with `--scanners`) with simplified output. It scans the whole source directory, not only the staged files, and in workspace mode it changes only the output. See [Run ASH in a container](../how-to/run-in-a-container.md) and [Run ASH with pre-commit](../how-to/pre-commit.md).
+Where the scan runs is a separate choice, the run mode. `local` (the default) runs the scanners installed on the host. `container` builds an image and runs the same scan inside it. `nix` runs it inside `nix develop`, which supplies pinned scanner binaries, and always scans offline. `precommit` is a local scan of a fixed set of fast scanners (bandit, detect-secrets, checkov, cdk-nag, and npm-audit, plus any you name with `--add-scanners`) with simplified output. It scans the whole source directory, not only the staged files, and in workspace mode it changes only the output. See [Run ASH in a container](../how-to/run-in-a-container.md) and [Run ASH with pre-commit](../how-to/pre-commit.md).
 
 ## How scanners are selected
 
 ASH ships 17 built-in scanners, all enabled by default except semgrep and opengrep on Windows. For each scanner it knows about, ASH asks these questions in order and records the first answer that stops the scanner:
 
-1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--scanners` cannot turn it back on; `ash scan --config-overrides scanners.<name>.enabled=true` can.
-2. Was it selected? `--scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
+1. Is it enabled? `scanners.<name>.enabled: false` in the config turns a scanner off. `--only-scanners` cannot turn it back on; `ash scan fs --config-overrides scanners.<name>.enabled=true` can.
+2. Was it selected? `--only-scanners` is an allowlist and `--exclude-scanners` removes names from it. A scanner that is not selected is recorded SKIPPED.
 3. Does it need only Python, when `--python-only` is set? A scanner that runs a tool of its own is recorded SKIPPED.
 4. Does it support this platform? A scanner that declares the operating system unsupported (semgrep on Windows) is recorded SKIPPED.
 5. Are its dependencies there? A scanner whose tool cannot be found, or is found only inside the scanned directory, is recorded MISSING. A scanner that the scan has nothing for is recorded SKIPPED instead, for example cdk-nag and cfn-nag with no CloudFormation template, or npm-audit with no lockfile beside a `package.json`.
@@ -84,7 +84,7 @@ This has three consequences. Finding counts are counts of scanner results, not o
 
 For secret detections, the ASFF findings of the `asff` and `aws-security-hub` reporters say which of them are about one secret: they share an `ash/correlationId`, derived from where the secret is and not from who reported it. The findings stay separate. See [AWS reporters](../plugins/aws.md#aws-security-hub).
 
-Sharding splits a scan by scanner, not by file, so `ash merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
+Sharding splits a scan by scanner, not by file, so `ash results merge` of the shards does not count any finding twice. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Where the exit code comes from
 

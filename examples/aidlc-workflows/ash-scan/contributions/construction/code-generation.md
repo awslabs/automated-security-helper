@@ -11,9 +11,15 @@ fragments:
 ### ash-scan: Scan the Unit's code with ASH
 
 Before the completion handoff, run a fast security scan of the project from its
-root: `ash --mode precommit --no-progress`. Precommit mode runs bandit,
-detect-secrets, checkov, cdk-nag, and npm-audit, and writes its reports to
-`.ash/ash_output/` in the project.
+root. Read the ASH version first, with `ash --version`, and run the scan as that
+version spells it: ASH 3.9 added `ash scan fs`, and an ASH older than 3.9 refuses
+that word with a usage error before it scans anything.
+
+- 3.9 or later: `ash scan fs --mode precommit --no-progress`
+- Older than 3.9: `ash scan --mode precommit --no-progress`
+
+Precommit mode runs bandit, detect-secrets, checkov, cdk-nag, and npm-audit, and
+writes its reports to `.ash/ash_output/` in the project.
 
 Act on the exit code:
 
@@ -39,6 +45,11 @@ Act on the exit code:
   handoff while the scan still exits 1.
 - 3: the project's ASH configuration is invalid. Fix the configuration file
   before continuing; `ash config validate` names the field.
+- 5: ASH did not accept the command line (a usage error), and its output names
+  the option or value it refused. Nothing was scanned, so do not read findings
+  from `.ash/ash_output/reports/ash.summary.md`: a file there is from an earlier
+  run. Correct the command, in the spelling for this version above, and run it
+  again. Do not continue to the completion handoff until a scan has run.
 
 Findings in files this Unit did not touch belong to the intent, not the Unit:
 note them in the code summary and leave them for Build and Test.

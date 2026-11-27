@@ -41,6 +41,7 @@ nav:
       - Deploy on AWS: how-to/deploy-on-aws.md
       - Troubleshoot: how-to/troubleshoot.md
       - Migrate from v2: how-to/migrate-from-v2.md
+      - Move to the scan subjects: how-to/migrate-to-scan-subjects.md
   - Concepts:
       - How ASH works: concepts/how-ash-works.md
       - Configuration trust model: concepts/trust-model.md

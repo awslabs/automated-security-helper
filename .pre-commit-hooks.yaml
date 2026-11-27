@@ -35,7 +35,7 @@
 - id: ash
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Runs ASH's pre-commit scanner set (bandit, detect-secrets, checkov, cdk-nag, npm-audit) locally on the staged files
-  entry: ashv3 --mode=precommit --staged
+  entry: ashv3 scan fs --mode=precommit --staged
   language: python
   additional_dependencies: [".[cdk]"]
   pass_filenames: false
@@ -45,7 +45,7 @@
 - id: ash-simple-scan
   name: Use ASH for SAST/IaC/Secrets scanning
   description: Same hook as `ash`; kept for configurations that use this id
-  entry: ashv3 --mode=precommit --staged
+  entry: ashv3 scan fs --mode=precommit --staged
   language: python
   additional_dependencies: [".[cdk]"]
   pass_filenames: false
@@ -57,7 +57,7 @@
 - id: ash-full-scan
   name: Use ASH for SAST/IaC/Secrets scanning (container)
   description: Runs a full ASH scan in a container image it builds (takes several minutes)
-  entry: ashv3 --mode=container --simple
+  entry: ashv3 scan fs --mode=container --simple
   language: python
   pass_filenames: false
   args: []

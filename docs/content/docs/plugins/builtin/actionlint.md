@@ -4,7 +4,7 @@
 
 ## Enabling it
 
-actionlint is a builtin scanner, enabled by default: a default scan runs it. `scanners.actionlint.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+actionlint is a builtin scanner, enabled by default: a default scan runs it. `scanners.actionlint.enabled: false` in the ASH config turns it off, and `--only-scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 ## Installing
 
@@ -22,7 +22,7 @@ ASH passes actionlint every `*.yml` / `*.yaml` file whose parent directory is `.
 
 A `uses: ./...` in a workflow makes actionlint read the action metadata or reusable workflow it names, from the repository root, and its findings then quote what it read (the action's name and its input names). A workflow with such a reference that resolves outside the scanned repository, through `..` or a symlink, is skipped with a warning, so actionlint never reads that file. References that stay inside the repository are checked as usual.
 
-If the scan root has no workflow files, actionlint does not run and the scanner reports `SKIPPED` (it evaluated nothing). A scan that selects only actionlint (`--scanners actionlint`) on such a tree therefore exits 1 with "Scan ran no scanners".
+If the scan root has no workflow files, actionlint does not run and the scanner reports `SKIPPED` (it evaluated nothing). A scan that selects only actionlint (`--only-scanners actionlint`) on such a tree therefore exits 1 with "Scan ran no scanners".
 
 actionlint is a native binary, so `--python-only` does not run it.
 
@@ -59,7 +59,7 @@ Each option names the program actionlint pipes every `run:` script to, started f
 
 <!-- doctest: illustrative reason="runs a full scan, which needs every scanner installed" -->
 ```bash
-ash scan --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
+ash scan fs --config-overrides 'scanners.actionlint.options.shellcheck=/opt/shellcheck/bin/shellcheck'
 ```
 
 Whoever sets it, a program that resolves inside the scanned tree is refused. An operator's relative path is resolved against the source directory and must land outside the tree, and a path inside the tree that a symbolic link there leads out of it is refused too, whether you wrote it or a name was found at it through an absolute `PATH` entry inside the tree, because the link, not you, chose the program. A refused value is logged as a warning and actionlint runs with that integration off.

@@ -50,6 +50,7 @@ import yaml
 
 from tests.snapshot.support.reporter_catalog import AWS_REPORTER_NAMES
 from tests.unit.docs.test_page_claims import CONTENT, assert_on_page
+from tests.utils.release_spellings import SUBJECTS_RELEASE
 
 pytestmark = pytest.mark.unit
 
@@ -291,8 +292,8 @@ def test_plugin_modules_are_named_by_a_config_key_an_option_and_an_environment_v
     )
     assert_on_page(
         INTEGRATIONS_PAGE,
-        "the `ASH_PLUGIN_MODULES` environment variable, which `ash scan` reads as the "
-        "option's default.",
+        "the `ASH_PLUGIN_MODULES` environment variable, which `ash scan fs` reads as "
+        "the option's default.",
     )
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -335,27 +336,120 @@ def test_the_aidlc_plugin_the_page_points_to_is_there_and_named_as_the_page_says
 def test_the_plugin_runs_the_two_scans_at_the_two_checkpoints_the_page_names():
     assert_on_page(
         AIDLC_PAGE,
-        "the developer agent runs `ash --mode precommit --no-progress` and fixes "
-        "actionable findings, or records suppressions with reasons and expiration "
-        "dates, before the Unit's completion handoff.",
+        "the developer agent runs `ash scan fs --mode precommit --no-progress` and "
+        "fixes actionable findings, or records suppressions with reasons and "
+        "expiration dates, before the Unit's completion handoff.",
     )
     assert_on_page(
         AIDLC_PAGE,
-        "the quality agent runs a full `ash scan --no-progress`, copies the scanner "
-        "table into the stage summary for the approval gate, and does not proceed "
-        "while the scan exits 1 or 2.",
+        "the quality agent runs a full `ash scan fs --no-progress`, copies the "
+        "scanner table into the stage summary for the approval gate, and does not "
+        "proceed while the scan exits 1 or 2.",
     )
     construction = AIDLC_PLUGIN / "contributions" / "construction"
     generation = (construction / "code-generation.md").read_text(encoding="utf-8")
-    assert "ash --mode precommit --no-progress" in generation
+    assert "`ash scan fs --mode precommit --no-progress`" in generation
     build = (construction / "build-and-test.md").read_text(encoding="utf-8")
-    assert "ash scan --no-progress" in build
+    assert "`ash scan fs --no-progress`" in build
 
     commands = _click_commands()
     scan = commands.commands["scan"].commands["fs"]
     assert "--no-progress" in _options(scan)
     mode = next(p for p in scan.params if "--mode" in p.opts)
     assert "precommit" in list(getattr(mode.type, "choices", []))
+
+
+#: What each checkpoint's fragment has the agent run, by what `ash --version` prints:
+#: (ASH 3.9 and later, an ASH older than that). The plugin runs whatever ASH is on the
+#: project's PATH, and an ASH older than 3.9 has no `ash scan fs`: it refuses the word
+#: with a usage error before it scans anything. So a fragment gives both spellings and
+#: has the agent read the version before it runs either.
+CHECKPOINT_SCANS = {
+    "code-generation.md": (
+        "`ash scan fs --mode precommit --no-progress`",
+        "`ash scan --mode precommit --no-progress`",
+    ),
+    "build-and-test.md": ("`ash scan fs --no-progress`", "`ash scan --no-progress`"),
+}
+
+#: The release that reads `ash scan fs`, as the other tests of the spellings name it.
+SUBJECTS_FROM = ".".join(str(part) for part in SUBJECTS_RELEASE[:2])
+
+
+def _fragment_prose(name: str) -> str:
+    path = AIDLC_PLUGIN / "contributions" / "construction" / name
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
+def _reads_the_version_before_a_scan(prose: str) -> bool:
+    """Whether ``ash --version`` is named, and ``ash scan`` is not named ahead of it."""
+    version = re.search(r"ash --version", prose)
+    scan = re.search(r"ash scan\b", prose)
+    return bool(version and scan and version.start() < scan.start())
+
+
+#: What the fragments said before: the scan first, the version check after it.
+_THE_SCAN_AND_THEN_THE_VERSION = (
+    "run `ash scan fs --no-progress`. When `ash --version` prints a version older "
+    "than 3.9, that ASH has no `ash scan fs`: run `ash scan --no-progress`."
+)
+
+
+@pytest.mark.parametrize(
+    ("prose", "expected"),
+    [
+        (_THE_SCAN_AND_THEN_THE_VERSION, False),
+        ("run `ash scan fs --no-progress`.", False),
+        ("Read `ash --version` first.", False),
+        ("Read `ash --version`, then run `ash scan fs --no-progress`.", True),
+        # A word that only starts like the command is not a scan.
+        ("The `ash scanner` table. Read `ash --version`, then `ash scan fs`.", True),
+    ],
+)
+def test_the_version_check_detector_on_planted_text(prose, expected):
+    assert _reads_the_version_before_a_scan(prose) is expected, prose
+
+
+def test_the_page_says_when_the_agent_reads_the_version_and_what_an_older_ash_runs():
+    assert_on_page(
+        AIDLC_PAGE,
+        f"An ASH older than {SUBJECTS_FROM} has no `ash scan fs`: it refuses the word "
+        "with a usage error, before it scans anything. So at both checkpoints the "
+        "agent reads `ash --version` before it scans, and with an older ASH it runs "
+        "the same two scans as `ash scan --mode precommit --no-progress` and "
+        "`ash scan --no-progress`.",
+    )
+
+
+@pytest.mark.parametrize("name", sorted(CHECKPOINT_SCANS))
+def test_a_checkpoint_reads_the_ash_version_before_it_names_a_scan(name):
+    # Red before: the fragment gave `ash scan fs ...` as the command and told the agent
+    # to look at `ash --version` afterwards, so an ASH older than 3.9 was handed the
+    # word it refuses.
+    prose = _fragment_prose(name)
+    assert _reads_the_version_before_a_scan(prose), prose
+
+    newer, older = CHECKPOINT_SCANS[name]
+    assert f"{SUBJECTS_FROM} or later: {newer}" in prose, prose
+    assert f"Older than {SUBJECTS_FROM}: {older}" in prose, prose
+
+
+@pytest.mark.parametrize("name", sorted(CHECKPOINT_SCANS))
+def test_a_checkpoint_tells_a_refused_command_line_from_a_finding(name):
+    # Red before: the table ran from 0 to 3, so the agent had no row for the code a
+    # refused command line exits with, and nothing said that a summary left on disk
+    # is the report of an earlier run.
+    from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+
+    prose = _fragment_prose(name)
+    row = (
+        f"- {ASH_EXIT_USAGE_ERROR}: ASH did not accept the command line (a usage error)"
+    )
+    assert row in prose, prose
+    assert (
+        "Nothing was scanned, so do not read findings from "
+        "`.ash/ash_output/reports/ash.summary.md`: a file there is from an earlier run."
+    ) in prose, prose
 
 
 def test_the_plugin_rules_keep_the_habits_the_page_lists_and_ship_no_compose_hook():

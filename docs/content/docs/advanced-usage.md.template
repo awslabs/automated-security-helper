@@ -10,7 +10,7 @@ ASH v3 supports four execution modes:
 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
-ash --mode local
+ash scan fs --mode local
 ```
 
 - Runs the scan in the local Python process
@@ -22,7 +22,7 @@ ash --mode local
 ### Tools inside the scanned directory
 
 ASH does not start a scanner or any other tool that it finds inside the directory it
-is scanning. `uv run ash scan --source-dir .` puts the repository's `.venv/bin` first on `PATH`,
+is scanning. `uv run ash scan fs .` puts the repository's `.venv/bin` first on `PATH`,
 and `npm run` does the same with `node_modules/.bin`, so under either a scanner
 installed in the project, such as a `bandit` or `semgrep` dependency, is part of the
 repository being scanned. ASH skips it and uses the next copy on `PATH`, or the one
@@ -54,7 +54,7 @@ for the message and the fixes.
 
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-ash --mode container
+ash scan fs --mode container
 ```
 
 - Builds the ASH container image and runs the whole scan inside it
@@ -66,7 +66,7 @@ ash --mode container
 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
-ash --mode precommit
+ash scan fs --mode precommit
 ```
 
 - A local scan that runs only bandit, detect-secrets, checkov, cdk-nag and npm-audit,
@@ -82,7 +82,7 @@ ash --mode precommit
 
 <!-- doctest: illustrative reason="needs Nix" -->
 ```bash
-ash --mode nix
+ash scan fs --mode nix
 ```
 
 - Runs the scan inside `nix develop`, whose shell supplies every scanner at a pinned
@@ -261,7 +261,7 @@ scanners need more:
   cfn-nag 0.8.10 cannot load its YAML parser, so every template is reported as one
   ASH could not evaluate.
 
-If you do not need a scanner, leave it out, as in `ash --exclude-scanners npm-audit`.
+If you do not need a scanner, leave it out, as in `ash scan fs --exclude-scanners npm-audit`.
 It is then recorded SKIPPED, which does not make the scan incomplete.
 
 ## Platform limits
@@ -339,7 +339,7 @@ ash_plugin_modules:
 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
-ash --ash-plugin-modules my_ash_plugins
+ash scan fs --ash-plugin-modules my_ash_plugins
 ```
 
 ## Offline Mode
@@ -352,10 +352,10 @@ For air-gapped environments:
 ash container build --offline --offline-semgrep-rulesets p/ci
 
 # Run in offline mode
-ash --mode container --offline
+ash scan fs --mode container --offline
 
 # On a host without network access, run the image without rebuilding it
-ash --mode container --offline --no-build
+ash scan fs --mode container --offline --no-build
 ```
 
 Container mode builds the image before every scan unless given `--no-build`.
@@ -376,7 +376,7 @@ then passes and every report names the stale database. See
 
 Offline mode is decided when each scanner runs, from these sources in order:
 
-1. ASH's offline mode: `--offline` on `ash scan`, `ASH_OFFLINE=true` in the
+1. ASH's offline mode: `--offline` on `ash scan fs`, `ASH_OFFLINE=true` in the
    environment, or an image built with `ash container build --offline`. It applies to
    every scanner, and no scanner option turns it off.
 2. A scanner's own `options.offline: true` (checkov, grype, opengrep, semgrep, syft,
@@ -479,7 +479,7 @@ cp "$SEMGREP_RULES_CACHE_DIR"/*.yml "$OPENGREP_RULES_CACHE_DIR/"
 date -u +%Y-%m-%dT%H:%M:%SZ | tee "$SEMGREP_RULES_CACHE_DIR/.ash-rules-fetched-at" \
   > "$OPENGREP_RULES_CACHE_DIR/.ash-rules-fetched-at"
 
-ash --mode local --offline
+ash scan fs --mode local --offline
 ```
 
 Copy the cache directories to the air-gapped host and export the same two variables
@@ -501,13 +501,13 @@ ASH v3 executes scans in phases:
 <!-- doctest: illustrative reason="runs full scans of the current directory with every enabled scanner, which need their tools and network access" -->
 ```bash
 # Run only specific phases (give --phases once for each phase)
-ash --phases convert --phases scan
+ash scan fs --phases convert --phases scan
 
 # Skip report generation
-ash --phases convert --phases scan
+ash scan fs --phases convert --phases scan
 
 # Include inspection phase
-ash --phases convert --phases scan --phases report --phases inspect
+ash scan fs --phases convert --phases scan --phases report --phases inspect
 ```
 
 ## Using Existing Results
@@ -517,10 +517,10 @@ You can generate reports from existing scan results:
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Use existing results file
-ash --use-existing --output-dir /path/to/results
+ash scan fs --use-existing --output-dir /path/to/results
 
 # Generate a specific report format
-ash report --format html --output-dir /path/to/results
+ash results report --format html --output-dir /path/to/results
 ```
 
 ## Interactive Findings Explorer
@@ -530,7 +530,7 @@ ASH v3 includes an interactive TUI for exploring findings:
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Launch the findings explorer
-ash inspect findings --output-dir /path/to/results
+ash results inspect findings --output-dir /path/to/results
 ```
 
 A finding's detail view shows the code snippet its results hold. For a finding with
@@ -548,10 +548,10 @@ directory, a symlink that leads out of it, or results in any other directory sho
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Use Podman instead of Docker
-ash --mode container --oci-runner podman
+ash scan fs --mode container --oci-runner podman
 
 # Use Finch
-ash --mode container --oci-runner finch
+ash scan fs --mode container --oci-runner finch
 ```
 
 ### Custom Container Images
@@ -566,7 +566,7 @@ rebuild cadence it commits you to, and offline builds.
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
-ash --mode container
+ash scan fs --mode container
 ```
 
 ### Building Custom Images
@@ -582,8 +582,8 @@ ash container build --build-target ci --custom-containerfile ./my-dockerfile
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Complex configuration overrides
-ash --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
-ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
+ash scan fs --config-overrides 'scanners.semgrep.options.config=p/owasp-top-ten'
+ash scan fs --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
 ```
 
 ## Working with Suppressions
@@ -593,10 +593,10 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Add a suppression rule
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
+ash scan fs --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
 
 # Add a suppression with line range and expiration
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
+ash scan fs --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
 ```
 
 ### Inline code suppressions
@@ -646,10 +646,10 @@ suppressions start with `"(ASH)"` while inline suppressions start with
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run a scan ignoring all suppression rules, ignore_paths included
-ash --ignore-suppressions
+ash scan fs --ignore-suppressions
 
 # Useful for verifying if suppressed issues have been fixed
-ash --ignore-suppressions --output-dir ./verification-scan
+ash scan fs --ignore-suppressions --output-dir ./verification-scan
 ```
 
 ## Programmatic Usage
@@ -683,7 +683,7 @@ as a misspelled `fail_on_finding`, raises `TypeError` naming it; earlier version
 accepted it and ran the scan without it.
 
 The call returns the aggregated results only when the scan's exit code is 0.
-Otherwise it ends the way `ash scan` does, by raising `SystemExit` with that code
+Otherwise it ends the way `ash scan fs` does, by raising `SystemExit` with that code
 (see [Exit codes](../reference/exit-codes.md)): 2 for actionable findings while
 `fail_on_findings` is on, which is the default, and 1 for an incomplete scan, for
 example a selected scanner whose tool is not installed. That exit 1 is a
@@ -693,7 +693,7 @@ content databases) and whose `results` attribute holds the results. A run ASH re
 or gives up (3 for a config that does not validate or files git tracks where the scan
 writes, 5 for a scanner selection that names nothing, 1 for an error during the scan)
 raises `ScanRefusedExit`, a `SystemExit` subclass whose `message` attribute is the
-text `ash scan` prints for it.
+text `ash scan fs` prints for it.
 
 ### Logging to your own handler
 
@@ -754,7 +754,8 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          ash --mode local 2>&1 || status=$?
+          ash scan fs --mode local --fail-on-findings --fail-on-incomplete-scanners \
+            --no-allow-stale-content-db 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
       - name: Upload scan results
@@ -777,7 +778,7 @@ ash-scan:
   image: python:3.11
   script:
     - pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
-    - ash --mode local
+    - ash scan fs --mode local --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
   artifacts:
     paths:
       - .ash/ash_output/reports
@@ -791,13 +792,13 @@ Both examples keep `scanners/` and `converted/` out of the artifact: those hold 
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Run scanners in parallel (default)
-ash --strategy parallel
+ash scan fs --strategy parallel
 
 # Run scanners sequentially
-ash --strategy sequential
+ash scan fs --strategy sequential
 
 # Clean up temporary files after scan
-ash --cleanup
+ash scan fs --cleanup
 ```
 
 ## Debugging
@@ -805,13 +806,13 @@ ash --cleanup
 <!-- doctest: illustrative reason="runs a full scan that needs the tool of every enabled scanner" -->
 ```bash
 # Enable debug logging
-ash --debug
+ash scan fs --debug
 
 # Enable verbose logging
-ash --verbose
+ash scan fs --verbose
 
 # Disable progress display
-ash --no-progress
+ash scan fs --no-progress
 ```
 
 ### Scanner Validation

@@ -142,11 +142,11 @@ committed. Add it to `.gitignore`, or run `ash config init`, which writes a
 
 ## 5. Run the scan
 
-Run `ash` with no arguments. It scans the current directory with every scanner:
+Run `ash scan`, with no path or options. It scans the current directory with every scanner:
 
 <!-- doctest: illustrative reason="the exit code depends on which scanner tools the machine has installed; the next block runs the same scan with a fixed scanner set" -->
 ```bash
-ash
+ash scan
 echo "exit code: $?"
 ```
 
@@ -155,7 +155,7 @@ machine that has those two tools, without the network:
 
 <!-- doctest: run expect-exit=2 env="ASH_OFFLINE=YES" -->
 ```bash
-ash --scanners bandit,detect-secrets
+ash scan --scanners bandit,detect-secrets
 ```
 
 <!-- doctest: output -->
@@ -167,7 +167,7 @@ ash --scanners bandit,detect-secrets
 ERROR (2) Exiting due to 2 actionable findings found in ASH scan
 ```
 
-The rows of the other scanners show SKIPPED, because `--scanners` leaves them out.
+The rows of the other scanners show SKIPPED, because the command names only those two.
 
 A default scan runs the built-in scanners. Six more ship as alpha plugin modules
 that a scan runs once `ash_plugin_modules` names them; the
@@ -245,7 +245,7 @@ lists the fix for each), or leave out the scanners you cannot run:
 
 <!-- doctest: illustrative reason="same scan as above; needs the network" -->
 ```bash
-ash --exclude-scanners grype
+ash scan --exclude-scanners grype
 ```
 
 An excluded scanner shows as SKIPPED and does not fail the scan. Add the same
@@ -330,7 +330,7 @@ covers line ranges, symbols, and inline suppressions.
 
 <!-- doctest: illustrative reason="the scan needs the network for its scanners; the docs job has none" -->
 ```bash
-ash
+ash scan
 echo "exit code: $?"
 ```
 
@@ -358,7 +358,7 @@ Scan once more:
 
 <!-- doctest: illustrative reason="the scan needs the network for its scanners; the docs job has none" -->
 ```bash
-ash
+ash scan
 echo "exit code: $?"
 ```
 

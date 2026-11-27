@@ -65,7 +65,7 @@ an audit of what the current set hides:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --ignore-suppressions \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
@@ -118,7 +118,7 @@ Three options sharpen what a pull request is judged on:
   ([Add ASH to CI](../getting-started/ci.md)).
 
 For comparing two scans directly, run
-[`ash diff`](../how-to/export-reports.md#compare-scans) on the two results files.
+[`ash results diff`](../how-to/export-reports.md#compare-scans) on the two results files.
 Over the [MCP server](../reference/mcp-tools.md#diff_scan_results),
 `diff_scan_results` returns the resolved, new, and severity-changed findings between
 the same two files.

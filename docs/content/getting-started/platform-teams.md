@@ -19,7 +19,7 @@ and push it:
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
 export ASH_IMAGE_NAME=registry.example.com/security/ash:3.8.0
-ash container build --no-run --oci-runner docker --ash-revision-to-install v3.8.0 \
+ash build-image --no-run --oci-runner docker --ash-revision-to-install v3.8.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```
@@ -98,7 +98,7 @@ Scan it with the operator config:
 ash scan --config "$OPERATOR_CONFIG" --scanners detect-secrets
 ```
 
-`--scanners detect-secrets` keeps the check fast: detect-secrets ships with ASH, so it
+Naming only detect-secrets keeps the check fast: detect-secrets ships with ASH, so it
 needs no other tools. The scan ends with
 `ERROR (2) Exiting due to 1 actionable findings found in ASH scan`. Once the scan has
 loaded a config file, `.ash/ash_output/ash.log` names it in a `Using ASH configuration from`
@@ -222,8 +222,8 @@ same schedule as the ASH tag; the image route keeps both in one artifact. For on
 jobs, `uvx` runs the same pinned reference without installing it; the
 [GitHub Actions reusable workflow](../how-to/ci/github-actions.md) does this.
 
-Nix mode (`ash --mode nix`) is in the latest release; v3.7.x and older reject
-`--mode nix`, so a fleet rollout on it needs a release newer than those everywhere. See
+Nix mode (`--mode nix`) is in the latest release; v3.7.x and older reject that option,
+so a fleet rollout on it needs a release newer than those everywhere. See
 [Nix mode](../how-to/install.md#nix-mode).
 
 ## 5. Plan content database refresh
@@ -248,7 +248,7 @@ rebuild the image on a schedule with it:
 
 <!-- doctest: illustrative reason="needs a container runtime, network access, and a registry" -->
 ```bash
-ash container build --no-run --force --oci-runner docker --ash-revision-to-install v3.8.0 \
+ash build-image --no-run --force --oci-runner docker --ash-revision-to-install v3.8.0 \
   --container-uid 1001 --container-gid 1001
 docker push "$ASH_IMAGE_NAME"
 ```

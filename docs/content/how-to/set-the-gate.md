@@ -1,10 +1,10 @@
 # Set the gate
 
-A scan's exit code is its verdict: 0 passes, 2 means findings failed it, 1 means the scan did not produce a result you can rely on, and 3 means the config is invalid. 5 is a usage error: the command line was wrong, as with an unknown option or a `--scanners` list that names no scanner. This page shows which settings decide the verdict, in what order ASH checks them, and how to set them for CI. Every code, for every command, is in [Exit codes](../reference/exit-codes.md).
+A scan's exit code is its verdict: 0 passes, 2 means findings failed it, 1 means the scan did not produce a result you can rely on, and 3 means the config is invalid. 5 is a usage error: the command line was wrong, as with an unknown option or an `--only-scanners` list that names no scanner. This page shows which settings decide the verdict, in what order ASH checks them, and how to set them for CI. Every code, for every command, is in [Exit codes](../reference/exit-codes.md).
 
 ## What decides the exit code {#order}
 
-ASH decides the exit code from these conditions, in order, and stops at the first one that holds. A usage error (5) comes before all of them, except a `--scanners` list that names no scanner, which ASH refuses after the config check, when the scan phase starts; [Exit codes](../reference/exit-codes.md#scan-precedence) gives the whole order:
+ASH decides the exit code from these conditions, in order, and stops at the first one that holds. A usage error (5) comes before all of them, except an `--only-scanners` list that names no scanner, which ASH refuses after the config check, when the scan phase starts; [Exit codes](../reference/exit-codes.md#scan-precedence) gives the whole order:
 
 | Order | Condition | Exit | Controlled by |
 |---|---|---|---|
@@ -50,7 +50,7 @@ The values are uppercase and case-sensitive. `high`, `INFO`, and `NONE` are not 
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides global_settings.severity_threshold=high
 ```
 
@@ -69,7 +69,7 @@ ASH does not pass a threshold to trivy, so trivy reports every finding it makes,
 `fail_on_findings: false` in the config, or `--no-fail-on-findings` on the command line, makes findings never fail the scan:
 
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --no-fail-on-findings
 ```
 
 The flag takes precedence over the config, and `--fail-on-findings` turns the gate back on whatever the config says. The scan still exits 1 when it is incomplete or a database is stale.
@@ -127,21 +127,21 @@ Report findings, but fail when the scan is incomplete or a database is stale:
 
 <!-- doctest: illustrative reason="runs every default scanner, which needs each scanner's tool installed" -->
 ```bash
-ash --source-dir . --no-fail-on-findings
+ash scan fs . --no-fail-on-findings
 ```
 
 To try it without every scanner's tool, run detect-secrets alone. Its finding is reported, and the scan exits 0:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress --no-fail-on-findings
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --no-fail-on-findings
 ```
 
 Fail on HIGH and CRITICAL findings, with the gate set by the pipeline rather than by the repository:
 
 <!-- doctest: illustrative reason="names a pipeline config file outside the sample project" -->
 ```bash
-ash --source-dir . --config "$RUNNER_TEMP/ash-gate.yaml" \
+ash scan fs . --config "$RUNNER_TEMP/ash-gate.yaml" \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 ```
 
@@ -153,6 +153,6 @@ global_settings:
   severity_threshold: HIGH
 ```
 
-To fail on HIGH and above while still using the repository's config, override the threshold instead: `ash --source-dir . --config-overrides global_settings.severity_threshold=HIGH`.
+To fail on HIGH and above while still using the repository's config, override the threshold instead: `ash scan fs . --config-overrides global_settings.severity_threshold=HIGH`.
 
-In a sharded scan, gate on `ash merge`, which recomputes the verdict over all shards; see [Scale to large repositories](scale-large-repos.md).
+In a sharded scan, gate on `ash results merge`, which recomputes the verdict over all shards; see [Scale to large repositories](scale-large-repos.md).

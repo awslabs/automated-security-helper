@@ -7,8 +7,8 @@ scanner subprocess inside an OS-level sandbox instead. It is off by default.
 
 <!-- doctest: illustrative reason="needs a sandbox backend on the host and the tool of every enabled scanner" -->
 ```bash
-ash scan --sandbox auto            # best sandbox this machine has
-ash scan --sandbox bwrap --offline # bubblewrap, no scanner gets a network
+ash scan fs --sandbox auto            # best sandbox this machine has
+ash scan fs --sandbox bwrap --offline # bubblewrap, no scanner gets a network
 ```
 
 or in your ASH config file (`.ash.yaml` at the project root):
@@ -44,7 +44,7 @@ configuration, whose mode is `off`.
 
 `auto` uses the first backend that can start a sandbox on this machine: on Linux
 `bwrap`, then `firejail`, then `landlock`; on macOS `sandbox-exec`. To require one
-backend, name it: `ash scan --sandbox bwrap`.
+backend, name it: `ash scan fs --sandbox bwrap`.
 
 The scan output and `ash.log` say which backend ran each scanner:
 
@@ -66,8 +66,8 @@ sandbox, container mode prints a warning on stderr that it is not applied (whate
 `sandbox.mode=off` as its last override, and runs the scan, so one config file can serve
 local and container runs.
 
-Running `ash scan --sandbox <mode>` yourself inside the image, as in
-`docker run <image> ash scan --sandbox landlock`, is your own opt-in: the scan there is
+Running `ash scan fs --sandbox <mode>` yourself inside the image, as in
+`docker run <image> ash scan fs --sandbox landlock`, is your own opt-in: the scan there is
 a local one, and it applies the mode. The wrappers below never pass a mode other than
 `off`. When the
 backend cannot run in the image, each scanner is recorded MISSING with the reason, and
@@ -955,7 +955,7 @@ resolver's (`mDNSResponder`), so Docker Desktop's socket and the launchd SSH age
 stay out of reach. The scanner starts in a new session, with no controlling terminal.
 
 The home directory is the one `HOME` names. When that is not the home your account's
-passwd entry names, as in a CI job or `HOME=/tmp/x ash scan`, the profile denies
+passwd entry names, as in a CI job or `HOME=/tmp/x ash scan fs`, the profile denies
 reading both, and the keychain rule covers `Library/Keychains` under both. The paths
 the policy lists are allowed again after those denies, wherever they are, so a tool
 path inside either home stays readable. With `HOME` set to the passwd entry's home,

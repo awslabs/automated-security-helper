@@ -26,7 +26,7 @@ Finch, or Podman.
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0
 
 # Run from the project you want to scan
-ash --mode container
+ash scan --mode container
 ```
 
 The first container run builds the image and prepares scanner dependencies.
@@ -36,9 +36,9 @@ Open `.ash/ash_output/reports/ash.html` or run `ash inspect findings`.
 
 | Mode | Command | Requirements |
 | --- | --- | --- |
-| Container | `ash --mode container` | OCI-compatible runtime |
-| Local | `ash --mode local` | Local scanner dependencies |
-| Pre-commit | `ash --mode precommit` | Python-based scanners with simplified output |
+| Container | `ash scan --mode container` | OCI-compatible runtime |
+| Local | `ash scan --mode local` | Local scanner dependencies |
+| Pre-commit | `ash scan --mode precommit` | Python-based scanners with simplified output |
 
 Local and pre-commit workflows use [uv](https://docs.astral.sh/uv/getting-started/installation/)
 for managed tool installation. The [installation guide](docs/content/how-to/install.md)
@@ -52,7 +52,7 @@ Run with uv:
 <!-- doctest: illustrative reason="runs ASH from GitHub over the network" -->
 ```bash
 uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --help
-uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash --mode container
+uvx --from git+https://github.com/awslabs/automated-security-helper.git@v3.8.0 ash scan --mode container
 ```
 
 Install in a Python environment:

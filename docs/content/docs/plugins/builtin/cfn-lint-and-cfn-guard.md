@@ -4,7 +4,7 @@ cfn-lint and cfn-guard are two builtin CloudFormation scanners. Both read the sa
 
 ## Enabling it
 
-cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--scanners` and `--exclude-scanners` select them as they select any scanner. If cfn-guard is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner. cfn-lint is installed on first use when ASH is online, and is `MISSING` only when that install fails and none is on `PATH`. `ash dependencies install` and the container image provide both.
+cfn-lint and cfn-guard are builtin scanners, enabled by default: a default scan runs them. `scanners.cfn-lint.enabled: false` in the ASH config turns one off, and `--only-scanners` and `--exclude-scanners` select them as they select any scanner. If cfn-guard is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner. cfn-lint is installed on first use when ASH is online, and is `MISSING` only when that install fails and none is on `PATH`. `ash dependencies install` and the container image provide both.
 
 `--python-only` runs cfn-lint, a Python package ASH runs through uv, and does not run cfn-guard, a native binary.
 

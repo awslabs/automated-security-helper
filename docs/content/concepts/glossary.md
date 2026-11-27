@@ -124,7 +124,7 @@ A setting that gives sandboxed scanners more than the default policy: `sandbox.n
 
 ## Scanned directory
 
-The directory a scan runs over: `--source-dir`, the working directory, or a workspace's root. A config file inside it is a [repository config](#repository-config), and for the tool files you name ASH also looks at the [scanned tree](#scanned-tree) around it.
+The directory a scan runs over: the path given to `ash scan fs` (by default the working directory), or a workspace's root. A config file inside it is a [repository config](#repository-config), and for the tool files you name ASH also looks at the [scanned tree](#scanned-tree) around it.
 
 ## Scanned tree
 
@@ -152,7 +152,7 @@ The least severe level that counts as actionable: `global_settings.severity_thre
 
 ## Shard
 
-One of several scans of the same repository that each run a share of the scanners, combined afterward with `ash merge`. See [Scale to large repositories](../how-to/scale-large-repos.md).
+One of several scans of the same repository that each run a share of the scanners, combined afterward with `ash results merge`. See [Scale to large repositories](../how-to/scale-large-repos.md).
 
 ## Suppression
 

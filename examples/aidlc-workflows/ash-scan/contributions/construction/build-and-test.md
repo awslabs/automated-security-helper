@@ -11,9 +11,16 @@ fragments:
 ### ash-scan: Run the full ASH scan
 
 After the build and tests, run a full security scan of the project from its
-root: `ash scan --no-progress`. Unlike the per-Unit precommit scan, this runs
-every scanner the project's ASH configuration enables, across all Units'
-changes at once, and writes its reports to `.ash/ash_output/`.
+root. Read the ASH version first, with `ash --version`, and run the scan as that
+version spells it: ASH 3.9 added `ash scan fs`, and an ASH older than 3.9 refuses
+that word with a usage error before it scans anything.
+
+- 3.9 or later: `ash scan fs --no-progress`
+- Older than 3.9: `ash scan --no-progress`
+
+Unlike the per-Unit precommit scan, this runs every scanner the project's ASH
+configuration enables, across all Units' changes at once, and writes its reports
+to `.ash/ash_output/`.
 
 Act on the exit code:
 
@@ -31,6 +38,11 @@ Act on the exit code:
   say what was not measured, not read as a clean scan.
 - 3: the project's ASH configuration is invalid; `ash config validate` names
   the field. Fix it and rerun.
+- 5: ASH did not accept the command line (a usage error), and its output names
+  the option or value it refused. Nothing was scanned, so do not read findings
+  from `.ash/ash_output/reports/ash.summary.md`: a file there is from an earlier
+  run. Correct the command, in the spelling for this version above, and run it
+  again. Do not proceed to the completion handoff until a scan has run.
 
 Copy the scanner table from `.ash/ash_output/reports/ash.summary.md` into the
 build and test summary, so the gate shows which scanners ran, which were

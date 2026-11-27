@@ -6,7 +6,7 @@ detect-secrets stays on by default and is unaffected; the two can run side by si
 
 ## Enabling it
 
-Gitleaks is a builtin scanner, enabled by default: a default scan runs it. `scanners.gitleaks.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+Gitleaks is a builtin scanner, enabled by default: a default scan runs it. `scanners.gitleaks.enabled: false` in the ASH config turns it off, and `--only-scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 gitleaks is a native binary, so `--python-only` does not run it.
 

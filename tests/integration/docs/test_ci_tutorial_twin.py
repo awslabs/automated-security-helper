@@ -26,9 +26,9 @@ The page's ``main`` is a repository with code in it. The twin gives its tree one
 Python file, ``hello.py``, which stands for that code: a tree that holds nothing bandit
 can scan ends with exit 1 ("no scanner ran"), not with the pass the page describes.
 The ``ash_demo.py`` file and the ``.ashrc.yaml`` are the page's own blocks, read from
-the page; the scan is narrowed to ``ash --scanners bandit --offline``, which needs
-nothing but bandit. Like the local tutorial's twin, it fails, and does not skip, when
-bandit is missing.
+the page; the scan is narrowed to ``ash scan fs --only-scanners bandit --offline``,
+which needs nothing but bandit. Like the local tutorial's twin, it fails, and does not
+skip, when bandit is missing.
 
 Not run: the zizmor check of step 1 (a ``uses:`` line that names a tag is
 ``zizmor/unpinned-uses`` at HIGH until it is pinned to a commit). zizmor is not among

@@ -308,14 +308,14 @@ pinned, so the scanner toolchain matches the code.
 
 ## Container image
 
-No ASH image is published. `ash --mode container` builds an image with every scanner
+No ASH image is published. `ash scan --mode container` builds an image with every scanner
 on your machine and scans inside it; it rebuilds the image on every run unless you
-pass `--no-build`. `ash container build` builds one to push to your own registry. See
+pass `--no-build`. `ash build-image` builds one to push to your own registry. See
 [Run ASH in a container](run-in-a-container.md).
 
 ## Nix mode
 
-`ash --mode nix` runs the scan inside a Nix shell whose scanner tools come from
+`ash scan --mode nix` runs the scan inside a Nix shell whose scanner tools come from
 ASH's `flake.nix`. It needs Nix with flakes enabled, on Linux or macOS (on Windows,
 inside WSL2). It does not install ASH itself: the scan inside the shell runs the same
 ASH you started, so install ASH with one of the methods above first.

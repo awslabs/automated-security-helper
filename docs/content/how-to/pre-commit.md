@@ -48,7 +48,7 @@ Do not ignore all of `.ash/`: an ASH config file at a legacy location, such as `
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 --mode=precommit --staged` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
 
 - runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
   `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
@@ -99,7 +99,7 @@ scanned and is not listed) and makes it the scan's target set:
 
 What the tools read is the working-tree copy of each staged file. Under the
 pre-commit framework the two are identical, because it stashes unstaged changes
-around the hooks; a direct `ash --mode precommit --staged` run after `git add -p`,
+around the hooks; a direct `ash scan --mode precommit --staged` run after `git add -p`,
 or after editing a file it had staged, scans content that differs from what the
 commit will contain.
 
@@ -309,7 +309,7 @@ repos:
     hooks:
       - id: ash
         name: ASH
-        entry: ash --mode precommit
+        entry: ash scan --mode precommit
         language: system
         pass_filenames: false
 ```

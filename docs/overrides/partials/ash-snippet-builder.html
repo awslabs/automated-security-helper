@@ -49,37 +49,37 @@
 {% set t_local_uvtool -%}
 uv tool install --python 3.12 '{{ spec }}'
 ash dependencies install
-ash scan --mode local
+ash scan fs --mode local
 {%- endset %}
 {% set t_local_uvx -%}
 alias ash="uvx --python 3.12 --from '{{ spec }}' ash"
 ash dependencies install
-ash scan --mode local
+ash scan fs --mode local
 {%- endset %}
 {% set t_local_pipx -%}
 pipx install --python python3.12 '{{ spec }}'
 ash dependencies install
-ash scan --mode local
+ash scan fs --mode local
 {%- endset %}
 {% set t_local_pip -%}
 python3.12 -m venv ~/.venvs/ash
 . ~/.venvs/ash/bin/activate
 pip install '{{ spec }}'
 ash dependencies install
-ash scan --mode local
+ash scan fs --mode local
 {%- endset %}
 {% set t_local_brew -%}
 brew tap awslabs/automated-security-helper {{ repo }}.git
 brew install awslabs/automated-security-helper/ash
 ash dependencies install
-ash scan --mode local
+ash scan fs --mode local
 {%- endset %}
 {% set t_local_container -%}
-ash scan --mode container --source-dir src/my-app --output-dir ash-output/my-app
+ash scan fs src/my-app --mode container --output-dir ash-output/my-app
 {%- endset %}
 {% set t_local_nix -%}
 uv tool install --python 3.12 '{{ spec }}'
-ash scan --mode nix
+ash scan fs --mode nix
 {%- endset %}
 
 {% set t_pc_hook -%}
@@ -151,7 +151,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -188,7 +188,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -216,7 +216,7 @@ ash-scan:
   script:
     - ash_exit=0
     - >-
-      ash scan --mode local --no-progress
+      ash scan fs --mode local --no-progress
       --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
       || ash_exit=$?
     - echo "$ash_exit" > ash-exit-code.txt
@@ -245,7 +245,7 @@ python3 -m venv "$HOME/ash-venv"
 export PATH="$HOME/ash-venv/bin:$PATH"
 (cd "$(mktemp -d)" && ash dependencies install \
   {{ tool_args }})
-ash scan --mode local --no-progress \
+ash scan fs --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 {%- endset %}
 {% set t_ci_uvx -%}
@@ -256,7 +256,7 @@ ash() {
 }
 (cd "$(mktemp -d)" && ash dependencies install \
   {{ tool_args }})
-ash scan --mode local --no-progress \
+ash scan fs --mode local --no-progress \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
 {%- endset %}
 
@@ -420,7 +420,9 @@ ash scan --mode local --no-progress \
       {% for label, text in blocks %}
       <div class="ash-builder__block">
         <div class="ash-terminal__comment"># {{ label }}</div>
-        <div class="ash-builder__code"><pre tabindex="0"><code>{{ text | e }}</code></pre><button class="ash-copy" type="button" data-ash-copy="{{ text | e }}" aria-label="Copy {{ title | e }}: {{ label | e }}">{{ icon("content-copy") }}</button></div>
+        {#- The snippet installs the release `ref` names, so its commands are spelled as that release reads them (docs/hooks/install_refs.py release_spellings). -#}
+        {% set shown = text | release_spellings(ref) %}
+        <div class="ash-builder__code"><pre tabindex="0"><code>{{ shown | e }}</code></pre><button class="ash-copy" type="button" data-ash-copy="{{ shown | e }}" aria-label="Copy {{ title | e }}: {{ label | e }}">{{ icon("content-copy") }}</button></div>
       </div>
       {% endfor %}
       <p class="ash-builder__links">{% for label, path in links %}<a href="{{ path | url }}">{{ label }}</a>{% if not loop.last %} <span aria-hidden="true">·</span> {% endif %}{% endfor %}</p>

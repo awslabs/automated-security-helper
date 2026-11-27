@@ -223,6 +223,53 @@ TUTORIAL_PAGES = [
 ]
 
 
+#: The sentences of the pre-commit page that name what a hook of this manifest runs.
+#: The template is what a release renders, for the manifest that release ships; the
+#: committed page pins the current release and spells ASH's commands as that release
+#: reads them (scripts/version_template_manager.py spellings_for_release).
+HOOK_STATEMENTS = {
+    "ash": "The `ash` hook runs `{entry}` with your `args`.",
+    "ash-full-scan": (
+        "`.pre-commit-hooks.yaml` also defines `ash-full-scan`, which runs `{entry}`."
+    ),
+}
+
+
+def _version_template_manager():
+    import importlib.util
+
+    path = REPO_ROOT / "scripts" / "version_template_manager.py"
+    spec = importlib.util.spec_from_file_location(
+        "_version_template_manager_for_hooks", path
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.VersionTemplateManager(REPO_ROOT)
+
+
+@pytest.mark.parametrize("hook_id", sorted(HOOK_STATEMENTS))
+def test_the_pre_commit_page_names_the_command_the_hook_runs(hook_id):
+    """The page said the `ash` hook runs `ashv3 scan fs ...` while the manifest still
+    ran the subject-less `ashv3 ...`, which prints a deprecation line on every
+    commit. The page and the manifest have to name the same command."""
+    entry = {hook["id"]: hook for hook in HOOKS}[hook_id]["entry"]
+    manager = _version_template_manager()
+    template, page = TUTORIAL_PAGES[1], TUTORIAL_PAGES[0]
+    release = manager.packaged_release()
+    for path, command in (
+        (template, entry),
+        (page, manager.render(entry, release)),
+    ):
+        text = " ".join(path.read_text(encoding="utf-8").split())
+        sentence = HOOK_STATEMENTS[hook_id].format(entry=command)
+        assert sentence in text, (
+            f"{path.relative_to(REPO_ROOT)} does not say what hook {hook_id!r} runs "
+            f"({MANIFEST_PATH.name}: `{entry}`); it should say: {sentence}"
+        )
+
+
 @pytest.mark.parametrize("page", TUTORIAL_PAGES, ids=lambda page: page.name)
 def test_the_tutorial_ignores_the_output_and_not_the_suppressions(page):
     """It said "Add `.ash/` to your `.gitignore`".

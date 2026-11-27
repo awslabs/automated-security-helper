@@ -196,6 +196,248 @@ ASH_PIN_PATTERNS = {
     "ash-version:": (rf"({_FORM_PREFIX['ash-version:']}v){_SEMVER}",),
 }
 
+# The first release whose CLI spells a scan of a directory `ash scan fs [PATH]`, groups
+# the commands that read stored results under `ash results`, and names the image build
+# `ash container build`. A page that pins an earlier release has to show that release's
+# spellings: a reader copies its install command and then its other commands, and an
+# earlier `ash` refuses all three (its `scan` takes no path argument and no
+# subcommand). The templates hold the newest spellings, and `render` writes the older
+# ones in the code of a page when it renders for a release before this one
+# (markdown_for_release, which uses spellings_for_release); the prose around the code is
+# never rewritten. A render for this release or a later one leaves them, so the bump that
+# cuts it moves every page at once.
+SUBJECTS_RELEASE = (3, 9, 0)
+
+# `ash` or `ashv3` as a command word: not the end of a longer name (`dash`, `flash`) and
+# not a path that ends in `ash` (`/usr/local/bin/ash`).
+_ASH_COMMAND = r"(?<![\w./-])(?P<ash>ash|ashv3)"
+# What separates two words of one command: blanks, a backslash that ends a line (the
+# next line goes on with the command, and a blank must still stand between the words:
+# `ash\` and `scan` on the next line are one word), or the quotes and comma between two
+# items of a list of arguments (`["ash", "scan", "fs", "."]`), which may put each item on
+# a line of its own.
+_WORD_GAP = r"""(?:(?:\\\r?\n)*[ \t](?:[ \t]|\\\r?\n)*|["'][ \t]*,\s*["'])"""
+# The word after `fs` that is its path argument: a quoted string, a `<placeholder>`, or
+# a word that starts no option (`-`), continues no line (`\`), and is not a shell
+# operator, a comment, the end of a code span or of quoted text, a redirection (`2>&1`),
+# a usage placeholder (`[OPTIONS]`) or an ellipsis (`...`).
+_FS_PATH = (
+    r"(?P<path>\"[^\"\n]*\"|'[^'\n]*'|<[A-Za-z][\w-]*>"
+    r"|(?!\d+[<>]|\[|\.\.\.)[^\s`'\"\\|;&()<>#-][^\s`'\"|;&()<>]*)"
+)
+# `fs` ends where a word ends; a `.` after it ends a sentence, but `fs.py` is a name.
+_SCAN_FS = re.compile(
+    rf"{_ASH_COMMAND}(?P<before_scan>{_WORD_GAP})scan{_WORD_GAP}fs(?![\w/-])(?!\.\w)"
+    rf"(?:(?P<before_path>{_WORD_GAP}){_FS_PATH})?"
+)
+_RESULTS_VERB = re.compile(
+    rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})results{_WORD_GAP}"
+    r"(?P<verb>report|diff|trend|merge|inspect)(?![\w-])"
+)
+_CONTAINER_BUILD = re.compile(
+    rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})container{_WORD_GAP}build(?![\w-])"
+)
+# One `ash scan` command: up to a newline that is not escaped, or a separator that starts
+# another command, as _SAME_COMMAND reads a command. The flags below are rewritten only
+# inside it: a page that names a flag in a sentence says the flag, whatever release the
+# page pins.
+_SCAN_COMMAND = re.compile(rf"{_ASH_COMMAND}{_WORD_GAP}scan(?![\w-]){_SAME_COMMAND}")
+# The flags of 3.9 that name the scanners to run: `--only-scanners` for the whole
+# selection and `--add-scanners` for the scanners added to it. 3.8 has `--scanners` for
+# both, which 3.9 still reads and warns about.
+_SCANNER_SELECTION_FLAG = re.compile(r"(?<![\w-])--(?:only|add)-scanners(?![\w-])")
+_RELEASE_NUMBER = re.compile(r"(\d+)\.(\d+)\.(\d+)(?!\d)")
+
+# What the `entry:` of a hook in `.pre-commit-hooks.yaml` runs, as that file ships it
+# for SUBJECTS_RELEASE and as the release before it shipped it. A page that says what a
+# hook runs quotes the entry, so it has to say what the manifest of the release it pins
+# says: the entry is not a command a reader types, and its older form is not the
+# `ash scan` that the general rewrite below would write (`ashv3 scan --mode=precommit
+# --staged`, which neither manifest holds). The 3.9 hooks also pass `--staged`, which
+# 3.8.0 lacks, so the earlier entry is not a respelling of the later one and is listed
+# whole. Keyed by the newer entry; tests/unit/test_pre_commit_hooks_manifest.py holds the
+# keys to the manifest, and the values to the entries `git show v3.8.0:.pre-commit-
+# hooks.yaml` prints.
+HOOK_ENTRIES_BEFORE_THE_SUBJECTS = {
+    "ashv3 scan fs --mode=precommit --staged": "ashv3 --mode=precommit",
+    "ashv3 scan fs --mode=container --simple": "ashv3 --mode=container --simple",
+}
+_HOOK_ENTRY = re.compile(
+    rf"(?<![\w./-])({'|'.join(map(re.escape, HOOK_ENTRIES_BEFORE_THE_SUBJECTS))})"
+    r"(?![\w-])"
+)
+
+
+def _scan_before_the_subjects(found: "re.Match[str]") -> str:
+    """`ash scan fs [PATH]` as a release before SUBJECTS_RELEASE spells it.
+
+    The words keep the gaps they had, so a command that continues on the next line
+    still does, and a list of arguments (`["ash", "scan", "fs", "."]`) gets the flag
+    and its path as two items (`"--source-dir", "."`), not one.
+    """
+    command = f"{found['ash']}{found['before_scan']}scan"
+    if found["path"] is None:
+        return command
+    gap = found["before_path"]
+    flag_gap = gap if "," in gap else " "
+    return f"{command}{gap}--source-dir{flag_gap}{found['path']}"
+
+
+def spellings_for_release(text: str, version: str) -> str:
+    """``text`` with ASH's commands spelled as release ``version`` reads them.
+
+    For a release before SUBJECTS_RELEASE, ``ash scan fs PATH`` becomes
+    ``ash scan --source-dir PATH`` and ``ash scan fs`` with no path ``ash scan``,
+    ``ash results <verb>`` becomes ``ash <verb>``, and ``ash container build`` becomes
+    ``ash build-image``; ``ashv3`` is read as ``ash``. Inside an ``ash scan`` command,
+    ``--only-scanners`` and ``--add-scanners`` become ``--scanners``, the one flag that
+    release has for both. The entries of the hooks in ``.pre-commit-hooks.yaml``
+    (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that release ships, whole. Text
+    for SUBJECTS_RELEASE or a later release comes back unchanged, as does text for a
+    version that does not start with a release number (a branch name, a placeholder).
+
+    A command is read as a shell writes it, with its words on one line or on lines
+    joined by a backslash, and as a list of arguments (``["ash", "scan", "fs", "."]``).
+    What follows ``fs`` is its path only when it can be one: not an option, a
+    redirection (``2>&1``), a placeholder such as ``[OPTIONS]``, or ``...``.
+
+    Every command in ``text`` is rewritten, so ``text`` is a command or a text made of
+    commands (a snippet of the docs site). A document that has prose around its code
+    goes through markdown_for_release.
+    """
+    if not _is_before_the_subjects(version):
+        return text
+    text = _swap_hook_entries(text)
+    text = _SCAN_FS.sub(_scan_before_the_subjects, text)
+    text = _SCAN_COMMAND.sub(
+        lambda command: _SCANNER_SELECTION_FLAG.sub("--scanners", command[0]), text
+    )
+    text = _RESULTS_VERB.sub(
+        lambda verb: f"{verb['ash']}{verb['blank']}{verb['verb']}", text
+    )
+    return _CONTAINER_BUILD.sub(
+        lambda build: f"{build['ash']}{build['blank']}build-image", text
+    )
+
+
+def _is_before_the_subjects(version: str) -> bool:
+    """Whether ``version`` names a release before SUBJECTS_RELEASE.
+
+    A version that does not start with a release number (a branch name, a placeholder)
+    names none, so there are no older spellings to write for it.
+    """
+    found = _RELEASE_NUMBER.match(version.strip())
+    if found is None:
+        return False
+    return tuple(int(part) for part in found.groups()) < SUBJECTS_RELEASE
+
+
+def _swap_hook_entries(text: str) -> str:
+    """The entries of this repository's hooks, each as the earlier release ships it."""
+    return _HOOK_ENTRY.sub(
+        lambda entry: HOOK_ENTRIES_BEFORE_THE_SUBJECTS[entry[1]], text
+    )
+
+
+# A fence opens a block of code: three or more backticks (with no backtick after them on
+# the line, or it is an inline span) or tildes, at any indent. The fence that closes it
+# is of the same kind, at least as long, and alone on its line.
+_FENCE_OPEN = re.compile(r"^[ \t]*(?:(?P<ticks>`{3,})[^`]*|(?P<tildes>~{3,}).*)$")
+_FENCE_CLOSE = re.compile(r"^[ \t]*(?P<mark>`{3,}|~{3,})[ \t]*\r?$")
+# An inline code span: a run of backticks, the code, and the next run of as many. The
+# code may wrap onto the next line.
+_CODE_SPAN = re.compile(
+    r"(?<!`)(?P<ticks>`+)(?!`)(?P<code>.+?)(?<!`)(?P=ticks)(?!`)", re.DOTALL
+)
+# A blank line ends a paragraph, and a backtick left open there is only a backtick.
+_BLANK_LINE = re.compile(r"\n[ \t]*\r?\n")
+
+
+def _inline_code(text: str, start: int, end: int) -> List[Tuple[int, int]]:
+    """Where the inline code spans of ``text[start:end]`` hold their code."""
+    prose = text[start:end]
+    found = []
+    paragraph_from = 0
+    for gap in [*_BLANK_LINE.finditer(prose), None]:
+        paragraph_to = len(prose) if gap is None else gap.start()
+        for span in _CODE_SPAN.finditer(prose[paragraph_from:paragraph_to]):
+            found.append(
+                (
+                    start + paragraph_from + span.start("code"),
+                    start + paragraph_from + span.end("code"),
+                )
+            )
+        if gap is not None:
+            paragraph_from = gap.end()
+    return found
+
+
+def _code_ranges(text: str) -> List[Tuple[int, int]]:
+    """Where the code of a Markdown text is: the lines inside each fenced block and the
+    code inside each inline span, in order.
+
+    A fence that is never closed holds the rest of the text, as in CommonMark.
+    """
+    ranges: List[Tuple[int, int]] = []
+    opener = ""  # the mark of the fence that is open, or "" outside one
+    prose_from = 0  # where the prose before the next fence starts
+    body_from = 0  # where the body of the open fence starts
+    position = 0  # where the line being read starts
+    for line in text.split("\n"):
+        next_position = position + len(line) + 1
+        if opener:
+            closing = _FENCE_CLOSE.match(line)
+            if (
+                closing is not None
+                and closing["mark"][0] == opener[0]
+                and len(closing["mark"]) >= len(opener)
+            ):
+                ranges.append((body_from, position))
+                opener = ""
+                prose_from = next_position
+        else:
+            opening = _FENCE_OPEN.match(line)
+            if opening is not None:
+                ranges.extend(_inline_code(text, prose_from, position))
+                opener = opening["ticks"] or opening["tildes"]
+                body_from = min(next_position, len(text))
+        position = next_position
+    if opener:
+        ranges.append((body_from, len(text)))
+    else:
+        ranges.extend(_inline_code(text, min(prose_from, len(text)), len(text)))
+    return ranges
+
+
+def markdown_for_release(text: str, version: str) -> str:
+    """``text``, a Markdown document, with the commands in its code spelled as release
+    ``version`` reads them (spellings_for_release).
+
+    Only code is rewritten: the lines inside a fenced block and the text inside an
+    inline code span. The prose around it is left as it is, because a sentence that
+    names a spelling says what it says whatever release the page pins, and a rewrite
+    of it can make it false: a page that says an older ASH has no ``fs`` subject would
+    say, for that older release, that the subject is gone. The one exception is the
+    entry of one of this repository's hooks (HOOK_ENTRIES_BEFORE_THE_SUBJECTS), which
+    is swapped wherever it stands, since it is a quoted line of the manifest of the
+    release the page pins and not a spelling.
+
+    A template that is not Markdown has no code spans to find, so none of its commands
+    is rewritten; test_version_template_release_spellings.py fails when one holds a
+    spelling its release lacks.
+    """
+    if not _is_before_the_subjects(version):
+        return text
+    text = _swap_hook_entries(text)
+    pieces = []
+    last = 0
+    for begin, end in _code_ranges(text):
+        pieces.append(text[last:begin])
+        pieces.append(spellings_for_release(text[begin:end], version))
+        last = end
+    pieces.append(text[last:])
+    return "".join(pieces)
+
 
 def _ash_pins(text: str) -> List[Tuple[str, str, int]]:
     """(form name, release number, where the number starts) of every ASH pin in text."""
@@ -315,6 +557,17 @@ def _entry_around(lines: List[str], index: int, begin: int, finish: int) -> str:
     return entry[before + 1 : until]
 
 
+def _first_difference(page: str, rendered: str) -> Tuple[int, str, str]:
+    """Where two texts first differ: the line number, and that line of each text."""
+    offset = next(
+        (index for index, pair in enumerate(zip(page, rendered)) if pair[0] != pair[1]),
+        min(len(page), len(rendered)),
+    )
+    # Up to ``offset`` the texts are the same, so the line is the same in both.
+    number = page.count("\n", 0, offset)
+    return number + 1, page.split("\n")[number], rendered.split("\n")[number]
+
+
 class FileResult(enum.Enum):
     """What convert_file or generate_file did with one file.
 
@@ -406,10 +659,14 @@ class VersionTemplateManager:
         ]
 
     def render(self, content: str, version: str) -> str:
-        """A template rendered for a release: both placeholders become the version."""
-        return content.replace(self.version_placeholder, version).replace(
+        """A template rendered for a release: both placeholders become the version, and
+        the commands in its code take the spellings that release reads
+        (markdown_for_release), since the page pins that release's install command.
+        The prose around the code is rendered as the template writes it."""
+        rendered = content.replace(self.version_placeholder, version).replace(
             self.release_placeholder, version
         )
+        return markdown_for_release(rendered, version)
 
     def packaged_release(self) -> str:
         """The current release number: `[tool.commitizen] version` in pyproject.toml.
@@ -517,9 +774,20 @@ class VersionTemplateManager:
         with those placeholders gone and the next generate stamped the stale doc
         over every edit made to the template.
 
+        With ``overwrite`` the template is replaced only by one that renders back to
+        the doc: rendered for the release the doc pins, it has to give the doc itself.
+        A doc that pins two releases, that names a placeholder in its text, or that
+        holds a spelling its release does not read (a command of a newer ASH on a page
+        pinned to an older one) comes back different, and replacing the template with
+        what was written from it would change the next generate. What the check cannot
+        see is what a doc never held: a page rendered for a release before 3.9 holds
+        that release's spellings, so the template written from it holds them too, and
+        loses the newer ones its predecessor had.
+
         Args:
             file_path: Path to the file to convert.
-            overwrite: Replace an existing template instead of keeping it.
+            overwrite: Replace an existing template instead of keeping it, when the
+                template written from the doc renders back to the doc.
 
         Returns:
             True if conversion was successful and changes were made. False for a skip
@@ -534,7 +802,9 @@ class VersionTemplateManager:
 
         DONE when a template was written; SKIPPED for a reason that is not an error (a
         template kept, no version reference, no change); FAILED for an error, which it
-        has already printed, a listed page that does not exist included.
+        has already printed, a listed page that does not exist included, and a template
+        that ``overwrite`` would have replaced with one that does not render back to
+        the doc (_why_it_does_not_render_back), which is left as it was.
         """
         if not file_path.exists():
             # A listed target with no page is the convert-side twin of a target with no
@@ -544,7 +814,8 @@ class VersionTemplateManager:
             return FileResult.FAILED
 
         template_path = self.template_beside(file_path)
-        if template_path.exists() and not overwrite:
+        replacing = template_path.exists()
+        if replacing and not overwrite:
             print(
                 f"Template {template_path} exists; keeping it (convert replaces an "
                 "existing template only with --overwrite)"
@@ -570,6 +841,15 @@ class VersionTemplateManager:
                 print(f"No changes made to {file_path}")
                 return FileResult.SKIPPED
 
+            if replacing:
+                why_not = self._why_it_does_not_render_back(original_content, content)
+                if why_not is not None:
+                    print(
+                        f"Error: not replacing {template_path}: the template written "
+                        f"from {file_path} would not give it back. {why_not}"
+                    )
+                    return FileResult.FAILED
+
             # Create template file
             with open(template_path, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -580,6 +860,31 @@ class VersionTemplateManager:
         except Exception as e:
             print(f"Error converting {file_path} to template: {e}")
             return FileResult.FAILED
+
+    def _why_it_does_not_render_back(self, page: str, template: str) -> Optional[str]:
+        """Why ``template``, written from ``page``, renders to something else; None if
+        it renders back to ``page``.
+
+        A template renders for one release, so a page that pins two cannot come back
+        from it. For the one release the page pins, the render writes the placeholders
+        in and the spellings of that release, so a placeholder the page names in its
+        text, or a spelling its release does not read, comes back changed.
+        """
+        pins = self.release_pins(page)
+        if len(pins) != 1:
+            return (
+                f"The page pins {len(pins)} releases ({', '.join(sorted(pins))}) and "
+                "a template renders for one."
+            )
+        (release,) = pins
+        rendered = self.render(template, release)
+        if rendered == page:
+            return None
+        number, wanted, written = _first_difference(page, rendered)
+        return (
+            f"Rendered for {release}, line {number} of the page is {wanted!r} and the "
+            f"template writes {written!r}."
+        )
 
     def _version_to_render(self) -> str:
         """The version of the checkout the templates belong to, never "unknown"."""
@@ -766,7 +1071,10 @@ def main() -> int:
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="convert: replace an existing .template instead of keeping it",
+        help=(
+            "convert: replace an existing .template instead of keeping it, when the "
+            "template written from the page renders back to the page"
+        ),
     )
 
     args = parser.parse_args()

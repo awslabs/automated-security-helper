@@ -51,12 +51,12 @@ Prerequisites:
   templates to the ASH release they ship in. The Terraform `ash_version` variable has
   no default, and the Terraform examples pin the same release. Both accept a tag, a
   branch, or a full commit SHA. The targets need options that no release up to 3.7.1
-  has: stateless MCP (`ash mcp --stateless-http`), and `ash merge` with the shard
-  options for the distributed pipeline. Set `AshVersion` to an ASH that has them, for
-  example the commit SHA you deploy from. With one that lacks them, the Fargate MCP
-  container exits at startup, the AgentCore server starts in stateful mode and logs a
-  warning, and the distributed pipeline cannot run its shard and merge commands. Each
-  target's README lists what it needs.
+  has: stateless MCP (`ash mcp --stateless-http`), and the shard options of `ash merge`
+  (`ash results merge` from 3.9) for the distributed pipeline. Set `AshVersion` to an
+  ASH that has them, for example the commit SHA you deploy from. With one that lacks
+  them, the Fargate MCP container exits at startup, the AgentCore server starts in
+  stateful mode and logs a warning, and the distributed pipeline cannot run its shard
+  and merge commands. Each target's README lists what it needs.
 - The image is only as current as its last build. The build runs on the `RebuildSchedule`
   you set, and rebuilding the image does not update a running service on its own; each
   target's README says how to roll it out.

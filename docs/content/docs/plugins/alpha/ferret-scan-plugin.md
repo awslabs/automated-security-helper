@@ -134,7 +134,7 @@ Use the `--ash-plugin-modules` flag when running ASH:
 
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
-uv run ash scan --source-dir /path/to/code \
+uv run ash scan fs /path/to/code \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
@@ -166,16 +166,16 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # Scan current directory
-uv run ash --scanners ferret-scan
+uv run ash scan fs --only-scanners ferret-scan
 
 # Scan specific directory
-uv run ash --source-dir /path/to/project --scanners ferret-scan
+uv run ash scan fs /path/to/project --only-scanners ferret-scan
 
 # Run with ferret-scan's own debug output
-uv run ash --scanners ferret-scan -o ferret_debug=true
+uv run ash scan fs --only-scanners ferret-scan -o ferret_debug=true
 
 # Run with ferret-scan's own verbose output
-uv run ash --scanners ferret-scan -o ferret_verbose=true
+uv run ash scan fs --only-scanners ferret-scan -o ferret_verbose=true
 ```
 
 ### Run Without Configuration File
@@ -185,11 +185,11 @@ If you want to run Ferret Scan without saving a configuration file:
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # Scan current directory only with ferret-scan
-uv run ash --scanners ferret-scan \
+uv run ash scan fs --only-scanners ferret-scan \
   --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 
 # Scan with all available scanners (including ferret-scan)
-uv run ash --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
+uv run ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
 ## Configuration Options
@@ -435,7 +435,7 @@ Set them with `--config-overrides`:
 
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
-ash --config-overrides 'scanners.ferret-scan.options.profile=security-audit'
+ash scan fs --config-overrides 'scanners.ferret-scan.options.profile=security-audit'
 ```
 
 or in a config file outside the scanned tree, named with `--config`:
@@ -547,7 +547,7 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # Use Ferret Scan alongside other ASH scanners
-uv run ash --scanners ferret-scan,bandit,detect-secrets
+uv run ash scan fs --only-scanners ferret-scan,bandit,detect-secrets
 ```
 
 ### CI/CD Integration
@@ -555,7 +555,7 @@ uv run ash --scanners ferret-scan,bandit,detect-secrets
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners ferret-scan
+uv run ash scan fs --mode container --only-scanners ferret-scan
 ```
 
 ## Output Integration
@@ -625,10 +625,10 @@ Enable ferret-scan's own debug/verbose output to troubleshoot issues:
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
 # Enable ferret-scan's debug output (shows preprocessing and validation flow)
-uv run ash --scanners ferret-scan -o ferret_debug=true
+uv run ash scan fs --only-scanners ferret-scan -o ferret_debug=true
 
 # Enable ferret-scan's verbose output (shows detailed finding info)
-uv run ash --scanners ferret-scan -o ferret_verbose=true
+uv run ash scan fs --only-scanners ferret-scan -o ferret_verbose=true
 ```
 
 ## Integration Examples
@@ -643,7 +643,7 @@ repos:
     hooks:
       - id: ash-ferret-scan
         name: ASH Ferret Scan Sensitive Data Detection
-        entry: uv run ash --scanners ferret-scan --mode precommit
+        entry: uv run ash scan fs --add-scanners ferret-scan --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -680,7 +680,8 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          uv run ash --scanners ferret-scan --output-format sarif \
+          uv run ash scan fs --only-scanners ferret-scan --output-format sarif \
+            --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
             --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]" 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
@@ -705,7 +706,8 @@ ferret-security-scan:
     - pip install 'ferret-scan>=2.4.5,<2.7.0' uv
   script:
     - |
-      uv run ash --scanners ferret-scan \
+      uv run ash scan fs --only-scanners ferret-scan \
+        --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
         --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_ferret_plugins\"]"
   artifacts:
     reports:
@@ -728,7 +730,7 @@ ferret-security-scan:
 Consider using both scanners together for comprehensive coverage:
 <!-- doctest: illustrative reason="runs a scan that needs ferret-scan installed on the host" -->
 ```bash
-uv run ash --scanners ferret-scan,detect-secrets
+uv run ash scan fs --only-scanners ferret-scan,detect-secrets
 ```
 
 ## Documentation

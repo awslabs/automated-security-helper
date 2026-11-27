@@ -87,7 +87,7 @@ them to the tool.
 or not their tools are installed.
 
 `--mode precommit` runs the five scanners marked yes, plus any you name with
-`--scanners`.
+`--add-scanners`.
 
 ## How each scanner picks its files {#file-patterns}
 
@@ -213,7 +213,7 @@ mkdir -p .ash/ash_output/keep
 printf 'DATABASE_PASSWORD = "correct-horse-battery-staple-1234"\n' > .ash/ash_output/keep/tracked.py
 git add -f .ash/ash_output/keep/tracked.py
 git commit -q -m "Commit a file under the default output directory"
-ash scan --scanners detect-secrets
+ash scan fs --only-scanners detect-secrets
 ```
 
 detect-secrets reports the password in `.ash/ash_output/keep/tracked.py`, and the scan

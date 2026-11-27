@@ -8,11 +8,12 @@ read the results, explain a finding, draft a suppression, fix a finding and comp
 scans. The agent itself, its MCP client configuration and the server's transport are
 the boundary of this twin; nothing here starts an MCP server or an agent.
 
-What the agent calls is ASH, and the twin runs that. The scans are ``ash --scanners
-bandit --offline``, which is the scan ``run_ash_scan`` runs narrowed to the one scanner
-that has findings in this project (the page: "three findings, all from bandit"). The
-tools that read the results, ``explain_finding``, ``suggest_suppression`` and
-``diff_scan_results``, are called through the functions the MCP tools wrap
+What the agent calls is ASH, and the twin runs that. The scans are ``ash scan fs
+--only-scanners bandit --offline``, which is the scan ``run_ash_scan`` runs narrowed to
+the one scanner that has findings in this project (the page: "three findings, all from
+bandit"). The tools that read the results, ``explain_finding``,
+``suggest_suppression`` and ``diff_scan_results``, are called through the functions
+the MCP tools wrap
 (``mcp_explain_finding``, ``mcp_suggest_suppression``, ``mcp_diff_scan_results``), on
 the results of those scans. The project, the suppression config, the validate step and
 the fix are the page's own blocks, read from the page.

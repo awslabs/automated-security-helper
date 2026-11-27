@@ -142,9 +142,9 @@ Tell ASH which Python modules hold your plugins with any of three inputs:
 
 - `ash_plugin_modules` in an ASH config file
   ([reference](reference/configuration.md#ash_plugin_modules));
-- the `--ash-plugin-modules` option of `ash scan`
-  ([reference](reference/cli.md#scan--ash-plugin-modules));
-- the `ASH_PLUGIN_MODULES` environment variable, which `ash scan` reads as the
+- the `--ash-plugin-modules` option of `ash scan fs`
+  ([reference](reference/cli.md#scan-fs--ash-plugin-modules));
+- the `ASH_PLUGIN_MODULES` environment variable, which `ash scan fs` reads as the
   option's default.
 
 [Plugins](plugins/index.md#load-a-plugin-module) describes the separators each

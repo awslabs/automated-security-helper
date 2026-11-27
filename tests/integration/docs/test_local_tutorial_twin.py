@@ -9,8 +9,9 @@ page's central claims to the code: that the project of step 4 has findings, that
 suppression of step 7 takes one of them away, and that the fix of step 9 makes the
 scan pass. This test runs a twin of steps 4 to 9 through the docs runner. The
 project, the suppression and the fix are the journey's own blocks; only each scan is
-narrowed to the journey's ``twin.scan`` (``ash --scanners bandit --offline``), which
-needs nothing but bandit. bandit is the scanner the page's findings come from.
+narrowed to the journey's ``twin.scan`` (``ash scan fs --only-scanners bandit
+--offline``), which needs nothing but bandit. bandit is the scanner the page's findings
+come from.
 
 The page is a render of ``docs/journeys/getting-started-local.journey.yaml``
 (``scripts/generate_journey_pages.py``), and that file's ``twin:`` fields are what
@@ -22,7 +23,7 @@ while this test checks another. The test used to recover the same facts by parsi
 rendered page with regular expressions.
 
 Each scan must exit with the code the journey states, and print its ``Exiting due to
-N actionable findings`` line where it states a count. ``ash report`` in step 6 must
+N actionable findings`` line where it states a count. ``ash results report`` in step 6 must
 exit 0 and name the rule the page suppresses next.
 
 bandit has to be where a docs session finds tools (docs_runner.session_path): the

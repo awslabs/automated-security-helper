@@ -18,7 +18,7 @@ In a repository with no CloudFormation template and one detect-secrets finding, 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets,cfn-nag --offline --no-progress
+ash scan fs . --only-scanners detect-secrets,cfn-nag --offline --no-progress
 ```
 
 ## Turn scanners off
@@ -35,30 +35,30 @@ scanners:
 
 Use the hyphenated names that `ash plugin list` shows (`detect-secrets`, `cdk-nag`, and `npm-audit`). A misspelled name is ignored without a warning, so the scanner keeps running.
 
-To choose scanners for one run, use `--scanners` to run only the ones you name, or `--exclude-scanners` to run all but those:
+To choose scanners for one run, use `--only-scanners` to run only the ones you name, or `--exclude-scanners` to run all but those:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 <!-- doctest: illustrative reason="runs every scanner, which needs each scanner's tool installed" -->
 ```bash
-ash --source-dir . --exclude-scanners trivy,grype
+ash scan fs . --exclude-scanners trivy,grype
 ```
 
-Both options take a comma-separated list or can be repeated, and the `ASH_SCANNERS` and `ASH_EXCLUDED_SCANNERS` environment variables set them too. How they combine with the config:
+Both options take a comma-separated list or can be repeated, and the `ASH_EXCLUDED_SCANNERS` environment variable sets `--exclude-scanners` too. `--only-scanners` has no environment variable of its own, and it cannot be combined with `--add-scanners` or with the deprecated `--scanners` and its `ASH_SCANNERS` variable. `--add-scanners` adds names to the selection the mode and the config give instead of replacing it ([Choose which scanners run by default](configure.md#default-scanners)). How they combine with the config:
 
-- A scanner runs only when it is enabled in the config, named by `--scanners` (when given), and not named by `--exclude-scanners`.
-- `--scanners` cannot run a scanner the config disables. To turn one back on for a run, override the config: `--config-overrides scanners.bandit.enabled=true`.
-- A name in both lists is excluded. If every scanner `--scanners` names is also excluded, ASH refuses the run with exit 5, the code for a usage error.
-- An unknown name in `--scanners` gets a warning when another name matches; when none matches, ASH refuses the run with exit 5. When some match, the scan runs those, and the results record the names that matched nothing in `metadata.requested_scanners_not_run` ([Output files](../reference/output-files.md)); the console summary lists them after the scanner table, as in `Requested but not run: trivyy (no registered scanner has this name)`. An unknown name in `--exclude-scanners` excludes nothing, and a warning names it; the scan still runs, and the results do not record the name.
+- A scanner runs only when it is enabled in the config, named by `--only-scanners` (when given), and not named by `--exclude-scanners`.
+- `--only-scanners` cannot run a scanner the config disables. To turn one back on for a run, override the config: `--config-overrides scanners.bandit.enabled=true`.
+- A name in both lists is excluded. If every scanner `--only-scanners` names is also excluded, ASH refuses the run with exit 5, the code for a usage error.
+- An unknown name in `--only-scanners` gets a warning when another name matches; when none matches, ASH refuses the run with exit 5. When some match, the scan runs those, and the results record the names that matched nothing in `metadata.requested_scanners_not_run` ([Output files](../reference/output-files.md)); the console summary lists them after the scanner table, as in `Requested but not run: trivyy (no registered scanner has this name)`. An unknown name in `--exclude-scanners` excludes nothing, and a warning names it; the scan still runs, and the results do not record the name.
 
 A scanner that is turned off, not selected, or excluded is recorded SKIPPED and does not affect the exit code. If every selected scanner is SKIPPED, including when none of them has a file to scan, the scan exits 1 (with `fail_on_incomplete_scanners` on, the default).
 
 ### Run only Python-based scanners
 
-`--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --scanners grype`, no scanner runs and the scan exits 1.
+`--python-only` keeps the scanners that need nothing but Python: bandit, cfn-lint, checkov, detect-secrets, semgrep, and zizmor. ASH applies it before it checks the scanners' tools, so every other scanner is recorded SKIPPED whether or not its tool is installed, and does not affect the exit code. When the run selects no Python-only scanner, as with `--python-only --only-scanners grype`, no scanner runs and the scan exits 1.
 
 <a id="community"></a>
 <a id="alpha"></a>
@@ -94,7 +94,7 @@ Every scanner has `severity_threshold`, which overrides the global threshold for
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides scanners.bandit.options.severity_level=HIGH
 ```
 
@@ -173,7 +173,7 @@ When a repository config sets one of these to a value other than the operator's,
 
 <!-- doctest: illustrative reason="names a gitleaks config file that the sample project does not have" -->
 ```bash
-ash --source-dir . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
+ash scan fs . --config-overrides scanners.gitleaks.options.config_file=/etc/ash/gitleaks.toml
 ```
 
 These scanners do not read the repository's own config files for their tools, such as `.gitleaks.toml`, `.gitleaksignore`, `zizmor.yml`, `actionlint.yaml`, `.bandit`, `bandit.yaml`, `bandit.toml`, `.grype.yaml`, `.syft.yaml`, `trivy.yaml`, `.trivyignore`, or `.cfnlintrc`. To use one, point the option at it from an operator source.

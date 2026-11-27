@@ -93,7 +93,7 @@ In the same shell:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners ruff-security
 ```
 
 ASH runs ruff, reads its SARIF, and adds a row to the summary. In a repository with a hardcoded password and a `subprocess` call with `shell=True`, ruff reports both, the scanner is FAILED, and the scan exits with code 2:
@@ -121,7 +121,7 @@ ASH checks the options of every section a loaded plugin reads with the plugin's 
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security \
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners ruff-security \
   --config-overrides 'scanners.ruff-security.options.selct=S,B'
 ```
 
@@ -151,7 +151,7 @@ Run the tool only by returning its command from `_execute_scan`. A process you s
 
 | Part | What it does |
 |---|---|
-| The config class | `name` is the scanner's name: the key under `scanners` in an ASH config, the value `--scanners` takes, and the directory under `.ash/ash_output/scanners/`. Options go in a subclass of `ScannerOptionsBase`, which already has `severity_threshold`, `scan_timeout`, and `offline`. An option the model does not declare refuses the configuration ([above](#3-scan-with-it)). |
+| The config class | `name` is the scanner's name: the key under `scanners` in an ASH config, the value `--only-scanners` takes, and the directory under `.ash/ash_output/scanners/`. Options go in a subclass of `ScannerOptionsBase`, which already has `severity_threshold`, `scan_timeout`, and `offline`. An option the model does not declare refuses the configuration ([above](#3-scan-with-it)). |
 | `model_post_init` | ASH constructs the scanner with no config when the ASH config has no section for it, and the base class refuses an empty config, so set the default before calling `super()`. |
 | `command` and `tool_type` | `command` is the program the default dependency check looks for; `tool_type` labels the findings (SAST, SCA, SECRETS, IAC, and others). |
 | `self.results_dir` | A directory for this scanner's files, `.ash/ash_output/scanners/<name>/`. Write the tool's output under it, one subdirectory per `target_type`. |
@@ -207,11 +207,11 @@ If the read paths or environment variables come from the scanner's own options, 
 
 ## Declare whether the scanner is Python-only
 
-`ash scan --python-only` runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the `python_only` class variable. `True` puts it in a `--python-only` run, `False` keeps it out, and a scanner that declares nothing (`None`) counts as Python-only only when it runs its tool through uv (`use_uv_tool`). `ruff-security` runs the `ruff` program from `PATH` and declares nothing, so a `--python-only` run leaves it out. With no other scanner selected, that scan would run no scanner and report itself clean, so ASH refuses it with exit code 5 and names the scanner it left out:
+`ash scan fs --python-only` runs only the scanners that need nothing but Python, and records every other scanner SKIPPED without looking for its tool. A scanner says which it is with the `python_only` class variable. `True` puts it in a `--python-only` run, `False` keeps it out, and a scanner that declares nothing (`None`) counts as Python-only only when it runs its tool through uv (`use_uv_tool`). `ruff-security` runs the `ruff` program from `PATH` and declares nothing, so a `--python-only` run leaves it out. With no other scanner selected, that scan would run no scanner and report itself clean, so ASH refuses it with exit code 5 and names the scanner it left out:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan --ash-plugin-modules acme_ash_plugins --scanners ruff-security --python-only
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners ruff-security --python-only
 ```
 
 A scanner that does its work in ASH's own process, such as the one in [A scanner with no external tool](#a-scanner-with-no-external-tool), declares `True` in its class body; one that runs a binary, Node.js, or anything else that is not a Python package declares `False`:

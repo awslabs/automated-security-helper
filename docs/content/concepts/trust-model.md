@@ -10,7 +10,7 @@ ASH reads its configuration from places with different owners. You, the person o
 | Repository | Any config file inside a git checkout or inside the scanned directory: the discovered `.ash.yaml` and its siblings, a `--config` or `ASH_CONFIG` that points into the repository being scanned, and a config file kept in a checkout of its own, such as an ops or dotfiles repository. |
 | MCP client | Any file under the MCP server's workspace root, where delivered source trees and uploads are stored, except each session's `config/` directory, which only the server writes. Also any other config file a client names as a tool's `config_path`, wherever it is, unless it is in a directory `ASH_MCP_ALLOWED_CONFIG_ROOTS` names or in its session's `config/` directory, which only the server writes. |
 
-The MCP workspace root is `ASH_MCP_WORKSPACE_ROOT` when set, read against the current directory when it is relative; else `$XDG_CACHE_HOME/ash-mcp` when `XDG_CACHE_HOME` is an absolute path, since a relative one is ignored; else `~/.cache/ash-mcp` when `HOME` is an absolute path. A file there is an MCP-client file whether or not a server is running, so a CLI scan of a delivered tree, with that tree as `--source-dir`, gets the same treatment. With an empty or relative `HOME` and neither variable, or with an `ASH_MCP_WORKSPACE_ROOT` under `~`, there is no workspace root, and no file is an MCP-client file because of where it is. `ash mcp` still starts, with a warning that ASH uses nothing under `~`.
+The MCP workspace root is `ASH_MCP_WORKSPACE_ROOT` when set, read against the current directory when it is relative; else `$XDG_CACHE_HOME/ash-mcp` when `XDG_CACHE_HOME` is an absolute path, since a relative one is ignored; else `~/.cache/ash-mcp` when `HOME` is an absolute path. A file there is an MCP-client file whether or not a server is running, so a CLI scan of a delivered tree, with that tree as the directory `ash scan fs` scans, gets the same treatment. With an empty or relative `HOME` and neither variable, or with an `ASH_MCP_WORKSPACE_ROOT` under `~`, there is no workspace root, and no file is an MCP-client file because of where it is. `ash mcp` still starts, with a warning that ASH uses nothing under `~`.
 
 ## How a file's tier is decided {#how-the-tier-is-decided}
 
@@ -87,7 +87,7 @@ Settings not listed here can be set from any tier. The repository tier's limits 
 | Relaxing the stale content database check: `content_db_staleness: warn`, and `content_db_staleness_overrides` entries with `policy: warn` | Honored, as is `--allow-stale-content-db` | A value equal to the trusted one, or one that makes the check stricter (`fail`), is kept. Any other policy is replaced by the trusted value, and any other entry is dropped. |
 | Scanner options that name a tool config file, ignore file, rules or plugin directory, or a program for a tool to run, or that choose which part of a tool's own config applies | Honored. For some scanners the file may not be inside the scanned tree. | Limited for some scanners only: some ignore the repository's value, and the others accept only a path outside every git checkout and the scanned directory. Set these options from an operator source, and pass your config with `--config` so the repository's config is not read. |
 
-[Options only the operator can set](../how-to/choose-scanners.md#operator-only) lists the scanners that limit the options in the last row. The reporter limits apply to a reporter's section under any spelling ASH reads as that reporter, so a repository's reporter section spelled `BedrockSummary` is limited like `bedrock-summary-reporter`. The table is how a scan reads the reporter settings. `ash report` and `ash merge` read stored results, which do not record which tree was scanned, so any config file they read, even one outside every git checkout, is held to the repository column for whether each AWS reporter runs and where it sends: those come only from `--config-overrides` ([Rendering a reporter from saved results](../plugins/aws.md#ash-report)). Two rules apply from every tier: `reporters.<name>.extension` must be a plain filename suffix, and report files are written only inside the reports directory.
+[Options only the operator can set](../how-to/choose-scanners.md#operator-only) lists the scanners that limit the options in the last row. The reporter limits apply to a reporter's section under any spelling ASH reads as that reporter, so a repository's reporter section spelled `BedrockSummary` is limited like `bedrock-summary-reporter`. The table is how a scan reads the reporter settings. `ash results report` and `ash results merge` read stored results, which do not record which tree was scanned, so any config file they read, even one outside every git checkout, is held to the repository column for whether each AWS reporter runs and where it sends: those come only from `--config-overrides` ([Rendering a reporter from saved results](../plugins/aws.md#ash-report)). Two rules apply from every tier: `reporters.<name>.extension` must be a plain filename suffix, and report files are written only inside the reports directory.
 
 ## When a lower tier sets something it may not {#denied-settings}
 
@@ -113,14 +113,14 @@ The CLI refuses the config with exit code 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ASH_MCP_WORKSPACE_ROOT="$(dirname "$PWD")" ash --source-dir . --scanners detect-secrets --offline --no-progress
+ASH_MCP_WORKSPACE_ROOT="$(dirname "$PWD")" ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 Outside the workspace root the same file is a repository file, which may turn the gate off, so the same scan exits 0 although detect-secrets reports a finding:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
-ash --source-dir . --scanners detect-secrets --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 The default list also names `sandbox`, `ash_plugin_modules`, `global_settings.mcp`, suppressions, and ignore paths, and delivered files are checked differently for those. Sandbox settings and plugin modules may restrict the server's own but not widen them: a delivered file whose own `sandbox` section gives a scanner a network or an `extra_read_paths` entry the server's config does not, or sets a sandbox mode other than the server's when the server's mode is not `off`, or whose own `ash_plugin_modules` list loads a module the table above keeps out, is refused the same way. Any other sandbox grant or module a delivered file asks for is dropped, as for a repository file. A delivered file's `global_settings.mcp` section has no effect, and suppressions and ignore paths are honored and marked, as described next. Under the default policy a delivered config can still disable scanners, turn the reporters that write only local files on or off and set their options, apart from `gitlab-sast`'s `exclude_suppressed`, and raise severity thresholds. It cannot turn a reporter that sends findings off the host on or off: its `enabled: false` for one of them is not refused, but it has no effect, and each runs as the server's config says, or by the reporter's own default where that config sets nothing. [Run the MCP server](../how-to/mcp-server.md) covers running the server.
@@ -159,21 +159,21 @@ The tiers decide who may change the settings above. They do not make every setti
 
     <!-- doctest: run expect-exit=0 -->
     ```bash
-    ash --source-dir . --scanners detect-secrets --offline --no-progress
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress
     ```
 
     `--ignore-suppressions` brings the finding back, and the scan fails:
 
     <!-- doctest: run expect-exit=2 -->
     ```bash
-    ash --source-dir . --scanners detect-secrets --offline --no-progress --ignore-suppressions
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions
     ```
 
     To drop only the repository's ignore paths and keep its suppressions, replace the ignore paths with `--config-overrides`, and the finding fails the scan too:
 
     <!-- doctest: run expect-exit=2 -->
     ```bash
-    ash --source-dir . --scanners detect-secrets --offline --no-progress \
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress \
       --config-overrides 'global_settings.ignore_paths=[]'
     ```
 
@@ -190,7 +190,7 @@ The tiers decide who may change the settings above. They do not make every setti
 
     <!-- doctest: run expect-exit=2 -->
     ```bash
-    ash --source-dir . --scanners detect-secrets --offline --no-progress --ignore-suppressions
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions
     ```
 
 - Some scanners read configuration files from the scanned directory by name. For actionlint, bandit, cfn-lint, checkov, ferret-scan, gitleaks, grype, opengrep, semgrep, syft, trivy, trivy-repo, and zizmor, ASH gives the tool its own configuration instead, or keeps the repository's file from being read, a `.semgrepignore` included. detect-secrets reads a `.secrets.baseline` or `.ash/.secrets.baseline` in the source directory and uses the plugins and filters it lists, unless your config sets `plugins_used` in detect-secrets' `scan_settings`. The table above says which of the baseline's settings ASH drops. Apart from those settings, ASH does not limit or mark these files, or any other file a tool reads from the scanned directory on its own.
