@@ -154,7 +154,8 @@ class Route:
     caveats: Tuple[str, ...] = ()
     #: Providers tried before this one, with the reason each was skipped.
     skipped: Tuple[Tuple[str, str], ...] = ()
-    #: A route with a key is built once per run (nix realizes the whole toolchain).
+    #: A route with a key is built once per plugin, and not again in the run once
+    #: its command has exited 0 (nix realizes the whole toolchain).
     run_once_key: Optional[str] = None
 
 

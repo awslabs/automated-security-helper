@@ -10,11 +10,11 @@ and exited 0. Where it failed, the next plugin that routes to nix runs it again,
 each plugin reports its own result instead of the later ones being reported as
 verified because an earlier attempt was made.
 
-A plugin's own second command on the realization is served by its first, so it is
-neither announced nor counted: nothing has run when the commands are routed. A plugin
-an earlier realization served is told so once, reads INSTALLED, and is named on a
-summary line of its own, never as verified against a pinned digest, which nothing
-checked.
+A plugin's own second command on the realization is served by its first, so it gets
+no "Already realized" line and is not counted, and the route's own notes still print
+for it. A plugin an earlier realization served is told so once, reads INSTALLED, and
+is named on a summary line of its own, never as verified against a pinned digest,
+which nothing checked.
 """
 
 from __future__ import annotations
