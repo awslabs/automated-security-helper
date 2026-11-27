@@ -684,6 +684,56 @@ def test_a_yaml_merge_key_is_refused_by_file_line_and_key(cast, tmp_path):
     assert "the YAML merge key '<<' is not part of storyboard schema 1" in message
 
 
+# Besides a plain ``<<``, PyYAML's resolver reads each of these keys as a merge key and
+# merges the mapping after it into the mapping that holds the key. A key it reads as a
+# string is an ordinary key, however much it looks like ``<<``.
+MERGE_SPELLINGS = {
+    "the non-specific tag": "! <<",
+    "the non-specific tag on a quoted key": '! "<<"',
+    "the verbatim non-specific tag": "!<!> <<",
+    "the merge tag": "!!merge <<",
+    "the merge tag on another word": "!!merge extra",
+}
+NOT_MERGE_SPELLINGS = {
+    "a quoted key": '"<<"',
+    "a single-quoted key": "'<<'",
+    "a key given the string tag": "!!str <<",
+}
+
+
+@pytest.mark.parametrize("name", sorted(MERGE_SPELLINGS))
+def test_a_merge_key_is_refused_however_it_is_spelled(cast, tmp_path, name):
+    """The loader reads the tag PyYAML resolved and not the key's text, because a merge
+    under a spelling it missed drops the merged caption without a word."""
+    spelling = MERGE_SPELLINGS[name]
+    merged = VERSION_CAPTION + ", " + spelling + ': {caption: "Read it twice"}'
+    path, text = _board(tmp_path, (VERSION_CAPTION, merged))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, spelling)[0]}: ")
+    assert "the YAML merge key" in message
+    assert "is not part of storyboard schema 1" in message
+
+
+def test_a_merge_marker_given_as_a_value_is_refused(cast, tmp_path):
+    shown = 'expect_screen: ["awslabs/automated-security-helper v"]'
+    path, text = _board(tmp_path, (shown, "expect_screen: [<<]"))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '[<<]')[0]}: ")
+    assert "the YAML merge key" in message
+
+
+@pytest.mark.parametrize("name", sorted(NOT_MERGE_SPELLINGS))
+def test_a_key_the_resolver_reads_as_a_string_is_not_a_merge_key(cast, tmp_path, name):
+    """Must-not-flag: PyYAML merges nothing under these, so the loader does not call
+    them merge keys. The schema refuses each as a key it does not name."""
+    old = "{id: version, " + VERSION_CAPTION
+    new = "{id: version, " + NOT_MERGE_SPELLINGS[name] + ": 1, " + VERSION_CAPTION
+    path, _text = _board(tmp_path, (old, new))
+    message = _refused(cast, path)
+    assert "unknown key(s) ['<<']" in message
+    assert "merge key" not in message
+
+
 def test_a_caption_given_twice_in_a_scene_is_refused(cast, tmp_path):
     """The later caption would replace the first, so the loader names both lines."""
     again = 'caption: "Check it again"'
