@@ -2661,7 +2661,7 @@ jobs:
         timeout-minutes: 5
         run: |
           BASE_ARGS=()
-          if [ -s "${RUNNER_TEMP}/docs-feature-coverage-base-baseline.txt" ]; then
+          if [ -f "${RUNNER_TEMP}/docs-feature-coverage-base-baseline.txt" ]; then
             BASE_ARGS=(--base-baseline "${RUNNER_TEMP}/docs-feature-coverage-base-baseline.txt")
           fi
           uv run python scripts/docs_feature_coverage.py check \

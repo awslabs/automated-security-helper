@@ -13,12 +13,16 @@ Features are enumerated from code, never listed by hand:
 * ``command:ash scan``: a command of the click tree (commands that share a callback are
   one feature, named by the longest visible path), measured in the callback's code;
 * ``option:ash scan --scanners``: an option of such a command, which counts only when a
-  block gives it on its command line and reaches the command's code;
+  block gives it on its command line and reaches the command's code, the code of the
+  option's own callback, or a branch of the command's code that reads the option (the
+  body of an ``if`` whose test reads the option's parameter: ``ash --version`` prints
+  and leaves before the scan's own code, so that branch is what it reaches);
 * ``scanner:bandit``, ``reporter:sarif``, ``converter:archive``: a plugin the plugin
   modules register, measured in the work method the framework leaves to the plugin;
 * ``config:global_settings.severity_threshold``: a row of the generated configuration
-  reference, which counts when a block loads a saved configuration holding the key or
-  gives it with ``--config-overrides``;
+  reference, which counts when a block loads a saved configuration holding the key,
+  where the page shows that block can have read that file, or gives it with
+  ``--config-overrides``, keys inside the value included;
 * ``mcp-tool:run_ash_scan``: a tool the MCP server registers, measured in its body.
 
 Why options and keys are not plain code reach: an option's parameter and a config field
@@ -26,18 +30,72 @@ are read on every invocation, with their defaults, so reaching the code alone wo
 every option of every command the docs run as covered. The example's own text names what
 it demonstrates; coverage proves that the block ran and reached the code that uses it.
 
+The rule for every doubt is the same: read the feature as UNCOVERED. A feature wrongly
+read as uncovered puts one line in the shrink-only baseline, which the change that
+corrects the measurement then has to delete; a feature wrongly read as covered stays out
+of the baseline, and that change could then not list it.
+
+A block is evidence when the runner ran it, it passed, and its marker expects exit 0
+(success) or 2 (actionable findings). It expects exit 1 for a scan that ended with scan
+errors, but ASH also exits 1 for many refusals (``--use-existing`` with no results to
+use, ``ash config init`` refusing a second config source), so an exit-1 block counts
+only when its processes also reached the part of
+``ASHScanOrchestrator._write_results_file`` that follows its early exits: a scan ran and
+wrote its results. Any other expectation shows ASH refusing something or being stopped.
+
+A feature measured in a function is reached by running its REGION: the statements that
+come after the function's leading guards (the early exits it opens with, before its
+first statement that is not one), each as its whole span, or all of the body when it
+opens with none. An early exit after a statement that is not one can follow work the
+function did, so it is inside the region. Two named exceptions measure past the last
+early exit: a scanner's or a converter's work method, which opens with resets and then
+the skip checks that end a scan with nothing for it to do (every scan runs every one of
+them, so a leading-guards region would be reached by each scan that skipped them), and
+the results write named above.
+
+Plugins that share one work method (``opengrep`` and ``semgrep``) cannot be told apart
+by line coverage of it. Each also needs a method of its own, defined in its class body,
+that the shared method calls on ``self``, and a plugin that shares its work method with
+no such method is an inventory error.
+
+A saved configuration counts for a block that reached ``load_config_file`` only where
+the block can have read that file: the latest save of its path in the session at or
+before the block, of kind ``ash`` or ``pyproject`` (a fragment never counts), saved
+under the name discovery picks among the saves of the directory it searches, or named by
+the block's own ``--config``, ``-c`` or literal ``ASH_CONFIG=<file>``. Nothing counts
+after a shell block of the session may have changed directory. Where the unprovable case
+is left uncovered, it is left so on purpose.
+
 ``check`` fails (exit 1) on an uncovered feature missing from the shrink-only baseline
 (scripts/docs_feature_coverage_baseline.txt) and on a baseline line that names no
 feature; given the base branch's baseline it also fails on a line for a covered feature
 and on a line the pull request added. It exits 2 when the measurement cannot be
-trusted: nothing was measured, the data does not fit the docs tree, or the inventory
-cannot be built the same everywhere.
+trusted: nothing was measured, a coverage data file cannot be read, the data does not
+fit the docs tree, or the inventory cannot be built the same everywhere.
 
 Not measured: processes outside this interpreter's environment (a scanner's own tool,
 ``uvx``, a container), a sandboxed scanner's Python (the sandbox passes on an allowlist
 of environment variables, and ``COVERAGE_PROCESS_START`` is not on it), and a process
-killed by SIGKILL at a block's timeout. Plugins that share one work method cannot be
-told apart by line coverage, so covering one covers each of them.
+that is killed before it saves its data: the runner kills a block's processes with
+SIGKILL at its timeout, and coverage.py saves on SIGTERM only with ``sigterm = true`` in
+its ``[run]`` settings, which the rc file does not set.
+
+Stated limit, refusal returns that remain inside regions. Under the region rule a
+function that returns or raises a refusal after its first statement has that refusal
+inside its region, so a docs example that ended in one would read as covering the
+function. No executed docs example ends in one today, which is why none is a named
+exception, and each is named here by function: the ``if refusal is not None: return
+refusal`` of the MCP tools in ``cli/mcp_server.py`` (``get_scan_progress``,
+``list_active_scans``, ``cancel_scan``, ``set_source_git``, ``set_source_zip_chunk``,
+``set_source_zip_finalize``, ``clear_source``, ``set_source_image``,
+``set_source_image_archive_chunk``, ``set_source_image_archive_finalize`` and
+``select_profile``, with the ``profile_refusal`` of ``resolve_ash_workspace`` and
+``run_ash_workspace_scan``); the asff reporter's ``ValueError`` guards and the
+aws-security-hub reporter's ``SecurityHubImportError`` guards; and the ``return None``
+of the s3 and cloudwatch-logs reporters when their settings are missing. A page that
+drives an MCP tool call with no session, or enables one of those reporters, makes the
+limit live: the change that adds such an example is the one that gives that guard a
+named exception.
 """
 
 from __future__ import annotations
@@ -51,6 +109,7 @@ import inspect
 import json
 import os
 import pkgutil
+import posixpath
 import re
 import sys
 import tempfile
@@ -165,6 +224,12 @@ class Feature:
     paths: tuple[tuple[str, ...], ...] = ()
     #: For an option: its canonical name, the first ``--`` spelling.
     canonical: str = ""
+    #: For a plugin that shares its work method with another plugin: the regions of the
+    #: methods it defines in its own class body that the shared method calls on
+    #: ``self``. Line coverage cannot tell which plugin ran the shared code, so such a
+    #: feature is covered only when a block also reached one of these. Empty for every
+    #: other feature, and left out of the report.
+    requires: tuple[Region, ...] = ()
 
     @property
     def kind(self) -> str:
@@ -226,21 +291,47 @@ def _find_function(
     )
 
 
-def _region_of(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[int]:
-    """The statements past the function's last early exit, each as its full span.
+def _leading_guards(body: list[ast.stmt]) -> int:
+    """How many statements at the start of ``body`` are early exits."""
+    count = 0
+    while count < len(body) and _is_early_exit(body[count]):
+        count += 1
+    return count
+
+
+def _region_of(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, *, past_the_last_exit: bool = False
+) -> frozenset[int]:
+    """The statements past the function's leading guards, each as its full span.
 
     Importing a module runs its def lines, decorators and default values, and a
-    docstring is not executed, so none of them shows the function ran. The statements
-    up to a last early exit run on calls that do none of the function's work: the scan
-    callback's ``ctx.invoked_subcommand`` exit runs before every subcommand, so a
-    block that ran any other ``ash`` command would otherwise cover the scan. A
-    statement is its whole span because coverage can record a continuation line. When
-    nothing follows the last early exit the whole body is the region.
+    docstring is not executed, so none of them shows the function ran. The leading
+    guards are the early exits before the body's first statement that is not one. They
+    run on calls that do none of the function's work: the scan callback's
+    ``ctx.invoked_subcommand`` exit runs before every subcommand, so a block that ran
+    any other ``ash`` command would otherwise cover the scan. An early exit after a
+    statement that is not one can follow work the function did (a reporter that
+    renders and then returns early on an empty report has run), so it is inside the
+    region with the statements before it. A statement is its whole span because
+    coverage can record a continuation line. When the body opens with no guard, or
+    nothing follows the guards, the whole body is the region.
+
+    ``past_the_last_exit`` is the rule's two named exceptions: the region starts past
+    the body's last early exit, wherever it is. It holds where the function opens with
+    statements that run on every call (resets) and ends a call that has nothing to do
+    at a skip check after them: a scanner's work method, a converter's, and the
+    results write that tells a scan that wrote its results from a refusal.
     """
     body = _without_docstring(node.body)
-    exits = [index for index, statement in enumerate(body) if _is_early_exit(statement)]
-    if exits and exits[-1] + 1 < len(body):
-        body = body[exits[-1] + 1 :]
+    if past_the_last_exit:
+        exits = [
+            index for index, statement in enumerate(body) if _is_early_exit(statement)
+        ]
+        start = exits[-1] + 1 if exits else 0
+    else:
+        start = _leading_guards(body)
+    if 0 < start < len(body):
+        body = body[start:]
     lines = frozenset(
         line
         for statement in body
@@ -255,10 +346,15 @@ def _region_of(node: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[int]:
     return lines
 
 
-def region_lines(source: str, name: str, firstlineno: int) -> frozenset[int]:
+def region_lines(
+    source: str, name: str, firstlineno: int, *, past_the_last_exit: bool = False
+) -> frozenset[int]:
     """The region of the function ``name`` whose def line, or first decorator's line, is
     ``firstlineno`` (a function's ``__code__.co_firstlineno``)."""
-    return _region_of(_find_function(ast.parse(source), name, firstlineno))
+    return _region_of(
+        _find_function(ast.parse(source), name, firstlineno),
+        past_the_last_exit=past_the_last_exit,
+    )
 
 
 def _raises_only_not_implemented(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -333,9 +429,11 @@ def _function_info(fn: Any) -> tuple[str, ast.FunctionDef | ast.AsyncFunctionDef
     return _package_path(Path(filename).resolve().as_posix()), node
 
 
-def function_region(fn: Any) -> Region:
+def function_region(fn: Any, *, past_the_last_exit: bool = False) -> Region:
     path, node = _function_info(fn)
-    return Region(path=path, lines=_region_of(node))
+    return Region(
+        path=path, lines=_region_of(node, past_the_last_exit=past_the_last_exit)
+    )
 
 
 def code_feature(feature_id: str, fn: Any) -> Feature:
@@ -375,6 +473,33 @@ def _walk_commands(
         yield from _walk_commands(subcommands[name], path + (name,))
 
 
+def _branch_region(path: str, callback: ast.AST, parameter: str) -> Region | None:
+    """The bodies of the ``if`` statements of a callback whose test reads ``parameter``.
+
+    The union, over every ``if`` found by walking the whole callback at any depth (an
+    ``elif`` is the ``if`` it is), of the full spans of the statements of its body:
+    never the test line, never its ``else``. ``if not quiet:`` reads ``quiet`` too, so
+    its body belongs to ``--quiet``; an option counts only beside a command line that
+    gives it, so a block that ran that body because ``--quiet`` was absent covers
+    nothing. None when no ``if`` reads the parameter.
+    """
+    lines: set[int] = set()
+    for statement in ast.walk(callback):
+        if not isinstance(statement, ast.If):
+            continue
+        if any(
+            isinstance(word, ast.Name)
+            and isinstance(word.ctx, ast.Load)
+            and word.id == parameter
+            for word in ast.walk(statement.test)
+        ):
+            for inner in statement.body:
+                lines.update(
+                    range(inner.lineno, (inner.end_lineno or inner.lineno) + 1)
+                )
+    return Region(path=path, lines=frozenset(lines)) if lines else None
+
+
 def cli_features(root: Any) -> list[Feature]:
     """The commands and options of a click tree (``typer.main.get_command(app)``).
 
@@ -386,6 +511,12 @@ def cli_features(root: Any) -> list[Feature]:
     are. The options are the parameters typer built, which are not ``click.Option``
     instances (typer builds its tree from its own vendored click), so they are read by
     ``param_type_name``.
+
+    An option is measured in the command's region and in the code of its own callback
+    when it has one. An option whose work is an early exit would never reach the
+    command's region (``ash --version`` prints and leaves before the scan's own code),
+    so the bodies of the callback's ``if`` statements that read the option's parameter
+    are one more region of it (``_branch_region``).
     """
     groups: dict[Any, list[tuple[tuple[str, ...], Any]]] = defaultdict(list)
     for path, command in _walk_commands(root, ("ash",)):
@@ -406,6 +537,7 @@ def cli_features(root: Any) -> list[Feature]:
             continue
         name = " ".join(min(visible, key=lambda path: (-len(path), path)))
         region = function_region(callback)
+        callback_path, callback_node = _function_info(callback)
         paths = tuple(sorted(path for path, _ in members))
         location = f"{region.path}:{callback.__code__.co_firstlineno}"
         features.append(
@@ -425,11 +557,16 @@ def cli_features(root: Any) -> list[Feature]:
                 if not names or _COMPLETION_OPTIONS & set(names):
                     continue
                 extra = options.setdefault(_canonical(names), [])
+                own: list[Region] = []
                 if param.callback is not None:
                     try:
-                        found = function_region(param.callback)
+                        own.append(function_region(param.callback))
                     except InventoryError:
-                        continue  # typer's own or a lambda: no code of the package's
+                        pass  # typer's own or a lambda: no code of the package's
+                branch = _branch_region(callback_path, callback_node, param.name)
+                if branch is not None:
+                    own.append(branch)
+                for found in own:
                     if found not in extra and found != region:
                         extra.append(found)
         for canonical, extra in options.items():
@@ -496,6 +633,50 @@ def _work_method(cls: type, kind: str) -> Any:
     return method
 
 
+#: The kinds of plugin whose work method is measured past its last early exit, a named
+#: exception to the region rule (``_region_of``). A scanner's work method opens with
+#: resets (counters, the target list) and then its skip checks, which end a scan that
+#: has nothing for the scanner to scan, and a converter's late exits are its no-input
+#: skips. Every scan runs every enabled scanner and every converter, so measured past
+#: its leading guards alone each of them would be covered by every scan that skipped
+#: it. No scanner or converter runs its tool or its conversion before its last early
+#: exit, so the exception leaves no work out. A reporter takes the rule: it has work
+#: before an early exit that follows it (a report that renders and returns on an empty
+#: result has run).
+PAST_THE_LAST_EXIT_KINDS = ("scanner", "converter")
+
+
+def _self_calls(node: ast.AST) -> set[str]:
+    """The names a function calls on ``self``: ``self.<name>(...)``, anywhere in it."""
+    return {
+        call.func.attr
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "self"
+    }
+
+
+def _own_methods_the_shared_one_calls(
+    plugin: type, shared: ast.FunctionDef | ast.AsyncFunctionDef
+) -> tuple[Region, ...]:
+    """The regions of the methods ``plugin`` defines in its own class body (not
+    inherited) that the work method it shares with another plugin calls on ``self``.
+
+    Reaching the shared method shows that one of the plugins ran, not which. A method
+    one plugin defines and the shared code calls runs only for that plugin, so it is
+    what tells it apart. Each takes the region rule, one region per method.
+    """
+    regions: dict[Region, None] = {}
+    for name in sorted(_self_calls(shared)):
+        member = vars(plugin).get(name)
+        function = getattr(member, "__func__", member)
+        if inspect.isfunction(function):
+            regions.setdefault(function_region(function), None)
+    return tuple(regions)
+
+
 def plugin_features(package: Any = None) -> list[Feature]:
     """The plugins the plugin modules register, each measured in its work method.
 
@@ -503,7 +684,13 @@ def plugin_features(package: Any = None) -> list[Feature]:
     and ``ASH_CONVERTERS`` of every module under the package), which docs_checks reads
     for the names the docs may give. The inventory must be the same wherever the check
     runs or the baseline would read stale, so a module that does not import, and a
-    plugin group the builtin package recorded as not loaded, are errors.
+    plugin group the package or a module under it recorded as not loaded, are errors.
+
+    Plugins that share one work method (``opengrep`` and ``semgrep`` share the grep
+    base's ``_execute_scan``) cannot be told apart by line coverage of that method, so
+    each also ``requires`` the methods of its own that the shared one calls, and a
+    plugin that shares its work method and has none is an error naming it: the change
+    that creates the gap is the one that finds out.
     """
     if package is None:
         from automated_security_helper import plugin_modules as package
@@ -524,7 +711,10 @@ def plugin_features(package: Any = None) -> list[Feature]:
         )
 
     found: dict[type, str] = {}
-    for module in modules:
+    # Walking a package never yields the package itself, and its own __init__.py can
+    # hold the record of a plugin group that did not load, so it is read as well. Only
+    # the modules under it list plugins.
+    for module in (package, *modules):
         # A plugin group can fail only because of what was imported first; ASH retries
         # it once the first import has finished, and a real failure survives that.
         retry = getattr(module, "retry_failed_plugin_groups", None)
@@ -536,12 +726,14 @@ def plugin_features(package: Any = None) -> list[Feature]:
                 f"{module.__name__} recorded plugin groups as not loaded: "
                 + "; ".join(f"{key}: {value}" for key, value in sorted(errors.items()))
             )
+        if module is package:
+            continue
         for kind in PLUGIN_KINDS:
             for plugin in getattr(module, f"ASH_{kind.upper()}S", None) or []:
                 found.setdefault(plugin, kind)
 
     checks = _checks()
-    built: dict[str, tuple[type, Feature]] = {}
+    built: dict[str, tuple[type, ast.FunctionDef | ast.AsyncFunctionDef, Feature]] = {}
     for plugin, kind in found.items():
         feature_id = f"{kind}:{checks._declared_plugin_name(plugin)}"
         method = _work_method(plugin, kind)
@@ -553,9 +745,13 @@ def plugin_features(package: Any = None) -> list[Feature]:
             )
         if feature_id in built and built[feature_id][0] is not plugin:
             raise InventoryError(f"two plugin classes are named {feature_id}")
-        region = Region(path=path, lines=_region_of(node))
+        region = Region(
+            path=path,
+            lines=_region_of(node, past_the_last_exit=kind in PAST_THE_LAST_EXIT_KINDS),
+        )
         built[feature_id] = (
             plugin,
+            node,
             Feature(
                 id=feature_id,
                 regions=(region,),
@@ -564,18 +760,30 @@ def plugin_features(package: Any = None) -> list[Feature]:
         )
 
     by_region: dict[tuple[Region, ...], list[str]] = defaultdict(list)
-    for feature_id, (_plugin, feature) in built.items():
+    for feature_id, (_plugin, _node, feature) in built.items():
         by_region[feature.regions].append(feature_id)
     features = []
-    for feature_id, (_plugin, feature) in sorted(built.items()):
+    for feature_id, (plugin, node, feature) in sorted(built.items()):
         others = sorted(set(by_region[feature.regions]) - {feature_id})
         note = f"shares its code with {', '.join(others)}" if others else ""
+        requires: tuple[Region, ...] = ()
+        if others:
+            requires = _own_methods_the_shared_one_calls(plugin, node)
+            if not requires:
+                raise InventoryError(
+                    f"{feature_id} ({plugin.__module__}.{plugin.__qualname__}) shares "
+                    f"{node.name} ({feature.location}) with {', '.join(others)} and "
+                    "defines none of the methods that code calls on self, so no line "
+                    "of its own could tell it from them: give it a method of its own "
+                    "for the shared one to call"
+                )
         features.append(
             Feature(
                 id=feature.id,
                 regions=feature.regions,
                 location=feature.location,
                 note=note,
+                requires=requires,
             )
         )
     return features
@@ -726,20 +934,25 @@ def _written_chains(node: Any, chain: _Chain = ()) -> Iterator[_Chain]:
                 yield from _written_chains(item, chain + ((key, True),))
 
 
-def _rows_set_by(chain: _Chain) -> set[str]:
-    """The rows a written key sets: it and every prefix of it. A key that matches no
-    row, and what lies under it, sets nothing."""
+def _walk_rows(chain: _Chain) -> tuple[set[str], str, bool]:
+    """(the rows a written key sets, the prefix its last key leads to, whether every key
+    of the chain matched a row). The rows are the key and every prefix of it; a key
+    that matches no row, and what lies under it, sets nothing."""
     spellings = _config_spellings()
     prefix = ""
     rows: set[str] = set()
     for key, in_list in chain:
         alias = spellings.get(prefix, {}).get(key)
         if alias is None:
-            break
+            return rows, prefix, False
         full = f"{prefix}.{alias}" if prefix else alias
         rows.add(f"config:{full}")
         prefix = full + ("[]" if in_list else "")
-    return rows
+    return rows, prefix, True
+
+
+def _rows_set_by(chain: _Chain) -> set[str]:
+    return _walk_rows(chain)[0]
 
 
 def _rows_of_document(document: Any, at: _Chain = ()) -> set[str]:
@@ -749,15 +962,51 @@ def _rows_of_document(document: Any, at: _Chain = ()) -> set[str]:
     return rows
 
 
+def _parse_override_value(value: str) -> Any:
+    """The value of an override as ``apply_config_overrides`` reads it."""
+    from automated_security_helper.config import resolve_config
+
+    parse = getattr(resolve_config, "_parse_config_value", None)
+    if parse is None:
+        raise MeasurementError(
+            "resolve_config._parse_config_value, which reads the value of a "
+            "--config-overrides entry, is gone: the keys inside a value cannot be told"
+        )
+    return parse(value)
+
+
 def _rows_of_override(text: str) -> set[str]:
-    """The row an ``--config-overrides`` value names: the text before ``=`` or ``+=``."""
-    key = text.split("=", 1)[0]
-    if "=" not in text:
+    """The rows an ``--config-overrides`` entry sets: the key before ``=`` or ``+=``,
+    and the keys inside its value.
+
+    ``apply_config_overrides`` splits an entry at the first ``=``, ends a key that
+    appends with ``+``, and reads the value with ``_parse_config_value``, which this
+    does too. A value that parses to a mapping sets the keys it holds, at any depth,
+    under the key; a list sets the keys of each of its mappings under the key's items
+    (``<row>[]``); and a mapping appended with ``+=`` to a row whose section is a list
+    (``<row>[]`` has rows) is an item of that list, so its keys are items' keys. A key
+    inside a value that names no row sets nothing, and a value that stays a string (the
+    YAML flow form ``{severity_threshold: HIGH}`` is not JSON, so it is kept as text)
+    sets only the key.
+    """
+    key, separator, value = text.partition("=")
+    if not separator:
         return set()
+    appends = key.endswith("+")
     key = key.removesuffix("+").strip()
     if not key:
         return set()
-    return _rows_set_by(tuple((part, False) for part in key.split(".")))
+    chain: _Chain = tuple((part, False) for part in key.split("."))
+    rows, prefix, whole = _walk_rows(chain)
+    parsed = _parse_override_value(value)
+    into_items = chain[:-1] + ((chain[-1][0], True),)
+    if isinstance(parsed, dict):
+        appended_to_a_list = appends and whole and f"{prefix}[]" in _config_spellings()
+        rows |= _rows_of_document(parsed, into_items if appended_to_a_list else chain)
+    elif isinstance(parsed, list):
+        for item in parsed:
+            rows |= _rows_of_document(item, into_items)
+    return rows
 
 
 def _ash_config_rows(block: Any, *, saved_only: bool) -> set[str]:
@@ -804,19 +1053,57 @@ class _Recorded:
 
 
 def _counting_exits() -> frozenset[str]:
-    """The exits a block may expect and still be evidence: success, scan errors,
-    actionable findings. Every other expectation shows ASH refusing something or being
-    stopped, and the code it names never ran its work. Read from the enum."""
+    """The exits a block may expect and always be evidence: success and actionable
+    findings. Every other expectation shows ASH refusing something or being stopped,
+    and the code it names never ran its work, except scan errors, which
+    ``_scan_errors_exit`` holds to more. Read from the enum."""
     from automated_security_helper.core.enums import AshExitCode
 
     return frozenset(
         str(int(member))
-        for member in (
-            AshExitCode.SUCCESS,
-            AshExitCode.SCAN_ERRORS,
-            AshExitCode.ACTIONABLE_FINDINGS,
-        )
+        for member in (AshExitCode.SUCCESS, AshExitCode.ACTIONABLE_FINDINGS)
     )
+
+
+def _scan_errors_exit() -> str:
+    """The exit of a scan whose scanners failed, which ASH also uses for many refusals
+    (``--use-existing`` with no results to use, ``ash config init`` refusing a second
+    source): a block that expects it shows a scan only if the scan also wrote its
+    results (``_results_write_anchor``). Read from the enum."""
+    from automated_security_helper.core.enums import AshExitCode
+
+    return str(int(AshExitCode.SCAN_ERRORS))
+
+
+def _anchor(module: Any, name: str, *, owner: str) -> Any:
+    """The function ``name`` of ``module`` (a module or a class), which the measurement
+    reads a block's reach from. A rename must stop the check, naming what is gone,
+    and never leave every block it would have judged silently covered or uncovered."""
+    try:
+        return getattr(module, name)
+    except AttributeError as exc:
+        raise MeasurementError(
+            f"{owner}.{name}, which the measurement reads a block's reach from, is "
+            "gone: its replacement has to be named in scripts/docs_feature_coverage.py"
+        ) from exc
+
+
+def _results_write_anchor() -> Region:
+    """The region of ``ASHScanOrchestrator._write_results_file`` a scan reaches once it
+    has written its results.
+
+    The body is a guard (no results file for this run), a cancellation check, a second
+    guard (the engine returned something other than results) and the write. The second
+    guard follows the cancellation check, so the region rule would measure it: a run
+    whose engine gave no results would count as one that wrote them. The region is
+    therefore the named exception, past the last early exit.
+    """
+    from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+
+    write = _anchor(
+        ASHScanOrchestrator, "_write_results_file", owner="ASHScanOrchestrator"
+    )
+    return function_region(write, past_the_last_exit=True)
 
 
 def _selected(page: Any) -> bool:
@@ -896,8 +1183,17 @@ def _read_records(
 class _Coverage:
     """The coverage data of a run, combined into a file of its own.
 
-    The data files are combined with ``keep=True`` into a temporary directory: coverage
-    deletes what it combines by default, and the run's data is uploaded afterwards.
+    The data files are combined with ``keep=True`` into a temporary directory:
+    coverage deletes what it combines by default, and the directory is the run's, read
+    by ``report``, ``check`` and ``write-baseline`` alike, so it is left as it was.
+
+    coverage.py's combine skips a data file it cannot read and says so only to the
+    warning callback of the data it combines into (``CoverageData(warn=...)``;
+    ``combine_parallel_data`` has no warning argument of its own and calls
+    ``data._warn``). A process killed while it saved its data leaves such a file, and
+    dropping it unseen would read the features only that process reached as
+    uncovered, so every message the callback gets is an error naming the file. A file
+    the combine skips as the duplicate of another (the same content) is no error.
     """
 
     def __init__(self, data: Path):
@@ -917,13 +1213,19 @@ class _Coverage:
             )
         self.files = len(files)
         self._scratch = tempfile.TemporaryDirectory(prefix="docs-feature-coverage-")
+        unreadable: list[str] = []
         try:
             self._data = CoverageData(
-                basename=os.path.join(self._scratch.name, ".coverage")
+                basename=os.path.join(self._scratch.name, ".coverage"),
+                warn=unreadable.append,
             )
             combine_parallel_data(
                 self._data, data_paths=[str(path) for path in files], keep=True
             )
+            if unreadable:
+                raise MeasurementError(
+                    "the coverage data cannot be read: " + "; ".join(unreadable)
+                )
             self.contexts = frozenset(c for c in self._data.measured_contexts() if c)
             by_suffix: dict[str, list[str]] = defaultdict(list)
             for measured in self._data.measured_files():
@@ -1004,6 +1306,327 @@ def _option_keys(feature: Feature) -> tuple[tuple[tuple[str, ...], ...], str]:
     return (tuple(command.split()),), canonical
 
 
+def _shows(coverage: _Coverage, context: str, feature: Feature) -> bool:
+    """Whether the block with ``context`` ran any of a feature's regions and, when the
+    feature requires methods of its own (``Feature.requires``), any of those too."""
+    return any(coverage.reached(context, region) for region in feature.regions) and (
+        not feature.requires
+        or any(coverage.reached(context, region) for region in feature.requires)
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Saved configurations: which of them a block that loaded one can have read
+# --------------------------------------------------------------------------- #
+#
+# A block that reached ``load_config_file`` loaded ONE configuration, not every one its
+# page saved. A saved configuration's rows count for it only where the page shows the
+# scan can have read that file, and every case that cannot be shown is left uncovered
+# ON PURPOSE. The two errors are not alike: an uncovered feature that an example does
+# show costs one line in the shrink-only baseline, which the change that corrects the
+# measurement is then forced to delete, while a covered feature no example shows keeps
+# its line out of the baseline for good. So each reading below that has a doubtful side
+# takes that side, pinned or not.
+
+#: A word of a shell block's text is a run of the characters a command, an option or a
+#: path is made of, so ``cd-notes``, ``--source-dir`` and ``./setup.sh`` are words of
+#: their own and none is ``cd``, ``source`` or ``.``.
+_BEFORE_A_WORD = r"(?<![A-Za-z0-9_./-])"
+_AFTER_A_WORD = r"(?![A-Za-z0-9_./-])"
+#: A word that can move the shell of a session, or read code that can. The runner
+#: carries the directory and the variables a shell block ends with into the blocks
+#: after it in the same session, while every save stays anchored at the page's project,
+#: so once a block may have changed directory, nothing shows which file a later scan
+#: read. The match is on the word wherever it stands, inside quotes, comments and
+#: here-documents too: a list of the places bash runs ``cd`` (after ``;``, ``then``,
+#: ``do``, ``&``, a case arm, ``command``, ``time``...) has gaps, and a word never has.
+#: The cost is a lost credit where a page only mentions a word.
+_MOVES_THE_SESSION = re.compile(
+    _BEFORE_A_WORD + r"(?:cd|pushd|popd|eval|source)" + _AFTER_A_WORD
+)
+#: The word ``.`` that reads a file (``. ./setup.sh``): a ``.`` followed on its line by
+#: blanks and a character a file name can start with. A ``.`` at the end of its line, or
+#: before an option (``--source-dir . --offline``), names no file.
+_DOT_OF_A_FILE = re.compile(_BEFORE_A_WORD + r"\.[ \t]+[^\s#;&|)<>-]")
+#: A word a shell would expand (a variable, a substitution, a glob, a brace list, a
+#: home directory) or a placeholder (``<path>``) names no file that can be read from the
+#: page.
+_EXPANDS = re.compile(r"[$`*?\[\]{}<>\n]|^~")
+_ASSIGNMENT_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+
+#: The commands that read a configuration through discovery when they are given no
+#: config path: the scan, which bare ``ash`` runs too (``scan`` in cli/scan.py), and
+#: the config commands that ask ``_source_dir`` and ``_config_path_or_discovered`` in
+#: cli/config.py for the file a scan of the same directory would read. ``ash report``
+#: is none of them: it resolves its configuration with no source directory, so with no
+#: config path it reads none. A command not listed credits no discovered save. Each path
+#: must be a command of ``ash`` or the check stops (``_discovering_commands``).
+_DISCOVERING_COMMANDS: tuple[tuple[str, ...], ...] = (
+    ("ash",),
+    ("ash", "scan"),
+    ("ash", "config", "get"),
+    ("ash", "config", "update"),
+    ("ash", "config", "validate-plugin-dependencies"),
+    ("ash", "config", "lint"),
+    ("ash", "config", "validate"),
+)
+
+
+def _discovering_commands() -> frozenset[tuple[str, ...]]:
+    cli = _checks().load_cli()
+    for path in _DISCOVERING_COMMANDS:
+        command = cli
+        for name in path[1:]:
+            found = command.subcommands.get(name)
+            if found is None:
+                raise MeasurementError(
+                    f"'{' '.join(path)}', a command that reads a configuration "
+                    "through discovery, is not a command of ash now: "
+                    "scripts/docs_feature_coverage.py names the commands that do"
+                )
+            command = found
+    return frozenset(_DISCOVERING_COMMANDS)
+
+
+def _discovery() -> Any:
+    """``discover_config_source``: the one place that says which of the config files in
+    a directory a scan loads, and in which order it ranks them."""
+    try:
+        from automated_security_helper.config import config_sources
+    except ImportError as exc:
+        raise MeasurementError(
+            f"config discovery (config_sources) cannot be imported: {exc}"
+        ) from exc
+    return _anchor(config_sources, "discover_config_source", owner="config_sources")
+
+
+def _shell_text(block: Any) -> str:
+    """What the runner runs from a shell block: its text, and from a console block only
+    the commands after its prompts."""
+    checks = _checks()
+    if block.lang in checks.CONSOLE_LANGS:
+        return checks.console_commands(block.body)
+    return block.body
+
+
+def _mentions(name: str, text: str) -> bool:
+    """Whether ``name`` is a word of ``text`` as a shell variable is written
+    (``ASH_CONFIG`` is not ``ASH_CONFIG_FILE``). Quoting and position are not read: a
+    variable is assigned in more shapes than a static read can list (a prefix on a
+    command, ``export``, ``declare -x``, a plain assignment, which the runner exports
+    through ``set -a``, ``read``, ``printf -v``...), so a mention is read as an
+    assignment, and a command that only reads the variable turns the credit off too."""
+    pattern = rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])"
+    return re.search(pattern, text) is not None
+
+
+def _project_path(text: str | None) -> str | None:
+    """A path of the page's project as saves are anchored there, normalized: ``/``
+    separators and no ``.`` parts (``./a`` is ``a``, the project itself is ``.``).
+    None for a path that cannot be told: empty, expanded by the shell, absolute, or
+    with a ``..`` part, which reaches the directory it names only when the part before
+    it exists."""
+    if not text or _EXPANDS.search(text):
+        return None
+    text = text.replace("\\", "/")
+    parts = [part for part in text.split("/") if part not in ("", ".")]
+    if text.startswith("/") or ".." in parts:
+        return None
+    return "/".join(parts) or "."
+
+
+def _latest_saves(session: Sequence[_Recorded], line: int) -> dict[str, _Recorded]:
+    """The save that holds each path of the project for the block fenced on ``line``:
+    the latest save of its ``save_as`` in the session, at or before that block. A later
+    save replaced the earlier one, and a save after the block replaced nothing it
+    read. A save the runner refused or whose block failed is the latest too, since the
+    file may hold what that block wrote: it replaces the earlier one, and counts for
+    nothing itself."""
+    latest: dict[str, _Recorded] = {}
+    for earlier in sorted(session, key=lambda item: item.record["line"]):
+        if earlier.record["line"] > line:
+            break
+        saved_as = earlier.record["save_as"]
+        path = _project_path(saved_as) if isinstance(saved_as, str) else None
+        if path is not None:
+            latest[path] = earlier
+    return latest
+
+
+def _discovered(saves: Mapping[str, _Recorded], directory: str) -> str | None:
+    """The save a scan of ``directory`` loads when it is given no config path: the one
+    file config discovery selects, never two (``Sources are never merged``).
+
+    The order discovery ranks the names in is read from discovery, not restated: the
+    page's saves are written, as they are saved, into a scratch directory and
+    ``discover_config_source`` runs on it. Every save competes, whatever its marker's
+    kind, because discovery reads files and not kinds, so a fragment saved under the
+    name discovery picks hides a full configuration saved under a lower one. None when
+    discovery finds nothing there or cannot tell (a ``pyproject.toml`` it cannot read,
+    a path that is a file and a directory): nothing then counts.
+    """
+    discover = _discovery()
+    with tempfile.TemporaryDirectory(prefix="docs-feature-coverage-discovery-") as tmp:
+        root = Path(tmp)
+        for path, saved in saves.items():
+            target = root / path
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(saved.block.body + "\n", encoding="utf-8")
+            except OSError:
+                return None
+        search = root if directory == "." else root / directory
+        if not search.is_dir():
+            return None
+        try:
+            found = discover(search)
+        except Exception:
+            return None
+        if found.selected is None:
+            return None
+        return found.selected.path.relative_to(root).as_posix()
+
+
+def _assigned_config_paths(block: Any) -> set[str]:
+    """The files ``ASH_CONFIG=<literal>`` names for an ``ash`` command of a shell block:
+    a prefix assignment on the command, or an ``export`` on an earlier line of the
+    block. A value with an expansion names nothing. An assignment by an earlier block
+    of the session does not count either: whether it still holds, and for which
+    command, cannot be shown."""
+    if block.family != "shell":
+        return set()
+    checks = _checks()
+    exported: str | None = None
+    found: set[str] = set()
+    for command in checks.split_shell(_shell_text(block)):
+        words = list(command.words)
+        prefix: dict[str, str] = {}
+        while words and (match := _ASSIGNMENT_WORD.match(words[0])):
+            prefix[match.group(1)] = match.group(2)
+            words.pop(0)
+        if words[:1] == ["export"]:
+            for word in words[1:]:
+                match = _ASSIGNMENT_WORD.match(word)
+                if match and match.group(1) == "ASH_CONFIG":
+                    exported = _project_path(match.group(2))
+            continue
+        if checks.find_invocations(command.words):
+            path = (
+                _project_path(prefix["ASH_CONFIG"])
+                if "ASH_CONFIG" in prefix
+                else exported
+            )
+            if path is not None:
+                found.add(path)
+    return found
+
+
+def _rows_of_a_save(saved: _Recorded, path: str) -> set[str]:
+    """The rows ``saved`` sets once a scan loads the file it was saved as. An ``ash``
+    configuration is a whole document, and so is a ``pyproject`` one under the
+    ``[tool.ash]`` table of the file named ``pyproject.toml``; a fragment holds keys
+    that sit at the root of the file it is loaded from, not under its ``at=`` prefix,
+    so it never counts, and neither does a configuration the page shows refused. A save
+    that did not pass counts for nothing."""
+    from automated_security_helper.core import constants
+
+    if not saved.record["ok"]:
+        return set()
+    block = saved.block
+    if block.config_kind not in ("ash", "pyproject"):
+        return set()
+    if (block.config_kind == "pyproject") != (
+        posixpath.basename(path) == constants.ASH_PYPROJECT_FILE_NAME
+    ):
+        return set()
+    return _ash_config_rows(block, saved_only=True)
+
+
+def _saved_rows_read(
+    entry: _Recorded,
+    session: Sequence[_Recorded],
+    invoked: Sequence[tuple[Any, Any, Any]],
+    discovering: frozenset[tuple[str, ...]],
+) -> set[str]:
+    """The rows of the saved configurations that the block ``entry``, which reached
+    ``load_config_file``, can have read.
+
+    * No save counts once a shell block of the session, at or before the block, holds a
+      word that can move the session (``cd``, ``pushd``, ``popd``, ``eval``, ``source``,
+      or ``.`` before a file): after a change of directory a scan reads another
+      directory than the one the saves went into, and a relative ``--config`` or
+      ``ASH_CONFIG`` names another file. The block's verdict does not matter, since the
+      runner carries the directory of a failed block too, and a ``cd`` in an earlier
+      session never moved this one.
+    * Of the saves, the latest of each path before the block, a file the block's
+      command line names counts: ``--config`` or ``-c`` in any spelling, or, with no
+      ``--config`` in the block, a literal ``ASH_CONFIG=<file>`` of the block's own
+      text (the option wins where both are given).
+    * A file counts through discovery, which ranks one and loads that one, only for a
+      command that runs discovery (``_DISCOVERING_COMMANDS``) given no ``--config`` and
+      no ``ASH_CONFIG`` or ``ASH_SOURCE_DIR`` in any shell block of the session up to
+      the block: a mention of either is read as an assignment, and ``ASH_SOURCE_DIR``
+      moves the directory discovery searches to one nothing shows. The directory is the
+      ``--source-dir`` a discovering command of the block gives (a literal path; ``.``
+      is the working directory), else the working directory, as the session has not
+      moved. The block shows the scan reached the loader, not which of its commands did,
+      so any one of them is enough.
+
+    What cannot be shown is not counted, on purpose: a file a shell block wrote and a
+    save never held, a value a variable fills in, a ``cd`` the text does not spell.
+    """
+    line = entry.record["line"]
+    shells = [
+        earlier
+        for earlier in session
+        if earlier.record["line"] <= line and earlier.block.family == "shell"
+    ]
+    texts = [_shell_text(shell.block) for shell in shells]
+    if any(
+        _MOVES_THE_SESSION.search(text) or _DOT_OF_A_FILE.search(text) for text in texts
+    ):
+        return set()
+    saves = _latest_saves(session, line)
+    if not saves:
+        return set()
+
+    gave_config = False
+    named: list[str | None] = []
+    directories: list[str | None] = []
+    for _invocation, command_path, option_uses in invoked:
+        config_uses = [use for use in option_uses if "--config" in use.names]
+        if config_uses:
+            gave_config = True
+            named += [use.value for use in config_uses]
+        if tuple(command_path) in discovering:
+            source_dirs = [
+                use.value for use in option_uses if "--source-dir" in use.names
+            ]
+            directories.append(_project_path(source_dirs[-1]) if source_dirs else ".")
+
+    paths: set[str] = set()
+    if gave_config:
+        paths = {path for path in map(_project_path, named) if path is not None}
+    else:
+        paths = _assigned_config_paths(entry.block)
+    environment_names = any(
+        _mentions("ASH_CONFIG", text) or _mentions("ASH_SOURCE_DIR", text)
+        for text in texts
+    )
+    if not gave_config and not environment_names:
+        for directory in {directory for directory in directories if directory}:
+            picked = _discovered(saves, directory)
+            if picked is not None:
+                paths.add(picked)
+
+    rows: set[str] = set()
+    for path in paths:
+        saved = saves.get(path)
+        if saved is not None:
+            rows |= _rows_of_a_save(saved, path)
+    return rows
+
+
 _REGISTRY_KINDS = {"scanner": "scanner", "reporter": "reporter"}
 _CONFIG_SECTIONS = {
     "scanners": "scanner",
@@ -1019,8 +1642,10 @@ def evaluate(
 
     ``data`` is the run's coverage directory: ``data/.coverage.*`` (coverage.py's data
     files) and ``blocks/*.json`` (the runner's records). Only a block the runner ran,
-    that passed, and whose marker expects success, scan errors or findings is evidence,
-    for every kind of feature (``_counting_exits``).
+    that passed, and whose marker expects success or findings is evidence, for every
+    kind of feature (``_counting_exits``). A block that expects scan errors (exit 1,
+    which ASH uses for many refusals too) is evidence only when its scan also wrote its
+    results (``_results_write_anchor``).
     """
     features = list(features)
     data, docs_root = Path(data), Path(docs_root)
@@ -1045,6 +1670,8 @@ def _evaluate(
     pages: dict[Path, Any],
 ) -> Evaluation:
     counting = _counting_exits()
+    scan_errors = _scan_errors_exit()
+    results_write = _results_write_anchor()
     uses = _Uses(docs_root)
     run = [entry for entry in recorded if entry.record["runs"]]
     passed = [entry for entry in run if entry.record["ok"]]
@@ -1060,7 +1687,13 @@ def _evaluate(
     evidence = [
         entry
         for entry in passed
-        if entry.record["expected"] in counting
+        if (
+            entry.record["expected"] in counting
+            or (
+                entry.record["expected"] == scan_errors
+                and coverage.reached(entry.record["context"], results_write)
+            )
+        )
         and not uses.refuses_a_selection_of_dependencies(entry.block)
     ]
 
@@ -1078,8 +1711,13 @@ def _evaluate(
     if config_ids:
         from automated_security_helper.config import resolve_config
 
-        load_anchor = function_region(resolve_config.load_config_file)
-        override_anchor = function_region(resolve_config.apply_config_overrides)
+        load_anchor = function_region(
+            _anchor(resolve_config, "load_config_file", owner="resolve_config")
+        )
+        override_anchor = function_region(
+            _anchor(resolve_config, "apply_config_overrides", owner="resolve_config")
+        )
+        discovering = _discovering_commands()
 
     covered: set[str] = set()
     covered_on: dict[str, set[str]] = defaultdict(set)
@@ -1095,7 +1733,7 @@ def _evaluate(
     for entry in evidence:
         context = entry.record["context"]
         for feature in code_features:
-            if any(coverage.reached(context, region) for region in feature.regions):
+            if _shows(coverage, context, feature):
                 cover(feature.id, entry.page)
         if not (by_kind["option"] or config_ids):
             continue
@@ -1105,22 +1743,15 @@ def _evaluate(
                 for feature in option_index.get(
                     (tuple(use.command), _canonical(use.names)), ()
                 ):
-                    if any(
-                        coverage.reached(context, region) for region in feature.regions
-                    ):
+                    if _shows(coverage, context, feature):
                         cover(feature.id, entry.page)
         if not config_ids:
             continue
         if coverage.reached(context, load_anchor):
-            for earlier in sessions[(entry.page, entry.record["session"])]:
-                if (
-                    earlier.record["save_as"]
-                    and earlier.record["ok"]
-                    and earlier.record["line"] <= entry.record["line"]
-                ):
-                    for feature_id in _ash_config_rows(earlier.block, saved_only=True):
-                        if feature_id in config_ids:
-                            cover(feature_id, entry.page)
+            session = sessions[(entry.page, entry.record["session"])]
+            for feature_id in _saved_rows_read(entry, session, invoked, discovering):
+                if feature_id in config_ids:
+                    cover(feature_id, entry.page)
         if coverage.reached(context, override_anchor):
             for _invocation, _path, option_uses in invoked:
                 for use in option_uses:

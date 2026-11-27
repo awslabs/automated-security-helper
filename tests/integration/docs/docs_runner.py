@@ -501,16 +501,30 @@ class DocsCoverage:
         return cls(directory)
 
     def session_environment(self) -> dict[str, str]:
-        """What a session needs to be measured: the rc file, which this writes."""
+        """What a session needs to be measured: the rc file, which this writes.
+
+        Every session of every xdist worker asks for the file while processes that
+        start meanwhile read it, and coverage.py started on an empty read measures
+        with its defaults: the lines are lost and a stray data file lands in the
+        page's project. So the file is never rewritten in place. The text is rendered
+        once and written only when the file is missing or holds other text, to a
+        temporary name beside it that is renamed over it, so a reader sees the old
+        text or the whole new one.
+        """
         (self.directory / "data").mkdir(parents=True, exist_ok=True)
         (self.directory / "blocks").mkdir(parents=True, exist_ok=True)
-        self.rcfile.write_text(
-            _COVERAGE_RC.format(
-                data_file=self.directory / "data" / ".coverage",
-                context=COVERAGE_CONTEXT_VARIABLE,
-            ),
-            encoding="utf-8",
+        text = _COVERAGE_RC.format(
+            data_file=self.directory / "data" / ".coverage",
+            context=COVERAGE_CONTEXT_VARIABLE,
         )
+        try:
+            current = self.rcfile.read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError):
+            current = None
+        if current != text:
+            pending = self.rcfile.with_name(f".{self.rcfile.name}.{os.getpid()}.tmp")
+            pending.write_text(text, encoding="utf-8")
+            os.replace(pending, self.rcfile)
         return {"COVERAGE_PROCESS_START": str(self.rcfile)}
 
     @staticmethod
