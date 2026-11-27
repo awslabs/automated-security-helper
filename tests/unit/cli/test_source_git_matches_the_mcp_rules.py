@@ -16,6 +16,8 @@ is replaced by a fake at the one seam each surface has.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,8 +34,13 @@ from automated_security_helper.cli.mcp.source_delivery import (
 )
 from automated_security_helper.cli.mcp_tools import mcp_set_source_git
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from tests.utils import source_delivery_doubles as doubles
 
 pytestmark = pytest.mark.unit
+
+#: The shared fixtures, bound to this module's namespace so pytest finds them here.
+read_only_files = doubles.read_only_files
+windows_semantics = doubles.windows_semantics
 
 URL = "https://example.com/team/repo.git"
 
@@ -233,6 +240,49 @@ class TestTheCommandLine:
         # The output directory is beside the working directory, not in the clone.
         assert not str(run.call_args.kwargs["output_dir"]).startswith(str(root))
         assert not root.exists()
+
+    def test_a_clone_holding_a_read_only_file_is_removed_afterwards(
+        self, tmp_path, monkeypatch, read_only_files, windows_semantics
+    ):
+        """A file the first removal refuses does not keep the clone on disk.
+
+        git makes its pack files read-only, and Windows does not delete a read-only
+        file, so the command's cleanup has to go on past the first refusal, as the
+        MCP delivery's does (``source_delivery._remove_tree``). The doubles of that
+        delivery's own tests stand the Windows rule in on every platform: the first
+        removal refuses a file whose owner-write bit is clear. ``windows_semantics``
+        applies them to ``source_delivery``'s ``os`` and ``shutil``, and the patch
+        below to the ``shutil`` module itself, where a cleanup that imports
+        ``shutil`` on its own gets ``rmtree``. Fails on
+        ``shutil.rmtree(root, ignore_errors=True)``: the refusal is ignored, and
+        the pack file and the directories above it stay.
+        """
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+        roots = []
+
+        def fake_clone(url, ref, *, depth, destination):
+            roots.append(Path(destination))
+            source = Path(destination) / "source"
+            pack = source / ".git" / "objects" / "pack" / "pack.pack"
+            pack.parent.mkdir(parents=True)
+            pack.write_text("pack\n", encoding="utf-8")
+            read_only_files(pack)
+            return source
+
+        windows_semantics()
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.source_delivery.clone_remote_source",
+                side_effect=fake_clone,
+            ),
+            patch("automated_security_helper.cli.scan.run_ash_scan"),
+            patch.object(shutil, "rmtree", doubles.rmtree_calling_windows_unlink),
+        ):
+            result = _scan("--source-git", URL)
+
+        assert result.exit_code == 0, result.output
+        (root,) = roots
+        assert not root.exists(), f"the command left {root} behind"
 
     def test_a_clone_git_refused_exits_one_and_leaves_nothing(self):
         from automated_security_helper.cli.mcp.source_delivery import (
