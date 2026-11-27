@@ -196,11 +196,16 @@ The MCP server carries both shapes beside its git and zip channels:
 
 - `set_source_image` records a reference on the session; nothing is fetched at
   delivery time. The reference's registry must be on the operator's
-  `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` list (`host[:port]` entries; bare Docker
-  Hub references need `docker.io` listed; empty, the default, admits none):
-  scanning a delivered reference makes the *server's* tools reach that
-  registry with the server's network, daemon store and registry credentials,
-  the same reach `ASH_MCP_GIT_ALLOWED_HOSTS` closes for the git channel. The
+  `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` list (`host[:port]` entries, matched
+  without regard to case; empty, the default, admits none): scanning a
+  delivered reference makes the *server's* tools reach that registry with the
+  server's network, daemon store and registry credentials, the same reach
+  `ASH_MCP_GIT_ALLOWED_HOSTS` closes for the git channel. The registry is read
+  as the image tools read it: the text before the first `/` is a registry host
+  when it holds a `.` or a `:`, is `localhost` or has an uppercase letter (a
+  repository path is lowercase, so `Intranet/app:1` names the host `Intranet`),
+  and `index.docker.io` is `docker.io`. Every other reference, `alpine:3` and
+  `team/app` alike, is on Docker Hub, so `docker.io` must be listed for it. The
   archive upload needs no registry and is not gated.
 - `set_source_image_archive_chunk` + `set_source_image_archive_finalize` upload a
   saved image in the zip channel's exact shape: ordered base64 chunks of at most

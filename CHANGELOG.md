@@ -260,6 +260,11 @@
   does in `--output-dir report` and `config` in `--source-dir config`, was kept off the
   daemon for that reason; the word is now read as the option's value and the scan can
   use the daemon.
+- **`set_source_image` reads a reference's registry as the image tools do.** A first
+  segment with an uppercase letter (`Intranet/app:1`) names a registry host, so that host
+  must be on `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` where it was read as Docker Hub;
+  `index.docker.io` counts as `docker.io` in the list and in a reference; and grype's
+  `purl:` and `cpe:` input prefixes are refused like the other source schemes.
 
 ### Features
 
