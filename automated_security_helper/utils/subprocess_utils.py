@@ -1678,23 +1678,42 @@ def keep_an_ignored_sigint_ignored() -> None:
     start every tool of a scan with two or more scanners, the workspace's project
     workers every tool of a workspace scan. Called on the main thread before such
     a pool starts, this sets SIG_IGN again, and the disposition, which belongs to
-    the process, holds for every child the workers start. polars is imported
-    first: its import puts the handler in place once (measured with polars
-    1.44.2: a query afterwards leaves SIG_IGN as it is), so a first import in a
-    worker, after this, would put it back for every child started after it.
+    the process, holds for the children that pool's workers start. polars is
+    imported first: its import puts the handler in place once (measured with
+    polars 1.44.2: a query afterwards leaves SIG_IGN as it is), so a first import
+    in a worker, after this, would put it back for every child started after it.
 
     A no-op off the main thread, where no disposition can be set, and where Python
     does not record SIGINT as ignored: a Python handler is held at each start
     instead, and a SIGINT at its default stays at its default. So polars is
     imported here only in a process that ignores SIGINT. A handler another native
     library installs from a worker after this call is not undone.
+
+    A scan that runs on a thread other than the main thread is not covered, unless
+    the main thread called this before it. Nothing can be set from that thread, so
+    when polars is first imported there its handler stays in place, and the scan's
+    tools start with SIGINT at its default, exec having reset the handler. The MCP
+    server hands each scan to an executor thread and does not call this on the main
+    thread first, so a server started with SIGINT ignored (``ash mcp &``) can start
+    a scan's tools with SIGINT at its default.
+
+    A polars import that fails with any Exception (a native library that will not
+    load, a warning raised as an error, a broken install) is logged at debug and
+    does not stop the set: SIGINT is set to ignored all the same. A
+    KeyboardInterrupt or SystemExit propagates.
     """
     if threading.current_thread() is not threading.main_thread():
         return
     if signal.getsignal(signal.SIGINT) != signal.SIG_IGN:
         return
-    with contextlib.suppress(ImportError):
+    try:
         import polars as pl  # noqa: F401 - imported for the handler its import installs
+    except Exception as exc:  # noqa: BLE001 -- the set below needs no polars
+        ASH_LOGGER.debug(
+            f"Importing polars failed ({type(exc).__name__}: {_text_of(exc)}); "
+            "SIGINT stays ignored",
+            extra=NO_MARKUP,
+        )
 
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
