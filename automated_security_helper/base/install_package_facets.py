@@ -45,8 +45,10 @@ matches a prefix when it equals it or starts with it plus a dot, so ``3.24.4`` m
 releases. ``arches`` records that a read covered one architecture and is not matched.
 ``InstallPackageFacet.row_for`` returns the first row of an ecosystem whose host match
 fits, then the first row of it that names no host, then None. Two rows of one ecosystem
-overlap when one host can match both, and a row with no hosts overlaps every row of its
-ecosystem, so the register holds no two overlapping rows of one ecosystem for a tool.
+overlap when one host can match both. A row with no hosts is the fallback for the hosts
+no host row names, so it overlaps only another row with no hosts, which would be the
+same fallback twice. The register holds no two overlapping rows of one ecosystem for a
+tool: host rows that no host matches twice, and at most one fallback beside them.
 
 What a row is not: a promise the package exists at every version, or on every
 platform. A package name that does not resolve fails the install command loudly, and
@@ -189,15 +191,17 @@ class EcosystemPackage:
         return host is not None and any(match.matches(host) for match in self.hosts)
 
     def overlaps(self, other: EcosystemPackage) -> bool:
-        """Whether one host can be served by both rows.
+        """Whether one host can be matched by both rows.
 
-        Rows of two ecosystems never compete. A row with no hosts serves every host,
-        so it overlaps every other row of its ecosystem.
+        Rows of two ecosystems never compete. A row with no hosts is the fallback for
+        the hosts no host row names (``InstallPackageFacet.row_for`` takes a host row
+        first), so it overlaps another row with no hosts, which would be the same
+        fallback twice, and no host row.
         """
         if self.ecosystem != other.ecosystem:
             return False
         if not self.hosts or not other.hosts:
-            return True
+            return not self.hosts and not other.hosts
         return any(
             mine.overlaps(theirs) for mine in self.hosts for theirs in other.hosts
         )
