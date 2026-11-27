@@ -1671,14 +1671,26 @@ class AshAggregatedResults(RecordModel):
         row_names = {
             name.lower() for name in self.scanner_results if isinstance(name, str)
         }
+        # The metrics' share from the SARIF is one walk for every name, made the
+        # first time a loop below needs a count and not before: a model whose
+        # loops read none walks nothing. A name's count is that share plus the
+        # dict results' (``dict_result_counts``, called with the spelling the
+        # per-name reader was called with, because its report lookup tries the
+        # exact key before a case fold).
+        sarif_counts = None
+
+        def metrics_suppressed(name: str, folded: str) -> int:
+            nonlocal sarif_counts
+            if sarif_counts is None:
+                sarif_counts = ScannerStatisticsCalculator.sarif_counts_by_scanner(self)
+            return (
+                sarif_counts.for_name(folded).suppressed
+                + ScannerStatisticsCalculator.dict_result_counts(self, name).suppressed
+            )
+
         for scanner_key, count in suppressed_by_scanner.items():
             if scanner_key in row_names:
-                count = max(
-                    count,
-                    ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
-                        self, scanner_key
-                    )[0],
-                )
+                count = max(count, metrics_suppressed(scanner_key, scanner_key))
             self._apply_suppression_side_effects(scanner_key, count)
         # A row of a scanner with no suppressed finding left (the SARIF was
         # narrowed since the row was written) would keep its old count while the
@@ -1701,9 +1713,7 @@ class AshAggregatedResults(RecordModel):
                 and row_name.lower() not in suppressed_by_scanner
                 and (row.suppressed_finding_count or row.severity_counts.suppressed)
             ):
-                counted = ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
-                    self, row_name
-                )[0]
+                counted = metrics_suppressed(row_name, row_name.lower())
                 row.suppressed_finding_count = counted
                 row.severity_counts.suppressed = counted
 

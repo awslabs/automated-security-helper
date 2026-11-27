@@ -33,7 +33,7 @@ from automated_security_helper.base.scanner_facets import (
     ScannerFacets,
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.base.uv_tool_mixin import _tool_name
+from automated_security_helper.base.uv_tool_mixin import tool_name
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
@@ -624,7 +624,9 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         pointed at a subdirectory of a checkout names the checkout's top level as
         well: the first parent that holds a ``.git`` the scanned directory's owner
         also owns, and never a filesystem root (``safe_directories_for``). Outside a
-        checkout only the scanned directory is named.
+        checkout only the scanned directory is named. Where the platform has no user
+        ids (Windows) no owner can be compared, so the top is not named and git's own
+        ownership check decides it.
 
         A sandboxed spawn reads the same list from the policy, which computes it
         from the scan target with the same function, and rebuilds the entries
@@ -657,10 +659,10 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         it, so the row says where the copy is and how to allow it rather than
         "not installed".
         """
-        found = find_executable(_tool_name(self))
+        found = find_executable(tool_name(self))
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         if found is None:
-            refusal = in_tree_refusal(_tool_name(self))
+            refusal = in_tree_refusal(tool_name(self))
             if refusal is not None:
                 self.dependency_unavailable_reason = refusal
                 self._plugin_log(refusal, level=logging.WARNING)
@@ -681,7 +683,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     def _get_opengrep_version(self) -> tuple[int, int, int] | None:
         try:
             result = spawn_run(  # nosec B603 — list args, executable from find_executable()
-                [_tool_name(self), "--version"],
+                [tool_name(self), "--version"],
                 capture_output=True,
                 text=True,
                 timeout=5,

@@ -18,9 +18,14 @@ What is held to what:
   statically linked into the polars runtime wheel) is in the SBOM, and it
   carries the polars parent purl and the sdist's sha256 the harvest stamped;
 - the four ``global_settings.suppressions`` entries of ``.ash.yaml`` that
-  name the harvested lockfile each match a finding reported at the path
-  syft gives the lockfile, so none of them reads as unused, and a finding for
-  another crate or another rustls version is not suppressed (the control).
+  name polars' harvested lockfile each match a finding reported at the path
+  syft gives the lockfile, so none of them reads as unused;
+- no entry over the harvest layout suppresses a finding there for another
+  crate or another rustls version, or the same advisory in a file outside the
+  layout (the controls). The layout holds entries for other harvested
+  packages too (ruff, pydantic-core, rpds-py, rtoml, uv), so the controls read
+  every one of them: a broad entry with no version pin would cover polars'
+  lockfile as well and silently undo the four entries' version pin.
 """
 
 from __future__ import annotations
@@ -47,14 +52,17 @@ LINKED_CRATE = "rustls"
 LINKED_CRATE_VERSION = "0.23.43"
 LINKED_CRATE_PURL = f"pkg:cargo/{LINKED_CRATE}@{LINKED_CRATE_VERSION}"
 
-#: The harvested lockfile's suppressions: two advisories, each in the trivy and
-#: the grype spelling.
+#: The suppressions of polars' harvested lockfile: two advisories, each in the
+#: trivy and the grype spelling.
 EXPECTED_SUPPRESSION_RULE_IDS = (
     "GHSA-2mjx-qc3c-rqvc",
     "GHSA-2mjx-qc3c-rqvc-rustls",
     "GHSA-c8m5-c952-6cm4",
     "GHSA-c8m5-c952-6cm4-rustls",
 )
+
+#: The part of a suppression's path that names polars' harvested lockfile.
+LINKED_LOCKFILE_DIR = f"{HARVEST_DIR_NAME}/polars-runtime-32/"
 
 
 def _components(report: Any) -> List[Mapping[str, Any]]:
@@ -108,15 +116,24 @@ def assert_linked_crate_is_listed_with_its_parent(
     return locations
 
 
-def harvest_suppressions() -> List[AshSuppression]:
-    """The repository's suppressions that name the harvested lockfile."""
+def harvest_layout_suppressions() -> List[AshSuppression]:
+    """Every suppression of the repository whose path names the harvest layout."""
     document = yaml.safe_load(
         REPO_ROOT.joinpath(".ash.yaml").read_text(encoding="utf-8")
     )
-    entries = [
+    return [
         AshSuppression.model_validate(raw)
         for raw in document["global_settings"]["suppressions"]
         if HARVEST_DIR_NAME in str(raw.get("path", ""))
+    ]
+
+
+def harvest_suppressions() -> List[AshSuppression]:
+    """The repository's suppressions that name polars' harvested lockfile."""
+    entries = [
+        entry
+        for entry in harvest_layout_suppressions()
+        if LINKED_LOCKFILE_DIR in (entry.path or "")
     ]
     assert sorted(e.rule_id or "" for e in entries) == sorted(
         EXPECTED_SUPPRESSION_RULE_IDS
@@ -160,10 +177,12 @@ def assert_suppressions_match_reported_paths(locations: Sequence[str]) -> None:
     """Each harvest suppression matches a finding at every reported path form.
 
     "None unused" is checked by identity: the entries that matched a finding
-    are collected and compared with the full list. The control is a finding the
-    entries must not cover (another crate, another rustls version).
+    are collected and compared with the full list. The controls are findings
+    no entry over the harvest layout may cover (another crate, another rustls
+    version, a file outside the layout), for each of the four rule ids.
     """
     entries = harvest_suppressions()
+    layout_entries = harvest_layout_suppressions()
     used = set()
     for location in locations:
         for path in reported_path_forms(location):
@@ -180,22 +199,18 @@ def assert_suppressions_match_reported_paths(locations: Sequence[str]) -> None:
     unused = [e.rule_id for e in entries if e.id not in used]
     assert not unused, f"suppressions that match no reported path: {unused}"
 
-    for control in (
-        _finding(
-            EXPECTED_SUPPRESSION_RULE_IDS[0],
-            locations[0],
-            "tokio",
-            LINKED_CRATE_VERSION,
-        ),
-        _finding(
-            EXPECTED_SUPPRESSION_RULE_IDS[0], locations[0], LINKED_CRATE, "0.23.99"
-        ),
-        _finding(
-            EXPECTED_SUPPRESSION_RULE_IDS[0],
-            "uv.lock",
-            LINKED_CRATE,
-            LINKED_CRATE_VERSION,
-        ),
-    ):
-        suppressed, _ = should_suppress_finding(control, entries)
-        assert not suppressed, f"control finding was suppressed: {control.model_dump()}"
+    # Every path form, not only syft's own: an entry spelled for the converted
+    # tree's path matches the scanners' forms and not syft's.
+    controls = [
+        _finding(rule_id, "uv.lock", LINKED_CRATE, LINKED_CRATE_VERSION)
+        for rule_id in EXPECTED_SUPPRESSION_RULE_IDS
+    ]
+    for rule_id in EXPECTED_SUPPRESSION_RULE_IDS:
+        for path in reported_path_forms(locations[0]):
+            controls.append(_finding(rule_id, path, "tokio", LINKED_CRATE_VERSION))
+            controls.append(_finding(rule_id, path, LINKED_CRATE, "0.23.99"))
+    for control in controls:
+        suppressed, matching = should_suppress_finding(control, layout_entries)
+        assert not suppressed, (
+            f"control finding was suppressed by {matching}: {control.model_dump()}"
+        )
