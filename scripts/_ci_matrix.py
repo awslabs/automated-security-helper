@@ -261,13 +261,20 @@ def axis_cells(matrix: Mapping[str, Any], event: str = "push") -> list[dict[str,
     An exclude entry names axes. A key it names that is no axis (a typo, or a key only an
     ``include`` adds) is refused with UnsupportedMatrix, on every event and for a void
     entry too: GitHub rejects the workflow, and an entry that matched nothing would leave
-    the legs looking right.
+    the legs looking right. An entry with no key at all is refused the same way: it would
+    match every leg, since every one of no keys matches, and drop them all.
     """
     _check_event(event)
     _refuse_unread_expressions(matrix)
     axes = _axes(matrix)
     excludes = _entries(matrix, "exclude")
     for excluded in excludes:
+        if not excluded:
+            raise UnsupportedMatrix(
+                "an empty matrix exclude entry names no axis and would match every "
+                f"leg (the axes are {', '.join(map(str, axes)) or 'none'}): "
+                f"{list(excludes)!r}"
+            )
         for key in excluded:
             if key not in axes:
                 raise UnsupportedMatrix(
@@ -655,18 +662,45 @@ def _declared_runs_on(job: Mapping[str, Any]) -> str | None:
     return declared
 
 
-def _input_default(workflow: Mapping[str, Any] | None, name: str, text: str) -> str:
-    """The string default of the ``workflow_call`` input ``name``."""
+def _declared_input(
+    workflow: Mapping[str, Any] | None, name: str
+) -> Mapping[str, Any] | None:
+    """The ``workflow_call`` input ``name`` as ``workflow`` declares it, or None."""
     on = workflow.get("on") if workflow is not None else None
     call = on.get("workflow_call") if isinstance(on, Mapping) else None
     inputs = call.get("inputs") if isinstance(call, Mapping) else None
     declared = inputs.get(name) if isinstance(inputs, Mapping) else None
-    default = declared.get("default") if isinstance(declared, Mapping) else None
+    return declared if isinstance(declared, Mapping) else None
+
+
+def _input_default(workflow: Mapping[str, Any] | None, name: str, text: str) -> str:
+    """The string default of the ``workflow_call`` input ``name``."""
+    declared = _declared_input(workflow, name)
+    default = declared.get("default") if declared is not None else None
     if not isinstance(default, str):
         raise UnsupportedExpression(
             "a runs-on input with no string default", text, "runs-on"
         )
     return default
+
+
+def _every_caller_passes(workflow: Mapping[str, Any] | None, name: str) -> bool:
+    """Whether every caller has to pass the ``workflow_call`` input ``name``, and the
+    input has no string default to fall back on.
+
+    GitHub's workflow syntax reference says of ``required`` that the input "must be
+    supplied", so the label such an input gives a runs-on is one each caller wrote, and
+    check_runner_labels reads it in that call. It also says that a string input left out
+    with no default is "", so an input that is not required can leave a runs-on empty,
+    and no call names a label for it:
+    https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+    """
+    declared = _declared_input(workflow, name)
+    return (
+        declared is not None
+        and declared.get("required") is True
+        and not isinstance(declared.get("default"), str)
+    )
 
 
 def _matrix_labels(job: Mapping[str, Any], key: str) -> set[str]:
@@ -697,11 +731,13 @@ def runs_on_labels(
     """Every label the job's ``runs-on`` can name, whichever leg runs.
 
     Read: a literal label, ``${{ matrix.<key> }}``, the override shape above, and
-    ``${{ inputs.<name> }}`` (the default of that ``workflow_call`` input of ``workflow``).
-    A job that calls a reusable workflow names none: check_runner_labels reads what its
-    ``with:`` passes. Anything else raises. So does a matrix key that the job's matrix does
-    not name or that a leg lacks. The override needs the axis it compares to be named, and
-    an ``os`` in every leg.
+    ``${{ inputs.<name> }}``. That is the default of the ``workflow_call`` input of
+    ``workflow``, or no label when the input is required and has no default: each call
+    passes its label, and _called_labels reads it there. A job that calls a reusable
+    workflow names none: check_runner_labels reads what its ``with:`` passes. Anything
+    else raises. So does a matrix key that the job's matrix does not name or that a leg
+    lacks. The override needs the axis it compares to be named, and an ``os`` in every
+    leg.
     """
     declared = _declared_runs_on(job)
     if declared is None:
@@ -721,7 +757,10 @@ def runs_on_labels(
         return _matrix_labels(job, "os") | {override.group("label")}
     from_input = _RUNS_ON_INPUT.match(declared)
     if from_input:
-        return {_input_default(workflow, from_input.group(1), declared)}
+        name = from_input.group(1)
+        if _every_caller_passes(workflow, name):
+            return set()
+        return {_input_default(workflow, name, declared)}
     raise UnsupportedExpression("runs-on expression", declared, "runs-on")
 
 
@@ -739,7 +778,9 @@ def runs_on(
     """The label the leg ``cell`` of ``job`` runs on (the shapes runs_on_labels reads).
 
     The override compares as GitHub's == does (see _loosely_equal): a leg whose value
-    differs from the override's text only in case is still overridden.
+    differs from the override's text only in case is still overridden. A runs-on that
+    reads an input with no string default is refused, required or not: the label of a
+    leg is the caller's there, and this function does not hold the caller.
     """
     declared = _declared_runs_on(job)
     if declared is None:
