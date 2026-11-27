@@ -1638,7 +1638,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         if non_finding_count:
             ASH_LOGGER.info(
                 f"{non_finding_count} SARIF result(s) state no problem (kind pass, "
-                "notApplicable or informational) and are not OCSF findings"
+                "notApplicable or informational, with no level or severity that "
+                "reports one) and are not OCSF findings"
             )
 
         # Log comprehensive processing statistics. A degraded record is a

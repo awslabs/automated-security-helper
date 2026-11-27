@@ -253,7 +253,8 @@ class TestTheRunsTalliesAreStatedAsTheyWere:
         ) in lines
         assert (
             "1 SARIF result(s) state no problem (kind pass, "
-            "notApplicable or informational) and are not OCSF findings"
+            "notApplicable or informational, with no level or severity that "
+            "reports one) and are not OCSF findings"
         ) in lines
 
     def test_a_clean_run_reports_no_failures_or_degradation(
