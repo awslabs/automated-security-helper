@@ -25,6 +25,7 @@ from automated_security_helper.utils.terminal_text import (
 )
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    INFORMATION_NOTE,
     SUMMARY_BELOW_THRESHOLD,
     SUMMARY_POLICY_NOT_GATING,
     ReportContentEmitter,
@@ -418,6 +419,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append("FINDINGS OVERVIEW")
                 text_parts.append("----------------")
                 text_parts.extend(_findings_table(findings))
+                text_parts.append("")
+            # A result that states no finding is listed apart, and counted in no
+            # total.
+            information = emitter.get_information_overview()
+            if information:
+                text_parts.append("INFORMATION")
+                text_parts.append("-----------")
+                text_parts.append(INFORMATION_NOTE)
+                text_parts.extend(_findings_table(information))
                 text_parts.append("")
 
         # Add detailed findings if enabled

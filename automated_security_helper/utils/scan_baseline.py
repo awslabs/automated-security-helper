@@ -130,13 +130,16 @@ def apply_baseline(
     completed = _evaluated_scanners(baseline.results) - {
         name for name, _ in incomplete_scanners(baseline.results)
     }
+    # A result that states no finding is never matched, so a baseline never
+    # removes one: the baseline's own list leaves such rows out already
+    # (unique_findings), and the pairing below stays over every current result.
     match = match_findings(
         (
             finding
             for finding in baseline.findings
             if finding.source_report is None and finding.scanner in completed
         ),
-        current,
+        [finding for finding in current if finding.is_finding],
     )
     # Row-wise on purpose: each pair is decided by a chain of early exits, and the
     # threshold lookup in ``actionable`` goes through a scanner-statistics

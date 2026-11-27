@@ -27,6 +27,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_se
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    INFORMATION_NOTE,
     SUMMARY_BELOW_THRESHOLD,
     SUMMARY_POLICY_NOT_GATING,
     OutcomeTone,
@@ -59,6 +60,7 @@ DISPOSITION_LABELS: Dict[Disposition, str] = {
     Disposition.SUPPRESSED: "Suppressed",
     Disposition.BELOW_THRESHOLD: "Below threshold",
     Disposition.POLICY_NOT_GATING: "Not gating (workspace policy)",
+    Disposition.INFORMATION: "Information",
 }
 
 
@@ -243,7 +245,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         scanners = sorted(
             {
                 _scanner_label(finding.scanner)
-                for finding in emitter.fold_findings(emitter.flat_vulns)[0]
+                for finding in emitter.fold_findings(emitter.finding_rows())[0]
             }
         )
         scanner_options = "".join(
@@ -287,6 +289,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             "finding_count": self._shown_finding_count(emitter),
             "scanner_options": scanner_options,
             "finding_cards": self._format_finding_cards(emitter),
+            "information_section": self._format_information_section(
+                emitter.get_information_overview()
+            ),
             "scanner_results_table": self._format_scanner_results_table(
                 emitter.get_scanner_results()
             ),
@@ -305,8 +310,12 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
     @staticmethod
     def _shown_finding_count(emitter: ReportContentEmitter) -> int:
-        """How many finding cards the report holds: one per cluster when folded."""
-        return len(emitter.fold_findings(emitter.flat_vulns)[0])
+        """How many finding cards the report holds: one per cluster when folded.
+
+        A result that states no finding has no card: the Information section
+        lists it.
+        """
+        return len(emitter.fold_findings(emitter.finding_rows())[0])
 
     @staticmethod
     def _format_deduplicated_notice(summary: Dict[str, Any]) -> str:
@@ -458,8 +467,9 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
     @staticmethod
     def _format_finding_cards(emitter: ReportContentEmitter) -> str:
         # With the fold on, one card per duplicate cluster, the others named in
-        # its note; off, every finding has its card.
-        shown, notes = emitter.fold_findings(emitter.flat_vulns)
+        # its note; off, every finding has its card. A result that states no
+        # finding has none: the Information section lists it.
+        shown, notes = emitter.fold_findings(emitter.finding_rows())
         # Live cards first, then suppressed ones; each group most severe first,
         # then by file, line and rule, the emitter's own finding order.
         findings = emitter.by_severity(
@@ -668,6 +678,42 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
 
         section += "</table></div></div>"
         return section
+
+    @staticmethod
+    def _format_information_section(rows: List[Dict[str, Any]]) -> str:
+        """The section that lists the results which state no finding.
+
+        Empty for no rows, so a report with none is the page it always was. The
+        section holds no finding card, so the finding count, the scope menu, the
+        filters and the empty state of the findings above never read it.
+        """
+        if not rows:
+            return ""
+
+        label = DISPOSITION_LABELS[Disposition.INFORMATION]
+        body = "".join(
+            "<tr>"
+            + "".join(
+                # The scanner, rule, title and path come from the scan: each is
+                # one shown line.
+                f"<td>{html.escape(str(shown_on_one_line(str(row[key]))))}</td>"
+                for key in ("scanner", "rule_id", "title", "file_path")
+            )
+            + "</tr>"
+            for row in rows
+        )
+        return (
+            '\n    <section id="information" aria-labelledby="information-title" '
+            'class="report-section">'
+            '<div class="section-heading">'
+            f'<h2 id="information-title">{html.escape(label)}</h2>'
+            f"<p>{html.escape(INFORMATION_NOTE)}</p></div>"
+            '<div class="table-scroll" role="region" '
+            f'aria-label="{html.escape(label, quote=True)}" tabindex="0">'
+            '<table><tr><th scope="col">Scanner</th><th scope="col">Rule ID</th>'
+            '<th scope="col">Title</th><th scope="col">File</th></tr>'
+            f"{body}</table></div></section>"
+        )
 
     @staticmethod
     def _is_suppressed(result: Result) -> bool:

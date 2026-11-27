@@ -938,19 +938,27 @@ def _summary_line(findings: list) -> Text:
 
     Built from counts and this module's own words alone - no finding text
     reaches it - and listed with the vetted text builders so the markup guard
-    can hold every widget to them.
+    can hold every widget to them. A result whose kind states no finding is
+    counted as information alone: never active, in no severity and never
+    suppressed.
     """
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
     summary = Text()
-    active = [finding for finding in findings if not finding.get("suppressed")]
+    information = sum(1 for finding in findings if is_not_a_finding(finding))
+    counted = [finding for finding in findings if not is_not_a_finding(finding)]
+    active = [finding for finding in counted if not finding.get("suppressed")]
     summary.append(f"{len(active)} active", style=f"bold {COLORS['foreground']}")
     for level in SEVERITY_BUCKETS:
         count = sum(finding.get("severity", "").lower() == level for finding in active)
         if count:
             summary.append("  ·  ", style=COLORS["muted"])
             summary.append(f"{count} {level}", style=severity_color(level))
-    suppressed_count = len(findings) - len(active)
+    suppressed_count = len(counted) - len(active)
     if suppressed_count:
         summary.append(f"  ·  {suppressed_count} suppressed", style=COLORS["muted"])
+    if information:
+        summary.append(f"  ·  {information} information", style=COLORS["muted"])
     return summary
 
 
@@ -963,8 +971,23 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
     between the title's rows and before "line" is the layout's own, added
     after the values are escaped, and a value cannot add a row of its own.
     """
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
     is_suppressed = finding.get("suppressed", False)
-    color = COLORS["muted"] if is_suppressed else severity_color(finding["severity"])
+    # A result whose kind states no finding reads INFORMATION, in the muted colour
+    # of a suppressed one: its severity rates no finding.
+    is_information = is_not_a_finding(finding)
+    color = (
+        COLORS["muted"]
+        if is_suppressed or is_information
+        else severity_color(finding["severity"])
+    )
+    if is_information:
+        severity_text = "INFORMATION"
+    elif is_suppressed:
+        severity_text = "SUPPRESSED"
+    else:
+        severity_text = _one_line(finding["severity"].upper())
     title = Text(
         _one_line(_display_value(finding.get("rule_id"))),
         style=COLORS["foreground"],
@@ -980,12 +1003,9 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
         location += "\nline " + _one_line(finding["line"])
     cells = {
         # The severity is a results file's value like the others, so it goes
-        # through _one_line too; only the SUPPRESSED marker is this module's
-        # own word.
-        "severity": Text(
-            "SUPPRESSED" if is_suppressed else _one_line(finding["severity"].upper()),
-            style=color,
-        ),
+        # through _one_line too; only the SUPPRESSED and INFORMATION markers are
+        # this module's own words.
+        "severity": Text(severity_text, style=color),
         "finding": title,
         "scanner": Text(
             _one_line(finding.get("scanner", "N/A")),

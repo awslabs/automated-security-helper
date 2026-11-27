@@ -173,6 +173,9 @@ def _finding_row(finding: "FlatVulnerability") -> dict[str, Any]:
         "identity_base": canonical(base) if base is not None else None,
         "identity_message": finding.identity_message,
         "source_report": finding.source_report,
+        # The trend leaves a row whose result states no finding out of its
+        # counts; a record written before this key reads as a finding.
+        "result_kind": finding.result_kind,
     }
 
 
@@ -467,6 +470,7 @@ def _valid_row(row: Any) -> bool:
             row.get("file_path"),
             row.get("identity_message"),
             row.get("source_report"),
+            row.get("result_kind"),
         )
     ):
         return False

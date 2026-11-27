@@ -27,6 +27,7 @@ from automated_security_helper.utils.converter_refusals import (
     markdown_summary_lines,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    INFORMATION_NOTE,
     SUMMARY_BELOW_THRESHOLD,
     SUMMARY_POLICY_NOT_GATING,
     OutcomeTone,
@@ -644,6 +645,14 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             if findings:
                 parts.append("## Findings overview\n")
                 parts.extend(_findings_table(findings))
+                parts.append("")
+            # A result that states no finding is listed apart, and counted in
+            # no total.
+            information = emitter.get_information_overview()
+            if information:
+                parts.append("## Information\n")
+                parts.append(f"{INFORMATION_NOTE}\n")
+                parts.extend(_findings_table(information))
                 parts.append("")
 
         if options.include_detailed_findings:

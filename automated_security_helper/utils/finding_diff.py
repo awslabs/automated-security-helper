@@ -127,11 +127,16 @@ def check_same_project(
 def unique_findings(
     results: AshAggregatedResults, label: str
 ) -> list[FlatVulnerability]:
-    """*results*' findings, refusing a scan in which two share an ID."""
+    """*results*' findings, refusing a scan in which two share an ID.
+
+    The duplicate check reads every row. A row whose result states no finding
+    (SARIF kind pass, notApplicable or informational) is left out of what comes
+    back, so it is never new, absent, moved or changed.
+    """
     findings = results.to_flat_vulnerabilities()
     if len({finding.id for finding in findings}) != len(findings):
         raise ComparabilityRefusal(f"{label} scan contains duplicate finding IDs")
-    return findings
+    return [finding for finding in findings if finding.is_finding]
 
 
 def comparable_findings(

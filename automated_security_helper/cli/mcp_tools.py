@@ -4591,6 +4591,7 @@ def mcp_explain_finding(
             "references": references,
             "scanner": match.scanner,
             "scanner_metadata": scanner_metadata,
+            "result_kind": match.result_kind,
         },
     }
 
