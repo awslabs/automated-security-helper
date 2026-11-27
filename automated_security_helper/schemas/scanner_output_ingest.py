@@ -16,17 +16,26 @@ What may change. A part is repaired only when dropping or rewriting it cannot
 change a finding's level, kind, suppression, rule reference, locations, message,
 or the rule's id and default configuration: an unreadable region (the finding
 stays, without its lines), a key the spec does not define, a link that is not a
-URL, a date that does not parse, a number where the spec wants text (written as
-its decimal text), a related location, a property. A value that would have to be
-guessed to be kept (a ``level`` of ``info``, a missing ``message``, a suppression
-of a kind the spec does not define, a bad notification the completeness gate
-reads) is not repaired: the report is refused as before.
+URL, a date that does not parse, an integer where the spec wants text (written as
+its decimal text), a related location, a property. A number with a fraction or an
+exponent is not rewritten as text: reading it as a float lost the digits the tool
+wrote (``1.10`` reads as ``1.1``), and a rule id or a version must not change.
+
+What is not repaired. A value that would have to be guessed to be kept (a
+``level`` of ``info``, a missing ``message``, a suppression of a kind the spec
+does not define) and a part ASH reads or resolves through (a notification, a
+configuration override, the ``uri`` or ``uriBaseId`` of a base id a location is
+resolved against, a CycloneDX vulnerability) are not repaired: the report is
+refused as before.
 
 What the record holds. Each change is counted by kind and named by a pointer
 built only from list indices and names the SARIF or CycloneDX schema defines; any
 other key, which the tool chose (a property name, a fingerprint name), is written
 ``*``. The record holds no value from the report and no path, host or user name,
-so it can go into a log line, a results file and a SARIF notification.
+so it can go into a log line, a results file and a SARIF notification. A read
+that is refused leaves the changes its attempt made to the copy it discarded: a
+reader that goes on after a refusal rolls the record back (``checkpoint`` and
+``rollback``), and none says what was repaired of a report it did not read.
 
 The input is never changed: a refused document is repaired on a copy.
 """
@@ -70,8 +79,10 @@ _MAX_NAMED = 50
 #: URL, a sentence) is recorded as no rule id.
 _RULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
-#: A scope label for a per-template or per-chunk reader: an ordinal, never a name.
-_SCOPE_LABEL = re.compile(r"^[A-Za-z0-9 ._-]{1,40}$")
+#: A scope label for a per-template or per-chunk reader: a lowercase word and an
+#: ordinal, ``template 3`` or ``batch 2.1``. Never a name: a file name would fit
+#: any looser pattern.
+_SCOPE_LABEL = re.compile(r"^[a-z]+ [0-9]{1,6}(\.[0-9]{1,6})?$")
 
 _BOM_BYTES = b"\xef\xbb\xbf"
 _BOM_TEXT = _BOM_BYTES.decode("utf-8")
@@ -206,8 +217,8 @@ class IngestRecord:
         """Prefix the pointers noted inside the block with *label*.
 
         For a reader that makes one document per input (``template 3``, ``chunk
-        2``): the label is the input's ordinal, never its name. A label that is
-        not a short ordinal is replaced by ``input``.
+        2``): the label is a word and the input's ordinal, never its name. A
+        label of any other form is replaced by ``input``.
         """
         previous = self._scope
         self._scope = label if _SCOPE_LABEL.fullmatch(label) else "input"
@@ -426,8 +437,11 @@ class _Error(NamedTuple):
     change: _Change | None
 
 
-def _is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+def _is_integer(value: object) -> bool:
+    """A JSON integer, which is the only number that can be written back as the
+    text it was. A number with a fraction or an exponent was read as a float, and
+    the digits the tool wrote are gone (``1.10`` is ``1.1``), so it is not one."""
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _resolve(doc: Any, loc: Sequence[str | int]) -> tuple[_Path, _Path, _Unions, Any]:
@@ -523,7 +537,6 @@ _RULE_FIELDS = frozenset(
 _RUN_FIELDS = frozenset(
     {
         "versionControlProvenance",
-        "originalUriBaseIds",
         "automationDetails",
         "runAggregates",
         "baselineGuid",
@@ -541,10 +554,11 @@ _RUN_FIELDS = frozenset(
     }
 )
 #: Run fields that hold a map or a list, where one bad entry costs only itself.
+#: ``originalUriBaseIds`` is not one: a location's ``uriBaseId`` is resolved through
+#: it (``_base_id_change``).
 _RUN_ELEMENT_FIELDS = frozenset(
     {
         "versionControlProvenance",
-        "originalUriBaseIds",
         "runAggregates",
         "webRequests",
         "webResponses",
@@ -674,21 +688,56 @@ def _tool_change(path: _Path) -> _Change | None:
     return _drop(path, component + 1, "tool_field_unreadable")
 
 
+#: Invocation fields ASH reads, or that change what another part means. The
+#: completeness gate reads the execution notifications, the staleness check and
+#: bandit's reader read the configuration notifications, and a configuration
+#: override sets the level a rule or a notification reports at. One bad entry in
+#: any of them is not repaired: dropping the list would lose what the tool said
+#: it could not do, or how it was set up.
+_INVOCATION_KEPT_FIELDS = frozenset(
+    {
+        "executionSuccessful",
+        "toolExecutionNotifications",
+        "toolConfigurationNotifications",
+        "ruleConfigurationOverrides",
+        "notificationConfigurationOverrides",
+    }
+)
+
+
 def _invocation_change(path: _Path) -> _Change | None:
-    """The tool's own invocation: ASH reads only whether it succeeded and what it
-    reported; every other field may go."""
+    """The tool's own invocation: ASH reads whether it succeeded and what it
+    reported (``_INVOCATION_KEPT_FIELDS``); every other field may go."""
     if len(path) < 5 or not isinstance(path[3], int):
         return None
     field = path[4]
-    if field in ("executionSuccessful", "toolExecutionNotifications"):
+    if field in _INVOCATION_KEPT_FIELDS:
         return None
     if field == "properties":
         return _bag_change(path, 4, "invocation_field_unreadable")
     return _drop(path, 5, "invocation_field_unreadable")
 
 
+def _base_id_change(path: _Path) -> _Change | None:
+    """An error under ``originalUriBaseIds``, the table a location's ``uriBaseId``
+    is resolved through (dedupe keys, suppression scopes, the GitHub code scanning
+    report). An entry is never dropped, and neither is its ``uri`` or its own
+    ``uriBaseId``: without them a location points somewhere else. Only a field
+    that describes the entry may go."""
+    if len(path) < 5:
+        return None
+    field = path[4]
+    if field in ("uri", "uriBaseId"):
+        return None
+    if field == "properties":
+        return _bag_change(path, 4, "run_field_unreadable")
+    return _drop(path, 5, "run_field_unreadable")
+
+
 def _run_change(path: _Path) -> _Change | None:
     field = path[2]
+    if field == "originalUriBaseIds":
+        return _base_id_change(path)
     if field == "properties":
         return _bag_change(path, 2, "run_field_unreadable")
     if field in _RUN_ELEMENT_FIELDS and len(path) >= 4:
@@ -710,7 +759,7 @@ def _run_change(path: _Path) -> _Change | None:
 
 def _classify_sarif(path: _Path, tail: _Path, etype: str, value: Any) -> _Change | None:
     """The repair for one error at *path* in a SARIF document, or ``None``."""
-    if etype == "string_type" and not tail and _is_number(value):
+    if etype == "string_type" and not tail and _is_integer(value):
         return _Change("set_text", path, "number_as_text", 0)
     if etype == "extra_forbidden" and path and not tail:
         return _drop(path, len(path), "unknown_key")
@@ -748,36 +797,55 @@ _CDX_COMPONENT_FIELDS = frozenset(
 )
 #: What a CycloneDX document must keep for ASH to read it at all.
 _CDX_KEPT_FIELDS = frozenset({"bomFormat", "specVersion", "version", "components"})
+#: Top-level fields a bad entry is not repaired in. A vulnerability is a finding,
+#: and a refused SBOM says so where a dropped one would read as one with none.
+_CDX_REFUSED_FIELDS = frozenset({"vulnerabilities"})
+
+
+def _component_change(path: _Path, start: int) -> _Change | None:
+    """An error under a component whose own place is ``path[:start]``: a field that
+    describes it may go, and never its type, name or ``bom-ref``."""
+    rest = path[start:]
+    if not rest or rest[0] not in _CDX_COMPONENT_FIELDS:
+        return None
+    field = rest[0]
+    if len(rest) >= 2 and isinstance(rest[1], int):
+        return _drop(path, start + 2, f"{field}_entry_unreadable", 2)
+    return _drop(path, start + 1, f"{field}_unreadable")
 
 
 def _classify_cyclonedx(
     path: _Path, tail: _Path, etype: str, value: Any
 ) -> _Change | None:
     """The repair for one error at *path* in a CycloneDX document, or ``None``."""
-    if etype == "string_type" and not tail and _is_number(value):
+    if etype == "string_type" and not tail and _is_integer(value):
         return _Change("set_text", path, "number_as_text", 0)
     if etype == "extra_forbidden" and path and not tail:
         return _drop(path, len(path), "unknown_key")
     for index in range(len(path) - 2, -1, -1):
         if path[index] == "components" and isinstance(path[index + 1], int):
-            rest = path[index + 2 :]
-            if not rest or rest[0] not in _CDX_COMPONENT_FIELDS:
-                return None
-            field = rest[0]
-            if len(rest) >= 2 and isinstance(rest[1], int):
-                return _drop(path, index + 4, f"{field}_entry_unreadable", 2)
-            return _drop(path, index + 3, f"{field}_unreadable")
+            return _component_change(path, index + 2)
     if not path:
         return None
-    if path[0] == "dependencies":
+    first = path[0]
+    if first == "dependencies":
         if len(path) >= 2 and isinstance(path[1], int):
             return _drop(path, 2, "dependency_entry_unreadable", 2)
         return None
-    if path[0] == "metadata":
+    if first == "metadata":
+        if len(path) >= 2 and path[1] == "component":
+            # The component the BOM describes follows the component rules.
+            return _component_change(path, 2)
+        if len(path) >= 3 and isinstance(path[2], int):
+            return _drop(path, 3, "metadata_entry_unreadable", 2)
         return _drop(path, min(len(path), 2), "metadata_field_unreadable")
-    if path[0] not in _CDX_KEPT_FIELDS and path[0] != "dependencies":
-        return _drop(path, 1, "document_field_unreadable")
-    return None
+    if first in _CDX_KEPT_FIELDS or first in _CDX_REFUSED_FIELDS:
+        return None
+    if len(path) >= 2 and isinstance(path[1], int):
+        # One bad entry of a list (a service, a composition, an annotation) costs
+        # that entry, not the list.
+        return _drop(path, 2, "document_entry_unreadable", 2)
+    return _drop(path, 1, "document_field_unreadable")
 
 
 # --- choosing and applying repairs ------------------------------------------- #
@@ -889,11 +957,13 @@ def _apply(
     removed: dict[_Path, list[int]],
     record: IngestRecord,
 ) -> None:
-    """Note and make *changes* on *doc*.
+    """Make *changes* on *doc* and note them.
 
     The notes use the tool's own coordinates (``removed`` is what earlier rounds
     took out of lists), and the edits go from the last path to the first so a
-    list index a later edit names has not moved.
+    list index a later edit names has not moved. A change is noted once every
+    edit is made: an edit that raises leaves the record naming nothing of this
+    round, which the caller then refuses.
     """
     noted = [
         (
@@ -903,6 +973,16 @@ def _apply(
         )
         for change in changes
     ]
+    for change in sorted(changes, key=lambda item: _sort_key(item.path), reverse=True):
+        parent = _get(doc, change.path[:-1])
+        key = change.path[-1]
+        if change.kind == "drop":
+            del parent[key]
+        else:
+            number = parent[key]
+            if not _is_integer(number):
+                raise TypeError("only an integer is written as text")
+            parent[key] = str(number)
     for change, original, rule_id in noted:
         record.note(
             "dropped" if change.kind == "drop" else "rewritten",
@@ -910,13 +990,6 @@ def _apply(
             original,
             rule_id=rule_id,
         )
-    for change in sorted(changes, key=lambda item: _sort_key(item.path), reverse=True):
-        parent = _get(doc, change.path[:-1])
-        key = change.path[-1]
-        if change.kind == "drop":
-            del parent[key]
-        else:
-            parent[key] = str(parent[key])
     for change, original, _ in noted:
         if change.kind == "drop" and isinstance(change.path[-1], int):
             gone = original[-1]

@@ -31,6 +31,7 @@ from hypothesis import given, seed, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from automated_security_helper.schemas import scanner_output_ingest
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
 from automated_security_helper.schemas.sarif_schema_model import Invocation, SarifReport
 from automated_security_helper.schemas.scanner_output_ingest import (
@@ -250,6 +251,18 @@ def _message_is_text(result: Any) -> None:
 
 def _uri_is_text(result: Any) -> None:
     assert result.locations[0].physicalLocation.root.artifactLocation.uri == "123"
+
+
+def _driver_version_is_gone(report: SarifReport) -> None:
+    assert report.runs[0].tool.driver.version is None
+
+
+def _only_the_text_tag_stays(result: Any) -> None:
+    assert result.properties.tags == ["a"]
+
+
+def _base_id_keeps_its_uri(report: SarifReport) -> None:
+    assert report.runs[0].originalUriBaseIds["SRC"].uri == "file:///src/"
 
 
 _REPAIRS = [
@@ -622,14 +635,57 @@ _REPAIRS = [
     _case(
         "rule name that is a number",
         "gitleaks",
-        _put(_rule, "name", 1.5),
-        _rewritten("number_as_text", "1.5", *_RULE0, "name"),
+        _put(_rule, "name", 5),
+        _rewritten("number_as_text", "5", *_RULE0, "name"),
     ),
     _case(
         "rule reference whose id is a number",
         "zizmor",
         _put(_result, "rule", {"id": 5}),
         _rewritten("number_as_text", "5", *_R0, "rule", "id"),
+    ),
+    # A number with a fraction is never written as text: reading 3.20 gave 3.2, and
+    # a version or a name that changed would not be the tool's. A field that does
+    # not identify the finding goes instead, and the repair names it.
+    _case(
+        "driver version that is a float",
+        "gitleaks",
+        _put(_driver, "version", 3.20),
+        _dropped("tool_field_unreadable", *_DRIVER, "version"),
+        check=_driver_version_is_gone,
+    ),
+    _case(
+        "rule name that is a float",
+        "gitleaks",
+        _put(_rule, "name", 1.10),
+        _dropped("rule_field_unreadable", *_RULE0, "name"),
+    ),
+    _case(
+        "tags with a float and a text",
+        "gitleaks",
+        _put(_result, "properties", {"tags": [2.10, "a"]}),
+        _dropped("tag_not_text", *_R0, "properties", "tags", 0),
+        check=_result_is(0, _only_the_text_tag_stays),
+    ),
+    # The table a location's uriBaseId is resolved through keeps every entry and
+    # its uri: only a field that describes the entry goes.
+    _case(
+        "base id with a description that is not a message",
+        "gitleaks",
+        _put(
+            _run,
+            "originalUriBaseIds",
+            {"SRC": {"uri": "file:///src/", "description": "the root"}},
+        ),
+        _dropped(
+            "run_field_unreadable",
+            "runs",
+            0,
+            "originalUriBaseIds",
+            Key("SRC"),
+            "description",
+        ),
+        check=_base_id_keeps_its_uri,
     ),
     # Several defects in one document: each repaired, each in its own result.
     _case(
@@ -735,10 +791,80 @@ _REFUSED = [
         ),
     ),
     (
+        "configuration notification with no message",
+        "gitleaks",
+        _put(
+            _run,
+            "invocations",
+            [
+                {
+                    "executionSuccessful": True,
+                    "toolConfigurationNotifications": [{"level": "warning"}],
+                }
+            ],
+        ),
+    ),
+    (
+        "rule configuration override with no configuration",
+        "gitleaks",
+        _put(
+            _run,
+            "invocations",
+            [
+                {
+                    "executionSuccessful": True,
+                    "ruleConfigurationOverrides": [{"descriptor": {"id": "x"}}],
+                }
+            ],
+        ),
+    ),
+    (
+        "notification configuration override with a level the spec does not define",
+        "gitleaks",
+        _put(
+            _run,
+            "invocations",
+            [
+                {
+                    "executionSuccessful": True,
+                    "notificationConfigurationOverrides": [
+                        {"configuration": {"level": "info"}, "descriptor": {"id": "x"}}
+                    ],
+                }
+            ],
+        ),
+    ),
+    (
         "invocation with no outcome",
         "gitleaks",
         _put(_run, "invocations", [{"exitCode": 1}]),
     ),
+    # A number with a fraction is never written as text, and where no other
+    # repair is admitted the report is refused as before.
+    ("rule id that is a float", "gitleaks", _put(_result, "ruleId", 2.10)),
+    (
+        "message text that is a float",
+        "gitleaks",
+        lambda doc: _result(doc)["message"].__setitem__("text", 1.10),
+    ),
+    (
+        "artifact uri that is a float",
+        "gitleaks",
+        lambda doc: _physical(doc)["artifactLocation"].__setitem__("uri", 3.20),
+    ),
+    # The table a location's uriBaseId is resolved through is never dropped from,
+    # and neither is an entry's uri.
+    (
+        "base id whose uri is a list",
+        "gitleaks",
+        _put(_run, "originalUriBaseIds", {"SRC": {"uri": ["file:///src/"]}}),
+    ),
+    (
+        "base id that is not an object",
+        "gitleaks",
+        _put(_run, "originalUriBaseIds", {"SRC": "file:///src/"}),
+    ),
+    ("base id table that is a list", "gitleaks", _put(_run, "originalUriBaseIds", [])),
     ("locations that is not a list", "gitleaks", _put(_result, "locations", {})),
     ("runs that is not a list", "gitleaks", lambda doc: doc.__setitem__("runs", {})),
     (
@@ -980,6 +1106,38 @@ def test_a_pointer_is_prefixed_with_an_ordinal_scope_and_never_a_name():
     assert pointers == [f"template 3: {region}", f"input: {region}", region]
 
 
+@pytest.mark.parametrize(
+    ("label", "shown"),
+    [
+        ("template 3", "template 3"),
+        ("chunk 12", "chunk 12"),
+        ("batch 2.1", "batch 2.1"),
+        ("/home/user/templates/prod.yaml", "input"),
+        ("prod.yaml", "input"),
+        ("acme-secrets.env", "input"),
+        ("jsmith", "input"),
+        ("template prod", "input"),
+        ("template 1234567", "input"),
+        ("Template 3", "input"),
+        ("", "input"),
+    ],
+)
+def test_a_scope_label_is_a_word_and_an_ordinal_and_anything_else_is_input(
+    label, shown
+):
+    """A file name fits any pattern loose enough to take ``prod.yaml``, so the label
+    must be the form callers write, a lowercase word and an ordinal."""
+    doc = copy.deepcopy(_BASES["gitleaks"])
+    _region(doc)["startLine"] = 0
+    record = IngestRecord()
+
+    with record.scoped(label):
+        ingest_sarif(doc, record)
+
+    (element,) = record.summary()["elements"]
+    assert element["pointer"] == f"{shown}: {_pointer(_REGION)}"
+
+
 def test_nothing_the_report_held_reaches_the_record_or_the_error():
     secrets = ("SECRET-LINE", "SECRET-KEY", "SECRET-URI", "/home/secret-user")
     doc = copy.deepcopy(_BASES["gitleaks"])
@@ -1089,6 +1247,82 @@ def test_a_report_with_a_byte_that_is_not_utf8_in_a_message_keeps_every_finding(
 
     assert len(report.runs[0].results) == 5
     assert [e["code"] for e in record.summary()["elements"]] == ["bytes_not_utf8"]
+
+
+def test_a_report_read_from_bytes_that_are_not_utf8_is_written_as_json_and_read_back():
+    """A byte that is not UTF-8 is read as a lone surrogate, which no UTF-8 writer can
+    encode. The SARIF models hold such text in its record form, the six characters
+    of the escape, so the report the scanner writes is the report it read."""
+    doc = copy.deepcopy(_BASES["gitleaks"])
+    _result(doc)["message"]["text"] = "a name with a PLACEHOLDER byte"
+    data = json.dumps(doc).encode("utf-8").replace(b"PLACEHOLDER", b"\xe9")
+    record = IngestRecord()
+    report = ingest_sarif(read_json_tolerant(data, record), record)
+
+    written = report.model_dump_json(exclude_none=True, exclude_unset=True)
+    again = SarifReport.model_validate_json(written)
+
+    escape = chr(0x5C) + "udce9"
+    assert report.runs[0].results[0].message.root.text == f"a name with a {escape} byte"
+    assert again.runs[0].results[0].message.root.text == f"a name with a {escape} byte"
+    assert len(again.runs[0].results) == len(report.runs[0].results)
+
+
+# --------------------------------------------------------------------------- #
+# Numbers where the spec wants text
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("number", [0, 7, 10, 120, 12345678901234567890])
+def test_an_integer_is_written_back_as_its_decimal_text(number):
+    log = copy.deepcopy(_BASES["gitleaks"])
+    _result(log)["ruleId"] = number
+    sbom = copy.deepcopy(_SYFT)
+    _component(sbom)["version"] = number
+
+    assert ingest_sarif(log, IngestRecord()).runs[0].results[0].ruleId == str(number)
+    assert ingest_cyclonedx(sbom, IngestRecord()).components[0].version.root == str(
+        number
+    )
+
+
+@pytest.mark.parametrize("digits", ["1.10", "2.10", "3.20", "1e2", "0.5"])
+def test_a_number_with_a_fraction_or_an_exponent_is_never_written_back_as_text(digits):
+    """JSON text such as 1.10 is read as the float 1.1. Writing that back as text
+    would give a rule id or a version the tool did not write, so where no other
+    repair is admitted the report is refused, as the model refuses it."""
+    number = json.loads(digits)
+    assert isinstance(number, float)
+    log = copy.deepcopy(_BASES["gitleaks"])
+    _result(log)["ruleId"] = number
+    sbom = copy.deepcopy(_SYFT)
+    _component(sbom)["version"] = number
+    sarif_record, cyclonedx_record = IngestRecord(), IngestRecord()
+
+    with pytest.raises(ValidationError):
+        ingest_sarif(log, sarif_record)
+    with pytest.raises(ValidationError):
+        ingest_cyclonedx(sbom, cyclonedx_record)
+
+    assert sarif_record.is_empty and cyclonedx_record.is_empty
+
+
+def test_a_round_whose_edit_fails_names_nothing_it_did_not_make(monkeypatch):
+    """A change is noted once the round's edits are made. An edit that raises ends
+    the read in a refusal, and the record does not name a change that was not made."""
+    doc = copy.deepcopy(_BASES["gitleaks"])
+    _region(doc, 0)["startLine"] = 0
+    record = IngestRecord()
+
+    def cannot_be_reached(doc, path):
+        raise KeyError(path)
+
+    monkeypatch.setattr(scanner_output_ingest, "_get", cannot_be_reached)
+
+    with pytest.raises(ValidationError):
+        ingest_sarif(doc, record)
+
+    assert record.is_empty
 
 
 # --------------------------------------------------------------------------- #
@@ -1322,6 +1556,49 @@ _CDX_REPAIRS = [
         ),
         _dropped("unknown_key", "components", 0, "components", 0, Key("foundBy")),
     ),
+    # A number with a fraction is never written as text (1.10 reads as 1.1): the
+    # field goes where it may, and the version of a component is refused below.
+    _cdx_case(
+        "purl that is a float",
+        lambda d: _component(d).update(purl=2.10),
+        _dropped("purl_unreadable", "components", 0, "purl"),
+    ),
+    # One bad entry of a list costs that entry, not the list.
+    _cdx_case(
+        "composition with an aggregate the spec does not define",
+        lambda d: d.update(
+            compositions=[{"aggregate": "everything"}, {"aggregate": "complete"}]
+        ),
+        _dropped("document_entry_unreadable", "compositions", 0),
+    ),
+    _cdx_case(
+        "service whose name is a list",
+        lambda d: d.update(services=[{"name": ["x"]}, {"name": "kept"}]),
+        _dropped("document_entry_unreadable", "services", 0),
+    ),
+    _cdx_case(
+        "document external reference of a type the spec does not define",
+        lambda d: d.update(
+            externalReferences=[
+                {"type": "homepage-x", "url": "https://a"},
+                {"type": "website", "url": "https://b"},
+            ]
+        ),
+        _dropped("document_entry_unreadable", "externalReferences", 0),
+    ),
+    _cdx_case(
+        "metadata author that is not an object",
+        lambda d: d["metadata"].update(authors=[5, {"name": "kept"}]),
+        _dropped("metadata_entry_unreadable", "metadata", "authors", 0),
+    ),
+    # The component the BOM describes follows the rules of a component.
+    _cdx_case(
+        "described component with a purl that is a list",
+        lambda d: d["metadata"].update(
+            component={"type": "library", "name": "n", "purl": ["a"]}
+        ),
+        _dropped("purl_unreadable", "metadata", "component", "purl"),
+    ),
 ]
 
 _CDX_REFUSED = [
@@ -1339,6 +1616,21 @@ _CDX_REFUSED = [
     ("bom format other than CycloneDX", lambda d: d.update(bomFormat="SPDX")),
     ("components that is not a list", lambda d: d.update(components={})),
     ("component version that is a list", lambda d: _component(d).update(version=["x"])),
+    ("component version that is a float", lambda d: _component(d).update(version=1.10)),
+    # A vulnerability is a finding: one bad entry refuses the SBOM, where dropping
+    # the list would read as an SBOM that holds none.
+    (
+        "vulnerability with a field of the wrong type",
+        lambda d: d.update(vulnerabilities=[{"id": ["x"]}, {"id": "CVE-2021-0001"}]),
+    ),
+    (
+        "described component with a type the spec does not define",
+        lambda d: d["metadata"].update(component={"type": "unknown-type", "name": "n"}),
+    ),
+    (
+        "described component with no name",
+        lambda d: d["metadata"].update(component={"type": "library"}),
+    ),
 ]
 
 
