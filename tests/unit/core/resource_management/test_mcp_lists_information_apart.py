@@ -8,9 +8,11 @@ states no finding (SARIF 3.27.9). The note ASH writes when nothing scanned a
 container image is one. At the ``ALL`` threshold the tools counted it as an
 actionable finding, in the findings list, in the total and in the INFO bucket.
 
-The findings list keeps its entry and names its kind in ``result_kind``;
-``findings_count``, the total, the buckets and the actionable view leave it out.
-``explain_finding`` names the kind of the finding it explains.
+The findings list is the actionable view's, so the note never reaches it, and each
+entry names its kind in ``result_kind``
+(tests/unit/cli/mcp/test_actionable_findings_reach_the_client.py drives it through
+the server). ``findings_count``, the total, the buckets and the actionable view leave
+the note out. ``explain_finding`` names the kind of the finding it explains.
 """
 
 from unittest.mock import patch
@@ -21,7 +23,6 @@ from automated_security_helper.cli.mcp_tools import mcp_explain_finding
 from automated_security_helper.core.resource_management.result_filters import (
     _counts_toward_exit_2,
     _stats_of_sarif,
-    add_findings_list,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -62,21 +63,6 @@ def _sarif(*results: dict) -> dict:
         "version": "2.1.0",
         "runs": [{"tool": {"driver": {"name": "ASH"}}, "results": list(results)}],
     }
-
-
-def test_the_findings_list_keeps_the_note_and_names_its_kind():
-    listed = add_findings_list({"raw_results": {"sarif": _sarif(_bandit(), _note())}})
-
-    assert [(f["rule_id"], f.get("result_kind")) for f in listed["findings"]] == [
-        ("B602", "fail"),
-        (NOTE, "informational"),
-    ]
-
-
-def test_the_findings_count_leaves_the_note_out():
-    listed = add_findings_list({"raw_results": {"sarif": _sarif(_bandit(), _note())}})
-
-    assert listed["findings_count"] == 1
 
 
 def test_a_result_that_states_no_finding_never_counts_toward_exit_2():
