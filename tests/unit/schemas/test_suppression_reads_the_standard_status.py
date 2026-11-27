@@ -94,6 +94,7 @@ def test_both_keys_with_the_same_value_keep_the_one():
         ("rejected", "accepted", "rejected"),
         ("underReview", "accepted", "underReview"),
         ("underReview", "rejected", "underReview"),
+        ("rejected", "underReview", "rejected"),
     ],
 )
 def test_both_keys_with_different_values_keep_the_one_that_is_not_accepted(
@@ -114,6 +115,19 @@ def test_a_status_next_to_an_empty_state_is_read():
     )
 
     assert _state_of(suppression) == "rejected"
+
+
+@pytest.mark.parametrize("state", ["accepted", "rejected", "underReview"])
+def test_a_null_status_never_replaces_a_state(state):
+    """``status: null`` says nothing, so the state it sits next to is kept and an
+    ``exclude_none`` dump still writes it."""
+    suppression = Suppression.model_validate(
+        {"kind": "inSource", "state": state, "status": None}
+    )
+
+    assert _state_of(suppression) == state
+    dumped = suppression.model_dump(mode="json", exclude_none=True)
+    assert dumped == {"kind": "inSource", "state": state}
 
 
 def test_any_other_key_is_still_refused():
@@ -169,6 +183,11 @@ def test_a_result_is_suppressed_only_when_the_standard_status_is_accepted(
         ({"kind": "inSource", "state": "accepted", "status": "rejected"}, False),
         ({"kind": "inSource", "state": "rejected", "status": "accepted"}, False),
         ({"kind": "inSource", "state": None, "status": "rejected"}, False),
+        ({"kind": "inSource", "state": "rejected", "status": None}, False),
+        ({"kind": "inSource", "state": "accepted", "status": None}, True),
+        ({"kind": "inSource", "state": "underReview", "status": None}, False),
+        ({"kind": "inSource", "state": "rejected", "status": "underReview"}, False),
+        ({"kind": "inSource", "state": "underReview", "status": "rejected"}, False),
     ],
 )
 def test_a_mapping_with_only_a_status_is_read_by_the_one_reading_of_suppressions(

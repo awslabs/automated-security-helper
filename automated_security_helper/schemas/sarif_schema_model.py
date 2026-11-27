@@ -1692,7 +1692,9 @@ class Suppression(RecordModel):
         """Read SARIF's ``status`` as this model's ``state`` (see the module header).
 
         The mapping the caller passed is not changed. Both keys given and
-        different: the one that is not ``accepted`` stays.
+        different: the one that is not ``accepted`` stays. A null ``status`` never
+        replaces a value, so ``{"state": "accepted", "status": null}`` stays
+        accepted.
         """
         if not isinstance(data, dict) or "status" not in data:
             return data
@@ -1701,7 +1703,11 @@ class Suppression(RecordModel):
         state = data.get("state")
         if state is None:
             data["state"] = status
-        elif state != status and str(getattr(state, "value", state)) == "accepted":
+        elif (
+            status is not None
+            and state != status
+            and str(getattr(state, "value", state)) == "accepted"
+        ):
             data["state"] = status
         return data
 
