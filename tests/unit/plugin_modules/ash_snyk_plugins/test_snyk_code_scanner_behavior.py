@@ -2281,7 +2281,9 @@ def test_snyk_starts_in_a_new_private_empty_directory_outside_the_scanned_tree(
     assert run["entries"] == []
     assert not run["is_link"]
     if os.name != "nt":
-        assert run["mode"] == 0o700, oct(run["mode"])
+        # A new directory takes a set-gid parent's set-gid bit; only the
+        # permission bits say who can reach it.
+        assert run["mode"] & 0o777 == 0o700, oct(run["mode"])
     existing = {
         source.resolve(): "the source directory",
         tested: "the directory snyk tests",
@@ -2316,6 +2318,90 @@ def test_each_snyk_run_starts_in_a_directory_of_its_own(
     assert first["cwd"].resolve() != second["cwd"].resolve()
     assert first["entries"] == []
     assert second["entries"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("target_type", ["source", "converted"])
+def test_a_second_run_of_the_same_target_does_not_start_in_the_first_runs_directory(
+    scanner, snyk_on_path, plugin_context, snyk_run_record, target_type
+):
+    """Not chosen by target and kept: a file put into the first run's directory,
+    as a committed snyk.yaml would be if that directory were in the scanned tree,
+    is not in the directory the second run of the same target starts in."""
+    source = plugin_context.source_dir
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+    target = source
+    if target_type == "converted":
+        target = plugin_context.work_dir
+        converted = target / "jupyter"
+        converted.mkdir(parents=True)
+        (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
+
+    scanner.scan(target=target, target_type=target_type)
+    (snyk_run_record[0]["cwd"] / "snyk.yaml").write_text(
+        "endpoint: https://example.invalid\n", encoding="utf-8"
+    )
+    scanner.scan(target=target, target_type=target_type)
+
+    first, second = snyk_run_record
+    assert second["cwd"].resolve() != first["cwd"].resolve()
+    assert second["entries"] == []
+
+
+@pytest.mark.unit
+def test_snyk_starts_outside_the_scanned_tree_when_the_output_directory_is_in_it(
+    tmp_path, snyk_on_path, snyk_run_record
+):
+    """The default layout puts the output directory, and with it the results and
+    work directories, at <source>/.ash/ash_output. The converted target, the work
+    directory, still reaches snyk there, and its run must not start in the tree."""
+    import os
+
+    source = tmp_path / "repo"
+    output = source / ".ash" / "ash_output"
+    work = output / "converted"
+    converted = work / "jupyter"
+    converted.mkdir(parents=True)
+    (converted / "nb-converted.py").write_text("x = 1\n", encoding="utf-8")
+    (source / "snyk.yaml").write_text(
+        "endpoint: https://example.invalid\n", encoding="utf-8"
+    )
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=work,
+        config=get_default_config(),
+    )
+    scanner = SnykCodeScanner(context=context, config=SnykCodeScannerConfig())
+
+    scanner.scan(target=work, target_type="converted")
+
+    (run,) = snyk_run_record
+    cwd = run["cwd"].resolve()
+    assert run["entries"] == []
+    if os.name != "nt":
+        assert run["mode"] & 0o777 == 0o700, oct(run["mode"])
+    assert cwd != source.resolve()
+    assert source.resolve() not in cwd.parents
+
+
+@pytest.mark.unit
+def test_the_directory_snyk_starts_in_is_removed_when_the_scanner_run_ends(
+    scanner, snyk_on_path, plugin_context, snyk_run_record
+):
+    """The scanner executor runs each scanner inside a tool_config_scope. The
+    directory snyk starts in is that scope's, and goes when the scope ends."""
+    from automated_security_helper.utils.tool_config_dir import tool_config_scope
+
+    source = plugin_context.source_dir
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    with tool_config_scope(plugin_context):
+        scanner.scan(target=source, target_type="source")
+        (run,) = snyk_run_record
+        assert run["cwd"].is_dir()
+
+    assert not run["cwd"].exists()
 
 
 @pytest.mark.unit
@@ -2382,3 +2468,41 @@ def test_relative_orchestrator_directories_reach_snyk_as_absolute_paths(
         == Path(scanner.results_dir, "converted", "results_sarif.sarif").resolve()
     )
     assert report is not None
+
+
+@pytest.mark.unit
+def test_the_copy_reaches_snyk_absolute_when_its_path_is_relative(
+    scanner, snyk_on_path, plugin_context, snyk_run_record, monkeypatch
+):
+    """On Python 3.11, tempfile.mkdtemp returns the path it joined, so with TMPDIR
+    set to "." the copy of the source target is a bare name, relative to the
+    working directory, which names something else from the directory snyk starts
+    in. The double reproduces that: the working directory is the temporary
+    directory, where the copy is made, and scan() gets the copy under its bare
+    name. A relative path from anywhere else need not exist: on Windows the
+    temporary directory and the test's own directory can be on different
+    drives."""
+    import tempfile
+
+    real_stage = SnykCodeScanner._stage_source
+    copies = []
+
+    def stage_by_name(self, *args, **kwargs):
+        staged = real_stage(self, *args, **kwargs)
+        if staged is None:
+            return None
+        copies.append(Path(staged).resolve())
+        return Path(Path(staged).name)
+
+    monkeypatch.chdir(tempfile.gettempdir())
+    monkeypatch.setattr(SnykCodeScanner, "_stage_source", stage_by_name)
+    source = plugin_context.source_dir
+    (source / "app.py").write_text("print('hello')\n", encoding="utf-8")
+
+    scanner.scan(target=source, target_type="source")
+
+    (run,) = snyk_run_record
+    (copy,) = copies
+    tested = next(arg for arg in run["command"][3:] if not arg.startswith("-"))
+    assert Path(tested).is_absolute(), run["command"]
+    assert Path(tested).resolve() == copy, (tested, copy)
