@@ -1,4 +1,4 @@
 automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md	ferret-scan --file sample.py --checks SECRETS --format sarif
 deploy/terraform/modules/codepipeline-executor/README.md	ash merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
 docs/content/contributing/documentation.md	ash --mode container --source-dir .
-docs/content/docs/plugins/alpha/index.md	ash scan --ash-plugin-modules my_plugin
+docs/content/docs/plugins/alpha/index.md	pip install <my-plugin-package-name>

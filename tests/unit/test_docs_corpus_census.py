@@ -61,9 +61,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNNABLE_PAGES_FLOOR = 41
 EXECUTED_BLOCKS_AT_MAIN = 151
 #: How many lines of the illustrative seed (docs/illustrative-seed/) sat on a page the
-#: runner runs at that commit. The seed also has a line for each .md.template copy of a
-#: page, 85 of its 599, which no runner runs: the rendered page does.
-SEED_LINES_ON_RUN_PAGES_AT_MAIN = 514
+#: runner runs at that commit, counted the way the seed counts now: 518 of its 628
+#: lines. The seed also has a line for each .md.template copy of a page, 91 of them,
+#: which no runner runs: the rendered page does. And it has 19 ``runner=none`` lines on
+#: pages that are run, which are no docs block either (CI_RUNNER_LINE below).
+SEED_LINES_ON_RUN_PAGES_AT_MAIN = 518
 #: Seed lines that left the seed by deleting their block (or turning it into something
 #: nothing runs) rather than by making it run. Each such commit raises this by the
 #: number of lines it removed and says in its message why the examples are not run.
@@ -71,8 +73,9 @@ SEED_LINES_RETIRED_NOT_RUN = 0
 #: Blocks the runner executes beyond what main had and the seed accounts for: a block
 #: added that runs. Each commit that adds one raises this by the number it adds, so the
 #: count of executed blocks equals its floor, and no slack from an earlier addition
-#: lets a block deleted instead of converted go unseen.
-EXECUTED_BLOCKS_ADDED_SINCE_MAIN = 0
+#: lets a block deleted instead of converted go unseen. It was 50 when the count was made
+#: exact: the runner then executed 201 blocks, against the 151 it ran at main.
+EXECUTED_BLOCKS_ADDED_SINCE_MAIN = 50
 SEED_DIR = REPO_ROOT / "docs" / "illustrative-seed"
 #: How a seed line of a pipeline kept from its CI runner (``runner=none``) begins, which
 #: the line is told apart by: restated here rather than imported, like the rest.

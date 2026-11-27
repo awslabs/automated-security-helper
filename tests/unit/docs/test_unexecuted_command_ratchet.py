@@ -947,7 +947,7 @@ def _listed() -> dict[str, str]:
 
 
 @pytest.mark.integration
-def test_the_committed_seed_equals_the_baseline_measured_in_the_corpus(corpus):
+def test_the_committed_seed_is_what_the_check_counts_in_the_corpus(corpus):
     dc = checks()
 
     measured = dc.unexecuted_seed_lines(dc.load_pages(corpus, REPO_ROOT), _listed())

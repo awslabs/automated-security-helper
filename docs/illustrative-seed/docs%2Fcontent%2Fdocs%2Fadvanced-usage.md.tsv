@@ -19,5 +19,7 @@ docs/content/docs/advanced-usage.md	runs a full scan that needs the tool of ever
 docs/content/docs/advanced-usage.md	a fragment of Python code that names objects defined elsewhere
 docs/content/docs/advanced-usage.md	runs a full scan that needs the tool of every enabled scanner
 docs/content/docs/advanced-usage.md	runs a full scan that needs the tool of every enabled scanner
+docs/content/docs/advanced-usage.md	runner=none: a workflow for the reader's own repository, which installs ASH from GitHub
+docs/content/docs/advanced-usage.md	runner=none: a pipeline for the reader's own project, which installs ASH from GitHub
 docs/content/docs/advanced-usage.md	runs a full scan that needs the tool of every enabled scanner
 docs/content/docs/advanced-usage.md	runs a full scan that needs the tool of every enabled scanner

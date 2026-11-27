@@ -16,3 +16,5 @@ docs/content/docs/plugins/alpha/snyk-plugin.md	needs the Snyk CLI and a Snyk acc
 docs/content/docs/plugins/alpha/snyk-plugin.md	needs the Snyk CLI and a Snyk account
 docs/content/docs/plugins/alpha/snyk-plugin.md	runs a scan that needs the Snyk CLI and a Snyk account
 docs/content/docs/plugins/alpha/snyk-plugin.md	runs a scan that needs the Snyk CLI and a Snyk account
+docs/content/docs/plugins/alpha/snyk-plugin.md	runner=none: a workflow for the reader's own repository, which needs a Snyk token
+docs/content/docs/plugins/alpha/snyk-plugin.md	runner=none: a pipeline for the reader's own project, which needs a Snyk token
