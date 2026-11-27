@@ -1035,3 +1035,288 @@ def test_run_command_sets_uv_no_config_unless_the_command_is_uv_tool(
         # The inherited environment, without UV_NO_CONFIG added.
         names = set() if env is None else set(env)
         assert "UV_NO_CONFIG" not in names, no_config_value
+
+
+# ---------------------------------------------------------------------------
+# Files uv is sent to by name: UV_ENV_FILE, UV_CONFIG_FILE and .python-version
+# ---------------------------------------------------------------------------
+#
+# ``uv tool run`` reads an env file (``--env-file``, ``UV_ENV_FILE``) and uv reads
+# ``UV_CONFIG_FILE`` even ahead of ``--no-config``; both are resolved against uv's
+# working directory when relative, and a scanner starts uv in the scanned tree.
+# ``uv tool run`` takes ``--no-env-file`` (uv-cli ``ToolRunArgs.no_env_file``).
+
+NO_ENV_FILE = "--no-env-file"
+
+
+class _Spawns:
+    """Every uv command the runner starts, with the cwd and environment it got."""
+
+    def __init__(self):
+        self.runs: List[dict] = []
+
+    def record(self, command, cwd=None, env=None):
+        self.runs.append({"command": list(command), "cwd": cwd, "env": env})
+
+    def tool_runs(self) -> List[dict]:
+        return [run for run in self.runs if run["command"][1:3] == ["tool", "run"]]
+
+
+def _effective(env):
+    """The environment a child gets: the process's when none was passed."""
+    return dict(os.environ) if env is None else dict(env)
+
+
+@pytest.fixture
+def spawns(monkeypatch):
+    recorder = _Spawns()
+
+    def spawn(args, *pargs, **kwargs):
+        recorder.record(args, kwargs.get("cwd"), kwargs.get("env"))
+        return subprocess.CompletedProcess(args, 0, "tool 1.0\n", "")
+
+    def output_handling(command, **kwargs):
+        recorder.record(command, kwargs.get("cwd"), kwargs.get("env"))
+        return {"returncode": 0, "stdout": "", "stderr": ""}
+
+    runner = UVToolRunner(uv_executable="/opt/uv")
+    monkeypatch.setattr(uv_tool_runner, "spawn_run", spawn)
+    monkeypatch.setattr(
+        subprocess_utils, "run_command_with_output_handling", output_handling
+    )
+    monkeypatch.setattr(UVToolRunner, "uv_availability", lambda self: (True, None))
+    monkeypatch.setattr(UVToolRunner, "is_uv_available", lambda self: True)
+    monkeypatch.setattr(uv_tool_runner, "find_uv_or_none", lambda: "/opt/uv")
+    monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", lambda: runner)
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
+    _reset_uv_tool_runner_caches()
+    yield recorder
+    _reset_uv_tool_runner_caches()
+
+
+@pytest.fixture
+def tree(tmp_path, monkeypatch):
+    """A scanned tree that names an env file, a uv config and an interpreter."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / ".env").write_text("PYTHONPATH=planted\n")
+    (src / "uv.toml").write_text("no-index = true\n")
+    (src / ".python-version").write_text("3.8\n")
+    monkeypatch.setenv("UV_ENV_FILE", ".env")
+    monkeypatch.setenv("UV_CONFIG_FILE", "uv.toml")
+    monkeypatch.delenv("UV_PYTHON", raising=False)
+    return src
+
+
+def _assert_guarded(runs: List[dict], src: Path, tool: str):
+    assert runs, "no uv tool run was recorded"
+    for run in runs:
+        argv = run["command"]
+        assert NO_ENV_FILE in argv[: argv.index(tool)], argv
+        value = _effective(run["env"]).get("UV_CONFIG_FILE")
+        if value is not None:
+            where = os.path.abspath(os.path.join(os.fspath(run["cwd"] or src), value))
+            assert not where.startswith(os.fspath(src) + os.sep), (value, where)
+        # The planted .python-version names 3.8; ASH's own request is what runs.
+        assert "3.8" not in argv, argv
+        if "--python" in argv:
+            assert argv[argv.index("--python") + 1] != "3.8", argv
+
+
+def _plugin_context(src: Path, tmp_path: Path):
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+
+    output = tmp_path / "output"
+    (output / "converted").mkdir(parents=True)
+    return PluginContext(
+        source_dir=src,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(project_name="test"),
+    )
+
+
+def _scanner_cases():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        bandit_scanner,
+        checkov_scanner,
+        semgrep_scanner,
+    )
+
+    return [
+        pytest.param(
+            bandit_scanner.BanditScanner,
+            bandit_scanner.BanditScannerConfig,
+            "bandit",
+            id="bandit",
+        ),
+        pytest.param(
+            checkov_scanner.CheckovScanner,
+            checkov_scanner.CheckovScannerConfig,
+            "checkov",
+            id="checkov",
+        ),
+        pytest.param(
+            semgrep_scanner.SemgrepScanner,
+            semgrep_scanner.SemgrepScannerConfig,
+            "semgrep",
+            id="semgrep",
+        ),
+    ]
+
+
+def _run_scanner(scanner_class, config_class, src: Path, tmp_path: Path):
+    scanner = scanner_class(
+        context=_plugin_context(src, tmp_path), config=config_class()
+    )
+    scanner.use_uv_tool = True
+    scanner._run_subprocess(
+        [scanner.command, "--version"],
+        results_dir=tmp_path / "results",
+        stdout_preference="return",
+        stderr_preference="return",
+        timeout=30,
+    )
+
+
+@pytest.mark.parametrize("scanner_class, config_class, tool", _scanner_cases())
+@pytest.mark.unit
+def test_a_scanners_uv_tool_run_reads_no_file_the_tree_names(
+    scanner_class, config_class, tool, tree, tmp_path, spawns
+):
+    _run_scanner(scanner_class, config_class, tree, tmp_path)
+    _assert_guarded([r for r in spawns.tool_runs() if tool in r["command"]], tree, tool)
+
+
+@pytest.mark.unit
+def test_a_uv_config_file_inside_the_tree_by_its_absolute_path_is_dropped(
+    tree, tmp_path, spawns, monkeypatch
+):
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    [(_, scanner_class, config_class, tool)] = [
+        (None, *case.values) for case in _scanner_cases()[:1]
+    ]
+    _run_scanner(scanner_class, config_class, tree, tmp_path)
+    runs = [r for r in spawns.tool_runs() if tool in r["command"]]
+    assert runs
+    for run in runs:
+        assert "UV_CONFIG_FILE" not in _effective(run["env"]), run["env"]
+
+
+@pytest.mark.unit
+def test_an_absolute_uv_config_file_outside_the_tree_is_kept(
+    tree, tmp_path, spawns, monkeypatch
+):
+    """Control: the operator's own file is still read."""
+    outside = tmp_path / "operator" / "uv.toml"
+    outside.parent.mkdir()
+    outside.write_text("")
+    monkeypatch.setenv("UV_CONFIG_FILE", str(outside))
+    [(_, scanner_class, config_class, tool)] = [
+        (None, *case.values) for case in _scanner_cases()[:1]
+    ]
+    _run_scanner(scanner_class, config_class, tree, tmp_path)
+    runs = [r for r in spawns.tool_runs() if tool in r["command"]]
+    assert runs
+    for run in runs:
+        assert _effective(run["env"]).get("UV_CONFIG_FILE") == str(outside)
+
+
+@needs_uv
+@pytest.mark.integration
+def test_the_real_uv_loads_no_env_file_the_tree_names(isolated_uv, monkeypatch):
+    """uv 0.13's ``uv tool run`` loads UV_ENV_FILE; the runner's run does not.
+
+    The planted tool's console script writes ``$PLANTED_MARKER``, which the scanned
+    tree's ``.env`` sets. The control starts uv by hand with the same environment
+    and no ``--no-env-file``, and the marker appears; so the flag is accepted by
+    this uv and is what keeps the file out.
+    """
+    sub = _plant(isolated_uv, "user")
+    marker = isolated_uv / "from-the-tree-env"
+    (sub / ".env").write_text(f"PLANTED_MARKER={marker}\n")
+    monkeypatch.delenv("PLANTED_MARKER", raising=False)
+    monkeypatch.setenv("UV_ENV_FILE", ".env")
+    monkeypatch.chdir(sub)
+
+    control = subprocess.run(  # nosec B603
+        [UV, "tool", "run", "--offline", "--from", PLANTED, PLANTED],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=sub,
+    )
+    assert control.returncode == 0, control.stderr
+    assert marker.exists(), "the control did not load the planted env file"
+    marker.unlink()
+
+    UVToolRunner(uv_executable=UV).run_tool(
+        PLANTED, cwd=sub, results_dir=isolated_uv / "results"
+    )
+    assert not marker.exists(), "uv tool run loaded the tree's env file"
+
+
+@pytest.mark.unit
+def test_the_probes_carry_the_guard_too(tree, spawns):
+    runner = UVToolRunner(uv_executable="/opt/uv")
+    runner.get_tool_version("bandit")
+    runner.get_tool_version("bandit", "bandit>=1")
+    uv_tool_runner.get_uv_tool_command("bandit")
+    runs = spawns.tool_runs()
+    assert runs, spawns.runs
+    for run in runs:
+        argv = run["command"]
+        assert NO_ENV_FILE in argv[: argv.index("bandit")], argv
+        assert "UV_CONFIG_FILE" not in _effective(run["env"]), argv
+
+
+@pytest.mark.unit
+def test_the_guarddog_bootstrap_is_guarded_and_drops_the_working_directory(
+    tree, tmp_path, spawns
+):
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+        guarddog_scanner as guarddog_module,
+    )
+    from automated_security_helper.utils import python_child
+
+    scanner = guarddog_module.GuardDogScanner(
+        context=_plugin_context(tree, tmp_path),
+        config=guarddog_module.GuardDogScannerConfig(
+            enabled=True,
+            options=guarddog_module.GuardDogScannerConfigOptions(max_hits=3),
+        ),
+    )
+    scanner.use_uv_tool = True
+    prefix, failure = scanner._prepare_hit_limit()
+    assert failure is None, failure
+    assert prefix[1:3] == ["tool", "run"], prefix
+    assert NO_ENV_FILE in prefix[: prefix.index("python")], prefix
+    # G5: nothing of the working directory is importable ahead of the bootstrap's
+    # own imports.
+    assert guarddog_module._HIT_LIMIT_BOOTSTRAP.startswith(
+        python_child.DROP_WORKING_DIRECTORY
+    )
+
+
+@pytest.mark.unit
+def test_the_nbconvert_uv_route_is_guarded(tree, tmp_path, spawns, monkeypatch):
+    from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
+        JupyterConverter,
+        JupyterConverterConfig,
+    )
+
+    converter = JupyterConverter(
+        context=_plugin_context(tree, tmp_path), config=JupyterConverterConfig()
+    )
+    monkeypatch.setattr(JupyterConverter, "_uv_from_spec", lambda self: "nbconvert>=7")
+    converter._execute_nbconvert_via_uv(
+        ["jupyter", "nbconvert", "--to", "script", "x.ipynb"], timeout=30
+    )
+    runs = spawns.tool_runs()
+    assert runs, spawns.runs
+    for run in runs:
+        argv = run["command"]
+        assert NO_ENV_FILE in argv, argv
+        assert argv.index(NO_ENV_FILE) < argv.index("--to"), argv
+        assert "UV_CONFIG_FILE" not in _effective(run["env"]), run["env"]
