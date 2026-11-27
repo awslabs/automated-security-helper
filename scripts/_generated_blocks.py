@@ -678,12 +678,12 @@ def _swap(temporary: Path, target: Path) -> None:
     """Replace ``target`` with ``temporary`` in one step; retry on Windows if refused.
 
     Windows refuses the swap with a PermissionError while any other process has
-    ``target`` open without sharing delete access: an editor, an indexer, a virus
-    scanner, or a program that is only reading the page. That is usually over in
-    moments, so there the swap is tried up to ``_REPLACE_ATTEMPTS`` times with a pause
-    between the tries, and the last refusal is raised naming ``target``, with the
-    refusal itself as its cause. Anywhere else, and for any error that is not a
-    PermissionError, the first failure is raised at once.
+    ``target``, or the new file just written beside it, open without sharing delete
+    access: an editor, an indexer, a virus scanner, or a program that is only reading
+    the page. That is usually over in moments, so there the swap is tried up to
+    ``_REPLACE_ATTEMPTS`` times with a pause between the tries, and the last refusal is
+    raised naming ``target``, with the refusal itself as its cause. Anywhere else, and
+    for any error that is not a PermissionError, the first failure is raised at once.
     """
     if sys.platform != "win32":
         os.replace(temporary, target)
