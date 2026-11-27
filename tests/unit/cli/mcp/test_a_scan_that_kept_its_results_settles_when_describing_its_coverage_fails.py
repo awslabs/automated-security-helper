@@ -250,6 +250,140 @@ class _ReasonsThatCannotBeRead:
         raise RuntimeError(f"a planted failure reading {name}")
 
 
+class _AnExitWhoseReasonsCannotBeRead(Exception):
+    """An exit whose ``incompleteness`` raises when it is read.
+
+    The error is not an ``AttributeError``: ``getattr`` with a default answers that
+    with the default, and the guard these cells pin is never reached.
+    """
+
+    @property
+    def incompleteness(self) -> Any:
+        raise RuntimeError("a planted failure reading the exit's reasons")
+
+
+class _TextThatCannotBeShown:
+    """An unevaluated rule whose text cannot be made: ``str()`` of it raises."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("a planted failure making the text")
+
+
+class _ARecordWhoseNameCannotBeRead:
+    """A stale content database record whose ``name`` raises when it is read."""
+
+    scanner = "trivy"
+
+    @property
+    def name(self) -> str:
+        raise RuntimeError("a planted failure reading the name")
+
+
+#: Exit reasons with one row that cannot be read between rows that can, each with the
+#: payload key the rows are reported under and what the fallback must name there. The
+#: row costs only itself: it is stored as ``unknown`` (an observed status that is not a
+#: pair is skipped, since it names no scanner), and every row around it reads as it
+#: does alone.
+_AN_UNREADABLE_ROW_AMONG_READABLE_ONES = {
+    "unreadable-converter": (
+        ras.ScanIncompleteness(
+            converters=(
+                ras.IncompleteConverter("archive", "crashed", ("zip",)),
+                ("not a converter",),
+                ras.IncompleteConverter("installer", "timed out", ()),
+            )
+        ),
+        "incomplete_converters",
+        [
+            {
+                "converter": "archive",
+                "reason": "crashed",
+                "failed_input_kinds": ["zip"],
+            },
+            {"converter": "unknown", "reason": "", "failed_input_kinds": []},
+            {"converter": "installer", "reason": "timed out", "failed_input_kinds": []},
+        ],
+    ),
+    "unreadable-could-not-stop-row": (
+        ras.ScanIncompleteness(
+            could_not_stop=(
+                ("grype", "grype could not be stopped"),
+                ("a", "three", "tuple"),
+                ("trivy", "trivy could not be stopped"),
+            )
+        ),
+        "could_not_stop",
+        [
+            {"scanner": "grype", "reason": "grype could not be stopped"},
+            {"scanner": "unknown", "reason": ""},
+            {"scanner": "trivy", "reason": "trivy could not be stopped"},
+        ],
+    ),
+    "unreadable-unevaluated-rule": (
+        ras.ScanIncompleteness(
+            unevaluated_rules=("CKV_AWS_20", _TextThatCannotBeShown(), "CKV_AWS_21")
+        ),
+        "unevaluated_rules",
+        ["CKV_AWS_20", "unknown", "CKV_AWS_21"],
+    ),
+    "unreadable-stale-database": (
+        ras.ScanIncompleteness(
+            stale_content_databases=(
+                _a_stale_database(),
+                _ARecordWhoseNameCannotBeRead(),
+            )
+        ),
+        "stale_content_databases",
+        [
+            {"name": "grype-db", "scanner": "grype"},
+            {"name": "unknown", "scanner": "trivy"},
+        ],
+    ),
+    "unreadable-observed-status": (
+        ras.ScanIncompleteness(
+            scanners=(("bandit", "ERROR"),),
+            observed=(("not a pair",), ("bandit", "ERROR")),
+        ),
+        "incomplete_scanners",
+        [
+            {
+                "scanner": "bandit",
+                "status": "ERROR",
+                "reason": incomplete_scanner_reason("ERROR"),
+                "detail": "ERROR",
+            }
+        ],
+    ),
+}
+
+#: What the planted close of an incomplete scan fails with.
+PLANTED_INCOMPLETE_CLOSE = "a planted failure of the incomplete close"
+
+
+def _refuse_every_incomplete_close(
+    monkeypatch: pytest.MonkeyPatch, closes: List[MCScanStatus]
+) -> None:
+    """Make every close of an entry as incomplete raise.
+
+    A stand-in for a close that fails because of what it carries. A close with any
+    other status reaches the real registry. Every close is recorded in ``closes`` by
+    its status.
+    """
+    real_finish = ScanRegistry.finish_scan
+
+    def a_close_that_fails_when_it_is_incomplete(
+        self: ScanRegistry, scan_id: str, status: MCScanStatus, *args: Any, **kw: Any
+    ) -> bool:
+        closes.append(status)
+        if status == MCScanStatus.INCOMPLETE:
+            raise RuntimeError(PLANTED_INCOMPLETE_CLOSE)
+        return real_finish(self, scan_id, status, *args, **kw)
+
+    monkeypatch.setattr(
+        ScanRegistry, "finish_scan", a_close_that_fails_when_it_is_incomplete
+    )
+
+
 @pytest.mark.asyncio
 async def test_an_exit_for_incomplete_coverage_whose_payload_cannot_be_built(
     tmp_path, monkeypatch
@@ -430,6 +564,36 @@ async def test_a_scan_that_was_not_settled_and_has_nothing_to_describe_is_closed
 
 
 @pytest.mark.asyncio
+async def test_an_incomplete_close_that_raises_for_a_scan_that_kept_no_results_fails_the_entry(
+    tmp_path, monkeypatch
+):
+    """The scan exits for incomplete coverage after its cancel event was set, so its
+    thread kept no results and recorded no close, and the runner's close of the entry
+    as incomplete raises. The failure arm finds no mark, so it closes the entry as
+    failed with the error, the previous results are put back, and the task ends
+    normally. Before, the error left the ``ScanIncompleteExit`` arm, which no sibling
+    arm catches, so it escaped the task with the entry still running."""
+    closes: List[MCScanStatus] = []
+    _refuse_every_incomplete_close(monkeypatch, closes)
+
+    def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
+        raise ras.ScanIncompleteExit(EXIT_REASONS, AshAggregatedResults())
+
+    entry, drops, restores = await _run(
+        tmp_path,
+        monkeypatch,
+        a_scan_that_exits_incomplete,
+        cancel_during_the_scan=True,
+    )
+
+    # The close as incomplete, which raised, then the close as failed.
+    assert closes == [MCScanStatus.INCOMPLETE, MCScanStatus.FAILED], closes
+    assert entry.status == MCScanStatus.FAILED, (entry.status, entry.error_message)
+    assert PLANTED_INCOMPLETE_CLOSE in (entry.error_message or ""), entry.error_message
+    assert drops == [] and len(restores) == 1, (drops, restores)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case", sorted(_ONE_REASON_AND_NO_SCANNER_ROW))
 async def test_an_exit_with_no_scanner_row_whose_payload_cannot_be_built_is_closed_incomplete(
     tmp_path, monkeypatch, case
@@ -494,6 +658,55 @@ def test_an_unreadable_scanner_row_is_stored_as_unknown_and_keeps_the_rows_aroun
     ), grype
 
 
+@pytest.mark.parametrize("case", sorted(_AN_UNREADABLE_ROW_AMONG_READABLE_ONES))
+def test_an_unreadable_row_in_each_other_list_keeps_the_rows_around_it(case):
+    """Each other list the fallback reads holds one row it cannot read between rows it
+    can: an incomplete converter that is not a row, a tool that could not be stopped
+    given as three words, an unevaluated rule whose text cannot be made, a stale
+    content database record whose name cannot be read, and an observed status that is
+    not a (scanner, status) pair. The row costs only itself: it is stored as
+    ``unknown`` (the status that is not a pair is skipped, and the scanner after it
+    still gets its status), and every row around it is kept, in order. Before, the
+    fallback read the scanner rows only, all inside one ``try``, so one row it could
+    not read dropped itself and every row after it."""
+    reasons, key, named = _AN_UNREADABLE_ROW_AMONG_READABLE_ONES[case]
+
+    gap = mcp_tools._gap_named_by_the_exit(
+        ras.ScanIncompleteExit(reasons, AshAggregatedResults())
+    )
+
+    assert gap[key] == named, gap
+    assert set(gap) == PAYLOAD_KEYS, gap
+    assert coverage_has_gap(gap), gap
+
+
+def test_a_reason_lookup_that_raises_costs_the_row_only_its_token(monkeypatch):
+    """The lookup of a scanner's reason token raises. The row is kept, as it was read,
+    with the token the lookup gives a status it does not know
+    (``unrecognized_status``), written out in the fallback: a lookup that fails must
+    not cost the row or make the fallback raise, which the close of a scan that kept
+    its results relies on never happening. The fallback imports the lookup where it
+    calls it, so the attribute patched here is the module's; this file's own name for
+    it is untouched."""
+    monkeypatch.setattr(
+        "automated_security_helper.utils.scan_completeness.incomplete_scanner_reason",
+        _a_planted_failure,
+    )
+
+    gap = mcp_tools._gap_named_by_the_exit(
+        ras.ScanIncompleteExit(EXIT_REASONS, AshAggregatedResults())
+    )
+
+    assert gap["incomplete_scanners"] == [
+        {
+            "scanner": "bandit",
+            "status": "ERROR",
+            "reason": "unrecognized_status",
+            "detail": "ERROR",
+        }
+    ], gap
+
+
 @pytest.mark.parametrize(
     "case",
     ["scanner-rows", "no-reasons-attribute", *sorted(_ONE_REASON_AND_NO_SCANNER_ROW)],
@@ -520,7 +733,13 @@ def test_the_fallback_gap_carries_every_key_of_the_payload(case):
 
 
 @pytest.mark.parametrize(
-    "case", ["no-reasons-attribute", "every-field-raises", "every-field-empty"]
+    "case",
+    [
+        "no-reasons-attribute",
+        "reasons-attribute-raises",
+        "every-field-raises",
+        "every-field-empty",
+    ],
 )
 def test_an_exit_that_names_nothing_readable_names_one_unknown_scanner(case):
     """Nothing the exit carries can be read, or none of it names a gap. The exit is
@@ -528,9 +747,12 @@ def test_an_exit_that_names_nothing_readable_names_one_unknown_scanner(case):
     fallback names one incomplete scanner ``unknown``, which the registry accepts, and
     every other list is empty. The row's reason is the token the lookup gives a status
     it does not know. It never raises, where before a reason object whose fields raise
-    made the read of ``no_scanner_ran`` raise out of it."""
+    made the read of ``no_scanner_ran`` raise out of it, and so did an exit whose
+    ``incompleteness`` raises when it is read."""
     if case == "no-reasons-attribute":
         ended: BaseException = SystemExit(1)
+    elif case == "reasons-attribute-raises":
+        ended = _AnExitWhoseReasonsCannotBeRead()
     elif case == "every-field-raises":
         ended = ras.ScanIncompleteExit(
             _ReasonsThatCannotBeRead(), AshAggregatedResults()
