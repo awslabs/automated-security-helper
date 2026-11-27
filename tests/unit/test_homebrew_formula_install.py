@@ -229,6 +229,53 @@ class TestTheFormulaInstallsTheLockedDependencies:
         assert match, "def install no longer lists the console scripts it links"
         assert set(match["names"].split()) == scripts
 
+    def test_a_wrapper_is_written_only_for_a_script_the_release_installed(self):
+        """The formula builds the tag it names, and that tag may predate a script.
+
+        Homebrew's `write_env_script` does not check that its target exists, so a
+        wrapper for a script the built release lacks installs without error and
+        then exits 127 when it is run. v3.8.0 lists `ash`, `ashv3` and
+        `automated-security-helper` in [project.scripts]; the name list follows
+        main, which has a fourth. Each wrapper write is therefore guarded by the
+        target's existence, and a release that adds a script gets its wrapper
+        with no formula edit.
+        """
+        install = _install_method()
+        loop = re.search(
+            r"%w\[[^\]]*\]\.each do \|(?P<var>\w+)\|\n(?P<body>.*?)\n    end\n",
+            install,
+            re.DOTALL,
+        )
+        assert loop, "def install no longer loops over the console scripts"
+        var, body = loop["var"], loop["body"]
+        guard = f'next unless (libexec/"bin"/{var}).exist?'
+        write = f'(bin/{var}).write_env_script libexec/"bin"/{var}, PATH: path'
+        assert guard in body, "the wrapper loop does not check the script exists"
+        assert write in body
+        assert body.index(guard) < body.index(write), "the guard follows the write"
+        assert install.count(".write_env_script ") == 1, (
+            "a wrapper is written outside the guarded loop"
+        )
+
+    def test_the_formula_test_runs_every_wrapper_that_exists(self):
+        """`brew test` ran only `ash`, so a broken second wrapper passed it."""
+        scripts = set(_pyproject()["project"]["scripts"])
+        match = re.search(
+            r"^  test do\n(?P<body>.*?)^  end\n", _formula(), re.DOTALL | re.MULTILINE
+        )
+        assert match, "Formula/ash.rb has no `test do ... end`"
+        loop = re.search(
+            r"%w\[(?P<names>[^\]]*)\]\.each do \|(?P<var>\w+)\|\n(?P<body>.*?)\n    end\n",
+            match["body"],
+            re.DOTALL,
+        )
+        assert loop, "the formula test does not loop over the console scripts"
+        var = loop["var"]
+        assert set(loop["names"].split()) == scripts
+        assert f"next unless (bin/{var}).exist?" in loop["body"]
+        assert f'shell_output("#{{bin/{var}}} --version")' in loop["body"]
+        assert '"automated-security-helper"' in loop["body"]
+
 
 @pytest.mark.unit
 class TestTheCiLegScansWithTheDefaultSelection:
