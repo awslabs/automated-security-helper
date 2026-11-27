@@ -54,6 +54,7 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 import pytest
 
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
+from automated_security_helper.core.enums import SandboxMode
 from tests.unit.test_base_image_override_reaches_every_build_entrypoint import (
     _REQUIRES_BASH,
 )
@@ -496,8 +497,10 @@ class TestTheBashEntrypoint:
         resolved = resolve_config(source_dir=repository, config_overrides=overrides)
         without_the_flag = resolve_config(source_dir=repository, config_overrides=[])
 
-        assert str(resolved.sandbox.mode) == "off", overrides
-        assert str(without_the_flag.sandbox.mode) == "landlock"
+        # The member's value, the spelling the mode is written and dumped with:
+        # str() of a SandboxMode reads SandboxMode.off, so it is not compared.
+        assert SandboxMode(resolved.sandbox.mode).value == "off", overrides
+        assert SandboxMode(without_the_flag.sandbox.mode).value == "landlock"
 
     def test_a_double_dash_after_the_command_leaves_the_sandbox_off(self, tmp_path):
         """--sandbox off goes right after the command, ahead of the caller's words.
