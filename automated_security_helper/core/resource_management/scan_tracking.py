@@ -1390,18 +1390,25 @@ def _add_aggregated_scanner_progress(
     containers, not the entries in them, so an entry that is not an object is
     rejected here with its scanner named.
     """
-    from automated_security_helper.utils.sarif_utils import is_result_suppressed
+    from automated_security_helper.utils.sarif_utils import (
+        is_not_a_finding,
+        is_result_suppressed,
+    )
 
     # The scanner and the bucket of each finding of the SARIF. A result with a
     # suppression in effect is graded ``suppressed``, as the completed view
     # grades it (_completed_findings_summary): it is in that bucket and not in
-    # its severity or in the count.
+    # its severity or in the count. A result whose kind states no finding (pass,
+    # notApplicable, informational) is in neither: the counts a scan records
+    # leave it out, and this tally is read in their place when the document
+    # records none for the scanner.
     finding_scanners: List[str] = []
     finding_buckets: List[str] = []
     for run, result in _sarif_run_results(results.get("sarif")):
-        severity = (
-            "suppressed" if is_result_suppressed(result) else result_severity(result)
-        )
+        suppressed = is_result_suppressed(result)
+        if is_not_a_finding(result) and not suppressed:
+            continue
+        severity = "suppressed" if suppressed else result_severity(result)
         # The scanner the result names, as every other reader of the aggregated
         # SARIF attributes it (sarif_utils). The run's tool is the fallback
         # only: ASH writes one run for all its scanners, so the driver name
