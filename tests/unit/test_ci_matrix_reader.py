@@ -185,7 +185,12 @@ class TestExpansion:
 
     @pytest.mark.parametrize(
         "event, legs",
-        [("push", 2), ("merge_group", 2), ("workflow_dispatch", 2), ("pull_request", 1)],
+        [
+            ("push", 2),
+            ("merge_group", 2),
+            ("workflow_dispatch", 2),
+            ("pull_request", 1),
+        ],
     )
     def test_an_overlay_drops_a_cell_only_on_a_pull_request(self, event, legs):
         job = _job({"os": ["a", "b"], "exclude": [{"os": _overlay("a")}]})
@@ -370,7 +375,9 @@ class TestExpansion:
         with pytest.raises(ci.UnsupportedMatrix, match="not a mapping"):
             ci.cells({"strategy": {"matrix": ["a"]}})
 
-    def test_matrix_values_name_what_the_matrix_names_whether_or_not_a_leg_runs_it(self):
+    def test_matrix_values_name_what_the_matrix_names_whether_or_not_a_leg_runs_it(
+        self,
+    ):
         job = _job(
             {
                 "os": ["a", "b"],
@@ -386,12 +393,8 @@ class TestExpansion:
 
 #: The conditions the validator steps of install-validation carry, in their two spellings:
 #: wrapped in ${{ }} with a status function, and bare.
-UVX_ONLY_ON_3_12 = (
-    "${{ !cancelled() && matrix.method == 'bundle' && matrix.python-version == '3.12' }}"
-)
-ANY_CONTAINER_RUNTIME = (
-    "matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'"
-)
+UVX_ONLY_ON_3_12 = "${{ !cancelled() && matrix.method == 'bundle' && matrix.python-version == '3.12' }}"
+ANY_CONTAINER_RUNTIME = "matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'"
 
 #: Condition shapes the evaluator refuses, with the name it must refuse them by.
 REFUSED = [
@@ -497,7 +500,9 @@ class TestTheConditionEvaluator:
             ),
         ],
     )
-    def test_the_shapes_it_reads_evaluate_over_the_cell(self, expression, cell, expected):
+    def test_the_shapes_it_reads_evaluate_over_the_cell(
+        self, expression, cell, expected
+    ):
         assert ci.evaluate_condition(expression, cell) is expected
 
     @pytest.mark.parametrize(
@@ -752,7 +757,12 @@ class TestRunnerLabels:
         seen: set[str] = set()
         for path in paths:
             seen |= ci.check_runner_labels(ci.load_workflow(path))
-        assert {"ubuntu-latest", "ubuntu-24.04-arm", "macos-15", "windows-latest"} <= seen
+        assert {
+            "ubuntu-latest",
+            "ubuntu-24.04-arm",
+            "macos-15",
+            "windows-latest",
+        } <= seen
 
 
 VALIDATOR = "./.github/actions/validate-"
@@ -760,9 +770,7 @@ VALIDATOR = "./.github/actions/validate-"
 
 def _validator_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        step
-        for step in job["steps"]
-        if str(step.get("uses", "")).startswith(VALIDATOR)
+        step for step in job["steps"] if str(step.get("uses", "")).startswith(VALIDATOR)
     ]
 
 
@@ -776,7 +784,9 @@ class TestTheRealWorkflows:
             "workflow_dispatch": False,
         }
 
-    @pytest.mark.parametrize("name", ["ash-install-methods.yml", "ash-docs-ci-runners.yml"])
+    @pytest.mark.parametrize(
+        "name", ["ash-install-methods.yml", "ash-docs-ci-runners.yml"]
+    )
     def test_a_path_filtered_workflow_runs_on_a_filtered_pull_request_and_a_dispatch(
         self, name
     ):
@@ -792,23 +802,33 @@ class TestTheRealWorkflows:
         "name",
         ["ash-unified-ci.yml", "ash-install-methods.yml", "ash-docs-ci-runners.yml"],
     )
-    @pytest.mark.parametrize("event", ["push", "pull_request", "merge_group", "workflow_dispatch"])
-    def test_every_job_of_the_matrix_workflows_expands_on_every_event(self, name, event):
+    @pytest.mark.parametrize(
+        "event", ["push", "pull_request", "merge_group", "workflow_dispatch"]
+    )
+    def test_every_job_of_the_matrix_workflows_expands_on_every_event(
+        self, name, event
+    ):
         jobs = ci.load_workflow(WORKFLOWS / name)["jobs"]
         legs = {job_id: len(ci.cells(job, event)) for job_id, job in jobs.items()}
         assert legs
         assert all(count >= 1 for count in legs.values()), legs
 
     def test_every_leg_of_install_methods_runs_exactly_one_validator_step(self):
-        job = ci.load_workflow(WORKFLOWS / "ash-install-methods.yml")["jobs"]["validate"]
+        job = ci.load_workflow(WORKFLOWS / "ash-install-methods.yml")["jobs"][
+            "validate"
+        ]
         legs = ci.cells(job, "workflow_dispatch")
         assert len(legs) >= 50, len(legs)
         for leg in legs:
-            running = [s.get("uses") for s in _validator_steps(job) if ci.step_runs(s, leg)]
+            running = [
+                s.get("uses") for s in _validator_steps(job) if ci.step_runs(s, leg)
+            ]
             assert len(running) == 1, (leg, running)
 
     def test_the_bundle_leg_runs_uvx_on_python_3_12_only(self):
-        job = ci.load_workflow(WORKFLOWS / "ash-unified-ci.yml")["jobs"]["install-validation"]
+        job = ci.load_workflow(WORKFLOWS / "ash-unified-ci.yml")["jobs"][
+            "install-validation"
+        ]
         legs = ci.cells(job, "push")
         bundle = [leg for leg in legs if leg["method"] == "bundle"]
         assert len(bundle) >= 10, len(bundle)
@@ -826,7 +846,9 @@ class TestTheRealWorkflows:
         others = [leg for leg in legs if leg["method"] != "bundle"]
         assert others
         for leg in others:
-            running = [s.get("uses") for s in _validator_steps(job) if ci.step_runs(s, leg)]
+            running = [
+                s.get("uses") for s in _validator_steps(job) if ci.step_runs(s, leg)
+            ]
             assert len(running) == 1, (leg, running)
 
 
