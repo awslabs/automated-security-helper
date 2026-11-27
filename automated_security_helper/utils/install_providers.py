@@ -680,6 +680,19 @@ class ReleaseDownloadProvider(InstallProvider):
                 f"{tool or request.subject} has no pinned release asset "
                 "(tool_downloads)",
             )
+        if request.kind not in (
+            CommandKind.PYTHON_TOOL,
+            CommandKind.PYTHON_ENV,
+            CommandKind.NATIVE_PACKAGE,
+            CommandKind.OPAQUE,
+        ):
+            # Only an install, in a shape the classifier recognizes (a Python tool or
+            # environment install, or a system package), is rebuilt as the tool's
+            # pinned download. Any other command of the tool is the plugin's own,
+            # such as cfn-guard's rules bundle or opengrep's refusal of a version it
+            # cannot verify, and runs as declared: rebuilt from the tool's name it was
+            # one more download of the binary, and the command it stood for never ran.
+            return self._identity(request)
         pairs = [tuple(p) for p in supported_platforms(tool)]
         if (context.platform_name, context.arch) not in pairs:
             return Refusal(

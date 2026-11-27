@@ -438,6 +438,10 @@
   written. They still warn about an absolute path under the scan root, one that names
   something in it, one with a `.` or `..` component, and `/`, and the warning now says
   the path matches nothing in the scan root.
+- `ash dependencies install --providers release-download` runs a plugin's own install
+  commands as declared instead of downloading the tool's pinned binary in their place:
+  cfn-guard's rules bundle is installed, and an opengrep version that ASH cannot verify
+  fails the install instead of being replaced by the pinned one.
 
 ## v3.8.0 (2026-11-12)
 
