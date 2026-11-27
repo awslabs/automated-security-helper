@@ -212,19 +212,19 @@ def _set_by_override(
     scan reads. The key is not stripped either: the override is applied to the
     key exactly as written.
 
-    Under ``scanners``, an override whose section segment is a retired
+    Under ``scanners``, the overrides whose section segment is a retired
     scanner's name the alias table resolves to *section_key*
-    (``_is_retired_name_of``) counts only where it writes the option. The
-    resolver does not read the table, so the apply writes the section under
-    the name as typed, in a configuration that holds no section under it
-    (the loader folds each file's sections as it reads them), and writes
-    every segment below it as typed too. The model's alias fold then lays
-    that section over the serving scanner's key by key and keeps only the
-    options the scanner declares, under their declared names
-    (``ash_config.fold_scanner_name_aliases``). So such an override counts
-    only when it writes the option under its declared name, at the end of
-    its key path or in its value (``_retired_section_override_writes``).
-    Counting every one of them skipped the confinement for an override that
+    (``_is_retired_name_of``) count only where, applied in their order, they
+    leave the option where the scan reads it (``_retired_overrides_write``).
+    The resolver does not read the table, so the apply writes such a section
+    under the name as typed, in a configuration that holds no section under
+    it (the loader folds each file's sections as it reads them), and the
+    model's alias fold lays it over the serving scanner's key by key,
+    keeping only the options the scanner declares
+    (``ash_config.fold_scanner_name_aliases``). An override of the retired
+    section or of its options is therefore not an override of the serving
+    section, and the overrides under the name build that section together.
+    Counting every one of them skipped the confinement for overrides that
     wrote nothing the scan reads, such as the option spelled with dashes,
     which the fold drops.
     """
@@ -247,14 +247,9 @@ def _set_by_override(
             == target[index]
         )
 
+    retired: List[str] = []
     for override in config_overrides or []:
-        written, _, value = override.partition("=")
-        appended = written.endswith("+")
-        parts = written.removesuffix("+").split(".")
-        if not parts or len(parts) > len(target):
-            continue
-        if all(lands_on(index, part) for index, part in enumerate(parts)):
-            return True
+        parts = override.partition("=")[0].removesuffix("+").split(".")
         if (
             kind == "scanners"
             and len(parts) >= 2
@@ -265,43 +260,64 @@ def _set_by_override(
                 ),
                 section_key,
             )
-            and _retired_section_override_writes(parts[2:], value, option, appended)
         ):
+            retired.append(override)
+            continue
+        if not parts or len(parts) > len(target):
+            continue
+        if all(lands_on(index, part) for index, part in enumerate(parts)):
+            return True
+    return _retired_overrides_write(retired, section_key, option, environment_values)
+
+
+def _retired_overrides_write(
+    overrides: Sequence[str],
+    section_key: str,
+    option: str,
+    environment_values: Sequence[str],
+) -> bool:
+    """Whether *overrides*, the overrides whose section segment is a retired
+    scanner name the alias table resolves to *section_key*, leave *option*
+    where the scan reads it once applied in their order (_set_by_override).
+
+    The configuration they apply to holds no section under a retired name
+    (the loader folds each file's sections as it reads them), so they write
+    onto mappings only they make, each over what the ones before it made. A
+    later override lands on a key an earlier one made (a ``-``/``_`` twin),
+    an append onto a mapping an earlier one made sets it instead of starting
+    a list, and an override of the section or of its options replaces what
+    was there. The model's alias fold then lays each such section over the
+    serving scanner's key by key and keeps only the options the scanner
+    declares (``ash_config.fold_scanner_name_aliases``). So the overrides
+    are applied here as the apply applies them
+    (``resolve_config._apply_config_override``) to a ``scanners`` mapping
+    that holds nothing else, the result is folded as the model folds it, and
+    *option* counts as written where the section the fold lays over the
+    serving scanner's holds it. Judged one at a time, an override that a
+    later one replaced or respelled was counted, and an append that an
+    earlier one turned into a set was not.
+    """
+    if not overrides:
+        return False
+    from automated_security_helper.config.ash_config import (
+        fold_scanner_name_aliases,
+    )
+    from automated_security_helper.config.resolve_config import (
+        _apply_config_override,
+    )
+
+    scratch: Dict[str, Any] = {"scanners": {}}
+    for override in overrides:
+        written, _, value = override.partition("=")
+        _apply_config_override(scratch, written, value, environment_values)
+    folded = fold_scanner_name_aliases(scratch["scanners"], log=False)
+    for key, section in folded.items():
+        if not (isinstance(key, str) and _spells_scanner_section(key, section_key)):
+            continue
+        options = section.get("options") if isinstance(section, dict) else None
+        if isinstance(options, dict) and option in options:
             return True
     return False
-
-
-def _retired_section_override_writes(
-    rest: Sequence[str], value: str, option: str, appended: bool
-) -> bool:
-    """Whether an override of a retired scanner name's section, whose key path
-    continues with *rest* below that name and whose value is *value*, writes
-    *option* where the scan reads it (_set_by_override).
-
-    The apply creates the section under the name and writes each segment of
-    *rest* as typed: the configuration holds nothing under the name to
-    respell a segment against. The alias fold reads the section's ``options``
-    mapping by that key and keeps an option only under a name the serving
-    scanner declares. So the override writes *option* only when *rest* is
-    ``options`` then *option*, or when *value*, parsed as the apply parses it
-    (``resolve_config._parse_config_value``), holds *option* under
-    ``options`` at the depth *rest* leaves. An append (``+=``) above the
-    option starts a list there, which the fold does not lay.
-    """
-    from automated_security_helper.config.resolve_config import _parse_config_value
-
-    if len(rest) >= 2:
-        return list(rest) == ["options", option]
-    if appended:
-        return False
-    parsed = _parse_config_value(value)
-    if not rest:
-        held = parsed.get("options") if isinstance(parsed, dict) else None
-    elif rest[0] == "options":
-        held = parsed
-    else:
-        return False
-    return isinstance(held, dict) and option in held
 
 
 #: An operator-only option confinement gave the trusted base's value (or left

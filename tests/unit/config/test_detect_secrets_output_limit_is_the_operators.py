@@ -248,8 +248,10 @@ def test_an_override_under_a_retired_name_that_writes_no_limit_leaves_it_confine
     repository's .ash.yaml writes 2048, that value is ignored with the one
     warning and the scan keeps the default, 256. Where only the trusted file
     writes 64, its bound holds and nothing is ignored. Counting every such
-    override as one that set the limit kept the repository's 2048 with no
-    warning, and dropped the trusted file's 64 for the default."""
+    override as one that set the limit left the repository's 2048 out
+    without the warning, so the scan read the default, 256, unwarned (the
+    warning is what the repository's cells pin), and dropped the trusted
+    file's 64 for the default."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
@@ -304,6 +306,85 @@ def test_an_override_under_a_retired_name_whose_value_holds_the_limit_sets_it(
 
     assert _limit(config) == 512
     assert not _about_the_limit(messages), messages
+
+
+#: Overrides under the retired name, each list as the operator passes it, with
+#: the limit the scan reads beside the trusted file's 64. In the first three,
+#: the apply runs the entries in order on one dictionary: a later entry lands
+#: on the dashed twin an earlier one made, which the fold drops; a later
+#: section value replaces the section an earlier entry's limit was in; and an
+#: append onto the mapping an earlier entry made sets it instead of starting a
+#: list. The last two write nothing the scan reads: an append onto nothing
+#: starts a list, which the fold does not lay, and a value that is not JSON is
+#: written as text, which the fold does not lay either.
+_RETIRED_OVERRIDE_SEQUENCES = [
+    pytest.param(
+        [
+            f"scanners.{_RETIRED_NAME}.options.max-worker-output-mib=1",
+            f"scanners.{_RETIRED_NAME}.options.max_worker_output_mib=1024",
+        ],
+        64,
+        id="respelled-onto-the-dashed-twin",
+    ),
+    pytest.param(
+        [
+            f"scanners.{_RETIRED_NAME}.options.max_worker_output_mib=1024",
+            f'scanners.{_RETIRED_NAME}={{"enabled": true}}',
+        ],
+        64,
+        id="replaced-by-a-later-section",
+    ),
+    pytest.param(
+        [
+            f"scanners.{_RETIRED_NAME}.enabled=true",
+            f'scanners.{_RETIRED_NAME}+={{"options": {{"max_worker_output_mib": 512}}}}',
+        ],
+        512,
+        id="appended-onto-a-mapping",
+    ),
+    pytest.param(
+        [f'scanners.{_RETIRED_NAME}+={{"options": {{"max_worker_output_mib": 512}}}}'],
+        64,
+        id="appended-onto-nothing",
+    ),
+    pytest.param(
+        [f"scanners.{_RETIRED_NAME}={{options: {{max_worker_output_mib: 512}}}}"],
+        64,
+        id="not-json",
+    ),
+]
+
+
+@pytest.mark.parametrize("overrides, expected", _RETIRED_OVERRIDE_SEQUENCES)
+def test_overrides_under_a_retired_name_are_judged_as_the_apply_builds_them(
+    tmp_path, monkeypatch, plant_scanner_alias, overrides, expected
+):
+    """--config-overrides entries under a retired scanner name the alias
+    table resolves to detect-secrets, over a silent repository and a trusted
+    file that writes 64. The apply runs the entries in order on one
+    dictionary, so a later entry lands on the keys an earlier one made or
+    replaces them, and the gate judges them the same way
+    (operator_only_options._retired_overrides_write): the limit is the
+    operator's only where the entries leave it under its declared name, and
+    otherwise the trusted file's 64 binds. Judged one entry at a time, the
+    first two lists counted an entry whose limit the scan never reads and
+    dropped the 64 for the default, 256, and the append onto a mapping was
+    not counted, so the 64 replaced the operator's 512."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    checkout = _checkout(tmp_path, "project_name: p\n")
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(_setting(64), encoding="utf-8")
+
+    config = resolve_config(
+        source_dir=checkout,
+        trusted_config_path=operator,
+        config_overrides=overrides,
+    )
+
+    assert _limit(config) == expected
 
 
 def test_the_same_setting_in_a_file_outside_the_tree_is_kept(tmp_path):
