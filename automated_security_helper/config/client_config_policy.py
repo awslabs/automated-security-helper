@@ -361,6 +361,115 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/converters/archive/options/max_total_bytes",
             "/converters/archive/options/max_compression_ratio",
         ),
+        # The list v3.8.0 shipped. Do not edit it: a profile ``ash config init``
+        # wrote at v3.8.0 holds exactly this, and it counts as the default only
+        # while this entry is unchanged (tests/unit/config/
+        # test_a_released_default_denied_paths_list_stays_a_shipped_default.py
+        # pins it from a literal outside this table).
+        (
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/content_db_staleness_overrides",
+            "/honor_ignore_files",
+            "/content_db_staleness_offline_image_default",
+            "/sandbox",
+            "/sandbox/**",
+            "/ash_plugin_modules",
+            "/ash_plugin_modules/**",
+            "/scanners/detect-secrets/options/scan_settings/filters_used",
+            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+            "/scanners/detect-secrets/options/baseline_file",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/global_settings/mcp",
+            "/global_settings/mcp/**",
+            "/scanners/opengrep/options/exclude_rule",
+            "/scanners/semgrep/options/exclude_rule",
+            "/scanners/bandit/options/confidence_level",
+            "/scanners/checkov/options/frameworks",
+            "/scanners/checkov/options/skip_frameworks",
+            "/scanners/opengrep/options/config",
+            "/scanners/opengrep/options/patterns",
+            "/scanners/opengrep/options/severity",
+            "/scanners/semgrep/options/config",
+            "/scanners/semgrep/options/severity",
+            "/scanners/detect-secrets/options/scan_settings",
+            "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+            "/scanners/ferret-scan/options/checks",
+            "/scanners/ferret-scan/options/confidence_levels",
+            "/scanners/ferret-scan/options/disable_ip_types",
+            "/scanners/ferret-scan/options/enable_preprocessors",
+            "/scanners/ferret-scan/options/finding_limit",
+            "/scanners/ferret-scan/options/profile",
+            "/scanners/ferret-scan/options/recursive",
+            "/scanners/ferret-scan/options/respect_gitignore",
+            "/scanners/ferret-scan/options/use_default_config",
+            "/scanners/ferret-scan/options/validator_budget",
+            "/scanners/trivy-repo/options/license_full",
+            "/scanners/trivy-repo/options/scanners",
+            "/scanners/*/options/offline",
+            "/scanners/ferret-scan/options/max_live_bytes",
+            "/scanners/bandit/options/config_file",
+            "/scanners/checkov/options/config_file",
+            "/scanners/ferret-scan/options/config_file",
+            "/scanners/grype/options/config_file",
+            "/scanners/syft/options/config_file",
+            "/scanners/trivy-repo/options/secret_config_file",
+            "/scanners/snyk-code/options/honor_tree_exclusions",
+            "/scanners/*/options/tool_version",
+            "/converters/jupyter/options/tool_version",
+            "/scanners/opengrep/options/version",
+            "/scanners/opengrep/options/sha256",
+            "/scanners/opengrep/options/metrics",
+            "/scanners/semgrep/options/metrics",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**",
+            "/reporters/aws-security-hub/**",
+            "/reporters/bedrock-summary-reporter/options/model_id",
+            "/reporters/bedrock-summary-reporter/options/output_file",
+            "/reporters/bedrock-summary-reporter/options/output_executive_file",
+            "/reporters/bedrock-summary-reporter/options/output_technical_file",
+            "/reporters/s3/**",
+            "/reporters/bedrock-summary-reporter/**",
+            "/reporters/gitlab-sast/options/exclude_suppressed",
+            "/scanners/detect-secrets/**",
+            "/scanners/npm-audit/**",
+            "/scanners/opengrep/**",
+            "/scanners/semgrep/**",
+            "/scanners/snyk-code/**",
+            "/scanners/trivy-repo/**",
+            "/scanners/trivy/**",
+            "/scanners/zizmor/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio",
+            "/scanners/cfn-guard/options/rule_sets",
+            "/scanners/cfn-lint/options/ignore_checks",
+            "/scanners/cfn-lint/options/regions",
+            "/scanners/gitleaks/options/baseline_path",
+            "/scanners/trivy/options/scanners",
+            "/scanners/trivy/options/ignore_unfixed",
+            "/scanners/gitleaks/options/max_target_megabytes",
+            "/scanners/trivy-repo/options/config_file",
+            "/scanners/trivy-repo/options/module_dir",
+            "/scanners/trivy/options/config_file",
+            "/scanners/trivy/options/secret_config_file",
+            "/scanners/actionlint/options/config_file",
+            "/scanners/actionlint/options/shellcheck",
+            "/scanners/actionlint/options/pyflakes",
+            "/scanners/cfn-guard/options/rules_paths",
+            "/scanners/cfn-lint/options/config_file",
+            "/scanners/gitleaks/options/config_file",
+            "/scanners/zizmor/options/config_file",
+            "/scanners/zizmor/options/online_audits",
+            "/scanners/cfn-lint/options/honor_inline_ignores",
+            "/scanners/gitleaks/options/honor_inline_ignores",
+            "/scanners/zizmor/options/honor_inline_ignores",
+        ),
         (
             "/fail_on_findings",
             "/fail_on_incomplete_scanners",
@@ -481,8 +590,9 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 # The default after `/global_settings/exclusions` joined it
 # (issue #894; an exclusion drops findings outright, so a runtime patch must
 # not install one). Derived rather than written out because it differs from
-# the shipped v3.8.0 list by that one entry; the next default change after a
-# release that ships this one appends its own list the same way.
+# the last written-out entry above (the default after the post-v3.8.0 additions;
+# the v3.8.0 list is the entry before that) by that one entry; the next default
+# change after a release that ships this one appends its own list the same way.
 SHIPPED_DEFAULT_DENIED_PATHS = SHIPPED_DEFAULT_DENIED_PATHS + (
     SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/global_settings/exclusions"},
 )
@@ -813,6 +923,7 @@ def client_file_denials(
     all_delivered: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
     moved_exclusions: bool = False,
+    filled: Optional[Mapping[Path, Sequence[Any]]] = None,
 ) -> List[Tuple[Path, List[Any]]]:
     """(file, denials) for each client-delivered file in ``documents`` that sets a denied field.
 
@@ -834,6 +945,17 @@ def client_file_denials(
     (``client_scanner_exclusions.moved_exclusion_pointers``,
     ``runtime_patch.config_document_denials``). A caller whose files are not
     resolved that way leaves it off and refuses them as written.
+
+    A session's client-patched profile copy holds each value its profile read
+    from the environment as the reference text, and a scan's load fills the
+    operator's value in for it before the model is built. ``filled`` is what that
+    load recorded for each document (``ResolvedConfigDocument.filled_references``,
+    from ``resolve_config``): the documents are the filled ones, and a leaf that
+    holds such a value is the operator's own, not one the client chose. A copy
+    with nothing recorded (the documents a check reads before the scan, the
+    validator and the workspace resolver) is filled here the same way, from the
+    references ``rules.base`` read, and judged as filled, so every judge of a
+    copy applies one rule (``_filled_copy``).
 
     Raises:
         ASHConfigPolicyUnreadableError: A file is delivered and ``rules`` are
@@ -867,29 +989,72 @@ def client_file_denials(
             # The placeholder policy and empty base of unreadable rules would
             # judge this file against defaults the server does not hold.
             _refuse_unreadable(rules, delivered=True)
+        patched = session_config_was_patched(path)
+        # The document as the scan's load made it, with the references it read
+        # the operator's values for: those are the leaves the operator wrote.
+        own, judged = (
+            _filled_copy(path, document, rules.base, filled)
+            if patched
+            else ((), document)
+        )
         denials = [
             denial
             for denial in config_document_denials(
-                document,
+                judged,
                 allowlist=rules.policy,
                 config=rules.base,
                 exempt=exempt,
-                moved=moved_exclusion_pointers(document) if moved_exclusions else (),
+                moved=moved_exclusion_pointers(judged) if moved_exclusions else (),
                 inert=INERT_PATHS,
-                repeats_trusted=session_config_was_patched(path),
+                repeats_trusted=patched,
+                own_references=own,
+                document_path=path,
             )
-            if not _writes_plugin_default(document, denial, rules.base)
-            and not _writes_a_tightening(document, denial)
+            if not _writes_plugin_default(judged, denial, rules.base)
+            and not _writes_a_tightening(judged, denial)
         ]
         # Always: the restrict-only check only adds refusals, and an operator's
         # own list may deny one sandbox key (replace_default_denied_paths) and
         # leave the others to this check.
         denials.extend(
-            _widenings(_with_own_patch(document, rules.base), rules.base, root)
+            _widenings(_with_own_patch(judged, rules.base), rules.base, root)
         )
         if denials:
             found.append((_as_reached(path, names), denials))
     return found
+
+
+def _filled_copy(
+    path: Path,
+    document: Any,
+    base: AshConfig,
+    filled: Optional[Mapping[Path, Sequence[Any]]],
+) -> Tuple[Sequence[Any], Any]:
+    """(the references that are ``document``'s own, ``document`` as it is judged),
+    for ``document``, the copy of a profile a client patched, read from ``path``.
+
+    A load that filled the copy from the operator's profile recorded what it read
+    (``filled``, by the document's path), and the documents it hands on are the
+    filled ones, so those references are the copy's own. A copy with no record is
+    filled here from the references ``base`` (the trusted profile's config) read,
+    as the load fills it (``environment_record.fill_environment_references``):
+    where the copy holds exactly the reference text the profile wrote, at the
+    place it wrote it, it gets the operator's value, and nothing else is read.
+    Each reference that was read is stamped as ``path``'s own.
+    """
+    from automated_security_helper.config.environment_record import (
+        fill_environment_references,
+    )
+
+    recorded = None if filled is None else filled.get(path)
+    if recorded is not None:
+        return tuple(recorded), document
+    references = tuple(getattr(base, "_environment_references", None) or ())
+    if not references:
+        return (), document
+    placed: List[Any] = []
+    judged = fill_environment_references(document, references, placed=placed)
+    return tuple(reference.read_in(path) for reference in placed), judged
 
 
 def _as_reached(path: Path, names: Optional[Mapping[Path, Sequence[Path]]]) -> Path:
@@ -1293,6 +1458,7 @@ def apply_client_config_rules(
     all_delivered: bool = False,
     client_overrides: bool = False,
     names: Optional[Mapping[Path, Sequence[Path]]] = None,
+    filled: Optional[Mapping[Path, Sequence[Any]]] = None,
 ) -> AshConfig:
     """``config``, checked for denied fields its client-delivered files set.
 
@@ -1312,6 +1478,9 @@ def apply_client_config_rules(
     against the same allowlist (``cli/mcp/workspace._gate_client_overrides``).
     ``names`` gives the paths each file of ``documents`` was reached by
     (``ResolvedConfigDocument.names``): a file is delivered when any of them is.
+    ``filled`` gives, for each file of ``documents`` the load filled from the
+    operator's profile, the references it read
+    (``ResolvedConfigDocument.filled_references``; see ``client_file_denials``).
     """
     from automated_security_helper.config.client_scanner_exclusions import (
         strip_client_scanner_exclusions,
@@ -1352,6 +1521,7 @@ def apply_client_config_rules(
         all_delivered=all_delivered,
         names=names,
         moved_exclusions=True,
+        filled=filled,
     )
     if found and DENIED_FIELD_HANDLING == "refuse":
         from automated_security_helper.core.exceptions import (

@@ -55,6 +55,7 @@ with every built-in scanner installed:
 | `ash-scan-set-files-list.txt` | the scan set step | The files ASH selected, one absolute path per line. Scanners that walk the source directory themselves can read more; see [Coverage](coverage.md#what-decides-the-files). |
 | `analysis/` | `ash scan --inspect` | The SARIF field analysis. Empty otherwise. |
 | `converted/` | the converters | `archive/` holds a directory per `.zip`, `.tar`, or `.gz` file with the members ASH extracted; `jupyter/` holds each notebook converted to a script, named after the notebook's path and ending in `-converted.py` for a Python notebook (see [Converted files](coverage.md#converted-files)). Empty when there was nothing to convert. |
+| `history/` | the scan engine, `ash results merge` | One compact record per recorded run, named `<report ID>.json`, written while `global_settings.history.enabled` is on. The first record creates the directory, and each new record prunes it to the newest `global_settings.history.keep_runs`. No scan clears it, so it stays, with its records, after the setting is turned off. Read by `ash results trend --history`; see [Track findings over time](../how-to/track-findings-over-time.md). Not shown in the layout above. |
 | `reports/` | the reporters | One file per enabled reporter, named `ash.<extension>`. See [below](#reports). |
 | `scanners/<name>/<target>/` | each scanner | `ASH.ScanResults.json` and the tool's own output for one target: `source` for the source directory, `converted` for `converted/`. See [below](#per-scanner-results). |
 
@@ -72,7 +73,7 @@ are in each project's `reports/`. See
 Before a scan writes anything, ASH removes and recreates `analysis/`, `reports/`,
 `scanners/`, and `converted/`, and deletes `ash_aggregated_results.json`,
 `ash-ignore-report.txt`, and `ash-scan-set-files-list.txt`. `ash.log` is truncated
-when the logger opens it.
+when the logger opens it. None of this touches `history/`.
 
 So a scan that fails leaves only what it wrote before it failed: gate CI on ASH's exit
 code, not on whether `reports/` exists. Container mode and Nix mode delete the same
@@ -133,7 +134,9 @@ these:
   `ash-ignore-report.txt`, `ash-scan-set-files-list.txt`, `ash.log`, and
   `ash.log.jsonl`;
 - in workspace mode, `projects` and `.workspace-spool` in the workspace's output
-  directory, and each project's `projects/<project>` directory.
+  directory, and each project's `projects/<project>` directory;
+- `history` in the output directory, and the record a run writes in it, which are checked
+  when the record is written rather than before the run starts (see below).
 
 It also refuses an output directory below the source directory whose real path, with
 every link resolved, is outside the source directory.
@@ -170,6 +173,14 @@ This applies to scans in every run mode, including `--use-existing` and workspac
 and to `ash merge`. `ash merge` prints the same text after `Refusing to write reports:`.
 `ash report` prints its report instead of writing it, and refuses a link only at a file
 the reporter writes beside it.
+
+The run history is checked when a record is written, not before the run starts, so a link
+there does not stop the run. With `global_settings.history.enabled` on, ASH writes no
+record through a link at `history` or at the record's own name, and pruning neither
+removes a link nor reaches through one. It logs a warning that starts `Could not record
+this scan in the history:` and names the link, and the scan or merge finishes and exits as
+it would have. `ash results trend --history` reads no records through a linked `history`,
+and refuses as it does for an empty one.
 
 ## `ash_aggregated_results.json` {#aggregated-results}
 
@@ -305,8 +316,11 @@ results, not as an access control. See
 SARIF 2.1.0 run, written two ways. The member writes every field of every result,
 defaults included, so its results show `"ruleIndex": -1`, and `"rule": null` unless the
 scanner gave one. `reports/ash.sarif` leaves out the fields ASH did not set, `ruleIndex`
-among them, and the empty ones, and adds each result's `rule` reference (below). After a
-scan of the sample project:
+among them, and the empty ones, and adds each result's `rule` reference (below). It also
+writes a result's cross-scanner correlation id, where the result has one, into the
+result's `properties` as `ash/correlationId`
+([Correlate one observation across scanners](../how-to/export-reports.md#correlation)),
+which the member does not hold. After a scan of the sample project:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
