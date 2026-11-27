@@ -19,18 +19,25 @@ group keeps it out of its commands. This module imports nothing heavy: ``ash sca
 --help`` prints the legacy command's help (the options tools read it for), and the
 engine's heavy trees stay deferred as they are for ``ash --version``
 (tests/unit/cli/test_version_startup_budget.py).
+
+``fs`` alone takes ``--archive FILE``, a zip of source code to scan in place of a
+directory. The option is declared on that subject and read by its callback, which
+extracts the archive and hands the engine the extracted directory as the one to scan,
+so the engine and the forms that share it know nothing of archives, and the module
+that reads the zip (``utils/source_archive``) is imported only when one is given.
 """
 
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 from typing import Annotated, Any, Callable, Iterable, Optional
 
 import typer
 from typer.core import TyperGroup
 
 from automated_security_helper.cli.json_input import CliJsonInputCommand
-from automated_security_helper.cli.scan import run_ash_scan_cli_command
+from automated_security_helper.cli.scan import _fail_state, run_ash_scan_cli_command
 from automated_security_helper.cli.scan_deprecation import (
     SCAN_FORM_META,
     SCAN_NOUN_META,
@@ -38,6 +45,7 @@ from automated_security_helper.cli.scan_deprecation import (
     SOURCE_DIR_LINE,
     warn_deprecated,
 )
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 #: The subject ``ash scan`` takes when none is named.
 DEFAULT_SUBJECT = "fs"
@@ -99,6 +107,34 @@ _FILE_HELP = (
     "The '.code-workspace' file whose folders are scanned as separate, "
     "independently-scoped projects. Pass 'auto' to use the single "
     "'*.code-workspace' file in the current directory."
+)
+
+_ARCHIVE_HELP = (
+    "A zip of source code to scan in place of a directory. ASH checks it against its "
+    "size, name and link rules, extracts it to a temporary directory that is removed "
+    "when the command ends, and scans that; results go to .ash/ash_output in the "
+    "working directory unless --output-dir names another. Cannot be combined with the "
+    "PATH argument, --source-dir, --source-git, an image option, --staged, "
+    "--use-existing or --changed-files-only."
+)
+
+#: Why ``--archive`` cannot be given with each of the options it excludes. A refusal
+#: reads "--archive cannot be combined with <option>: <reason>".
+_ARCHIVE_IS_THE_DIRECTORY = (
+    "the archive is the directory that is scanned. Use one or the other."
+)
+_ARCHIVE_IS_NO_CLONE = (
+    "the archive is the directory that is scanned, not a clone. Use one or the other."
+)
+_ONLY_FOR_A_CLONE = "it applies to a clone, and the archive is not one."
+_ONE_SUBJECT = "one scan has one subject. Scan the archive and the image as two runs."
+_NO_GIT_INDEX = "the staged scope is read from a git index, and an archive has none."
+_NO_GIT_DIFF = (
+    "the changed-files scope is read from a git diff, and an archive has none."
+)
+_SCANS_NOTHING = (
+    "--use-existing reports the results of an earlier run and scans nothing, so "
+    "there is no archive to read."
 )
 
 #: The refusal for a directory named twice, as the PATH argument and with --source-dir.
@@ -305,6 +341,23 @@ def _file_parameter() -> inspect.Parameter:
     )
 
 
+def _archive_parameter() -> inspect.Parameter:
+    return inspect.Parameter(
+        "archive",
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        default=None,
+        annotation=Annotated[
+            Optional[str],
+            typer.Option(
+                "--archive",
+                metavar="FILE",
+                help=_ARCHIVE_HELP,
+                rich_help_panel="Scan",
+            ),
+        ],
+    )
+
+
 def _signature(
     argument: inspect.Parameter, *, without: Iterable[str] = ()
 ) -> inspect.Signature:
@@ -317,7 +370,16 @@ def _signature(
 
 
 def _fs_signature() -> inspect.Signature:
-    return _signature(_path_parameter(), without=WORKSPACE_OPTIONS)
+    """The engine's signature without the workspace options, with the PATH argument
+    and ``--archive``, which only this subject takes, listed right after
+    ``--source-dir``."""
+    signature = _signature(_path_parameter(), without=WORKSPACE_OPTIONS)
+    parameters = list(signature.parameters.values())
+    after_source_dir = 1 + next(
+        index for index, p in enumerate(parameters) if p.name == "source_dir"
+    )
+    parameters.insert(after_source_dir, _archive_parameter())
+    return signature.replace(parameters=parameters)
 
 
 def _legacy_signature() -> inspect.Signature:
@@ -348,6 +410,71 @@ def _declared(
     return function
 
 
+def _refuse_what_an_archive_replaces(
+    ctx: Any, kwargs: dict[str, Any], path: str | None, *, directory_named: bool
+) -> None:
+    """Refuse ``--archive`` beside anything else that names or scopes the tree scanned.
+
+    The archive is extracted to be the directory that is scanned, so every other way to
+    name a directory, a clone or an image is refused, and so are the scopes that read a
+    git checkout or an earlier run's results, which an archive has none of. Each refusal
+    names both options and exits with the usage-error code, before anything is
+    extracted. ``ASH_SOURCE_DIR`` is ambient, so the archive replaces it, as the clone
+    of ``--source-git`` does; *directory_named* is whether ``--source-dir`` was given
+    on the command line or by a ``--cli-json-input`` document.
+    """
+    for other, given, reason in (
+        ("the PATH argument", path is not None, _ARCHIVE_IS_THE_DIRECTORY),
+        ("--source-dir", directory_named, _ARCHIVE_IS_THE_DIRECTORY),
+        ("--source-git", kwargs.get("source_git") is not None, _ARCHIVE_IS_NO_CLONE),
+        ("--git-ref", kwargs.get("git_ref") is not None, _ONLY_FOR_A_CLONE),
+        ("--git-depth", kwargs.get("git_depth") is not None, _ONLY_FOR_A_CLONE),
+        ("--image", bool(kwargs.get("image")), _ONE_SUBJECT),
+        ("--image-archive", kwargs.get("image_archive") is not None, _ONE_SUBJECT),
+        ("--image-layout", kwargs.get("image_layout") is not None, _ONE_SUBJECT),
+        ("--staged", bool(kwargs.get("staged")), _NO_GIT_INDEX),
+        ("--use-existing", bool(kwargs.get("use_existing")), _SCANS_NOTHING),
+        ("--changed-files-only", bool(kwargs.get("changed_files_only")), _NO_GIT_DIFF),
+    ):
+        if given:
+            ctx.fail(f"--archive cannot be combined with {other}: {reason}")
+
+
+def _extract_archive(ctx: Any, archive: str) -> str:
+    """Extract ``--archive`` into a temporary directory and return it as the directory
+    to scan.
+
+    ``utils/source_archive`` is imported here and nowhere else, so ``ash --version`` and
+    ``ash scan --help`` do not load it (tests/unit/cli/test_version_startup_budget.py).
+    It reads the zip under one set of limits and member rules, the ones the MCP
+    ``set_source_zip_finalize`` upload is held to. The temporary directory is removed
+    when the click context closes, which every ending of the command reaches, an exit
+    and an error included, and a refused archive too: the extraction can stop partway,
+    and the caller owns what it wrote. An archive the rules refuse is a usage error
+    that prints the rule's own message; a problem with the disk (no room, an
+    unreadable file system) exits 1, the answer for a run that produced no scan.
+    """
+    import shutil
+    import tempfile
+
+    from automated_security_helper.utils.source_archive import (
+        SourceArchiveRefused,
+        extract_source_archive,
+    )
+
+    try:
+        root = Path(tempfile.mkdtemp(prefix="ash-source-archive-"))
+    except OSError as error:
+        _fail_state(shown_on_one_line(f"--archive: {error}"))
+    ctx.call_on_close(lambda: shutil.rmtree(root, ignore_errors=True))
+    try:
+        return extract_source_archive(Path(archive), root).as_posix()
+    except SourceArchiveRefused as refusal:
+        ctx.fail(f"--archive: {refusal}")
+    except OSError as error:
+        _fail_state(shown_on_one_line(f"--archive: {error}"))
+
+
 def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
     """Scan a directory for code, infrastructure, secrets, and dependency findings.
 
@@ -361,6 +488,9 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
     """
     ctx = kwargs["ctx"]
     path = kwargs.pop("path", None)
+    # The engine has no `archive` parameter: this subject takes the option, and the
+    # engine is handed the directory the archive was extracted to.
+    archive = kwargs.pop("archive", None)
     routed_without_subject = ctx.meta.get(SCAN_FORM_META) == "scan"
     source_dir_source = getattr(ctx.get_parameter_source("source_dir"), "name", None)
     from_command_line = source_dir_source == "COMMANDLINE"
@@ -368,7 +498,16 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
     # default_map (cli/json_input.py), so a document that names the directory with
     # the deprecated option's key reads as DEFAULT_MAP.
     from_document = source_dir_source == "DEFAULT_MAP"
-    if path is not None:
+    if archive is not None:
+        _refuse_what_an_archive_replaces(
+            ctx, kwargs, path, directory_named=from_command_line or from_document
+        )
+        kwargs["source_dir"] = _extract_archive(ctx, archive)
+        if kwargs.get("output_dir") is None:
+            # The default is beside the source directory, which here is a temporary
+            # tree that is removed when the command ends, with the results in it.
+            kwargs["output_dir"] = Path.cwd().joinpath(".ash", "ash_output").as_posix()
+    elif path is not None:
         if kwargs.get("source_git") is not None:
             ctx.fail(
                 "--source-git cannot be combined with the PATH argument: the clone "

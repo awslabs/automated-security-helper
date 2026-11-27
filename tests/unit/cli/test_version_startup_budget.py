@@ -46,6 +46,9 @@ FORBIDDEN_AT_VERSION_TIME = (
     # workspace resolution (pulls the config model)
     "automated_security_helper.workspace",
     "automated_security_helper.models.workspace",
+    # the source-archive rules `ash scan fs --archive` extracts with: read when an
+    # archive is given, never to print the option
+    "automated_security_helper.utils.source_archive",
     # the lazily-registered subcommand modules themselves
     "automated_security_helper.cli.config",
     "automated_security_helper.cli.dependencies",
@@ -192,5 +195,29 @@ def test_scan_workspace_help_module_count_stays_bounded():
     report = _version_run_report(("scan", "workspace", "--help"))
     assert report["module_count"] <= MODULE_COUNT_CEILING, (
         f"`ash scan workspace --help` now loads {report['module_count']} modules "
+        f"(ceiling {MODULE_COUNT_CEILING})."
+    )
+
+
+def test_scan_fs_help_imports_no_forbidden_module():
+    """`ash scan fs --help` lists `--archive` without importing the archive rules.
+
+    The option is declared from the subject's signature; the module that reads the zip
+    is imported when an archive is given, so printing the option must not pay for it.
+    """
+    report = _version_run_report(("scan", "fs", "--help"))
+    assert report["exit_code"] == 0, report["output"]
+    assert "--archive" in report["output"]
+    assert report["present"] == [], (
+        "`ash scan fs --help` imported modules that must stay lazy: "
+        f"{report['present']}. Defer the import that pulled them (cli/scan_group.py "
+        "imports utils/source_archive inside the function that extracts an archive)."
+    )
+
+
+def test_scan_fs_help_module_count_stays_bounded():
+    report = _version_run_report(("scan", "fs", "--help"))
+    assert report["module_count"] <= MODULE_COUNT_CEILING, (
+        f"`ash scan fs --help` now loads {report['module_count']} modules "
         f"(ceiling {MODULE_COUNT_CEILING})."
     )
