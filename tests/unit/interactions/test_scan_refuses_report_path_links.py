@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan`` with a link already at a report path, run as a child process.
+"""A scan with a link already at a report path, run as a child process.
 
 A link at ``reports/ash.sarif`` that led out of the output directory used to make
 the SARIF reporter's write fail with the scan still exiting 0, and the link stayed,
@@ -11,7 +11,7 @@ nothing ASH wrote holds the target's content.
 
 Where the link reaches the report phase
 ---------------------------------------
-``--use-existing`` keeps the reports directory, as ``ash report`` and ``ash merge``
+``--use-existing`` keeps the reports directory, as ``ash results report`` and ``ash results merge``
 do, so a link there is still there when reports are written. A workspace run never
 clears its top-level ``reports/``. A fresh single-directory scan clears
 ``reports/`` while setting up its directories, link included, before any phase
@@ -139,7 +139,7 @@ def test_a_scan_of_existing_results_with_a_linked_sarif_report_exits_non_zero(tm
 
     completed = _ash_scan(
         tmp_path,
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
@@ -163,7 +163,7 @@ def test_a_scan_of_existing_results_replaces_a_regular_sarif_report(tmp_path):
 
     completed = _ash_scan(
         tmp_path,
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
@@ -185,7 +185,7 @@ def test_a_fresh_scan_clears_a_link_left_in_reports(tmp_path):
 
     completed = _ash_scan(
         tmp_path,
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
@@ -217,7 +217,7 @@ def test_a_workspace_scan_with_a_linked_report_is_refused_before_any_project(tmp
 
     completed = _ash_scan(
         tmp_path,
-        "--workspace",
+        "workspace",
         str(workspace_file),
         "--output-dir",
         str(output),
@@ -261,7 +261,7 @@ def test_a_reports_directory_that_is_a_link_refuses_the_scan(tmp_path, target, r
         _write_existing_results(output)
 
     completed = _ash_scan(
-        tmp_path, "--source-dir", str(source), "--output-dir", str(output), *extra
+        tmp_path, "fs", str(source), "--output-dir", str(output), *extra
     )
 
     console = _console(completed)

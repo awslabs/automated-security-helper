@@ -816,7 +816,7 @@ def test_the_inner_cli_reads_the_file_as_in_another_checkout_while_it_runs(
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--config",
             str(config),
@@ -854,7 +854,7 @@ def test_the_inner_cli_reads_the_hosts_ash_config_file_as_in_another_checkout(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--source-dir", str(source), ENV_FLAG, str(env), FLAG, str(env)],
+        ["scan", "fs", str(source), ENV_FLAG, str(env), FLAG, str(env)],
     )
 
     assert result.exit_code == 0, result.output
@@ -896,7 +896,7 @@ def test_the_mark_does_not_lift_the_limits_on_a_file_inside_the_scanned_director
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--config",
             str(config),
@@ -928,7 +928,7 @@ def test_a_file_mark_that_is_not_a_file_of_a_chain_is_refused_and_nothing_scans(
     config = _write(tmp_path / "ash.yaml")
     env = _write(tmp_path / "env.yaml", "project_name: env\n")
     other = _write(tmp_path / "other.yaml", "project_name: o\n")
-    args = ["scan", "--source-dir", str(tmp_path / "src")]
+    args = ["scan", "fs", str(tmp_path / "src")]
     if where == "not-in-the-chain":
         args += ["--config", str(config)]
     elif where == "not-in-the-ash-config-chain":
@@ -961,12 +961,12 @@ def test_the_mark_on_any_other_scan_is_a_usage_error(mode, monkeypatch, tmp_path
         app,
         [
             "scan",
+            "fs",
+            "src",
             "--mode",
             mode,
             "--no-build",
             "--no-progress",
-            "--source-dir",
-            "src",
             "--output-dir",
             "out",
             "--config",
@@ -1006,7 +1006,7 @@ def test_a_file_marked_both_ways_is_read_as_the_scanned_trees(monkeypatch, tmp_p
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--config",
             str(config),
@@ -1236,7 +1236,7 @@ def test_the_inner_cli_no_longer_takes_the_stopped_walk_option(monkeypatch, tmp_
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(tmp_path / "src"),
             "--config",
             str(config),

@@ -111,7 +111,7 @@ def _exit_code(
         (False, None, 0),
         (True, None, 2),
         # A pre-read that answered keeps its place: it read the same file,
-        # and the callers that pass one (ash merge, local mode) pass the
+        # and the callers that pass one (ash results merge, local mode) pass the
         # recorded value itself.
         (False, True, 2),
         (None, False, 0),

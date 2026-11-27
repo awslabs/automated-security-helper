@@ -34,7 +34,13 @@ pytestmark = pytest.mark.integration
 _CHECKOUT = Path(automated_security_helper.__file__).resolve().parents[1]
 
 #: The scan every test runs: one scanner that reads each file by its path.
-_SCAN = ["--scanners", "detect-secrets", "--python-only", "--no-progress", "--no-color"]
+_SCAN = [
+    "--add-scanners",
+    "detect-secrets",
+    "--python-only",
+    "--no-progress",
+    "--no-color",
+]
 
 #: What the child runs: ``ash`` as its console script does, after the tool probes are
 #: answered (tests/unit/interactions/test_an_output_dir_that_is_not_utf8_works.py).
@@ -113,10 +119,10 @@ def _scan(
         tmp_path,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
             *_SCAN,
@@ -250,15 +256,15 @@ def test_the_results_read_back_and_every_report_names_the_file(tmp_path):
     }
     assert uris == {_ODD_RECORDED}, uris
 
-    # A report over the stored results, as `ash scan --use-existing` makes it.
+    # A report over the stored results, as `ash scan fs --use-existing` makes it.
     again = _ash(
         tmp_path,
         [
             "scan",
+            "fs",
+            str(odd_source),
             "--mode",
             "local",
-            "--source-dir",
-            str(odd_source),
             "--output-dir",
             str(odd_out),
             "--use-existing",

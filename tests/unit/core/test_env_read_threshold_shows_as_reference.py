@@ -328,7 +328,7 @@ def _dumped_and_reloaded(config, tmp_path: Path):
     a drift in either side reddens this file; loaded back with
     ``model_validate_json`` under ``warning_of_dropped_keys``; then
     ``take_own_values`` over the reloaded config with the report path's
-    kwargs. Both reload paths run that call -- ``ash report``, and a scan over
+    kwargs. Both reload paths run that call -- ``ash results report``, and a scan over
     existing results, which is the one that renders the metrics table -- and
     its pending set is the fields the record cannot hold, so the external
     section's reloaded reference text survives it. Returns the reloaded model
@@ -494,7 +494,7 @@ def test_a_results_record_reloaded_by_a_scan_over_existing_results_shows_ref(
     variable and wrote its results record, and a later scan over those
     existing results loads the file back, runs ``take_own_values`` over the
     reloaded config, and hands the model to the execution engine, which
-    renders the metrics table (``ash report`` runs the same reload and the
+    renders the metrics table (``ash results report`` runs the same reload and the
     same ``take_own_values`` but never renders this table). The record holds
     the reference as the file wrote it (the ``!ENV `` tag included), the
     reloaded row has no provenance flag, the narrow cell reads ``REF (c)``,

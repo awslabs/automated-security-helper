@@ -9,7 +9,7 @@ Why this file exists
 ``options.severity_threshold`` is judged by it, every other scanner by the global
 one. The workspace verdict judged every finding of a project against the one
 project-wide threshold, so a project whose config tightened or relaxed one scanner
-got a different answer inside a workspace than ``ash --source-dir P`` gave it.
+got a different answer inside a workspace than ``ash scan fs P`` gave it.
 The per-scanner rollup in the unified file re-derived its counts the same way,
 and over every finding of the run, so it also counted policy-origin findings the
 project's own verdict excludes and exceeded the per-project totals it sums.
@@ -207,7 +207,7 @@ class TestTheCounterAndTheGateReadOneFinding:
 
 
 def test_a_scanner_with_its_own_looser_threshold_is_judged_by_it(tmp_path, monkeypatch):
-    """`ash --source-dir P` with bandit at CRITICAL exits 0 on a HIGH; so must P here."""
+    """`ash scan fs P` with bandit at CRITICAL exits 0 on a HIGH; so must P here."""
     monkeypatch.setattr(
         ScannerStatisticsCalculator,
         "get_scanner_threshold_details",
@@ -407,7 +407,7 @@ def test_without_a_ceiling_a_scanners_own_looser_option_stands_through_real_conf
     entry = outcome.payload.projects[0]
 
     # bandit's HIGH is below the CRITICAL its own option set, as it is in
-    # `ash --source-dir P` with the same config.
+    # `ash scan fs P` with the same config.
     assert entry.finding_count == 1
     assert entry.actionable_finding_count == 0
     assert outcome.exit_code == WorkspaceExitCode.SUCCESS

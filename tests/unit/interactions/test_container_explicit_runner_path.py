@@ -3,7 +3,7 @@
 
 """An explicit runner path is the runner that runs; a bare name resolves on PATH.
 
-``ash --mode container --oci-runner`` (and ``run_ash_container(oci_runner=...)``)
+``ash scan fs . --mode container --oci-runner`` (and ``run_ash_container(oci_runner=...)``)
 resolves the runner with ``find_executable``, which hands a value holding a
 directory to ``shutil.which`` as that path. Pinned here with two runners named
 ``docker``, one at the given path and one first on PATH, each recording its own

@@ -14,7 +14,7 @@ That shared name is a known limit, on POSIX only: Windows cannot hold either nam
 holds for the two files:
 
 - both are scanned and both files' findings are in the results, under a plain scan, in
-  a report ``ash report`` renders from the saved results, and under
+  a report ``ash results report`` renders from the saved results, and under
   ``--changed-files-only``;
 - the results name both with the one record name;
 - an ignore path or a suppression naming either file applies to both. Config names the
@@ -278,7 +278,7 @@ def test_a_mixed_decision_applies_to_both_files_in_the_rendered_report_too(
     tmp_path, case
 ):
     """An ignored pair is absent and a suppressed pair stays suppressed, in the
-    scan's results and in a report ``ash report`` renders again from the saved
+    scan's results and in a report ``ash results report`` renders again from the saved
     results."""
     ignore, suppress, state = MIXED_DECISIONS[case]
     source = names.make_tree(tmp_path / "src", _files())

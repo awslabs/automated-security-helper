@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A whole ``ash scan`` over a tree whose archives the extraction limits refuse.
+"""A whole ``ash scan fs`` over a tree whose archives the extraction limits refuse.
 
 The unit tests in ``tests/unit/converters/test_archive_converter_limits.py`` drive the
 converter alone, and ``tests/unit/config/test_archive_limits_are_operator_settings.py``
@@ -107,13 +107,13 @@ def scan(tmp_path_factory):
             "-c",
             module_from_this_checkout("automated_security_helper.cli.main"),
             "scan",
-            "--source-dir",
+            "fs",
             str(tree),
             "--output-dir",
             str(output),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--phases",
             "convert",

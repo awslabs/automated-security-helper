@@ -5,7 +5,7 @@
 
 It is the config of a project that declares none, and the trusted base the sandbox
 grants of every project's in-tree config come from, so a missing one is refused
-even when every project has its own config. ``ash scan --workspace`` passes
+even when every project has its own config. ``ash scan workspace`` passes
 ``--config`` to planning, so the refusal is exit 3 at planning, ``--dry-run``
 included.
 """
@@ -80,9 +80,9 @@ def test_dry_run_refuses_a_config_option_that_does_not_name_a_file(
         app,
         [
             "scan",
-            "--no-progress",
-            "--workspace",
+            "workspace",
             str(tmp_path / "team.code-workspace"),
+            "--no-progress",
             "--output-dir",
             str(tmp_path / "out"),
             "--config",

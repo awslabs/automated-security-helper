@@ -3,7 +3,7 @@
 
 """A ``--config`` named inside the scanned tree is mounted only if its real path is too.
 
-The scanned tree is the outermost checkout at or above ``--source-dir``. A config
+The scanned tree is the outermost checkout at or above the scan PATH. A config
 named inside it whose real path is outside it -- the file is a symbolic link, or a
 directory on the way to it is -- refuses the run with exit 3, before anything is
 built or run. A link that stays inside the tree is followed, and so is a link

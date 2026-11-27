@@ -11,7 +11,7 @@ and docs/content/docs/cli-reference.md ("Running a scan in a container") lists t
 - ``/ash-config/...``, ``--config`` and the files of its ``extends`` chain, read-only;
 - ``/ash-workspace-config/...``, the workspace policy, read-only.
 
-These tests build the command ``ash --mode container`` would run, for a plain
+These tests build the command ``ash scan fs . --mode container`` would run, for a plain
 tree, a config chain, a chain reached through links, a workspace, and paths with
 spaces and other unusual characters, and hold it to that list:
 
@@ -701,7 +701,7 @@ def commands(monkeypatch, tmp_path) -> List[List[str]]:
 def _scan(*args: str):
     from automated_security_helper.cli.main import app
 
-    return CliRunner().invoke(app, ["scan", "--no-progress", "--no-build", *args])
+    return CliRunner().invoke(app, ["scan", *args, "--no-progress", "--no-build"])
 
 
 class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
@@ -733,10 +733,10 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
         (root / "ash.yaml").symlink_to(target)
 
         result = _scan(
+            "fs",
+            str(root),
             "--mode",
             "container",
-            "--source-dir",
-            str(root),
             "--output-dir",
             str(workspace["out"]),
             "--config",
@@ -761,10 +761,10 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
         extra = [] if how == "discovered" else ["--workspace-config", str(link)]
 
         result = _scan(
+            "workspace",
+            str(root / "dev.code-workspace"),
             "--mode",
             "container",
-            "--workspace",
-            str(root / "dev.code-workspace"),
             "--output-dir",
             str(workspace["out"]),
             *extra,
@@ -815,10 +815,10 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
         (root / "ash-workspace.yaml").symlink_to(Path("policies") / "p.yaml")
 
         _scan(
+            "workspace",
+            str(root / "dev.code-workspace"),
             "--mode",
             "container",
-            "--workspace",
-            str(root / "dev.code-workspace"),
             "--output-dir",
             str(workspace["out"]),
         )
@@ -834,10 +834,10 @@ class TestALinkOutOfTheScannedTreeIsRefusedForEveryMountedConfig:
     ):
         """Control: an operator's policy outside the tree, named as itself."""
         _scan(
+            "workspace",
+            str(workspace["root"] / "dev.code-workspace"),
             "--mode",
             "container",
-            "--workspace",
-            str(workspace["root"] / "dev.code-workspace"),
             "--output-dir",
             str(workspace["out"]),
             "--workspace-config",

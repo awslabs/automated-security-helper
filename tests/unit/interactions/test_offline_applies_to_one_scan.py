@@ -46,9 +46,7 @@ def observed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list:
 
 
 def _scan(*args: str):
-    return CliRunner().invoke(
-        app, ["scan", "--source-dir", "src", "--output-dir", "out", *args]
-    )
+    return CliRunner().invoke(app, ["scan", "fs", "src", "--output-dir", "out", *args])
 
 
 def test_the_scan_after_an_offline_scan_is_online(observed):

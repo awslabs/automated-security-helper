@@ -1,9 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A whole ``ash scan`` does not start tools that live inside the tree it scans.
+"""A whole ``ash scan fs`` does not start tools that live inside the tree it scans.
 
-``uv run ash scan .`` puts the repository's ``.venv/bin`` first on PATH, and
+``uv run ash scan fs .`` puts the repository's ``.venv/bin`` first on PATH, and
 ``npm run`` does the same with ``node_modules/.bin``. A bandit or semgrep there is
 repository content. This runs the real command, in a child process, over a tree
 holding a stand-in ``.venv/bin/bandit`` and ``node_modules/.bin/semgrep``, each of
@@ -57,7 +57,7 @@ DRIVER = (
         """
         from automated_security_helper.cli.main import app
 
-        sys.argv = ["ash", "scan", *sys.argv[1:]]
+        sys.argv = ["ash", "scan", "fs", *sys.argv[1:]]
         app()
         """
     )
@@ -141,13 +141,16 @@ def scan(tree: Path, tools: dict, *extra: str, env_extra=None) -> str:
             "-I",
             "-c",
             importing_this_checkout(DRIVER),
-            "--source-dir",
             str(tree),
             "--output-dir",
             str(output),
             "--mode",
             "local",
-            *(() if "--scanners" in extra else ("--scanners", "bandit,semgrep")),
+            *(
+                ()
+                if "--add-scanners" in extra
+                else ("--add-scanners", "bandit,semgrep")
+            ),
             "--phases",
             "scan",
             "--no-progress",
@@ -248,7 +251,7 @@ def test_a_scanner_whose_only_tool_is_in_the_tree_is_missing_and_says_why(tmp_pa
     log = scan(
         tree,
         {"bandit": tool, "semgrep": tool},
-        "--scanners",
+        "--add-scanners",
         "cfn-nag",
         env_extra={"ASH_BIN_PATH": str(empty_bin), "PATH_SUFFIX_ONLY": "1"},
     )

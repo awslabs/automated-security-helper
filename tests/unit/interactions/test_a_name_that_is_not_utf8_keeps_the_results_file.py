@@ -12,7 +12,7 @@ ignore path or a suppression's reason in the recorded config) would stop the res
 file from being written, and with it every scanner's findings. Each one is written
 as its record form, the six characters ``\\udcNN`` (utils/undecodable_text.py).
 
-Each cell runs ``ash scan`` in a child process, as a user runs it, with every tool
+Each cell runs ``ash scan fs`` in a child process, as a user runs it, with every tool
 probe answered as on a host without the tool, and every program start refused and
 logged apart from ASH's own detect-secrets worker, so the child starts nothing else.
 """
@@ -143,7 +143,7 @@ def _tree(root: Path, files: Dict[bytes, bytes]) -> Path:
 def _scan(
     tmp_path: Path, source: Path, *extra: str, allow_program: str | None = None
 ) -> Tuple[int, str, Path, List[str]]:
-    """``ash scan`` of *source* in a child, which starts no program but ASH's
+    """``ash scan fs`` of *source* in a child, which starts no program but ASH's
     detect-secrets worker and *allow_program*, by name."""
     output = tmp_path / f"{source.name}-out"
     starts = tmp_path / f"{source.name}-starts.log"
@@ -171,13 +171,13 @@ def _scan(
             "-c",
             _DRIVER,
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--python-only",
             "--no-progress",

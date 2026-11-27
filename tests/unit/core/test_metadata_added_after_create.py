@@ -11,7 +11,7 @@ metadata it was handed by then, so a value added later needs its own way onto
 the results model, and has to be part of what a report over saved results
 applies again when it loads their model in place of the new one.
 
-A report over saved results (``ash scan --use-existing``) is not a scan of this
+A report over saved results (``ash scan fs --use-existing``) is not a scan of this
 run's directory, though, and does not know whether the saved set was filtered.
 So over a loaded set this run's ``scan_source`` is never applied, and its
 ``changed_files_only`` only when it is True (this run's report is narrowed to
@@ -105,7 +105,7 @@ def test_added_metadata_reaches_results_loaded_from_a_saved_set(tmp_path):
 @pytest.mark.parametrize(
     "saved_source, saved_marker",
     [
-        # ash merge over shards that recorded different directories, one of them
+        # ash results merge over shards that recorded different directories, one of them
         # filtered and one not saying.
         (None, None),
         # A full scan of services/api.
@@ -125,7 +125,7 @@ def test_added_metadata_reaches_results_loaded_from_a_saved_set(tmp_path):
 def test_a_report_over_saved_results_keeps_their_scan_markers(
     tmp_path, monkeypatch, saved_source, saved_marker
 ):
-    """``ash scan --use-existing`` from the repository root, without
+    """``ash scan fs --use-existing`` from the repository root, without
     --changed-files-only: this run records "." and False, and neither replaces
     what the saved set says, in what the run returns or in the results it
     writes. What the aws-security-hub reporter archives for each saved pair is

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What a whole ``ash scan`` reports when the archive converter refuses an archive.
+"""What a whole ``ash scan fs`` reports when the archive converter refuses an archive.
 
 ``test_scan_archive_extraction_limits.py`` checks what the scan extracted and
 recorded. This checks the verdict and the reports: an archive over an extraction
@@ -55,13 +55,13 @@ def _scan(base: Path, archives: dict[str, bytes]) -> tuple[int, str, Path]:
             "-c",
             module_from_this_checkout("automated_security_helper.cli.main"),
             "scan",
-            "--source-dir",
+            "fs",
             str(tree),
             "--output-dir",
             str(output),
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--phases",
             "convert",

@@ -14,7 +14,7 @@ carried it:
   path, so a file a reporter wrote itself beside its report stayed, and the
   reports directory with it.
 * ``record_reports_written`` at the end of each run replaced the previous run's
-  record, so the second ReportPhase ``ash merge`` runs (the off-host reporters)
+  record, so the second ReportPhase ``ash results merge`` runs (the off-host reporters)
   erased the record that ``ash.sarif`` had been written.
 """
 

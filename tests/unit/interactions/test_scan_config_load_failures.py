@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan`` and ``run_ash_scan`` exit 3 for a config file they cannot load.
+"""``ash scan fs`` and ``run_ash_scan`` exit 3 for a config file they cannot load.
 
 A named config file that does not exist, and a named or discovered file that cannot
 be read or parsed, refuse the scan with the config exit code (3) before any scanner
@@ -79,7 +79,7 @@ def _dangling_link(path: Path) -> Path:
     return path
 
 
-# Each case: how to lay out the tree, the extra ``ash scan`` arguments, and the
+# Each case: how to lay out the tree, the extra ``ash scan fs`` arguments, and the
 # environment. ``root`` holds ``src`` (the scanned tree) and files outside it.
 Setup = Callable[[Path], Tuple[List[str], Dict[str, str]]]
 
@@ -158,9 +158,9 @@ def _cli_scan(root: Path, setup: Setup) -> Tuple[int, str]:
         app,
         [
             "scan",
-            "--no-progress",
-            "--source-dir",
+            "fs",
             str(root / "src"),
+            "--no-progress",
             "--output-dir",
             str(root / "out"),
             *args,

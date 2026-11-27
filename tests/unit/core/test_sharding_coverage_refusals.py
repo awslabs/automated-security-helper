@@ -7,7 +7,7 @@ Why this file exists
 --------------------
 The missing-index refusal built ``set(range(shard_count))`` and listed every
 missing index. ``shard_count`` is read from a results file and has no upper
-bound, so a corrupt or hostile count made ``ash merge`` exhaust memory or print
+bound, so a corrupt or hostile count made ``ash results merge`` exhaust memory or print
 a refusal megabytes long instead of refusing promptly. The count is now exact and
 the listing bounded.
 

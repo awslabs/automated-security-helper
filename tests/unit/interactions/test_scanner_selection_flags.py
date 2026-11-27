@@ -420,7 +420,7 @@ class TestCliConflictsAndDeprecation:
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 "--output-dir",
                 str(source.parent / "out"),
@@ -1134,9 +1134,9 @@ class TestTheHiddenMarkerOnTheCommandLine:
             app,
             [
                 "scan",
-                "--no-progress",
-                "--source-dir",
+                "fs",
                 str(clean_cli_env),
+                "--no-progress",
                 "--output-dir",
                 str(tmp_path / "out"),
                 "--config",

@@ -115,7 +115,7 @@ def test_an_unknown_policy_key_is_refused():
 def test_a_policy_entry_with_an_unknown_key_is_a_policy_error(tmp_path, entry, key):
     """A typo in a policy suppression or ignore path refuses the policy file.
 
-    It is a WorkspaceDefinitionError, so ``ash scan`` exits 4 (a workspace
+    It is a WorkspaceDefinitionError, so ``ash scan workspace`` exits 4 (a workspace
     definition or policy error), not 3 as an unknown key in a project's own
     configuration does; the message names the file and the key.
     """
@@ -331,7 +331,7 @@ def test_a_double_star_suppression_reaches_every_project():
 def test_a_dot_slash_policy_path_is_refused_not_pushed_down_as_everything(field):
     """ "./" names nothing to the matcher. Pushed down as "**", it suppressed or
     ignored every finding in every project and the scan exited 0; it is refused
-    with a WorkspaceDefinitionError, so ``ash scan`` exits 4."""
+    with a WorkspaceDefinitionError, so ``ash scan workspace`` exits 4."""
     entry = (
         _suppression("./")
         if field == "suppressions"

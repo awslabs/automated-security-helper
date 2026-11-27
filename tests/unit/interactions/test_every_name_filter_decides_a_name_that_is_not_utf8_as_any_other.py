@@ -5,7 +5,7 @@
 
 A file whose name is not valid UTF-8 (latin-1 ``secr\\xe9t.py``) sits beside an
 ASCII-named control (``secret.py``) holding the same secret. Each cell points one name
-filter at both files and runs ``ash scan`` in a child, as a user runs it, then reads
+filter at both files and runs ``ash scan fs`` in a child, as a user runs it, then reads
 the results file: the file named so gets the decision the control gets. The filters:
 
 - an ignore path in the repository's own config, written with the byte itself (a

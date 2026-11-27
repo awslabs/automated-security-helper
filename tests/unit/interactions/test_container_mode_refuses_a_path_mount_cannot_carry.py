@@ -9,7 +9,7 @@ runtimes read that value as comma-separated fields (CSV): a comma starts a field
 its own, a double quote starts CSV quoting, and a line break ends the argument for a
 runner that reads it a line at a time. So a source or output directory whose path
 holds a comma, a double quote, a newline or a carriage return is refused before any
-runtime call, by ``ash scan --mode container`` and by ``run_ash_container`` called
+runtime call, by ``ash scan fs --mode container`` and by ``run_ash_container`` called
 directly, as ``./ash`` refuses it. The path is shown escaped, so the refusal holds
 no raw line break. A path holding a NUL byte, which only a caller of the API can
 pass, is refused the same way.

@@ -229,7 +229,7 @@ def test_the_completeness_gate_can_see_it(tmp_path, real_validation_manager):
     """The consequence, which is the point of the status choice.
 
     Asserted through ``incomplete_scanners`` rather than by re-reading the status,
-    because that function is what the exit code and ``ash merge`` both consult, and it
+    because that function is what the exit code and ``ash results merge`` both consult, and it
     reads through ``get_unified_scanner_metrics`` rather than off ``scanner_results``
     directly. A status that were correct in the model but invisible through that path
     would fix nothing.
@@ -323,8 +323,8 @@ def test_a_deselected_scanner_is_still_skipped_not_missing(tmp_path):
 
 
 def _rebuilt_and_reloaded(results):
-    """The final results as the engine rebuilds them, and as ``ash report`` and
-    ``ash merge`` read them back and rebuild again."""
+    """The final results as the engine rebuilds them, and as ``ash results report`` and
+    ``ash results merge`` read them back and rebuild again."""
     from automated_security_helper.core.unified_metrics import (
         populate_metrics_from_unified_source,
     )
@@ -353,7 +353,7 @@ def test_the_rebuilt_row_keeps_dependencies_satisfied(tmp_path):
 
     Read from the final ``scanner_results`` record, the per-target report the rebuild
     reads, and the flat row (ash.flat.json), after the rebuild and after a JSON round
-    trip and a second rebuild (what ``ash report`` and ``ash merge`` do). Two mutations
+    trip and a second rebuild (what ``ash results report`` and ``ash results merge`` do). Two mutations
     break it: dropping the ``dependencies_recorded_satisfied`` term from the rebuilt
     row's ``dependencies_missing``, and recording the report's
     ``dependencies_satisfied`` False. The first turns the row's pair into (MISSING,

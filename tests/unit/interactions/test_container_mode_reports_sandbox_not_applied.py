@@ -8,7 +8,7 @@ Why this file exists
 Container mode turns the sandbox off for the scan inside the container: it appends
 ``sandbox.mode=off`` to the overrides it hands over, because it never sandboxes the
 scanners inside the image and the container is the boundary there. It does not do
-that in silence, for ``ash scan --mode container --sandbox bwrap`` or for a config file
+that in silence, for ``ash scan fs --mode container --sandbox bwrap`` or for a config file
 with ``sandbox.mode`` set.
 
 An explicit ``--sandbox`` with a mode other than ``off`` is refused as a usage
@@ -108,14 +108,17 @@ def _scan(
     *args: str,
     env_extra: Optional[Dict[str, str]] = None,
     build: bool = False,
+    subject: str = "fs",
 ):
-    """Run ``ash scan --mode container`` with the stand-in; return output and its call.
+    """Run ``ash scan fs --mode container`` with the stand-in; return output and its call.
 
     Without *build* the image is not built (``--no-build``) and the stand-in must be
     asked to run it. With *build*, the caller passes ``--no-run`` and the stand-in
     must be asked to build and nothing else.
     """
-    result, calls = _run_cli(tmp_path, bin_dir, *args, env_extra=env_extra, build=build)
+    result, calls = _run_cli(
+        tmp_path, bin_dir, *args, env_extra=env_extra, build=build, subject=subject
+    )
     output = result.stdout + result.stderr
     assert [call[0] for call in calls] == ["build" if build else "run"], (
         "the stand-in runner was not the one ASH ran:\n" + output
@@ -146,11 +149,13 @@ def _run_cli(
     env_extra: Optional[Dict[str, str]] = None,
     build: bool = False,
     root_args: Sequence[str] = (),
+    subject: str = "fs",
 ):
-    """``ash <root_args> scan --mode container ... <args>``.
+    """``ash <root_args> scan fs --mode container ... <args>``.
 
     *root_args* go to ``ash`` itself, ahead of ``scan``: an option given there that
-    scan takes reaches it as if written after it.
+    scan takes reaches it as if written after it. *subject* is ``fs``, or
+    ``workspace`` to scan a workspace file.
     """
     log = tmp_path / "runner-calls.jsonl"
     guard_log = tmp_path / "guard-calls"
@@ -187,6 +192,7 @@ def _run_cli(
             "automated_security_helper.cli.main",
             *root_args,
             "scan",
+            subject,
             "--mode",
             "container",
             *([] if build else ["--no-build"]),
@@ -261,9 +267,7 @@ class TestAnExplicitSandboxIsRefused:
     def test_refused_before_the_runner_is_called(
         self, tmp_path, stand_in, project, flag
     ):
-        returncode, output = _refused(
-            tmp_path, stand_in, "--source-dir", str(project), *flag
-        )
+        returncode, output = _refused(tmp_path, stand_in, str(project), *flag)
 
         assert returncode == 5, output
         assert REFUSAL in _one_line(output), output
@@ -274,15 +278,13 @@ class TestAnExplicitSandboxIsRefused:
         "flag", [["--sandbox", "bwrap"], ["--sandbox=landlock"]], ids=" ".join
     )
     def test_a_root_level_sandbox_before_scan(self, tmp_path, stand_in, project, flag):
-        """`ash --sandbox <mode> scan --mode container` is refused the same way.
+        """`ash --sandbox <mode> scan fs --mode container` is refused the same way.
 
         ash passes an option given before a subcommand on to it when the subcommand
         takes it, so the flag reaches scan as if written after it, and scan refuses
         it before anything is built or run.
         """
-        returncode, output = _refused(
-            tmp_path, stand_in, "--source-dir", str(project), root_args=flag
-        )
+        returncode, output = _refused(tmp_path, stand_in, str(project), root_args=flag)
 
         assert returncode == 5, output
         assert REFUSAL in _one_line(output), output
@@ -292,7 +294,6 @@ class TestAnExplicitSandboxIsRefused:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--sandbox",
             "bwrap",
@@ -308,7 +309,7 @@ class TestAnExplicitSandboxIsRefused:
         _unresolvable_on_the_host(project)
 
         returncode, output = _refused(
-            tmp_path, stand_in, "--source-dir", str(project), "--sandbox", "bwrap"
+            tmp_path, stand_in, str(project), "--sandbox", "bwrap"
         )
 
         assert returncode == 5, output
@@ -321,7 +322,7 @@ class TestTheDroppedSandboxIsReported:
             "project_name: sandboxed\nsandbox:\n  mode: auto\n", encoding="utf-8"
         )
 
-        output, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
+        output, run_args = _scan(tmp_path, stand_in, str(project))
 
         assert WARNING in _one_line(output), output
         assert "(auto," in _one_line(output)
@@ -336,7 +337,6 @@ class TestTheDroppedSandboxIsReported:
         output, run_args = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=firejail",
@@ -362,7 +362,6 @@ class TestTheDroppedSandboxIsReported:
         result, calls = _run_cli(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=bwrap",
@@ -387,7 +386,7 @@ class TestTheDroppedSandboxIsReported:
             encoding="utf-8",
         )
 
-        output, _ = _scan(tmp_path, stand_in, "--workspace", str(workspace))
+        output, _ = _scan(tmp_path, stand_in, str(workspace), subject="workspace")
 
         assert WARNING in _one_line(output), output
         assert "(landlock," in _one_line(output)
@@ -404,7 +403,6 @@ class TestTheDroppedSandboxIsReported:
         output, _ = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             'sandbox={"mode": "bwrap"}',
@@ -431,10 +429,10 @@ class TestTheDroppedSandboxIsReported:
         output, _ = _scan(
             tmp_path,
             stand_in,
-            "--workspace",
             str(workspace),
             "--config",
             str(operator),
+            subject="workspace",
         )
 
         assert WARNING in _one_line(output), output
@@ -455,7 +453,6 @@ class TestTheDroppedSandboxIsReported:
         output, _ = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config",
             str(in_tree),
@@ -484,7 +481,6 @@ class TestTheDroppedSandboxIsReported:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=bwrap",
@@ -503,7 +499,6 @@ class TestTheDroppedSandboxIsReported:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             'sandbox+={"mode": "bwrap"}',
@@ -531,7 +526,6 @@ class TestTheDroppedSandboxIsReported:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config",
             str(in_tree),
@@ -551,7 +545,6 @@ class TestTheDroppedSandboxIsReported:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "global_settings.severity_threshold=BOGUS",
@@ -581,7 +574,6 @@ class TestTheDroppedSandboxIsReported:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=bwrap",
@@ -610,7 +602,7 @@ class TestNothingToReport:
             f"project_name: repo\nextends: {outside.as_posix()}\n", encoding="utf-8"
         )
 
-        returncode, output = _refused(tmp_path, stand_in, "--source-dir", str(project))
+        returncode, output = _refused(tmp_path, stand_in, str(project))
 
         assert returncode == 3, output
         assert WARNING not in _one_line(output), output
@@ -623,7 +615,7 @@ class TestNothingToReport:
         _unresolvable_on_the_host(project)
 
         returncode, output = _refused(
-            tmp_path, stand_in, "--source-dir", str(project), "--sandbox", "off"
+            tmp_path, stand_in, str(project), "--sandbox", "off"
         )
 
         assert returncode == 3, output
@@ -639,7 +631,6 @@ class TestNothingToReport:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=bwrap",
@@ -663,7 +654,6 @@ class TestNothingToReport:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config",
             str(in_tree),
@@ -682,7 +672,6 @@ class TestNothingToReport:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=not-a-mode",
@@ -693,7 +682,7 @@ class TestNothingToReport:
         assert "Traceback" not in output, output
 
     def test_no_sandbox_asked_for(self, tmp_path, stand_in, project):
-        output, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
+        output, run_args = _scan(tmp_path, stand_in, str(project))
 
         assert WARNING not in _one_line(output), output
         assert _overrides(run_args)[-1] == "sandbox.mode=off"
@@ -705,9 +694,7 @@ class TestNothingToReport:
             "project_name: sandboxed\nsandbox:\n  mode: auto\n", encoding="utf-8"
         )
 
-        output, _ = _scan(
-            tmp_path, stand_in, "--source-dir", str(project), "--sandbox", "off"
-        )
+        output, _ = _scan(tmp_path, stand_in, str(project), "--sandbox", "off")
 
         assert WARNING not in _one_line(output), output
 
@@ -716,7 +703,6 @@ class TestNothingToReport:
         output, _ = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=bwrap",
@@ -730,7 +716,6 @@ class TestNothingToReport:
         output, _ = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--config-overrides",
             "sandbox.mode=bwrap",
@@ -742,9 +727,7 @@ class TestNothingToReport:
 
     def test_the_flag_set_to_off_is_accepted(self, tmp_path, stand_in, project):
         """Only a mode that asks for a sandbox is refused."""
-        output, _ = _scan(
-            tmp_path, stand_in, "--source-dir", str(project), "--sandbox", "off"
-        )
+        output, _ = _scan(tmp_path, stand_in, str(project), "--sandbox", "off")
 
         assert REFUSAL not in _one_line(output), output
 
@@ -779,7 +762,6 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         _, run_args = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             env_extra={"COLUMNS": "80", "LINES": "24"},
         )
@@ -810,7 +792,8 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
             "LINES=24",
             DEFAULT_IMAGE,
             "ash",
-            "--source-dir",
+            "scan",
+            "fs",
             "/src",
             "--output-dir",
             "/out",
@@ -848,7 +831,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         # The handoff happens only for a config the host's gate accepts, and the
         # forwarded argv does not depend on the configured mode, so the argv is
         # captured with no config; the refused one is written after it.
-        _, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
+        _, run_args = _scan(tmp_path, stand_in, str(project))
         (project / ".ash.yaml").write_text(
             "project_name: repo\nsandbox:\n  mode: not-a-mode\n", encoding="utf-8"
         )
@@ -914,7 +897,7 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
                 f'project_name: repo\nsandbox:\n  mode: "{mode}"\n', encoding="utf-8"
             )
 
-        _, run_args = _scan(tmp_path, stand_in, "--source-dir", str(project))
+        _, run_args = _scan(tmp_path, stand_in, str(project))
 
         assert _overrides(run_args) == ["sandbox.mode=off"]
 
@@ -938,7 +921,6 @@ class TestSchemaDependentInvalidsAreTheImagesToJudge:
         _, run_args = _scan(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             env_extra={"ASH_CONFIG": str(operator)},
         )
@@ -1336,7 +1318,7 @@ class TestChangedFilesOnlyIsRefused:
     @pytest.mark.integration
     def test_refused_before_the_runner_is_called(self, tmp_path, stand_in, project):
         returncode, output = _refused(
-            tmp_path, stand_in, "--source-dir", str(project), "--changed-files-only"
+            tmp_path, stand_in, str(project), "--changed-files-only"
         )
 
         assert returncode == 5, output
@@ -1348,7 +1330,6 @@ class TestChangedFilesOnlyIsRefused:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             "--changed-files-only",
             "--no-run",
@@ -1365,7 +1346,6 @@ class TestChangedFilesOnlyIsRefused:
         returncode, output = _refused(
             tmp_path,
             stand_in,
-            "--source-dir",
             str(project),
             env_extra={"ASH_CHANGED_FILES_ONLY": "true"},
         )
@@ -1421,13 +1401,13 @@ class TestChangedFilesOnlyIsRefused:
                 CHILD_TOOL_PROBE_STUBS
                 + "from automated_security_helper.cli.main import app\napp()\n",
                 "scan",
+                "fs",
+                str(project),
                 "--mode",
                 "local",
-                "--source-dir",
-                str(project),
                 "--output-dir",
                 str(tmp_path / "out"),
-                "--scanners",
+                "--add-scanners",
                 "detect-secrets",
                 "--no-progress",
                 "--no-color",
@@ -1453,7 +1433,7 @@ class TestTheRefusalIsForContainerModeOnly:
     """``_refuse_sandbox_in_container_mode`` refuses nothing outside container mode.
 
     In process: every CLI test of the refusal runs ``--mode container``, so dropping
-    the mode check would refuse ``ash scan --sandbox bwrap`` in local mode with
+    the mode check would refuse ``ash scan fs --sandbox bwrap`` in local mode with
     nothing failing.
     """
 

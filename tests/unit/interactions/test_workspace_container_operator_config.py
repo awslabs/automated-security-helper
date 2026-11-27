@@ -233,7 +233,7 @@ def test_the_cli_refuses_an_in_checkout_config_before_container_mode(
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(checkout / "work" / "dev.code-workspace"),
             "--mode",
             "container",

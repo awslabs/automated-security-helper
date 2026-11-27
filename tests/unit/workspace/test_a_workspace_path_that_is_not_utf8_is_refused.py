@@ -9,7 +9,7 @@ arrives as a str with surrogate escapes, which neither can hold. Without the
 refusal (measured), resolution builds the plan and pydantic refuses the first
 project with "Input should be a valid string, unable to parse raw data as a
 unicode string [type=string_unicode]": the CLI (--dry-run, a local or container
-run, --workspace auto) would exit 1 with a traceback, and both MCP workspace
+run, ash scan workspace auto) would exit 1 with a traceback, and both MCP workspace
 tools would answer exit_code 1, the code for an ASH bug, with nothing written.
 
 Resolution refuses such a workspace at the start, before it reads any
@@ -278,7 +278,7 @@ _CLI_SURFACES = {
     "local": [
         "--mode",
         "local",
-        "--scanners",
+        "--add-scanners",
         "detect-secrets",
         "--python-only",
         "--no-progress",
@@ -350,7 +350,7 @@ def test_ash_scan_refuses_it_with_exit_4_and_the_message_shown_once(tmp_path, su
     before = _entries(tmp_path)
 
     child = _ash(
-        tmp_path, ["--workspace", str(definition), *_CLI_SURFACES[surface]], tmp_path
+        tmp_path, ["workspace", str(definition), *_CLI_SURFACES[surface]], tmp_path
     )
     stderr = child.stderr.decode("utf-8")
 
@@ -373,7 +373,7 @@ def test_ash_scan_workspace_auto_refuses_it_too(tmp_path):
     _workspace(root, ["api"])
     before = _entries(root)
 
-    child = _ash(tmp_path, ["--workspace", "auto", "--dry-run"], root)
+    child = _ash(tmp_path, ["workspace", "auto", "--dry-run"], root)
     stderr = child.stderr.decode("utf-8")
 
     assert child.returncode == int(WorkspaceExitCode.WORKSPACE_ERROR), ascii(stderr)
@@ -386,7 +386,7 @@ def test_the_cli_shows_a_name_with_controls_once_and_not_obeyed(tmp_path):
     root = _not_utf8(tmp_path, b"caf\xe9\x1b[31m[red]x\n::error::injected")
     definition = _workspace(root, ["api"])
 
-    child = _ash(tmp_path, ["--workspace", str(definition), "--dry-run"], tmp_path)
+    child = _ash(tmp_path, ["workspace", str(definition), "--dry-run"], tmp_path)
     stderr = child.stderr.decode("utf-8")
 
     assert child.returncode == int(WorkspaceExitCode.WORKSPACE_ERROR), ascii(stderr)
@@ -621,7 +621,7 @@ def test_ash_scan_refuses_such_a_policy_or_config_with_exit_4(tmp_path, flag, su
 
     child = _ash(
         tmp_path,
-        ["--workspace", str(definition), flag, str(value), *_CLI_SURFACES[surface]],
+        ["workspace", str(definition), flag, str(value), *_CLI_SURFACES[surface]],
         tmp_path,
     )
     stderr = child.stderr.decode("utf-8")

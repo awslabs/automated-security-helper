@@ -144,12 +144,12 @@ class TestARealWorkspaceRunNamesAnEnvReadEntryMasked:
                 app,
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     "dev.code-workspace",
+                    "--no-progress",
                     "--output-dir",
                     "out",
-                    "--scanners",
+                    "--add-scanners",
                     "bandit",
                 ],
             )
@@ -217,12 +217,12 @@ class TestEveryProjectEngineNamesTheModuleByTheRunsMap:
                 app,
                 [
                     "scan",
-                    "--no-progress",
-                    "--workspace",
+                    "workspace",
                     "dev.code-workspace",
+                    "--no-progress",
                     "--output-dir",
                     "out",
-                    "--scanners",
+                    "--add-scanners",
                     "bandit",
                 ],
             )

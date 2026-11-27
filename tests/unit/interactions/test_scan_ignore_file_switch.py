@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Whole ``ash scan`` runs over one tree, with and without honoring its ignore files.
+"""Whole ``ash scan fs`` runs over one tree, with and without honoring its ignore files.
 
 The scanned repository's ``.gitignore`` and ``.ignore`` files decide which of its files
 are in ASH's scan set, the list detect-secrets, cfn-nag, cdk-nag, cfn-lint, cfn-guard,
@@ -262,7 +262,7 @@ def scan(
     )
     args = [
         "scan",
-        "--source-dir",
+        "fs",
         str(tree),
         "--output-dir",
         str(output),
@@ -274,7 +274,7 @@ def scan(
     for phase in phases:
         args += ["--phases", phase]
     if with_secrets_scan:
-        args += ["--scanners", "detect-secrets"]
+        args += ["--add-scanners", "detect-secrets"]
     completed = run_ash(work, *args, *extra_args)
     # A precondition of every test below rather than a test of its own: a scan that
     # did not finish leaves nothing to inspect.
@@ -304,7 +304,7 @@ def _workspace_scan(base: Path, *extra_args: str) -> WorkspaceRun:
     completed = run_ash(
         work,
         "scan",
-        "--workspace",
+        "workspace",
         str(work / "w.code-workspace"),
         "--output-dir",
         str(output),
@@ -479,10 +479,11 @@ class TestTheRecordOfWhatIgnoreFilesExcluded:
 
     @pytest.mark.parametrize("report_format", ["text", "markdown"])
     def test_a_re_rendered_summary_keeps_the_record(self, scans, report_format):
-        """``ash report`` renders from the stored results, not from the scan's memory."""
+        """``ash results report`` renders from the stored results, not from the scan's memory."""
         run = scans("default")
         completed = run_ash(
             run.output.parent,
+            "results",
             "report",
             "--format",
             report_format,
@@ -494,7 +495,7 @@ class TestTheRecordOfWhatIgnoreFilesExcluded:
         )
         lines = ignore_lines(completed.stdout)
         assert any(re.search(rf"\b{EXPECTED_TOTAL}\b", line) for line in lines), (
-            f"`ash report --format {report_format}` lost the ignore-file record; lines "
+            f"`ash results report --format {report_format}` lost the ignore-file record; lines "
             f"about ignore files: {lines}"
         )
 

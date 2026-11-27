@@ -6,7 +6,7 @@ container: a mapping that names its scanner. ``get_scanner_status_info`` read th
 version, or one put together by hand, can hold something else there: the sample
 results under tests/test_data/outputs carry ``"source"`` mappings without
 ``scanner_name``. Merged as the one shard of a 1-way scan, that file raised
-``KeyError: 'scanner_name'`` out of ``ash merge``.
+``KeyError: 'scanner_name'`` out of ``ash results merge``.
 
 Such an entry is no report. The scanner then has no recorded status, which the
 calculator has always reported as an error, and the merge reaches a verdict.
@@ -67,7 +67,7 @@ def test_an_entry_that_is_no_report_records_no_status(reports):
     """An entry that is no report, or that names another scanner, records no
     status, so the scanner reads as errored, as a scanner with nothing recorded
     always has. Only a
-    results file given to ``ash merge`` can hold such a report: a scan writes each
+    results file given to ``ash results merge`` can hold such a report: a scan writes each
     one under the name it carries."""
     assert _status(reports) == (False, False, True)
 
@@ -138,6 +138,7 @@ def _merge_the_sample_results_as_one_shard(tmp_path, *flags):
         return CliRunner().invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(shard),

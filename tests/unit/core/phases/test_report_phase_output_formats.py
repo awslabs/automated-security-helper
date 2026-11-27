@@ -11,7 +11,7 @@ string: a format name is ``markdown``, an extension is the ``summary.md`` in
 ``ash.summary.md``. They coincide for exactly four reporters -- ``csv``,
 ``html``, ``sarif`` and ``yaml`` -- so for the rest the comparison matched
 nothing, the reporter was skipped, and the run exited 0 having written no report
-at all. ``ash scan --output-formats markdown`` produced an empty ``reports/``
+at all. ``ash scan fs --output-formats markdown`` produced an empty ``reports/``
 directory and said nothing, while the closing summary still pointed the operator
 at ``reports/ash.summary.md``.
 
@@ -633,8 +633,8 @@ def test_export_format_members_select_as_well_as_strings(tmp_path):
     """``ExportFormat`` members work, not only their ``.value`` strings.
 
     ``ScanExecutionEngine`` threads the enum through unconverted -- pinned by
-    ``tests/unit/cli/test_output_formats_fix.py`` -- while the ``ash scan`` and
-    ``ash merge`` paths convert to ``.value`` first. Both shapes reach the filter,
+    ``tests/unit/cli/test_output_formats_fix.py`` -- while the ``ash scan fs`` and
+    ``ash results merge`` paths convert to ``.value`` first. Both shapes reach the filter,
     so both are asserted here; a filter that handled only one would work from the
     CLI and fail from the engine, or the reverse.
     """

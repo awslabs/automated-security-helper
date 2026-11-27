@@ -4,7 +4,7 @@
 """Three shapes the sharding module meets in a mixed-version or defective fan-out.
 
 A results file written by a newer ASH can carry a provenance field this version
-does not know; ``ShardAssignment`` refused it, and ``ash merge`` then reported
+does not know; ``ShardAssignment`` refused it, and ``ash results merge`` then reported
 the shard as having no provenance at all, naming the wrong cause. A caller that
 reaches ``partition_scanners`` with no selection at all got a ``TypeError`` from
 the modulo instead of the selection error every other bad pair raises. And a

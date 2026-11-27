@@ -188,12 +188,12 @@ def _scan(source: Path, *extra: str):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "container",
             "--no-build",
             "--no-progress",
-            "--source-dir",
-            str(source),
             *extra,
         ],
     )

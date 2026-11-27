@@ -13,7 +13,7 @@ A link above an output directory outside the tree is the operator's own spelling
 keeps working. The output directory itself, and each working directory, is refused
 when it is a link wherever it is: see test_linked_output_dir_is_refused.py.
 
-``ash scan`` makes the same refusal itself (run_ash_scan._refuse_symlinked_output_dir),
+``ash scan fs`` makes the same refusal itself (run_ash_scan._refuse_symlinked_output_dir),
 before its logger opens ash.log in the output directory; the last test covers it.
 """
 

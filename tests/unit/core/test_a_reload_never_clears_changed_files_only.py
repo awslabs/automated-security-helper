@@ -10,7 +10,7 @@ changed files, so a finding it does not list was left out, not fixed. The
 aws-security-hub reporter archives findings a scan no longer reports, and it
 trusts an explicit ``false``.
 
-A report over saved results (``ash scan --use-existing``, the orchestrator's
+A report over saved results (``ash scan fs --use-existing``, the orchestrator's
 ``existing_results_path``) re-applies this run's metadata to the loaded model.
 run_ash_scan writes ``changed_files_only`` on every run, ``false`` when the flag
 was not given. Re-applied over a saved filtered set, that would record ``false`` on

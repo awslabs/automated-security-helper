@@ -48,11 +48,11 @@ def _scan(root, monkeypatch, *selection_args):
         app,
         [
             "scan",
+            "fs",
+            str(root),
             "--mode",
             "local",
             "--no-progress",
-            "--source-dir",
-            str(root),
             "--output-dir",
             str(root.parent / "out"),
             *selection_args,
@@ -73,7 +73,7 @@ def test_the_control_a_cancelled_selection_is_refused(project, monkeypatch):
     reached, result = _scan(
         project,
         monkeypatch,
-        "--scanners",
+        "--add-scanners",
         "bandit",
         "--exclude-scanners",
         "bandit",

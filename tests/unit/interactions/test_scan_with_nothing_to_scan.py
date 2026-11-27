@@ -6,7 +6,7 @@
 A scanner with no file of its kind to scan is SKIPPED rather than PASSED with no
 findings. A run whose every scanner is SKIPPED has shown the target to be neither
 clean nor dirty, so with fail_on_incomplete_scanners on (the default) it exits 1,
-and 0 with --no-fail-on-incomplete-scanners. ``ash merge`` reaches the same verdict
+and 0 with --no-fail-on-incomplete-scanners. ``ash results merge`` reaches the same verdict
 through the same code.
 
 The error used to be "Scan ran no scanners", which reads as a selection mistake.
@@ -119,11 +119,11 @@ def _scan(base: Path, source: Path, output: Path, *extra: str):
         base,
         source,
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "detect-secrets",
         "--offline",
         "--no-progress",
@@ -195,6 +195,7 @@ def test_a_merge_of_shards_with_nothing_to_scan_says_the_same(tmp_path):
     merged = _ash(
         tmp_path,
         source,
+        "results",
         "merge",
         "--results",
         str(tmp_path / "shard-0"),

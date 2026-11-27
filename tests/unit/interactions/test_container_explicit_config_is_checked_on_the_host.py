@@ -14,7 +14,7 @@
   source directory), and the scan inside is given that container path, never the
   path as typed.
 
-Both ``ash scan --mode container`` and ``ash --mode container`` are driven, with
+Both ``ash scan fs --mode container`` and ``ash --mode container`` are driven, with
 the runner recorded instead of started.
 """
 
@@ -32,8 +32,8 @@ from automated_security_helper.utils.subprocess_utils import create_completed_pr
 pytestmark = pytest.mark.unit
 
 ENTRY_POINTS = [
-    pytest.param(["scan", "--mode", "container"], id="ash-scan"),
-    pytest.param(["--mode", "container"], id="ash"),
+    pytest.param(["scan", "fs", "src", "--mode", "container"], id="ash-scan"),
+    pytest.param(["--mode", "container", "--source-dir", "src"], id="ash"),
 ]
 
 
@@ -77,8 +77,6 @@ def _scan(entry: List[str], *extra: str):
             *entry,
             "--no-build",
             "--no-progress",
-            "--source-dir",
-            "src",
             "--output-dir",
             "out",
             *extra,

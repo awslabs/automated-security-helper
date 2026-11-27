@@ -147,7 +147,7 @@ def test_the_cli_reads_ash_config_as_the_config_option_and_refuses(
     tmp_path, monkeypatch
 ):
     """At the CLI, ``--config`` reads ASH_CONFIG when the flag is absent, so a
-    broken ASH_CONFIG becomes the --config file there: ``ash scan --mode
+    broken ASH_CONFIG becomes the --config file there: ``ash scan fs --mode
     container`` refuses it with exit 3, naming the file, before any runner is
     resolved. The cell above holds at the layer below, where ASH_CONFIG is not
     routed into the options."""
@@ -173,10 +173,10 @@ def test_the_cli_reads_ash_config_as_the_config_option_and_refuses(
             app,
             [
                 "scan",
+                "fs",
+                str(src),
                 "--mode",
                 "container",
-                "--source-dir",
-                str(src),
                 "--output-dir",
                 str(out),
             ],

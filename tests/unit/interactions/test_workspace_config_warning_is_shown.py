@@ -35,7 +35,7 @@ _HOSTILE = "cfg\x07\x1b]52;c;ZXZpbA==\n::add-mask::hidden.yaml"
 _RAW_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 _COMMAND_LINE = re.compile(r"^\s*::|##[A-Za-z]*\[", re.MULTILINE)
 
-#: A fresh process, as `ash scan --mode workspace` starts one, refusing as the
+#: A fresh process, as `ash scan workspace` starts one, refusing as the
 #: scan's own handlers refuse (run_ash_scan: ``except ASHConfigValidationError``,
 #: which calls ``_printed_config_refusal``).
 _CHILD = """

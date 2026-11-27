@@ -12,7 +12,7 @@ and reported, a suppressed finding is shown, a changed file's findings are dropp
 
 Each case below makes one decision for two files at once, ``secr\\xe9t.py`` (latin-1,
 not UTF-8) and ``secret.py``, beside ``keep.py``, which no decision names. One
-``ash scan`` over the three must give the first file what it gives the second, and
+``ash scan fs`` over the three must give the first file what it gives the second, and
 must still report keep.py, so a case whose decision did nothing, or did too much,
 fails too.
 

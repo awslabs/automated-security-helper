@@ -141,9 +141,9 @@ def test_a_workspace_runs_crash_is_redacted_on_every_surface(workspace, log_reco
         app,
         [
             "scan",
-            "--no-progress",
-            "--workspace",
+            "workspace",
             "dev.code-workspace",
+            "--no-progress",
             "--output-dir",
             "out",
         ],
@@ -162,9 +162,9 @@ def test_a_workspace_dry_runs_crash_is_redacted(workspace, log_records):
         app,
         [
             "scan",
-            "--no-progress",
-            "--workspace",
+            "workspace",
             "dev.code-workspace",
+            "--no-progress",
             "--output-dir",
             "out",
             "--dry-run",

@@ -5,7 +5,7 @@
 
 The non-root user cannot write a bind-mounted output directory on Windows, so a
 Windows host builds the ``ci`` stage when no stage is asked for, with
-``ash build-image`` and with ``ash --mode container`` alike. An explicit
+``ash container build`` and with ``ash scan fs . --mode container`` alike. An explicit
 ``--build-target`` wins on every platform.
 """
 
@@ -65,18 +65,18 @@ def _target(commands: List[List[str]]) -> str:
 
 _SCAN = [
     "scan",
+    "fs",
+    "src",
     "--mode",
     "container",
     "--no-progress",
     "--no-run",
-    "--source-dir",
-    "src",
     "--output-dir",
     "out",
     "--ash-revision-to-install",
     "v3.7.0",
 ]
-_BUILD_IMAGE = ["build-image", "--no-run", "--ash-revision-to-install", "v3.7.0"]
+_BUILD_IMAGE = ["container", "build", "--no-run", "--ash-revision-to-install", "v3.7.0"]
 
 
 @pytest.mark.parametrize("command", [_SCAN, _BUILD_IMAGE], ids=["scan", "build-image"])
@@ -99,7 +99,7 @@ def test_the_stage_built(
     from automated_security_helper.cli.main import app
 
     _pretend_windows(monkeypatch, windows)
-    # `ash build-image` leaves the decision to the container runner.
+    # `ash container build` leaves the decision to the container runner.
     host = SimpleNamespace(system=lambda: "Windows" if windows else "Linux")
     monkeypatch.setattr(image, "platform", host, raising=False)
 

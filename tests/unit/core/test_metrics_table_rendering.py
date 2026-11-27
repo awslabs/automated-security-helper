@@ -206,7 +206,7 @@ def test_narrow_threshold_cell_never_cuts_a_reference_mid_reference(narrow_conso
 def test_narrow_threshold_cell_names_a_reloaded_reference_without_cutting_it(
     narrow_console,
 ):
-    """A results record read back by ``ash merge`` or ``ash report`` holds the
+    """A results record read back by ``ash results merge`` or ``ash results report`` holds the
     threshold as plain ``${VARIABLE}`` text, with no provenance flag. It is
     still shaped like a reference, so the cell prints a fixed token for it, not
     the first four characters."""

@@ -493,8 +493,8 @@ def test_an_enabled_per_project_reporter_is_not_checked_at_workspace_level(
 # The registry is process-wide: a module registers its reporters the first time
 # anything in the process imports it, an earlier MCP session or an earlier test
 # among them. A scan's engine resolves only ASH's built-ins and the modules the
-# run names (loader.plugins_of), but workspace reporting, `ash report` and `ash
-# merge` read every reporter the process held, and checked and ran any that was
+# run names (loader.plugins_of), but workspace reporting, `ash results report` and `ash
+# results merge` read every reporter the process held, and checked and ran any that was
 # enabled. Each case below registers a reporter the run does not name, the way
 # an earlier test or session does, and runs a step that does not ask for it by
 # module.
@@ -605,7 +605,7 @@ def _merge(tmp_path: Path, shard_paths: List[str], *extra: str):
 
     from automated_security_helper.cli.main import app
 
-    args = ["merge"]
+    args = ["results", "merge"]
     for path in shard_paths:
         args += ["--results", path]
     args += ["--output-dir", str(tmp_path / "merged"), *extra]
@@ -652,6 +652,7 @@ def _report(tmp_path: Path, report_format: str, *extra: str):
     return CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             report_format,
@@ -724,7 +725,7 @@ def test_a_report_phase_built_without_reporters_runs_none(
     """No reporter list means no reporters: nothing is built or written.
 
     Every caller that runs reporters hands the phase its run's list (the scan's
-    engine and ash merge); a phase built without one takes nothing from the
+    engine and ash results merge); a phase built without one takes nothing from the
     process-wide registry, another run's reporter included.
     """
     context = _context(tmp_path, AshConfig())

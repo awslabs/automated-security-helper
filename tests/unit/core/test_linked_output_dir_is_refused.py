@@ -103,7 +103,7 @@ def _linked_entry(layout, name: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# ash scan: run_ash_scan's own check, called directly
+# ash scan fs: run_ash_scan's own check, called directly
 # ---------------------------------------------------------------------------
 
 
@@ -328,7 +328,7 @@ def test_the_clean_up_itself_refuses_and_deletes_nothing(layout, mode):
 
 
 # ---------------------------------------------------------------------------
-# The orchestrator, for callers that do not come through ash scan
+# The orchestrator, for callers that do not come through ash scan fs
 # ---------------------------------------------------------------------------
 
 

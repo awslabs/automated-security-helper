@@ -30,11 +30,11 @@ pytestmark = pytest.mark.unit
 
 SCAN = [
     "scan",
+    "fs",
+    "src",
     "--mode",
     "container",
     "--no-progress",
-    "--source-dir",
-    "src",
     "--output-dir",
     "out",
 ]

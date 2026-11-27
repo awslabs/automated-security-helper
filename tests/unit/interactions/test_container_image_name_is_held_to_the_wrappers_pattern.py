@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan --mode container`` takes the image names the wrappers take.
+"""``ash scan fs --mode container`` takes the image names the wrappers take.
 
 ./ash and Invoke-ASH hold ASH_IMAGE_NAME to A-Z, a-z, 0-9 and . _ : / @ -, not
 starting with '-', and refuse anything else with 3 before anything is built or run.
@@ -31,11 +31,11 @@ pytestmark = pytest.mark.unit
 
 SCAN = [
     "scan",
+    "fs",
+    "src",
     "--mode",
     "container",
     "--no-progress",
-    "--source-dir",
-    "src",
     "--output-dir",
     "out",
 ]

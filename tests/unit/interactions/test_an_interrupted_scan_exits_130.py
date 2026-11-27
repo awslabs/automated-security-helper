@@ -176,7 +176,7 @@ def _interrupt(
     """Run `ash <args>` in its own session; once the child is waiting, send SIGINT.
 
     ``cwd`` is where ASH starts (``tmp_path`` unless named). A scan with no
-    ``--source-dir`` scans its working directory, and ASH refuses a tool it finds
+    ``PATH`` scans its working directory, and ASH refuses a tool it finds
     inside the scanned tree, so a test that keeps its fake runtime in ``tmp_path``
     starts ASH in a directory beside it.
 
@@ -310,13 +310,13 @@ def test_container_mode_passes_ctrl_c_to_the_runtime_and_exits_130(tmp_path, iso
         {**isolated["env"], "FAKE_LOG": str(runtime_log)},
         [
             "scan",
+            "fs",
+            str(tmp_path / "src"),
             "--mode",
             "container",
             "--no-build",
             "--oci-runner",
             str(runtime),
-            "--source-dir",
-            str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
         ],
@@ -346,13 +346,13 @@ def test_local_mode_says_it_was_interrupted_and_prints_no_results(
         app,
         [
             "scan",
+            "fs",
+            "src",
             "--mode",
             "local",
-            "--source-dir",
-            "src",
             "--output-dir",
             "out",
-            "--scanners",
+            "--add-scanners",
             "bandit",
         ],
     )
@@ -375,7 +375,7 @@ def test_nix_mode_says_it_was_interrupted_and_exits_130(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--mode", "nix", "--source-dir", "src", "--output-dir", "out"],
+        ["scan", "fs", "src", "--mode", "nix", "--output-dir", "out"],
     )
 
     assert result.exit_code == 130, result.output
@@ -418,7 +418,7 @@ def test_nix_mode_passes_ctrl_c_to_the_shell_and_gives_it_the_grace(
     returncode, stdout, stderr = _interrupt(
         tmp_path,
         env,
-        ["scan", "--mode", "nix", "--source-dir", "src", "--output-dir", "out"],
+        ["scan", "fs", "src", "--mode", "nix", "--output-dir", "out"],
         to_the_group=to_the_group,
     )
 
@@ -439,7 +439,7 @@ def test_build_image_says_it_was_interrupted_and_exits_130(tmp_path, isolated):
     returncode, stdout, stderr = _interrupt(
         tmp_path,
         env,
-        ["build-image", "--oci-runner", str(runtime), "--no-run"],
+        ["container", "build", "--oci-runner", str(runtime), "--no-run"],
         to_the_group=True,
         # build-image scans its working directory; the runtime is kept outside it.
         cwd=tmp_path / "src",
@@ -490,7 +490,8 @@ def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
                 "-I",
                 "-c",
                 module_from_this_checkout("automated_security_helper.cli.main"),
-                "build-image",
+                "container",
+                "build",
                 "--oci-runner",
                 str(runtime),
                 "--no-run",
@@ -566,15 +567,15 @@ class _InterruptedRuntime:
 @pytest.mark.parametrize(
     "command",
     [
-        pytest.param(["build-image", "--no-run"], id="build-image"),
+        pytest.param(["container", "build", "--no-run"], id="build-image"),
         pytest.param(
             [
                 "scan",
+                "fs",
+                "src",
                 "--mode",
                 "container",
                 "--no-build",
-                "--source-dir",
-                "src",
                 "--output-dir",
                 "out",
             ],
@@ -1258,7 +1259,7 @@ def test_build_image_names_a_verdict_only_when_it_would_have_scanned(
 
     monkeypatch.setattr(image, "run_ash_scan", _interrupted)
 
-    result = CliRunner().invoke(app, ["build-image", *args])
+    result = CliRunner().invoke(app, ["container", "build", *args])
 
     assert result.exit_code == 130, result.output
     assert says in result.stderr, result.stderr

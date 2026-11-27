@@ -7,7 +7,7 @@ Why this exists
 ---------------
 The scan engine drops findings outside the changed files in two places: at the
 start of the report phase, and at the end of the scan phase, for a run whose
-phases stop at ``scan`` (``ash scan --phases scan``). That run writes no
+phases stop at ``scan`` (``ash scan fs --phases scan``). That run writes no
 reports, but run_ash_scan still writes the results file and takes the verdict
 from these results. Only the report-phase drop was tested, so removing the
 scan-phase one survived the test suite. This runs the scan phase alone, with a

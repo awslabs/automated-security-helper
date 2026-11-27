@@ -3,9 +3,9 @@
 
 """Every exit-1 coverage message shows the names it quotes, and logs as text.
 
-Under ``ash merge`` the names come from shard results any job in the matrix wrote,
+Under ``ash results merge`` the names come from shard results any job in the matrix wrote,
 and the merged model reaches the same _compute_exit_code an ordinary scan does.
-Under real ``ash merge`` children, a scanner named "x\\e[31m\\n::error
+Under real ``ash results merge`` children, a scanner named "x\\e[31m\\n::error
 title=merge::orphan" (in "Scan ran no scanners") and a converter error
 "boom\\n##[error]r" (in "Conversion incomplete") are shown with ESC and the line
 break written out, so no stdout line starts "::error" or "##[error]". The rules
