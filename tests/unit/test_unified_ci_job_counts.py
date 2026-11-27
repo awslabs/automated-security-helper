@@ -40,9 +40,7 @@ direction is a slower pull request rather than a missing leg.
 
 from __future__ import annotations
 
-import importlib.util
 import re
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -50,6 +48,7 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.utils.ci_matrix_loader import load_ci_matrix
 from tests.utils.ci_tiers import (
     E2E_TEST_JOB_IDS,
     INTEGRATION_TEST_JOB_IDS,
@@ -72,22 +71,7 @@ def _jobs(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
 
 
-def _load_ci_matrix() -> Any:
-    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
-        )
-        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
-
-
-ci_matrix = _load_ci_matrix()
+ci_matrix = load_ci_matrix()
 
 # The expansion is the shared reader's. The names below are the ones this module's tests
 # read it by.
