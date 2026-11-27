@@ -2405,6 +2405,22 @@ class PluginBase(UVToolMixin, BaseModel):
                     ).items()
                     if key != "UV_PYTHON"
                 }
+            # uv is sent to a file by name through UV_CONFIG_FILE and UV_ENV_FILE,
+            # and resolves a relative name against the directory it starts in:
+            # the scanned tree. One the tree supplies (relative, or inside the
+            # source or the output directory) is not passed on, and a
+            # ``uv tool run`` gets ``--no-env-file``. An absolute file outside both
+            # directories is the operator's and stays.
+            from automated_security_helper.utils.uv_tool_runner import (
+                with_no_env_file,
+                without_tree_uv_files,
+            )
+
+            env = without_tree_uv_files(
+                env, (Path(source_dir), Path(self._require_context().output_dir))
+            )
+            command = with_no_env_file(command)
+
             uv_overrides = python_child.uv_child_overrides(command, env)
             if uv_overrides:
                 child_env = snapshot_environ() if env is None else env

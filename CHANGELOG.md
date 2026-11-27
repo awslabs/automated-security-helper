@@ -168,6 +168,12 @@
 
 ### Fixes
 
+- **ASH's `uv tool run` calls read no env file or uv config file named relative to the
+  scanned tree.** Every `uv tool run` ASH starts passes `--no-env-file`, and a
+  `UV_CONFIG_FILE` or `UV_ENV_FILE` that is relative, or that names a file inside the
+  scanned or the output directory, is not passed on to the child. An absolute file
+  outside both directories is still read. The GuardDog hit-limit bootstrap also drops
+  the working directory from its import path before importing GuardDog.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

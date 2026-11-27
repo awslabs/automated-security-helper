@@ -98,6 +98,85 @@ _PROGRESS_UPDATE_INTERVAL_SECONDS = 10
 # names the cache those tools use. ``uv --version`` reads no configuration at all.
 UV_NO_CONFIG = "--no-config"
 
+# Passed to every ``uv tool run`` ASH builds, before the tool's name. ``uv tool run``
+# accepts ``--no-env-file`` (``ToolRunArgs.no_env_file`` in uv-cli at 0.13.4 and
+# 0.13.9, next to ``env_file``, which reads ``UV_ENV_FILE``), so a ``UV_ENV_FILE``
+# the operator's environment names relative to the working directory (a direnv or CI
+# setting) loads no ``.env`` from the scanned tree into the tool's environment.
+UV_NO_ENV_FILE = "--no-env-file"
+
+# The variables through which uv is sent to a file by name. A value that is relative,
+# or that lies inside the scanned or the output directory, makes the scanned tree
+# supply the file; uv reads ``UV_CONFIG_FILE`` even ahead of ``--no-config``.
+_UV_FILE_VARIABLES = ("UV_CONFIG_FILE", "UV_ENV_FILE")
+
+
+def with_no_env_file(command: List[str]) -> List[str]:
+    """``command`` with ``--no-env-file`` after ``tool run``, when it is a uv tool run.
+
+    Any other command, and one that already carries the flag, comes back as it was.
+    """
+    words = list(command)
+    if (
+        len(words) < 3
+        or os.path.basename(str(words[0])).lower() not in ("uv", "uv.exe")
+        or words[1:3] != ["tool", "run"]
+        or UV_NO_ENV_FILE in words
+    ):
+        return command
+    return [*words[:3], UV_NO_ENV_FILE, *words[3:]]
+
+
+def _names_a_tree_file(value: str, roots: Tuple[os.PathLike, ...]) -> bool:
+    if not value:
+        return False
+    expanded = os.path.expanduser(value)
+    if not os.path.isabs(expanded):
+        return True
+    spelled = [
+        os.path.abspath(expanded),
+        os.path.join(
+            os.path.realpath(os.path.dirname(os.path.abspath(expanded))),
+            os.path.basename(expanded),
+        ),
+    ]
+    resolved = set()
+    for root in roots:
+        resolved.add(os.path.abspath(os.fspath(root)))
+        resolved.add(os.path.realpath(os.fspath(root)))
+    return any(
+        os.path.normcase(path).startswith(
+            os.path.normcase(root).rstrip(os.sep) + os.sep
+        )
+        for path in spelled
+        for root in resolved
+    )
+
+
+def without_tree_uv_files(
+    environment: Optional[Dict[str, str]],
+    roots: Tuple[os.PathLike, ...] = (),
+) -> Optional[Dict[str, str]]:
+    """``environment`` without a ``UV_CONFIG_FILE`` or ``UV_ENV_FILE`` the tree supplies.
+
+    A value is the tree's when it is relative (uv resolves it against its working
+    directory, the scanned tree) or names a file inside one of ``roots`` (the scanned
+    and the output directory). An absolute value outside them is the operator's and
+    stays. ``environment`` is what the child gets (this process's when None); the
+    same object comes back when nothing is dropped, so a run that passed no
+    environment still passes none.
+    """
+    current = snapshot_environ() if environment is None else environment
+    dropped = [
+        name
+        for name in _UV_FILE_VARIABLES
+        if isinstance(current.get(name), str)
+        and _names_a_tree_file(current[name], roots)
+    ]
+    if not dropped:
+        return environment
+    return {key: value for key, value in current.items() if key not in dropped}
+
 
 class UVToolRunnerError(Exception):
     """Exception raised for UV tool runner errors."""
@@ -1863,6 +1942,9 @@ class UVToolRunner:
                     probe_env["UV_OFFLINE"] = "1"
                     command.append("--offline")
 
+                command.append(UV_NO_ENV_FILE)
+                probe_env = without_tree_uv_files(probe_env)
+
                 # Build command with --from parameter if extras specified
                 if package_name:
                     # Build the --from specification
@@ -2583,6 +2665,13 @@ class UVToolRunner:
 
         if python_request:
             command.extend(["--python", python_request])
+
+        # No env file: the one UV_ENV_FILE names is read relative to cwd, the
+        # scanned tree, and a UV_CONFIG_FILE the tree supplies is dropped.
+        command.append(UV_NO_ENV_FILE)
+        env = without_tree_uv_files(
+            env, tuple(path for path in (cwd, results_dir) if path is not None)
+        )
 
         # Build command with --from parameter if extras or version constraint specified
         base_name = package_name or tool_name
@@ -3965,6 +4054,8 @@ def get_uv_tool_command(
                 probe_command.append("--offline")
                 probe_env = snapshot_environ()
                 probe_env["UV_OFFLINE"] = "1"
+            probe_command.append(UV_NO_ENV_FILE)
+            probe_env = without_tree_uv_files(probe_env)
             if from_spec:
                 probe_command.extend(["--from", from_spec])
             probe_command.extend([tool_name, "--version"])
