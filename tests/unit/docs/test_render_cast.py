@@ -209,7 +209,9 @@ def make_table() -> Table:
     for name in ("Scanner", "Status", "Critical", "High", "Action"):
         table.add_column(name)
     table.add_row("bandit", "[red]FAILED[/red]", "0", "2", "2")
-    table.add_row("detect-secrets", "[green]PASSED[/green]", "0", "0", "0", style="on #161d26")
+    table.add_row(
+        "detect-secrets", "[green]PASSED[/green]", "0", "0", "0", style="on #161d26"
+    )
     return table
 
 
@@ -311,7 +313,13 @@ def test_the_grid_equals_what_rich_exports_for_a_table_a_panel_and_markdown(rc):
     assert lines == export_lines(make_table(), make_panel(), make_markdown())
     # The oracle is not vacuous: it holds all three parts, link text included.
     text = "\n".join(lines)
-    for expected in ("Scanner results", "detect-secrets", "Metrics help", "B324", "link"):
+    for expected in (
+        "Scanner results",
+        "detect-secrets",
+        "Metrics help",
+        "B324",
+        "link",
+    ):
         assert expected in text
 
 
@@ -646,7 +654,13 @@ def style_at(rc, data: str, column: int = 0):
 
 @pytest.mark.parametrize(
     ("code", "field"),
-    [("1", "bold"), ("2", "dim"), ("3", "italic"), ("4", "underline"), ("7", "reverse")],
+    [
+        ("1", "bold"),
+        ("2", "dim"),
+        ("3", "italic"),
+        ("4", "underline"),
+        ("7", "reverse"),
+    ],
 )
 def test_each_sgr_attribute_is_set_and_its_reset_clears_it(rc, code, field):
     assert style_at(rc, f"{ESC}[{code}mX") == rc.Style(**{field: True})
@@ -686,7 +700,9 @@ def test_256_colors_and_true_colors_are_read_in_both_places(rc):
 
 def test_one_sgr_may_set_many_things_in_any_order(rc):
     style = style_at(rc, f"{ESC}[1;38;2;255;0;0;48;5;4;4;3mX")
-    assert style == rc.Style(fg=(255, 0, 0), bg=4, bold=True, underline=True, italic=True)
+    assert style == rc.Style(
+        fg=(255, 0, 0), bg=4, bold=True, underline=True, italic=True
+    )
 
 
 def test_a_style_stays_until_reset_across_lines_and_wraps(rc):
@@ -998,7 +1014,9 @@ def mini_runs(core) -> dict:
         ),
     )
     return {
-        "version": core.SceneRun("ash --version", (core.RawChunk(0.02, "ash 1.0\r\n"),)),
+        "version": core.SceneRun(
+            "ash --version", (core.RawChunk(0.02, "ash 1.0\r\n"),)
+        ),
         "scan": core.SceneRun("ash --scanners bandit", scanning),
         "report": core.SceneRun(
             "ash report",
@@ -1097,9 +1115,7 @@ def test_an_unknown_sequence_in_a_cast_is_refused_with_its_bytes(rc, core):
 # ---------------------------------------------------------------------------
 
 
-def test_a_typed_command_is_one_frame_and_never_one_frame_per_character(
-    rc, recording
-):
+def test_a_typed_command_is_one_frame_and_never_one_frame_per_character(rc, recording):
     timeline = timeline_of(rc, recording)
     assert len(timeline.reveals) == 3
     typed_total = sum(len(run.typed) for run in recording.runs.values())
@@ -1112,7 +1128,9 @@ def test_a_typed_command_is_one_frame_and_never_one_frame_per_character(
         scene = recording.storyboard.scene(scene_record.scene_id)
         # The frame shows the whole command; the reveal uncovers it as typed.
         assert frame.time_ms == scene.start_ms
-        typed = frame.screen.row_text(reveal.row)[reveal.col : reveal.col + reveal.chars]
+        typed = frame.screen.row_text(reveal.row)[
+            reveal.col : reveal.col + reveal.chars
+        ]
         assert typed == scene_record.command
         assert reveal.col == len("$ ")
         assert (reveal.start_ms, reveal.end_ms) == (
@@ -1122,9 +1140,7 @@ def test_a_typed_command_is_one_frame_and_never_one_frame_per_character(
         # No other frame of the scene holds a half-typed command: the frames after
         # the typing frame all come after the typing ended.
         later = [
-            f
-            for f in timeline.frames
-            if f.scene == frame.scene and f is not frame
+            f for f in timeline.frames if f.scene == frame.scene and f is not frame
         ]
         assert all(f.time_ms >= scene_record.typing.end_ms for f in later)
 
@@ -1142,7 +1158,9 @@ def test_the_frames_of_the_small_recording_are_the_ones_the_events_make(rc, reco
 def test_frame_times_increase_strictly_from_zero(rc, recording):
     times = [frame.time_ms for frame in timeline_of(rc, recording).frames]
     assert times[0] == 0
-    assert all(later > earlier for earlier, later in zip(times, times[1:], strict=False))
+    assert all(
+        later > earlier for earlier, later in zip(times, times[1:], strict=False)
+    )
     assert times[-1] < recording.storyboard.total_ms
 
 
@@ -1195,9 +1213,7 @@ def test_every_scene_ends_on_a_frame_that_is_its_end_screen(rc, recording):
             assert timeline.frames[last + 1].scene == index + 1
 
 
-def test_the_poster_frame_is_the_end_screen_of_the_scene_the_storyboard_names(
-    rc, core
-):
+def test_the_poster_frame_is_the_end_screen_of_the_scene_the_storyboard_names(rc, core):
     for poster, index in (("version", 0), ("scan", 1), ("report", 2)):
         recording = build_recording(core, storyboard_data(poster=poster))
         timeline = timeline_of(rc, recording)
@@ -1238,12 +1254,16 @@ def test_decimation_keeps_what_the_poster_the_reveals_and_the_scene_ends_need(
     smaller = timeline_of(rc, recording, max_frames=6)
     assert len(smaller.frames) == 6
     times = [frame.time_ms for frame in smaller.frames]
-    assert all(later > earlier for earlier, later in zip(times, times[1:], strict=False))
+    assert all(
+        later > earlier for earlier, later in zip(times, times[1:], strict=False)
+    )
     assert len(smaller.reveals) == 3
     for reveal in smaller.reveals:
         assert smaller.frames[reveal.frame].screen.row_text(reveal.row).strip()
     for index, last in enumerate(smaller.scene_frames):
-        assert smaller.frames[last].screen == full.frames[full.scene_frames[index]].screen
+        assert (
+            smaller.frames[last].screen == full.frames[full.scene_frames[index]].screen
+        )
     assert (
         smaller.frames[smaller.poster_frame].screen
         == full.frames[full.poster_frame].screen
@@ -1464,9 +1484,7 @@ def style_text(root: ET.Element) -> str:
 def render_recording(rc, recording) -> Rendered:
     rendering = rc.render(recording.cast, recording.record, recording.storyboard)
     root = ET.fromstring(rendering.svg)
-    timeline = rc.build_timeline(
-        recording.cast, recording.record, recording.storyboard
-    )
+    timeline = rc.build_timeline(recording.cast, recording.record, recording.storyboard)
     return Rendered(recording, rendering, root, style_text(root), timeline)
 
 
@@ -1536,7 +1554,7 @@ def keyframes(css: str, name: str) -> list[tuple[str, str]]:
 
 
 def translate(axis: str, offset: int) -> str:
-    return f"transform:translate{axis}({offset if offset else 0}px)"
+    return f"transform:translate{axis}({offset or 0}px)"
 
 
 def test_the_svg_is_an_accessible_image_of_the_size_the_terminal_gives(rc, rendered):
@@ -1580,7 +1598,10 @@ def test_each_distinct_row_is_stored_once_and_numbered_by_first_appearance(rende
     assert list(dict.fromkeys(uses)) == list(rows)
     # Rows repeat between frames; the markup does not.
     assert len(uses) > len(rows)
-    bodies = [re.sub(r' id="r\d+"', "", ET.tostring(g, encoding="unicode")) for g in rows.values()]
+    bodies = [
+        re.sub(r' id="r\d+"', "", ET.tostring(g, encoding="unicode"))
+        for g in rows.values()
+    ]
     assert len(set(bodies)) == len(rows)
 
 
@@ -1597,7 +1618,10 @@ def test_the_frames_are_stacked_in_one_strip_and_read_back_as_their_screens(
     for index, (frame, expected) in enumerate(
         zip(frames, rendered.timeline.frames, strict=True)
     ):
-        assert frame.get("transform") == f"translate({rc.PAD_X} {index * pitch + rc.PAD_Y})"
+        assert (
+            frame.get("transform")
+            == f"translate({rc.PAD_X} {index * pitch + rc.PAD_Y})"
+        )
         assert frame_lines(frame, rows, rc, 40, 8) == expected.screen.lines()
     # One viewport the size of one frame clips the strip.
     viewports = [e for e in root.iter(SVG + "svg") if strips[0] in list(e)]
@@ -1646,7 +1670,7 @@ def test_the_strip_steps_between_frames_at_each_frames_time_and_ends_on_the_post
     assert "a" in tokens(strip)
     # The attribute is the poster; the animation overrides it while it runs.
     offset = -poster * pitch
-    assert strip.get("transform") == f"translate(0 {offset if offset else 0})"
+    assert strip.get("transform") == f"translate(0 {offset or 0})"
 
 
 def test_reduced_motion_turns_the_animation_off_and_leaves_the_poster(rendered):
@@ -1736,9 +1760,9 @@ def test_the_poster_is_the_frame_the_storyboard_names(rc, core):
         frames[rendered.timeline.poster_frame], stored_rows(rendered.root), rc, 40, 8
     )
     assert animated == expected
-    assert [text.text for text in poster.iter(SVG + "text") if "cap" in tokens(text)] == [
-        "Scan the project"
-    ]
+    assert [
+        text.text for text in poster.iter(SVG + "text") if "cap" in tokens(text)
+    ] == ["Scan the project"]
 
 
 def test_the_poster_is_static(rendered):
@@ -1826,7 +1850,9 @@ def test_styles_reach_the_svg_as_classes_colors_and_blocks(rc, core):
 
 
 def test_the_256_color_cube_and_the_gray_ramp_follow_xterm(rc, core):
-    text = f"{ESC}[38;5;16mA{ESC}[38;5;231mB{ESC}[38;5;232mC{ESC}[38;5;255mD{ESC}[0m\r\n"
+    text = (
+        f"{ESC}[38;5;16mA{ESC}[38;5;231mB{ESC}[38;5;232mC{ESC}[38;5;255mD{ESC}[0m\r\n"
+    )
     rendered = render_recording(rc, recording_with_output(core, text))
     colors = dict(re.findall(r"\.(c\d+)\{fill:(#[0-9a-f]{6})\}", rendered.css))
     root = rendered.root
@@ -1899,9 +1925,7 @@ def test_the_terminal_theme_is_the_design_system_palette_with_a_fixed_rest(rc, c
     assert len(set(theme.palette)) == 16
 
 
-def test_a_change_to_the_design_system_palette_reaches_the_svg(
-    rc, core, monkeypatch
-):
+def test_a_change_to_the_design_system_palette_reaches_the_svg(rc, core, monkeypatch):
     monkeypatch.setitem(COLORS, "error", "#123456")
     monkeypatch.setitem(COLORS, "background", "#0a0b0c")
     rendered = render_recording(
@@ -1933,7 +1957,9 @@ def live_refresh_chunks(count: int, height: int = 26, width: int = 100) -> list[
         vertical_overflow="visible",
     ) as live:
         for step in range(count):
-            log = [*log, f"scanner {step}: [green]ok[/green] [dim]{step * 7}[/dim]"][-12:]
+            log = [*log, f"scanner {step}: [green]ok[/green] [dim]{step * 7}[/dim]"][
+                -12:
+            ]
             live.update(make_layout(log, step * 100 // count), refresh=True)
             data = buffer.getvalue()
             chunks.append(data[mark:])
@@ -1948,7 +1974,8 @@ def busy_recording(core, refreshes: int = 40) -> Recording:
     runs["scan"] = core.SceneRun(
         "ash scan",
         tuple(
-            core.RawChunk(0.1 * (index + 1), chunk) for index, chunk in enumerate(chunks)
+            core.RawChunk(0.1 * (index + 1), chunk)
+            for index, chunk in enumerate(chunks)
         ),
     )
     return build_recording(core, storyboard_data(cols=100, rows=30), runs)
@@ -2075,7 +2102,9 @@ def test_check_fails_when_an_output_file_is_missing_and_creates_nothing(
     assert not paths["poster"].exists()
 
 
-def test_a_missing_input_exits_2_and_names_the_file(rc, core, recording, tmp_path, capsys):
+def test_a_missing_input_exits_2_and_names_the_file(
+    rc, core, recording, tmp_path, capsys
+):
     paths = write_inputs(core, recording, tmp_path)
     paths["cast"] = tmp_path / "nope.cast"
     assert rc.main(cli_args(paths)) == 2

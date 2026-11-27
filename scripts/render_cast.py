@@ -120,7 +120,9 @@ TAB_WIDTH = 8
 MAX_CSI_LENGTH = 64
 MAX_OSC_LENGTH = 4096
 
-FONT_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
+FONT_STACK = (
+    'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
+)
 CAPTION_FONT_STACK = (
     'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif'
 )
@@ -639,7 +641,9 @@ class Emulator:
             if char == "\\":
                 self._finish_osc(2)
             else:
-                self._refuse("".join(self._buffer), "an escape inside a string sequence")
+                self._refuse(
+                    "".join(self._buffer), "an escape inside a string sequence"
+                )
         elif char == "\x07":
             self._finish_osc(1)
         elif char == _ESC:
@@ -1016,7 +1020,9 @@ def terminal_theme() -> CastTheme:
         for index in range(16)
     )
     return CastTheme(
-        fg=colors["foreground"].lower(), bg=colors["background"].lower(), palette=palette
+        fg=colors["foreground"].lower(),
+        bg=colors["background"].lower(),
+        palette=palette,
     )
 
 
@@ -1119,7 +1125,11 @@ def _analyze_row(
         style = cell.style
         color, block = _resolve(style, theme)
         if block is not None:
-            if blocks and blocks[-1][2] == block and blocks[-1][0] + blocks[-1][1] == col:
+            if (
+                blocks
+                and blocks[-1][2] == block
+                and blocks[-1][0] + blocks[-1][1] == col
+            ):
                 blocks[-1][1] += width
             else:
                 blocks.append([col, width, block])
@@ -1138,7 +1148,13 @@ def _analyze_row(
             if on
         )
         look = (color, flags)
-        if current is not None and not wide and not current[4] and current[3] == look and gap <= 1:
+        if (
+            current is not None
+            and not wide
+            and not current[4]
+            and current[3] == look
+            and gap <= 1
+        ):
             current[1] += " " * gap + cell.text
             current[2] += gap + width
         else:
@@ -1165,7 +1181,9 @@ def _row_markup(
             f'height="{LINE_HEIGHT}" class="{classes[color]}"/>'
         )
     for run in runs:
-        names = ([classes[run.color]] if run.color is not None else []) + list(run.flags)
+        names = ([classes[run.color]] if run.color is not None else []) + list(
+            run.flags
+        )
         attribute = f' class="{" ".join(names)}"' if names else ""
         parts.append(
             f'<text x="{run.col * CELL_WIDTH}" y="{BASELINE}" '
@@ -1259,9 +1277,11 @@ def _animation_rules(
     total = timeline.total_ms
     once = storyboard.playback == "once"
     rules = [
-        f".a{{animation-duration:{total}ms;animation-timing-function:step-end;"
-        f"animation-iteration-count:{'1' if once else 'infinite'};"
-        "animation-fill-mode:forwards}",
+        (
+            f".a{{animation-duration:{total}ms;animation-timing-function:step-end;"
+            f"animation-iteration-count:{'1' if once else 'infinite'};"
+            "animation-fill-mode:forwards}"
+        ),
         ".s{animation-name:s}.k{animation-name:k}",
     ]
     rules.extend(
@@ -1303,18 +1323,26 @@ def _animation_rules(
 
 
 def _poster_scene(storyboard: Storyboard) -> int:
-    return [scene.scene_id for scene in storyboard.scenes].index(storyboard.poster_scene)
+    return [scene.scene_id for scene in storyboard.scenes].index(
+        storyboard.poster_scene
+    )
 
 
 def _stylesheet(look: _Look, classes: Mapping[str, str], extra: Sequence[str]) -> str:
     theme = look.theme
     rules = [
-        f"text{{font-family:{FONT_STACK};font-size:{FONT_SIZE}px;"
-        f"fill:{theme.fg};white-space:pre}}",
-        f".cap{{font-family:{CAPTION_FONT_STACK};font-size:{CAPTION_SIZE}px;"
-        f"fill:{look.muted}}}",
-        ".b{font-weight:700}.i{font-style:italic}.u{text-decoration:underline}"
-        ".d{opacity:.6}",
+        (
+            f"text{{font-family:{FONT_STACK};font-size:{FONT_SIZE}px;"
+            f"fill:{theme.fg};white-space:pre}}"
+        ),
+        (
+            f".cap{{font-family:{CAPTION_FONT_STACK};font-size:{CAPTION_SIZE}px;"
+            f"fill:{look.muted}}}"
+        ),
+        (
+            ".b{font-weight:700}.i{font-style:italic}.u{text-decoration:underline}"
+            ".d{opacity:.6}"
+        ),
         f".w,.v{{fill:{theme.bg}}}.h{{fill:{look.surface}}}.l{{fill:{look.border}}}",
         f".x1{{fill:{look.close}}}.x2{{fill:{look.minimize}}}.x3{{fill:{look.zoom}}}",
     ]
@@ -1382,7 +1410,9 @@ def _animated_svg(
     pitch = rows * LINE_HEIGHT + 2 * PAD_Y
     height = CHROME_HEIGHT + pitch
     store = _Rows(look.theme)
-    covered = {reveal.frame: (number, reveal) for number, reveal in enumerate(timeline.reveals)}
+    covered = {
+        reveal.frame: (number, reveal) for number, reveal in enumerate(timeline.reveals)
+    }
     frames = []
     for index, frame in enumerate(timeline.frames):
         cover = ""
@@ -1413,11 +1443,15 @@ def _animated_svg(
         *store.markup(classes),
         "</defs>",
         *_window(width, height),
-        f'<svg x="0" y="0" width="{width}" height="{CHROME_HEIGHT}">'
-        f'<g class="a k" transform="translate(0 {-poster_scene * CHROME_HEIGHT})">'
-        f"{captions}</g></svg>",
-        f'<svg x="0" y="{CHROME_HEIGHT}" width="{width}" height="{pitch}">'
-        f'<rect class="w" width="{width}" height="{pitch}"/>',
+        (
+            f'<svg x="0" y="0" width="{width}" height="{CHROME_HEIGHT}">'
+            f'<g class="a k" transform="translate(0 {-poster_scene * CHROME_HEIGHT})">'
+            f"{captions}</g></svg>"
+        ),
+        (
+            f'<svg x="0" y="{CHROME_HEIGHT}" width="{width}" height="{pitch}">'
+            f'<rect class="w" width="{width}" height="{pitch}"/>'
+        ),
         f'<g class="a s" transform="translate(0 {-timeline.poster_frame * pitch})">',
         *frames,
         "</g>",
@@ -1549,7 +1583,9 @@ def main(argv: list[str] | None = None) -> int:
     record_path = (
         Path(args.record) if args.record else cast_dir / f"{RECORDING_NAME}.record.json"
     )
-    storyboard_path = Path(args.storyboard) if args.storyboard else root / STORYBOARD_PATH
+    storyboard_path = (
+        Path(args.storyboard) if args.storyboard else root / STORYBOARD_PATH
+    )
     svg_path = Path(args.svg) if args.svg else cast_dir / f"{RECORDING_NAME}.svg"
     poster_path = (
         Path(args.poster) if args.poster else cast_dir / f"{RECORDING_NAME}-poster.svg"
