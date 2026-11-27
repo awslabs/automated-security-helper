@@ -1880,3 +1880,43 @@ def test_ash_dependencies_install_drops_a_uv_path_inside_the_source_tree(
     # Controls: the operator's own values reach uv.
     assert child.get("UV_CONSTRAINT") == operator
     assert child.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
+
+
+@pytest.mark.parametrize(
+    ("command", "shell"),
+    [
+        pytest.param(["uv tool install bandit"], True, id="uv-in-a-shell-line"),
+        pytest.param(["make", "install"], False, id="another-program"),
+        pytest.param([sys.executable, "-c", "pass"], False, id="python-code"),
+    ],
+)
+@pytest.mark.unit
+def test_every_command_ash_dependencies_install_runs_drops_a_uv_path_in_the_tree(
+    command, shell, tree, tmp_path, monkeypatch
+):
+    # A command declared as one shell line can name uv, and a script or another
+    # program can start uv in turn. Only uv reads these variables, so every command
+    # the install starts goes without the ones that name a path in the source tree.
+    from automated_security_helper.cli import dependencies
+
+    started = []
+
+    def run_cmd(args, **kwargs):
+        started.append(kwargs.get("env"))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess_utils, "run_command", run_cmd)
+    monkeypatch.chdir(tree)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    monkeypatch.setenv("UV_FIND_LINKS", str(tree / "wheels"))
+    operator = str(tmp_path / "operator" / "constraints.txt")
+    monkeypatch.setenv("UV_CONSTRAINT", operator)
+    monkeypatch.setenv("UV_INDEX_URL", "https://mirror.invalid/simple")
+    assert dependencies.run_command(list(command), shell=shell) == 0
+    [env] = started
+    child = _effective(env)
+    for name in ("UV_CONFIG_FILE", "UV_FIND_LINKS", "UV_ENV_FILE"):
+        assert name not in child, name
+    # Controls: the operator's own values are passed on.
+    assert child.get("UV_CONSTRAINT") == operator
+    assert child.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
