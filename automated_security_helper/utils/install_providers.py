@@ -1170,12 +1170,23 @@ def in_tree_path_refusal(
     is untrusted: a flag that points the installer at a file the tree can supply
     (a forced binary, a virtualenv whose interpreter the install commands
     execute) must refuse it, or the flag becomes the way around that refusal.
-    Judged on realpaths, the way the scan-time in-tree refusal judges a lookup.
+
+    A path is inside when its real path is the tree's real path or below it,
+    compared as text, or when the tree is that real path or one of its parents
+    by device and inode (``scanned_tree._has_ancestor_file``, the identity test a
+    scan applies to the real path of a path it finds). So the tree named in
+    another letter case on a case-insensitive volume, or reached through a bind
+    mount, is inside. A filesystem that reports no inode numbers is judged by the
+    text compare alone, and a path that does not exist yet by its nearest parent
+    that does. A path written inside the tree through a link whose target is
+    outside it is judged by that target, while a scan (``is_inside_tree``) also
+    judges it as written.
     """
     from automated_security_helper.utils.subprocess_utils import (
         ALLOW_IN_TREE_TOOLS_ENV,
         parse_allow_in_tree_tools,
     )
+    from automated_security_helper.utils.scanned_tree import _has_ancestor_file
 
     if source_dir is None:
         return None
@@ -1185,6 +1196,17 @@ def in_tree_path_refusal(
         ) == os.path.realpath(source_dir)
     except ValueError:
         inside = False
+    if not inside:
+        # Another spelling of the tree: a real path keeps the letter case of every
+        # component that is not a link, so the tree named in another case on a
+        # case-insensitive volume, or reached through a bind mount, has a real path
+        # that is not under the tree's as text. A scan also asks whether the tree is
+        # the path or one of its parents by device and inode, and so does this. A
+        # path no operating system call takes (a NUL character) is outside.
+        try:
+            inside = _has_ancestor_file(Path(os.path.realpath(path)), source_dir)
+        except ValueError:
+            inside = False
     if not inside:
         return None
     # The ONE reading of the opt-in (``parse_allow_in_tree_tools``), shared with
