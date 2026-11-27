@@ -218,7 +218,8 @@
   the warning does not show the value. Some spellings that name the tree without lying
   under it as written count as the tree's. On POSIX systems, a path through
   `/proc/self`, `/proc/thread-self` or `/dev/fd` is the tree's, with a run of leading
-  slashes read as one (`//proc/self/cwd/uv.toml`), because what such a path names
+  slashes read as one (`//proc/self/cwd/uv.toml`) and even with a `..` component
+  in it (`/proc/self/cwd/../../src/uv.toml`), because what such a path names
   depends on the process that opens it. On macOS, a path that differs from the tree's
   only in letter case or in Unicode normalization form is the tree's, as the volume
   reads it. On Windows, a `\\?\` or `\\?\UNC\` prefix is removed from a path

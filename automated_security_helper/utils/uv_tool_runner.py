@@ -361,13 +361,22 @@ def _reads_the_opening_process(path: str, pathmod: Any) -> bool:
     """Whether the POSIX path ``path`` is, or lies below, one of the spellings through
     which a process opens something of its own (``_PROCESS_RELATIVE_PATHS``).
 
-    It is read as the system reads it: a ``.`` or ``..`` is taken out first, and a run
-    of leading slashes is one slash (Python's ``normpath`` keeps exactly two, which
-    Linux reads as one), so ``//proc/self/cwd/x`` is ``/proc/self/cwd/x``.
+    Any such spelling that holds a ``..`` component is the opening process's path, as
+    ``/proc/self/cwd/../../x`` is: the system resolves the ``..`` from the directory
+    the link names, which is the opening process's own, where taking it out first would
+    read ``/proc/x``. So the path is judged as written: a ``.`` is taken out and a run
+    of slashes is one slash (Python's ``normpath`` keeps exactly two at the start,
+    which Linux reads as one), so ``//proc/./self/cwd/x`` is ``/proc/self/cwd/x``, but
+    every ``..`` stays. It is judged again with its ``..`` taken out, so a path that
+    reaches one of the spellings by a ``..`` (``/tmp/../proc/self/cwd/x``) is the
+    opening process's too.
     """
-    spelled = "/" + pathmod.normpath(path).lstrip("/")
+    parts = [part for part in path.split("/") if part not in ("", ".")]
+    as_written = "/" + "/".join(parts)
+    without_dotdots = "/" + pathmod.normpath(path).lstrip("/")
     return any(
         spelled == prefix or spelled.startswith(prefix + "/")
+        for spelled in (as_written, without_dotdots)
         for prefix in _PROCESS_RELATIVE_PATHS
     )
 
