@@ -50,7 +50,11 @@ from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
 )
-from automated_security_helper.config.spellings import fold_written_spellings
+from automated_security_helper.config.spellings import (
+    SpellingRefused,
+    fold_written_spellings,
+    refuse_removed_spellings,
+)
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
@@ -833,6 +837,18 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
                 f"Failed to apply the config override for '{key_path}': "
                 f"{type(e).__name__}"
             ) from e
+
+    # The dump holds the canonical spelling only, so an old spelling of a key in
+    # it is one an override wrote. The models read a removed spelling at every
+    # release, so it is refused here, naming the override keys and the place, and
+    # no value.
+    try:
+        refuse_removed_spellings(config_dict, "config override")
+    except SpellingRefused as refused:
+        raise ASHConfigValidationError(
+            "Configuration is invalid after applying the requested overrides for "
+            f"{', '.join(repr(key) for key in keys)}: {refused.located}"
+        ) from None
 
     # Convert back to AshConfig. An entry warn mode kept at load (an unknown
     # suppression key under fail_on_unknown_keys: false) still carries its key

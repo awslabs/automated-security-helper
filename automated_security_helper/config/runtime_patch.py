@@ -83,7 +83,11 @@ from automated_security_helper.config.patch_ops import (
     NODE_EDITING_OPS,
     VALUE_WRITING_OPS,
 )
-from automated_security_helper.config.spellings import canonical_segments
+from automated_security_helper.config.spellings import (
+    SpellingRefused,
+    canonical_segments,
+    refuse_removed_spellings,
+)
 from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -1586,6 +1590,7 @@ def apply_runtime_patch(
     _refuse_a_malformed_op(patch_ops)
     _refuse_a_key_read_from_the_environment(base, patch_ops)
     check_runtime_ops(patch_ops, allowlist=allowlist, config=base)
+    _refuse_a_removed_spelling(patch_ops)
     patch_ops, _ = _without_turn_offs(patch_ops, base)
 
     # One op at a time, in order, as jsonpatch applies a patch, so a refusal can
@@ -1707,6 +1712,27 @@ def _refuse_a_malformed_op(patch_ops: List[Dict[str, Any]]) -> None:
             or ("path" in op and not isinstance(op["path"], str))
         ):
             raise RuntimePatchDeniedError(op, MALFORMED_OP_REFUSAL)
+
+
+def _refuse_a_removed_spelling(patch_ops: List[Dict[str, Any]]) -> None:
+    """Refuse an op that writes the old spelling of a key the running release no
+    longer reads, in its path, its ``from`` or its value.
+
+    A patch is applied to the configuration as dumped by field name, which holds
+    the canonical spelling only, and the models read a removed spelling at every
+    release, so this is what refuses it (``spellings.refuse_removed_spellings``).
+    The ops are only read: before the removal release nothing is refused here and
+    nothing changes, so a pointer in the old spelling still fails to apply and a
+    value in it is still read as the canonical key. The refusal names the op and
+    the keys, never a value.
+    """
+    from automated_security_helper.config.config_sources import PATCH_KEY
+
+    for op in patch_ops:
+        try:
+            refuse_removed_spellings({PATCH_KEY: [op]}, "runtime patch")
+        except SpellingRefused as refused:
+            raise RuntimePatchDeniedError(op, refused.detail) from None
 
 
 #: The refusal of an op whose path goes into a text setting's characters.

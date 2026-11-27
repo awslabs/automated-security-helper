@@ -17,16 +17,20 @@ direction. Every reader now reads the rows below instead:
   spelling, and the file is refused at the release that removes the old one;
 * a ``patch`` operation is part of its file: its pointers and its values are
   folded with the keys;
+* a reader that builds a configuration from a document it does not fold (a
+  runtime patch, a profile's ``override_yaml``, a config override) checks it with
+  :func:`refuse_removed_spellings`;
 * a runtime-patch denial matches both spellings of a renamed key
   (:func:`canonical_segments`);
 * lint reads the rows and the places that hold their model
   (:func:`entry_places`), and every reader that pairs a top-level field with the
   keys it is written under reads :func:`field_spellings`.
 
-A row's old spellings are read by the loader until ``removed_in`` and refused
-from that release on (:func:`is_removed`). A stored results file is a record of
-the run that wrote it and loads at every release, so the model-level rule never
-gates a stored config.
+A row's old spellings are read until ``removed_in`` and refused from that release
+on (:func:`is_removed`), by the loader's fold of a file and by
+:func:`refuse_removed_spellings` in the readers above. The models read them at
+every release and refuse none: an entry built in code keeps loading, and so does
+a stored results file, a record of the run that wrote it.
 
 No message here carries a value. A value can be read from the environment, so
 every message names files, places in the document, and keys.
@@ -216,14 +220,22 @@ class SpellingRefused(ValueError):
     the log handlers) shows it once, and a name escaped here first would be shown
     twice, each escape's backslash doubled
     (``config_sources.describe_config_path`` says the same of every path it names).
+
+    A reader whose document is no file (a runtime patch, an override) words its
+    own refusal from ``place`` and ``detail``, or from ``located``.
     """
 
     def __init__(self, source: str, place: str, detail: str) -> None:
         self.source = source
         self.place = place
         self.detail = detail
-        where = f"{place}: " if place else ""
-        super().__init__(f"Config {source}: {where}{detail}")
+        super().__init__(f"Config {source}: {self.located}")
+
+    @property
+    def located(self) -> str:
+        """The refusal without the file: the place in the document, then the
+        detail."""
+        return f"{self.place}: {self.detail}" if self.place else self.detail
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +540,10 @@ class _Fold:
 
     Checked (``source`` given), it says each old spelling it renames, refuses one
     past its removal release and a file that writes both spellings with different
-    values. Unchecked, it renames and nothing else, keeping the canonical key
+    values. Checked with ``removal_only``, it refuses an old spelling past its
+    removal release and does nothing else: no warning, no line, no refusal of
+    both spellings, so a reader that goes on to use the document as it is can
+    check it. Unchecked, it renames and nothing else, keeping the canonical key
     where both are written: the view of a file as it was written (its
     environment references) pairs with the folded data key for key.
     """
@@ -538,10 +553,12 @@ class _Fold:
         root: type[BaseModel],
         source: Optional[str] = None,
         version: Optional[str] = None,
+        removal_only: bool = False,
     ) -> None:
         self.root = root
         self.source = source
         self.version = version
+        self.removal_only = removal_only
         self.lines: Dict[Tuple[str, str, str], str] = {}
 
     # -- the document ------------------------------------------------------
@@ -619,6 +636,8 @@ class _Fold:
             return
         if row.status(self.version) == "removed":
             raise SpellingRefused(self.source, place, removal_message(row, old))
+        if self.removal_only:
+            return
         message = deprecation_message(row, old)
         warnings.warn(message, DeprecationWarning)
         self.lines.setdefault(
@@ -635,7 +654,11 @@ class _Fold:
                 (canonical if key == old else key): value
                 for key, value in mapping.items()
             }
-        if self.source is not None and mapping[old] != mapping[canonical]:
+        if (
+            self.source is not None
+            and not self.removal_only
+            and mapping[old] != mapping[canonical]
+        ):
             raise SpellingRefused(self.source, place, disagreement_message(row, old))
         return {key: value for key, value in mapping.items() if key != old}
 
@@ -752,6 +775,33 @@ def fold_written_spellings(
     return _Fold(model if model is not None else _root_model()).document(document)
 
 
+def refuse_removed_spellings(
+    document: Any,
+    source: str,
+    *,
+    model: Optional[type[BaseModel]] = None,
+    version: Optional[str] = None,
+) -> None:
+    """Raise :class:`SpellingRefused` when ``document`` writes the old spelling of
+    a row removed at ``version`` (the running release when None): as a key, in a
+    ``patch`` pointer or in an operation's value. Return None otherwise.
+
+    For a reader that builds a configuration from a document it does not fold: a
+    runtime patch, a profile's ``override_yaml``, a config override. The models
+    read an old spelling at every release and refuse none, so such a reader
+    refuses a removed one here, naming the place and the keys and no value. It
+    only checks. ``document`` is not changed and the reader goes on with it as it
+    is, so nothing is said for a spelling that is still live, and a document that
+    writes both spellings is left to the models, which refuse it.
+    """
+    _Fold(
+        model if model is not None else _root_model(),
+        source,
+        version,
+        removal_only=True,
+    ).document(document)
+
+
 # ---------------------------------------------------------------------------
 # The rule of a model built without the loader
 # ---------------------------------------------------------------------------
@@ -768,12 +818,16 @@ def check_spellings(model: type[BaseModel], data: Any, info: ValidationInfo) -> 
     equal duplicate drops the old key, different values record a note and keep the
     data, and nothing is said or gated, so a results file loads at every release.
 
-    A live config says the deprecation (a ``DeprecationWarning`` and, where the
-    load collects them, a line), refuses the old spelling at the row's removal
-    release, drops an old key equal to the canonical one, refuses different
-    values, and otherwise renames the old key where it stood. A file the loader
-    read has been folded already, so this meets only what was built from a
-    mapping directly: a model validated in code, an override.
+    A config built from a mapping says the deprecation while the row is live (a
+    ``DeprecationWarning`` and, where the load collects them, a line), drops an
+    old key equal to the canonical one, refuses different values, and otherwise
+    renames the old key where it stood. From the row's removal release it does
+    the same and says nothing: the model reads an old spelling at every release
+    and refuses none, so an entry built in code keeps loading, and what refuses a
+    removed spelling is a reader of a document (the loader's fold, and
+    :func:`refuse_removed_spellings`). A file the loader read has been folded
+    already, so this meets only what was built from a mapping directly: a model
+    validated in code, an override.
 
     The deprecation is a Python warning and not an ``ASH_LOGGER`` line because
     entries are validated wherever a config or an override is read, so a logger
@@ -801,14 +855,15 @@ def check_spellings(model: type[BaseModel], data: Any, info: ValidationInfo) -> 
                 else:
                     notes.append(disagreement_note(row, old))
                 continue
-            if row.status() == "removed":
-                raise ValueError(removal_message(row, old))
-            message = deprecation_message(row, old)
-            warnings.warn(message, DeprecationWarning)
-            warned = warned_notes(info)
-            if warned is not None:
-                kind = getattr(model, "ENTRY_KIND", None) or model.__name__
-                warned.append(f"In {kind}: {message}")
+            # A removed row's old spelling is no deprecation any more: it is
+            # renamed below and nothing is said.
+            if row.status() != "removed":
+                message = deprecation_message(row, old)
+                warnings.warn(message, DeprecationWarning)
+                warned = warned_notes(info)
+                if warned is not None:
+                    kind = getattr(model, "ENTRY_KIND", None) or model.__name__
+                    warned.append(f"In {kind}: {message}")
             if row.canonical not in data:
                 data = {
                     (row.canonical if key == old else key): value

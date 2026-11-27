@@ -6964,6 +6964,18 @@ def _select_profile(
                 ),
             }
         try:
+            # The models read a removed spelling of a key at every release, so
+            # the client's document is checked for one here. Places and keys
+            # only: the response goes to the client.
+            spellings.refuse_removed_spellings(raw or {}, "override_yaml")
+        except spellings.SpellingRefused as refused:
+            return {
+                "success": False,
+                "error": raw_controls_on_one_line(
+                    f"override_yaml validation error: {refused.located}"
+                ),
+            }
+        try:
             override_cfg = AshConfig.model_validate(raw or {}, strict=True)
         except _ValidationError as exc:
             # error_text: each entry of errors() holds the refused input, and
