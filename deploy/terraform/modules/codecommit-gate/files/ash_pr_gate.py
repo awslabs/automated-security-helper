@@ -197,14 +197,30 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: not.
 #:
 #: Presentation and diagnostic flags are deliberately absent, so an operator keeps the
-#: extra args they have a real use for: --offline, --output-formats and its aliases,
-#: --strategy, --cleanup, --inspect, --verbose, --debug, --quiet, --log-level,
-#: --progress, --color, --show-summary, --simple, --compact-report. --offline was
-#: checked rather than assumed: it does not drop the npm/pnpm/yarn audit scanners, it
-#: passes `--offline` through to the tool and keeps going, so those scanners still run
-#: and still report a status the completeness gate covers. --ignore-suppressions is
-#: absent for the same kind of reason -- it makes suppressed findings actionable, so
-#: it can only report more, and its negation is ASH's own default.
+#: extra args they have a real use for: --output-formats and its aliases, --strategy,
+#: --cleanup, --inspect, --verbose, --debug, --quiet, --log-level, --progress, --color,
+#: --show-summary, --simple, --compact-report. --ignore-suppressions is absent for the
+#: same kind of reason -- it makes suppressed findings actionable, so it can only report
+#: more, and its negation is ASH's own default.
+#:
+#: --offline and --honor-ignore-files are present, with their negations, although
+#: each looks like a harmless toggle. Both were once left to the operator on a reading
+#: that did not hold against the code:
+#:   - --honor-ignore-files and --no-honor-ignore-files. `ash scan` turns either one
+#:     into a --config-overrides entry (honor_ignore_files=true or =false), and an
+#:     override outranks the config this gate passes with --config. So extra args
+#:     could set the operator's honor_ignore_files value either way, and a pull
+#:     request's own .gitignore and .ignore files could then leave content out of the
+#:     scan set of the scanners that read them (detect-secrets among them). The gate
+#:     refuses --config-overrides itself, which reaches the same key.
+#:   - --offline and --no-offline. --offline sets ASH_OFFLINE for the scan, and the
+#:     scanners then change what they run: the grep-based scanners drop a registry
+#:     ruleset and use the rules baked into the image instead, and trivy leaves out
+#:     its Terraform checks. This gate decides offline mode itself, through
+#:     ash_offline_mode (which sets ASH_OFFLINE) and the seeded scanner caches, so
+#:     extra args do not get a second vote. Offline does not keep npm-audit running
+#:     either: it does not run offline, and reports MISSING when the scan has
+#:     lockfiles and SKIPPED when it has none.
 #:
 #: Every spelling ASH accepts is listed, enumerated from the real click command rather
 #: than derived by hand, because a near-miss reads like a closed hole and is not one.
@@ -215,6 +231,15 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: --no-fail-on-incomplete leaves the parameter at its default. The --opt=value form
 #: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
 #: options that take a value, --min-severity among them.
+#:
+#: The set itself is a literal, so it can fall behind the CLI. One test in
+#: tests/unit/deploy/test_codecommit_gate_fails_closed.py closes that:
+#: test_every_option_ash_scan_declares_is_decided reads every spelling off the real
+#: click command and requires each to be either in this set (or
+#: GATE_OWNED_SHORT_OPTIONS) or in that file's _PASSTHROUGH_OPTIONS table with the
+#: reason it cannot change what is scanned or the exit code. The prose above names the
+#: kinds of option left to the operator; that table is the list, and an option ASH
+#: adds fails the test until someone decides which side it is on.
 GATE_OWNED_SCAN_OPTIONS = frozenset(
     {
         # Passed by this gate, so a repeat here would resolve last and win.
@@ -231,6 +256,12 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # scanners.
         "--scanners",
         "--exclude-scanners",
+        # --only-scanners states the whole selection, and --add-scanners means what
+        # --scanners means: in the local mode this gate scans in, with no
+        # default_scanners.only in the config, the scanners it names are the whole
+        # selection too.
+        "--only-scanners",
+        "--add-scanners",
         "--python-only",
         "--python-based-scanners-only",
         "--python-based-plugins-only",
@@ -249,6 +280,14 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # one name, and --config-overrides reaches the same settings key by key.
         "--config",
         "--config-overrides",
+        # The flag spelling of the content-database staleness settings, which
+        # --config-overrides also reaches. With --allow-stale-content-db, a clean scan
+        # against a database older than its declared bound exits 0 instead of 1, and
+        # exit 0 is the outcome this gate reads as a pass. The negation overrides the
+        # config's staleness settings for every database. Either choice belongs in the
+        # base config, in its content_db_staleness settings.
+        "--allow-stale-content-db",
+        "--no-allow-stale-content-db",
         # Skip the scan phase, or answer from a results file rather than from a scan.
         # --use-existing fails closed today only because `clone_source` clears
         # WORK_ROOT on every invocation, so the file it would read cannot exist -- an
@@ -261,6 +300,55 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         # history, so --base-ref has real refs to point at.
         "--changed-files-only",
         "--base-ref",
+        # End `ash scan` with exit 0 before any scanner starts, which is the outcome
+        # this gate reads as "pass". check_completeness_flag's own `ash scan --help`
+        # probe is a separate command, built here and never from the extra args.
+        "--help",
+        "--version",
+        "--generate-cli-skeleton",
+        # Read parameter values from a JSON document, which can supply any parameter
+        # the command line does not set apart from hidden ones, --express and the
+        # options click handles itself. So a document can set the scanner selection
+        # the way --only-scanners does.
+        "--cli-json-input",
+        # Report only findings that are not in a saved results file: the reports, the
+        # summary and the exit code count only new findings, the same mechanism
+        # --changed-files-only is refused for.
+        "--baseline",
+        # Hidden options container mode passes to the scan inside the container, and
+        # which an operator has no use for in extra args. --ash-config-from-host is set
+        # as ASH_CONFIG, so the file it names is the BASE configuration the scan reads
+        # beneath this gate's own --config: the same hole --config and
+        # --config-overrides are reserved for, since a base holding
+        # default_scanners.only, ignore_paths or suppressions narrows the scan. The
+        # other three mark which files of the config chain the scanned repository
+        # wrote or that sit in another checkout, which changes how that chain is
+        # trusted.
+        "--ash-config-from-host",
+        "--config-from-scanned-repository",
+        "--config-file-from-scanned-repository",
+        "--config-file-from-another-checkout",
+        # Lets scanners and other tools found inside the scanned directory, which is the
+        # pull request's clone, run. Off by default so that such a tool is treated as
+        # missing; nothing here can know that the Lambda's tool lookup never reaches
+        # the clone, so the gate does not let extra args turn it on.
+        "--allow-in-tree-tools",
+        # --ash-plugin-modules imports Python modules that hold scanners, reporters or
+        # event subscribers, which can change what a scan reports.
+        "--ash-plugin-modules",
+        # Names the semgrep rule sets for offline mode, and in `ash scan` only the
+        # container-mode path reads it, so in the local mode this gate scans in it has
+        # no effect of its own. It is reserved with --offline, which it belongs to, so
+        # that the pair is decided in one place and cannot start to matter unnoticed.
+        "--offline-semgrep-rulesets",
+        # Operator-owned scan settings. Each spelling is turned into a
+        # --config-overrides entry or into ASH_OFFLINE, and either route outranks what
+        # this gate configures; see the paragraph above on --offline and
+        # --honor-ignore-files. Both polarities, for the same reason as above.
+        "--honor-ignore-files",
+        "--no-honor-ignore-files",
+        "--offline",
+        "--no-offline",
     }
 )
 

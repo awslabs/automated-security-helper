@@ -168,6 +168,51 @@
 
 ### Fixes
 
+- **The Terraform CodeCommit gate reserves more `ash scan` options in
+  `ash_scan_extra_args`.** `--only-scanners` and `--add-scanners` join `--scanners`,
+  because the gate's completeness check covers only the scanners that were selected,
+  so the gate decides the selection: `--only-scanners` states the whole selection,
+  and `--add-scanners` means what `--scanners` means, so in the local mode the gate
+  scans in, with no `default_scanners.only` in the base config, the scanners it names
+  are the whole selection. `--cli-json-input` is reserved because the JSON document it
+  reads can supply any option the command line leaves unset, apart from hidden
+  options, `--express` and the options click handles itself, so a document can set
+  the selection the way `--only-scanners` does. `--help`, `--version` and
+  `--generate-cli-skeleton` are reserved because each ends `ash scan` with exit 0
+  before any scanner starts, and exit 0 is the gate's pass outcome.
+  `--allow-stale-content-db` and `--no-allow-stale-content-db` are reserved like
+  `--config-overrides`, which reaches the same staleness settings: with the first, a
+  clean scan against a content database older than its declared bound passes instead
+  of failing. Set `content_db_staleness` in the base config to make that choice. A
+  deployment that sets one of these options in `ash_scan_extra_args` reports an error
+  on every pull request until it is removed. A unit test reads every `ash scan`
+  option and fails when one is neither reserved by the gate nor listed with the reason
+  it cannot narrow a scan.
+- **The Terraform CodeCommit gate also reserves the options that replace the base
+  configuration, load code, or leave findings out of the verdict.** `--ash-config-from-host`
+  sets the base configuration under the gate's own `--config`, so a base holding
+  `default_scanners.only` or suppressions narrowed the scan; it is reserved with the
+  three other options container mode passes to the scan inside it
+  (`--config-from-scanned-repository`, `--config-file-from-scanned-repository` and
+  `--config-file-from-another-checkout`). `--baseline` is reserved because the reports
+  and the exit code then count only findings not in the saved results file;
+  `--allow-in-tree-tools` because it lets tools found in the pull request's clone run;
+  and `--ash-plugin-modules` because it loads plugin code. `--offline-semgrep-rulesets`
+  is reserved with `--offline`: it is read only on the container-mode path, so it has
+  no effect of its own in the local mode the gate scans in. `--honor-ignore-files`,
+  `--no-honor-ignore-files`, `--offline` and `--no-offline` are reserved as well.
+  `ash scan` turns either `honor-ignore-files` spelling into a configuration override,
+  which outranks the configuration the gate passes, so extra args could change what the
+  scanners that read a pull request's ignore files see. `--offline` sets
+  `ASH_OFFLINE`, which makes some scanners drop a registry ruleset for the baked one
+  and trivy leave out its Terraform checks; the gate decides offline mode through
+  `ash_offline_mode`. A deployment that sets one of them in
+  `ash_scan_extra_args` reports an error on every pull request until it is removed. The
+  two drift tests that guessed which options matter are replaced by one that reads
+  every option `ash scan` declares and requires each to be reserved or listed with the
+  reason it cannot change what is scanned or the exit code, so an option ASH adds fails
+  the test until someone decides.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

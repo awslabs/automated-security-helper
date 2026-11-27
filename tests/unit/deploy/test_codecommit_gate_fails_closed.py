@@ -170,7 +170,7 @@ def test_the_flag_is_not_switchable_by_configuration(gate, monkeypatch, tmp_path
     it is named after.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
-    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--verbose")
 
     gate.run_scan(tmp_path / "src", "low", True)
 
@@ -213,7 +213,7 @@ def test_a_refusal_names_the_offending_token(gate, monkeypatch, tmp_path):
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
     monkeypatch.setenv(
-        "ASH_SCAN_EXTRA_ARGS", "--offline --no-fail-on-incomplete-scanners"
+        "ASH_SCAN_EXTRA_ARGS", "--verbose --no-fail-on-incomplete-scanners"
     )
 
     with pytest.raises(RuntimeError) as excinfo:
@@ -286,16 +286,40 @@ def test_no_gate_owned_option_can_be_set_from_extra_args(
 #: SKIPPED is on the completeness allowlist.
 #:
 #: The value in each pair is one that would do damage, not a placeholder, and
-#: ``test_a_reserved_option_would_really_have_narrowed_the_scan`` resolves these same values
-#: through the real CLI. Without that, a typo in the frozenset would leave this table green
-#: while the hole stayed open: the refusal would fire on a spelling ASH does not accept, and
-#: the spelling ASH does accept would sail past.
+#: ``test_a_reserved_option_would_really_have_narrowed_the_scan`` resolves the same value
+#: through the real CLI for the pairs in its own table, which is not this one. A pair
+#: here whose value names a file that does not exist is resolved by a different test, and
+#: must not be added to that table: ``--cli-json-input``'s ``selection.json`` by
+#: ``test_a_cli_json_input_document_would_really_have_set_the_selection``, which writes a
+#: document of the same kind, and ``--baseline``, ``--ash-config-from-host`` and the
+#: values of the hidden container options by no resolver at all, because their refusal
+#: does not depend on the value. What keeps a typo in the frozenset from leaving this
+#: table green while the hole stays open is
+#: ``test_every_option_ash_scan_declares_is_decided``, which reads every spelling off the
+#: real click command.
 _NARROWING_OPTIONS_WITH_VALUES = [
     ("--scanners", "bandit", "scans one scanner and reports the other nine as SKIPPED"),
     (
         "--exclude-scanners",
         "semgrep",
         "drops a scanner the completeness gate would otherwise have covered",
+    ),
+    (
+        "--only-scanners",
+        "bandit",
+        (
+            "states the whole selection: bandit runs and every other scanner is "
+            "recorded SKIPPED"
+        ),
+    ),
+    (
+        "--add-scanners",
+        "bandit",
+        (
+            "means what --scanners means: in a mode with no default set, such as the "
+            "local mode the gate scans in, and with no default_scanners.only in the "
+            "config, the scanners it names are the whole selection"
+        ),
     ),
     (
         "--mode",
@@ -328,6 +352,45 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "HEAD~1",
         "filters findings to one commit's diff before the exit code is computed",
     ),
+    (
+        "--cli-json-input",
+        "selection.json",
+        "the document it names can set the scanner selection, as --only-scanners does",
+    ),
+    (
+        "--baseline",
+        "main-results.json",
+        "leaves findings already in a saved results file out of the reports and the exit code",
+    ),
+    (
+        "--ash-config-from-host",
+        "base.yaml",
+        "becomes ASH_CONFIG, the base configuration the scan reads beneath the gate's --config",
+    ),
+    (
+        "--config-file-from-scanned-repository",
+        "ash.yaml",
+        "container plumbing that marks how a config file is trusted; no use in extra args",
+    ),
+    (
+        "--config-file-from-another-checkout",
+        "ash.yaml",
+        "container plumbing that marks how a config file is trusted; no use in extra args",
+    ),
+    (
+        "--ash-plugin-modules",
+        "some_module",
+        "imports a module of plugins and subscribers that can change what is reported",
+    ),
+    (
+        "--offline-semgrep-rulesets",
+        "p/none",
+        (
+            "names semgrep's rule sets for offline mode and is read only on the "
+            "container-mode path, so it has no effect of its own in local mode; "
+            "reserved with --offline"
+        ),
+    ),
 ]
 
 #: The same class, spelled as flags that take no value. ``--full`` and its aliases are ASH's
@@ -335,6 +398,14 @@ _NARROWING_OPTIONS_WITH_VALUES = [
 #: already refuses a redundant ``--fail-on-incomplete-scanners``, which is that accepting the
 #: harmless polarity establishes this variable as the place the setting gets chosen, and the
 #: next edit to it is the harmful one.
+#:
+#: ``--allow-stale-content-db`` and its negation set the content-database staleness
+#: settings that ``--config-overrides`` also reaches: with the first, a scan against a
+#: database older than its declared bound passes instead of failing.
+#:
+#: The last three leave nothing scanned: ``--help``, ``--version`` and
+#: ``--generate-cli-skeleton`` each end ``ash scan`` with exit 0 before any
+#: scanner starts, and exit 0 is the outcome this gate reads as a pass.
 _NARROWING_FLAGS = [
     ("--python-only", "narrows to Python-only plugins; the rest are recorded SKIPPED"),
     ("--python-based-scanners-only", "an alias of the same option"),
@@ -345,6 +416,54 @@ _NARROWING_FLAGS = [
     ("--use-existing", "answers from a prior results file instead of scanning"),
     ("--no-use-existing", "the other polarity of the same option"),
     ("--changed-files-only", "drops findings outside a git diff from the verdict"),
+    (
+        "--allow-stale-content-db",
+        "lets a scan against a content database past its declared bound pass",
+    ),
+    (
+        "--no-allow-stale-content-db",
+        "the other polarity, which overrides the config's staleness settings",
+    ),
+    (
+        "--honor-ignore-files",
+        (
+            "becomes a config override that outranks the gate's --config, so extra "
+            "args could set the operator's honor_ignore_files value"
+        ),
+    ),
+    (
+        "--no-honor-ignore-files",
+        (
+            "the other polarity, a config override of the same kind, so extra args "
+            "could set the operator's honor_ignore_files value to false"
+        ),
+    ),
+    (
+        "--offline",
+        (
+            "sets ASH_OFFLINE: grep-based scanners swap a registry ruleset for the "
+            "baked cache and trivy drops its Terraform checks; the gate decides "
+            "offline mode through ash_offline_mode"
+        ),
+    ),
+    (
+        "--no-offline",
+        "the other polarity, refused so the pair is decided in one place",
+    ),
+    (
+        "--config-from-scanned-repository",
+        "container plumbing that marks how the config is trusted; no use in extra args",
+    ),
+    (
+        "--allow-in-tree-tools",
+        "lets tools found inside the pull request's clone run instead of reading missing",
+    ),
+    ("--help", "prints the help and exits 0 before any scanner runs"),
+    ("--version", "prints the version and exits 0 before any scanner runs"),
+    (
+        "--generate-cli-skeleton",
+        "prints a --cli-json-input template and exits 0 before any scanner runs",
+    ),
 ]
 
 
@@ -400,6 +519,39 @@ def test_no_reserved_flag_can_be_set_from_extra_args(
         gate.run_scan(tmp_path / "src", "low", True)
 
     assert not captured, f"{flag} was honored: {why}"
+
+
+@pytest.mark.parametrize(
+    "extra, offending",
+    [
+        ("--honor-ignore-files", "--honor-ignore-files"),
+        ("--no-honor-ignore-files", "--no-honor-ignore-files"),
+        ("--verbose --honor-ignore-files", "--honor-ignore-files"),
+        ("--offline", "--offline"),
+        ("--no-offline", "--no-offline"),
+        ("--output-formats html --offline", "--offline"),
+    ],
+)
+def test_the_operator_owned_scan_settings_are_refused_like_the_other_reserved_options(
+    gate, monkeypatch, tmp_path, extra, offending
+):
+    """--honor-ignore-files and --offline, with their negations, are refused.
+
+    ``ash scan`` turns the first pair into a ``--config-overrides`` entry, which outranks the
+    ``--config`` this gate passes, and ``--offline`` sets ``ASH_OFFLINE``, which swaps rulesets
+    and drops checks in some scanners. Both were once passed through on reasons that did not
+    hold against the code. The refusal is the same as for every other reserved option: a
+    RuntimeError naming the token and the variable, and no scan.
+    """
+    captured = _capture_argv(gate, monkeypatch, tmp_path)
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", extra)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    message = str(excinfo.value)
+    assert offending in message and "ASH_SCAN_EXTRA_ARGS" in message, message
+    assert not captured, f"{extra} reached the scan: {captured}"
 
 
 @pytest.mark.parametrize(
@@ -486,9 +638,13 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     from automated_security_helper.cli.main import app
 
     scan_command = typer.main.get_command(app).commands["scan"]
+    # get_params, not params: click adds its help option there, and --help is a
+    # spelling the gate reserves. Resilient parsing, under which the eager
+    # callbacks return without printing or exiting.
+    ctx = scan_command.make_context("scan", [], resilient_parsing=True)
     declared = {
         spelling
-        for param in scan_command.params
+        for param in scan_command.get_params(ctx)
         for spelling in (*param.opts, *param.secondary_opts)
     }
     gate_module = _load_gate()
@@ -502,17 +658,206 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
     )
 
 
+_CONTAINER_MODE_ONLY = (
+    "a container-mode option: ash scan reads it to build or run the container, and "
+    "this gate's --mode is reserved, so the gate always scans in local mode where it "
+    "has no part in what is scanned or the exit code"
+)
+
+_PRESENTATION = (
+    "changes how output is written or how much of it, and is not an input to which "
+    "findings count or to the exit code"
+)
+
+#: Every spelling ``ash scan`` declares that the gate leaves to ASH_SCAN_EXTRA_ARGS, with
+#: the reason it cannot change what is scanned or the exit code. A spelling is either
+#: here or in ``GATE_OWNED_SCAN_OPTIONS`` / ``GATE_OWNED_SHORT_OPTIONS``, never both and
+#: never neither: ``test_every_option_ash_scan_declares_is_decided`` holds that, so an
+#: option ASH adds fails CI until it is placed. A reason is a claim about the CLI at the
+#: time of writing; read the option's help text in ``cli/scan.py`` before relying on it.
+_PASSTHROUGH_OPTIONS = {
+    # Output and diagnostics, listed in the gate module as deliberately absent.
+    "--format": _PRESENTATION,
+    "--formats": _PRESENTATION,
+    "--output-format": _PRESENTATION,
+    "--output-formats": _PRESENTATION,
+    "-f": _PRESENTATION,
+    "--progress": _PRESENTATION,
+    "--no-progress": _PRESENTATION,
+    "-p": _PRESENTATION,
+    "-P": _PRESENTATION,
+    "--cleanup": "removes the work directory after the scan; the verdict is already computed",
+    "--no-cleanup": "keeps the work directory after the scan; the verdict is already computed",
+    "--inspect": _PRESENTATION,
+    "--no-inspect": _PRESENTATION,
+    "--verbose": _PRESENTATION,
+    "-v": _PRESENTATION,
+    "--debug": _PRESENTATION,
+    "-d": _PRESENTATION,
+    "--quiet": _PRESENTATION,
+    "--no-quiet": _PRESENTATION,
+    "--log-level": _PRESENTATION,
+    "--color": _PRESENTATION,
+    "--no-color": _PRESENTATION,
+    "--show-summary": _PRESENTATION,
+    "--no-show-summary": _PRESENTATION,
+    "--simple": _PRESENTATION,
+    "--no-simple": _PRESENTATION,
+    "--compact-report": _PRESENTATION,
+    "--annotate-duplicates": (
+        "adds columns to the CSV and flat-JSON reports; rows, counts, suppressions and "
+        "baselines are unchanged"
+    ),
+    "--fold-duplicates": (
+        "shows one row per duplicate cluster in the human-readable reports and adds "
+        "deduplicated counts beside the per-scanner counts; findings are not dropped"
+    ),
+    "--strategy": "runs the selected scanners in parallel or in sequence; the selection is unchanged",
+    "--ignore-suppressions": (
+        "makes suppressed findings actionable, so it can only report more findings"
+    ),
+    "--no-ignore-suppressions": "ASH's own default",
+    "--sandbox": (
+        "runs scanner subprocesses in an OS sandbox, and a scanner whose sandbox cannot "
+        "be set up is graded as refused or missing, which the completeness gate covers; "
+        "it cannot select fewer scanners"
+    ),
+    "--express": (
+        "chooses between the resident daemon and a cold in-process run of the same "
+        "scan, which ASH already picks by itself when its socket exists"
+    ),
+    "--no-express": "forces the cold in-process run of the same scan",
+    "--require-scanner-selection": (
+        "hidden; container mode passes it to the scan it starts, and it only refuses "
+        "a scan whose settled default_scanners differs from the JSON document it is "
+        "given, or a document it cannot read, so it can stop a scan but cannot narrow "
+        "one"
+    ),
+    "--staged": (
+        "ash scan refuses it outside --mode precommit (_refuse_staged_outside_precommit_mode), "
+        "and --mode is reserved"
+    ),
+    # Replace the source directory or need workspace mode, and the gate always passes
+    # --source-dir.
+    "--workspace": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    "--workspace-config": "the policy file of a workspace scan, which --workspace is reserved against",
+    "--allow-missing-projects": "workspace mode only, and a workspace scan is not reachable",
+    "--dry-run": "workspace mode only, and a workspace scan is not reachable",
+    "--image": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    "--image-archive": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    "--image-layout": "exclusive with --source-dir, which the gate always passes, so ASH refuses it",
+    # Container-mode options.
+    "--build": _CONTAINER_MODE_ONLY,
+    "--no-build": _CONTAINER_MODE_ONLY,
+    "-b": _CONTAINER_MODE_ONLY,
+    "-B": _CONTAINER_MODE_ONLY,
+    "--run": _CONTAINER_MODE_ONLY,
+    "--no-run": _CONTAINER_MODE_ONLY,
+    "-r": _CONTAINER_MODE_ONLY,
+    "-R": _CONTAINER_MODE_ONLY,
+    "--force": _CONTAINER_MODE_ONLY,
+    "--oci": _CONTAINER_MODE_ONLY,
+    "--oci-runner": _CONTAINER_MODE_ONLY,
+    "--runner": _CONTAINER_MODE_ONLY,
+    "-o": _CONTAINER_MODE_ONLY,
+    "--build-target": _CONTAINER_MODE_ONLY,
+    "--container-uid": _CONTAINER_MODE_ONLY,
+    "-u": _CONTAINER_MODE_ONLY,
+    "--container-gid": _CONTAINER_MODE_ONLY,
+    "-g": _CONTAINER_MODE_ONLY,
+    "--ash-revision-to-install": _CONTAINER_MODE_ONLY,
+    "--custom-containerfile": _CONTAINER_MODE_ONLY,
+    "--custom-build-arg": _CONTAINER_MODE_ONLY,
+}
+
+
+def test_every_option_ash_scan_declares_is_decided():
+    """Every spelling ``ash scan`` declares is reserved by the gate or listed here.
+
+    ``GATE_OWNED_SCAN_OPTIONS`` is a literal while the CLI keeps growing. Two earlier
+    tests tried to catch a new option by a heuristic, one on a spelling that names
+    scanners and one on ``expose_value=False``, and each missed whole classes
+    (``--ash-config-from-host``, ``--baseline`` and ``--allow-in-tree-tools`` among
+    them). This one has no heuristic: every spelling that
+    ``scan_command.get_params(ctx)`` returns, hidden options and the other half of a
+    boolean pair included, must be in the gate's reserved set or in
+    ``_PASSTHROUGH_OPTIONS`` with the reason it cannot change what is scanned or the
+    exit code. An option ASH adds therefore fails this test until someone decides
+    which side it belongs on.
+    """
+    import typer.main
+
+    from automated_security_helper.cli.main import app
+
+    scan_command = typer.main.get_command(app).commands["scan"]
+    # Resilient parsing, under which the eager callbacks return without acting.
+    ctx = scan_command.make_context("scan", [], resilient_parsing=True)
+    declared = {
+        spelling
+        for param in scan_command.get_params(ctx)
+        for spelling in (*param.opts, *param.secondary_opts)
+    }
+
+    # Controls on the enumeration itself: a rule that read nothing would pass every
+    # check below. It has to find options of each kind this test exists for.
+    for spelling in (
+        "--scanners",
+        "--help",
+        "--cli-json-input",
+        "--ash-config-from-host",
+        "--no-allow-stale-content-db",
+        "--baseline",
+        "--allow-in-tree-tools",
+    ):
+        assert spelling in declared, f"the enumeration missed {spelling}"
+
+    gate_module = _load_gate()
+    reserved = (
+        gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
+    )
+    passthrough = set(_PASSTHROUGH_OPTIONS)
+
+    undecided = sorted(declared - reserved - passthrough)
+    assert not undecided, (
+        "ash scan declares these options and the gate neither reserves them nor "
+        f"lists them in _PASSTHROUGH_OPTIONS: {undecided}. Decide each one: add it to "
+        "GATE_OWNED_SCAN_OPTIONS if it can change what is scanned or the exit code, "
+        "or to _PASSTHROUGH_OPTIONS with the reason it cannot."
+    )
+
+    both = sorted(reserved & passthrough)
+    assert not both, f"these spellings are both reserved and passed through: {both}"
+
+    stale = sorted(passthrough - declared)
+    assert not stale, (
+        f"these passthrough entries name no option ash scan declares: {stale}"
+    )
+
+    for spelling, reason in _PASSTHROUGH_OPTIONS.items():
+        assert reason.strip(), f"{spelling} is passed through with no reason"
+
+
 @pytest.mark.parametrize(
     "argv_tail, parameter, expected",
     [
         (["--scanners", "bandit"], "scanners", ("bandit",)),
         (["--exclude-scanners", "semgrep"], "exclude_scanners", ("semgrep",)),
+        (["--only-scanners", "bandit"], "only_scanners", ("bandit",)),
+        (["--only-scanners=bandit"], "only_scanners", ("bandit",)),
+        (["--add-scanners", "bandit"], "add_scanners", ("bandit",)),
+        (["--add-scanners=bandit"], "add_scanners", ("bandit",)),
         (["--python-only"], "python_based_plugins_only", True),
         (["--changed-files-only"], "changed_files_only", True),
         (["--base-ref", "HEAD~1"], "base_ref", "HEAD~1"),
         (["--shard-index", "0"], "shard_index", 0),
         (["--shard-count", "4"], "shard_count", 4),
         (["--use-existing"], "use_existing", True),
+        (["--honor-ignore-files"], "honor_ignore_files", True),
+        (["--no-honor-ignore-files"], "honor_ignore_files", False),
+        (["--offline"], "offline", True),
+        (["--allow-stale-content-db"], "allow_stale_content_db", True),
+        (["--no-allow-stale-content-db"], "allow_stale_content_db", False),
+        (["--version"], "version", True),
         (["--config", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
         (["-c/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
@@ -544,26 +889,94 @@ def test_a_reserved_option_would_really_have_narrowed_the_scan(
     )
 
 
+@pytest.mark.parametrize("flag", ["--help", "--generate-cli-skeleton"])
+def test_an_eager_reserved_flag_would_have_ended_the_scan_with_exit_0(flag):
+    """The positive control for the two eager flags in ``_NARROWING_FLAGS``.
+
+    ``click`` runs an eager option's callback while it parses, so resolving the command
+    line is enough to see it end the command: each raises ``Exit(0)`` before the scan
+    function is called, and exit 0 is the outcome this gate reads as a pass.
+    ``--version`` is not eager; its row in the table above resolves it, and
+    ``run_ash_scan_cli_command`` exits 0 on it before starting anything.
+    """
+    import typer
+
+    # typer vendors click, so the parse raises typer's Exit, not the click package's.
+    with pytest.raises(typer.Exit) as excinfo:
+        _resolve_scan_params(["ash", "scan", flag])
+
+    assert excinfo.value.exit_code == 0, (
+        f"{flag} ended the command with {excinfo.value.exit_code}, not 0"
+    )
+
+
+@pytest.mark.parametrize("form", ["space", "equals"])
+def test_a_cli_json_input_document_would_really_have_set_the_selection(tmp_path, form):
+    """The positive control for ``--cli-json-input`` in the refusal table.
+
+    Its value has to name a real document, so it is resolved here rather than in the
+    table above. A document that sets ``only_scanners`` decides the selection the same
+    way ``--only-scanners`` does, which is why the option is reserved: the gate passes
+    no selection of its own for the command line to win with.
+    """
+    document = tmp_path / "selection.json"
+    document.write_text('{"only_scanners": ["bandit"]}\n', encoding="utf-8")
+    if form == "space":
+        tail = ["--cli-json-input", str(document)]
+    else:
+        tail = [f"--cli-json-input={document}"]
+
+    params = _resolve_scan_params(["ash", "scan", *tail])
+
+    assert tuple(params["only_scanners"]) == ("bandit",), params["only_scanners"]
+
+
+@pytest.mark.parametrize(
+    "flag, policy",
+    [("--allow-stale-content-db", "warn"), ("--no-allow-stale-content-db", "fail")],
+)
+def test_the_staleness_flag_would_really_have_set_the_policy(flag, policy):
+    """The positive control for the two staleness flags in ``_NARROWING_FLAGS``.
+
+    ``run_ash_scan_cli_command`` turns the parameter either flag resolves to into
+    ``--config-overrides`` entries through ``content_db_staleness_flag_overrides``,
+    and these are the entries it adds. With ``--allow-stale-content-db`` the policy
+    is "warn", so a database past its bound no longer fails the scan. The negation
+    sets "fail" and empties the per-database exceptions, so it overrides whatever
+    the config chose.
+    """
+    from automated_security_helper.utils.content_databases import (
+        STALENESS_CONFIG_FIELD,
+        STALENESS_OVERRIDES_CONFIG_FIELD,
+        content_db_staleness_flag_overrides,
+    )
+
+    params = _resolve_scan_params(["ash", "scan", flag])
+    overrides = content_db_staleness_flag_overrides(
+        allow_stale=params["allow_stale_content_db"]
+    )
+
+    assert f"{STALENESS_CONFIG_FIELD}={policy}" in overrides, overrides
+    assert f"{STALENESS_OVERRIDES_CONFIG_FIELD}=[]" in overrides, overrides
+
+
 def test_a_benign_extra_arg_is_still_passed_through(gate, monkeypatch, tmp_path):
     """The guard rejects the options the gate reserves, not extra args in general.
 
     The extras here were chosen for being unable to narrow the verdict, which
     ``--scanners bandit`` -- what this test used to offer as its example of a benign arg -- is
-    not. ``--offline`` does not drop the npm/pnpm/yarn audit scanners; it passes ``--offline``
-    through to the tool and keeps going, so each of them still runs and still reports a status
-    that ``--fail-on-incomplete-scanners`` covers. ``--output-formats`` decides which report
-    files get written and is read by nothing that computes the exit code.
-
-    An operator whose Lambda has no egress needs ``--offline``, so a guard that refused it
-    would fail closed on a correct deployment.
+    not, and neither is ``--offline``, which this test once offered: it changes which rules and
+    checks some scanners run, so the gate reserves it. ``--verbose`` and ``--output-formats``
+    decide how much is printed and which report files get written, and are read by nothing
+    that computes the exit code.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
-    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline --output-formats html")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--verbose --output-formats html")
 
     gate.run_scan(tmp_path / "src", "low", True)
 
     argv = captured[0]
-    assert "--offline" in argv and "--output-formats" in argv and "html" in argv, argv
+    assert "--verbose" in argv and "--output-formats" in argv and "html" in argv, argv
 
 
 def test_the_gates_own_options_are_resolved_last(gate, monkeypatch, tmp_path):
@@ -579,12 +992,12 @@ def test_the_gates_own_options_are_resolved_last(gate, monkeypatch, tmp_path):
     gate passes no ``--scanners`` of its own for the ordering to favour.
     """
     captured = _capture_argv(gate, monkeypatch, tmp_path)
-    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--offline --output-formats html")
+    monkeypatch.setenv("ASH_SCAN_EXTRA_ARGS", "--verbose --output-formats html")
 
     gate.run_scan(tmp_path / "src", "medium", False)
 
     argv = captured[0]
-    last_extra = max(argv.index("--offline"), argv.index("html"))
+    last_extra = max(argv.index("--verbose"), argv.index("html"))
     for owned in (
         "--source-dir",
         "--output-dir",
