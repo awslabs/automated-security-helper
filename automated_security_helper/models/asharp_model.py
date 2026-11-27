@@ -72,6 +72,7 @@ from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.secret_masking import (
     SecretValueShape,
     mask_secrets_in_results,
+    report_secret_rule_ids,
 )
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
@@ -1609,6 +1610,12 @@ class AshAggregatedResults(RecordModel):
         # when there is none).
         sarif = recorded(self.sarif) if self.sarif else self.sarif
         if sarif and sarif.runs:
+            # A scanner can mark a secret finding on its rule alone (trivy tags
+            # its secret rules ``secret`` and writes nothing on the result), so
+            # every result's fallback snippet is classified with the report's
+            # rule ids, read once here as the secret masking reads them; the
+            # secret-detection flag reads each result's own rule.
+            secret_rules = report_secret_rule_ids(sarif)
             for run in sarif.runs:
                 if not run.results:
                     continue
@@ -1629,7 +1636,11 @@ class AshAggregatedResults(RecordModel):
 
                 for result in run.results:
                     flat_vuln = FlatVulnerability.from_sarif_result(
-                        result, tool_name, tool_type, run=run
+                        result,
+                        tool_name,
+                        tool_type,
+                        run=run,
+                        secret_rules=secret_rules,
                     )
                     flat_vulns.append(flat_vuln)
 

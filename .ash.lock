@@ -156,7 +156,7 @@
           "symbol": "mask_secrets_in_sarif_report"
         }
       ],
-      "sha256": "6585f8d5439168a9f1c6d8535979c75cbce83dbf8c142290d9c5843bc9a071e9"
+      "sha256": "39abbb3521699306774dd536ac20ebbb1ef36b808763531e26d07d2206ca7008"
     },
     "tests/integration/scanners/test_trivy_real_binary.py": {
       "created": "2026-11-25T17:02:48Z",

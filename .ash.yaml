@@ -3695,8 +3695,8 @@ global_settings:
     # bounded in length, so none of these is wider than it has to be.
     - rule_id: B104
       path: automated_security_helper/utils/secret_masking.py
-      line_start: 463
-      line_end: 463
+      line_start: 465
+      line_end: 465
       reason: >-
         False positive. "0.0.0.0" here is a schema-satisfying placeholder in the
         tuple of synthetic replacement values a masked SARIF field can take, not

@@ -87,6 +87,20 @@
   baseline or a suppression keyed by that id needs refreshing. A suppression written
   against the config file's path and lines is not affected. A result that has a line in
   the generated script with no sidecar row is unchanged.
+- **trivy and trivy-repo secret findings are secret detections, so they match a baseline
+  only by exact identity and get `secret/` correlation ids, like other secret
+  detections.** trivy marks a secret finding with the `secret` tag on its rule and
+  nothing on the result. The secret masking and the Bedrock summary reporter read that
+  tag; the flattened findings, which the baseline gate and the correlation ids are built
+  from, now read the tags of the rule each result names in its own scanner's tool
+  component, so a rule another scanner declares under the same id does not decide its
+  flag. A code scanner's finding whose own rule is tagged CWE-798 or CWE-321 (a semgrep
+  or opengrep hard-coded credential rule outside `generic.secrets`, say) is a secret
+  detection the same way. A dependency scanner's finding (SCA or SBOM) is not, whatever
+  CWE it or its rule names. A baseline matches a secret detection only by an exact
+  identity with a fingerprint on both sides, so one whose scanner writes no fingerprint
+  (trivy, and semgrep without a login) is no longer covered by an existing baseline: it
+  is reported again, and recording the baseline again does not change that.
 - **checkov's `all` no longer runs its GitLab, GitHub and Bitbucket configuration
   frameworks.** `frameworks` defaults to `all`, and checkov now leaves
   `gitlab_configuration`, `github_configuration` and `bitbucket_configuration` out of
