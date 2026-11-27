@@ -898,7 +898,7 @@ def test_a_part_the_table_does_not_admit_is_refused_as_before(base, mutate):
     assert _errors_of(ingested.value) == _errors_of(plain.value)
 
 
-def test_the_repairs_made_before_a_refusal_are_kept_and_only_the_remaining_errors_are_raised():
+def test_the_repairs_made_before_a_refusal_are_not_counted_and_only_the_remaining_errors_are_raised():
     doc = copy.deepcopy(_BASES["gitleaks"])
     _region(doc, 0)["startLine"] = 0
     _result(doc, 1).pop("message")
@@ -907,10 +907,9 @@ def test_the_repairs_made_before_a_refusal_are_kept_and_only_the_remaining_error
     with pytest.raises(ValidationError) as refused:
         ingest_sarif(doc, record)
 
-    assert record.repaired == 1
-    assert [e["code"] for e in record.summary()["elements"]] == [
-        "region_line_unreadable"
-    ]
+    # The line-0 region was repaired on the way, and the report was then refused:
+    # nothing the report keeps changed, so the record holds nothing.
+    assert record.is_empty and record.summary() is None
     errors = refused.value.errors(include_input=False)
     assert [tuple(e["loc"]) for e in errors] == [("runs", 0, "results", 1, "message")]
 
@@ -1374,7 +1373,7 @@ def test_a_document_takes_at_most_ten_thousand_changes_then_is_refused():
         with pytest.raises(ValidationError):
             ingest_sarif(doc, record)
 
-    assert record.repaired == 10_000
+    assert record.is_empty
     assert 1 <= validate.call_count <= 9
 
 

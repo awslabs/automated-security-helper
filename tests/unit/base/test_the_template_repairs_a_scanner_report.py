@@ -292,6 +292,9 @@ def _an_overriding_scanner(plugin_context, *, raises: bool):
             self.tool_type = ScannerToolType.SAST
             super().model_post_init(context)
 
+        def _execute_scan(self, target, target_type, global_ignore_paths):
+            raise NotImplementedError
+
         def scan(self, target, target_type, global_ignore_paths=None, **kwargs):
             type(self).found_empty.append(self.output_ingest_record is None)
             self._ingest_record.note("dropped", "unknown_key", ("x",))
