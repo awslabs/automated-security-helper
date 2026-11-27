@@ -96,21 +96,35 @@ def _value(instance, attr: str):
 
 
 def _manifest_cells(plugin) -> tuple[str, str]:
-    """(tier, loads by default) for the summary, both read from the scanner's manifest.
+    """(tier, loads by default) for a scanner, both read from its manifest.
 
     ``tier`` is the maturity the manifest declares and ``default_enabled`` is whether
     the scanner's module loads without ``ash_plugin_modules`` naming it. They are
     separate facts, so an alpha scanner reads "no" here while its ``enabled`` default
-    (the "On once loaded" column) still reads "yes". A scanner with no manifest reads
-    "not determined" in both: "no" would claim it is opt-in.
+    (the "On once loaded" line) still reads "yes". A scanner with no manifest stops
+    the generator and is named: both facts are the manifest's to declare, and a page
+    that printed "not determined", or a guessed "no", would state what nobody did.
     """
     from _plugin_reference import yes_no
     from automated_security_helper.plugin_manifests import manifest_for
 
     manifest = manifest_for(plugin.name)
     if manifest is None:
-        return "not determined", "not determined"
+        raise SystemExit(
+            f"ERROR: the scanner {plugin.name!r} has no manifest in "
+            "automated_security_helper/plugin_manifests/, so its tier and whether "
+            "its module loads by default cannot be written; add one."
+        )
     return manifest.tier.value, yes_no(manifest.default_enabled)
+
+
+def _tier_list(tiers) -> str:
+    """The tier names as code spans, "a, b or c", from the enum itself so that a
+    tier added to it is named without an edit here."""
+    names = [code(tier.value) for tier in tiers]
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " or " + names[-1]
 
 
 def _sandbox(plugin) -> tuple[str, str, str]:
@@ -193,6 +207,7 @@ def generate(docs_root: Path) -> tuple[str, dict]:
         place_env_note,
         yes_no,
     )
+    from automated_security_helper.base.plugin_manifest import PluginTier
 
     plugins = discover("scanner")
     instantiate(plugins)
@@ -243,8 +258,8 @@ def generate(docs_root: Path) -> tuple[str, dict]:
     lines += [
         "",
         (
-            "Tier is the maturity the scanner's manifest declares: `supported`, "
-            "`alpha` or `deprecated`. Tool type is the scanner's own "
+            "Tier is the maturity the scanner's manifest declares: "
+            f"{_tier_list(PluginTier)}. Tool type is the scanner's own "
             "`ScannerToolType`. Loads by default says whether `ash scan` loads the "
             "scanner's plugin module on every scan, as the manifest declares it; "
             "where it says no, `ash scan` runs the scanner only when the "
@@ -271,6 +286,7 @@ def generate(docs_root: Path) -> tuple[str, dict]:
         if description:
             lines += [md_prose(description), ""]
         network, env, env_set = _sandbox(p)
+        tier, loads = _manifest_cells(p)
         facts = []
         page = scanner_page(p, docs_root)
         if page is not None:
@@ -279,7 +295,9 @@ def generate(docs_root: Path) -> tuple[str, dict]:
         facts += [
             ("Class", code(f"{p.cls.__module__}.{p.cls.__name__}")),
             ("Provided by", package_note(p)),
-            ("Enabled by default", yes_no(p.enabled)),
+            ("Tier", tier),
+            ("Loads by default", loads),
+            ("On once loaded", yes_no(p.enabled)),
             ("Tool type", str(_value(inst, "tool_type") or "not determined")),
             (
                 "Command",
