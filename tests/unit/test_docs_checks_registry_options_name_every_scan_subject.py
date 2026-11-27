@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -71,9 +72,14 @@ def _first_names(command) -> set[str]:
 
 
 def _findings(tmp_path: Path, line: str) -> list[str]:
-    """What the CLI check says about one ``ash`` line in a bash block of a page."""
-    root = tmp_path / "repo"
-    (root / "docs").mkdir(parents=True)
+    """What the CLI check says about one ``ash`` line in a bash block of a page.
+
+    Each call builds a repository of its own under ``tmp_path``, so a test that asks
+    about several lines reads only the page for the line it is asking about, with no
+    page left over from an earlier call.
+    """
+    root = Path(tempfile.mkdtemp(prefix="repo-", dir=tmp_path))
+    (root / "docs").mkdir()
     (root / dc.PRE_COMMIT_HOOKS).write_text(
         (REPO_ROOT / dc.PRE_COMMIT_HOOKS).read_text(encoding="utf-8"),
         encoding="utf-8",
