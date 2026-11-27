@@ -41,6 +41,7 @@ registers, or whose refusal cannot be read from its class alone (an override tha
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import os
 import re
@@ -509,6 +510,26 @@ def _refusals(cls: type, name: str) -> dict[str, str | None]:
     return refusals
 
 
+@contextlib.contextmanager
+def _scripts_on_path():
+    """Have scripts/ on ``sys.path`` while the sibling scripts load, then leave it as found.
+
+    The scripts import each other by plain name. This file puts its directory on the path
+    when it loads, but a caller that imported it from somewhere else (a test, the docs
+    gate) may have taken that directory off the path again, so the imports a collector
+    makes when it runs cannot rely on what the path held at load time.
+    """
+    added = str(_SCRIPTS) not in sys.path
+    if added:
+        sys.path.insert(0, str(_SCRIPTS))
+    try:
+        yield
+    finally:
+        if added:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(str(_SCRIPTS))
+
+
 def read_scanner_inputs(docs_root: Path) -> list[ScannerInput]:
     """One ``ScannerInput`` for each scanner manifest, read from the code.
 
@@ -516,6 +537,11 @@ def read_scanner_inputs(docs_root: Path) -> list[ScannerInput]:
     class no plugin package registers is refused, so a manifest cannot publish a row
     for a scanner a scan would never load.
     """
+    with _scripts_on_path():
+        return _read_scanner_inputs(docs_root)
+
+
+def _read_scanner_inputs(docs_root: Path) -> list[ScannerInput]:
     from automated_security_helper import plugin_manifests
     from automated_security_helper.base.plugin_manifest import resolve_ref
     from automated_security_helper.base.scanner_operational_facets import (
