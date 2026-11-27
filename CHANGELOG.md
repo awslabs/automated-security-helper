@@ -173,13 +173,14 @@
   under a path another member holds as a file, an encrypted member, a compression method
   other than stored and deflate, a member whose data is not the size it declares, and a
   file that holds anything besides one zip: bytes before, between or after its members,
-  an end record that does not match the file, or a local header that disagrees with the
-  central directory. A zip that cannot be read is refused in the same words by both, the
-  upload is removed, and the answer names no exception class. The MCP tool descriptions
-  use the 3.9 spellings: `resolve_ash_workspace` and `run_ash_workspace_scan` are the MCP
-  equivalents of `ash scan workspace FILE` (they said `ash --workspace FILE`), and
-  `set_source_zip_finalize` lists what it refuses. Tool names and parameters do not
-  change.
+  an end record that does not match the file (a zip64 locator that places its end record
+  anywhere but where it lies is refused in the same words on every Python), or a local
+  header that disagrees with the central directory. A zip that cannot be read is refused
+  in the same words by both, the upload is removed, and the answer names no exception
+  class. The MCP tool descriptions use the 3.9 spellings: `resolve_ash_workspace` and
+  `run_ash_workspace_scan` are the MCP equivalents of `ash scan workspace FILE` (they
+  said `ash --workspace FILE`), and `set_source_zip_finalize` lists what it refuses. Tool
+  names and parameters do not change.
 - **The AI-DLC `ash-scan` plugin reads `ash --version` before it names a scan.** Its two
   fragments give `ash scan fs ...` for ASH 3.9 and later and `ash scan ...` for an older
   ASH, and their exit-code tables list exit 5 (a command line ASH did not accept), so an
