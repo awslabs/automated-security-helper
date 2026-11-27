@@ -168,7 +168,7 @@ def test_a_crashed_inner_scan_over_a_held_set_exits_non_zero(tmp_path, mode):
 
 
 def test_the_container_host_exit_code_after_an_inner_crash(tmp_path):
-    """Through run_ash_scan(mode=container), as `ash scan --mode container` runs it."""
+    """Through run_ash_scan(mode=container), as `ash scan fs --mode container` runs it."""
     opts = _opts(tmp_path)
     output = opts.output_dir
     _seed(

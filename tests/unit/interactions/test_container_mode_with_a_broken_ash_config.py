@@ -93,10 +93,10 @@ def test_the_cli_envvar_route_refuses_before_the_runner(
             app,
             [
                 "scan",
+                "fs",
+                str(tmp_path / "src"),
                 "--mode",
                 "container",
-                "--source-dir",
-                str(tmp_path / "src"),
                 "--output-dir",
                 str(tmp_path / "out"),
             ],

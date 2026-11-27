@@ -73,26 +73,26 @@ class TestRewriteModeArgs:
         # options: a rebuild drops whatever it forgets to handle.
         argv = [
             "scan",
-            "--source-dir",
+            "fs",
             "/src",
             "--output-dir",
             "/out",
             "--mode",
             "nix",
-            "--scanners",
+            "--add-scanners",
             "bandit",
             "--debug",
         ]
         result = rewrite_mode_args(argv)
         assert result == [
             "scan",
-            "--source-dir",
+            "fs",
             "/src",
             "--output-dir",
             "/out",
             "--mode",
             "local",
-            "--scanners",
+            "--add-scanners",
             "bandit",
             "--debug",
             "--no-show-summary",

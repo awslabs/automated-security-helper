@@ -52,7 +52,7 @@ def test_an_option_variable_of_the_host_does_not_reach_an_argv_built_scan(
 ):
     monkeypatch.setenv(name, "from-the-host")
 
-    nix.run_ash_nix(argv=["scan", "--source-dir", "src", "--output-dir", "out"])
+    nix.run_ash_nix(argv=["scan", "fs", "src", "--output-dir", "out"])
 
     assert shell.env is not None
     assert name not in shell.env, (
@@ -78,14 +78,14 @@ def test_the_config_variable_is_kept_for_an_argv_built_scan(shell, monkeypatch):
     inner and outer keep agreeing on it."""
     monkeypatch.setenv("ASH_CONFIG", "/elsewhere/ash.yaml")
 
-    nix.run_ash_nix(argv=["scan", "--source-dir", "src", "--output-dir", "out"])
+    nix.run_ash_nix(argv=["scan", "fs", "src", "--output-dir", "out"])
 
     assert shell.env is not None
     assert shell.env.get("ASH_CONFIG") == "/elsewhere/ash.yaml"
 
 
 def test_the_shells_own_variables_are_still_set(shell):
-    nix.run_ash_nix(argv=["scan", "--source-dir", "src", "--output-dir", "out"])
+    nix.run_ash_nix(argv=["scan", "fs", "src", "--output-dir", "out"])
 
     assert shell.env is not None
     assert shell.env[nix.ASH_IN_NIX_ENV_VAR] == "1"

@@ -4,7 +4,7 @@
 """A workspace scan in container mode marks or refuses a config the repository
 could have written.
 
-A one-directory container scan mounts a config from outside ``--source-dir`` at
+A one-directory container scan mounts a config from outside the scan PATH at
 ``/ash-config`` and, when a local scan would count it as repository-written (it is
 in the scanned tree, or reached through a link that sits there), passes
 ``--config-from-scanned-repository`` so the scan inside limits it. A workspace scan
@@ -246,7 +246,7 @@ def test_the_inner_workspace_scan_accepts_the_mark(monkeypatch, tmp_path):
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace / "ash.code-workspace"),
             "--config",
             str(config),
@@ -279,7 +279,7 @@ def test_the_inner_workspace_scan_needs_a_config_for_the_mark(monkeypatch, tmp_p
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace / "ash.code-workspace"),
             rac.CONFIG_FROM_SCANNED_REPOSITORY_FLAG,
         ],
@@ -472,12 +472,12 @@ def test_the_scan_cli_refuses_a_repository_written_policy_before_clearing_the_ou
         app,
         [
             "scan",
+            "workspace",
+            str(checkout / "ws" / "ash.code-workspace"),
             "--mode",
             "container",
             "--no-build",
             "--no-progress",
-            "--workspace",
-            str(checkout / "ws" / "ash.code-workspace"),
             "--workspace-config",
             str(policy),
             "--output-dir",
@@ -628,12 +628,12 @@ def test_the_scan_cli_refuses_it_before_clearing_the_output(
         app,
         [
             "scan",
+            "workspace",
+            str(checkout / "ws" / "ash.code-workspace"),
             "--mode",
             "container",
             "--no-build",
             "--no-progress",
-            "--workspace",
-            str(checkout / "ws" / "ash.code-workspace"),
             "--config",
             str(config),
             "--output-dir",

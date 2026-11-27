@@ -3,7 +3,7 @@
 
 """Container and nix mode refuse a config file that cannot be used before anything starts.
 
-``ash scan --mode container`` and ``--mode nix`` run a second ASH, inside an image or
+``ash scan fs --mode container`` and ``--mode nix`` run a second ASH, inside an image or
 a Nix shell, and that ASH refuses a config file that does not load with exit 3. It
 did so only after the image was built and started (or the shell entered), and after
 the previous run's output was cleared. Now the host judges the file first, with the
@@ -257,11 +257,11 @@ def _cli(stage: Stage, mode: str, *extra: str, env: Dict[str, str] | None = None
 
     args = [
         "scan",
+        "fs",
+        str(stage.source),
         "--mode",
         mode,
         "--no-progress",
-        "--source-dir",
-        str(stage.source),
         "--output-dir",
         str(stage.output),
         *(["--no-build"] if mode == "container" else []),
@@ -577,12 +577,12 @@ def test_control_container_no_run_builds_without_judging_the_config(stage):
         app,
         [
             "scan",
+            "fs",
+            str(stage.source),
             "--mode",
             "container",
             "--no-progress",
             "--no-run",
-            "--source-dir",
-            str(stage.source),
             "--output-dir",
             str(stage.output),
             "--config",

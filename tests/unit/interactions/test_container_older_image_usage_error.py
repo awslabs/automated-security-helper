@@ -83,7 +83,7 @@ def container(monkeypatch, tmp_path) -> Dict[str, Any]:
 
 def _scan(*args: str):
     return CliRunner().invoke(
-        app, ["scan", "--mode", "container", "--no-build", "--no-progress", *args]
+        app, ["scan", "fs", "--mode", "container", "--no-build", "--no-progress", *args]
     )
 
 
@@ -96,7 +96,6 @@ def test_the_mark_an_older_image_does_not_know(container, tmp_path):
     config.write_text("project_name: p\n", encoding="utf-8")
 
     result = _scan(
-        "--source-dir",
         str(checkout / "svc"),
         "--output-dir",
         str(tmp_path / "out"),
@@ -127,7 +126,6 @@ def test_the_mark_for_a_config_in_another_checkout_an_older_image_does_not_know(
     config.write_text("project_name: p\n", encoding="utf-8")
 
     result = _scan(
-        "--source-dir",
         "src",
         "--output-dir",
         str(tmp_path / "out"),
@@ -147,7 +145,7 @@ def test_the_mark_for_a_config_in_another_checkout_an_older_image_does_not_know(
 def test_any_other_usage_error_inside(container, tmp_path):
     (tmp_path / "src").mkdir()
 
-    result = _scan("--source-dir", "src", "--output-dir", str(tmp_path / "out"))
+    result = _scan("src", "--output-dir", str(tmp_path / "out"))
 
     assert result.exit_code == 3, result.output
     assert "Rebuild the image from this ASH" in _words(result.output)
@@ -159,7 +157,7 @@ def test_success_without_results_is_unchanged(container, tmp_path):
     container["returncode"] = 0
     (tmp_path / "src").mkdir()
 
-    result = _scan("--source-dir", "src", "--output-dir", str(tmp_path / "out"))
+    result = _scan("src", "--output-dir", str(tmp_path / "out"))
 
     assert result.exit_code == 1, result.output
     assert "Results file not found" in _words(result.output)
@@ -182,7 +180,6 @@ def _values(argv, flag):
 def _scan_with(tmp_path, config, *args):
     (tmp_path / "src").mkdir(exist_ok=True)
     return _scan(
-        "--source-dir",
         "src",
         "--output-dir",
         str(tmp_path / "out"),
@@ -304,7 +301,6 @@ def test_ash_config_s_selection_under_a_named_checkout_config_is_required(
     checkout, config = _checkout_with_config(tmp_path, _CHECKOUT_BODIES[body])
 
     result = _scan(
-        "--source-dir",
         str(checkout),
         "--output-dir",
         str(tmp_path / "out"),
@@ -415,7 +411,6 @@ def test_unresolved_operator_selection_is_not_lost_beside_a_checkout_config(
     checkout, config = _checkout_with_config(tmp_path, _CHECKOUT_BODIES["no-section"])
 
     result = _scan(
-        "--source-dir",
         str(checkout),
         "--output-dir",
         str(tmp_path / "out"),

@@ -21,7 +21,7 @@ holding only a refusal is never left for ``--use-existing`` to read as a scan.
 Most tests run the inner local scan in this process, with a stand-in orchestrator
 around the real report phase, so the records are written by the code that writes
 them in production. Some hand the outer process a results file written here, to
-pin how it reads one. The last runs ``ash scan --mode nix`` as a child process,
+pin how it reads one. The last runs ``ash scan fs --mode nix`` as a child process,
 with a stand-in ``nix`` on PATH that runs the inner command directly.
 """
 
@@ -916,7 +916,7 @@ def test_the_container_output_directory_in_a_refusal_is_given_as_the_hosts(tmp_p
 
 
 # --------------------------------------------------------------------------- #
-# ash scan --mode nix, end to end
+# ash scan fs --mode nix, end to end
 # --------------------------------------------------------------------------- #
 
 PLUGIN = textwrap.dedent(
@@ -1005,10 +1005,10 @@ def test_ash_scan_in_nix_mode_exits_1_when_the_inner_run_refuses_a_name(tmp_path
             [
                 str(ASH),
                 "scan",
+                "fs",
+                str(source),
                 "--mode",
                 "nix",
-                "--source-dir",
-                str(source),
                 "--output-dir",
                 str(output),
                 "--use-existing",

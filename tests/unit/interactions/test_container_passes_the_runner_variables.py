@@ -112,9 +112,10 @@ def _ash_run_argv(tmp_path: Path, env: dict[str, str]) -> list[str]:
         [
             "bash",
             str(ASH_SCRIPT),
-            "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source_dir),
+            "--no-build",
             "--output-dir",
             str(tmp_path / "out"),
         ],
@@ -237,7 +238,7 @@ def _given_values(argv: list[str]) -> set[str]:
 
 
 def _container_mode(tmp_path, monkeypatch, env, wrapper, *, build=False):
-    """Run `ash scan --mode container` against a recording runner."""
+    """Run `ash scan fs --mode container` against a recording runner."""
     from typer.testing import CliRunner
 
     from automated_security_helper.cli.main import app
@@ -267,9 +268,9 @@ def _container_mode(tmp_path, monkeypatch, env, wrapper, *, build=False):
     # runner markers, not the config handover.
     operator = tmp_path / "src" / "ash-operator.yaml"
     operator.write_text("project_name: ${ASH_PROBE_VALUE}\n", encoding="utf-8")
-    args = ["scan", "--mode", "container", "--no-progress"]
+    args = ["scan", "fs", "src", "--mode", "container", "--no-progress"]
     args += [] if build else ["--no-build"]
-    args += ["--source-dir", "src", "--output-dir", "out", "--config", str(operator)]
+    args += ["--output-dir", "out", "--config", str(operator)]
     result = CliRunner().invoke(app, args, env={"COLUMNS": "300"})
     return result, out
 
@@ -406,9 +407,10 @@ def _ash_through(
     if wrapper is not None:
         path = _executable(tmp_path / wrapper, WRAPPERS[wrapper])
         given["OCI_RUNNER_WRAPPER"] = str(path)
-    argv = ["bash", str(ASH_SCRIPT)] + ([] if build else ["--no-build"])
+    argv = ["bash", str(ASH_SCRIPT), "scan", "fs", str(source_dir)]
+    argv += [] if build else ["--no-build"]
     argv += ["--debug"] if debug else []
-    argv += ["--source-dir", str(source_dir), "--output-dir", str(tmp_path / "out")]
+    argv += ["--output-dir", str(tmp_path / "out")]
     result = subprocess.run(  # nosec B603 B607 - fixed script path, list args, no shell
         argv,
         capture_output=True,
@@ -465,7 +467,7 @@ WITH_CONTROLS = {
 @needs_the_bash_entrypoint
 @pytest.mark.integration
 def test_the_bash_entrypoint_traces_the_markers_shown_under_debug(tmp_path):
-    """./ash --debug traces its commands. Through a wrapper the run line carries the
+    """./ash scan fs . --debug traces its commands. Through a wrapper the run line carries the
     markers' values, so it is traced as shown: a control in a marker is written out,
     not sent to the terminal. The marker still reaches the container as it is."""
     result, out = _ash_through(

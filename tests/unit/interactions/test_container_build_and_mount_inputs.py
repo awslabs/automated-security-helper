@@ -3,7 +3,7 @@
 
 """What container mode builds, how it mounts the source, and which image stage it runs.
 
-Three properties of the commands ``ash --mode container`` hands to the OCI runner:
+Three properties of the commands ``ash scan fs . --mode container`` hands to the OCI runner:
 
 - The image is built from ASH's own Dockerfile. A pinned revision builds the
   packaged one; a LOCAL revision builds the one at the root of the ASH source tree
@@ -262,18 +262,18 @@ class TestTheImageIsBuiltFromAshsOwnDockerfile:
             pytest.param(
                 [
                     "scan",
+                    "fs",
+                    "src",
                     "--mode",
                     "container",
                     "--no-progress",
                     "--no-run",
-                    "--source-dir",
-                    "src",
                     "--output-dir",
                     "out",
                 ],
                 id="scan",
             ),
-            pytest.param(["build-image", "--no-run"], id="build-image"),
+            pytest.param(["container", "build", "--no-run"], id="build-image"),
         ],
     )
     @pytest.mark.unit
@@ -487,12 +487,12 @@ class TestTheSourceIsMountedReadOnly:
         _invoke_cli(
             [
                 "scan",
+                "fs",
+                "src",
                 "--mode",
                 "container",
                 "--no-progress",
                 "--no-build",
-                "--source-dir",
-                "src",
                 *output_args,
             ]
         )
@@ -645,12 +645,12 @@ class TestTheBuildTargetIsTheOneRequested:
         _invoke_cli(
             [
                 "scan",
+                "fs",
+                "src",
                 "--mode",
                 "container",
                 "--no-progress",
                 "--no-run",
-                "--source-dir",
-                "src",
                 "--output-dir",
                 str(Path("..") / "out"),
                 "--ash-revision-to-install",
@@ -662,13 +662,15 @@ class TestTheBuildTargetIsTheOneRequested:
         assert _flag(_only(commands, "build"), "--target") == "non-root"
 
     def test_the_build_image_cli_builds_non_root_under_ci(self, commands, monkeypatch):
-        """`ash build-image` builds ``non-root`` under CI variables, as the scan does.
+        """`ash container build` builds ``non-root`` under CI variables, as the scan does.
         (A Windows host defaults to ``ci`` for its own documented reason, cli/image.py:
         bind-mounted output is not writable there; the ``commands`` fixture makes the
         host a non-Windows one, and test_container_windows_default_stage.py covers it.)
         """
         monkeypatch.setenv("CI", "true")
 
-        _invoke_cli(["build-image", "--no-run", "--ash-revision-to-install", "v3.7.0"])
+        _invoke_cli(
+            ["container", "build", "--no-run", "--ash-revision-to-install", "v3.7.0"]
+        )
 
         assert _flag(_only(commands, "build"), "--target") == "non-root"

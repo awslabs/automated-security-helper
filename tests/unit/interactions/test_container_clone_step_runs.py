@@ -20,9 +20,9 @@ What this pins:
 * A clone that fails fails the step, prints no LOCAL message and leaves nothing
   behind for ``uv build``.
 * A build whose context is a full
-  checkout (``./ash --ash-revision <rev>`` and the CDK image pipeline's build of
+  checkout (``./ash scan fs . --ash-revision <rev>`` and the CDK image pipeline's build of
   its own clone) holds the tree already, so it is built without cloning.
-  ``ash build-image`` is not
+  ``ash container build`` is not
   one of them: for any revision but LOCAL it builds the Dockerfile packaged with
   ASH, never a checkout in the working directory.
 * A commit id is never fetched by id from the ASH URL: GitHub serves a commit that

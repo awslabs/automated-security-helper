@@ -3,11 +3,11 @@
 
 """A config the scanned repository wrote keeps that standing inside the container.
 
-A local scan treats a config file inside the scanned tree (``--source-dir`` and
+A local scan treats a config file inside the scanned tree (the scan PATH and
 the checkout that holds it, or a link that sits there) as repository-written, and
 limits what it may set (``config/sandbox_grants.repository_written``,
 ``config/plugin_module_trust.py``). Container mode mounts a ``--config`` from
-outside ``--source-dir`` at ``/ash-config``, where the scan inside sees it outside
+outside the scan PATH at ``/ash-config``, where the scan inside sees it outside
 its own tree. The host decides, with the same rule a local scan uses, and tells the
 scan inside with ``--config-from-scanned-repository``, which applies the in-tree
 limits to the config and every file it extends
@@ -217,7 +217,7 @@ class TestTheScanInsideAppliesTheSameLimits:
 
         result = CliRunner().invoke(
             app,
-            ["scan", "--source-dir", str(source), "--config", str(config), FLAG],
+            ["scan", "fs", str(source), "--config", str(config), FLAG],
         )
 
         assert result.exit_code == 0, result.output
@@ -233,9 +233,7 @@ class TestTheScanInsideAppliesTheSameLimits:
         monkeypatch.setattr(scan_cli, "run_ash_scan", lambda **kw: None)
         (tmp_path / "src").mkdir()
 
-        result = CliRunner().invoke(
-            app, ["scan", "--source-dir", str(tmp_path / "src"), FLAG]
-        )
+        result = CliRunner().invoke(app, ["scan", "fs", str(tmp_path / "src"), FLAG])
 
         assert result.exit_code == 3, result.output
         assert FLAG in result.output
@@ -264,7 +262,7 @@ class TestTheScanInsideAppliesTheSameLimits:
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(tmp_path / "src"),
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -326,7 +324,7 @@ class TestTheScanInsideAppliesTheSameLimits:
                 app,
                 [
                     "scan",
-                    "--source-dir",
+                    "fs",
                     str(inner_source),
                     "--config",
                     str(mounted / "ash.yaml"),
@@ -384,7 +382,7 @@ class TestTheScanInsideAppliesTheSameLimits:
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 "--config",
                 str(config),
@@ -429,7 +427,7 @@ class TestTheScanInsideAppliesTheSameLimits:
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 rac.ASH_CONFIG_FROM_HOST_FLAG,
                 str(env),
@@ -467,7 +465,7 @@ class TestTheScanInsideAppliesTheSameLimits:
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(tmp_path / "src"),
                 rac.ASH_CONFIG_FROM_HOST_FLAG,
                 str(env),
@@ -535,12 +533,12 @@ class TestTheScanInsideAppliesTheSameLimits:
             app,
             [
                 "scan",
+                "fs",
+                "src",
                 "--mode",
                 mode,
                 "--no-build",
                 "--no-progress",
-                "--source-dir",
-                "src",
                 "--output-dir",
                 "out",
                 "--config",

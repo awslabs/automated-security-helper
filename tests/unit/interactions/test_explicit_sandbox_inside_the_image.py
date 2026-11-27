@@ -1,17 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Inside the image, an explicit ``ash scan --sandbox <mode>`` is the operator's own.
+"""Inside the image, an explicit ``ash scan fs --sandbox <mode>`` is the operator's own.
 
 Why this file exists
 --------------------
 The wrappers (``./ash``, ``invoke-ash``, ``Invoke-ASH``) give the scan in the image
-``--sandbox off``, and ``ash scan --mode container`` gives its inner scan
+``--sandbox off``, and ``ash scan fs --mode container`` gives its inner scan
 ``sandbox.mode=off``: the container is the boundary
 (tests/unit/test_sandbox_refused_by_every_container_entrypoint.py,
 tests/unit/interactions/test_container_mode_reports_sandbox_not_applied.py).
-Nothing refuses a ``--sandbox <mode>`` that an operator passes to ``ash scan`` run
-directly inside the image, as in ``docker run <image> ash scan --sandbox landlock``.
+Nothing refuses a ``--sandbox <mode>`` that an operator passes to ``ash scan fs`` run
+directly inside the image, as in ``docker run <image> ash scan fs --sandbox landlock``.
 That is the operator's own opt-in, and it keeps working. It fails closed: when the
 backend the operator named cannot run there, each scanner is recorded ERROR, unable
 to start its tool as requested, and none runs unsandboxed.
@@ -83,7 +83,7 @@ def _probe_reports(monkeypatch, reason):
 
 
 def _operators_overrides(tmp_path):
-    """What the CLI hands the scan for ``ash scan --sandbox <MODE>``, scanning nothing."""
+    """What the CLI hands the scan for ``ash scan fs --sandbox <MODE>``, scanning nothing."""
     source = tmp_path / "source"
     source.mkdir(exist_ok=True)
     (source / "app.py").write_text("print('x')\n", encoding="utf-8")
@@ -95,7 +95,7 @@ def _operators_overrides(tmp_path):
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(source),
                 "--output-dir",
                 str(tmp_path / "output"),
