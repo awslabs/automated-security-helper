@@ -2940,6 +2940,25 @@ def _payload_of(source: Union[bytes, Callable[[], bytes]]) -> bytes:
     return source() if callable(source) else source
 
 
+def _recording_extractions(monkeypatch: pytest.MonkeyPatch) -> List[object]:
+    """Note each call that asks zipfile to extract members, in the list returned, and
+    make the call.
+
+    An archive refused before anything is written is never extracted from. The words of
+    a refusal do not say when it was made: a source that refused an archive only as
+    extraction reached its member gives the same words as one that refused it first.
+    """
+    asked: List[object] = []
+    extract = zipfile.ZipFile.extractall
+
+    def recording(self, *args, **kwargs):
+        asked.append(args)
+        return extract(self, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "extractall", recording)
+    return asked
+
+
 #: What zipfile cannot read, or what cannot be read of a member, and the verdict both
 #: entry points reach: the archive (or a function that builds it), the rule, the start
 #: of the words (zipfile's own text follows), whether the refusal is made before
@@ -3010,7 +3029,9 @@ class TestWhatZipfileCannotReadIsRefusedAlikeByBothEntryPoints:
     """``open_zip`` and ``extract_zip_members`` take what zipfile raises through one
     classification, so ``extract_source_archive`` and the finalize refuse each of
     these in the same words, and the finalize removes the upload as it does for every
-    refusal."""
+    refusal. A row that is refused before anything is written is held to that by both:
+    the shared function leaves its destination unmade, and the finalize never asks
+    zipfile to extract."""
 
     @pytest.mark.parametrize("source,kind,start,before_writing,setup", UNREADABLE)
     def test_the_shared_function_refuses_it(
@@ -3032,18 +3053,26 @@ class TestWhatZipfileCannotReadIsRefusedAlikeByBothEntryPoints:
     def test_the_finalize_refuses_it_in_the_same_words(
         self, monkeypatch, tmp_path, source, kind, start, before_writing, setup
     ):
+        """The words do not say when the archive was refused, and the upload is removed
+        either way, so a row that is refused before anything is written also checks
+        that the finalize asked zipfile to extract nothing. A source that refuses a
+        damaged stream only as extraction reaches its member, as it did before rule 9,
+        gives the same verdict and fails there."""
         payload = _payload_of(source)
         if setup is not None:
             setup(monkeypatch)
         shared = _verdict(
             _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "tree")
         )
+        extractions = _recording_extractions(monkeypatch)
 
         delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
 
         assert delivered == shared
         assert delivered[0] is kind
         assert delivered[1].startswith(start)
+        if before_writing:
+            assert extractions == [], "the finalize extracted from a refused archive"
 
 
 class _FailingHandle:
