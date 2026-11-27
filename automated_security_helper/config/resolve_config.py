@@ -1336,7 +1336,7 @@ def _parse_config_value(value: str) -> Any:
 
 def _validated_with_overrides(
     config_dict: Dict[str, Any],
-    applied: List[Tuple[List[str], Any, bool]],
+    applied: List[Tuple[List[str], Any, OverrideOp]],
     raw_values: Sequence[str],
     context: Optional[Dict[str, Any]] = None,
 ) -> AshConfig:

@@ -291,7 +291,7 @@ def override_field_paths(
     ``applied`` is what ``_apply_config_override`` reported: the key segments
     it resolved and wrote to (so a folded spelling counts as the key it
     landed on, which is the spelling ``_sets`` resolves a query to), the
-    parsed value, and whether it appended. A replacing override overwrote the
+    parsed value, and the operator it applied. A replacing override overwrote the
     whole subtree under its key, so the record drops what the file wrote
     under it, which is gone, and takes the string-keyed paths inside the
     parsed value, which are written now. Every prefix is written too, as a
