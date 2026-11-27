@@ -70,16 +70,12 @@ global_settings:
         the same adduser --disabled-password flag that ferret-scan 2.6.1 reads as a
         password token. No secret is present. The copy is byte-identical, so it takes the
         same range.
-    - rule_id: SSN
-      path: docs/content/reference/converters.md
-      reason: >-
-        False positive. The nine-digit numbers are the 256 MiB byte limits in the
-        converter option examples and table, which the detector reads as a social
-        security number. The number is left out of this reason because it would make
-        this file trip the same rule.
     # === Test code and its support files: one entry per rule and file ===
-    # The same entries .ash.yaml holds for the scanners this file runs (bandit,
-    # gitleaks, ferret-scan); detect-secrets is off here, so its rules have none. The
+    # Each bandit and gitleaks entry here is also in .ash.yaml, which runs both of
+    # those scanners too; the ferret-scan entries are only here, because only this
+    # file runs ferret-scan. detect-secrets is off here, so its rules have none.
+    # GuardDog's excluded_paths keep it out of tests/, and hadolint, which lints
+    # Dockerfiles, has needed no entry here. The
     # tests build made-up credentials, fixed temporary paths, wildcard addresses and
     # shell calls on purpose, to check that ASH hides, refuses or confines them. Each
     # entry names one rule and one file, never a directory. The reasons describe the
