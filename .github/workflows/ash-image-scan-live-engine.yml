@@ -39,8 +39,8 @@ name: ASH - Image scan against a live engine and registry
 # read" and resolves nothing, so neither rung runs and the scope stays on the
 # reference text (core/phases/scan_phase.py, utils/scanner_tool_types.py). syft stays
 # in the selection so the job still exercises its engine-delegated image argv.
-# tests/unit/test_live_engine_workflow_selects_a_digest_consumer.py holds the
-# selection to the same function the scan phase asks.
+# tests/unit/utils/test_image_digest_ladder.py holds the selection to the same
+# function the scan phase asks.
 #
 # DETERMINISM
 #
