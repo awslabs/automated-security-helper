@@ -13856,6 +13856,444 @@ def test_trivy_repo_counts_only_an_executable_trivy(
     assert satisfied is (found is not None), (satisfied, found)
 
 
+TRIVY_BUILTIN = "docs/plugins/builtin/trivy.md"
+
+#: How the two pages described trivy-repo's deadline before they matched the code.
+_TRIVY_REPO_NO_TIMEOUT_CLAIMS = (
+    "ASH does not pass `trivy --timeout`",
+    "it gets no `trivy --timeout`",
+)
+
+
+@pytest.mark.parametrize(
+    "scan_timeout,deadline",
+    [
+        pytest.param(60, "60s", id="a-bound"),
+        pytest.param(None, "2562047h", id="unbounded"),
+    ],
+)
+@pytest.mark.unit
+def test_trivy_repo_passes_scan_timeout_as_trivys_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scan_timeout: Optional[int],
+    deadline: str,
+) -> None:
+    """trivy-plugin.md (Configuration Options) and builtin/trivy.md (trivy-repo).
+
+    Both pages say trivy-repo passes ``scan_timeout`` as ``trivy --timeout``, and
+    neither may say the opposite or offer ``TRIVY_TIMEOUT``. The probe runs
+    trivy-repo's ``scan()`` with the trivy process replaced by a double that records
+    its argv, and ``TRIVY_TIMEOUT`` set: the bound must be on the command line once
+    whatever the environment says, since trivy reads a flag over ``TRIVY_<FLAG>``.
+    ``scan_timeout: null`` is trivy's longest duration, because trivy reads ``0s`` as
+    a deadline already passed.
+    """
+    assert_on_page(
+        TRIVY_PLUGIN,
+        "besides killing trivy after that many seconds, ASH passes it as "
+        "`trivy --timeout`",
+    )
+    assert_on_page(TRIVY_PLUGIN, "The flag outranks `TRIVY_TIMEOUT`")
+    assert_on_page(
+        TRIVY_BUILTIN,
+        "ASH's `scan_timeout` as `trivy --timeout` (so trivy's own 5-minute default "
+        "does not apply)",
+    )
+    for page in (TRIVY_PLUGIN, TRIVY_BUILTIN):
+        text = _normalize(_page_text(page))
+        stale = [
+            claim
+            for claim in _TRIVY_REPO_NO_TIMEOUT_CLAIMS
+            if _normalize(claim) in text
+        ]
+        assert not stale, (page, stale)
+    assert "export TRIVY_TIMEOUT" not in _page_text(TRIVY_PLUGIN)
+
+    from unittest.mock import patch
+
+    from automated_security_helper.base import scanner_plugin
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+        TrivyRepoScannerConfig,
+        TrivyRepoScannerConfigOptions,
+    )
+
+    source = tmp_path / "src"
+    output = source / ".ash" / "ash_output"
+    for directory in (source, output, output / "converted"):
+        directory.mkdir(parents=True, exist_ok=True)
+    (source / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=get_default_config(),
+    )
+    # trivy counts as installed without a process: the lookup answers a path, and
+    # the run itself is the double below.
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(
+                module, "find_executable", lambda name: "/opt/trivy/bin/trivy"
+            )
+    for name in ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TRIVY_TIMEOUT", "10m")
+    scanner = TrivyRepoScanner(
+        context=context,
+        config=TrivyRepoScannerConfig(
+            options=TrivyRepoScannerConfigOptions(scan_timeout=scan_timeout)
+        ),
+    )
+    scanner.dependencies_satisfied = True
+    document = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy"}}, "results": []}],
+    }
+    argv: List[str] = []
+
+    def _run(self: Any, command: List[Any], **kwargs: Any) -> Dict[str, Any]:
+        argv[:] = [str(arg) for arg in command]
+        report = Path(command[command.index("--output") + 1])
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps(document), encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    # The double is spec'd on the real _run_subprocess (autospec), so a change to its
+    # signature fails here instead of passing silently.
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+        patch.object(scanner, "_plugin_log"),
+    ):
+        double.side_effect = _run
+        scanner.scan(target=source, target_type="source")
+
+    timeouts = [arg for arg in argv if arg.startswith("--timeout=")]
+    assert timeouts == [f"--timeout={deadline}"], argv
+
+
+_FAQ = "faq.md"
+
+#: How the FAQ and the homepage described trivy-repo and ASH's output directories
+#: before they matched the code.
+_TRIVY_REPO_READS_OUTPUT_DIRS_CLAIMS = ("still reads those directories",)
+
+_OUTPUT_DIRS_ARE_SKIPPED_SENTENCE = (
+    "ASH tells each scanner that can skip a directory to skip the output directories "
+    "it leaves out that hold no committed file (`trivy --skip-dirs` for trivy and "
+    "trivy-repo), and drops the findings a scanner still reports there, except in "
+    "committed files and in the current scan's `converted/` directory."
+)
+
+
+@pytest.mark.unit
+def test_trivy_and_trivy_repo_skip_the_output_directories_that_hold_no_committed_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """faq.md and index.md (the paragraph on ASH's own output).
+
+    Both pages say ASH tells each scanner that can skip a directory to skip the
+    output directories it leaves out that hold no committed file,
+    ``trivy --skip-dirs`` for trivy and trivy-repo alike, and drops what a scanner
+    still reports there, except in committed files and in this scan's ``converted/``
+    directory. Neither may say trivy-repo still reads those directories. The
+    probe builds each scanner's command for a tree whose output directory is inside
+    it. While the scan set holds no file of that directory, it is one
+    ``--skip-dirs`` value; once the scan set holds a committed file there, the
+    directory is no longer skipped whole and ASH's own directories in it are. The
+    drop then removes a result in one of ASH's reports and keeps the one in the
+    committed file.
+    """
+    for page in (_FAQ, _HOMEPAGE):
+        assert_on_page(page, _OUTPUT_DIRS_ARE_SKIPPED_SENTENCE)
+        text = _normalize(_page_text(page))
+        stale = [
+            claim
+            for claim in _TRIVY_REPO_READS_OUTPUT_DIRS_CLAIMS
+            if _normalize(claim) in text
+        ]
+        assert not stale, (page, stale)
+
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from automated_security_helper.base import scanner_plugin
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (
+        TrivyScanner,
+        TrivyScannerConfig,
+        TrivyScannerConfigOptions,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+    )
+    from automated_security_helper.utils import scan_output_dirs
+
+    source = Path(os.path.realpath(tmp_path)) / "src"
+    output = source / ".ash" / "ash_output"
+    committed = output / "keep" / "tracked.py"
+    for directory in (output / "converted", output / "reports", committed.parent):
+        directory.mkdir(parents=True, exist_ok=True)
+    (source / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+    (output / "reports" / "ash.sarif").write_text("{}", encoding="utf-8")
+    committed.write_text("x = 1\n", encoding="utf-8")
+    # trivy counts as installed without a process: the lookup answers a path, and
+    # trivy-repo's run itself is the double in skips() below.
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(
+                module, "find_executable", lambda name: "/opt/trivy/bin/trivy"
+            )
+    for name in (
+        "ASH_OFFLINE",
+        "TRIVY_CONFIG",
+        "TRIVY_IGNOREFILE",
+        "TRIVY_SECRET_CONFIG",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    document = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy"}}, "results": []}],
+    }
+
+    def skips() -> Dict[str, List[str]]:
+        """The ``--skip-dirs`` values of the command each scanner builds for ``source``."""
+        builtin = TrivyScanner(
+            context=PluginContext(
+                source_dir=source,
+                output_dir=output,
+                work_dir=output / "converted",
+                config=AshConfig(),
+            ),
+            config=TrivyScannerConfig(options=TrivyScannerConfigOptions(offline=False)),
+        )
+        final_args, _, _ = builtin._execute_scan(source, "source", [])
+        repo = TrivyRepoScanner(
+            context=PluginContext(
+                source_dir=source,
+                output_dir=output,
+                work_dir=output / "converted",
+                config=get_default_config(),
+            )
+        )
+        repo.dependencies_satisfied = True
+        argv: List[str] = []
+
+        def _run(self: Any, command: List[Any], **kwargs: Any) -> Dict[str, Any]:
+            argv[:] = [str(arg) for arg in command]
+            report = Path(command[command.index("--output") + 1])
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(json.dumps(document), encoding="utf-8")
+            return {"stdout": "", "stderr": "", "returncode": 0}
+
+        # The double is spec'd on the real _run_subprocess (autospec), so a change to
+        # its signature fails here instead of passing silently.
+        with (
+            patch.object(repo, "_pre_scan", return_value=True),
+            patch.object(repo, "_post_scan"),
+            patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+            patch.object(repo, "_plugin_log"),
+        ):
+            double.side_effect = _run
+            repo.scan(target=source, target_type="source")
+        return {
+            "trivy": [a for a in map(str, final_args) if a.startswith("--skip-dirs=")],
+            "trivy-repo": [a for a in argv if a.startswith("--skip-dirs=")],
+        }
+
+    whole = "--skip-dirs=.ash/ash_output"
+    reports = "--skip-dirs=.ash/ash_output/reports"
+    before = skips()
+    assert all(whole in found for found in before.values()), before
+
+    # The repository committed a file to the output directory, so the scan set holds
+    # it: a tool cannot be told to skip a directory but for one file, so the
+    # directory is read, and ASH's own directories in it are skipped.
+    monkeypatch.setattr(
+        scan_output_dirs,
+        "scan_set_of",
+        lambda context: [os.fspath(source / "requirements.txt"), os.fspath(committed)],
+    )
+    after = skips()
+    assert all(whole not in found and reports in found for found in after.values()), (
+        after
+    )
+
+    def located(uri: str) -> Any:
+        return SimpleNamespace(
+            locations=[
+                SimpleNamespace(
+                    physicalLocation=SimpleNamespace(
+                        root=SimpleNamespace(artifactLocation=SimpleNamespace(uri=uri))
+                    )
+                )
+            ]
+        )
+
+    in_a_report = ".ash/ash_output/reports/ash.sarif"
+    in_the_committed_file = ".ash/ash_output/keep/tracked.py"
+    in_the_tree = "requirements.txt"
+    report = SimpleNamespace(
+        runs=[
+            SimpleNamespace(
+                results=[
+                    located(uri)
+                    for uri in (in_a_report, in_the_committed_file, in_the_tree)
+                ]
+            )
+        ]
+    )
+    context = SimpleNamespace(
+        source_dir=source, output_dir=output, work_dir=output / "converted"
+    )
+
+    removed = scan_output_dirs.drop_results_in_ash_output_dirs(
+        report, context, scanner_name="trivy-repo", scanned_files=[committed]
+    )
+
+    kept = [
+        result.locations[0].physicalLocation.root.artifactLocation.uri
+        for result in report.runs[0].results
+    ]
+    assert removed == 1, (removed, kept)
+    assert kept == [in_the_committed_file, in_the_tree], kept
+
+
+#: How coverage.md named the scanners that skip ASH's output directories before it
+#: listed trivy and trivy-repo among them.
+_COVERAGE_SKIPPERS_WITHOUT_TRIVY = "and ferret-scan skip ASH's output directories"
+
+#: How coverage.md said ASH treats its output directories outside a git checkout
+#: before it matched the code.
+_COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE = (
+    "Outside git, these directories are left out whole"
+)
+
+#: How coverage.md named the directories those scanners skip before it said ASH leaves
+#: them out. By the page's own definition that included an earlier run's
+#: ``.ash/ash_output``, which outside a git checkout no scanner is told to skip.
+_COVERAGE_SKIPS_EVERY_OUTPUT_DIR = (
+    "skip ASH's output directories that hold no file git tracks"
+)
+
+_COVERAGE_TRIVY_SKIPS_OUTPUT_DIRS_SENTENCE = (
+    "bandit, checkov, semgrep, opengrep, grype, syft, ferret-scan, trivy, and "
+    "trivy-repo skip the output directories ASH leaves out that hold no file git "
+    "tracks. trivy and trivy-repo get each of them as a `trivy --skip-dirs` value."
+)
+
+_COVERAGE_OUTSIDE_GIT_SENTENCE = (
+    "Outside a git checkout, or when git cannot list the repository, only this scan's "
+    "own output directory is left out: an earlier run's `.ash/ash_output` is scanned "
+    "like the rest of the tree, and ASH logs a warning while the scan set holds files "
+    "in it."
+)
+
+#: How coverage.md said what ASH drops before it said that outside a git checkout that
+#: is this scan's own output directory, and not an earlier run's.
+_COVERAGE_DROPS_EVERY_FINDING = "drops every finding in those directories"
+_COVERAGE_DROPS_IN_ITS_OUTPUT_DIRS = (
+    "ASH drops the findings scanners report in its output directories"
+)
+
+_COVERAGE_DROP_SENTENCE = (
+    "ASH drops the findings scanners report in the output directories it leaves out, "
+    "even with `--ignore-suppressions`, except in files git tracks there and in this "
+    "scan's `converted/`."
+)
+
+_COVERAGE_OUTSIDE_GIT_DROP_SENTENCE = (
+    "Outside a git checkout, or when git cannot list the repository, ASH cannot tell a "
+    "committed file from its own, so it drops what scanners report in this scan's own "
+    "output directory, apart from its `converted/`. An earlier run's `.ash/ash_output` "
+    "is scanned like the rest of the tree, and its findings are kept."
+)
+
+
+@pytest.mark.unit
+def test_coverage_lists_trivy_and_trivy_repo_with_the_output_dir_skippers() -> None:
+    """coverage.md (What decides the files; the scanners that walk the directory).
+
+    The page lists trivy and trivy-repo with the scanners that skip the output
+    directories ASH leaves out that hold no file git tracks, and says both get each of
+    them as a ``trivy --skip-dirs`` value. It does not say they skip ASH's output
+    directories without that qualifier: outside a git checkout no scanner is told to
+    skip an earlier run's ``.ash/ash_output``. This is the page half: the commands
+    both scanners build are probed by the faq.md and index.md test above.
+    """
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_TRIVY_SKIPS_OUTPUT_DIRS_SENTENCE)
+    text = _normalize(_page_text(COVERAGE_PAGE))
+    stale = [
+        phrase
+        for phrase in (
+            _COVERAGE_SKIPPERS_WITHOUT_TRIVY,
+            _COVERAGE_SKIPS_EVERY_OUTPUT_DIR,
+        )
+        if _normalize(phrase) in text
+    ]
+    assert not stale, (COVERAGE_PAGE, stale)
+
+
+@pytest.mark.unit
+def test_coverage_says_outside_git_only_this_scans_output_dir_is_left_out() -> None:
+    """coverage.md (What decides the files; ASH's own output directories).
+
+    Outside a git checkout, or where git cannot list the repository, only this scan's
+    own output directory is left out. An earlier run's ``.ash/ash_output`` is scanned
+    like the rest of the tree, and ASH logs a warning while the scan set holds files
+    in it. This is the page half: the behavior is probed by
+    tests/unit/test_leftover_output_dir_without_git_is_scanned.py.
+    """
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_OUTSIDE_GIT_SENTENCE)
+    text = _normalize(_page_text(COVERAGE_PAGE))
+    assert _normalize(_COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE) not in text, (
+        COVERAGE_PAGE,
+        _COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE,
+    )
+
+
+@pytest.mark.unit
+def test_coverage_says_outside_git_only_this_scans_output_dir_is_dropped() -> None:
+    """coverage.md (What decides the files; what ASH drops from its own output).
+
+    ASH drops what scanners report in the output directories it leaves out, except in
+    files git tracks there and in this scan's ``converted/``. Outside a git checkout,
+    or where git cannot list the repository, that is this scan's own output directory
+    apart from its ``converted/``: an earlier run's ``.ash/ash_output`` is scanned and
+    its findings are kept. This is the page half. The code halves are
+    tests/unit/test_leftover_output_dir_without_git_is_scanned.py, which asserts that
+    no output directory is named in a tree outside git that holds an earlier run's
+    ``.ash/ash_output`` (the drop acts only on named directories), and
+    tests/unit/test_ash_output_dirs_are_not_scanned.py, for what the drop removes and
+    keeps.
+    """
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_DROP_SENTENCE)
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_OUTSIDE_GIT_DROP_SENTENCE)
+    text = _normalize(_page_text(COVERAGE_PAGE))
+    stale = [
+        phrase
+        for phrase in (
+            _COVERAGE_DROPS_EVERY_FINDING,
+            _COVERAGE_DROPS_IN_ITS_OUTPUT_DIRS,
+        )
+        if _normalize(phrase) in text
+    ]
+    assert not stale, (COVERAGE_PAGE, stale)
+
+
 # --------------------------------------------------------------------------- #
 # Suppression paths that name a directory
 # --------------------------------------------------------------------------- #

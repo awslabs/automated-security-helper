@@ -177,8 +177,10 @@ Before the scan, ASH lists the files to scan, the scan set, and writes it to
   `.ash/ash_output` under the source directory and under the working directory, when they
   are inside the source directory and not reached through a symbolic link. In a git
   repository, the files git tracks in them stay in the scan set, in this scan's own
-  output directory too, and ASH logs a warning. Outside git, these directories are left
-  out whole. Any other directory, such
+  output directory too, and ASH logs a warning. Outside a git checkout, or when git
+  cannot list the repository, only this scan's own output directory is left out: an
+  earlier run's `.ash/ash_output` is scanned like the rest of the tree, and ASH logs a
+  warning while the scan set holds files in it. Any other directory, such
   as another shard's output, is scanned like the rest of the tree; when it holds ASH's
   result files, ASH logs a warning.
 - `node_modules`, `.venv`, and `venv` stay in the scan set. bandit, checkov, and zizmor
@@ -187,8 +189,9 @@ Before the scan, ASH lists the files to scan, the scan set, and writes it to
 The scanners marked "Selected files" above read only the scan set. The scanners that
 walk the directory themselves do not use it, so they can report files your `.gitignore`
 excludes; bandit, checkov, gitleaks, grype, and trivy do. bandit, checkov, semgrep,
-opengrep, grype, syft, and ferret-scan skip ASH's output directories that hold no file
-git tracks. checkov gets each of them as a `checkov --skip-path` value, unless
+opengrep, grype, syft, ferret-scan, trivy, and trivy-repo skip the output directories ASH
+leaves out that hold no file git tracks. trivy and trivy-repo get each of them as a
+`trivy --skip-dirs` value. checkov gets each of them as a `checkov --skip-path` value, unless
 `scanners.checkov.options.skip_ash_output_dir` is `false`. On Windows, ASH passes none,
 and it leaves out a directory whose path holds `(` or `)` with a warning; there, add the
 directory to `scanners.checkov.options.skip_path`, or move `--output-dir` outside the
@@ -202,8 +205,8 @@ findings under the others afterward. An ignore path stops applying on its `expir
 date. With `--ignore-suppressions`, ASH gives no scanner or converter the ignore paths and
 drops no finding under them. See [Suppress findings](../how-to/suppress-findings.md).
 
-ASH drops the findings scanners report in its output directories, even with
-`--ignore-suppressions`, except in files git tracks there and in this scan's
+ASH drops the findings scanners report in the output directories it leaves out, even
+with `--ignore-suppressions`, except in files git tracks there and in this scan's
 `converted/`. A file a repository commits to one of those directories is scanned and
 reported like any other, in this scan's own output directory too:
 
@@ -217,8 +220,10 @@ ash scan --scanners detect-secrets
 ```
 
 detect-secrets reports the password in `.ash/ash_output/keep/tracked.py`, and the scan
-exits 2. Outside a git repository, ASH cannot tell a committed file from its own, and
-drops every finding in those directories.
+exits 2. Outside a git checkout, or when git cannot list the repository, ASH cannot tell
+a committed file from its own, so it drops what scanners report in this scan's own
+output directory, apart from its `converted/`. An earlier run's `.ash/ash_output` is
+scanned like the rest of the tree, and its findings are kept.
 
 `--changed-files-only` drops the findings outside the changed files from every report
 after the scan; every scanner still reads its whole input.
