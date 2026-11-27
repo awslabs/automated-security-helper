@@ -2,3 +2,6 @@ automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md	ferre
 deploy/terraform/modules/codepipeline-executor/README.md	ash merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
 docs/content/contributing/documentation.md	ash --mode container --source-dir .
 docs/content/docs/plugins/alpha/index.md	pip install <my-plugin-package-name>
+docs/content/reference/cli.md	ash config lint
+docs/content/reference/cli.md	ash config validate
+docs/content/reference/cli.md	ash suppress add B602 --symbol Handler.run --file src/app.py --reason "The command is a constant."
