@@ -200,8 +200,10 @@ def test_an_invalid_config_is_refused_on_the_host_before_the_container_starts(
 def _wrapper_env() -> dict[str, str]:
     # No shell startup file of the developer's: ./ash is a bash script, and pwsh can
     # be one too, and a startup file could set OCI_RUNNER again. HOME and the XDG
-    # directories are kept here, because the real runner reads its configuration (and
-    # podman its image store) from them.
+    # directories are the fresh, empty ones tests/conftest.py gives each test. A
+    # podman keeps its images under XDG_DATA_HOME, so one started with them finds no
+    # image: a test that starts the runner adds developer_runner_env(RUNNER), and the
+    # -NoRun tests start no runner and stay in the empty home.
     env = {**inherited_env(), **QUIET_PWSH, "OCI_RUNNER": RUNNER}
     if ":" in IMAGE:
         env["ASH_IMAGE_NAME"] = IMAGE
@@ -226,7 +228,7 @@ def test_bash_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
             "--no-progress",
         ],
         cwd=in_tmp,
-        env=_wrapper_env(),
+        env={**_wrapper_env(), **developer_runner_env(RUNNER)},
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -241,7 +243,7 @@ def test_bash_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
         "exit_code": result.returncode,
         "announced_the_run": announcement in result.stderr,
         "last_line": _last_line(result.stdout),
-    } == snapshot
+    } == snapshot, f"the wrapper's stderr:\n{result.stderr}"
 
 
 def _pwsh(script: str, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
@@ -270,13 +272,13 @@ def test_powershell_wrapper_scan_of_the_fixture(snapshot, fixture_repo, in_tmp):
         "Invoke-ASH -NoBuild -BuildTarget ci -SourceDir src -OutputDir out "
         "-OCIRunner $env:OCI_RUNNER -Scanners bandit; exit $LASTEXITCODE",
         in_tmp,
-        _wrapper_env(),
+        {**_wrapper_env(), **developer_runner_env(RUNNER)},
     )
     assert {
         "exit_code": result.returncode,
         "announced_the_run": "Running ASH scan using built image..." in result.stdout,
         "last_line": _last_line(result.stdout),
-    } == snapshot
+    } == snapshot, f"pwsh's stderr:\n{result.stderr}"
 
 
 @pytest.mark.integration
