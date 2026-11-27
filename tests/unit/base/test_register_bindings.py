@@ -415,9 +415,9 @@ def test_a_family_builds_with_an_implemented_install_provider() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _alpha_modules_in_the_dockerfile() -> list[set[str]]:
+def _alpha_modules_in_the_dockerfile(text: str = _DOCKERFILE) -> list[set[str]]:
     copies = re.findall(
-        r'^ARG ASH_ALPHA_PLUGIN_MODULES="([^"]*)"', _DOCKERFILE, flags=re.MULTILINE
+        r'^ARG ASH_ALPHA_PLUGIN_MODULES="([^"]*)"', text, flags=re.MULTILINE
     )
     return [{module for module in value.split(",") if module} for value in copies]
 
