@@ -115,11 +115,11 @@ def _scan(repo: Path, output: Path, mode: str, env: dict) -> set:
         [
             str(ash if ash.exists() else shutil.which("ash")),
             "scan",
-            "--source-dir",
+            "fs",
             str(repo),
             "--output-dir",
             str(output),
-            "--scanners",
+            "--add-scanners",
             "trivy-repo",
             "--sandbox",
             mode,

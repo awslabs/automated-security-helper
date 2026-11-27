@@ -234,13 +234,13 @@ def test_a_full_scan_with_actionlint_selected(repo, tmp_path):
 
     result = _ash(
         "scan",
+        "fs",
+        str(repo),
         "--mode",
         "local",
-        "--source-dir",
-        str(repo),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "actionlint",
         "--no-progress",
         env=env,
@@ -277,13 +277,13 @@ def test_enabled_but_missing_is_missing_and_exits_one(repo, tmp_path):
 
     result = _ash(
         "scan",
+        "fs",
+        str(repo),
         "--mode",
         "local",
-        "--source-dir",
-        str(repo),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "actionlint",
         "--no-progress",
         env=env,
@@ -328,13 +328,13 @@ def _scan(
 ) -> subprocess.CompletedProcess:
     return _ash(
         "scan",
+        "fs",
+        str(repo),
         "--mode",
         "local",
-        "--source-dir",
-        str(repo),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "actionlint",
         "--no-progress",
         # An on/off flag: `--fail-on-findings false` is refused, since `ash scan`

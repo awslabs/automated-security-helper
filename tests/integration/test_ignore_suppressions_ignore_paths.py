@@ -83,10 +83,10 @@ def _scan(
     command = [
         ash,
         "scan",
+        "fs",
+        str(source),
         "--mode",
         "local",
-        "--source-dir",
-        str(source),
         "--output-dir",
         str(output),
         "--no-progress",
@@ -94,7 +94,7 @@ def _scan(
         "--fail-on-findings",
     ]
     for scanner in scanners:
-        command += ["--scanners", scanner]
+        command += ["--add-scanners", scanner]
     if ignore_suppressions:
         command.append("--ignore-suppressions")
     proc = subprocess.run(

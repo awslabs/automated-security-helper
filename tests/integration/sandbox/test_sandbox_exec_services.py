@@ -271,11 +271,11 @@ def _attempt(
     command = [
         _ash_executable(),
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(output),
-        "--scanners",
+        "--add-scanners",
         "sandbox-escape",
         "--sandbox",
         mode,

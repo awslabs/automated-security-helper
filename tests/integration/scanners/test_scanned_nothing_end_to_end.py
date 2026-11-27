@@ -103,7 +103,7 @@ def _scan(base: Path, files: dict[str, str], config: str | None = None) -> dict:
         "-I",
         "-c",
         DRIVER,
-        "--source-dir",
+        "fs",
         str(tree),
         "--output-dir",
         str(base / "out"),
@@ -112,7 +112,7 @@ def _scan(base: Path, files: dict[str, str], config: str | None = None) -> dict:
         "--no-progress",
         "--no-fail-on-findings",
         "--no-fail-on-incomplete-scanners",
-        "--scanners",
+        "--add-scanners",
         ",".join(SCANNERS),
     ]
     if config is not None:

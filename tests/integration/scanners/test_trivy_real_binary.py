@@ -446,12 +446,12 @@ def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
         [
             _ash(),
             "scan",
+            "fs",
+            str(source),
             "--ash-plugin-modules",
             "automated_security_helper.plugin_modules.ash_trivy_plugins",
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
             "--config",
@@ -508,7 +508,7 @@ CONFIG = {
 def test_ash_scan_runs_trivy_and_records_its_database(tmp_path, trivy_env):
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out"
-    proc, log = _run_ash(source, output, CONFIG, trivy_env, "--scanners", "trivy")
+    proc, log = _run_ash(source, output, CONFIG, trivy_env, "--add-scanners", "trivy")
     assert proc.returncode == 2, log  # actionable findings
     data = _aggregated(output)
     assert data["scanner_results"]["trivy"]["status"] == "FAILED", log
@@ -538,7 +538,7 @@ def test_a_severity_threshold_gates_the_verdict_and_drops_no_finding(
             "trivy": {"enabled": True, "options": {"severity_threshold": "CRITICAL"}}
         },
     }
-    proc, log = _run_ash(source, output, config, trivy_env, "--scanners", "trivy")
+    proc, log = _run_ash(source, output, config, trivy_env, "--add-scanners", "trivy")
     assert proc.returncode == 0, log
     data = _aggregated(output)
     assert STABLE <= {
@@ -556,7 +556,7 @@ def test_ash_scan_offline_uses_the_cached_database(tmp_path, trivy_env):
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out"
     proc, log = _run_ash(
-        source, output, CONFIG, trivy_env, "--scanners", "trivy", "--offline"
+        source, output, CONFIG, trivy_env, "--add-scanners", "trivy", "--offline"
     )
     assert proc.returncode == 2, log
     data = _aggregated(output)
@@ -592,7 +592,7 @@ def test_offline_a_stale_database_fails_the_scan(tmp_path, trivy_env, trivy_cach
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out"
     proc, log = _run_ash(
-        source, output, CONFIG, env, "--scanners", "trivy", "--offline"
+        source, output, CONFIG, env, "--add-scanners", "trivy", "--offline"
     )
     assert proc.returncode == 1, log
     assert "trivy-db" in proc.stdout + proc.stderr, log
@@ -608,7 +608,7 @@ def test_offline_a_stale_database_fails_the_scan(tmp_path, trivy_env, trivy_cach
         output2,
         CONFIG,
         env,
-        "--scanners",
+        "--add-scanners",
         "trivy",
         "--offline",
         "--allow-stale-content-db",
@@ -623,7 +623,7 @@ def test_offline_with_no_database_is_missing(tmp_path, trivy_env):
     source = _copy_fixture(tmp_path)
     output = tmp_path / "out"
     proc, log = _run_ash(
-        source, output, CONFIG, env, "--scanners", "trivy", "--offline"
+        source, output, CONFIG, env, "--add-scanners", "trivy", "--offline"
     )
     assert proc.returncode == 1, log
     assert _aggregated(output)["scanner_results"]["trivy"]["status"] == "MISSING", log
@@ -653,7 +653,7 @@ def test_trivy_and_trivy_repo_together_report_each_under_its_own_name(
         },
     }
     proc, log = _run_ash(
-        source, output, config, trivy_env, "--scanners", "trivy,trivy-repo"
+        source, output, config, trivy_env, "--add-scanners", "trivy,trivy-repo"
     )
     assert proc.returncode == 2, log
     data = _aggregated(output)
@@ -876,14 +876,14 @@ def test_trivy_repo_does_not_load_the_scanned_repos_trivy_yaml(tmp_path, trivy_e
         "scanners": {"trivy-repo": {"options": {"scanners": ["vuln"]}}},
     }
     proc, log = _run_ash(
-        source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
+        source, tmp_path / "out0", config, trivy_env, "--add-scanners", "trivy-repo"
     )
     baseline = _repo_pairs(tmp_path / "out0")
     assert baseline, log
     (source / "trivy.yaml").write_text("severity:\n  - CRITICAL\n", encoding="utf-8")
 
     proc, log = _run_ash(
-        source, tmp_path / "out1", config, trivy_env, "--scanners", "trivy-repo"
+        source, tmp_path / "out1", config, trivy_env, "--add-scanners", "trivy-repo"
     )
 
     assert _repo_pairs(tmp_path / "out1") == baseline, log
@@ -896,7 +896,7 @@ def test_trivy_repo_does_not_load_the_scanned_repos_trivy_yaml(tmp_path, trivy_e
         tmp_path / "out2",
         config,
         trivy_env,
-        "--scanners",
+        "--add-scanners",
         "trivy-repo",
         "--config-overrides",
         f"scanners.trivy-repo.options.config_file={operator_config.as_posix()}",
@@ -921,7 +921,7 @@ def test_trivy_repo_does_not_apply_an_ignore_policy_from_the_trees_trivy_yaml(
     subprocess.run(["git", "init", "-q"], cwd=source, check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     config = _trivy_repo_config(["vuln"])
     proc, log = _run_ash(
-        source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
+        source, tmp_path / "out0", config, trivy_env, "--add-scanners", "trivy-repo"
     )
     baseline = _repo_pairs(tmp_path / "out0")
     assert _DROPPED_BY_THE_POLICY in baseline, log
@@ -932,7 +932,7 @@ def test_trivy_repo_does_not_apply_an_ignore_policy_from_the_trees_trivy_yaml(
     )
 
     proc, log = _run_ash(
-        source, tmp_path / "out1", config, trivy_env, "--scanners", "trivy-repo"
+        source, tmp_path / "out1", config, trivy_env, "--add-scanners", "trivy-repo"
     )
 
     assert _repo_pairs(tmp_path / "out1") == baseline, log
@@ -958,7 +958,7 @@ def test_trivy_repo_does_not_read_the_trees_trivy_secret_yaml(tmp_path, trivy_en
     subprocess.run(["git", "init", "-q"], cwd=source, check=True)  # nosec B603 B607 - fixed argv, git init on a tmp_path copy
     config = _trivy_repo_config(["secret"])
     proc, log = _run_ash(
-        source, tmp_path / "out0", config, trivy_env, "--scanners", "trivy-repo"
+        source, tmp_path / "out0", config, trivy_env, "--add-scanners", "trivy-repo"
     )
     baseline = _repo_pairs(tmp_path / "out0")
     assert baseline, log
@@ -966,7 +966,7 @@ def test_trivy_repo_does_not_read_the_trees_trivy_secret_yaml(tmp_path, trivy_en
     (source / "trivy-secret.yaml").write_text(rules, encoding="utf-8")
 
     proc, log = _run_ash(
-        source, tmp_path / "out1", config, trivy_env, "--scanners", "trivy-repo"
+        source, tmp_path / "out1", config, trivy_env, "--add-scanners", "trivy-repo"
     )
 
     assert _repo_pairs(tmp_path / "out1") == baseline, log
@@ -978,7 +978,7 @@ def test_trivy_repo_does_not_read_the_trees_trivy_secret_yaml(tmp_path, trivy_en
         tmp_path / "out2",
         config,
         trivy_env,
-        "--scanners",
+        "--add-scanners",
         "trivy-repo",
         "--config-overrides",
         f"scanners.trivy-repo.options.secret_config_file={operator_rules.as_posix()}",
@@ -1019,7 +1019,7 @@ def test_trivy_and_trivy_repo_share_an_empty_cache_without_racing(
         env.pop("ASH_OFFLINE", None)
         output = tmp_path / f"out-{round_}"
         proc, log = _run_ash(
-            source, output, config, env, "--scanners", "trivy,trivy-repo"
+            source, output, config, env, "--add-scanners", "trivy,trivy-repo"
         )
         statuses = {
             name: info.get("status")
@@ -1057,14 +1057,14 @@ def test_both_scanners_scan_from_a_read_only_prepared_cache(tmp_path, trivy_bin_
         "scanners": {"trivy": {"enabled": True}},
     }
     proc, log = _run_ash(
-        source, tmp_path / "out0", config, env, "--scanners", "trivy,trivy-repo"
+        source, tmp_path / "out0", config, env, "--add-scanners", "trivy,trivy-repo"
     )
     assert (cache / "db").is_dir(), log
     for path in [cache, *cache.rglob("*")]:
         path.chmod(path.stat().st_mode & ~0o222)
     try:
         proc, log = _run_ash(
-            source, tmp_path / "out1", config, env, "--scanners", "trivy,trivy-repo"
+            source, tmp_path / "out1", config, env, "--add-scanners", "trivy,trivy-repo"
         )
         statuses = {
             name: info.get("status")
