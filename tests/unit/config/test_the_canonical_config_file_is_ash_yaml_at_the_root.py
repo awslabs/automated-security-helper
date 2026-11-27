@@ -47,11 +47,15 @@ LEGACY_LOCATIONS = [
     if location != ASH_CANONICAL_CONFIG_FILE_NAME
 ] + list(ASH_RC_FILE_NAMES)
 
-# The legacy locations written in TOML, and the rest. The canonical file is read
-# as YAML, so a TOML file cannot be moved there.
+# The legacy locations by the language their name says. The canonical file is
+# read as YAML, so a TOML file cannot be moved there, and a JSON file can only
+# when it is not indented with tabs.
 TOML_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".toml")]
-OTHER_LEGACY = [
-    location for location in LEGACY_LOCATIONS if location not in TOML_LEGACY
+JSON_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".json")]
+YAML_LEGACY = [
+    location
+    for location in LEGACY_LOCATIONS
+    if location not in TOML_LEGACY + JSON_LEGACY
 ]
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -106,10 +110,21 @@ def test_every_legacy_location_is_listed():
     assert ASH_CANONICAL_CONFIG_FILE_NAME not in LEGACY_LOCATIONS
 
 
-def test_the_toml_legacy_locations_are_there_to_test():
-    """The parametrized tests below have cases, and the two lists split the whole."""
+def test_the_legacy_locations_by_language_are_there_to_test():
+    """The parametrized tests below have cases, and every location is in one list."""
     assert TOML_LEGACY == [".ashrc.toml", "ashrc.toml"]
-    assert sorted(TOML_LEGACY + OTHER_LEGACY) == sorted(LEGACY_LOCATIONS)
+    assert sorted(JSON_LEGACY) == sorted(
+        [
+            ".ash.json",
+            ".ash/.ash.json",
+            "ash.json",
+            ".ash/ash.json",
+            ".ashrc.json",
+            "ashrc.json",
+        ]
+    )
+    assert all(location.endswith(_YAML_SUFFIXES) for location in YAML_LEGACY)
+    assert sorted(TOML_LEGACY + JSON_LEGACY + YAML_LEGACY) == sorted(LEGACY_LOCATIONS)
 
 
 class TestCanonicalIsFirst:
@@ -224,14 +239,42 @@ class TestWarnings:
         assert "renaming the TOML file is not enough" in warning, warning
         assert "move this file to" not in warning, warning
 
-    @pytest.mark.parametrize("legacy", OTHER_LEGACY)
-    def test_a_yaml_or_json_legacy_file_keeps_the_advice_to_move_it(
+    @pytest.mark.parametrize("legacy", YAML_LEGACY)
+    def test_a_yaml_legacy_file_keeps_the_advice_to_move_it(self, tmp_path, legacy):
+        _write(tmp_path, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(tmp_path))
+        canonical = (tmp_path / ".ash.yaml").as_posix()
+        assert warning.endswith(f"move this file to {canonical}."), warning
+
+    @pytest.mark.parametrize("legacy", JSON_LEGACY)
+    def test_a_json_legacy_file_is_moved_after_its_tabs_are_replaced(
         self, tmp_path, legacy
     ):
         _write(tmp_path, legacy, "legacy")
         [warning] = discovery_warnings(discover_config_source(tmp_path))
         canonical = (tmp_path / ".ash.yaml").as_posix()
-        assert warning.endswith(f"move this file to {canonical}."), warning
+        caveat = (
+            ".ash.yaml is read as YAML, so re-indent this file with spaces first "
+            "if it is indented with tabs."
+        )
+        assert warning.endswith(f"move this file to {canonical}; {caveat}"), warning
+
+
+class TestAMovedFileIsRefusedWhenYamlCannotReadIt:
+    """Why the advice above is not "rename it": `.ash.yaml` is parsed as YAML."""
+
+    def test_json_indented_with_tabs_in_the_canonical_file_is_refused(self, tmp_path):
+        (tmp_path / ".ash.yaml").write_text(
+            '{\n\t"project_name": "x"\n}\n', encoding="utf-8"
+        )
+        with pytest.raises(ASHConfigValidationError):
+            resolve_config(source_dir=tmp_path)
+
+    def test_the_same_json_indented_with_spaces_is_read(self, tmp_path):
+        (tmp_path / ".ash.yaml").write_text(
+            '{\n  "project_name": "x"\n}\n', encoding="utf-8"
+        )
+        assert resolve_config(source_dir=tmp_path).project_name == "x"
 
 
 class TestAMovedTomlFileIsRefused:

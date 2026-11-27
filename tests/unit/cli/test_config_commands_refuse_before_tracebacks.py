@@ -153,6 +153,26 @@ def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
     assert not (tmp_path / ".ash.yaml").exists()
 
 
+def test_init_beside_a_json_source_says_a_file_with_tabs_needs_spaces_first(
+    tmp_path, monkeypatch
+):
+    """A JSON file is read as YAML at `.ash.yaml`, and the YAML loader refuses a
+    tab for indentation: the move is still the advice, with that caveat."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ashrc.json").write_text('{"project_name": "old"}\n', encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert "Move " in result.output, result.output
+    assert " to .ash.yaml (the canonical config file, which is read as YAML" in (
+        result.output
+    )
+    assert "is indented with tabs, re-indent it with spaces first)" in result.output
+    assert "as YAML in .ash.yaml and delete" not in result.output, result.output
+    assert not (tmp_path / ".ash.yaml").exists()
+
+
 def test_init_beside_a_pyproject_table_keeps_its_own_advice(tmp_path, monkeypatch):
     """A pyproject.toml table is a TOML file too, and is edited where it is."""
     monkeypatch.chdir(tmp_path)
