@@ -4,10 +4,11 @@ Why this exists
 ---------------
 The metadata of a workspace's unified results file is written fresh, with only the
 keys the writer names, so a key a project's own metadata holds reaches the root only
-if the writer carries it. A project can run on a different host from the next (the
-workspace's projects share one process today, but a results file is also read where
-it was not written), and a notice says what its own run met, so a root that kept the
-first project's notices alone would describe one project only.
+if the writer carries it. Each project's scan records what it met: the rows raised at
+the start of a run are the same for every project, and a row raised at a decision (a
+scanner that is skipped, a sandbox backend that falls back) is recorded only by the
+projects that reached the decision. A root that kept the first project's notices alone
+would drop the others'.
 
 The writer takes each project's ``metadata.support_notices`` in workspace-file order
 and records them united by id, the first record of an id kept. It writes no key when no

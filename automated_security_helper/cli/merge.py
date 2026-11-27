@@ -306,6 +306,7 @@ from automated_security_helper.core.unified_metrics import (
 )
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
+    combined_support_notices,
     new_report_id,
     warning_of_dropped_keys,
 )
@@ -1701,7 +1702,9 @@ def merge_shard_results(
     operator listed the shards in. ``converter_results`` rows are combined across
     shards instead; see :func:`_merge_converter_rows`. So is
     ``metadata.plugin_load_errors``, every shard's modules that failed to import
-    (``plugins.loader.combined_plugin_load_errors``). The ``report_id`` is the
+    (``plugins.loader.combined_plugin_load_errors``), and so is
+    ``metadata.support_notices``, every shard's notices by id
+    (``models.asharp_model.combined_support_notices``). The ``report_id`` is the
     exception: see :func:`_union_report_id`.
 
     Args:
@@ -1820,6 +1823,13 @@ def merge_shard_results(
         }
     )
     merged.metadata.requested_scanners_not_run = requested_not_run or None
+    # Every shard's notices, united by id in shard order. The shards of one scan can
+    # run on different hosts and a notice says what its own run met, so the base
+    # shard's copy would describe one host only. None when no shard recorded one, as
+    # a single scan writes it.
+    merged.metadata.support_notices = combined_support_notices(
+        shard.metadata.support_notices for _, shard, _ in shards
+    )
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)
     merged.metadata.report_id = _union_report_id(shards)

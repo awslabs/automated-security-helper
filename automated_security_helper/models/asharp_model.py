@@ -47,7 +47,9 @@ from typing import (
     Annotated,
     Dict,
     Any,
+    Iterable,
     Iterator,
+    Literal,
     Optional,
     Union,
     List,
@@ -906,6 +908,329 @@ def new_report_id(
     return f"{prefix}-{instant.strftime('%Y%m%d%H%M%S')}-{token}"
 
 
+#: The words a support notice is written in, as static types, so a field that holds
+#: one refuses any other. They are spelled here and not taken from
+#: base/support_register.py, whose enums they mirror (as ``SeverityThresholdText`` in
+#: models/vocab.py mirrors its enum): the register builds and checks every declaration
+#: it holds when it is imported, and a results file has to load without that, because
+#: ``ash report`` and ``ash merge`` read notices and never evaluate a row.
+#: tests/unit/models/test_support_notice_binds_to_the_register.py holds each of them
+#: equal to the register's enum, so a member added there fails here.
+SupportLevelText = Literal["polyfilled", "degraded", "unsupported"]
+SupportBehaviorText = Literal[
+    "continues", "skips-scanner", "scanner-missing", "scanner-error", "refuses"
+]
+SupportRaisedText = Literal["start", "decision"]
+UpgradePathKindText = Literal[
+    "same-os", "container", "wsl", "other-os", "other-host", "ci-runner"
+]
+UpgradePathGroupText = Literal["this-machine", "elsewhere"]
+
+#: The path kinds that change the machine the scan runs on. Every other kind moves the
+#: scan to another machine, another operating system or a CI runner.
+_THIS_MACHINE_PATH_KINDS = frozenset({"same-os", "container", "wsl"})
+
+#: A path on the machine that wrote a notice: an absolute path (``/home/alice/.venv``),
+#: a home path (``~/.cache``, ``~alice``), a drive path (``C:\Users\alice``), a network
+#: share (``\\server\share``) or a file URI. It has to start a token, so a slash inside
+#: a word (``windows/arm64``, ``n/a``), the path of a URL and a relative path
+#: (``./check``) are not one.
+_LOCAL_PATH = re.compile(
+    r"""
+    (?<![\w/.\\~])               # the start of a token
+    (?:
+        /[\w.~+@%-]              # /home/alice
+      | ~(?:[/\\]|[A-Za-z_])     # ~/.cache or ~alice
+      | [A-Za-z]:[\\/]           # C:\Users or c:/work
+      | \\\\[\w.$-]              # \\server\share
+      | file:/                   # file:///home/alice
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _refuse_a_local_path(name: str, text: str) -> str:
+    """*text*, which a support notice holds as *name*, or a refusal when it holds a
+    path on the machine that wrote the notice.
+
+    Results are shared, and a path under the user's home names the user, the
+    interpreter and the layout of the machine. A notice carries tokens, ids and public
+    sentences. The text is refused, not rewritten, so a writer's mistake fails the
+    test that builds the notice instead of reaching a results file in a changed form.
+    The refusal quotes nothing it was given.
+    """
+    if _LOCAL_PATH.search(text):
+        raise ValueError(
+            f"{name} holds a path on the machine that wrote the notice, and a "
+            "support notice carries none, because results are shared"
+        )
+    return text
+
+
+class UpgradePathNotice(StrippedRecordModel):
+    """One way out of a configuration ASH does not fully support, as a notice has it.
+
+    The id, the kind and the one sentence are the support register's upgrade path. The
+    command the CLI builds for some paths is not recorded: it names the interpreter by
+    its path under the user's home, which a shared report must not carry, so this
+    record has no field for one and a key that tries to carry one is dropped.
+    """
+
+    # Only these fields are kept. A results file ASH reads back can hold a key a later
+    # ASH added, and no ASH writer sets any other: such a key is dropped, not refused,
+    # so a record a later version wrote still loads. Read from a results file, whose
+    # values an error does not quote.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
+    )
+
+    id: Annotated[
+        str,
+        Field(min_length=1, description="The id of the upgrade path."),
+    ]
+    group: Annotated[
+        UpgradePathGroupText,
+        Field(
+            description=(
+                "this-machine for a path that changes the machine the scan runs on (a "
+                "reinstall, a container, WSL), elsewhere for a path that moves the "
+                "scan to another machine, another operating system or a CI runner."
+            )
+        ),
+    ]
+    kind: Annotated[
+        UpgradePathKindText,
+        Field(
+            description=(
+                "What the path changes: same-os, container or wsl on this machine, "
+                "other-os, other-host or ci-runner elsewhere."
+            )
+        ),
+    ]
+    summary: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "One sentence that says what to do. It holds no command: a command "
+                "can name the interpreter by its path under the user's home, which a "
+                "shared report must not carry."
+            ),
+        ),
+    ]
+    docs: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "The documentation page and section that explain the path, relative "
+                "to the documentation content root."
+            ),
+        ),
+    ]
+
+    @field_validator("id", "summary", "docs", mode="after")
+    @classmethod
+    def _hold_no_local_path(cls, value: str, info: ValidationInfo) -> str:
+        return _refuse_a_local_path(str(info.field_name), value)
+
+    @model_validator(mode="after")
+    def _group_follows_kind(self) -> "UpgradePathNotice":
+        if (self.kind in _THIS_MACHINE_PATH_KINDS) != (self.group == "this-machine"):
+            raise ValueError(
+                "an upgrade path's group follows its kind: this-machine for same-os, "
+                "container and wsl, elsewhere for the others"
+            )
+        return self
+
+
+class SupportNotice(StrippedRecordModel):
+    """A configuration this run met that ASH supports only through a polyfill, with a
+    loss, or not at all, with the upgrade paths on offer.
+
+    Built from a row of the support register (base/support_register.py) and the facts
+    the run matched. It carries tokens, ids and public sentences, never a host name, a
+    user name or a path on the machine that wrote it, and never the command the CLI
+    builds for an upgrade path: results are shared.
+    """
+
+    # Only these fields are kept, as for UpgradePathNotice.
+    model_config = ConfigDict(
+        str_strip_whitespace=True, extra="ignore", hide_input_in_errors=True
+    )
+
+    id: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "The id of the support row this notice reports, for example "
+                "host.cpu.below-polars-runtime. The id of a scanner's row names the "
+                "scanner."
+            ),
+        ),
+    ]
+    scope: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "ash for a configuration of the whole run, or the config name of the "
+                "scanner the row is about."
+            ),
+        ),
+    ]
+    dimension: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description="What the row is about, for example cpu, sandbox or os.",
+        ),
+    ]
+    level: Annotated[
+        SupportLevelText,
+        Field(
+            description=(
+                "polyfilled when ASH works through a named stand-in, degraded when it "
+                "works with a named loss, unsupported when it does not support the "
+                "configuration."
+            )
+        ),
+    ]
+    behavior: Annotated[
+        SupportBehaviorText,
+        Field(
+            description=(
+                "What ASH did where the row matched: continues, skips-scanner, "
+                "scanner-missing, scanner-error or refuses."
+            )
+        ),
+    ]
+    message: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "One sentence: why the configuration is unsupported, what is lost, or "
+                "what the stand-in does differently."
+            ),
+        ),
+    ]
+    polyfill: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "The id of the stand-in a polyfilled notice names. Null for the other "
+                "levels."
+            ),
+        ),
+    ] = None
+    found: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "What ASH read that matched the row, for example the processor flags "
+                "that are missing. Null when the row has nothing to add."
+            ),
+        ),
+    ] = None
+    facts: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "The tokens the row matched, by fact name, for example arch amd64 and "
+                "cpu_level compat-only."
+            ),
+        ),
+    ]
+    raised: Annotated[
+        SupportRaisedText,
+        Field(
+            description=(
+                "start when ASH noticed it before the scan began, decision when it "
+                "noticed it where it made the decision."
+            )
+        ),
+    ]
+    docs: Annotated[
+        str,
+        Field(
+            min_length=1,
+            description=(
+                "The documentation page and section that explain the row, relative "
+                "to the documentation content root."
+            ),
+        ),
+    ]
+    paths: Annotated[
+        List[UpgradePathNotice],
+        Field(
+            default_factory=list,
+            description=(
+                "The ways to a supported configuration that can be offered here, the "
+                "ones on this machine first and then the ones elsewhere. Empty when "
+                "the row declares none, and for a polyfill."
+            ),
+        ),
+    ]
+
+    @field_validator(
+        "id", "scope", "dimension", "message", "polyfill", "found", "docs", mode="after"
+    )
+    @classmethod
+    def _hold_no_local_path(
+        cls, value: str | None, info: ValidationInfo
+    ) -> str | None:
+        if value is None:
+            return value
+        return _refuse_a_local_path(str(info.field_name), value)
+
+    @field_validator("facts", mode="after")
+    @classmethod
+    def _facts_hold_no_local_path(cls, value: Dict[str, str]) -> Dict[str, str]:
+        for name, token in value.items():
+            _refuse_a_local_path("a fact name", name)
+            _refuse_a_local_path("a fact", token)
+        return value
+
+
+def combined_support_notices(
+    runs: Iterable[Optional[Iterable[Any]]],
+) -> Optional[List[SupportNotice]]:
+    """Several runs' ``metadata.support_notices`` as one list, each notice id once.
+
+    For the two outputs that combine runs: the workspace results file, which has one
+    run for each project, and ``ash merge``, which has one for each shard. A notice
+    says what its own run met, and the runs meet different rows: the shards of one
+    scan can run on different hosts, and the projects of a workspace reach different
+    decisions, so the first run's list alone would leave the others' out. The first
+    record of an id is kept (a row describes one configuration, so the runs that meet
+    it say the same of it), in the order the runs are given and each run's own order,
+    so a caller that passes them in workspace-file or shard-index order gets a result
+    that does not depend on which run finished first. Each notice is a copy, so the
+    list shares no object with a run it came from. A record that is a mapping, as one
+    read from a results file can be, is taken as a notice.
+
+    None when no run recorded one, which is how a run on a fully supported
+    configuration writes the field.
+    """
+    united: Dict[str, SupportNotice] = {}
+    for notices in runs:
+        for notice in notices or ():
+            record = (
+                notice
+                if isinstance(notice, SupportNotice)
+                else SupportNotice.model_validate(notice)
+            )
+            if record.id not in united:
+                united[record.id] = record.model_copy(deep=True)
+    return list(united.values()) or None
+
+
 class ReportMetadata(StrippedRecordModel):
     """Metadata for security reports."""
 
@@ -1085,6 +1410,26 @@ class ReportMetadata(StrippedRecordModel):
                 "suppression was matched in any phase and the unused-suppressions "
                 "report is not evaluated. Absent otherwise: a normal run records "
                 "nothing here."
+            ),
+        ),
+    ] = None
+    # Declared, rather than left to ride on this model's extra="allow", for the reasons
+    # the `shard` field above states. Left out of what is written while empty, as
+    # `suppressions_ignored` is (and for an empty list too, as `secret_value_shapes`
+    # is), so the results of a run on a fully supported configuration are written as
+    # they were before the field existed. The two outputs that combine runs record
+    # every run's notices by id, since the runs can be on different hosts: the
+    # workspace results file (workspace/aggregation.py) and `ash merge`
+    # (combined_support_notices).
+    support_notices: Annotated[
+        List[SupportNotice] | None,
+        Field(
+            default=None,
+            exclude_if=lambda value: not value,
+            description=(
+                "Configurations this run met that ASH supports only through a "
+                "polyfill, with a loss, or not at all, each with its upgrade paths. "
+                "Absent when the run's configuration is fully supported."
             ),
         ),
     ] = None

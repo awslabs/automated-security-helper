@@ -151,7 +151,10 @@ from urllib.parse import quote, unquote
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.enums import MinSeverity, ScannerStatus
 from automated_security_helper.core.exceptions import WorkspacePatternError
-from automated_security_helper.models.asharp_model import new_report_id
+from automated_security_helper.models.asharp_model import (
+    combined_support_notices,
+    new_report_id,
+)
 from automated_security_helper.models.core import merged_honoring
 from automated_security_helper.models.workspace import (
     SCANNER_EXIT_CODE_UNRECORDED,
@@ -1764,6 +1767,7 @@ class WorkspaceAggregator:
         project_name: Optional[str] = None,
         secret_value_shapes: Optional[Sequence[Any]] = None,
         plugin_load_errors: Optional[Mapping[str, str]] = None,
+        support_notices: Optional[Iterable[Optional[Iterable[Any]]]] = None,
     ) -> Path:
         """Stream the unified results file and return its path.
 
@@ -1781,6 +1785,16 @@ class WorkspaceAggregator:
         ``metadata.plugin_load_errors``), written to ``metadata`` when there are
         any. The completeness gate reads a module missing from it as one that
         loaded.
+
+        ``support_notices`` holds each project's ``metadata.support_notices`` (None
+        for a project that recorded none), in workspace-file order. They are written
+        to ``metadata`` united by id, the first record of an id kept
+        (``models.asharp_model.combined_support_notices``), and not at all when no
+        project recorded one. Each project's scan records what it met: the rows
+        raised at the start of a run are the same for every project, and a row raised
+        at a decision (a scanner that is skipped, a sandbox backend that falls back)
+        is recorded only by the projects that reached the decision, so the first
+        project's notices alone would drop the others'.
         """
         payload = self.results_payload(
             exit_code,
@@ -1810,6 +1824,11 @@ class WorkspaceAggregator:
             metadata["ignore_file_exclusions"] = ignore_file_exclusions
         if plugin_load_errors:
             metadata["plugin_load_errors"] = dict(plugin_load_errors)
+        notices = combined_support_notices(support_notices or ())
+        if notices:
+            metadata["support_notices"] = [
+                notice.model_dump(mode="json") for notice in notices
+            ]
 
         header: Dict[str, Any] = {
             "name": f"ASH Workspace Scan: {project_name or Path(self.plan.workspace_root).name}",
