@@ -9,9 +9,11 @@ it is, how ASH was installed, and whether the express path is available.
 How the reads work:
 
 * No network and no child process. A read is a file (the processor flags, the kernel
-  release, os-release), a ctypes call (the macOS translation flag and feature strings,
-  the Windows processor-feature and machine-type calls), a value the interpreter
-  already holds, or an ``importlib.metadata`` lookup.
+  release, os-release, and the head of the interpreter's own executable, which names
+  its program loader when the C library does not say glibc), a ctypes call (the macOS
+  translation flag and feature strings, the Windows processor-feature and machine-type
+  calls), a value the interpreter already holds, or an ``importlib.metadata`` lookup.
+  No loader is ever run to ask it a version.
 * Each fact is one token of a closed set (``TOKENS``). A reader that fails, or that
   cannot tell, gives ``unknown``, and ``unknown`` matches no row that marks a host as
   unsupported, so detection never stops a scan and never guesses.
@@ -270,11 +272,15 @@ _IMAGE_MACHINE_I386 = 0x014C
 _IMAGE_MACHINE_AMD64 = 0x8664
 _IMAGE_MACHINE_ARM64 = 0xAA64
 
-#: Entries of ``/proc/cpuinfo`` and of the platform tags the readers look at.
+#: How much of a host file a reader looks at.
 _CPUINFO_LIMIT = 65536
 _KERNEL_RELEASE_LIMIT = 4096
-_TAG_SCAN_LIMIT = 16
 _FLAGS_FILE_LIMIT = 4096
+#: The head of the interpreter's executable that is read to find its program loader,
+#: and how many program headers are looked at in it. The loader is named by the first
+#: segments of an executable, well inside the head.
+_ELF_HEAD_LIMIT = 4096
+_ELF_HEADERS_LIMIT = 64
 _NAME_LIMIT = 32
 #: A version text longer than this is left to ``packaging`` rather than read here.
 _PLAIN_LIMIT = 64
@@ -309,9 +315,13 @@ def _live_pointer_bits() -> int:
     return 64 if sys.maxsize > 2**32 else 32
 
 
-def _live_read_text(path: str, limit: int) -> str:
+def _live_read_head(path: str, limit: int) -> bytes:
     with open(path, "rb") as handle:
-        return handle.read(limit).decode("utf-8", errors="replace")
+        return handle.read(limit)
+
+
+def _live_read_text(path: str, limit: int) -> str:
+    return _live_read_head(path, limit).decode("utf-8", errors="replace")
 
 
 def _live_freedesktop_os_release() -> Mapping[str, str]:
@@ -409,15 +419,9 @@ def _live_libc_version() -> str:
     return version
 
 
-def _live_platform_tags() -> Iterator[str]:
-    """The platform part of each tag this interpreter accepts, each one once."""
-    from packaging import tags
-
-    seen: set[str] = set()
-    for tag in tags.sys_tags():
-        if tag.platform not in seen:
-            seen.add(tag.platform)
-            yield tag.platform
+def _live_executable() -> str:
+    """The path of the running interpreter's executable, empty when it has none."""
+    return sys.executable or ""
 
 
 def _live_distribution(name: str) -> Optional[Distribution]:
@@ -502,9 +506,11 @@ class Sources:
     sysctl_str: Callable[[str], str] = _live_sysctl_str
     wow64_machines: Callable[[], tuple[int, int]] = _live_wow64_machines
     windows_feature_present: Callable[[int], bool] = _live_windows_feature_present
-    # libc.
+    # libc: the C library's own answer, and the interpreter's executable, whose head
+    # names its program loader.
     libc_version: Callable[[], str] = _live_libc_version
-    platform_tags: Callable[[], Iterable[str]] = _live_platform_tags
+    executable: Callable[[], str] = _live_executable
+    read_head: Callable[[str, int], bytes] = _live_read_head
     # Installed software and where it lives.
     distribution: Callable[[str], Optional[Distribution]] = _live_distribution
     getenv: Callable[[str], Optional[str]] = _live_getenv
@@ -960,6 +966,59 @@ def _is_editable(direct_url: Optional[str]) -> bool:
     return isinstance(info, dict) and info.get("editable") is True
 
 
+_PT_INTERP = 3
+#: The file names of the program loaders glibc ships (``ld-linux-x86-64.so.2``,
+#: ``ld64.so.2``, ``ld.so.1``).
+_GLIBC_LOADERS = ("ld-linux", "ld64.so", "ld.so")
+
+
+def _elf_interpreter(head: bytes) -> Optional[str]:
+    """The program loader that the head of an ELF executable names, else None.
+
+    The loader is the string of the ``PT_INTERP`` program header, such as
+    ``/lib/ld-musl-x86_64.so.1`` on musl or ``/lib64/ld-linux-x86-64.so.2`` on glibc.
+    ``head`` is the first bytes of the file, and nothing past it is read. None means a
+    file that is not an ELF executable, a head that stops before the program header
+    table or before the loader's name, or an executable with no loader (a static one).
+    """
+    if len(head) < 6 or head[:4] != b"\x7fELF" or head[4] not in (1, 2):
+        return None
+    if head[5] not in (1, 2):
+        return None
+    wide = head[4] == 2
+    order = "little" if head[5] == 1 else "big"
+
+    def field(start: int, size: int) -> Optional[int]:
+        if start + size > len(head):
+            return None
+        return int.from_bytes(head[start : start + size], order)
+
+    # Where the program header table starts, how big an entry is, and how many there
+    # are; then, in an entry, where the segment's file offset and length are.
+    if wide:
+        table, size, count = field(0x20, 8), field(0x36, 2), field(0x38, 2)
+        smallest, offset_at, length_at, word = 56, 8, 32, 8
+    else:
+        table, size, count = field(0x1C, 4), field(0x2A, 2), field(0x2C, 2)
+        smallest, offset_at, length_at, word = 32, 4, 16, 4
+    if table is None or size is None or count is None or size < smallest:
+        return None
+    for index in range(min(count, _ELF_HEADERS_LIMIT)):
+        entry = table + index * size
+        kind = field(entry, 4)
+        if kind is None:
+            return None
+        if kind != _PT_INTERP:
+            continue
+        offset = field(entry + offset_at, word)
+        length = field(entry + length_at, word)
+        if offset is None or length is None or offset + length > len(head):
+            return None
+        name, terminator, _rest = head[offset : offset + length].partition(b"\x00")
+        return name.decode("utf-8", errors="replace") if terminator else None
+    return None
+
+
 # --------------------------------------------------------------------------------------
 # Failures
 # --------------------------------------------------------------------------------------
@@ -1142,21 +1201,20 @@ class HostFactsReader:
                 return "glibc"
         except Exception:
             pass
-        # packaging 26 yields the plain linux tag first; older versions yield it last.
-        for tag in self._remember(("platform_tag_scan",), self._scan_tags):
-            if tag.startswith("manylinux"):
-                return "glibc"
-            if tag.startswith("musllinux"):
-                return "musl"
+        # The C library says nothing on musl. The program loader that the interpreter's
+        # own executable names does, and it is read from the file: nothing is run (the
+        # platform tags would run the loader to find a musl version).
+        path = self._src("executable")
+        if not path:
+            return UNKNOWN
+        loader = _elf_interpreter(self._src("read_head", path, _ELF_HEAD_LIMIT))
+        if loader is None:
+            return UNKNOWN
+        if "musl" in loader:
+            return "musl"
+        if posixpath.basename(loader).startswith(_GLIBC_LOADERS):
+            return "glibc"
         return UNKNOWN
-
-    def _scan_tags(self) -> tuple[str, ...]:
-        tags: list[str] = []
-        for tag in self._sources.platform_tags():
-            tags.append(str(tag))
-            if len(tags) >= _TAG_SCAN_LIMIT:
-                break
-        return tuple(tags)
 
     # ---- the processor and polars ------------------------------------------------
 

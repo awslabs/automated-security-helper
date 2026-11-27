@@ -209,9 +209,10 @@ _ALLOWED_SIZED_READS = {
     "lines, and only a version matching the number shape leaves the reader",
     (
         "utils/host_facts.py",
-        "_live_read_text",
-    ): "a host file (the processor flags, the kernel release) at the byte limit "
-    "its caller names; parsed for the host's facts, never shown",
+        "_live_read_head",
+    ): "the head of a host file (the processor flags, the kernel release, the "
+    "interpreter's own executable) at the byte limit its caller names; parsed for the "
+    "host's facts, never shown",
     (
         "utils/host_facts.py",
         "read_runtime_flags",

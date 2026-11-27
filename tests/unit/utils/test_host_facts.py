@@ -38,7 +38,7 @@ import sys
 from collections import Counter
 from importlib.metadata import PathDistribution
 from pathlib import Path
-from typing import Any, Callable, Collection, Iterable, Mapping, Optional
+from typing import Any, Callable, Collection, Mapping, Optional
 
 import pytest
 from packaging.specifiers import SpecifierSet
@@ -419,6 +419,9 @@ def linux_host(
             raise FileNotFoundError(errno.ENOENT, path)
         return files[path][:limit]
 
+    def read_head(path: str, limit: int) -> bytes:
+        return planted_elf("/lib64/ld-linux-x86-64.so.2")[:limit]
+
     return planted(
         sys_platform=lambda: "linux",
         machine=lambda: "x86_64",
@@ -426,9 +429,10 @@ def linux_host(
         read_text=read_text,
         freedesktop_os_release=lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"},
         libc_version=lambda: "glibc 2.39",
-        platform_tags=lambda: iter(
-            ["linux_x86_64", "manylinux_2_39_x86_64", "manylinux_2_38_x86_64"]
-        ),
+        # The interpreter's executable names the glibc loader, so a C library read that
+        # fails is still answered (the fallback is read from this file, never run).
+        executable=lambda: "/usr/bin/python3",
+        read_head=read_head,
         distribution=site.lookup,
         getenv=environment.get,
         sys_prefix=lambda: prefix,
@@ -1096,87 +1100,17 @@ def test_wsl_is_not_applicable_off_linux_and_reads_nothing_there(tmp_path):
 # --------------------------------------------------------------------------------------
 
 
-def test_glibc_is_answered_by_the_c_library_and_reads_no_tags(tmp_path):
+def test_glibc_is_answered_by_the_c_library_and_reads_no_executable(tmp_path):
     sources = dataclasses.replace(
-        linux_host(tmp_path), platform_tags=_unplanted("platform_tags")
+        linux_host(tmp_path),
+        executable=_unplanted("executable"),
+        read_head=_unplanted("read_head"),
     )
     assert read(sources).libc == "glibc"
 
 
-@pytest.mark.parametrize(
-    ("tags", "expected"),
-    [
-        # packaging 26 yields the plain linux tag first; 24 yields it last.
-        (["linux_x86_64", "manylinux_2_34_x86_64", "manylinux_2_17_x86_64"], "glibc"),
-        (["manylinux_2_28_x86_64", "manylinux2014_x86_64", "linux_x86_64"], "glibc"),
-        (["linux_x86_64", "musllinux_1_2_x86_64", "musllinux_1_1_x86_64"], "musl"),
-        (["musllinux_1_2_aarch64", "linux_aarch64"], "musl"),
-        (["linux_x86_64"], "unknown"),
-        ([], "unknown"),
-        (["any"], "unknown"),
-    ],
-)
-def test_libc_falls_back_to_the_platform_tags_when_the_c_library_is_silent(
-    tmp_path, tags, expected
-):
-    def silent() -> str:
-        raise ValueError("unrecognized configuration name")
-
-    sources = dataclasses.replace(
-        linux_host(tmp_path), libc_version=silent, platform_tags=lambda: iter(tags)
-    )
-    assert read(sources).libc == expected
-
-
-def test_a_c_library_that_is_not_glibc_falls_back_to_the_tags(tmp_path):
-    sources = dataclasses.replace(
-        linux_host(tmp_path),
-        libc_version=lambda: "uClibc 1.0",
-        platform_tags=lambda: iter(["linux_x86_64", "musllinux_1_2_x86_64"]),
-    )
-    assert read(sources).libc == "musl"
-
-
-def test_the_tag_scan_is_bounded(tmp_path):
-    def endless() -> Iterable[str]:
-        while True:
-            yield "linux_x86_64"
-
-    def silent() -> str:
-        raise ValueError("no such name")
-
-    sources = dataclasses.replace(
-        linux_host(tmp_path), libc_version=silent, platform_tags=endless
-    )
-    assert read(sources).libc == UNKNOWN
-
-
-def test_a_manylinux_tag_beyond_the_scan_bound_is_not_read(tmp_path):
-    tags = ["linux_x86_64"] * 64 + ["manylinux_2_17_x86_64"]
-
-    def silent() -> str:
-        raise ValueError("no such name")
-
-    sources = dataclasses.replace(
-        linux_host(tmp_path), libc_version=silent, platform_tags=lambda: iter(tags)
-    )
-    assert read(sources).libc == UNKNOWN
-
-
-def test_a_failing_tag_source_reads_unknown_and_is_a_failure(tmp_path):
-    def silent() -> str:
-        raise ValueError("no such name")
-
-    sources = dataclasses.replace(
-        linux_host(tmp_path), libc_version=silent, platform_tags=_raises
-    )
-    reading = read(sources)
-    assert reading.libc == UNKNOWN
-    assert ("libc", "RuntimeError") in reading.failed
-
-
 def test_libc_is_not_applicable_off_linux(tmp_path):
-    # libc_version and platform_tags stay unplanted there.
+    # libc_version, executable and read_head stay unplanted there.
     assert read(macos_host(tmp_path)).libc == "n/a"
     assert read(windows_host(tmp_path / "w")).libc == "n/a"
 
@@ -1360,6 +1294,152 @@ def test_a_c_library_that_does_not_say_glibc_leaves_the_answer_to_the_loader(
     got = libc_beside(tmp_path, monkeypatch, content, libc_version=lambda: version)
     assert got == expected
     assert child_processes == []
+
+
+# The same fallback through planted sources: what the reader asks of the host, and how
+# it reads the program header table of a head that is cut, lying or oversized.
+
+
+def a_silent_c_library() -> str:
+    raise ValueError("unrecognized configuration name")
+
+
+def with_executable(
+    sources: Sources,
+    head: bytes,
+    *,
+    asked: Optional[list[tuple[str, int]]] = None,
+    libc_version: Callable[[], str] = a_silent_c_library,
+) -> Sources:
+    """``sources`` with a silent C library and an executable that starts with ``head``.
+
+    ``asked`` collects each ``(path, limit)`` the executable is read with.
+    """
+
+    def read_head(path: str, limit: int) -> bytes:
+        if asked is not None:
+            asked.append((path, limit))
+        return head[:limit]
+
+    return dataclasses.replace(
+        sources,
+        libc_version=libc_version,
+        executable=lambda: "/opt/python/bin/python3",
+        read_head=read_head,
+    )
+
+
+def elf_with_loader_at(index: int, interpreter: str) -> bytes:
+    """A 64-bit little-endian ELF head whose loader is the program header ``index``.
+
+    The headers before it are null entries: only the length of the table differs from
+    ``planted_elf``.
+    """
+    entry, table = 56, 64
+    name = interpreter.encode("ascii") + b"\x00"
+    end = table + (index + 1) * entry
+    ident = bytes([0x7F, 0x45, 0x4C, 0x46, 2, 1, 1]) + bytes(9)
+    header = struct.pack(
+        "<HHIQQQIHHHHHH", 2, 62, 1, 0, table, 0, 0, 64, entry, index + 1, 0, 0, 0
+    )
+    null = struct.pack("<IIQQQQQQ", 0, 0, 0, 0, 0, 0, 0, 1)
+    loader = struct.pack("<IIQQQQQQ", 3, 4, end, end, end, len(name), len(name), 1)
+    return ident + header + null * index + loader + name
+
+
+def patched(content: bytes, start: int, value: int, size: int) -> bytes:
+    """``content`` with the little-endian number at ``start`` replaced by ``value``."""
+    return content[:start] + value.to_bytes(size, "little") + content[start + size :]
+
+
+#: (id, head, libc): a 64-bit head whose header table is bounded or does not add up.
+ELF_SHAPES = [
+    # The first 64 program headers are read, and the loader comes before the rest.
+    (
+        "loader-at-the-last-header-read",
+        elf_with_loader_at(63, "/lib/ld-musl-x86_64.so.1"),
+        "musl",
+    ),
+    (
+        "loader-past-the-last-header-read",
+        elf_with_loader_at(64, "/lib/ld-musl-x86_64.so.1"),
+        "unknown",
+    ),
+    # A table that claims more headers than the head holds stops at the loader.
+    ("more-headers-than-the-head-holds", patched(_WHOLE_ELF, 0x38, 0xFFFF, 2), "musl"),
+    ("no-program-headers", patched(_WHOLE_ELF, 0x38, 0, 2), "unknown"),
+    ("an-entry-size-below-the-minimum", patched(_WHOLE_ELF, 0x36, 8, 2), "unknown"),
+    ("a-table-beyond-the-head", patched(_WHOLE_ELF, 0x20, 1 << 40, 8), "unknown"),
+    ("a-loader-name-with-no-end", _WHOLE_ELF[:-1] + b"x", "unknown"),
+]
+
+
+@pytest.mark.parametrize(
+    ("interpreter", "options", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in LOADERS],
+)
+def test_the_loader_a_planted_executable_names_decides_a_silent_c_library(
+    tmp_path, interpreter, options, expected
+):
+    head = planted_elf(interpreter, **options)
+    assert read(with_executable(linux_host(tmp_path), head)).libc == expected
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param(case[1], id=case[0]) for case in NOT_ELF]
+)
+def test_a_planted_executable_that_is_not_a_whole_elf_file_reads_unknown(
+    tmp_path, content
+):
+    reading = read(with_executable(linux_host(tmp_path), content))
+    assert reading.libc == UNKNOWN
+    assert reading.failed == ()
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in ELF_SHAPES],
+)
+def test_the_program_header_table_is_read_within_its_bounds(
+    tmp_path, content, expected
+):
+    assert read(with_executable(linux_host(tmp_path), content)).libc == expected
+
+
+def test_the_loader_name_is_the_string_the_interp_header_points_at():
+    assert host_facts._elf_interpreter(_WHOLE_ELF) == "/lib/ld-musl-x86_64.so.1"
+    big_32 = planted_elf("/lib/ld.so.1", bits=32, order="big")
+    assert host_facts._elf_interpreter(big_32) == "/lib/ld.so.1"
+    assert host_facts._elf_interpreter(planted_elf(None)) is None
+
+
+def test_the_executable_is_read_for_a_bounded_head_once_per_reader(tmp_path):
+    asked: list[tuple[str, int]] = []
+    head = planted_elf("/lib/ld-musl-x86_64.so.1")
+    reader = HostFactsReader(with_executable(linux_host(tmp_path), head, asked=asked))
+    first = reader.read(express_supported=lambda: True)
+    second = reader.read(express_supported=lambda: True)
+    assert first.libc == second.libc == "musl"
+    assert asked == [("/opt/python/bin/python3", 4096)]
+
+
+@pytest.mark.parametrize("source", ["executable", "read_head"])
+def test_a_failing_executable_source_reads_unknown_and_is_a_failure(tmp_path, source):
+    sources = with_executable(linux_host(tmp_path), planted_elf(None))
+    reading = read(dataclasses.replace(sources, **{source: _raises}))
+    assert reading.libc == UNKNOWN
+    assert ("libc", "RuntimeError") in reading.failed
+
+
+def test_an_empty_executable_path_reads_unknown_and_reads_no_file(tmp_path):
+    sources = dataclasses.replace(
+        with_executable(linux_host(tmp_path), planted_elf(None)),
+        executable=lambda: "",
+        read_head=_unplanted("read_head"),
+    )
+    reading = read(sources)
+    assert reading.libc == UNKNOWN
+    assert reading.failed == ()
 
 
 # --------------------------------------------------------------------------------------
@@ -2898,7 +2978,7 @@ def test_the_two_readers_return_unknown_on_any_failure_and_never_raise(tmp_path)
         linux_host(tmp_path),
         freedesktop_os_release=_raises,
         libc_version=_raises,
-        platform_tags=_raises,
+        executable=_raises,
     )
     assert host_facts.read_os_release(sources) == UNKNOWN
     assert host_facts.read_libc(sources) == UNKNOWN
@@ -3041,6 +3121,25 @@ def test_the_live_text_read_is_bounded_and_replaces_bad_bytes(tmp_path):
     assert host_facts._live_read_text(str(target), 4096) == "abc\ufffddef-and-more"
     with pytest.raises(FileNotFoundError):
         host_facts._live_read_text(str(tmp_path / "absent"), 10)
+
+
+def test_the_live_head_read_is_bounded_and_returns_the_bytes_as_they_are(tmp_path):
+    target = tmp_path / "file"
+    target.write_bytes(b"abc\xffdef-and-more")
+    assert host_facts._live_read_head(str(target), 7) == b"abc\xffdef"
+    assert host_facts._live_read_head(str(target), 4096) == b"abc\xffdef-and-more"
+    with pytest.raises(FileNotFoundError):
+        host_facts._live_read_head(str(tmp_path / "absent"), 10)
+
+
+def test_the_live_executable_is_the_interpreters_and_empty_when_it_has_none(
+    monkeypatch,
+):
+    monkeypatch.setattr(sys, "executable", "/opt/python/bin/python3")
+    assert host_facts._live_executable() == "/opt/python/bin/python3"
+    for none in ("", None):
+        monkeypatch.setattr(sys, "executable", none)
+        assert host_facts._live_executable() == ""
 
 
 def test_the_live_distribution_lookup_answers_none_for_a_missing_name(
