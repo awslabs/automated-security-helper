@@ -36,6 +36,14 @@ no zip writer makes them. The controls hand both entry points every layout a wri
 descriptors with and without their signature, in four-byte and eight-byte sizes, zip64
 end records, an archive comment and an empty archive.
 
+A member holds what it declares (rule 9). zipfile cuts a member at its declared size and
+checks the CRC-32 of what it returned, so ``_Raw`` and ``_deflated_raw`` write members
+whose two headers give a size and a CRC-32 that zipfile finds nothing wrong with, over
+data that is longer, shorter or has more after its stream: the archives zipfile extracts
+as a cut file without a word, which both entry points refuse before anything is written.
+The spy on ``zlib.decompressobj`` shows that admission inflates in steps and stops a
+byte past the size a member declares.
+
 The module reads the Unicode path field itself (rule 3), so its verdict cannot depend on
 whether this Python's zipfile applies the field, as it does from 3.12. The rows that
 turn on it run twice: under this zipfile, and under one made to ignore the field, as
@@ -568,11 +576,15 @@ def _zip_written_to_a_pipe(entries: Dict[str, bytes], *, zip64: bool = False) ->
 
 @dataclass(frozen=True)
 class _Raw:
-    """One stored member, written byte by byte, with what each of its headers says.
+    """One member, written byte by byte, with what each of its headers says.
 
-    The local header gives the member's true CRC-32 and sizes, or zeros when its flags
-    say a data descriptor follows the data, unless ``local_sizes`` gives others;
-    ``local_flags`` defaults to ``flags``. ``descriptor`` is written after the data.
+    Stored unless ``method`` says another, in which case ``data`` is what that method
+    made of the member. The local header gives the member's true CRC-32 and sizes, or
+    zeros when its flags say a data descriptor follows the data, unless
+    ``local_sizes`` gives others; ``local_flags`` defaults to ``flags``.
+    ``descriptor`` is written after the data. Both headers give ``size`` for the member
+    once uncompressed and the CRC-32 of ``crc_of``, where those are not the length and
+    the CRC-32 of ``data``: a member that declares less than it holds, or more.
     """
 
     name: bytes
@@ -582,6 +594,17 @@ class _Raw:
     local_sizes: Optional[Tuple[int, int, int]] = None
     local_extra: bytes = b""
     descriptor: bytes = b""
+    method: int = zipfile.ZIP_STORED
+    size: Optional[int] = None
+    crc_of: Optional[bytes] = None
+
+    @property
+    def declared_size(self) -> int:
+        return len(self.data) if self.size is None else self.size
+
+    @property
+    def crc(self) -> int:
+        return zlib.crc32(self.data if self.crc_of is None else self.crc_of)
 
     def local_record(self) -> bytes:
         flags = self.flags if self.local_flags is None else self.local_flags
@@ -590,17 +613,13 @@ class _Raw:
         elif flags & 0x8:
             crc = compressed = size = 0
         else:
-            crc, compressed, size = (
-                zlib.crc32(self.data),
-                len(self.data),
-                len(self.data),
-            )
+            crc, compressed, size = self.crc, len(self.data), self.declared_size
         header = struct.pack(
             "<4s5H3L2H",
             b"PK\x03\x04",
             20,
             flags,
-            zipfile.ZIP_STORED,
+            self.method,
             0,
             0x21,
             crc,
@@ -612,7 +631,6 @@ class _Raw:
         return header + self.name + self.local_extra + self.data + self.descriptor
 
     def central_entry(self, offset: int) -> bytes:
-        size = len(self.data)
         entry = struct.pack(
             "<4s4B4HL2L5H2L",
             b"PK\x01\x02",
@@ -621,12 +639,12 @@ class _Raw:
             20,
             0,
             self.flags,
-            zipfile.ZIP_STORED,
+            self.method,
             0,
             0x21,
-            zlib.crc32(self.data),
-            size,
-            size,
+            self.crc,
+            len(self.data),
+            self.declared_size,
             len(self.name),
             0,
             0,
@@ -636,6 +654,38 @@ class _Raw:
             offset,
         )
         return entry + self.name
+
+
+def _deflated(content: bytes) -> bytes:
+    """The raw deflate stream of ``content``, which is what a deflated member holds."""
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
+    return compressor.compress(content) + compressor.flush()
+
+
+def _deflated_raw(
+    content: bytes,
+    *,
+    declares: Optional[int] = None,
+    after: bytes = b"",
+    cut: int = 0,
+) -> _Raw:
+    """A deflated member ``a.py`` of ``content``, written byte by byte.
+
+    Both headers give the size ``declares`` (the length of ``content`` by default) and
+    the CRC-32 of the first ``declares`` bytes of what the stream makes, so zipfile
+    finds nothing wrong with the member it cuts at that size. ``after`` is written
+    after the stream, inside the member's compressed data, and ``cut`` bytes are taken
+    off the end of the stream.
+    """
+    stream = _deflated(content)
+    size = len(content) if declares is None else declares
+    return _Raw(
+        b"a.py",
+        stream[: len(stream) - cut] + after,
+        method=zipfile.ZIP_DEFLATED,
+        size=size,
+        crc_of=content[:size],
+    )
 
 
 def _descriptor(data: bytes, *, signature: bool = True, zip64: bool = False) -> bytes:
@@ -891,6 +941,9 @@ _STORED = b"print('stored as it is')\n"
 _ZIP64_ARCHIVE = _raw_zip([_Raw(b"app.py", b"x")], zip64_end=True)
 _ZIP64_LOCATOR_AT = _zip64_locator_at(_ZIP64_ARCHIVE)
 _ZIP64_RECORD_AT = _ZIP64_LOCATOR_AT - 56
+#: 128 KiB that deflate cannot make smaller, the same on every run: a deflated member of
+#: it holds more compressed data than one read of admission takes.
+_NOISE = b"".join(hashlib.sha256(at.to_bytes(2, "big")).digest() for at in range(4096))
 
 
 def _stored(content: bytes = _STORED) -> bytes:
@@ -1409,6 +1462,68 @@ REFUSED = [
         "zip entry 'a.py' is encrypted: an encrypted member cannot be read",
         id="an-encrypted-member-of-another-method-is-refused-as-encrypted",
     ),
+    # Rule 9: a member's data is the size it declares. zipfile cuts a member at that size
+    # and checks the CRC-32 of what it returned, so it extracts the first 10 bytes of a
+    # member that holds 200 without a word, and as many as a member holds that declares
+    # more; a reader of the whole data (zipimport, python app.zip) gets all of it. Both
+    # headers of each row give the size and the CRC-32 of what zipfile returns. Red at
+    # the base: each was admitted, and extracted as a cut file.
+    pytest.param(
+        # 200 bytes of stored data under a size of 10: the scan reads `import os`, and
+        # `python archive.zip` runs all 200.
+        _raw_zip(
+            [
+                _Raw(
+                    b"__main__.py",
+                    b"import os\n" + b"#" * 189 + b"\n",
+                    size=10,
+                    crc_of=b"import os\n",
+                )
+            ]
+        ),
+        Kind.NOT_A_ZIP,
+        "zip entry '__main__.py' holds 200 bytes of stored data and declares a size of "
+        "10 bytes",
+        id="a-stored-member-that-holds-more-than-it-declares",
+    ),
+    pytest.param(
+        _raw_zip([_Raw(b"a.py", b"x" * 5, size=50)]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' holds 5 bytes of stored data and declares a size of 50 bytes",
+        id="a-stored-member-that-holds-less-than-it-declares",
+    ),
+    pytest.param(
+        _raw_zip([_deflated_raw(b"A" * 100, declares=10)]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' inflates to more than the 10 bytes it declares",
+        id="a-deflated-stream-that-inflates-past-the-size-it-declares",
+    ),
+    pytest.param(
+        _raw_zip([_deflated_raw(b"A" * 5, declares=50)]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' inflates to 5 bytes and declares 50",
+        id="a-deflated-stream-that-ends-before-the-size-it-declares",
+    ),
+    pytest.param(
+        _raw_zip([_deflated_raw(b"A" * 100, after=b"junk")]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' holds 4 bytes of compressed data after the end of its stream",
+        id="a-deflated-member-with-compressed-data-after-its-stream",
+    ),
+    pytest.param(
+        _raw_zip([_deflated_raw(b"A" * 100, cut=1)]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' holds a compressed stream that does not end within its "
+        f"{len(_deflated(b'A' * 100)) - 1} bytes of data",
+        id="a-deflated-stream-that-never-ends",
+    ),
+    pytest.param(
+        _raw_zip([_Raw(b"a.py", b"", method=zipfile.ZIP_DEFLATED, size=5)]),
+        Kind.NOT_A_ZIP,
+        "zip entry 'a.py' holds a compressed stream that does not end within its 0 "
+        "bytes of data",
+        id="a-deflated-member-with-no-data-that-declares-a-size",
+    ),
 ]
 
 #: Rule 3, run under this Python's zipfile and under one that ignores the field.
@@ -1623,6 +1738,18 @@ ADMITTED = [
         id="an-archive-comment",
     ),
     pytest.param(_zip({}), {}, id="an-empty-archive"),
+    pytest.param(
+        _raw_zip([_deflated_raw(b"VALUE = 1\n" * 20)]),
+        {"a.py": b"VALUE = 1\n" * 20},
+        id="a-deflated-member-whose-stream-ends-at-its-size",
+    ),
+    pytest.param(
+        # More compressed data than one step reads, and a stream that stops inside a
+        # step: the member is read in pieces and ends where its size says.
+        _raw_zip([_deflated_raw(_NOISE)]),
+        {"a.py": _NOISE},
+        id="a-deflated-member-longer-than-one-read",
+    ),
 ]
 
 
@@ -1746,6 +1873,93 @@ class TestAMethodButStoredAndDeflatedIsNeverDecompressed:
 
         assert without_it == with_the_module
         assert with_the_module[0] is Kind.UNSUPPORTED_COMPRESSION
+
+
+class _InflateLog:
+    """The output limit of each call to a decompressor, and how much each returned."""
+
+    def __init__(self) -> None:
+        self.limits: List[int] = []
+        self.made: List[int] = []
+
+
+def _logging_decompressors(monkeypatch: pytest.MonkeyPatch, log: _InflateLog) -> None:
+    """Make every ``zlib.decompressobj`` note, in ``log``, each call it is given."""
+    real = zlib.decompressobj
+
+    class Logging:
+        def __init__(self, wbits: int) -> None:
+            self._real = real(wbits)
+
+        def decompress(self, data: bytes, max_length: int = 0) -> bytes:
+            log.limits.append(max_length)
+            made = self._real.decompress(data, max_length)
+            log.made.append(len(made))
+            return made
+
+        def __getattr__(self, name: str):
+            return getattr(self._real, name)
+
+    monkeypatch.setattr(zlib, "decompressobj", Logging)
+
+
+class TestADeflatedMemberIsInflatedUnderABound:
+    """Rule 9: admission inflates a deflated member in steps, and never makes more than
+    a byte past the size the member declares, however far its stream could expand."""
+
+    def test_a_stream_that_expands_far_past_its_size_is_stopped_a_byte_past_it(
+        self, monkeypatch
+    ):
+        """8 MiB of one byte under a size of 10: one call, asked for 11 bytes. Red at the
+        base: no stream was inflated by admission, and extraction made it all."""
+        log = _InflateLog()
+        _logging_decompressors(monkeypatch, log)
+        payload = _raw_zip([_deflated_raw(bytes(8 * MiB), declares=10)])
+
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            with pytest.raises(sa.SourceArchiveRefused) as refused:
+                sa.admit_zip_members(archive)
+
+        assert refused.value.kind is Kind.NOT_A_ZIP
+        assert str(refused.value) == (
+            "zip entry 'a.py' inflates to more than the 10 bytes it declares"
+        )
+        assert log.limits == [11]
+        assert log.made == [11]
+
+    def test_every_call_is_bounded_and_what_is_made_is_the_declared_size(
+        self, monkeypatch
+    ):
+        """No call is allowed an unlimited output (``max_length`` 0 means none), none
+        makes more than one step, and the whole is the size the member declares."""
+        log = _InflateLog()
+        _logging_decompressors(monkeypatch, log)
+        content = bytes(MiB)
+        payload = _raw_zip([_deflated_raw(content)])
+
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            assert len(sa.admit_zip_members(archive)) == 1
+
+        assert len(log.limits) > 1, "a megabyte was inflated in one call"
+        assert all(0 < limit <= sa._INFLATE_STEP_BYTES for limit in log.limits)
+        assert max(log.made) <= sa._INFLATE_STEP_BYTES
+        assert sum(log.made) == len(content)
+
+    def test_a_member_is_not_inflated_when_a_cheaper_rule_refuses_the_archive(
+        self, monkeypatch
+    ):
+        """The data is the last thing read: an archive that holds two members on one path
+        is refused for it without inflating either."""
+        log = _InflateLog()
+        _logging_decompressors(monkeypatch, log)
+        payload = _zip_members([("a.py", b"x" * 100), ("a.py", b"y" * 100)])
+
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            with pytest.raises(sa.SourceArchiveRefused) as refused:
+                sa.admit_zip_members(archive)
+
+        assert refused.value.kind is Kind.PATH_COLLISION
+        assert log.limits == []
 
 
 class TestASecondNameIsRefusedWhicheverNameZipfileTakes:
@@ -1938,6 +2152,16 @@ class TestOneZipIsAdmittedHoweverItsWriterLaysItOut:
 
         assert _tree(extracted) == tree
         assert _tree(delivered) == tree
+
+    def test_a_deflated_member_with_no_data_at_all_is_admitted(self):
+        """Control for rule 9: a deflated member that declares no size and holds no
+        compressed data has nothing to inflate and nothing to disagree about: no reader
+        gets a byte from it."""
+        payload = _raw_zip([_Raw(b"empty.py", b"", method=zipfile.ZIP_DEFLATED)])
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = sa.admit_zip_members(archive)
+
+        assert [member.filename for member in members] == ["empty.py"]
 
     def test_a_name_outside_ascii_that_both_headers_flag_as_utf8_is_admitted(self):
         """Control for the comparison of a local header's name and UTF-8 flag with the
@@ -2601,6 +2825,26 @@ UNREADABLE = [
         False,
         None,
         id="a-member-whose-data-fails-its-checksum",
+    ),
+    pytest.param(
+        # A stream that opens with a block of the one type no stream has: zlib refuses
+        # it as admission inflates the member, in the words extraction used for it.
+        _raw_zip(
+            [
+                _Raw(
+                    b"a.py",
+                    b"\x07",
+                    method=zipfile.ZIP_DEFLATED,
+                    size=5,
+                    crc_of=b"hello",
+                )
+            ]
+        ),
+        Kind.UNREADABLE_MEMBER,
+        "zip entry 'a.py' cannot be read: ",
+        True,
+        None,
+        id="a-deflated-member-whose-stream-is-damaged",
     ),
 ]
 

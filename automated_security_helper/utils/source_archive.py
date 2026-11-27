@@ -14,19 +14,21 @@ same words. The rules are the ones the MCP delivery enforced, moved here, with
 additions that hold for both: a NUL, a ``.`` or an empty component in a member name,
 a Unicode path field that renames a member, two members on one path (names that differ
 only in case or Unicode normalization count as one on Windows and macOS), an
-encrypted member, a compression method other than stored and deflate, and a file that
-holds anything besides one zip (below).
+encrypted member, a compression method other than stored and deflate, a member whose
+data is not the size it declares, and a file that holds anything besides one zip
+(below).
 
 What is refused
 ---------------
-Every rule is decided from the archive's end records, its central directory and its
-members' local headers before anything is written, so a refused archive leaves the
-destination as it was.
+Every rule is decided from the archive's end records, its central directory, its
+members' local headers and, for rule 9, their data, before anything is written, so a
+refused archive leaves the destination as it was.
 
 1. Size. At most 100 MiB of archive, 500 MiB of members once uncompressed, and
    50,000 members, directories included. The uncompressed total is the sum of the
    sizes the members declare, which also bounds what extraction writes: zipfile
-   stops reading a member at its declared size.
+   stops reading a member at its declared size, and rule 9 refuses a member whose
+   data is any other size.
 2. Names, judged as the archive spells them (``ZipInfo.orig_filename``) rather than
    as zipfile rewrites them, so one spelling is judged on every platform: an empty
    name; a backslash, since ``/`` is the zip separator and a backslash name lands on
@@ -106,6 +108,19 @@ destination as it was.
    The method is read from the central directory right after the encryption flag, so
    both entry points refuse such a member in the same words, on every Python, whether
    or not it was built with the method's module.
+9. Data that is the size it declares. zipfile cuts a member at the size it declares and
+   checks the CRC-32 of what it returned, so data past that size is invisible to it; a
+   reader that takes the member's whole data, as ``zipimport`` and ``python app.zip``
+   do, gets all of it, so a member that declares 10 bytes and holds 200 gives the scan
+   the first and that reader the rest. A stored member's data is as long as its size. A
+   deflated member is inflated by this module, which reads at most 64 KiB of its
+   compressed data and makes at most 64 KiB of output in a step, and never more than a
+   byte past the size the member declares, so memory stays at the step and the work at
+   the declared total, which rule 1 holds to 500 MiB: its stream has to end exactly at
+   that size, and to be the whole of its compressed data. The CRC-32 is zipfile's check,
+   made as it extracts the member. A stream zlib cannot read is refused as an
+   unreadable member, here, in the words extraction used for it, so no member is
+   written before it.
 
 A malformed member is refused, never repaired: an archive that has to be rewritten to
 be safe is not the tree its sender meant to send.
@@ -161,8 +176,10 @@ Limits
   long names), can still hold two members' paths as one. Where that happens zipfile
   writes the later of two files over the earlier, and a file and a directory end the
   extraction with the ``OSError`` the filesystem raises.
-* A member whose data is damaged is found when extraction reaches it, after the
-  members before it were written. The caller removes the destination on any failure.
+* A member whose data does not match its CRC-32 is found when extraction reaches it,
+  after the members before it were written: admission inflates a deflated member to its
+  end and counts what it makes, but does not check the CRC-32 over it, and reads no
+  stored member's data. The caller removes the destination on any failure.
 * A Unicode path field that restates its name from a legacy code page rather than
   from UTF-8 bytes (Info-ZIP under a locale that is not UTF-8, for a name outside
   ASCII) is refused as naming another file.
@@ -173,10 +190,11 @@ Limits
   local header, so a reader of the local headers finds where that member ends from its
   data: where its compressed stream stops, or, for a stored member, where it finds a
   data descriptor. Rule 6 places the end by the compressed size in the central
-  directory, as zipfile does, and does not decompress the member before extraction to
-  check that its stream stops there. A deflated stream that stops early, which zipfile
-  reads without complaint, or a stored member whose data holds what reads as its own
-  descriptor, can end that member somewhere else for such a reader.
+  directory, as zipfile does, and rule 9 checks that a deflated stream stops exactly
+  there, so what is left is a stored member whose data holds what reads as its own
+  descriptor, which can end that member somewhere else for such a reader.
+* Admission inflates each deflated member once and extraction inflates it again, so
+  an archive of deflated members costs its declared total twice, bounded as above.
 """
 
 from __future__ import annotations
@@ -190,6 +208,7 @@ import struct
 import sys
 import unicodedata
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -225,6 +244,11 @@ _UTF8_NAME_FLAG = 0x800
 #: The compression methods a member may use (rule 8): stored, and deflated, the two
 #: that Info-ZIP, git archive and zipfile write by default.
 _ADMITTED_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+#: How much of a deflated member admission reads at a time, and the most that one
+#: inflate call may produce (rule 9): memory stays at about twice this, whatever the
+#: member declares or holds. The work is bounded by the sizes the members declare,
+#: which rule 1 holds to ``ZipRules.max_extracted_bytes`` in all.
+_INFLATE_STEP_BYTES = 64 * 1024
 #: The methods a refusal names, by their numbers in PKWARE's APPNOTE (section 4.4.5): the
 #: ones other tools write. Any other number is named as the number.
 _METHOD_NAMES = {
@@ -466,6 +490,16 @@ class ZipRules:
     archives: str = SOURCE_ARCHIVES
 
 
+@dataclass(frozen=True)
+class _LocalRecord:
+    """What the walk of a member's local record finds that a later rule reads."""
+
+    #: The extra field of its local header (rule 3).
+    extra: bytes
+    #: Where its data starts: after its local header, name and extra field (rule 9).
+    data_at: int
+
+
 def admit_zip_members(
     archive: zipfile.ZipFile, rules: Optional[ZipRules] = None
 ) -> List[zipfile.ZipInfo]:
@@ -476,21 +510,24 @@ def admit_zip_members(
 
     Writes nothing. Reads the file ``archive`` was opened on where its records are (the
     end records, the central directory, each member's local header and any data
-    descriptor) and, for a link, the first bytes of its target; no other member data.
-    The member count is checked first; then that no member is encrypted; then that none
-    is compressed with a method other than stored or deflated, so that no link's target
-    or other data is ever handed to a decompressor that cannot be bounded; then that the
-    file is one zip and nothing else; then, for each member in archive order, its name,
-    its Unicode path fields and the name an admitted one gives, the uncompressed total
-    so far, and whether it is a link; then that no two members are extracted to one
-    path. The first rule that refuses ends the check.
+    descriptor), for a link the first bytes of its target, and the compressed data of
+    each deflated member, which it inflates under a bound and drops (rule 9); no other
+    member data. The member count is checked first; then that no member is encrypted;
+    then that none is compressed with a method other than stored or deflated, so that
+    no data is ever handed to a decompressor that cannot be bounded; then that the file
+    is one zip and nothing else; then, for each member in archive order, its name, its
+    Unicode path fields and the name an admitted one gives, the uncompressed total so
+    far, and whether it is a link; then that no two members are extracted to one path;
+    last, that each member's data is the size it declares. The first rule that refuses
+    ends the check.
 
     Raises:
         SourceArchiveRefused: naming the rule. What zipfile raises as the first bytes
             of a link's target are read is refused as unreadable, like anything else
             zipfile raises about the archive, but an ``OSError`` and a
-            ``MemoryError``. Whatever ``rules.validate_name`` raises, and every
-            exception of this module's own, is raised as it is.
+            ``MemoryError``; so is a deflated stream zlib cannot read. Whatever
+            ``rules.validate_name`` raises, and every exception of this module's own,
+            is raised as it is.
         ValueError: ``archive`` is closed.
     """
     if rules is None:
@@ -503,11 +540,11 @@ def admit_zip_members(
         )
     _refuse_encrypted_members(members)
     _refuse_unsupported_methods(members)
-    spelled_names, local_extras = _refuse_anything_but_one_zip(archive, members)
+    spelled_names, records = _refuse_anything_but_one_zip(archive, members)
     total = 0
-    for info, spelled, local_extra in zip(members, spelled_names, local_extras):
+    for info, spelled, record in zip(members, spelled_names, records):
         rules.validate_name(info.orig_filename)
-        restated = _refuse_a_second_name(info, spelled, local_extra)
+        restated = _refuse_a_second_name(info, spelled, record.extra)
         if restated is not None and restated != info.orig_filename:
             rules.validate_name(restated)
         total += info.file_size
@@ -520,27 +557,35 @@ def admit_zip_members(
         if is_symlink_member(info):
             raise _link_refused(archive, info, rules)
     _refuse_shared_paths(members)
+    _refuse_data_that_is_not_its_size(_archive_file(archive), members, records)
     return members
+
+
+def _archive_file(archive: zipfile.ZipFile) -> IO[bytes]:
+    """The file ``archive`` reads, which the records and the data are read from."""
+    handle = archive.fp
+    if handle is None:
+        raise ValueError("Attempt to use ZIP archive that was already closed")
+    return handle
 
 
 def _refuse_anything_but_one_zip(
     archive: zipfile.ZipFile, members: List[zipfile.ZipInfo]
-) -> Tuple[List[bytes], List[bytes]]:
+) -> Tuple[List[bytes], List[_LocalRecord]]:
     """Refuse a file that holds anything besides one zip (rule 6).
 
     The end record has to end the file with its comment; the central directory has to
     be where the end record (or the zip64 end record) says, as many entries as it
     counts, none running past it; and the members' local records have to fill the file
     from byte 0 to the central directory, each local header agreeing with the entry
-    that lists it (:func:`_local_extras`). zipfile opened the archive, so the records
+    that lists it (:func:`_local_records`). zipfile opened the archive, so the records
     it read are there to be found the way it found them.
 
     Returns each member's name in the bytes the central directory spells it with, and
-    the extra field of its local header, in archive order, for rule 3.
+    what its local record gives later rules (:class:`_LocalRecord`: the extra field of
+    its local header for rule 3, where its data starts for rule 9), in archive order.
     """
-    handle = archive.fp
-    if handle is None:
-        raise ValueError("Attempt to use ZIP archive that was already closed")
+    handle = _archive_file(archive)
     size = handle.seek(0, io.SEEK_END)
     end = _end_record_position(handle, size)
     # The entries on this disk and in all, the directory's size and offset, and the
@@ -580,7 +625,7 @@ def _refuse_anything_but_one_zip(
             f"directory holds {held}"
         )
     spelled = _spelled_names(handle, archive.start_dir, directory_size, members)
-    return spelled, _local_extras(handle, archive.start_dir, members, spelled)
+    return spelled, _local_records(handle, archive.start_dir, members, spelled)
 
 
 def _not_a_zip(message: str) -> SourceArchiveRefused:
@@ -692,22 +737,22 @@ def _spelled_names(
     return names
 
 
-def _local_extras(
+def _local_records(
     handle: IO[bytes],
     directory_start: int,
     members: List[zipfile.ZipInfo],
     spelled: List[bytes],
-) -> List[bytes]:
+) -> List[_LocalRecord]:
     """Refuse bytes before, between or after the members' local records.
 
     Taken in the order of their local headers, each record has to start where the one
     before it ends, the first at byte 0, and the last has to end where the central
     directory starts (:func:`_local_record_end` says where each ends, and what its
     local header has to agree on with the entry that lists it, ``spelled`` being that
-    entry's name for each member). Returns each member's local extra field, in archive
-    order.
+    entry's name for each member). Returns what each member's record gives later rules,
+    in archive order.
     """
-    extras = [b""] * len(members)
+    records = [_LocalRecord(b"", 0)] * len(members)
     order = sorted(range(len(members)), key=lambda at: members[at].header_offset)
     boundaries = [members[at].header_offset for at in order[1:]] + [directory_start]
     reached = 0
@@ -721,7 +766,7 @@ def _local_extras(
             )
         if info.header_offset != reached:
             raise _misplaced(previous, info, reached)
-        reached, extras[position] = _local_record_end(
+        reached, records[position] = _local_record_end(
             handle, info, boundary, spelled[position]
         )
         previous = info
@@ -738,7 +783,7 @@ def _local_extras(
         raise _not_a_zip(
             f"zip entry {previous.orig_filename!r} runs into the central directory"
         )
-    return extras
+    return records
 
 
 def _misplaced(
@@ -761,8 +806,8 @@ def _misplaced(
 
 def _local_record_end(
     handle: IO[bytes], info: zipfile.ZipInfo, boundary: int, spelled: bytes
-) -> Tuple[int, bytes]:
-    """Where the local record of ``info`` ends, and its local header's extra field.
+) -> Tuple[int, _LocalRecord]:
+    """Where the local record of ``info`` ends, and what it gives later rules.
 
     The record is its header, name, extra field and data, as long as the central
     directory says; then, when the member has a data descriptor, the bytes up to
@@ -787,7 +832,9 @@ def _local_record_end(
     name_at = offset + _LOCAL_HEADER.size
     extra_at = name_at + name_length
     extra = _read_at(handle, extra_at, extra_length)
-    data_end = extra_at + extra_length + info.compress_size
+    data_at = extra_at + extra_length
+    data_end = data_at + info.compress_size
+    record = _LocalRecord(extra, data_at)
     descriptor = bool(info.flag_bits & _DATA_DESCRIPTOR_FLAG)
     compared = [
         ("compression method", method, info.compress_type),
@@ -812,12 +859,12 @@ def _local_record_end(
                 f"{what} than the central directory"
             )
     if not descriptor or data_end > boundary:
-        return data_end, extra
+        return data_end, record
     between = boundary - data_end
     if between <= _LONGEST_DATA_DESCRIPTOR and _restates(
         _read_at(handle, data_end, between), info
     ):
-        return boundary, extra
+        return boundary, record
     raise _not_a_zip(
         f"zip entry {info.orig_filename!r} is not followed by a data descriptor "
         "that restates its CRC-32 and sizes"
@@ -1043,6 +1090,104 @@ def _refuse_shared_paths(members: List[zipfile.ZipInfo]) -> None:
                 "which the archive holds as a file"
                 f"{_folded_note(holder, other, under=True)}",
             )
+
+
+def _refuse_data_that_is_not_its_size(
+    handle: IO[bytes], members: List[zipfile.ZipInfo], records: List[_LocalRecord]
+) -> None:
+    """Refuse a member whose data is not as long as the size it declares (rule 9).
+
+    A stored member's data is its size. A deflated member is inflated here, and its
+    stream has to end at its size and be the whole of its compressed data
+    (:func:`_refuse_a_stream_off_its_size`); rule 8 left no other method. zipfile cuts
+    a member at the size it declares and checks the CRC-32 of what it returned, so data
+    past that size is invisible to it, while a reader that takes the member's whole
+    data, as ``zipimport`` and ``python app.zip`` do, gets all of it.
+
+    Last of the rules, so that every cheaper one decides first: the total of the sizes
+    declared has been held to the limit by now, and that is all of the output this makes.
+    """
+    for info, record in zip(members, records):
+        if info.compress_type == zipfile.ZIP_STORED:
+            if info.compress_size != info.file_size:
+                raise _not_a_zip(
+                    f"zip entry {info.orig_filename!r} holds {info.compress_size} "
+                    f"bytes of stored data and declares a size of {info.file_size} "
+                    "bytes"
+                )
+        elif info.compress_size or info.file_size:
+            _refuse_a_stream_off_its_size(handle, info, record.data_at)
+
+
+def _refuse_a_stream_off_its_size(
+    handle: IO[bytes], info: zipfile.ZipInfo, data_at: int
+) -> None:
+    """Refuse a deflated member whose stream does not end exactly at its size.
+
+    Inflates the member's compressed data, ``info.compress_size`` bytes from
+    ``data_at``, in steps: at most ``_INFLATE_STEP_BYTES`` of it are read at a time, and
+    no call makes more than that of output, or more than one byte past the size the
+    member declares, where it is refused. Memory stays at the step, and the work at the
+    size declared, however far the stream could expand. What is made is counted and
+    dropped.
+
+    The stream has to end, at the size declared, and to be the whole of the compressed
+    data: bytes after it are refused, since zipfile never reads them and a reader of
+    the whole data would. A stream zlib cannot read is refused as an unreadable
+    member, in the words extraction used for it.
+    """
+    name = info.orig_filename
+    declared = info.file_size
+    inflater = zlib.decompressobj(-zlib.MAX_WBITS)
+    produced = fed = 0
+    pending = b""
+    try:
+        while not inflater.eof:
+            if not pending and fed < info.compress_size:
+                pending = _read_at(
+                    handle,
+                    data_at + fed,
+                    min(_INFLATE_STEP_BYTES, info.compress_size - fed),
+                )
+                if not pending:
+                    raise _stream_does_not_end(name, info.compress_size)
+                fed += len(pending)
+            offered = len(pending)
+            # A call allowed no limit on its output (max_length 0) is the one thing
+            # this bound must never make: the step is at least 1 whatever is left.
+            made = inflater.decompress(
+                pending, min(_INFLATE_STEP_BYTES, declared - produced + 1)
+            )
+            pending = inflater.unconsumed_tail
+            produced += len(made)
+            if produced > declared:
+                raise _not_a_zip(
+                    f"zip entry {name!r} inflates to more than the {declared} bytes "
+                    "it declares"
+                )
+            if not made and len(pending) >= offered and not inflater.eof:
+                # Nothing taken in and nothing made, with all of the data given: the
+                # stream waits for bytes the member does not hold.
+                raise _stream_does_not_end(name, info.compress_size)
+    except zlib.error as error:
+        raise _unreadable(f"zip entry {name!r}", error) from error
+    if produced < declared:
+        raise _not_a_zip(
+            f"zip entry {name!r} inflates to {produced} bytes and declares {declared}"
+        )
+    left = info.compress_size - fed + len(inflater.unused_data)
+    if left:
+        raise _not_a_zip(
+            f"zip entry {name!r} holds {left} bytes of compressed data after the end "
+            "of its stream"
+        )
+
+
+def _stream_does_not_end(name: str, compress_size: int) -> SourceArchiveRefused:
+    return _not_a_zip(
+        f"zip entry {name!r} holds a compressed stream that does not end within its "
+        f"{compress_size} bytes of data"
+    )
 
 
 def _link_refused(
