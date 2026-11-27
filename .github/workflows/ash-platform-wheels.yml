@@ -13,9 +13,10 @@ name: ASH - Platform Wheels
 # with glibc and with musl, macOS on both architectures, Windows on both) and for
 # every Python minor version requires-python allows. It keeps the outcome of each
 # cell in scripts/platform_wheels.json and fails when a measured cell no longer
-# matches its record. It also resolves the base install universally with and without
-# the alpha requirements, and fails when adding them moves a version the base install
-# resolves.
+# matches its record, or when a measured row has no recorded row at all: a new extra
+# or a new alpha candidate is recorded in the pull request that adds it. It also
+# resolves the base install universally with and without the alpha requirements, and
+# fails when adding them moves a version the base install resolves.
 #
 # The cutoff of every resolution is the cooldown uv.lock records, counted back from
 # the moment the job starts, so the job sees what `uv lock` could lock today and not
@@ -49,10 +50,14 @@ name: ASH - Platform Wheels
 #
 # WHEN IT FAILS
 #
-# Read the summary, then decide whether the change is wanted. If it is, re-record with
+# A cell that moved is usually PyPI publishing or withdrawing a wheel, so the failure is
+# a re-record and not a defect in the change under review. Read the summary, then
+# decide whether the change is wanted. If it is, re-record with
 # `python scripts/check_platform_wheels.py --record` on a machine with network access,
-# read the diff of scripts/platform_wheels.json, and commit it. A run that could not
-# reach the index fails with a different message and is never recorded as a cell.
+# read the diff of scripts/platform_wheels.json, and commit it. A difference in the
+# base install's closure is not in the record, so a re-record does not clear it. A run
+# that could not reach the index fails with a different message and is never recorded
+# as a cell.
 
 on:
   pull_request:
@@ -121,7 +126,7 @@ jobs:
         run: |
           report="${RUNNER_TEMP}/platform-wheels-check.md"
           status=0
-          python scripts/check_platform_wheels.py --check \
+          python scripts/check_platform_wheels.py --check --require-complete \
             --measured-out "${RUNNER_TEMP}/platform_wheels.measured.json" \
             > "$report" || status=$?
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
