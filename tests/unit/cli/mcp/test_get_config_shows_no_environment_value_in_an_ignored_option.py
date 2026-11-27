@@ -1227,3 +1227,39 @@ def test_a_reference_at_a_case_variant_of_a_destination_is_not_read_into_the_opt
     assert options.get("aws_region", _ABSENT) == "eu-test-7", result
     assert options.get("AWS_Region", _ABSENT) == _REPO_REGION_REFERENCE, result
     assert "test" not in options["AWS_Region"], result
+
+
+# The checkout's reference at a destination option is dropped whatever it
+# resolved to, so the answer never tells whether the variable the checkout named
+# holds the operator's value. The twin of the literal cell above, for a file that
+# reads its own variable.
+@pytest.mark.parametrize(
+    "repository_region",
+    [_OPERATOR_REGION_VALUE, "checkout-region-1"],
+    ids=["a-variable-equal-to-the-operators-value", "a-different-value"],
+)
+def test_a_reference_in_another_checkout_does_not_tell_whether_its_variable_equals_the_value(
+    tmp_path, monkeypatch, repository_region
+):
+    """The operator's file reads aws_region from one variable, and the file in
+    another checkout reads its own from another, which holds the operator's value
+    or a different text. The load gives the option the operator's value either
+    way, and the answer shows the operator's reference there, never the
+    checkout's, and neither value."""
+    monkeypatch.setenv(_OPERATOR_REGION_VAR, _OPERATOR_REGION_VALUE)
+    monkeypatch.setenv(_REPO_REGION_VAR, repository_region)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("aws_region: ${ASH_TEST_OPERATOR_REGION}\n"),
+        _section("aws_region: ${ASH_TEST_REPO_REGION}\n"),
+    )
+
+    dumped = json.dumps(result, default=str)
+    assert _OPERATOR_REGION_VALUE not in dumped, result
+    assert repository_region not in dumped, result
+    assert _REPO_REGION_REFERENCE not in dumped, result
+    assert _options(result).get("aws_region", _ABSENT) == (
+        _OPERATOR_REGION_REFERENCE
+    ), result

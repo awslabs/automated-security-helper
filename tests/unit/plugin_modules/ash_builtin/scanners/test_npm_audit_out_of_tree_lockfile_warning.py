@@ -49,6 +49,9 @@ GHSA = "https://github.com/advisories/GHSA-xvch-5gv4-984h"
 NOT_UNDER = "is not under the scanned directory"
 UNREADABLE = "could not be read"
 CONSEQUENCE = "so its results keep the install-location URI"
+#: The reason given for a link loop: a fixed text, not the system's own, which
+#: reads differently from one platform to the next.
+LINK_LOOP_REASON = "too many levels of symbolic links"
 
 
 def _npm_report() -> dict:
@@ -121,7 +124,7 @@ def _warnings(capture, *needles: str) -> list[str]:
     ]
 
 
-def _resolve_fails_for(monkeypatch, directory: Path, error: OSError) -> None:
+def _resolve_fails_for(monkeypatch, directory: Path, error: Exception) -> None:
     """Make ``Path.resolve`` raise ``error`` for ``directory`` and any path under
     it, and for no other path: a path under a looped directory fails to resolve
     too, so a change that resolves the lockfile itself still meets the failure."""
@@ -256,8 +259,8 @@ def test_a_scanned_target_that_is_a_link_loop_warns_once_and_raises_nothing(
     """Before Python 3.13 ``Path.resolve`` raises ``RuntimeError`` for a link loop
     where it raises no ``OSError``; from 3.13 it raises nothing. Either way the
     conversion completes and warns once. Before 3.13 the warning is the
-    could-not-be-read one, with the reason the system gives for a loop and never
-    the ``RuntimeError``'s text, which names the looped path."""
+    could-not-be-read one, with a fixed reason for a loop and never the
+    ``RuntimeError``'s text, which names the looped path."""
     loop = tmp_path / "loop"
     try:
         loop.symlink_to(loop)
@@ -273,7 +276,68 @@ def test_a_scanned_target_that_is_a_link_loop_warns_once_and_raises_nothing(
     assert CONSEQUENCE in warnings[0], warnings
     if sys.version_info < (3, 13):
         assert UNREADABLE in warnings[0], warnings
-        assert f"({os.strerror(errno.ELOOP)})" in warnings[0], warnings
+        assert f"({LINK_LOOP_REASON})" in warnings[0], warnings
         assert NOT_UNDER not in warnings[0], warnings
     else:
         assert UNREADABLE in warnings[0] or NOT_UNDER in warnings[0], warnings
+
+
+# --- A RuntimeError that is no link loop is named by its class --------------------
+
+
+def test_the_link_loop_runtime_error_gets_the_fixed_reason_and_not_its_text(
+    tmp_path, monkeypatch, capture
+):
+    """CPython's own link-loop ``RuntimeError`` (its text starts ``Symlink loop``
+    and names the looped path) is reported with the fixed reason for a loop,
+    whichever Python runs the cell, and its text never reaches the message. The
+    control for the two cells below: the same code path, the loop's error."""
+    target = tmp_path / "repo"
+    target.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    lockfile = _lockfile(elsewhere, "package-lock.json")
+    _resolve_fails_for(
+        monkeypatch, elsewhere, RuntimeError("Symlink loop from 'looped-place-qz4b'")
+    )
+
+    assert npm_audit_scanner._shown_lockfile(lockfile, target) is None
+
+    (warning,) = _warnings(capture)
+    assert UNREADABLE in warning, warning
+    assert f"({LINK_LOOP_REASON})" in warning, warning
+    assert "looped-place-qz4b" not in warning, warning
+    assert "Symlink loop" not in warning, warning
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RecursionError("maximum recursion depth exceeded near 'recursed-place-qz4b'"),
+        NotImplementedError("cannot resolve 'unsupported-place-qz4b'"),
+        RuntimeError("winerror 1921 at 'winerror-place-qz4b'"),
+    ],
+    ids=["recursion", "not-implemented", "other-runtime-error"],
+)
+def test_a_runtime_error_that_is_no_link_loop_is_named_by_its_class(
+    error, tmp_path, monkeypatch, capture
+):
+    """Only the loop's own ``RuntimeError`` reads as a link loop. A
+    ``RecursionError``, a ``NotImplementedError`` and any other ``RuntimeError``
+    (Windows' winerror 1921 before 3.13 among them) are named by their class, the
+    reason for a loop is not given for them, and the error's own text, which can
+    name a place, never reaches the message."""
+    target = tmp_path / "repo"
+    target.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    lockfile = _lockfile(elsewhere, "package-lock.json")
+    _resolve_fails_for(monkeypatch, elsewhere, error)
+
+    assert npm_audit_scanner._shown_lockfile(lockfile, target) is None
+
+    (warning,) = _warnings(capture)
+    assert UNREADABLE in warning, warning
+    assert f"({type(error).__name__})" in warning, warning
+    assert LINK_LOOP_REASON not in warning, warning
+    assert "-place-qz4b" not in warning, warning
+    assert NOT_UNDER not in warning, warning
+    assert CONSEQUENCE in warning, warning
