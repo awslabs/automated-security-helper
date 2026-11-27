@@ -1175,29 +1175,74 @@ OWN_LOADERS = {
 }
 
 
+#: The two spellings by which a module names the reader: its file, and the module name
+#: the shared helper registers it under.
+READER_FILE = "_ci_matrix.py"
+READER_NAME = "_ash_ci_matrix"
+
+
+def _docstring_values(tree: ast.AST) -> set[int]:
+    """The ids of the string nodes that are a docstring: prose, never a name."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            first = node.body[0] if node.body else None
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant):
+                found.add(id(first.value))
+    return found
+
+
 def _own_loader_lines(source: bytes | str, filename: str) -> list[int]:
-    """The lines where a test module loads the reader with its own loader: the calls
-    of ``spec_from_file_location`` that name the reader's file. ``filename`` names the
-    module in a SyntaxError."""
+    """The lines where a test module loads the reader with its own loader.
+
+    A module has one when it calls ``spec_from_file_location`` and also writes the
+    reader's file name or its module name as a string, outside a docstring. Its calls
+    are the lines. The call need not hold the name: a loader that takes the path or the
+    name from a constant, as ``MODULE`` or ``name`` here, is still one. ``filename``
+    names the module in a SyntaxError.
+    """
     tree = ast.parse(source, filename=filename)
+    prose = _docstring_values(tree)
+    names_the_reader = any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in prose
+        and (
+            node.value == READER_NAME
+            or node.value == READER_FILE
+            or node.value.endswith("/" + READER_FILE)
+        )
+        for node in ast.walk(tree)
+    )
+    if not names_the_reader:
+        return []
     return sorted(
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and getattr(node.func, "attr", "") == "spec_from_file_location"
-        and "_ci_matrix.py" in ast.unparse(node)
+        and getattr(node.func, "attr", getattr(node.func, "id", ""))
+        == "spec_from_file_location"
     )
 
 
 def _own_loaders(root: Path, modules: Iterable[Path]) -> dict[str, list[int]]:
-    """The consumers among ``modules`` that load the reader with their own loader, by
-    path below ``root``, each with the lines of its loader calls."""
+    """The modules among ``modules`` that load the reader with their own loader, by
+    path below ``root``, each with the lines of its loader calls.
+
+    The loader helper and this file are not read. A module whose bytes name no loader
+    or no reader is not parsed, so a fixture that is not Python does not stop the scan
+    until it names both."""
     found: dict[str, list[int]] = {}
     for path in modules:
         name = path.relative_to(root).as_posix()
-        if name not in CONSUMERS:
+        if name in (LOADER_HELPER, THIS_FILE):
             continue
-        lines = _own_loader_lines(path.read_bytes(), name)
+        data = path.read_bytes()
+        if b"spec_from_file_location" not in data or b"_ci_matrix" not in data:
+            continue
+        lines = _own_loader_lines(data, name)
         if lines:
             found[name] = lines
     return found
