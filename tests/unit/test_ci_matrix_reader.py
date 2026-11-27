@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import ast
 import copy
-import importlib.util
 import sys
 from pathlib import Path
 from typing import Any
@@ -37,20 +36,14 @@ WORKFLOW_FILES = _workflow_files(WORKFLOWS)
 
 
 def _load() -> Any:
-    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
-    name = "_ash_ci_matrix_under_test"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(name, MODULE)
-        assert spec and spec.loader, f"cannot load {MODULE}"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        try:
-            spec.loader.exec_module(module)
-        except BaseException:
-            sys.modules.pop(name, None)
-            raise
-    return module
+    """scripts/_ci_matrix.py, loaded by path under a name of its own for this file, so the
+    modules that share the reader under another name do not share this copy.
+
+    The helper is imported here and not at the top, so a broken helper fails the tests
+    that use it with its own error and not this whole file at collection."""
+    from tests.utils.ci_matrix_loader import load_by_path
+
+    return load_by_path("_ash_ci_matrix_under_test", MODULE)
 
 
 class _Reader:

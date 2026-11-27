@@ -54,14 +54,14 @@ people to edit the test rather than read it.
 
 from __future__ import annotations
 
-import importlib.util
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+
+from tests.utils.ci_matrix_loader import load_ci_matrix
 
 # The unit-test matrix is three jobs, one per runner pool, so each pool has its own
 # max-parallel cap. tests/unit/test_unit_test_shards.py holds the three to one another.
@@ -79,22 +79,7 @@ RUN_SCAN_TEST = ACTIONS / "run-scan-test" / "action.yml"
 RUN_UNIT_TESTS = ACTIONS / "run-unit-tests" / "action.yml"
 
 
-def _load_ci_matrix() -> Any:
-    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
-        )
-        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
-
-
-ci_matrix = _load_ci_matrix()
+ci_matrix = load_ci_matrix()
 
 #: The event whose matrix is the static axes less the static excludes: the pull-request
 #: overlay is void on a manual run, and these tests read the full matrix (the note on the
