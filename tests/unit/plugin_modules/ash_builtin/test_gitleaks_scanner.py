@@ -2161,36 +2161,44 @@ def _with_byte_order_mark(tmp_path, monkeypatch, how: str, text: str):
     return _with_config_text(tmp_path, monkeypatch, how, _BYTE_ORDER_MARK + text)
 
 
-@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
-@pytest.mark.unit
-def test_a_relative_extend_path_behind_a_byte_order_mark_is_refused(
-    tmp_path, monkeypatch, how
-):
-    """A config saved with a byte order mark is still read, so its relative extend
-    path is refused for what it is, not as text ASH could not parse."""
-    scanner = _with_byte_order_mark(tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
-    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
-        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+#: The words of the refusal of a config that starts with the mark.
+_MARK_REFUSAL = re.escape(
+    "starts with a UTF-8 byte order mark, which gitleaks cannot read"
+)
 
 
-@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
-@pytest.mark.unit
-def test_an_absolute_extend_path_behind_a_byte_order_mark_is_passed_as_config(
-    tmp_path, monkeypatch, how
-):
-    """The control: with an absolute extend path the operator's config is passed,
-    and text from the environment is passed as given, mark and all."""
-    common = tmp_path / "op" / "common.toml"
-    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
-    scanner = _with_byte_order_mark(tmp_path, monkeypatch, how, absolute)
-    common.write_text(_TREE_COMMON)
-    source = scanner.context.source_dir
-    passed = _passed_config(scanner._build_arguments(source, tmp_path / "o.sarif"))
+def _marked(tmp_path, how: str) -> str:
+    """How the refusal names the config of ``how`` that starts with the mark: the
+    file (for ``chain``, the extended one), or the variable that holds the text."""
     if how == "env_toml":
-        assert _ashs_own(passed, source)
-        assert passed.read_text(encoding="utf-8") == _BYTE_ORDER_MARK + absolute
-    else:
-        assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
+        return "the config text in GITLEAKS_CONFIG_TOML"
+    return repr(
+        str(tmp_path / "op" / ("mid.toml" if how == "chain" else "gitleaks.toml"))
+    )
+
+
+@pytest.mark.parametrize("extend", ["relative", "absolute"])
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_config_behind_a_byte_order_mark_is_refused_for_the_mark(
+    tmp_path, monkeypatch, how, extend
+):
+    """gitleaks cannot read a config that starts with a UTF-8 byte order mark: its
+    TOML reader stops at the first byte ("invalid character at start of key") and it
+    exits 1. So ASH refuses the config before gitleaks runs, naming it, whatever its
+    extend path says. The same configs without the mark are the controls above: the
+    relative one is refused for its path and the absolute one is passed."""
+    common = tmp_path / "op" / "common.toml"
+    text = (
+        _RELATIVE_EXTEND
+        if extend == "relative"
+        else f"[extend]\npath = '{common.as_posix()}'\n"
+    )
+    scanner = _with_byte_order_mark(tmp_path, monkeypatch, how, text)
+    common.write_text(_TREE_COMMON)
+    with pytest.raises(ScannerError, match=_MARK_REFUSAL) as refused:
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert _marked(tmp_path, how) in str(refused.value)
 
 
 @pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
@@ -2198,10 +2206,10 @@ def test_an_absolute_extend_path_behind_a_byte_order_mark_is_passed_as_config(
 def test_a_byte_order_mark_inside_an_extend_path_is_part_of_the_path(
     tmp_path, monkeypatch, how
 ):
-    """Only a mark at the start of the text is skipped. One at the start of the path
-    value is part of the path, which then does not start at a root, so gitleaks
-    would open it from the scanned tree. It is refused as written, although the
-    path with the mark removed names a file outside the tree."""
+    """A mark at the start of the path value, not of the text, is part of the path,
+    which then does not start at a root, so gitleaks would open it from the scanned
+    tree. It is refused as written, although the path with the mark removed names a
+    file outside the tree."""
     common = tmp_path / "op" / "common.toml"
     value = _BYTE_ORDER_MARK + common.as_posix()
     scanner = _with_config_text(
