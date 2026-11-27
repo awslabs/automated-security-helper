@@ -464,12 +464,18 @@ class ScannerStatisticsCalculator:
 
         Results that name no scanner are skipped. The kind is ``"suppressed"`` for a
         result with a suppression in effect, otherwise its resolved severity.
+        A result whose kind states no finding (``pass``, ``notApplicable``,
+        ``informational``) is skipped too, because it is in no severity count: its
+        level ``none`` resolves to INFO, which counted a rule that was not evaluated
+        as an info finding. One that carries a suppression in effect stays a
+        suppression, as the flat findings count it.
         *only*, when given, keeps the results whose name matches it case-insensitively,
-        and the two per-result readings are made for those alone.
+        and the per-result readings are made for those alone.
         """
         from automated_security_helper.utils.count_frame import SUPPRESSED
         from automated_security_helper.utils.sarif_utils import (
             _resolve_result_severity,
+            is_not_a_finding,
             is_result_suppressed,
         )
 
@@ -488,11 +494,16 @@ class ScannerStatisticsCalculator:
             # rejected or underReview (SARIF 3.35.4) hides nothing, so its
             # finding is counted under its severity, as the exit code, the
             # flat finding and the workspace verdict count it.
+            suppressed = is_result_suppressed(result)
+            # The kind is read before the level: a pass, notApplicable or
+            # informational result carries level none, which resolves to INFO.
+            # It states no finding, so it is in no severity count; a suppression
+            # on it still counts as one, as the flat findings count it.
+            if is_not_a_finding(result) and not suppressed:
+                continue
             yield (
                 result_scanner,
-                SUPPRESSED
-                if is_result_suppressed(result)
-                else _resolve_result_severity(result),
+                SUPPRESSED if suppressed else _resolve_result_severity(result),
             )
 
     @staticmethod
