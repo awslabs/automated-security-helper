@@ -15,6 +15,11 @@ section's case variant (``Bandit``). A refusal ends with the sentence the
 command registry gives, which names the command that rewrites the file once one
 is registered.
 
+A key the file itself writes as the ``-``/``_`` twin of the key its base writes
+(``global-settings`` over ``global_settings``, or ``ignore-paths`` under it) is
+read as that key too, so an old spelling under it is refused at 4.0, naming the
+file and the entry by the keys the file writes.
+
 guarddog's section is read as the scanner's own config class, since its manifest
 gives no typed section, so an old spelling in it is refused at 4.0 too, as a key
 and through a pointer, under the name its manifest declares or a case variant of
@@ -284,6 +289,53 @@ def test_an_op_through_either_spelling_of_global_settings_is_refused_at_removal(
     assert REMOVAL in message
     assert "repo.yaml" in message
     assert "patch[0]" in message
+
+
+#: A base that writes ``global_settings``, with one ignore path of its own.
+_SETTINGS_BASE: Dict[str, Any] = {
+    "global_settings": {"ignore_paths": [{"path": "build/", "reason": "generated"}]}
+}
+
+
+def _twin_child(twin: str) -> Dict[str, Any]:
+    """An extending file's own keys, by the key on the way to an entry that it
+    writes as the ``-``/``_`` twin of the key its base writes: the section itself,
+    or the list under it. The entry writes the old spelling."""
+    expiry = {"expiration": "2099-01-01"}
+    if twin == "section-twin":
+        return {"global-settings": {"suppressions": [{**_ENTRY, **expiry}]}}
+    ignored = {"path": "dist/", "reason": "generated", **expiry}
+    return {"global_settings": {"ignore-paths": [ignored]}}
+
+
+@pytest.mark.parametrize(
+    "twin,place",
+    [
+        ("section-twin", "global-settings.suppressions[0]"),
+        ("nested-twin", "global_settings.ignore-paths[0]"),
+    ],
+    ids=["section-twin", "nested-twin"],
+)
+def test_an_old_spelling_under_a_twin_key_is_refused_at_removal(
+    tmp_path: Path, running, twin: str, place: str
+) -> None:
+    """The fold reads a key the file writes as the twin of its base's key as that
+    key, as the merge does, so an entry under it in the old spelling is refused at
+    the removal release, naming the file and the entry by the keys the file
+    writes."""
+    running(REMOVAL_RELEASE)
+    _write(tmp_path / "cfg" / "org.yaml", _SETTINGS_BASE)
+    child = _write(
+        tmp_path / "cfg" / "repo.yaml", {"extends": "org.yaml", **_twin_child(twin)}
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert REMOVAL in message
+    assert "repo.yaml" in message
+    assert place in message
 
 
 #: The base's Bandit excluded paths, by how a pointer spells the scanner's

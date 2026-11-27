@@ -5,11 +5,19 @@ the canonical key before it layers the file over another. So:
 
 * the deprecation is said once per file and spelling, naming the file, however
   many entries use it, and whether or not unknown entry keys are fatal;
+* a base that the operator's overlay and a project's own file both extend is a
+  file of both chains, and says its line once;
+* a key a file writes as the ``-``/``_`` twin of the key its base writes
+  (``global-settings``, or ``ignore-paths`` under ``global_settings``) is read as
+  that key, so an old spelling under it is said for that file;
 * a file that writes both spellings with different values is refused naming
   that file, whichever file of the chain it is;
 * a ``patch`` pointer in either spelling reaches the key the merged document
   holds, so a child and its base can each be written in either spelling, and a
   pointer or an op's value in the old spelling is said like any other key;
+* a key a later file's ``patch`` writes again is that file's key: a refusal of
+  its value names it as the patch spells it, not as the base spelled the key the
+  patch wrote over;
 * a key that is canonical in another model (a content database staleness
   override's ``expiration``) is left as written;
 * a scanner section the scanners segment does not declare is read as the
@@ -22,12 +30,15 @@ the canonical key before it layers the file over another. So:
   canonical key, where the configuration holds it.
 
 Each of these is pinned below: three entries in two files give two lines, one
-naming each file, and ``fail_on_unknown_keys: true`` gives the line too; a
-disagreement in a base is refused naming the base; a pointer in either spelling
-applies over a base in the other; an op's value is folded, its line naming the
-file, and a disagreement in it is refused naming the op; guarddog's excluded
-path gives its file one line under either key, and a section no shipped manifest
-names gives none; and an environment read is recorded at the canonical key.
+naming each file, and ``fail_on_unknown_keys: true`` gives the line too; a base
+an overlay and a project both extend gives one line; an entry under a twin key
+gives its file one line; a disagreement in a base is refused naming the base; a
+pointer in either spelling applies over a base in the other; a key a patch
+writes again is refused under the patch's spelling, and with a date loads as it
+did; an op's value is folded, its line naming the file, and a disagreement in it
+is refused naming the op; guarddog's excluded path gives its file one line under
+either key, and a section no shipped manifest names gives none; and an
+environment read is recorded at the canonical key.
 """
 
 from pathlib import Path
@@ -127,6 +138,94 @@ def test_the_operators_overlay_file_is_folded_too(tmp_path: Path) -> None:
     assert len(lines) == 1, lines
     assert "ops.yaml" in lines[0], lines
     assert config.global_settings.suppressions[0].expires == "2099-01-03"
+
+
+def test_a_base_the_overlay_and_the_project_both_extend_says_its_line_once(
+    tmp_path: Path,
+) -> None:
+    """The operator's overlay and a project's own file can extend one base. A
+    project config kept outside its source directory has its bases confined to
+    its own directory, as the overlay's are, so here both sit beside the base,
+    outside the scanned tree. The base is a file of both chains, and its line is
+    said once, as each file's is."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    _write(
+        tmp_path / "ops" / "base.yaml",
+        {"global_settings": {"suppressions": [_suppression(expiration="2099-01-03")]}},
+    )
+    project = _write(
+        tmp_path / "ops" / "project.yaml",
+        {"extends": "base.yaml", "project_name": "project"},
+    )
+    operator = _write(
+        tmp_path / "ops" / "ops.yaml",
+        {"extends": "base.yaml", "fail_on_findings": True},
+    )
+    (tmp_path / "repo").mkdir()
+
+    config = resolve_config(
+        config_path=project,
+        source_dir=tmp_path / "repo",
+        trusted_config_path=operator,
+        overlay_config_path=operator,
+    )
+
+    lines = _deprecation_lines(config)
+    assert len(lines) == 1, lines
+    assert "base.yaml" in lines[0], lines
+    # The project's own file was read, under the overlay.
+    assert config.project_name == "project"
+    assert config.global_settings.suppressions[0].expires == "2099-01-03"
+
+
+#: A base that writes ``global_settings``, with one ignore path of its own.
+_SETTINGS_BASE: Dict[str, Any] = {
+    "global_settings": {"ignore_paths": [{"path": "build/", "reason": "generated"}]}
+}
+
+#: An extending file's own keys, by the key on the way to an entry that it writes
+#: as the ``-``/``_`` twin of the key its base writes: the section itself, or the
+#: list under it. The entry writes the old spelling.
+_TWIN_CHILDREN: Dict[str, Dict[str, Any]] = {
+    "section-twin": {
+        "global-settings": {"suppressions": [_suppression(expiration="2099-01-03")]}
+    },
+    "nested-twin": {
+        "global_settings": {
+            "ignore-paths": [
+                {"path": "dist/", "reason": "generated", "expiration": "2099-01-03"}
+            ]
+        }
+    },
+}
+
+
+@pytest.mark.parametrize("twin", ["section-twin", "nested-twin"])
+def test_an_old_spelling_under_a_twin_key_says_the_deprecation_for_its_file(
+    tmp_path: Path, twin: str
+) -> None:
+    """``global-settings`` is the ``-``/``_`` twin of ``global_settings``, and
+    ``ignore-paths`` of ``ignore_paths``. The merge reads a key a file writes as
+    the twin of its base's key as that key, and so does the fold: the entry under
+    it has its old spelling read as the canonical one, and the file gets its own
+    line."""
+    _write(tmp_path / "cfg" / "org.yaml", _SETTINGS_BASE)
+    child = _write(
+        tmp_path / "cfg" / "repo.yaml", {"extends": "org.yaml", **_TWIN_CHILDREN[twin]}
+    )
+
+    config = AshConfig.from_file(child)
+
+    lines = _deprecation_lines(config)
+    assert len(lines) == 1, lines
+    assert "repo.yaml" in lines[0], lines
+    entries = (
+        config.global_settings.suppressions
+        if twin == "section-twin"
+        else config.global_settings.ignore_paths
+    )
+    assert [entry.expires for entry in entries] == ["2099-01-03"]
 
 
 def test_a_disagreement_in_a_base_is_refused_naming_the_base(tmp_path: Path) -> None:
@@ -278,6 +377,63 @@ def test_a_patch_pointer_in_the_old_spelling_says_the_deprecation_for_its_file(
     assert len(lines) == 1, lines
     assert "repo.yaml" in lines[0], lines
     assert config.global_settings.suppressions[0].expires == "2199-12-31"
+
+
+def _patch_writing_the_expiry(how: str, value: str) -> List[Dict[str, Any]]:
+    """A ``patch`` that writes the expiry of the base's first suppression again,
+    under the canonical key, with ``value``: ``remove-then-add`` removes the key
+    and adds it back, and ``replace`` replaces it."""
+    pointer = "/global_settings/suppressions/0/expires"
+    if how == "replace":
+        return [{"op": "replace", "path": pointer, "value": value}]
+    return [
+        {"op": "remove", "path": pointer},
+        {"op": "add", "path": pointer, "value": value},
+    ]
+
+
+@pytest.mark.parametrize("how", ["remove-then-add", "replace"])
+def test_a_key_a_patch_writes_again_is_named_as_the_patch_spells_it(
+    tmp_path: Path, how: str
+) -> None:
+    """The base writes ``expiration``, and the child's ``patch`` writes the key
+    again under ``expires`` with a value that is not a date. The value refused is
+    the child's, under the key the child wrote, so the location names
+    ``expires``, never the base's spelling of a key the patch wrote over."""
+    child = _child_patching(
+        tmp_path,
+        _suppression(expiration="2099-01-01"),
+        _patch_writing_the_expiry(how, "not-a-date"),
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert "repo.yaml" in message
+    assert "Invalid value at 'global_settings.suppressions[0].expires'" in message
+    assert "suppressions[0].expiration" not in message
+
+
+@pytest.mark.parametrize("how", ["remove-then-add", "replace"])
+def test_a_key_a_patch_writes_again_with_a_date_loads_as_it_did(
+    tmp_path: Path, how: str
+) -> None:
+    """The control: only the refusal's wording is the patch's. With a date the
+    same chain loads the value the patch wrote, and the base's line is still
+    said."""
+    child = _child_patching(
+        tmp_path,
+        _suppression(expiration="2099-01-01"),
+        _patch_writing_the_expiry(how, "2199-12-31"),
+    )
+
+    config = AshConfig.from_file(child)
+
+    assert config.global_settings.suppressions[0].expires == "2199-12-31"
+    lines = _deprecation_lines(config)
+    assert len(lines) == 1, lines
+    assert "org.yaml" in lines[0], lines
 
 
 def _added_suppression(**expiry: str) -> Dict[str, Any]:
