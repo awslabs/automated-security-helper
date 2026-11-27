@@ -1005,7 +1005,8 @@ def _describe_load_error(error: Exception, config_path: Path) -> str:
     AshConfig.from_file raises ASHConfigValidationError naming the file, which
     the caller's message names already, so only the fields of the
     ValidationError it keeps are given, redacted with the values the file's
-    chain reads from the environment, read again here. The callers refuse such
+    chain reads from the environment, read again here, and naming a key the file
+    wrote under an old spelling as the file wrote it. The callers refuse such
     a file before loading it (_rewrite_refusal), but this does not depend on
     that; when the chain cannot be read again, the error's own message, which
     is redacted, is given. A parser's refusal is given as unparsed_config_reason
@@ -1023,13 +1024,18 @@ def _describe_load_error(error: Exception, config_path: Path) -> str:
     if not isinstance(validation_error, ValidationError):
         return str(error)
     try:
-        values = resolve_config_document(Path(config_path)).environment_values
+        document = resolve_config_document(Path(config_path))
     except (yaml.YAMLError, OSError, ValueError):
         if isinstance(error, ValidationError):
             # pydantic's own text quotes every input; never print it.
             return describe_validation_error(error)
         return str(error)
-    return describe_validation_error(validation_error, values)
+    return describe_validation_error(
+        validation_error,
+        document.environment_values,
+        data=document.data,
+        written=document.written_keys,
+    )
 
 
 def _print_issue(issue: Any, color: str, config_path: Path) -> None:

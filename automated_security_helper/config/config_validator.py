@@ -2053,8 +2053,17 @@ def _paired_items(
     ]
 
 
+#: ``ResolvedConfigDocument.written_keys``: for a mapping of the document, by the
+#: keys and list indices that lead to it, each canonical key the model validated
+#: and the spelling the file wrote it under.
+WrittenKeys = Mapping[Tuple[Any, ...], Mapping[str, str]]
+
+
 def _shown_at(
-    location: Sequence[Any], data: Any, shown: Any
+    location: Sequence[Any],
+    data: Any,
+    shown: Any,
+    written: Optional[WrittenKeys] = None,
 ) -> Tuple[List[Any], Any, Any]:
     """Each step of ``location``, a pydantic error's path into ``data``, as the
     copy ``shown`` names it, and the node of ``data`` and of ``shown`` the path
@@ -2065,14 +2074,27 @@ def _shown_at(
     step that is not a key of ``data`` (one pydantic adds, such as a union
     member's name) is named as it is and passed over, as are the steps after
     the path leaves ``data``.
+
+    ``written`` names a key the file wrote under an old spelling as the file wrote
+    it, where the model's location says the canonical key ``data`` holds. A step
+    is looked up by the path the steps before it took in ``data`` (a step that is
+    not a key of ``data`` leaves that path where it was), and a key that is shown
+    another way (read from the environment) is left as it is shown. The node the
+    path ends at is ``data``'s own, whatever a step is named.
     """
+    keys: WrittenKeys = written or {}
     steps: List[Any] = []
     node: Any = data
     shown_node: Any = shown
+    here: Optional[Tuple[Any, ...]] = () if keys else None
     for step in location:
         if isinstance(node, dict) and step in node:
             index = list(node).index(step)
             _key, node, shown_step, shown_node = _paired_items(node, shown_node)[index]
+            if here is not None:
+                if shown_step == step:
+                    shown_step = keys.get(here, {}).get(step, shown_step)
+                here = (*here, step)
             steps.append(shown_step)
             continue
         if isinstance(node, list) and isinstance(step, int) and 0 <= step < len(node):
@@ -2084,16 +2106,37 @@ def _shown_at(
             )
             node = node[step]
             shown_node = shown_items[step] if shown_items is not None else _ALL_SHOWN
+            if here is not None:
+                here = (*here, step)
             continue
         steps.append(step)
     return steps, node, shown_node
 
 
-def shown_location_text(location: Iterable[Any], data: Any, shown: Any) -> str:
+def written_location(
+    location: Iterable[Any], data: Any, written: Optional[WrittenKeys]
+) -> List[Any]:
+    """``location``, a pydantic error's path into ``data``, with each key the file
+    wrote under an old spelling named as the file wrote it (``written``). No key
+    is hidden: a caller that names keys read from the environment goes by
+    ``shown_location_text``."""
+    steps, _node, _shown_node = _shown_at(list(location), data, data, written)
+    return steps
+
+
+def shown_location_text(
+    location: Iterable[Any],
+    data: Any,
+    shown: Any,
+    *,
+    written: Optional[WrittenKeys] = None,
+) -> str:
     """``location_text`` of ``location``, a path into ``data``, with each key the
     config read from the environment named as ``shown`` (``data`` as
-    ``with_environment_values_shown`` returns it) holds it: ``<value>``."""
-    steps, _node, _shown_node = _shown_at(list(location), data, shown)
+    ``with_environment_values_shown`` returns it) holds it: ``<value>``. With
+    ``written``, a key the file wrote under an old spelling is named as the file
+    wrote it (``_shown_at``)."""
+    steps, _node, _shown_node = _shown_at(list(location), data, shown, written)
     return location_text(steps)
 
 
@@ -2668,7 +2711,13 @@ def _interpolated_pairs(literal: Any, resolved: Any) -> List[Tuple[str, str]]:
     return found
 
 
-def describe_validation_error(error: Any, values: Iterable[str] = ()) -> str:
+def describe_validation_error(
+    error: Any,
+    values: Iterable[str] = (),
+    *,
+    data: Any = None,
+    written: Optional[WrittenKeys] = None,
+) -> str:
     """A pydantic ValidationError as ASH prints it: one line per field, no input.
 
     pydantic's own text quotes every input (``input_value='...'``), and the
@@ -2680,10 +2729,15 @@ def describe_validation_error(error: Any, values: Iterable[str] = ()) -> str:
     location alone is redacted with ``min_length`` 1 as well: a key shorter
     than the free-text band is unquoted there (``'a.<key>.b'``), so the band
     left it in print, while by its place it is known to be one.
+
+    ``data`` is the document the model refused and ``written`` its written keys
+    (ResolvedConfigDocument.written_keys): a location then names a key the file
+    wrote under an old spelling as the file wrote it, where the model says the
+    canonical key.
     """
     messages = []
     for item in error.errors():
-        text = ConfigValidator.format_model_error(item)
+        text = ConfigValidator.format_model_error(item, data=data, written=written)
         location = ConfigValidator.model_error_location(text)
         if location is not None:
             prefix = ConfigValidator.MODEL_ERROR_PREFIX
@@ -4333,7 +4387,12 @@ class ConfigValidator:
                 cls._unredacted_refusal_messages(refused), config_data
             )
             result.errors.extend(
-                cls._refusal_messages(refused, data=resolved_data, shown=shown_resolved)
+                cls._refusal_messages(
+                    refused,
+                    data=resolved_data,
+                    shown=shown_resolved,
+                    written=refused.written_keys,
+                )
             )
         # Free text from another file, which names no field of this one: what
         # the chain read from the environment is redacted from it.
@@ -4933,19 +4992,27 @@ class ConfigValidator:
 
     @classmethod
     def _refusal_messages(
-        cls, refusal: Any, data: Any = None, shown: Any = None
+        cls,
+        refusal: Any,
+        data: Any = None,
+        shown: Any = None,
+        *,
+        written: Optional[WrittenKeys] = None,
     ) -> List[str]:
         """Why the AshConfig model refused the file, one message per field.
 
         ``refusal`` is load_config_file's ConfigFileRefused. A refusal after the
         overrides says so; an override that could not be applied at all has no
         field to name, and its own message is given. With ``shown``, each field
-        is named by its place (format_model_error).
+        is named by its place (format_model_error); with ``written``, a key the
+        file wrote under an old spelling is named as the file wrote it.
         """
         suffix = " (after --config-overrides)" if refusal.after_overrides else ""
         if refusal.validation_error is not None:
             return [
-                cls.format_model_error(error, suffix, data=data, shown=shown)
+                cls.format_model_error(
+                    error, suffix, data=data, shown=shown, written=written
+                )
                 for error in refusal.validation_error.errors()
             ]
         return [str(refusal)]
@@ -4957,6 +5024,8 @@ class ConfigValidator:
         suffix: str = "",
         data: Any = None,
         shown: Any = None,
+        *,
+        written: Optional[WrittenKeys] = None,
     ) -> str:
         """``Invalid value at 'a.b[0].c': <message>`` for one pydantic error.
 
@@ -4976,12 +5045,18 @@ class ConfigValidator:
         ``<value>`` by its place, and every key and string under the location
         read from the environment is replaced in the message whatever its
         length: by its place, it is known to be one.
+
+        With ``written`` (ResolvedConfigDocument.written_keys, for the ``data``
+        the model refused), a key the file wrote under an old spelling is named
+        as the file wrote it, where the model's location says the canonical key.
         """
         loc = error.get("loc", ())
-        if shown is None:
-            location = location_text(loc)
+        if shown is not None:
+            location = shown_location_text(loc, data, shown, written=written)
+        elif written:
+            location = location_text(written_location(loc, data, written))
         else:
-            location = shown_location_text(loc, data, shown)
+            location = location_text(loc)
         location = location or "(top level)"
         value = error.get("input")
         # Not a value equal to a name the schema defines (_input_leaves): a

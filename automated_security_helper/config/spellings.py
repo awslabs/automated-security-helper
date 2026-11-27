@@ -41,7 +41,7 @@ from __future__ import annotations
 import types
 import warnings
 from collections import abc as collections_abc
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import (
     Annotated,
     Any,
@@ -360,12 +360,46 @@ def entry_paths(model: type[BaseModel]) -> Tuple[Tuple[str, ...], ...]:
 
 
 @dataclass(frozen=True)
+class KeySpelling:
+    """A key a file wrote under an old spelling, and the key the fold put in its
+    place.
+
+    ``path`` is the mapping that holds the key: the keys and list indices from the
+    document's root to it, with a ``patch`` operation's value starting at
+    ``("patch", index, "value")``. The merged document and the model's errors say
+    ``canonical``; a message that names the place in the file says ``written``,
+    the key as the file wrote it. The fields after ``written`` are what a record of
+    a mapping key the file read from the environment has, so the loader follows
+    this one through a ``patch`` the way it follows that one.
+    """
+
+    path: Tuple[Any, ...]
+    canonical: str
+    written: str
+    #: Always true: the record is about a mapping key, as a reference is when the
+    #: file read the key from the environment.
+    key: bool = True
+
+    @property
+    def resolved(self) -> str:
+        """The key the merged document holds at ``path``."""
+        return self.canonical
+
+    def moved_to_unknown_list(self, path: Sequence[Any]) -> "KeySpelling":
+        """This record for the mapping a ``patch`` moved to ``path``."""
+        return replace(self, path=tuple(path))
+
+
+@dataclass(frozen=True)
 class FoldedDocument:
     """A document with its old spellings renamed, and what to say about them."""
 
     document: Any
     #: One line per file and old spelling met, each ``Config <file>: <message>``.
     warnings: Tuple[str, ...]
+    #: Each lone old key the fold renamed, in the order the walk met them. A key
+    #: written beside its canonical spelling is dropped and has no record.
+    renamed: Tuple[KeySpelling, ...] = ()
 
 
 def _decode(segment: str) -> str:
@@ -407,13 +441,15 @@ class _Fold:
         self.removal_only = removal_only
         self.by_hand = by_hand
         self.lines: Dict[Tuple[str, str, str], str] = {}
+        #: Each lone old key renamed, with the mapping that holds it.
+        self.renamed: List[KeySpelling] = []
 
     # -- the document ------------------------------------------------------
 
     def document(self, document: Any) -> Any:
         if not isinstance(document, dict):
             return document
-        folded = self.mapping(document, self.root, "")
+        folded = self.mapping(document, self.root, "", ())
         operations = folded.get(_PATCH_KEY)
         if isinstance(operations, list):
             respelled = self.operations(operations)
@@ -422,39 +458,45 @@ class _Fold:
         return folded
 
     def mapping(
-        self, mapping: Dict[Any, Any], model: type[BaseModel], place: str
+        self,
+        mapping: Dict[Any, Any],
+        model: type[BaseModel],
+        place: str,
+        path: Tuple[Any, ...],
     ) -> Any:
         """``mapping`` read as ``model``: its own old keys renamed, then the
-        values of the fields it holds. The same object when nothing changes."""
+        values of the fields it holds. ``place`` names the mapping in a message
+        and ``path`` is where it stands in the document, under which a rename is
+        recorded. The same object when nothing changes."""
         folded = mapping
         for row in rows_for(model):
             for old in row.old:
                 if old in folded:
-                    folded = self._respell(folded, row, old, place)
+                    folded = self._respell(folded, row, old, place, path)
         fields = _field_map(model)
         updated: Optional[Dict[Any, Any]] = None
         for key, value in folded.items():
             field = fields.get(key) if isinstance(key, str) else None
             if field is None or field.shape is None:
                 continue
-            respelled = self.value(value, field.shape, _join(place, key))
+            respelled = self.value(value, field.shape, _join(place, key), (*path, key))
             if respelled is not value:
                 if updated is None:
                     updated = dict(folded)
                 updated[key] = respelled
         return folded if updated is None else updated
 
-    def value(self, value: Any, shape: Shape, place: str) -> Any:
+    def value(self, value: Any, shape: Shape, place: str, path: Tuple[Any, ...]) -> Any:
         """``value`` read as ``shape``; the same object when nothing changes."""
         if shape.kind == "model":
             if not isinstance(value, dict):
                 return value
-            return self.mapping(value, shape.model, place)
+            return self.mapping(value, shape.model, place, path)
         if shape.kind == "list":
             if not isinstance(value, list):
                 return value
             items = [
-                self.mapping(item, shape.model, f"{place}[{index}]")
+                self.mapping(item, shape.model, f"{place}[{index}]", (*path, index))
                 if isinstance(item, dict)
                 else item
                 for index, item in enumerate(value)
@@ -466,7 +508,7 @@ class _Fold:
         # A dict's keys are the file's own names, which can be read from the
         # environment: a message names none of them.
         entries = {
-            key: self.mapping(item, shape.model, f"{place}.<key>")
+            key: self.mapping(item, shape.model, f"{place}.<key>", (*path, key))
             if isinstance(item, dict)
             else item
             for key, item in value.items()
@@ -494,11 +536,17 @@ class _Fold:
         )
 
     def _respell(
-        self, mapping: Dict[Any, Any], row: SpellingRow, old: str, place: str
+        self,
+        mapping: Dict[Any, Any],
+        row: SpellingRow,
+        old: str,
+        place: str,
+        path: Tuple[Any, ...],
     ) -> Dict[Any, Any]:
         canonical = row.canonical
         self._met(row, old, place)
         if canonical not in mapping:
+            self.renamed.append(KeySpelling(path, canonical, old))
             return {
                 (canonical if key == old else key): value
                 for key, value in mapping.items()
@@ -519,13 +567,17 @@ class _Fold:
         for index, operation in enumerate(operations):
             if not isinstance(operation, dict):
                 continue
-            respelled = self.operation(operation, f"{_PATCH_KEY}[{index}]")
+            respelled = self.operation(
+                operation, f"{_PATCH_KEY}[{index}]", (_PATCH_KEY, index)
+            )
             if respelled is not operation:
                 folded[index] = respelled
                 changed = True
         return folded if changed else operations
 
-    def operation(self, operation: Dict[Any, Any], place: str) -> Dict[Any, Any]:
+    def operation(
+        self, operation: Dict[Any, Any], place: str, path: Tuple[Any, ...]
+    ) -> Dict[Any, Any]:
         updated: Dict[str, Any] = {}
         end: Optional[Shape] = None
         for key in ("path", "from"):
@@ -537,7 +589,7 @@ class _Fold:
                 end = shape
         if operation.get("op") in _VALUE_OPS and "value" in operation and end:
             value = operation["value"]
-            folded = self.value(value, end, f"{place}.value")
+            folded = self.value(value, end, f"{place}.value", (*path, "value"))
             if folded is not value:
                 updated["value"] = folded
         return {**operation, **updated} if updated else operation
@@ -605,10 +657,13 @@ def fold_spellings(
     release, the running one when None) and when a mapping writes both spellings
     with different values. Each old spelling met also emits the row's
     ``DeprecationWarning``, and the returned ``warnings`` hold one line for each
-    spelling the file uses, however many places use it. A refusal at the removal
-    release ends with the registry's sentence about the command that rewrites the
-    file; ``by_hand`` is for a file that command does not rewrite in place (a TOML
-    one), whose sentence says to edit the key (``removal_message``).
+    spelling the file uses, however many places use it. ``renamed`` holds one
+    :class:`KeySpelling` for each old key renamed in a mapping that had no
+    canonical key, so a message that names a place in the file can say the key as
+    the file wrote it. A refusal at the removal release ends with the registry's
+    sentence about the command that rewrites the file; ``by_hand`` is for a file
+    that command does not rewrite in place (a TOML one), whose sentence says to
+    edit the key (``removal_message``).
     """
     fold = _Fold(
         model if model is not None else _root_model(),
@@ -617,7 +672,7 @@ def fold_spellings(
         by_hand=by_hand,
     )
     folded = fold.document(document)
-    return FoldedDocument(folded, tuple(fold.lines.values()))
+    return FoldedDocument(folded, tuple(fold.lines.values()), tuple(fold.renamed))
 
 
 def fold_written_spellings(

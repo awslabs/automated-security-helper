@@ -79,6 +79,7 @@ from automated_security_helper.config.config_sources import (
     is_json_file,
     is_symlink_loop,
     is_toml_file,
+    layered_written_keys,
     log_config_discovery,
     original_of_scan_copy,
     parse_config_text,
@@ -186,6 +187,7 @@ from automated_security_helper.config.config_validator import (
     environment_record_read,
     placed_at_appends,
     redact_values,
+    written_location,
 )
 from automated_security_helper.config import command_names
 from automated_security_helper.core.constants import (
@@ -1134,7 +1136,18 @@ class ConfigFileRefused(ASHConfigValidationError):
     None when an override could not be applied at all. ``after_overrides``
     tells a refusal of the file from one of the file with the overrides
     applied.
+
+    ``validated_data`` is the document the model refused, and ``written_keys``
+    the keys of it the file wrote under an old spelling
+    (``ResolvedConfigDocument.written_keys``): what describes the error again, in
+    a log line or a check, with each such key named as the file wrote it. Both
+    stay None for a refusal made after the overrides, whose locations are those of
+    the configuration as dumped, not of the file, and for one built from no
+    single document.
     """
+
+    validated_data: Any = None
+    written_keys: Optional[Dict[Tuple[Any, ...], Dict[str, str]]] = None
 
     def __init__(
         self,
@@ -1575,10 +1588,14 @@ def load_config_file(
             )
         document.documents = filled_documents
         document.filled_references = filled_references
+    # The keys of the document the file wrote under an old spelling, which a
+    # message that names a place in the file says as the file wrote them.
+    written = document.written_keys
     if overlay is not None and isinstance(data, dict):
         # A document that is not a mapping is left as it is, so its validation
         # error is still raised rather than replaced by the overlay's content.
         data = _layered_over(data, overlay)
+        written = layered_written_keys(written, overlay)
     try:
         config = build_config(data, config_overrides)
         _add_spelling_lines(config, document.spelling_warnings)
@@ -1591,28 +1608,34 @@ def load_config_file(
             # (_client_validation_error, the form validate_config_document
             # gives it): each problem's location, with a key the schema does
             # not name as <key>, and its kind; no value and no key of the file.
-            raise ConfigFileRefused(
-                str(_client_validation_error(config_path, e)),
-                document=document,
-                validation_error=e,
-                after_overrides=False,
-            ) from None
-        # Without pydantic's own text, which quotes every input: an input can
-        # be a value the file read from the environment. And without the
-        # values and keys the chain read from the environment: a key is
-        # printed in an error's location ("Invalid value at
-        # 'global_settings.<key>'"). Not chained: see
-        # ASHConfigValidationError.validation_error.
-        described = describe_validation_error(e, document.environment_values)
-        # One period before the hint, whether or not the last message has one.
-        raise ConfigFileRefused(
-            f"Configuration validation failed for "
-            f"'{describe_config_path(config_path)}': {described.rstrip('.')}. "
-            f"{lint_hint(config_path, source_dir)}",
+            message = str(
+                _client_validation_error(config_path, e, data=data, written=written)
+            )
+        else:
+            # Without pydantic's own text, which quotes every input: an input can
+            # be a value the file read from the environment. And without the
+            # values and keys the chain read from the environment: a key is
+            # printed in an error's location ("Invalid value at
+            # 'global_settings.<key>'"). Not chained: see
+            # ASHConfigValidationError.validation_error.
+            described = describe_validation_error(
+                e, document.environment_values, data=data, written=written
+            )
+            # One period before the hint, whether or not the last message has one.
+            message = (
+                f"Configuration validation failed for "
+                f"'{describe_config_path(config_path)}': {described.rstrip('.')}. "
+                f"{lint_hint(config_path, source_dir)}"
+            )
+        refusal = ConfigFileRefused(
+            message,
             document=document,
             validation_error=e,
             after_overrides=False,
-        ) from None
+        )
+        refusal.validated_data = data
+        refusal.written_keys = written
+        raise refusal from None
     except ASHConfigValidationError as e:
         # An override that cannot be applied, or that leaves the config invalid.
         # Its message names each field, and a key the file read from the
@@ -5454,6 +5477,8 @@ def _resolve_config(
                         + describe_validation_error(
                             refusal.validation_error,
                             refusal.document.environment_values,
+                            data=refusal.validated_data,
+                            written=refusal.written_keys,
                         ),
                         extra=NO_MARKUP,
                     )
@@ -5790,6 +5815,10 @@ def validate_config_document(
             document.data, strict=True, context={**context, "strict_file_load": True}
         )
     except ValidationError as e:
+        # The keys the file wrote under an old spelling, which a location names
+        # as the file wrote them. A document without them, a caller's stand-in
+        # that holds what the validation reads, has its canonical keys named.
+        written = getattr(document, "written_keys", None)
         if unquoted is None:
             # Not pydantic's own text, which quotes every input: a mapping key
             # the file read from the environment stands in an error's
@@ -5799,7 +5828,9 @@ def validate_config_document(
             # consumer of an AshConfig ValidationError gives it
             # (describe_validation_error). Not chained: the cause would carry
             # the text to the console, ash.log and an MCP reply.
-            described = describe_validation_error(e, document.environment_values)
+            described = describe_validation_error(
+                e, document.environment_values, data=document.data, written=written
+            )
             lint = command_names.render_command(command_names.CONFIG_LINT)
             raise ASHConfigValidationError(
                 f"Configuration validation failed for "
@@ -5807,7 +5838,9 @@ def validate_config_document(
                 f"{described.rstrip('.')}. "
                 f"Run '{lint}' to identify and fix issues."
             ) from None
-        refused = _client_validation_error(config_path, e, why=unquoted)
+        refused = _client_validation_error(
+            config_path, e, why=unquoted, data=document.data, written=written
+        )
     else:
         if warned:
             config._resolution_warnings.extend(warned)
@@ -5966,7 +5999,9 @@ def _below(annotation: Any, keyed: bool) -> Any:
     return None
 
 
-def _schema_location(model: Any, loc: Iterable[Any]) -> str:
+def _schema_location(
+    model: Any, loc: Iterable[Any], shown: Optional[Sequence[Any]] = None
+) -> str:
     """``loc`` with each segment the schema does not name replaced by ``<key>``.
 
     A field name or alias of the model reached so far, and a list index, are the
@@ -5975,7 +6010,15 @@ def _schema_location(model: Any, loc: Iterable[Any]) -> str:
     client having written it. A field's ``validation_alias`` is the schema's too: a
     plain string, or the string choices of an ``AliasChoices`` (an ``AliasPath`` is
     not a key spelling), so an error located by the alias as written keeps it.
+
+    ``shown``, when given, is ``loc`` with a key the file wrote under an old
+    spelling named as the file wrote it (``written_location``). The model is walked
+    by ``loc`` as it is, and a segment the schema names is printed as ``shown``
+    has it: the old spelling is one the schema names, a table's, never a key the
+    client chose.
     """
+    segments = list(loc)
+    named_as = segments if shown is None else list(shown)
 
     def validation_names(info: Any) -> Tuple[str, ...]:
         alias = getattr(info, "validation_alias", None)
@@ -5988,7 +6031,7 @@ def _schema_location(model: Any, loc: Iterable[Any]) -> str:
 
     parts: List[str] = []
     shape: Any = model
-    for segment in loc:
+    for position, segment in enumerate(segments):
         if isinstance(segment, int):
             parts.append(str(segment))
             shape = _below(shape, keyed=False)
@@ -6002,7 +6045,7 @@ def _schema_location(model: Any, loc: Iterable[Any]) -> str:
                     named = info
                     break
         if named is not None:
-            parts.append(str(segment))
+            parts.append(str(named_as[position]))
             shape = named.annotation
         else:
             parts.append(_UNNAMED_KEY)
@@ -6011,7 +6054,11 @@ def _schema_location(model: Any, loc: Iterable[Any]) -> str:
 
 
 def unquoted_validation_problems(
-    error: ValidationError, model: Any = None
+    error: ValidationError,
+    model: Any = None,
+    *,
+    data: Any = None,
+    written: Optional[Mapping[Tuple[Any, ...], Mapping[str, str]]] = None,
 ) -> List[str]:
     """Each problem in ``error`` as its location and pydantic's message, without the value.
 
@@ -6020,15 +6067,22 @@ def unquoted_validation_problems(
     not name is shown as ``<key>`` (``_schema_location``). Shared with the
     workspace policy file (``workspace/policy.py``), which a client can supply
     too.
+
+    ``data`` is the document the model refused and ``written`` its written keys
+    (``ResolvedConfigDocument.written_keys``): a location then names a key the
+    file wrote under an old spelling as the file wrote it, where the model's
+    location says the canonical key. The model is still walked by its own
+    location, so what the schema does not name is hidden as before.
     """
     problems = []
     for item in error.errors(include_url=False, include_input=False):
         loc = item.get("loc", ())
-        where = (
-            _schema_location(model, loc)
-            if model is not None
-            else ".".join(str(part) for part in loc) or "(top level)"
-        )
+        shown = written_location(loc, data, written) if written else None
+        if model is not None:
+            where = _schema_location(model, loc, shown)
+        else:
+            where = ".".join(str(part) for part in (loc if shown is None else shown))
+            where = where or "(top level)"
         kind = item.get("type", "")
         what = (
             f"invalid value ({kind})" if kind in _MESSAGES_THAT_QUOTE else item["msg"]
@@ -6042,6 +6096,9 @@ def _client_validation_error(
     error: ValidationError,
     layered_over: Optional[Path] = None,
     why: str = CLIENT_FILE,
+    *,
+    data: Any = None,
+    written: Optional[Mapping[Tuple[Any, ...], Mapping[str, str]]] = None,
 ) -> ASHConfigValidationError:
     """The validation error for a client's file: where each problem is, and what kind.
 
@@ -6049,9 +6106,14 @@ def _client_validation_error(
     client delivered or named (or a file a link of theirs reaches) is text the
     client may not have written. So the message gives each problem's location
     and pydantic's message for it, without the value, and for a validator's own
-    error (``_MESSAGES_THAT_QUOTE``) only its type.
+    error (``_MESSAGES_THAT_QUOTE``) only its type. ``data`` and ``written`` are
+    ``unquoted_validation_problems``': the document the model refused, and its
+    keys written under an old spelling, which a location names as the file wrote
+    them.
     """
-    problems = unquoted_validation_problems(error, AshConfig)
+    problems = unquoted_validation_problems(
+        error, AshConfig, data=data, written=written
+    )
     layered = (
         f" with '{describe_config_path(layered_over)}' layered over it"
         if layered_over is not None

@@ -3047,9 +3047,16 @@ class ResolvedConfigDocument:
     #: deprecation, said once wherever in the file the spelling is written, a
     #: ``patch`` pointer or an operation's value included. A caller that builds a
     #: configuration from the document adds them to its resolution warnings
-    #: (``resolve_config.build_config``), whether or not unknown entry keys are
-    #: fatal; the model's own validators meet only the canonical spelling.
+    #: (``resolve_config._add_spelling_lines``), whether or not unknown entry keys
+    #: are fatal; the model's own validators meet only the canonical spelling.
     spelling_warnings: Tuple[str, ...] = ()
+    #: Each mapping of ``data`` that holds the canonical key of a renamed key a
+    #: file of ``chain`` wrote under an old spelling, and that no later file wrote
+    #: over: the mapping's keys and list indices in ``data``, and for it
+    #: ``{canonical key: the spelling the file wrote}``. The model's errors name
+    #: the canonical key, since that is what it validated; a message that names a
+    #: place in the file says the written one (``config_validator.written_location``).
+    written_keys: Dict[Tuple[Any, ...], Dict[str, str]] = field(default_factory=dict)
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: as
@@ -3127,6 +3134,12 @@ class _ChainState:
     #: ``ResolvedConfigDocument.spelling_warnings``, in the order the files were
     #: folded, a line once however many times its file is reached.
     spelling_warnings: List[str] = field(default_factory=list)
+    #: The keys the files of the chain wrote under an old spelling, as the merge
+    #: has left them (``_resolve``): a record a later file wrote over is dropped
+    #: (``_survives``) and the rest follow a ``patch`` to where it puts their
+    #: mapping (``_placed_through_patch``). ``ResolvedConfigDocument.written_keys``
+    #: is read from them.
+    renamed: List[spellings.KeySpelling] = field(default_factory=list)
     #: ``resolve_config_document``'s ``confine``: given each file's resolved
     #: path, the name that reached it, and the document the file resolved to
     #: (its own data merged over its bases', its ``patch`` applied), it returns
@@ -4476,9 +4489,12 @@ def _shown_fold_key(key: str, path: Path, data: Any, text: Optional[str]) -> str
     return key
 
 
-#: A reference in a ``patch`` operation's value: the operation's index, the
-#: path inside the value, and the reference.
-_OpReference = Tuple[int, Tuple[Any, ...], EnvironmentReference]
+#: What a ``patch`` moves with the value or mapping it is about: a reference the
+#: file read from the environment, or a key it wrote under an old spelling
+#: (``spellings.KeySpelling``). Each says where it stands (``path``), whether it
+#: stands for a mapping key (``key``), which key (``resolved``), and how to stand
+#: somewhere else (``moved_to_unknown_list``).
+_Placed = TypeVar("_Placed", EnvironmentReference, spellings.KeySpelling)
 
 
 def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
@@ -4529,18 +4545,20 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
 
 
 def _split_references(
-    references: List[EnvironmentReference], data: Any
-) -> Tuple[List[EnvironmentReference], List[_OpReference]]:
+    references: List[_Placed], data: Any
+) -> Tuple[List[_Placed], List[Tuple[int, Tuple[Any, ...], _Placed]]]:
     """``references``, one file's: those at their places in the file's own
     settings, and those in the value of a ``patch`` operation that sets one
-    (``add`` or ``replace``), which _placed_through_patch places.
+    (``add`` or ``replace``), which _placed_through_patch places, each with the
+    operation's index and its path inside the value. The records of the keys the
+    file wrote under an old spelling are split the same way.
 
     One under ``extends`` names a base, which is not part of the merged
     configuration, and is left out. So is any other one under ``patch``: an
     operation's path, or a ``test`` operation's value, sets no value.
     """
-    own: List[EnvironmentReference] = []
-    from_ops: List[_OpReference] = []
+    own: List[_Placed] = []
+    from_ops: List[Tuple[int, Tuple[Any, ...], _Placed]] = []
     ops = data.get(PATCH_KEY) if isinstance(data, dict) else None
     for reference in references:
         head = reference.path[:1]
@@ -4584,10 +4602,96 @@ def _node_at(root: Any, path: Tuple[Any, ...]) -> Any:
     return node
 
 
+def _survives(document: Any, record: spellings.KeySpelling) -> bool:
+    """Whether ``record``, a key an earlier layer of the chain wrote under an old
+    spelling, still describes the merge once ``document`` is layered over it.
+
+    The merge is ``deep_merge``'s: two mappings merge key by key, and a list or a
+    scalar replaces what lay below it. So the record survives when ``document``
+    never reaches the mapping that holds the key, and when it reaches it without
+    writing the key under either spelling. It does not when ``document`` puts a
+    list or a scalar on the way, whose entries or keys are then its own, or writes
+    the key itself: that file folded the key already, and its own record, when it
+    wrote an old spelling, stands in the earlier one's place.
+    """
+    node = document
+    for segment in record.path:
+        if not isinstance(node, dict) or not isinstance(segment, str):
+            return False
+        key = _resolve_dict_key(node, segment)
+        if key not in node:
+            return True
+        node = node[key]
+    return (
+        isinstance(node, dict)
+        and record.canonical not in node
+        and record.written not in node
+    )
+
+
+def _written_keys(
+    records: Sequence[spellings.KeySpelling], data: Any
+) -> Dict[Tuple[Any, ...], Dict[str, str]]:
+    """``ResolvedConfigDocument.written_keys`` for ``data``, the merged document:
+    each of ``records`` whose mapping ``data`` holds at the place the record
+    names, with the canonical key and without the written one, by the path the
+    mapping has in ``data`` (a mapping key as ``data`` spells it, which the merge
+    matches as ``_resolve_dict_key`` does). The first record for a key wins."""
+    found: Dict[Tuple[Any, ...], Dict[str, str]] = {}
+    for record in records:
+        node = data
+        spelled: List[Any] = []
+        for segment in record.path:
+            if isinstance(node, dict) and isinstance(segment, str):
+                key = _resolve_dict_key(node, segment)
+                if key not in node:
+                    break
+                spelled.append(key)
+                node = node[key]
+            elif (
+                isinstance(node, list)
+                and isinstance(segment, int)
+                and 0 <= segment < len(node)
+            ):
+                spelled.append(segment)
+                node = node[segment]
+            else:
+                break
+        else:
+            if (
+                isinstance(node, dict)
+                and record.canonical in node
+                and record.written not in node
+            ):
+                found.setdefault(tuple(spelled), {}).setdefault(
+                    record.canonical, record.written
+                )
+    return found
+
+
+def layered_written_keys(
+    document_keys: Mapping[Tuple[Any, ...], Mapping[str, str]],
+    overlay: ResolvedConfigDocument,
+) -> Dict[Tuple[Any, ...], Dict[str, str]]:
+    """The written keys of a document that ``overlay`` is layered over: those of
+    ``document_keys`` the overlay does not write over (``_survives``), then the
+    overlay's own, which hold in the layered document as they do in the overlay
+    (a list the overlay sets replaces the document's whole)."""
+    layered: Dict[Tuple[Any, ...], Dict[str, str]] = {}
+    for path, names in document_keys.items():
+        for canonical, written in names.items():
+            record = spellings.KeySpelling(path, canonical, written)
+            if _survives(overlay.data, record):
+                layered.setdefault(path, {})[canonical] = written
+    for path, names in overlay.written_keys.items():
+        layered.setdefault(path, {}).update(names)
+    return layered
+
+
 def _plant(
     root: Any,
     path: Tuple[Any, ...],
-    reference: EnvironmentReference,
+    reference: _Placed,
     planted: Set[str],
 ) -> Optional[str]:
     """Put a token at ``reference``'s place under ``root`` (path ``path``) and
@@ -4633,16 +4737,17 @@ def _plant(
 def _placed_through_patch(
     document: Any,
     ops: List[Any],
-    tracked: List[EnvironmentReference],
-    from_ops: List[_OpReference],
+    tracked: List[_Placed],
+    from_ops: List[Tuple[int, Tuple[Any, ...], _Placed]],
     where: str,
     rewritten: Optional[Dict[int, _Rewritten]] = None,
-) -> List[EnvironmentReference]:
+) -> List[_Placed]:
     """The references of a file and of its bases, each at the place its value
     has once the file's ``patch`` (``ops``, which applied to ``document``) has.
-    ``rewritten`` is how ``document`` took the operations that did not fit it
-    as written (``_Patched.rewritten``); the copy takes each of those the same
-    way.
+    The records of keys written under an old spelling (``spellings.KeySpelling``)
+    are placed the same way, each at the place its mapping has. ``rewritten`` is
+    how ``document`` took the operations that did not fit it as written
+    (``_Patched.rewritten``); the copy takes each of those the same way.
 
     ``tracked`` are at their places in ``document``, the file merged over its
     bases; ``from_ops`` are in the operations' values. Each value is followed,
@@ -4661,14 +4766,17 @@ def _placed_through_patch(
     shadow = copy.deepcopy(document)
     shadow_ops = copy.deepcopy(ops)
     tokens: Set[str] = set()
-    planted: List[Tuple[EnvironmentReference, Optional[str]]] = []
+    planted: List[Tuple[_Placed, Optional[str]]] = []
     for reference in tracked:
         token = _plant(shadow, tuple(reference.path), reference, tokens)
         planted.append((reference, token))
-    for index, inside, reference in from_ops:
-        token = _plant(shadow_ops[index], ("value", *inside), reference, tokens)
+    for entry in from_ops:
+        op_index: int = entry[0]
+        inside: Tuple[Any, ...] = entry[1]
+        op_reference: _Placed = entry[2]
+        token = _plant(shadow_ops[op_index], ("value", *inside), op_reference, tokens)
         if token is not None:
-            planted.append((reference, token))
+            planted.append((op_reference, token))
     if not tokens:
         return list(tracked)
     result: Any = shadow
@@ -4718,7 +4826,7 @@ def _placed_through_patch(
                 walk(value, (*path, index))
 
     walk(result, ())
-    placed: List[EnvironmentReference] = []
+    placed: List[_Placed] = []
     for reference, token in planted:
         if token is None:
             placed.append(reference)
@@ -5082,6 +5190,9 @@ def _resolve(
     for line in folded.warnings:
         if line not in state.spelling_warnings:
             state.spelling_warnings.append(line)
+    # The keys it renamed, split as the references below are: those in the file's
+    # own settings, and those in the value of a `patch` operation.
+    own_renamed, op_renamed = _split_references(list(folded.renamed), data)
 
     # In read order, so a file's own come before those of the bases it extends,
     # which are read below. The order decides only which of two references at
@@ -5093,9 +5204,10 @@ def _resolve(
     state.read.extend(read)
     own_references, from_ops = _split_references(read, data)
     # This file's references and, after the loop below, its bases': the ones
-    # its patch can move.
+    # its patch can move. The same for the records of renamed keys.
     first = len(state.references)
     state.references.extend(own_references)
+    mark = len(state.renamed)
 
     state.reached(real, named)
     # The file that names a base chose it, so a base is judged by the paths of
@@ -5127,6 +5239,7 @@ def _resolve(
     ):
         state.order.append(real)
         state.named.append(named)
+        state.renamed.extend(own_renamed)
         if owned is not None and operator_file:
             _owned_plugin_keys(data, owned)
         return state.confined(real, named, data), data, owned
@@ -5180,6 +5293,7 @@ def _resolve(
             # The base as its entry spells it, before any symlink is followed:
             # relative to the resolved file that extends it, as base_path is.
             base_named = _base_named(base_ref, real)
+            before = len(state.renamed)
             base_document, base_unconfined, base_owned = _resolve(
                 base_path,
                 stack + (real,),
@@ -5201,6 +5315,14 @@ def _resolve(
                     f"{state.shown(real)}, must be a mapping once its own "
                     f"'{PATCH_KEY}' is applied, got {type(base_document).__name__}"
                 )
+            # This base is layered over the earlier ones: a key one of them wrote
+            # under an old spelling stays recorded only where this base does not
+            # write the key. The base's own records were settled in its resolution.
+            state.renamed[mark:before] = [
+                record
+                for record in state.renamed[mark:before]
+                if _survives(base_document, record)
+            ]
             # A retired scanner's section is the overlay inside one document,
             # but across documents the extending file has to win. Each base is
             # folded before it is layered, so the layering is the ordinary
@@ -5220,6 +5342,13 @@ def _resolve(
             if owned is not None and base_owned:
                 for segment_key, keys in base_owned.items():
                     owned.setdefault(segment_key, set()).update(keys)
+        # The file's own settings are layered over its bases, so the bases' records
+        # stay only where the file does not write the key, and the file's own
+        # follow them.
+        state.renamed[mark:] = [
+            record for record in state.renamed[mark:] if _survives(own, record)
+        ]
+        state.renamed.extend(own_renamed)
         merged = deep_merge(merged, own, AshConfig)
         if unconfined is not None:
             unconfined = deep_merge(unconfined, own, AshConfig)
@@ -5268,6 +5397,22 @@ def _resolve(
                 where=state.shown(real),
                 rewritten=patched.rewritten,
             )
+            if state.renamed[mark:] or op_renamed:
+                # The same for the keys written under an old spelling. Where the
+                # operations cannot be followed the records are left out and the
+                # canonical key is named: a spelling only decides how a place is
+                # worded, and never refuses a file.
+                try:
+                    state.renamed[mark:] = _placed_through_patch(
+                        merged,
+                        written_ops,
+                        state.renamed[mark:],
+                        op_renamed,
+                        where=state.shown(real),
+                        rewritten=patched.rewritten,
+                    )
+                except ASHConfigSourceError:
+                    del state.renamed[mark:]
             merged = patched.document
             unconfined = patched.unconfined
     except ASHConfigSourceError:
@@ -5492,6 +5637,7 @@ def resolve_config_document(
         environment_values=_values_of(state.read),
         reference_places=places,
         spelling_warnings=tuple(state.spelling_warnings),
+        written_keys=_written_keys(state.renamed, data),
     )
 
 

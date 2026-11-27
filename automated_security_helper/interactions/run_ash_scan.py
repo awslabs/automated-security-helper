@@ -2046,8 +2046,13 @@ def _model_or_refusal_of_resolved_document(
     except ValidationError as e:
         # The wording of resolve_config.load_config_file's file refusal, from
         # the same pieces, so the gate's refusal and a local scan's read alike.
-        described = describe_validation_error(e, document.environment_values)
-        return None, ConfigFileRefused(
+        described = describe_validation_error(
+            e,
+            document.environment_values,
+            data=document.data,
+            written=document.written_keys,
+        )
+        refusal = ConfigFileRefused(
             f"Configuration validation failed for "
             f"'{describe_config_path(Path(config_path_str))}': "
             f"{described.rstrip('.')}. "
@@ -2056,6 +2061,9 @@ def _model_or_refusal_of_resolved_document(
             validation_error=e,
             after_overrides=False,
         )
+        refusal.validated_data = document.data
+        refusal.written_keys = document.written_keys
+        return None, refusal
     except Exception:
         return None, None
 
