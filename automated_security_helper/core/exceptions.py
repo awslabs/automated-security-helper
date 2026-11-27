@@ -59,6 +59,7 @@ class ReasonCode:
     TARGET_PATH_REFUSED = "target_path_refused"
     OPTION_REFUSED = "option_refused"
     IGNORE_FILE_IN_TREE = "ignore_file_in_tree"
+    TOOL_NOT_USABLE = "tool_not_usable"
     OFFLINE_RULE_CACHE_UNUSABLE = "offline_rule_cache_unusable"
     OFFLINE_NOTHING_TO_RUN = "offline_nothing_to_run"
     DATABASE_UPDATE_FAILED = "database_update_failed"
@@ -130,6 +131,9 @@ DEFAULT_SENTENCES: dict[str, str] = {
     ReasonCode.OPTION_REFUSED: "an option of it is refused",
     ReasonCode.IGNORE_FILE_IN_TREE: (
         "the scanned tree holds an ignore file its tool reads whatever ASH passes"
+    ),
+    ReasonCode.TOOL_NOT_USABLE: (
+        "the copy of its tool ASH found cannot be run, so its tool is missing"
     ),
     ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE: "its offline rule cache is not usable",
     ReasonCode.OFFLINE_NOTHING_TO_RUN: "offline, nothing is left for its tool to run",

@@ -309,9 +309,41 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
     # (_resolve_configured_rules); the offline and online branches and the refusal
     # read this instead of resolving again, so path trust runs and warns once.
     _configured_rules: Optional[_ConfiguredRules] = PrivateAttr(default=None)
+    # The reason code recorded with ``dependency_unavailable_reason``, as a
+    # ``(reason, code)`` pair: the code only counts while the reason it was recorded
+    # with is still the reason (see ``_unavailable_code``), so a reason another
+    # writer sets later is never filed under this one's code.
+    _unavailable_with: Optional[tuple[str, str]] = PrivateAttr(default=None)
 
     # ---------------------------------------------------------------
     # Hooks subclasses override
+
+    def _record_unavailable(self, reason: str, code: str) -> None:
+        """Record why the scanner declines, and the kind of refusal it is.
+
+        ``dependency_unavailable_reason`` is the text the MISSING row shows; the code
+        is what the scan-time guard files if the scanner is dispatched anyway
+        (``_dependency_refusal``). The guard used to file every reason as an
+        offline rule cache that is not usable, whatever set it.
+        """
+        self.dependency_unavailable_reason = reason
+        self._unavailable_with = (reason, code)
+
+    def _unavailable_code(self) -> str:
+        """The code recorded with the current reason, or ``run_failed`` for a reason
+        that was set without one."""
+        recorded = self._unavailable_with
+        if recorded is not None and recorded[0] == self.dependency_unavailable_reason:
+            return recorded[1]
+        return ReasonCode.RUN_FAILED
+
+    def _dependency_refusal(self) -> ScannerError:
+        """The error a scan-time guard raises for a reason construction recorded."""
+        return ScannerError(
+            self.dependency_unavailable_reason,
+            reason=FailureReason(self._unavailable_code()),
+        )
+
     # ---------------------------------------------------------------
 
     def cache_dir_env_var(self) -> str:
@@ -727,14 +759,15 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             # operator how to fix a real misconfiguration: the remediation text
             # travels with the answer rather than being reconstructed by the
             # reader.
-            self.dependency_unavailable_reason = (
+            self._record_unavailable(
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
                 "Run `ash container build --offline` to pre-warm the cache in the image, "
                 "or, while online, download each ruleset from "
                 "https://semgrep.dev/c/<ruleset> into that directory and record the "
                 "time in .ash-rules-fetched-at. See 'Seeding the semgrep and opengrep "
-                "rule cache' in docs/content/docs/advanced-usage.md."
+                "rule cache' in docs/content/docs/advanced-usage.md.",
+                ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE,
             )
             ASH_LOGGER.warning(self.dependency_unavailable_reason)
             # No cache `--config` to append, so nothing further to configure. The
@@ -751,12 +784,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         if not self._cache_dir_is_passable(cache_abs, cache_env):
             # Recorded, not raised, as the missing-cache reason above is: the
             # scanner exists and declines, and the MISSING row says why.
-            self.dependency_unavailable_reason = (
+            self._record_unavailable(
                 f"{scanner_label} is running in offline mode, but ${cache_env} names "
                 "a rule cache inside the scanned tree, or one an MCP client "
                 "delivered, which ASH does not hand to the tool: the scanned "
                 "repository must not choose the rules it is scanned with. Point "
-                f"${cache_env} at a directory outside the scanned tree."
+                f"${cache_env} at a directory outside the scanned tree.",
+                ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE,
             )
             ASH_LOGGER.warning(self.dependency_unavailable_reason)
             return
@@ -788,7 +822,11 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         rules = self._configured()
         if rules.kind not in ("refused", "missing"):
             return False
-        self.dependency_unavailable_reason = (
+        # A value that resolves to nothing is a file that does not exist; one that
+        # resolves to a place ASH may not pass (inside the scanned tree, a git
+        # checkout) is an option ASH refuses. The refusal runs online and offline,
+        # so neither is about the offline cache.
+        self._record_unavailable(
             f"{self._config_option_key()} names rules ASH cannot pass to the tool: "
             f"{rules.detail}. The scan does not run under other rules in its place. "
             "Name a rules file or directory outside the scanned tree from an operator "
@@ -796,7 +834,10 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             "and the scanned directory, given with --config or ASH_CONFIG; a rules "
             "repository checked out elsewhere is admitted from such a source), a "
             "registry ruleset (auto, p/<ruleset>, r/<rule>, s/<snippet>), one of the "
-            "tool's own config spellings, or a URL."
+            "tool's own config spellings, or a URL.",
+            ReasonCode.CONFIG_FILE_MISSING
+            if rules.kind == "missing"
+            else ReasonCode.OPTION_REFUSED,
         )
         ASH_LOGGER.warning(self.dependency_unavailable_reason)
         return True
@@ -913,10 +954,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # should not depend on it, and a second caller (an installer probe, a
         # plugin-inventory path, an out-of-tree orchestrator) would not inherit it.
         if self.dependency_unavailable_reason:
-            raise ScannerError(
-                self.dependency_unavailable_reason,
-                reason=FailureReason(ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE),
-            )
+            raise self._dependency_refusal()
 
         if self.results_dir is None:
             raise ScannerError(

@@ -610,10 +610,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                 self.args.extra_args = []
                 self._process_config_options()
                 if self.dependency_unavailable_reason:
-                    raise ScannerError(
-                        self.dependency_unavailable_reason,
-                        reason=FailureReason(ReasonCode.OFFLINE_RULE_CACHE_UNUSABLE),
-                    )
+                    raise self._dependency_refusal()
         self._scan_target_path = target
         return super()._resolve_scan_arguments(target, results_file)
 
@@ -669,7 +666,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         if found is None:
             refusal = in_tree_refusal(_tool_name(self))
             if refusal is not None:
-                self.dependency_unavailable_reason = refusal
+                self._record_unavailable(refusal, ReasonCode.TOOL_NOT_USABLE)
                 self._plugin_log(refusal, level=logging.WARNING)
         return found is not None
 
