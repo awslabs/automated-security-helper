@@ -977,9 +977,9 @@ SCAN = ("ash", "scan")
             id="no-subcommand",
         ),
         pytest.param(
-            ["config", "validate", "--config", ".ash/.ash.yaml"],
+            ["config", "validate", "--config", ".ash.yaml"],
             ("ash", "config", "validate"),
-            [(("ash", "config", "validate"), "--config", ".ash/.ash.yaml")],
+            [(("ash", "config", "validate"), "--config", ".ash.yaml")],
             id="a-nested-subcommand",
         ),
         pytest.param(
@@ -3739,7 +3739,7 @@ def test_a_passing_block_covers_the_command_it_invokes_and_the_options_it_gives(
     ("command_line", "stops_at", "covered", "uncovered"),
     [
         pytest.param(
-            "ash config validate --config .ash/.ash.yaml",
+            "ash config validate --config .ash.yaml",
             "invoked_subcommand",
             set(),
             {"command:ash scan", "option:ash scan --config"},
@@ -3753,7 +3753,7 @@ def test_a_passing_block_covers_the_command_it_invokes_and_the_options_it_gives(
             id="the-version-exit-is-the-version-options-own-work",
         ),
         pytest.param(
-            "ash scan --config .ash/.ash.yaml",
+            "ash scan --config .ash.yaml",
             None,
             {"command:ash scan", "option:ash scan --config"},
             set(),
@@ -3923,7 +3923,7 @@ def _saved_config(
     body: str,
     *,
     kind: str = "kind=ash",
-    save_as: str = ".ash/.ash.yaml",
+    save_as: str = ".ash.yaml",
     lang: str = "yaml",
 ) -> str:
     return f"<!-- doctest: config {kind} save-as={save_as} -->\n{FENCE}{lang}\n{body}\n{FENCE}"
@@ -3951,7 +3951,7 @@ def _config_run(
     config_at: int = 0,
     block_at: int = 1,
     saved: bool = True,
-    save_as: str = ".ash/.ash.yaml",
+    save_as: str = ".ash.yaml",
     saved_ok: bool = True,
     block_ok: bool = True,
     block_session: int = 1,
@@ -4195,7 +4195,10 @@ def test_a_config_saved_under_a_name_discovery_reads_counts_for_a_scan_of_its_di
     """A scan that names no configuration loads the first config source discovery
     finds in the directory it scans, the working directory when no --source-dir is
     given; a saved configuration under any of discovery's names is one it can have
-    loaded. The names are read from the code."""
+    loaded. The names are read from the code.
+
+    Legacy location: the subject includes the deprecated names discovery still
+    reads, in ``.ash/`` and at the root, beside the canonical file."""
     suffix = name.rpartition(".")[2]
     lang = {"yml": "yaml"}.get(suffix, suffix)
     run = _loading_run(
