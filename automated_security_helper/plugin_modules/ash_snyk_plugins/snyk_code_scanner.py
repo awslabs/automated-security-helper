@@ -1190,6 +1190,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                         f"findings could not be graded: {error_text(e)}"
                     )
                 self._say_what_the_ingest_repaired(target_type)
+                self._refuse_a_repaired_report_with_no_run(sarif_report)
 
                 # Attach scanner details for proper identification
                 sarif_report = attach_scanner_details(

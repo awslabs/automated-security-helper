@@ -2111,6 +2111,23 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if sentence is not None:
             self._plugin_log(sentence, target_type=target_type, level=logging.WARNING)
 
+    def _refuse_a_repaired_report_with_no_run(self, report: SarifReport) -> None:
+        """Refuse *report* when reading it changed the document and it holds no run.
+
+        A document that names SARIF (it has ``runs`` or ``version``) and holds no
+        run once the parts the model does not define are dropped is not a scan
+        that found nothing: the repair is what left it empty. Returned, it would
+        be graded as a clean scan and the repair would only be logged. A report
+        that needed no repair is the tool's own statement, and is left to the
+        scanner as before.
+        """
+        if report.runs or self._ingest_record.is_empty:
+            return
+        raise ScannerError(
+            "its results file holds no SARIF run once the parts ASH could not "
+            "read were set aside, so there is nothing to grade"
+        )
+
     def _with_the_ingest_note(self, extras: Dict[str, Any]) -> Dict[str, Any]:
         """*extras* with the warning for what reading the report repaired.
 

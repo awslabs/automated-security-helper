@@ -688,6 +688,7 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                         f"findings could not be graded: {error_text(e)}"
                     )
                 self._say_what_the_ingest_repaired(target_type)
+                self._refuse_a_repaired_report_with_no_run(sarif_report)
                 sarif_report = self._attach_package_identity(sarif_report, target)
                 sarif_report = self._attach_misconfig_resources(
                     sarif_report, final_args

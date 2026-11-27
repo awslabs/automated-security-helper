@@ -2439,6 +2439,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     "could not be graded"
                 )
             self._say_what_the_ingest_repaired(target_type)
+            self._refuse_a_repaired_report_with_no_run(sarif_report)
 
             # Attach scanner details
             sarif_report = attach_scanner_details(

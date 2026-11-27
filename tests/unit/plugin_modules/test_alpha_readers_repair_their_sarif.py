@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -404,22 +405,6 @@ def test_snyk_refuses_a_report_the_step_cannot_repair_and_says_so(snyk):
 
     assert "Snyk Code scan failed" in str(raised.value)
     assert "not SARIF ASH can read" in str(raised.value)
-
-
-def test_snyk_names_no_input_in_its_refusal(snyk):
-    planted = "planted-results-value-not-sarif"
-    document = {
-        "version": "2.1.0",
-        "runs": [{"tool": {"driver": _SNYK_TOOL}, "results": [planted]}],
-    }
-
-    # Exit 0, so the run is read and refused by the reader, not first by the check
-    # that a run which exits 1 holds a result.
-    with pytest.raises(ScannerError) as raised:
-        _snyk_scan(snyk, _encoded(document), exit_code=0)
-
-    assert "not SARIF ASH can read" in str(raised.value)
-    assert planted not in str(raised.value)
 
 
 def test_the_control_snyk_without_the_step_loses_the_report(snyk, monkeypatch):
@@ -863,3 +848,104 @@ def test_the_control_hadolint_without_the_step_loses_the_chunk(hadolint, monkeyp
 
     assert _rule_ids(report) == ["DL3008"]
     assert hadolint.unevaluated_targets == [_FIRST_FILE]
+
+
+# --------------------------------------------------------------------------- #
+# The four single-document readers, side by side
+# --------------------------------------------------------------------------- #
+
+_PLANTED = "planted-results-value-not-sarif"
+
+
+# Each entry is (fixture name, a function that scans with the scanner and the bytes
+# the tool wrote). snyk is scanned at exit 0, so the run is read and refused by the
+# reader and not first by the check that a run which exits 1 holds a result;
+# hadolint runs one chunk per Dockerfile, so both chunks answer the same bytes.
+def _scan_ferret(scanner, _monkeypatch, written):
+    return _ferret_scan(scanner, written)[0]
+
+
+def _scan_snyk(scanner, _monkeypatch, written):
+    return _snyk_scan(scanner, written, exit_code=0)
+
+
+def _scan_trivy(scanner, _monkeypatch, written):
+    return _trivy_scan(scanner, written)
+
+
+def _scan_hadolint(scanner, monkeypatch, written):
+    return _hadolint_scan(scanner, monkeypatch, written.decode(), written.decode())
+
+
+# The third value is whether the error the refusal was raised from stays in the chain
+# a traceback prints. trivy's refusal is raised outside the handler that caught it,
+# so its chain ends at the refusal and nothing behind it can print an input.
+_READERS = [
+    pytest.param("ferret", _scan_ferret, True, id="ferret"),
+    pytest.param("snyk", _scan_snyk, True, id="snyk"),
+    pytest.param("trivy", _scan_trivy, False, id="trivy"),
+    pytest.param("hadolint", _scan_hadolint, True, id="hadolint"),
+]
+_NO_HADOLINT = _READERS[:3]
+
+
+def _everything_a_log_would_print(error: BaseException) -> str:
+    """The error as an uncaught traceback prints it, every chained error included."""
+    return "".join(traceback.format_exception(type(error), error, error.__traceback__))
+
+
+@pytest.mark.parametrize(("fixture", "scan", "chained"), _READERS)
+def test_no_reader_prints_an_input_value_in_a_refusal_or_in_the_error_behind_it(
+    request, monkeypatch, fixture, scan, chained
+):
+    """pydantic's own text for a refused value quotes it (``input_value=...``). The
+    models hide it, so neither the refusal nor the error it was raised from, which
+    a traceback in a log prints too, carries what the tool wrote."""
+    scanner = request.getfixturevalue(fixture)
+    document = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": _SNYK_TOOL}, "results": [_PLANTED]}],
+    }
+
+    with pytest.raises(ScannerError) as raised:
+        scan(scanner, monkeypatch, _encoded(document))
+
+    printed = _everything_a_log_would_print(raised.value)
+    if chained:
+        assert "validation error for" in printed, (
+            "the error behind the refusal is in the chain this test reads"
+        )
+    assert _PLANTED not in str(raised.value)
+    assert _PLANTED not in printed
+
+
+_NO_RUN_AFTER_A_REPAIR = {"version": "2.1.0", "tool_note": "x"}
+
+
+@pytest.mark.parametrize(("fixture", "scan", "chained"), _NO_HADOLINT)
+def test_a_document_that_the_repair_left_with_no_run_is_refused_not_graded_clean(
+    request, monkeypatch, fixture, scan, chained
+):
+    """``tool_note`` is a key SARIF does not define, so the step drops it and the
+    document is left with no run. Returned, it would be graded as a scan that found
+    nothing, and the repair would only be logged."""
+    scanner = request.getfixturevalue(fixture)
+
+    with pytest.raises(ScannerError, match="holds no SARIF run") as raised:
+        scan(scanner, monkeypatch, _encoded(_NO_RUN_AFTER_A_REPAIR))
+
+    assert "tool_note" not in str(raised.value)
+
+
+@pytest.mark.parametrize(("fixture", "scan", "chained"), _NO_HADOLINT)
+def test_a_document_that_names_no_run_and_needed_no_repair_is_still_returned(
+    request, monkeypatch, fixture, scan, chained
+):
+    """The refusal is for what the repair emptied. A report the tool wrote with an
+    empty ``runs`` list is its own statement and is read as it was."""
+    scanner = request.getfixturevalue(fixture)
+
+    report = scan(scanner, monkeypatch, _encoded({"version": "2.1.0", "runs": []}))
+
+    assert not report.runs
+    assert scanner.output_ingest_record is None
