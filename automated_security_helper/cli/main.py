@@ -258,18 +258,23 @@ MERGE_COMMAND_HELP = """Merges the results of a sharded scan into one unified re
 Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
 """
 
+#: The container build's help, shared by ``ash container build`` and its deprecated
+#: spelling ``ash build-image``, which puts its deprecation sentence in front of it.
+BUILD_HELP = """Builds the ASH container image, then scans the current directory with it unless --no-run is given.
+
+It takes only the options below. To scan with scan options, run `ash scan fs --mode container`, which builds the image the same way and accepts every scan option.
+"""
+
 #: The keyword arguments the eager ``app.command(...)`` registration passed for
 #: each lazily-built command function; a sub-Typer needs none (its own module
 #: carries its help and settings, as it did under ``app.add_typer``).
 _LAZY_COMMAND_KWARGS: dict[str, dict[str, Any]] = {
     "build-image": {
         "no_args_is_help": False,
-        "help": """Deprecated: use `ash container build`, which takes the same options.
-
-Builds the ASH container image, then scans the current directory with it unless --no-run is given.
-
-It takes only the options below. To scan with scan options, run `ash scan --mode container`, which builds the image the same way and accepts every scan option.
-""",
+        "help": (
+            "Deprecated: use `ash container build`, which takes the same options.\n\n"
+            + BUILD_HELP
+        ),
     },
     "report": {},
     "merge": {"help": MERGE_COMMAND_HELP},

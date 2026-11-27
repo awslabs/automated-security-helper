@@ -270,10 +270,25 @@ def test_an_old_unused_suppressions_report_suggests_scan_fs(tmp_path):
     ), result.output
 
 
-def test_the_container_build_help_names_scan_fs_for_a_scan_with_scan_options():
-    from automated_security_helper.cli.container import BUILD_HELP
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param(("container", "build"), id="container-build"),
+        pytest.param(("build-image",), id="build-image"),
+    ],
+)
+def test_the_container_build_help_names_scan_fs_for_a_scan_with_scan_options(path):
+    """Both spellings show the one help text. The deprecated one carried a copy of
+    its own that still sent a reader to a scan that warns."""
+    from automated_security_helper.cli.main import BUILD_HELP
 
-    assert "run `ash scan fs --mode container`" in BUILD_HELP, BUILD_HELP
+    command = typer.main.get_command(app)
+    for name in path:
+        command = command.commands[name]
+
+    assert command.help.strip().endswith(BUILD_HELP.strip()), command.help
+    assert "run `ash scan fs --mode container`" in command.help, command.help
+    assert "`ash scan --mode container`" not in command.help, command.help
 
 
 def test_the_merge_ignore_suppressions_help_names_scan_fs():
