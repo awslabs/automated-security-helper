@@ -63,6 +63,7 @@ What it does not cover
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1107,6 +1108,9 @@ class TestATomlConfigIsReadWithTheFirstParserThatImports:
     the Python that runs the test does not matter. Before the step tried tomli,
     "tomli only" failed with "No module named 'toml'" and "tomli and toml" read
     with toml; the other cases are controls that pass before the fix.
+
+    With none of them importable the step refuses in its own words, on one `::error::`
+    line that names all three, not with the last import error.
     """
 
     def _repo(self, tmp_path):
@@ -1139,7 +1143,7 @@ class TestATomlConfigIsReadWithTheFirstParserThatImports:
         tool_config = Path(rewritten["scanners"]["bandit"]["options"]["config_file"])
         assert tool_config.read_text(encoding="utf-8") == BASE_BANDIT
 
-    def test_with_no_parser_importable_the_step_fails_and_names_the_last_tried(
+    def test_with_no_parser_importable_the_step_refuses_and_names_all_three(
         self, tmp_path
     ):
         repo = self._repo(tmp_path)
@@ -1148,7 +1152,14 @@ class TestATomlConfigIsReadWithTheFirstParserThatImports:
         inputs = {**_required_inputs(context), "config": TOML_CONFIG_PATH}
         run, steps = _run_config_ref_step(repo, context, inputs)
         assert steps.get("config-ref-files", {}).get("outcome") == "failure", steps
-        assert "No module named 'toml'" in run.proc.stderr, run.describe()
+        (refusal,) = [
+            line
+            for line in run.proc.stdout.splitlines()
+            if line.startswith("::error::")
+        ]
+        for parser in ("tomllib", "tomli", "toml"):
+            assert re.search(rf"\b{parser}\b", refusal), (parser, refusal)
+        assert run.proc.stderr == "", run.describe()
 
 
 @pytest.mark.unit
