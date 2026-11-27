@@ -975,6 +975,22 @@ def test_the_generic_ls_refusal_names_the_short_flags_that_print_owners(cast):
     assert "-l, -g, -o, -n" not in cast.command_problem("cat --all")
 
 
+@pytest.mark.parametrize(
+    "value", ["long", "verbose", "l", "lo", "lon", "verb", "verbos", "across"]
+)
+def test_ls_format_with_its_value_in_the_next_argument_gets_the_owner_reason(
+    cast, value
+):
+    # GNU ls takes the value of --format from the next argument, so `ls --format long`
+    # prints owners and groups as `ls --format=long` does. The option is refused before
+    # its value is read, with the reason every ls option gets: the owner flags.
+    problem = cast.command_problem(f"ls --format {value}")
+    assert problem is not None
+    assert problem == cast.command_problem("ls --format")
+    assert "-l, -g, -o, -n" in problem
+    assert "owners and groups" in problem
+
+
 # --- ids, kinds and the other keys
 
 
@@ -1822,6 +1838,54 @@ def test_a_token_wrapped_inside_a_table_drawn_with_ascii_bars_is_not_rejoined(ca
     # The same table drawn with box-drawing characters is found.
     drawn = f"{BAR} /home/bu {BAR}\r\n{BAR} ilder/x {BAR}"
     assert [hit.view for hit in cast.scan_text(drawn, tokens, "event 6")] == ["flat"]
+
+
+ZERO_WIDTH_SPACE = "\N{ZERO WIDTH SPACE}"
+
+#: More wrapped paths that the flat view does not rejoin, each with a twin that it does.
+#: In the twin only characters the view removes lie between the halves. In the text,
+#: something it keeps does: the text of a column to the right of the wrapped cell, the
+#: right-hand column of a log line, the bar of an ASCII table, a zero-width space.
+NOT_REJOINED = {
+    "first column with a column to its right, bordered": (
+        f"{BAR} /home/bu {BAR} FAILED {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}\r\n",
+        f"{BAR} /home/bu {BAR}        {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}\r\n",
+    ),
+    "first column with a column to its right, spaced": (
+        " /home/bu   FAILED\r\n ilder/x\r\n",
+        " /home/bu\r\n ilder/x\r\n",
+    ),
+    "a log line with a right-hand column": (
+        "wrote /home/bu        cli.py:42\r\n                    ilder/x",
+        "wrote /home/bu\r\n                    ilder/x",
+    ),
+    "an ASCII border around two columns": (
+        "| /home/bu | FAILED |\r\n| ilder/x  |        |",
+        f"{BAR} /home/bu {BAR}        {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}",
+    ),
+    "a zero-width space inside the token": (
+        f"wrote /home/bu{ZERO_WIDTH_SPACE}ilder/x",
+        "wrote /home/bu\x07ilder/x",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(NOT_REJOINED))
+def test_a_token_with_something_kept_between_its_halves_is_not_rejoined(cast, shape):
+    """Limits of the flat view, pinned as they are, not promises. The view removes
+    escape sequences, control characters, box-drawing characters and the spaces beside
+    the last two, and nothing else. A token with anything else between its halves is
+    not found, so a recording must not wrap a path beside other text: the scan is not
+    what keeps such a path out of one. If the view comes to rejoin one of these, its
+    case here turns red and becomes a must-flag case.
+    """
+    text, twin = NOT_REJOINED[shape]
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in cast.flatten_text(text)
+    assert cast.scan_text(text, tokens, "event 6") == []
+    # The twin has only removed characters between the halves, and is found.
+    assert "/home/builder" in cast.flatten_text(twin)
+    assert [hit.view for hit in cast.scan_text(twin, tokens, "event 6")] == ["flat"]
 
 
 def test_a_hit_names_its_kind_and_never_the_value(cast):
