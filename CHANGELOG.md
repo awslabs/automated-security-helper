@@ -196,12 +196,13 @@
   dropped when a file that writes it under the retired name is read, or when a `patch`
   value under the retired name holds it, so a `patch` operation that removes, replaces
   or tests that option refuses the load, and the refusal says the option was dropped.
-  `--config-overrides` entries under the retired name count as setting an operator-only
-  option only where, applied in their order, they leave that option under its declared
-  name. A value read from the environment under the retired name, in a file's section
-  or in one a `patch` adds, is recorded and shown by its reference, as under the
-  current name. No shipped scanner name is retired today, so no current configuration
-  reads differently.
+  The fold's warning counts the options it drops and names none, since a key a file
+  reads from the environment is the value it read. `--config-overrides` entries under
+  the retired name count as setting an operator-only option only where, applied in
+  their order, they leave that option under its declared name. A value read from the
+  environment under the retired name, in a file's section or in one a `patch` adds, is
+  recorded and shown by its reference, as under the current name. No shipped scanner
+  name is retired today, so no current configuration reads differently.
 
 - **A session's patched profile that reads a value from the environment is no longer
   refused for that value.** When the registered profile sets an option a client may

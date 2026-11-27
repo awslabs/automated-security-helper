@@ -796,6 +796,48 @@ def test_a_load_through_the_model_logs_a_files_fold_once(
     assert len(_fold_lines(caplog)) == 1, _fold_lines(caplog)
 
 
+#: What the test below reads its option key as: a name bandit's options do not
+#: declare, so the fold drops the option.
+_UNDECLARED_KEY_VALUE = "retired-fold-key-5b2d"
+
+
+def test_the_fold_s_warning_counts_an_option_key_read_from_the_environment(
+    retired_oldname, tmp_path, monkeypatch, caplog
+):
+    """The file writes, under oldname, an option whose key it reads from the
+    environment, ${KEY}, and the variable holds a name bandit does not
+    declare. The fold drops the option as the file is read, and its warning
+    counts the options it dropped without naming them: a key read from the
+    environment is the value it read. Naming each dropped key printed the
+    variable's value in the log."""
+    from automated_security_helper.config.ash_config import (
+        config_env_var_is_interpolatable,
+    )
+    from automated_security_helper.config.config_sources import (
+        resolve_config_document,
+    )
+
+    # The premise: a config file may read the variable.
+    assert config_env_var_is_interpolatable(_FOLD_KEY_VAR)
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_KEY_VAR, _UNDECLARED_KEY_VALUE)
+    path = tmp_path / "keyed.yaml"
+    path.write_text(
+        f"scanners:\n  oldname:\n    options:\n      ${{{_FOLD_KEY_VAR}}}: 1\n",
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.INFO, logger="ash"):
+        resolve_config_document(path)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert len(_fold_lines(caplog)) == 1, messages
+    assert not [m for m in messages if _UNDECLARED_KEY_VALUE in m], messages
+    [warning] = [m for m in messages if "counterpart" in m]
+    assert "1 option with no bandit counterpart was dropped" in warning, warning
+
+
 # A value a file reads from the environment under the retired name. The loader
 # pairs the file's two readings before the fold, so every read is found, and
 # then moves each reference to the place the fold gives its value: the

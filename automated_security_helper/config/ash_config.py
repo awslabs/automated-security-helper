@@ -724,7 +724,9 @@ def fold_scanner_name_aliases(
     which of an alias section's option keys are dropped; the shipped
     ``ScannerConfigSegment`` when it is not given, looked up when the function
     runs. ``log=False`` suppresses every log line, for a view that mirrors a
-    document already folded with logging on, so no line prints twice.
+    document already folded with logging on, so no line prints twice. The
+    warning for dropped options counts them and names none: a key a file
+    read from the environment is the value it read.
 
     ``folds``, when given, receives what the fold did: for each plugin key it
     laid a retired name's section onto (the name ``canonical_scanner_name``
@@ -774,9 +776,13 @@ def fold_scanner_name_aliases(
             if dropped:
                 section["options"] = {k: v for k, v in options.items() if k in declared}
                 if log:
+                    # Counted, not named: a key a file read from the environment
+                    # is the value it read.
+                    count = len(dropped)
                     ASH_LOGGER.warning(
-                        f"scanners.{key}.options.{{{', '.join(dropped)}}} have no "
-                        f"{canonical} counterpart and were dropped"
+                        f"scanners.{key}.options: {count} option"
+                        f"{'' if count == 1 else 's'} with no {canonical} "
+                        f"counterpart {'was' if count == 1 else 'were'} dropped"
                     )
         if folds is not None:
             folds.setdefault(canonical, set()).update(dropped)
