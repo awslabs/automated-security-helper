@@ -503,10 +503,11 @@ aws codecommit associate-approval-rule-template-with-repository \
 ## Requires an ASH version with sharding
 
 The shard and merge actions call two commands that no ASH release up to v3.7.1
-has:
+has, each by the spelling its ASH has (the actions ask the image's ASH):
 
-- `ash scan --shard-index <i> --shard-count <n>`
-- `ash merge --results ... --output-dir ...`
+- `ash scan fs . --shard-index <i> --shard-count <n>` (`ash scan --source-dir .`
+  before ASH 3.9)
+- `ash results merge --results ... --output-dir ...` (`ash merge` before ASH 3.9)
 
 The `AshDistributedPipeline` template uses them as ASH defines them: zero-based
 index, both shard flags always passed together, `--results` repeatable and
