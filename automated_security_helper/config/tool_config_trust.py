@@ -1361,11 +1361,12 @@ def refuse_relative_extend_path(
     else:
         where = f"the config text in {source}"
     # chr(0xFEFF) is the byte order mark. gitleaks 8.30.1 and Betterleaks 1.10.1 each
-    # stop at one at the start of a config file passed with --config ("invalid
-    # character at start of key") and exit 1; a config's text in a variable, and a
-    # file a config extends, are refused the same way. So a config the tool reads is
-    # refused here, naming it, before the tool is given text it would fail on. A
-    # config the tool does not read cannot fail it, so only ASH's parse skips the mark.
+    # stop at one at the start of a config they read ("invalid character at start of
+    # key") and exit 1: a file passed with --config and a file a config extends, and
+    # for Betterleaks the file or the text a config variable gives it. So a config the
+    # tool reads is refused here, naming it, before the tool is given text it would
+    # fail on. Betterleaks parses no variable it does not read, nor a file that
+    # variable's config extends, so there only ASH's parse skips the mark.
     if text.startswith(chr(0xFEFF)):
         if read_by_tool:
             raise ScannerError(

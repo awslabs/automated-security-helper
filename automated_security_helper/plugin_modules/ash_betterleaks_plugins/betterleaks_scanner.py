@@ -217,12 +217,16 @@ _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _BINARY = getattr(os, "O_BINARY", 0)
 
 
-#: Environment variables Betterleaks reads a config from, in its order of precedence:
-#: ``BETTERLEAKS_CONFIG`` and ``GITLEAKS_CONFIG`` name a file, ``BETTERLEAKS_CONFIG_TOML``
-#: and ``GITLEAKS_CONFIG_TOML`` hold the config's text, and each ``GITLEAKS_`` name is
-#: read only when its ``BETTERLEAKS_`` one is unset. When one is set, outside the scanner
-#: sandbox, ASH leaves the TOML variables and an absolute path to Betterleaks, and passes
-#: a path that is not absolute as ``--config`` anchored to the directory ASH runs in.
+#: Environment variables Betterleaks reads a config from. Of ``BETTERLEAKS_CONFIG``,
+#: ``GITLEAKS_CONFIG``, ``BETTERLEAKS_CONFIG_TOML`` and ``GITLEAKS_CONFIG_TOML``, it
+#: reads the first that is set, in this order, and an empty value counts as unset. The
+#: first two name a file and the last two hold the config's text. That is the order
+#: Betterleaks 1.10.1 read in each pair of them set together, run on its own. The tuple
+#: lists each product's two names together, which is not that order, so
+#: ``_config_env_read_name`` gives the one Betterleaks reads. When one is set, outside
+#: the scanner sandbox, ASH leaves the TOML variables and an absolute path to
+#: Betterleaks, and passes a path that is not absolute as ``--config`` anchored to the
+#: directory ASH runs in.
 CONFIG_ENV_VARS = (
     "BETTERLEAKS_CONFIG",
     "BETTERLEAKS_CONFIG_TOML",
@@ -711,9 +715,11 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             )
         elif set_vars:
             # A relative extend path in the config would be opened from the
-            # scanned tree, so each config variable that is set is read first.
-            # Betterleaks opens only the one it reads by its precedence, so a byte
-            # order mark is refused in that one alone.
+            # scanned tree. Betterleaks opens only the config it reads by its
+            # precedence, but each variable that is set is checked for one, in
+            # case Betterleaks reads a variable ASH does not expect it to. A byte
+            # order mark only stops Betterleaks from reading a config, so it is
+            # refused in the one Betterleaks reads and skipped in the others.
             environ = snapshot_environ()
             read = _config_env_read_name()
             for name in set_vars:
