@@ -143,11 +143,17 @@ def _host(os_id, version_id="", id_like=()):
 
 def test_a_fedora_row_never_matches_a_host_that_only_names_fedora_in_id_like():
     """Rocky, AlmaLinux, RHEL and Amazon Linux 2023 carry ``fedora`` in ID_LIKE, and
-    a ``grype`` row read on Fedora would route onto every one of them."""
-    row = _row("dnf", "grype", hosts=_on("fedora", "43", "44"))
-    facet = ipf.InstallPackageFacet(tool="grype", rows=(row,), preference=())
+    a ``grype`` row read on Fedora would route onto every one of them.
+
+    The row is planted twice. One read on Fedora 43 and 44 is refused to rocky 9.6 and
+    amzn 2023 by its versions alone, whether or not ID_LIKE is read. Only a row that
+    names no release, which serves every Fedora release, is served to them by a
+    matcher that routes on ID_LIKE, so only that row tells the two matchers apart."""
     rocky = _host("rocky", "9.6", ("rhel", "centos", "fedora"))
     amzn = _host("amzn", "2023", ("fedora",))
+
+    row = _row("dnf", "grype", hosts=_on("fedora", "43", "44"))
+    facet = ipf.InstallPackageFacet(tool="grype", rows=(row,), preference=())
 
     assert facet.row_for("dnf", rocky) is None
     assert facet.row_for("dnf", amzn) is None
@@ -156,6 +162,19 @@ def test_a_fedora_row_never_matches_a_host_that_only_names_fedora_in_id_like():
     assert facet.row_for("dnf", _host("fedora", "43")) is row
     assert facet.row_for("dnf", _host("fedora", "44")) is row
     assert facet.row_for("dnf", _host("fedora", "45")) is None
+
+    # The same two hosts against a row with no release to refuse them on.
+    any_release = _row("dnf", "grype", hosts=_on("fedora"))
+    open_facet = ipf.InstallPackageFacet(
+        tool="grype", rows=(any_release,), preference=()
+    )
+
+    assert open_facet.row_for("dnf", rocky) is None
+    assert open_facet.row_for("dnf", amzn) is None
+    # The controls: every Fedora release is served by it, one that reports no release
+    # included, so a refusal above is the matcher declining the host.
+    assert open_facet.row_for("dnf", _host("fedora", "45")) is any_release
+    assert open_facet.row_for("dnf", _host("fedora")) is any_release
 
 
 def test_the_id_is_matched_exactly_and_id_like_is_never_read():
