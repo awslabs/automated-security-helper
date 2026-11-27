@@ -284,9 +284,16 @@ def _manager():
 
 def _rendered(line: str) -> str:
     """``line`` of a template as its page spells it: the page pins the current release
-    and names its commands as that release reads them."""
+    and names its commands as that release reads them.
+
+    A line of these templates is a line of a fenced block, and only code is respelled, so
+    it is rendered inside a fence, as the page holds it, and the fence is taken off."""
+    assert line.endswith("\n"), "the fence closes on a line of its own"
     manager = _manager()
-    return manager.render(line, manager.packaged_release())
+    opening, closing = "```yaml\n", "```\n"
+    rendered = manager.render(f"{opening}{line}{closing}", manager.packaged_release())
+    assert rendered.startswith(opening) and rendered.endswith(closing), rendered
+    return rendered[len(opening) : -len(closing)]
 
 
 # The lines the cells below change, each found once on its page.

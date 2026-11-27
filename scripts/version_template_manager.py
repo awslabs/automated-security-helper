@@ -202,9 +202,10 @@ ASH_PIN_PATTERNS = {
 # spellings: a reader copies its install command and then its other commands, and an
 # earlier `ash` refuses all three (its `scan` takes no path argument and no
 # subcommand). The templates hold the newest spellings, and `render` writes the older
-# ones when it renders for a release before this one (spellings_for_release); a render
-# for this release or a later one leaves them, so the bump that cuts it moves every
-# page at once.
+# ones in the code of a page when it renders for a release before this one
+# (markdown_for_release, which uses spellings_for_release); the prose around the code is
+# never rewritten. A render for this release or a later one leaves them, so the bump that
+# cuts it moves every page at once.
 SUBJECTS_RELEASE = (3, 9, 0)
 
 # `ash` or `ashv3` as a command word: not the end of a longer name (`dash`, `flash`) and
@@ -299,15 +300,14 @@ def spellings_for_release(text: str, version: str) -> str:
     joined by a backslash, and as a list of arguments (``["ash", "scan", "fs", "."]``).
     What follows ``fs`` is its path only when it can be one: not an option, a
     redirection (``2>&1``), a placeholder such as ``[OPTIONS]``, or ``...``.
+
+    Every command in ``text`` is rewritten, so ``text`` is a command or a text made of
+    commands (a snippet of the docs site). A document that has prose around its code
+    goes through markdown_for_release.
     """
-    found = _RELEASE_NUMBER.match(version.strip())
-    if found is None:
+    if not _is_before_the_subjects(version):
         return text
-    if tuple(int(part) for part in found.groups()) >= SUBJECTS_RELEASE:
-        return text
-    text = _HOOK_ENTRY.sub(
-        lambda entry: HOOK_ENTRIES_BEFORE_THE_SUBJECTS[entry[1]], text
-    )
+    text = _swap_hook_entries(text)
     text = _SCAN_FS.sub(_scan_before_the_subjects, text)
     text = _SCAN_COMMAND.sub(
         lambda command: _SCANNER_SELECTION_FLAG.sub("--scanners", command[0]), text
@@ -318,6 +318,125 @@ def spellings_for_release(text: str, version: str) -> str:
     return _CONTAINER_BUILD.sub(
         lambda build: f"{build['ash']}{build['blank']}build-image", text
     )
+
+
+def _is_before_the_subjects(version: str) -> bool:
+    """Whether ``version`` names a release before SUBJECTS_RELEASE.
+
+    A version that does not start with a release number (a branch name, a placeholder)
+    names none, so there are no older spellings to write for it.
+    """
+    found = _RELEASE_NUMBER.match(version.strip())
+    if found is None:
+        return False
+    return tuple(int(part) for part in found.groups()) < SUBJECTS_RELEASE
+
+
+def _swap_hook_entries(text: str) -> str:
+    """The entries of this repository's hooks, each as the earlier release ships it."""
+    return _HOOK_ENTRY.sub(
+        lambda entry: HOOK_ENTRIES_BEFORE_THE_SUBJECTS[entry[1]], text
+    )
+
+
+# A fence opens a block of code: three or more backticks (with no backtick after them on
+# the line, or it is an inline span) or tildes, at any indent. The fence that closes it
+# is of the same kind, at least as long, and alone on its line.
+_FENCE_OPEN = re.compile(r"^[ \t]*(?:(?P<ticks>`{3,})[^`]*|(?P<tildes>~{3,}).*)$")
+_FENCE_CLOSE = re.compile(r"^[ \t]*(?P<mark>`{3,}|~{3,})[ \t]*\r?$")
+# An inline code span: a run of backticks, the code, and the next run of as many. The
+# code may wrap onto the next line.
+_CODE_SPAN = re.compile(
+    r"(?<!`)(?P<ticks>`+)(?!`)(?P<code>.+?)(?<!`)(?P=ticks)(?!`)", re.DOTALL
+)
+# A blank line ends a paragraph, and a backtick left open there is only a backtick.
+_BLANK_LINE = re.compile(r"\n[ \t]*\r?\n")
+
+
+def _inline_code(text: str, start: int, end: int) -> List[Tuple[int, int]]:
+    """Where the inline code spans of ``text[start:end]`` hold their code."""
+    prose = text[start:end]
+    found = []
+    paragraph_from = 0
+    for gap in [*_BLANK_LINE.finditer(prose), None]:
+        paragraph_to = len(prose) if gap is None else gap.start()
+        for span in _CODE_SPAN.finditer(prose[paragraph_from:paragraph_to]):
+            found.append(
+                (
+                    start + paragraph_from + span.start("code"),
+                    start + paragraph_from + span.end("code"),
+                )
+            )
+        if gap is not None:
+            paragraph_from = gap.end()
+    return found
+
+
+def _code_ranges(text: str) -> List[Tuple[int, int]]:
+    """Where the code of a Markdown text is: the lines inside each fenced block and the
+    code inside each inline span, in order.
+
+    A fence that is never closed holds the rest of the text, as in CommonMark.
+    """
+    ranges: List[Tuple[int, int]] = []
+    opener = ""  # the mark of the fence that is open, or "" outside one
+    prose_from = 0  # where the prose before the next fence starts
+    body_from = 0  # where the body of the open fence starts
+    position = 0  # where the line being read starts
+    for line in text.split("\n"):
+        next_position = position + len(line) + 1
+        if opener:
+            closing = _FENCE_CLOSE.match(line)
+            if (
+                closing is not None
+                and closing["mark"][0] == opener[0]
+                and len(closing["mark"]) >= len(opener)
+            ):
+                ranges.append((body_from, position))
+                opener = ""
+                prose_from = next_position
+        else:
+            opening = _FENCE_OPEN.match(line)
+            if opening is not None:
+                ranges.extend(_inline_code(text, prose_from, position))
+                opener = opening["ticks"] or opening["tildes"]
+                body_from = min(next_position, len(text))
+        position = next_position
+    if opener:
+        ranges.append((body_from, len(text)))
+    else:
+        ranges.extend(_inline_code(text, min(prose_from, len(text)), len(text)))
+    return ranges
+
+
+def markdown_for_release(text: str, version: str) -> str:
+    """``text``, a Markdown document, with the commands in its code spelled as release
+    ``version`` reads them (spellings_for_release).
+
+    Only code is rewritten: the lines inside a fenced block and the text inside an
+    inline code span. The prose around it is left as it is, because a sentence that
+    names a spelling says what it says whatever release the page pins, and a rewrite
+    of it can make it false: a page that says an older ASH has no ``fs`` subject would
+    say, for that older release, that the subject is gone. The one exception is the
+    entry of one of this repository's hooks (HOOK_ENTRIES_BEFORE_THE_SUBJECTS), which
+    is swapped wherever it stands, since it is a quoted line of the manifest of the
+    release the page pins and not a spelling.
+
+    A template that is not Markdown has no code spans to find, so none of its commands
+    is rewritten; test_version_template_release_spellings.py fails when one holds a
+    spelling its release lacks.
+    """
+    if not _is_before_the_subjects(version):
+        return text
+    text = _swap_hook_entries(text)
+    pieces = []
+    last = 0
+    for begin, end in _code_ranges(text):
+        pieces.append(text[last:begin])
+        pieces.append(spellings_for_release(text[begin:end], version))
+        last = end
+    pieces.append(text[last:])
+    return "".join(pieces)
 
 
 def _ash_pins(text: str) -> List[Tuple[str, str, int]]:
@@ -530,12 +649,13 @@ class VersionTemplateManager:
 
     def render(self, content: str, version: str) -> str:
         """A template rendered for a release: both placeholders become the version, and
-        ASH's commands take the spellings that release reads (spellings_for_release),
-        since the page pins that release's install command."""
+        the commands in its code take the spellings that release reads
+        (markdown_for_release), since the page pins that release's install command.
+        The prose around the code is rendered as the template writes it."""
         rendered = content.replace(self.version_placeholder, version).replace(
             self.release_placeholder, version
         )
-        return spellings_for_release(rendered, version)
+        return markdown_for_release(rendered, version)
 
     def packaged_release(self) -> str:
         """The current release number: `[tool.commitizen] version` in pyproject.toml.

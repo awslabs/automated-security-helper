@@ -15,20 +15,27 @@ container``, which ASH 3.8 refuses: its ``scan`` takes no path argument and no
 subcommand. The README on GitHub and the ``main`` docs showed that pairing.
 
 A template now holds the newest spellings, and rendering it for a release older than
-the one that introduced them writes the spellings that release reads: ``ash scan``
-(with ``--source-dir`` for a path argument), the top-level results commands, and
-``ash build-image``. A render for that release or a later one changes only the version
-placeholders, so the bump that cuts it moves every page at once.
+the one that introduced them writes the spellings that release reads in its code: ``ash
+scan`` (with ``--source-dir`` for a path argument), the top-level results commands, and
+``ash build-image``. The prose around the code is rendered as the template writes it. A
+sentence that names a spelling says what it says on every page, and a rewrite of it can
+make it say the opposite: a page that tells its reader an older ASH has no ``fs``
+subject, rendered for that older ASH, would tell its reader the subject is gone. A
+render for that release or a later one changes only the version placeholders, so the
+bump that cuts it moves every page at once.
 
 What is asserted
 ----------------
-The rewrite, row by row, on the shapes the templates use; that every template rendered
-for 3.8.0 holds none of the newer spellings and renders for 3.9.0 with nothing but its
-placeholders replaced; and that each committed page, which pins the current release,
-names no spelling that release lacks. The patterns that say what 3.8 lacks, the release
-that introduced it and the results verbs are shared with every other test of the
-spellings (tests/utils/release_spellings.py); this file holds the threshold and the
-verbs to the manager's own.
+The rewrite, row by row, on the shapes the templates use, as a command and inside a
+fenced block of a page; which parts of a page a render reaches (the lines of a fenced
+block and the text of an inline span, never the prose, which the rows and the sentences
+below hold to fixed strings and not to a second pass of the rewrite); that every
+template rendered for 3.8.0 holds none of the newer spellings and renders for 3.9.0
+with nothing but its placeholders replaced; and that each committed page, which pins the
+current release, names no spelling that release lacks. The patterns that say what 3.8
+lacks, the release that introduced it and the results verbs are shared with every other
+test of the spellings (tests/utils/release_spellings.py); this file holds the threshold
+and the verbs to the manager's own.
 
 A page that says what a pre-commit hook runs quotes the hook's ``entry:``. For a
 release before 3.9 the render writes the entry that release's manifest holds, whole
@@ -66,6 +73,25 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
 HOOK_MANIFEST = REPO_ROOT / ".pre-commit-hooks.yaml"
 PRE_COMMIT_PAGE = REPO_ROOT / "docs" / "content" / "how-to" / "pre-commit.md"
+PRE_COMMIT_TEMPLATE = PRE_COMMIT_PAGE.with_name(PRE_COMMIT_PAGE.name + ".template")
+GITHUB_ACTIONS_PAGE = (
+    REPO_ROOT / "docs" / "content" / "how-to" / "ci" / "github-actions.md"
+)
+GITHUB_ACTIONS_TEMPLATE = GITHUB_ACTIONS_PAGE.with_name(
+    GITHUB_ACTIONS_PAGE.name + ".template"
+)
+
+#: What the GitHub Actions page says the reusable workflow passes to ASH, written out
+#: here and not computed. It names ``--source-dir .`` in prose, as the workflow passes
+#: it (an ASH before 3.9 reads it, and so does a later one), and no release rewrites a
+#: sentence of prose, so the page says it the same way for every release.
+GITHUB_ACTIONS_RUN_SENTENCE = (
+    "It runs ASH with `uvx --reinstall`, passing `--source-dir .`, the output "
+    "directory, `--no-progress`, the fail-on-findings choice, `--build-target ci`, "
+    "`--mode`, and `--config` when a config is set; `--verbose` unless `verbose` is "
+    "`false`; `--changed-files-only` and `--base-ref` when `changed-files-only` is "
+    "`true`; and then `ash-args`."
+)
 
 #: The ``entry:`` of each hook of ``.pre-commit-hooks.yaml`` at the v3.8.0 tag, the
 #: release the committed pages pin: lines 38, 48 and 60 of ``git show
@@ -116,8 +142,20 @@ def _newer_spellings(text: str) -> list[str]:
     return found
 
 
-# (template text, what a render for 3.8.0 writes). Each row is a shape the templates
-# or the site's snippets use.
+def _fenced(text: str) -> str:
+    """``text`` as the body of a fenced block, where a page holds a command."""
+    return f"```text\n{text}\n```\n"
+
+
+def _words(text: str) -> str:
+    """``text`` with each run of whitespace read as one blank, as a paragraph reads."""
+    return " ".join(text.split())
+
+
+# (text of commands, what 3.8.0 reads it as). Each row is a shape the templates or the
+# site's snippets use. The rewrite of commands is spellings_for_release, which the site
+# gives its snippets as they are; a page goes through render, which applies it to the
+# code of the page (RENDER_ROWS below), so each row is also run inside a fenced block.
 ROWS = [
     ("ash scan fs --mode container", "ash scan --mode container"),
     ("`ash scan fs`", "`ash scan`"),
@@ -293,7 +331,9 @@ ROWS = [
 def test_a_render_for_a_release_before_the_subjects_writes_its_spellings(
     template, rendered
 ):
-    assert MANAGER.render(template, "3.8.0") == rendered
+    assert MODULE.spellings_for_release(template, "3.8.0") == rendered
+    # The same text in a fenced block of a page, which is what a render reaches.
+    assert MANAGER.render(_fenced(template), "3.8.0") == _fenced(rendered)
 
 
 @pytest.mark.parametrize(("template", "rendered"), ROWS, ids=[row[0] for row in ROWS])
@@ -301,30 +341,200 @@ def test_a_render_for_the_subjects_release_or_later_leaves_the_spellings(
     template, rendered
 ):
     for version in ("3.9.0", "3.10.2", "4.0.0"):
+        assert MODULE.spellings_for_release(template, version) == template
         assert MANAGER.render(template, version) == template
+        assert MANAGER.render(_fenced(template), version) == _fenced(template)
 
 
 def test_the_rewrite_is_idempotent():
     for template, rendered in ROWS:
-        assert MANAGER.render(rendered, "3.8.0") == rendered
+        assert MODULE.spellings_for_release(rendered, "3.8.0") == rendered
+        assert MANAGER.render(_fenced(rendered), "3.8.0") == _fenced(rendered)
 
 
 def test_the_placeholders_still_render_beside_the_rewrite():
     template = (
+        "```bash\n"
         "pipx install git+https://example.invalid/a.git@v{{VERSION}}\n"
         "ash scan fs --mode container\n"
+        "```\n"
         "ASH {{RELEASE}}\n"
     )
     assert MANAGER.render(template, "3.8.0") == (
+        "```bash\n"
         "pipx install git+https://example.invalid/a.git@v3.8.0\n"
         "ash scan --mode container\n"
+        "```\n"
         "ASH 3.8.0\n"
     )
     assert MANAGER.render(template, "3.9.0") == (
+        "```bash\n"
         "pipx install git+https://example.invalid/a.git@v3.9.0\n"
         "ash scan fs --mode container\n"
+        "```\n"
         "ASH 3.9.0\n"
     )
+
+
+#: A sentence of prose that names the spellings of an older and a newer ASH, none of them
+#: in code: every release leaves it as written.
+A_SENTENCE_ABOUT_SPELLINGS = (
+    "An ASH older than 3.9 has no ash scan fs; it takes ash scan --source-dir . "
+    "and ash report."
+)
+
+# (text of a page, what a render of it for 3.8.0 writes). What a render reaches: the
+# lines of a fenced block and the text of an inline code span. The prose around them
+# stays as the template wrote it, and each such row is a fixed string, never the output
+# of the rewrite given its own output. A rewrite of prose turns these red.
+RENDER_ROWS = [
+    # An inline span: its code, and nothing around it.
+    ("Run `ash scan fs .` first.", "Run `ash scan --source-dir .` first."),
+    (
+        "Run `ash scan fs .` and then `ash results report`.",
+        "Run `ash scan --source-dir .` and then `ash report`.",
+    ),
+    ("``ash scan fs .``", "``ash scan --source-dir .``"),
+    (
+        "```ash scan fs .``` on a line",
+        "```ash scan --source-dir .``` on a line",
+    ),
+    (
+        "Run `ash scan fs .\n--mode local` now.",
+        "Run `ash scan --source-dir .\n--mode local` now.",
+    ),
+    (
+        "| `ash scan fs .` | ash scan fs . |",
+        "| `ash scan --source-dir .` | ash scan fs . |",
+    ),
+    # A fenced block: every line of it, whatever the fence is made of.
+    ("```bash\nash scan fs .\n```\n", "```bash\nash scan --source-dir .\n```\n"),
+    ("~~~\nash scan fs .\n~~~\n", "~~~\nash scan --source-dir .\n~~~\n"),
+    (
+        "  ```bash\n  ash scan fs .\n  ```\n",
+        "  ```bash\n  ash scan --source-dir .\n  ```\n",
+    ),
+    (
+        "````md\n```\nash scan fs .\n```\nash results report\n````\n",
+        "````md\n```\nash scan --source-dir .\n```\nash report\n````\n",
+    ),
+    (
+        "~~~\nash scan fs .\n```\nash results report\n~~~\nash scan fs .\n",
+        "~~~\nash scan --source-dir .\n```\nash report\n~~~\nash scan fs .\n",
+    ),
+    # A fence that is never closed holds the rest of the page; the line that opens a
+    # fence is not code, whatever its info string says.
+    ("```bash\nash scan fs .\n", "```bash\nash scan --source-dir .\n"),
+    (
+        "```ash scan fs\nash scan fs .\n```\n",
+        "```ash scan fs\nash scan --source-dir .\n```\n",
+    ),
+    # Prose is left as it is: after a fence, around a span, in a sentence about a
+    # spelling, and in a paragraph that holds a backtick it never closes.
+    (
+        "```\nash scan fs .\n```\nash scan fs .\n",
+        "```\nash scan --source-dir .\n```\nash scan fs .\n",
+    ),
+    (
+        "```\nash scan fs .\n`````\nash scan fs .\n",
+        "```\nash scan --source-dir .\n`````\nash scan fs .\n",
+    ),
+    ("Run ash scan fs . to scan.", "Run ash scan fs . to scan."),
+    (A_SENTENCE_ABOUT_SPELLINGS, A_SENTENCE_ABOUT_SPELLINGS),
+    (
+        "- ash results report\n- ash container build\n",
+        "- ash results report\n- ash container build\n",
+    ),
+    (
+        "A lone ` here.\n\nRun ash scan fs . now, then `x`.\n",
+        "A lone ` here.\n\nRun ash scan fs . now, then `x`.\n",
+    ),
+    # The entry of one of this repository's hooks is a quoted line of its manifest and
+    # not a spelling, so it is swapped wherever it stands.
+    (
+        (
+            "The `ash` hook runs `ashv3 scan fs --mode=precommit --staged` with your "
+            "`args`."
+        ),
+        "The `ash` hook runs `ashv3 --mode=precommit` with your `args`.",
+    ),
+    (
+        "It runs ashv3 scan fs --mode=precommit --staged on commit.",
+        "It runs ashv3 --mode=precommit on commit.",
+    ),
+    ("`ashv3 scan fs --mode=precommit`", "`ashv3 scan --mode=precommit`"),
+]
+
+
+@pytest.mark.parametrize(
+    ("page", "rendered"),
+    RENDER_ROWS,
+    ids=[f"row-{index}" for index in range(len(RENDER_ROWS))],
+)
+def test_a_render_writes_the_spellings_of_the_code_of_a_page_and_nothing_else(
+    page, rendered
+):
+    assert MANAGER.render(page, "3.8.0") == rendered
+
+
+@pytest.mark.parametrize(
+    ("page", "rendered"),
+    RENDER_ROWS,
+    ids=[f"row-{index}" for index in range(len(RENDER_ROWS))],
+)
+def test_a_render_for_the_subjects_release_leaves_a_page_as_it_is(page, rendered):
+    for version in ("3.9.0", "4.0.0"):
+        assert MANAGER.render(page, version) == page
+
+
+@pytest.mark.parametrize(
+    ("page", "rendered"),
+    RENDER_ROWS,
+    ids=[f"row-{index}" for index in range(len(RENDER_ROWS))],
+)
+def test_a_rendered_page_renders_as_it_is(page, rendered):
+    assert MANAGER.render(rendered, "3.8.0") == rendered
+
+
+@pytest.mark.parametrize("version", ["3.7.0", "3.8.0"])
+def test_the_github_actions_page_names_the_checkout_the_way_the_template_writes_it(
+    version,
+):
+    """A release before the subjects gets the sentence as the template writes it, in the
+    words written out above: the checkout is passed as ``--source-dir .``, said once,
+    with no second sentence about an older ASH on a page that pins one."""
+    page = _words(
+        MANAGER.render(GITHUB_ACTIONS_TEMPLATE.read_text(encoding="utf-8"), version)
+    )
+    assert GITHUB_ACTIONS_RUN_SENTENCE in page
+    assert "which has no `fs` subject" not in page
+
+
+def test_the_committed_github_actions_page_says_the_same_sentence():
+    release = _packaged_release()
+    if release_tuple(release) >= SUBJECTS_RELEASE:
+        pytest.skip(f"the current release, {release}, reads every newer spelling")
+    page = _words(GITHUB_ACTIONS_PAGE.read_text(encoding="utf-8"))
+    assert GITHUB_ACTIONS_RUN_SENTENCE in page, (
+        f"{GITHUB_ACTIONS_PAGE.name} pins ASH {release} and should say: "
+        f"{GITHUB_ACTIONS_RUN_SENTENCE}"
+    )
+
+
+@pytest.mark.parametrize("version", ["3.8.0", "3.9.0"])
+def test_the_pre_commit_template_names_the_entry_the_release_ships(version):
+    """The sentence says what the ``ash`` hook runs, in the entry of the manifest of the
+    release the page pins: the v3.8.0 manifest's, written out above, for a release before
+    the subjects, and this tree's otherwise."""
+    entries = (
+        V3_8_0_HOOK_ENTRIES
+        if release_tuple(version) < SUBJECTS_RELEASE
+        else _manifest_entries()
+    )
+    page = _words(
+        MANAGER.render(PRE_COMMIT_TEMPLATE.read_text(encoding="utf-8"), version)
+    )
+    assert f"The `ash` hook runs `{entries['ash']}` with your `args`." in page
 
 
 # (text, how many spellings 3.8 lacks the detector reads in it). The same shapes as the

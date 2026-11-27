@@ -185,7 +185,7 @@ def _closest_paragraph(text: str, sentence: str) -> Tuple[str, int]:
 
 
 @lru_cache(maxsize=1)
-def _template_manager():
+def _template_module():
     path = REPO_ROOT / "scripts" / "version_template_manager.py"
     spec = importlib.util.spec_from_file_location(
         "_version_template_manager_for_page_claims", path
@@ -194,7 +194,17 @@ def _template_manager():
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    return module.VersionTemplateManager(REPO_ROOT)
+    return module
+
+
+@lru_cache(maxsize=1)
+def _template_manager():
+    return _template_module().VersionTemplateManager(REPO_ROOT)
+
+
+#: An inline code span as Markdown reads one: a run of backticks, the code, and the next
+#: run of as many.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
 
 
 def as_the_page_spells_it(page: str, sentence: str) -> str:
@@ -203,13 +213,20 @@ def as_the_page_spells_it(page: str, sentence: str) -> str:
 
     A page rendered from a template pins the current release and names ASH's commands
     as that release reads them (scripts/version_template_manager.py
-    spellings_for_release), so a claim about it is rendered the same way. Any other
-    page describes this tree and is read as written.
+    spellings_for_release), so a claim about it is rendered the same way, in its code
+    spans and nowhere else. The page's prose is written as the template writes it, so
+    the words of a claim outside a span are the page's words: a claim is not run through
+    the renderer that wrote the page, which would let a rewrite of prose change both
+    sides and pass. Any other page describes this tree and is read as written.
     """
     manager = _template_manager()
     if f"docs/content/{page}" not in manager.target_files:
         return sentence
-    return manager.render(sentence, manager.packaged_release())
+    release = manager.packaged_release()
+    spell = _template_module().spellings_for_release
+    return _CODE_SPAN.sub(
+        lambda span: f"{span[1]}{spell(span[2], release)}{span[1]}", sentence
+    )
 
 
 def assert_on_page(page: str, sentence: str) -> None:
@@ -249,6 +266,31 @@ def _page_section(page: str, after: str, before: str) -> str:
     text = _normalize(_page_text(page))
     start = text.index(_normalize(after)) + len(_normalize(after))
     return text[start : text.index(_normalize(before), start)]
+
+
+@pytest.mark.unit
+def test_a_claim_is_respelled_in_its_code_spans_and_never_in_its_prose(monkeypatch):
+    """A claim about a rendered page is held to the page's own words.
+
+    The page spells ASH's commands as the release it pins reads them, in its code, and
+    says the rest as its template writes it. A claim is spelled the same way, in its
+    code spans only. Run through the renderer that wrote the page, a claim would change
+    with any rewrite of the page's prose, as the page does, and the pin would go on
+    passing over text that no longer says what the claim says.
+    """
+    manager = _template_manager()
+    page = "how-to/ci/github-actions.md"
+    assert f"docs/content/{page}" in manager.target_files
+    claim = "Run `ash scan fs .` or ash scan fs . and `ash results report`."
+    monkeypatch.setattr(manager, "packaged_release", lambda: "3.8.0")
+    assert as_the_page_spells_it(page, claim) == (
+        "Run `ash scan --source-dir .` or ash scan fs . and `ash report`."
+    )
+    # A page no template renders describes this tree, whatever release is packaged.
+    assert as_the_page_spells_it(TRUST_MODEL, claim) == claim
+    # A release that reads the newer spellings leaves the claim as it is.
+    monkeypatch.setattr(manager, "packaged_release", lambda: "3.9.0")
+    assert as_the_page_spells_it(page, claim) == claim
 
 
 # --------------------------------------------------------------------------- #
