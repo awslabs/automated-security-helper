@@ -477,34 +477,81 @@ def _is_in_an_untyped_plugin_section(resolved_keys: Sequence[str]) -> bool:
     )
 
 
-def _default_of_an_untyped_plugin_option(
+def _row_of_the_shipped_plugin_reading(
     segment: Dict[str, Any], resolved_keys: Sequence[str]
-) -> Optional[Tuple[Any, ...]]:
-    """The default list of the option an override landed at inside an untyped
-    plugin section, or None when no plugin ASH ships has such a list option there.
+) -> Optional[Mapping[Tuple[str, ...], Tuple[Any, ...]]]:
+    """The row of ``UNTYPED_LIST_OPTION_DEFAULTS`` for the plugin ASH ships that
+    reads the section an override landed in, or None when no such plugin does.
 
     *segment* is the document's plugin segment the override landed in
     (``config_dict["reporters"]``), *resolved_keys* the override's key as
-    ``_apply_config_override`` resolved it. The section belongs to the shipped
-    plugin that ``AshConfig.get_plugin_config`` reads it for: the key spelled as
-    the plugin's own name when the segment holds it, else the first key that claims
-    the plugin's reduced name (``plugin_section_key``), the choice
-    ``refuse_unknown_plugin_options`` makes when it checks the same section. Only
-    the shipped plugins are asked: a plugin from a module outside ASH is known
-    when that module loads, after the overrides are applied.
+    ``_apply_config_override`` resolved it. A plugin reads a section as
+    ``AshConfig.get_plugin_config`` finds it: the key spelled as the plugin's own
+    name when the segment holds one, else the first key that claims the plugin's
+    reduced name (``plugin_section_key``), the choice
+    ``refuse_unknown_plugin_options`` makes when it checks the same section.
+
+    The document here is ``config.model_dump()`` without aliases, which spells a
+    typed section by its field name (``gitlab_sast``); ``get_plugin_config`` reads
+    ``model_dump(by_alias=True)`` (``gitlab-sast``). The two lookups choose alike
+    today, because no typed key claims the reduced name of an untyped plugin ASH
+    ships.
+
+    Only the plugins ASH ships are asked: a plugin from a module outside ASH is
+    known when that module loads, after the overrides are applied. A shipped plugin
+    with no list option has no row, so a section of its own reads here as no
+    plugin's.
     """
     claims = plugin_section_claims(segment)
-    for plugin, options in UNTYPED_LIST_OPTION_DEFAULTS.get(
-        resolved_keys[0], {}
-    ).items():
+    for plugin, row in UNTYPED_LIST_OPTION_DEFAULTS.get(resolved_keys[0], {}).items():
         read = (
             plugin
             if plugin in segment
             else plugin_section_key(segment, reduced_plugin_name(plugin), claims)
         )
         if read == resolved_keys[1]:
-            return options.get(tuple(resolved_keys[2:]))
+            return row
     return None
+
+
+#: The keys of a ``+=`` that ``_warn_that_no_shipped_plugin_reads`` has named in this
+#: process, as logged (redacted). The same overrides are applied again to other
+#: bases (the trusted reporter view, the scanner views, ``ash merge`` and ``ash
+#: report`` replays, the MCP workspace gate), and one key is one warning.
+_APPEND_TO_UNREAD_SECTION_WARNED: Set[str] = set()
+_APPEND_TO_UNREAD_SECTION_LOCK = threading.Lock()
+#: Past this many keys the set starts over, so a long-lived process (the MCP server)
+#: stays bounded; a key can then be named again.
+_APPEND_TO_UNREAD_SECTION_BOUND = 1024
+
+
+def _warn_that_no_shipped_plugin_reads(
+    key_path: str, logged_path: str, environment_values: Sequence[str]
+) -> None:
+    """Say, once per process for each key, that a ``+=`` landed in a section that no
+    plugin ASH ships reads, so there is no default for it to add to.
+
+    *key_path* is the override's key as typed, without its ``+``; *logged_path* is
+    the same key redacted, the text every log line of ``_apply_config_override``
+    names it by and the key this remembers. The text names the key and the section
+    and never the value, which can be a credential.
+    """
+    with _APPEND_TO_UNREAD_SECTION_LOCK:
+        if logged_path in _APPEND_TO_UNREAD_SECTION_WARNED:
+            return
+        if len(_APPEND_TO_UNREAD_SECTION_WARNED) >= _APPEND_TO_UNREAD_SECTION_BOUND:
+            _APPEND_TO_UNREAD_SECTION_WARNED.clear()
+        _APPEND_TO_UNREAD_SECTION_WARNED.add(logged_path)
+    section = redact_values(".".join(key_path.split(".")[:2]), environment_values)
+    ASH_LOGGER.warning(
+        f"No plugin ASH ships reads {section} (a plugin from a module outside ASH "
+        "is read after the overrides are applied), so "
+        f"'{logged_path}+=' cannot add to that option's default: the list starts "
+        "from the appended items and replaces any default the plugin gives it. "
+        "Check the section name, or set the whole list with "
+        f"'{logged_path}=[...]'.",
+        extra=NO_MARKUP,
+    )
 
 
 def _apply_config_override(
@@ -593,37 +640,47 @@ def _apply_config_override(
         # alpha scanner, an AWS reporter, a plugin a module outside ASH adds) the
         # document holds only what a file wrote, so an option the file left out
         # is absent though the plugin's model gives it a default, and starting
-        # the list from the items alone would drop that default. The list starts
-        # from the default of a plugin ASH ships (UNTYPED_LIST_OPTION_DEFAULTS)
-        # and takes the items after it. For any other option of such a section
-        # no default is known here, because the plugin is read when it loads,
-        # after the overrides are applied: the append is refused, and the whole
-        # list is set with ``=``. A typed section holds every default already,
-        # and an override of a section as a whole has no option to read one for,
-        # so both keep the rule above.
+        # the list from the items alone would drop that default. When a plugin
+        # ASH ships reads the section and its row of UNTYPED_LIST_OPTION_DEFAULTS
+        # has the option, the list starts from that default and takes the items
+        # after it. Anywhere else the list starts from the items, as it does
+        # outside such a section. A shipped plugin whose row has no such option
+        # (it is no list option, or the plugin has none of that name) is checked
+        # by the plugin's own options model when the plugin loads, with its own
+        # message. For a section no shipped plugin reads (a plugin from a module
+        # outside ASH, which is imported after the overrides are applied, or a
+        # misspelled section name) no default can be known, so one warning names
+        # the key. It does not refuse: this function applies the same overrides
+        # to other bases as well (the trusted reporter view, the scanner views,
+        # the ``ash merge`` and ``ash report`` replays, the MCP workspace gate),
+        # and a base that lacks a key the real document holds would refuse what
+        # the operator's own application accepts, dropping an external
+        # reporter's whole section from the trusted view or refusing a call each
+        # project would accept. A typed section holds every default already, and
+        # an override of a section as a whole has no option to read one for, so
+        # both keep the rule above.
         items = list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
+        default: Optional[Tuple[Any, ...]] = None
         if _is_in_an_untyped_plugin_section(resolved_keys):
-            default = _default_of_an_untyped_plugin_option(
+            row = _row_of_the_shipped_plugin_reading(
                 config_dict[resolved_keys[0]], resolved_keys
             )
-            if default is None:
-                # The key only, redacted as the log line below is: the value can
-                # be a credential.
-                raise ASHConfigValidationError(
-                    f"Cannot apply '{logged_path}+=': no configuration sets that "
-                    "key, and its section belongs to a plugin that is read only "
-                    "when it loads, after the overrides are applied, so ASH has "
-                    "no default list to add to there. Set the whole list with "
-                    f"'{logged_path}=[...]' instead."
+            if row is None:
+                _warn_that_no_shipped_plugin_reads(
+                    key_path, logged_path, environment_values
                 )
-            current[final_key] = [*default, *items]
+            else:
+                default = row.get(tuple(resolved_keys[2:]))
+        if default is not None:
+            # Copied, so no item of the table is ever shared with the document.
+            current[final_key] = [*copy.deepcopy(list(default)), *items]
             ASH_LOGGER.debug(
                 f"Appended to the list at {logged_path}, after the option's default",
                 extra=NO_MARKUP,
             )
-            return resolved_keys, parsed_value, True
-        current[final_key] = items
-        ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
+        else:
+            current[final_key] = items
+            ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
         return resolved_keys, parsed_value, True
     else:
         # Set the value

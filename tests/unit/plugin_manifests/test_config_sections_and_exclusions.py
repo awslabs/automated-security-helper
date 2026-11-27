@@ -332,16 +332,21 @@ def _table_rows(table) -> dict[_Row, tuple]:
 
 
 def _shipped_plugin_packages() -> list:
-    """``ash_builtin`` and each ``ash_*_plugins`` package under ``plugin_modules``,
-    found by walking it, so a package added later is covered without being listed."""
+    """The plugin packages ASH ships: ``ash_builtin`` and each ``ash_*_plugins``
+    package under ``plugin_modules``, found by walking it, together with every
+    ``plugin_module`` a scanner manifest names. The union, so a package whose name
+    does not fit the pattern is not missed, and one added later is covered without
+    being listed."""
     import automated_security_helper.plugin_modules as plugin_modules
 
-    return [
-        importlib.import_module(f"{plugin_modules.__name__}.{info.name}")
+    names = {
+        f"{plugin_modules.__name__}.{info.name}"
         for info in pkgutil.iter_modules(plugin_modules.__path__)
         if info.name == "ash_builtin"
         or (info.name.startswith("ash_") and info.name.endswith("_plugins"))
-    ]
+    }
+    names.update(manifest.plugin_module for manifest in scanner_manifests())
+    return [importlib.import_module(name) for name in sorted(names)]
 
 
 def _list_defaults(
@@ -349,12 +354,14 @@ def _list_defaults(
 ) -> typing.Iterator[tuple[tuple[str, ...], tuple]]:
     """``(path, items)`` for each field of the options model whose default is a list
     or a tuple, the items as JSON values, descending into a field whose default is a
-    model of its own."""
+    model of its own. A field is keyed by its alias when it has one, as a config
+    file spells it."""
     for name, field in options_class.model_fields.items():
+        key = field.alias or name
         default = field.get_default(call_default_factory=True)
         if isinstance(default, (list, tuple)):
             yield (
-                (*path, name),
+                (*path, key),
                 tuple(
                     item.model_dump(mode="json")
                     if isinstance(item, BaseModel)
@@ -363,7 +370,7 @@ def _list_defaults(
                 ),
             )
         elif isinstance(default, BaseModel):
-            yield from _list_defaults(type(default), (*path, name))
+            yield from _list_defaults(type(default), (*path, key))
 
 
 def _declared_rows() -> dict[_Row, tuple]:

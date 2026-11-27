@@ -12,11 +12,13 @@ simply rejected everything could not pass.
 
 import importlib
 import json
+import logging
 from pathlib import Path
+from typing import Any
 
 import pytest
 import typer
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.report import report_command
@@ -29,6 +31,7 @@ from automated_security_helper.config.resolve_config import (
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
+from automated_security_helper.plugin_manifests import UNTYPED_LIST_OPTION_DEFAULTS
 
 pytestmark = pytest.mark.unit
 
@@ -426,6 +429,7 @@ _PLUGIN_MODELS = {
         "ash_aws_plugins.bedrock_summary_reporter",
         "BedrockSummaryReporterConfig",
     ),
+    "ferret-scan": ("ash_ferret_plugins.ferret_scanner", "FerretScannerConfig"),
     "guarddog": ("ash_guarddog_plugins.guarddog_scanner", "GuardDogScannerConfig"),
     "trivy-repo": ("ash_trivy_plugins.trivy_repo_scanner", "TrivyRepoScannerConfig"),
 }
@@ -479,6 +483,37 @@ _UNREAD_SECTIONS = [
 _BEDROCK = "bedrock-summary-reporter"
 _BEDROCK_EXCLUDED_TYPES = f"reporters.{_BEDROCK}.options.exclude_scanner_types"
 
+_KIND_OF_SEGMENT = {
+    "reporters": "reporter",
+    "scanners": "scanner",
+    "converters": "converter",
+}
+
+#: A value to append to each row of UNTYPED_LIST_OPTION_DEFAULTS, valid as an item
+#: of that option (read from the plugin's options model), by plugin and option name
+#: under ``options``. A row with no entry here fails the test that reads it.
+_PROBE_ITEMS: dict[tuple[str, str], Any] = {
+    ("bedrock-summary-reporter", "compliance_frameworks"): "probe-framework",
+    ("bedrock-summary-reporter", "exclude_scanner_types"): "IAC",
+    ("bedrock-summary-reporter", "exclude_sections"): "probe-section",
+    ("bedrock-summary-reporter", "include_sections"): "custom_notes",
+    ("ferret-scan", "exclude_patterns"): "vendor/**",
+    ("guarddog", "ecosystems"): "npm",
+    ("guarddog", "exclude_rules"): "probe-rule",
+    ("guarddog", "excluded_paths"): {"path": "vendor/", "reason": "probe"},
+    ("guarddog", "rules"): "probe-rule",
+    ("trivy-repo", "scanners"): "secret",
+}
+
+#: One case for each row of the table the append reads its defaults from, built from
+#: the table itself, so a row added to it is covered without being listed here.
+_TABLE_ROWS = [
+    pytest.param(segment, plugin, path, id=f"{plugin}-{'.'.join(path[1:])}")
+    for segment, plugins in UNTYPED_LIST_OPTION_DEFAULTS.items()
+    for plugin, options in plugins.items()
+    for path in options
+]
+
 
 def _plugin_config_class(plugin: str) -> type:
     module, name = _PLUGIN_MODELS[plugin]
@@ -497,6 +532,46 @@ def _effective_list(config: AshConfig, kind: str, plugin: str, option: str) -> l
     return list(getattr(model.options, option))
 
 
+def _read_path(model: BaseModel, path: tuple[str, ...]) -> Any:
+    """The value at *path* (``("options", "rules")``) of a plugin's config model."""
+    value: Any = model
+    for part in path:
+        value = getattr(value, part)
+    return value
+
+
+def _as_json(value: Any) -> Any:
+    """*value* with each model in it dumped as JSON, so lists of models compare."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, (list, tuple)):
+        return [_as_json(item) for item in value]
+    return value
+
+
+def _as_the_plugin_reads(plugin: str, path: tuple[str, ...], items: list) -> list:
+    """*items* as the plugin's own config model reads them at *path*, as JSON."""
+    document: Any = items
+    for part in reversed(path):
+        document = {part: document}
+    model = _plugin_config_class(plugin).model_validate(document)
+    return _as_json(_read_path(model, path))
+
+
+def _warnings_naming(caplog, key: str) -> list[str]:
+    """The texts of the warnings the test captured that name *key*."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno >= logging.WARNING and key in record.getMessage()
+    ]
+
+
+def _resolve_config_module():
+    """The module itself: ``resolve_config`` is a function in this file's names."""
+    return importlib.import_module("automated_security_helper.config.resolve_config")
+
+
 class TestAppendOntoAnUntypedPluginOption:
     """``+=`` on a plugin option that no config file wrote adds to its default.
 
@@ -506,9 +581,25 @@ class TestAppendOntoAnUntypedPluginOption:
     document the overrides are applied to, though the plugin's model gives it a
     default. The append used to start the list from the items it was given, which
     replaced that default; ``=`` replaced it as intended. Where ASH has no default
-    list to add to, the append is refused instead, and each refusal is paired with
-    the same key set with ``=``, which still takes effect.
+    list to add to (a section no plugin ASH ships reads, such as a plugin from a
+    module outside ASH, which loads after the overrides are applied) the list
+    still starts from the items and one warning names the key. The append is never
+    refused: the same overrides are applied again to other bases, which can lack a
+    key the real document holds.
     """
+
+    @pytest.fixture(autouse=True)
+    def _each_test_starts_with_no_key_warned_of(self):
+        """The keys already warned of are the process's: each test sees none, and
+        the process's own are put back."""
+        warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
+        held = set(warned)
+        warned.clear()
+        try:
+            yield
+        finally:
+            warned.clear()
+            warned.update(held)
 
     @pytest.mark.parametrize(
         ("segment", "kind", "plugin", "option", "value"), _NON_EMPTY_LIST_OPTIONS
@@ -644,40 +735,153 @@ class TestAppendOntoAnUntypedPluginOption:
             "terraform",
         ]
 
+    def test_the_defaults_table_the_cases_are_built_from_has_rows(self):
+        assert _TABLE_ROWS, "control: the table holds no row to build a case from"
+
+    @pytest.mark.parametrize(("segment", "plugin", "path"), _TABLE_ROWS)
+    def test_every_row_of_the_defaults_table_keeps_its_default_under_an_append(
+        self, segment, plugin, path
+    ):
+        """The list the plugin runs with, read through its own config model, is the
+        option's default followed by the appended item, for every row of the table
+        and not only the options the tests above name."""
+        option = ".".join(path[1:])
+        probe = _PROBE_ITEMS.get((plugin, option))
+        assert probe is not None, (
+            f"{segment}.{plugin}.{option} has no probe item: add one to "
+            "_PROBE_ITEMS, valid as an item of that option"
+        )
+        key = f"{segment}.{plugin}.{'.'.join(path)}"
+        default = _as_json(_read_path(_plugin_config_class(plugin)(), path))
+
+        config = apply_config_overrides(AshConfig(), [f"{key}+={json.dumps([probe])}"])
+
+        section = config.get_plugin_config(_KIND_OF_SEGMENT[segment], plugin)
+        model = _plugin_config_class(plugin).model_validate(section)
+        assert _as_json(_read_path(model, path)) == [
+            *default,
+            *_as_the_plugin_reads(plugin, path, [probe]),
+        ]
+
+    def test_the_trusted_reporter_view_keeps_the_default(self):
+        """The operator's overrides are replayed onto the trusted base, which holds
+        no section for the reporter just as a default configuration does. The append
+        starts from the reporter's default there too."""
+        from automated_security_helper.config.resolve_config import (
+            _with_reporter_overrides,
+        )
+
+        view = _with_reporter_overrides(
+            AshConfig(), [f'{_BEDROCK_EXCLUDED_TYPES}+=["IAC"]'], AshConfig()
+        )
+
+        options = view.model_dump(by_alias=True)["reporters"][_BEDROCK]["options"]
+        assert options["exclude_scanner_types"] == ["SECRET", "IAC"]
+
+    def test_an_external_reporters_section_survives_the_trusted_replay(self):
+        """The repository's own file holds the reporter's section and the trusted
+        base does not, so the replayed ``+=`` meets an option the base lacks. It
+        used to be refused there, which dropped the whole section, its
+        ``enabled`` included, from the view."""
+        from automated_security_helper.config.resolve_config import (
+            _with_reporter_overrides,
+        )
+
+        key = "reporters.acme-findings-exporter"
+        resolved = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "acme-findings-exporter": {"options": {"destinations": ["in-tree"]}}
+                }
+            }
+        )
+
+        view = _with_reporter_overrides(
+            AshConfig(),
+            [f"{key}.enabled=true", f'{key}.options.destinations+=["ops"]'],
+            resolved,
+        )
+
+        section = view.model_dump(by_alias=True)["reporters"]["acme-findings-exporter"]
+        assert section["enabled"] is True
+        assert section["options"]["destinations"] == ["ops"]
+
     @pytest.mark.parametrize(("segment", "kind", "plugin"), _UNREAD_SECTIONS)
-    def test_an_append_to_a_section_no_shipped_plugin_reads_is_refused(
-        self, segment, kind, plugin
+    def test_an_append_to_a_section_no_shipped_plugin_reads_is_applied_and_warned_of(
+        self, caplog, segment, kind, plugin
     ):
         key = f"{segment}.{plugin}.options.destinations"
 
-        with pytest.raises(ASHConfigValidationError) as exc_info:
-            apply_config_overrides(AshConfig(), [f'{key}+=["refused-value-7f3a"]'])
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(
+                AshConfig(), [f'{key}+=["appended-value-7f3a"]']
+            )
 
-        message = str(exc_info.value)
-        assert key in message
-        assert f"{key}=[...]" in message
-        assert "refused-value-7f3a" not in message
+        assert config.get_plugin_config(kind, plugin) == {
+            "options": {"destinations": ["appended-value-7f3a"]}
+        }
+        warnings = _warnings_naming(caplog, key)
+        assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+        assert f"No plugin ASH ships reads {segment}.{plugin} " in warnings[0]
+        assert f"{key}=[...]" in warnings[0]
+        assert "appended-value-7f3a" not in warnings[0]
+
+    def test_the_same_append_applied_twice_warns_once(self, caplog):
+        """The same overrides are applied again to other bases (the trusted views,
+        the replays, the MCP gate): each key is named once for the process."""
+        key = "reporters.acme-findings-exporter.options.destinations"
+        other = "scanners.acme-scanner.options.destinations"
+
+        with caplog.at_level("WARNING", logger="ash"):
+            apply_config_overrides(AshConfig(), [f'{key}+=["first"]'])
+            apply_config_overrides(AshConfig(), [f'{key}+=["second"]'])
+            apply_config_overrides(AshConfig(), [f'{other}+=["first"]'])
+
+        assert len(_warnings_naming(caplog, key)) == 1
+        assert len(_warnings_naming(caplog, other)) == 1, "control: a key of its own"
+
+    def test_the_warned_keys_stay_bounded_in_a_long_lived_process(self, caplog):
+        module = _resolve_config_module()
+        warned = module._APPEND_TO_UNREAD_SECTION_WARNED
+        bound = module._APPEND_TO_UNREAD_SECTION_BOUND
+        warned.update(f"filler-{index}" for index in range(bound))
+        key = "reporters.acme-findings-exporter.options.destinations"
+
+        with caplog.at_level("WARNING", logger="ash"):
+            apply_config_overrides(AshConfig(), [f'{key}+=["x"]'])
+
+        assert len(_warnings_naming(caplog, key)) == 1
+        assert key in warned
+        assert len(warned) <= bound
 
     @pytest.mark.parametrize(("segment", "kind", "plugin"), _UNREAD_SECTIONS)
     def test_the_same_key_set_with_equals_is_accepted(self, segment, kind, plugin):
         key = f"{segment}.{plugin}.options.destinations"
 
-        config = apply_config_overrides(AshConfig(), [f'{key}=["refused-value-7f3a"]'])
+        config = apply_config_overrides(AshConfig(), [f'{key}=["set-value-7f3a"]'])
 
         assert config.get_plugin_config(kind, plugin) == {
-            "options": {"destinations": ["refused-value-7f3a"]}
+            "options": {"destinations": ["set-value-7f3a"]}
         }
 
-    def test_an_append_to_a_shipped_plugins_option_that_is_not_a_list_is_refused(self):
+    def test_an_append_to_a_shipped_plugins_non_list_option_is_left_to_the_plugin(
+        self, caplog
+    ):
+        """The plugin's own options model refuses the list when the plugin loads,
+        as it does on main; the append adds no warning of its own."""
         key = f"reporters.{_BEDROCK}.options.aws_region"
+        unread = "reporters.acme-findings-exporter.options.destinations"
 
-        with pytest.raises(ASHConfigValidationError) as exc_info:
-            apply_config_overrides(AshConfig(), [f"{key}+=us-east-1"])
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(AshConfig(), [f"{key}+=us-east-1"])
+            apply_config_overrides(AshConfig(), [f'{unread}+=["x"]'])
 
-        message = str(exc_info.value)
-        assert key in message
-        assert f"{key}=[...]" in message
-        assert "us-east-1" not in message
+        section = config.get_plugin_config("reporter", _BEDROCK)
+        assert section == {"options": {"aws_region": ["us-east-1"]}}
+        assert _warnings_naming(caplog, key) == []
+        assert len(_warnings_naming(caplog, unread)) == 1, "control: the capture works"
+        with pytest.raises(ValidationError):
+            _plugin_config_class(_BEDROCK).model_validate(section)
 
     def test_the_same_option_set_with_equals_is_accepted(self):
         config = apply_config_overrides(
@@ -688,21 +892,19 @@ class TestAppendOntoAnUntypedPluginOption:
             "options": {"aws_region": "us-east-1"}
         }
 
-    def test_config_get_exits_three_for_the_refused_append_and_zero_for_the_set(
-        self, tmp_path
-    ):
+    def test_config_get_exits_zero_for_the_append_and_for_the_set(self, tmp_path):
         from typer.testing import CliRunner
 
         config_file = tmp_path / ".ash.yaml"
         config_file.write_text("project_name: from-file\n", encoding="utf-8")
         key = "reporters.acme-findings-exporter.options.destinations"
 
-        refused = CliRunner().invoke(
+        appended = CliRunner().invoke(
             config_app, ["get", str(config_file), "--config-overrides", f'{key}+=["x"]']
         )
-        accepted = CliRunner().invoke(
+        assigned = CliRunner().invoke(
             config_app, ["get", str(config_file), "--config-overrides", f'{key}=["x"]']
         )
 
-        assert refused.exit_code == 3, refused.output
-        assert accepted.exit_code == 0, accepted.output
+        assert appended.exit_code == 0, appended.output
+        assert assigned.exit_code == 0, assigned.output

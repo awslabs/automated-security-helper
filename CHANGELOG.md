@@ -78,12 +78,6 @@
   baseline or a suppression keyed by that id needs refreshing. A suppression written
   against the config file's path and lines is not affected. A result that has a line in
   the generated script with no sidecar row is unchanged.
-- **`+=` on an option of a plugin loaded from a module outside ASH is refused when no
-  config file sets the option.** ASH applies `--config-overrides` before that module
-  loads, so it cannot know the plugin's default for the option. The scan stops with
-  exit code 3 and names the key; set the whole list with `=` instead, as in
-  `reporters.my-reporter.options.destinations=[...]`. A `+=` on an option a config file
-  sets still adds to that list.
 
 ### Maintenance
 
@@ -157,7 +151,9 @@
   `reporters.bedrock-summary-reporter.options.exclude_scanner_types+=["IAC"]` gave
   `["IAC"]` and now gives `["SECRET", "IAC"]`. The reporter's `include_sections`,
   guarddog's `ecosystems` and trivy-repo's `scanners` behave the same way. `=` still
-  replaces the list.
+  replaces the list. For a plugin from a module outside ASH, whose default ASH cannot
+  read when it applies the overrides, `+=` still starts the list from the appended
+  items, and it now logs one warning that names the key.
 
 ### Features
 
