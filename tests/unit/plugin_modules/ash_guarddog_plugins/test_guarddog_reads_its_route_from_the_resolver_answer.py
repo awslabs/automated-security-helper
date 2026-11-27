@@ -22,6 +22,14 @@ installed and GuardDog not on PATH, and the scan started ``guarddog`` by name.
 Every test states the route the scan takes and the record that route owes: a copy
 on PATH is verified against the scan's requirement and its own version recorded,
 and the uv route keeps what the uv probe recorded.
+
+A probe that timed out opens a retry window in which the runner's availability
+check keeps answering "unavailable" without probing again, and the resolver, which
+never reads that window, can answer the uv form in the same moment. Every run of
+the scan passes that check, which refuses a uv run while it says no and starts
+nothing in its place, so a uv answer there is not a route the scan can run. The
+tests of that input put the window's answer where the unit tests' tool guard puts
+uv-absent's, and let the mixin's own check, version probe and gates read it.
 """
 
 from __future__ import annotations
@@ -42,6 +50,7 @@ from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scan
     GuardDogScannerConfig,
     GuardDogScannerConfigOptions,
 )
+from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
 pytestmark = pytest.mark.unit
 
@@ -51,6 +60,14 @@ TOOL = "guarddog"
 
 #: A copy of GuardDog on PATH, as the resolver names a binary it found.
 COPY = "/opt/bin/guarddog"
+
+#: What the resolver answers when uv runs GuardDog: uv, ``tool run``, ``--from`` the
+#: spec, then the tool.
+UV_ANSWER = ["uv", "tool", "run", "--from", f"{TOOL}==3.2.0", TOOL]
+
+#: The failure the runner's availability check carries inside the retry window a
+#: probe that timed out opens: the probe's own words.
+PROBE_TIMED_OUT = "the probe timed out after 10 seconds"
 
 #: What ``_uv_probe_from_spec`` answers in the tests of the resolver's arguments: a
 #: value the scan's own spec cannot equal, so the argument is shown to come from
@@ -128,12 +145,14 @@ class _Resolver:
         return self.answer
 
 
-def _verdict(status: str, version: str | None = None, detail: str = "") -> Any:
+def _verdict(
+    status: str, version: str | None = None, detail: str = "", summary: str = ""
+) -> Any:
     return SimpleNamespace(
         status=status,
         executable=COPY,
         detail=detail,
-        summary="",
+        summary=summary,
         from_nix=False,
         version=version,
     )
@@ -158,13 +177,33 @@ def _never_verified(*args: Any, **kwargs: Any) -> Any:
     pytest.fail("the answer is not verified as the tool")
 
 
-def _answering(monkeypatch, answer, verifier=_never_verified) -> _Resolver:
-    """The resolver answers ``answer`` and nothing is found by name on PATH."""
+def _answering(
+    monkeypatch, answer, verifier=_never_verified, on_path: str | None = None
+) -> _Resolver:
+    """The resolver answers ``answer``, and ``on_path`` is what a lookup of the tool's
+    name finds on PATH: nothing unless a copy is given."""
     resolver = _Resolver(answer)
     monkeypatch.setattr(guarddog_module, "get_uv_tool_command", resolver)
     monkeypatch.setattr(guarddog_module, "verify_pre_installed_tool", verifier)
-    monkeypatch.setattr(guarddog_module, "find_executable", lambda name: None)
+    monkeypatch.setattr(
+        guarddog_module,
+        "find_executable",
+        lambda name: on_path if name == TOOL else None,
+    )
     return resolver
+
+
+def _inside_the_retry_window(monkeypatch) -> None:
+    """The runner's availability check as it answers inside the window a timed-out
+    probe opened: no, with the probe's failure, and without probing again.
+
+    Nothing else is replaced. The check of the mixin, its version probe and its gates
+    all read this one answer, as they do in a run. The unit tests' tool guard puts
+    uv-absent's answer there, which carries no failure; this puts the window's in its
+    place."""
+    monkeypatch.setattr(
+        UVToolRunner, "uv_availability", lambda runner: (False, PROBE_TIMED_OUT)
+    )
 
 
 def _without_uv(monkeypatch, scanner, answer, verifier=_never_verified) -> _Resolver:
@@ -329,6 +368,111 @@ def test_the_uv_absent_branch_asks_the_resolver_under_the_scans_spec_and_mode(
     assert scanner.validate_plugin_dependencies() is True
 
     assert resolver.calls == [((TOOL,), {"from_spec": SPEC, "offline": offline})]
+
+
+# ---------------------------------------------------------------------------
+# A uv answer inside the retry window of a probe that timed out
+# ---------------------------------------------------------------------------
+
+
+def test_a_uv_answer_inside_the_window_runs_a_copy_that_satisfies_directly(
+    tmp_path, monkeypatch
+):
+    """The runner's probe of uv timed out, so inside its retry window the availability
+    check says no, while the resolver's own probe answers the uv form. Every run of
+    the scan passes that check, which refuses a uv run and starts nothing in its
+    place, so the uv route the answer names cannot run now. The copy on PATH that a
+    direct run would start is verified against the scan's requirement as the copy a
+    binary answer names is, and a copy that satisfies it runs: its own version is
+    recorded, and the version probe the uv route owed is dropped.
+
+    Without the fix the scan kept the uv route, and inside the window every run of
+    it was refused although a usable copy was on PATH."""
+    scanner = _scanner(tmp_path)
+    _inside_the_retry_window(monkeypatch)
+    verifier = _Verifier(_verdict("satisfied", version="3.2.0 (on PATH)", detail="ok"))
+    _answering(monkeypatch, UV_ANSWER, verifier, on_path=COPY)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is False
+    assert scanner.dependencies_satisfied is True
+    assert scanner.tool_version == "3.2.0 (on PATH)"
+    assert scanner._deferred_tool_version_probe is None
+    assert verifier.asked == [
+        (
+            COPY,
+            TOOL,
+            scanner._get_tool_package_extras(),
+            scanner._get_tool_version_constraint(),
+        )
+    ]
+
+
+def test_a_uv_answer_inside_the_window_runs_a_copy_that_cannot_be_verified_with_a_warning(
+    tmp_path, monkeypatch, capture
+):
+    """A copy the check could not verify runs, since nothing else can run inside the
+    window, and the log says it was not verified. It names no version, so none is
+    recorded for it and the probe the uv route owed is dropped.
+
+    Without the fix the scan kept the uv route, and inside the window every run of
+    it was refused."""
+    scanner = _scanner(tmp_path)
+    _inside_the_retry_window(monkeypatch)
+    verifier = _Verifier(_verdict("unverifiable", detail="the version probe timed out"))
+    _answering(monkeypatch, UV_ANSWER, verifier, on_path=COPY)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is False
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
+    assert scanner.tool_version is None
+    assert scanner._deferred_tool_version_probe is None
+    assert "could not be verified" in capture.text
+    assert COPY in capture.text
+
+
+def test_a_uv_answer_inside_the_window_keeps_uv_over_a_copy_that_falls_short(
+    tmp_path, monkeypatch, capture
+):
+    """A copy that falls short of the scan's requirement is not run, and it is not a
+    reason to give up the scanner either: the uv route runs GuardDog under the
+    scan's own requirement once the availability check passes. The scan keeps that
+    route and what the uv probe recorded for it (here the probe, still owed), and
+    the log says why the copy on PATH is not run.
+
+    Without the fix the copy was never checked, and nothing said why it was not run."""
+    scanner = _scanner(tmp_path)
+    _inside_the_retry_window(monkeypatch)
+    detail = "guarddog 2.9.0 does not satisfy ==3.2.0"
+    summary = "version 2.9.0 is below the required ==3.2.0"
+    verifier = _Verifier(
+        _verdict("unsatisfied", version="2.9.0", detail=detail, summary=summary)
+    )
+    _answering(monkeypatch, UV_ANSWER, verifier, on_path=COPY)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
+    assert scanner.tool_version is None
+    assert scanner._deferred_tool_version_probe == (TOOL, scanner._uv_from_spec())
+    assert verifier.asked == [
+        (
+            COPY,
+            TOOL,
+            scanner._get_tool_package_extras(),
+            scanner._get_tool_version_constraint(),
+        )
+    ]
+    # The verdict's summary names the shortfall; its detail can quote the copy's own
+    # output, so the line does not carry it.
+    assert COPY in capture.text
+    assert summary in capture.text
+    assert detail not in capture.text
 
 
 # ---------------------------------------------------------------------------
