@@ -5107,7 +5107,7 @@ SOFTWARE.
 <td><a id="scanners.mcp-config.options.allowed_command_prefixes"></a><code>allowed_command_prefixes</code></td>
 <td>list of string</td>
 <td><code>[]</code></td>
-<td>When not empty, every stdio command must be a path that starts with one of these prefixes (MEDIUM), compared on path boundaries after the command is normalized. A bare command name such as <code>npx</code> does not start with a path prefix and is flagged. Empty turns the check off.</td>
+<td>When not empty, every stdio command must be allowed by one of these entries (MEDIUM). An entry that is a path allows the commands that start with it, compared on path boundaries after the command is normalized. An entry that is a bare name such as <code>npx</code> allows exactly that bare command, which the client finds on PATH, and no command that has a path, <code>./npx</code> included. Empty turns the check off.</td>
 </tr>
 <tr>
 <td><a id="scanners.mcp-config.options.flag_env_secrets"></a><code>flag_env_secrets</code></td>

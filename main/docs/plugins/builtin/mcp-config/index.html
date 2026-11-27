@@ -3916,7 +3916,7 @@ SOFTWARE.
 <td><code>allowed_command_prefixes</code></td>
 <td><code>[]</code></td>
 <td>MEDIUM</td>
-<td>With a list: a declared command that is not a path starting with a listed prefix. A bare name such as <code>npx</code> is flagged. An empty list turns the check off.</td>
+<td>With a list: a declared command that no listed entry allows. An entry that is a path allows the commands that start with it. An entry that is a bare name such as <code>npx</code> allows exactly that bare command, which the client finds on PATH, and no command that has a path, <code>./npx</code> included. An empty list turns the check off.</td>
 </tr>
 <tr>
 <td><code>flag_env_secrets</code></td>
