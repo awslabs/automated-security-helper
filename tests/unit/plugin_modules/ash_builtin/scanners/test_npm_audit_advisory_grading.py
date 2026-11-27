@@ -462,7 +462,12 @@ def test_a_root_with_no_nodes_still_gives_the_transitive_result_a_ref(scanner):
     refs = by_rule["npm-audit-transitive-child"].properties.model_extra[
         "root_advisories"
     ]
-    assert refs == [{"rule_id": "GHSA-root-high", "uri": root_uri}], refs
+    # The ref also names the root's package, the per-package discrimination the
+    # suppress-findings how-to documents (older refs without it still match by
+    # rule and location alone).
+    assert refs == [
+        {"rule_id": "GHSA-root-high", "package_name": "root", "uri": root_uri}
+    ], refs
     assert root_uri == "node_modules/root/package.json"
 
 

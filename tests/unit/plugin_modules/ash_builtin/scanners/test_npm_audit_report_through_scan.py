@@ -179,7 +179,7 @@ def test_a_transitive_result_refers_to_its_rootless_root_through_the_scan(contex
         r for r in report.runs[0].results if r.ruleId == "npm-audit-transitive-child"
     ]
     assert child.properties.model_extra["root_advisories"] == [
-        {"rule_id": "GHSA-root-high", "uri": _uri(root)}
+        {"rule_id": "GHSA-root-high", "package_name": "root", "uri": _uri(root)}
     ]
     assert _uri(root) == "app/package-lock.json"
     # The root's own result is graded by its word; the transitive result's

@@ -3766,6 +3766,10 @@ def merge_command(
 
     write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
+    # After the merged results file exists, as a scan records after its own
+    # results file is saved (core/orchestrator): the record says a run
+    # completed, and here is where one has.
+    _record_merge_history(merged, output_dir_path)
 
     report_sarif_after = report_sarif_identity(output_dir_path)
     exit_code = _merged_exit_code(
@@ -4086,6 +4090,41 @@ def _resolve_require_scanner_completion(
         if isinstance(value, bool):
             return value
     return True
+
+
+def _record_merge_history(merged: AshAggregatedResults, output_dir: Path) -> None:
+    """Append the merged run to the output directory's history when the config asks.
+
+    The scan's mechanism, applied to the merge's own run
+    (``core/orchestrator._record_history`` is the scan-side twin; both call
+    ``scan_history.record_run_if_enabled``):
+
+    * The gate is ``global_settings.history`` read from the merge's config of
+      record -- the shards' recorded configuration with ``--config-overrides``
+      applied, never a config file discovered on this host -- for the reason the
+      verdict reads it: the collector job need not have the source tree checked
+      out, and the config that asked for a history is the one the shards
+      scanned under, resolved at scan time with the scan's own precedence. The
+      operator's knob at the merge is ``--config-overrides
+      global_settings.history.enabled=...``; ``--config`` does not flip it, as
+      it replaces only what a shard's recorded config cannot choose.
+    * The owning output directory is the merge's own ``--output-dir``, where the
+      merged results file was just written, so ``ash trend --history`` over a
+      reused collector output directory reads the merged series beside the file
+      each record describes.
+    * One record per merge: the merged report is one run under its own
+      ``report_id`` (:func:`_union_report_id`, deterministic over the same
+      shards), so a re-merge of the same shards replaces its record rather than
+      appending a second run, and the shards themselves are never recorded
+      (``scan_history.build_run_record`` refuses a shard).
+
+    Never raises: recording logs its own failures (utils/scan_history), and a
+    merge that produced its results file must not fail for its history.
+    """
+    from automated_security_helper.utils.scan_history import record_run_if_enabled
+
+    global_settings = getattr(merged.ash_config, "global_settings", None)
+    record_run_if_enabled(getattr(global_settings, "history", None), merged, output_dir)
 
 
 def _merged_exit_code(

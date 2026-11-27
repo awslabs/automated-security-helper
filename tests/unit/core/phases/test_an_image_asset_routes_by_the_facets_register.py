@@ -11,7 +11,7 @@ The C3 rows of the container-targets design, driven through the real
   declaration, before the scanner's platform, dependency or tool checks run,
   and queues nothing for it;
 - a scan on which nothing scanned the image gets ONE informational SARIF
-  result (kind=informational, level=note) on the model's own ASH run, so the
+  result (kind=informational, level=none) on the model's own ASH run, so the
   report is green by contract and visibly incomplete rather than silently
   clean;
 - the control: a scan with no asset (every caller that predates assets)
@@ -189,7 +189,9 @@ class TestAnImageAssetSkipsUnservingScanners:
         note = notes[0]
         assert note.ruleId == ScanPhase.IMAGE_NOT_SCANNED_RULE_ID
         assert getattr(note.kind, "value", note.kind) == "informational"
-        assert getattr(note.level, "value", note.level) == "note"
+        # SARIF 3.27.10: with any kind but "fail", a present level SHALL be
+        # "none"; a note-level result shows as an alert in level-graded viewers.
+        assert getattr(note.level, "value", note.level) == "none"
         text = note.message.root.text
         assert IMAGE_REF in text
         assert "was not scanned" in text
@@ -441,12 +443,35 @@ class TestTheNotScannedNoteStaysTrue:
         assert _informational_results(result) == []
 
 
+class TestTheNoRunWarningIsWrittenOnce:
+    def test_a_model_with_no_sarif_run_logs_one_warning(self, scan_phase, caplog):
+        # With no run to carry the note, the log line is the whole record and
+        # the per-scan ruleId dedup cannot run: the method is called before
+        # the executor AND after it, and without its own dedup the second call
+        # logged the warning again.
+        import logging
+
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+        scan_phase._scanner_tasks = []
+        model = AshAggregatedResults()
+        model.sarif = None
+        with caplog.at_level(logging.WARNING, logger="ash"):
+            scan_phase._record_unscanned_image_asset(model)
+            scan_phase._record_unscanned_image_asset(model)
+        lines = [
+            record.getMessage()
+            for record in caplog.records
+            if "was not scanned" in record.getMessage()
+        ]
+        assert len(lines) == 1
+
+
 class TestATagIsResolvedOnceBeforeAnyScannerRuns:
     """The scan phase asks the resolver once, and the scan carries its answer."""
 
     DIGEST = "sha256:" + "ab" * 32
 
-    def _patched(self, monkeypatch, answer):
+    def _patched(self, monkeypatch, answer, consumers_selected=True):
         calls = []
 
         def resolver(image, *, offline, **_):
@@ -457,7 +482,28 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
             "automated_security_helper.utils.image_digest_resolver.resolve_image_locator",
             resolver,
         )
+        if consumers_selected:
+            # These rows measure the resolution, not the consumer gate: the
+            # gate reads LOADED scanner classes, which depend on what the
+            # test process imported before this file. The gate's own rows
+            # (below) pin the class source instead and leave this unforced.
+            monkeypatch.setattr(
+                "automated_security_helper.utils.scanner_tool_types."
+                "an_image_digest_consumer_is_selected",
+                lambda *args, **kwargs: True,
+            )
         return calls
+
+    def _gate_reads_exactly(self, monkeypatch, *classes):
+        # The real gate over an EXPLICIT class set: the walk otherwise reads
+        # every loaded ScannerPluginBase subclass, so another declarer
+        # imported by an earlier test in this worker would open the gate and
+        # flip the never-asks rows on test order alone.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.scanner_tool_types."
+            "_loaded_scanner_classes",
+            lambda: iter(classes),
+        )
 
     def test_the_resolved_digest_is_on_the_asset_the_scanners_are_given(
         self, scan_phase, monkeypatch
@@ -534,3 +580,70 @@ class TestATagIsResolvedOnceBeforeAnyScannerRuns:
         )
 
         assert calls == []
+
+    def test_a_scan_with_every_digest_consumer_excluded_never_asks(
+        self, scan_phase, monkeypatch
+    ):
+        # The ladder keys FINDING ids, and only a scanner declaring
+        # Fetched.IMAGE_DIGEST produces ids the digest keys: with all of them
+        # excluded, no engine is asked and no registry request is made, as
+        # their operational-facets declarations promise the operator. The
+        # real consumer classes are imported, so the exclusion, not an
+        # unloaded class, is what the gate reads.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (  # noqa: F401
+            GrypeScanner,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # noqa: F401
+            TrivyScanner,
+        )
+
+        self._gate_reads_exactly(monkeypatch, GrypeScanner, TrivyScanner)
+        calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            excluded_scanners=["grype", "trivy"],
+        )
+
+        assert calls == []
+
+    def test_python_based_plugins_only_never_asks(self, scan_phase, monkeypatch):
+        # The declaring scanners are pinned binaries, which this run excludes.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (  # noqa: F401
+            GrypeScanner,
+        )
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner import (  # noqa: F401
+            TrivyScanner,
+        )
+
+        self._gate_reads_exactly(monkeypatch, GrypeScanner, TrivyScanner)
+        calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            python_based_plugins_only=True,
+        )
+
+        assert calls == []
+
+    def test_a_selected_consumer_opens_the_gate_for_real(self, scan_phase, monkeypatch):
+        # The positive control for the two rows above, through the REAL gate:
+        # with the consumers loaded and nothing deselecting them, the
+        # resolution runs.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (  # noqa: F401
+            GrypeScanner,
+        )
+
+        self._gate_reads_exactly(monkeypatch, GrypeScanner)
+        calls = self._patched(monkeypatch, lambda image: image, consumers_selected=None)
+        scan_phase.plugin_context.asset = Asset.for_image(ImageLocator(ref=IMAGE_REF))
+
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        assert len(calls) == 1
