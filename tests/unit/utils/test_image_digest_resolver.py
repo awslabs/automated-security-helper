@@ -827,8 +827,8 @@ class TestOnlyAnExactRecordNameIsARecord:
         """The name test used to strip any run of dots and slashes from the front.
 
         A saved image's record under such a name is not read as the record. The
-        tools still read the member as manifest.json, so the archive names no
-        digest, and the reason says why.
+        archive routing still reads the member as manifest.json, so the archive
+        names no digest, and the reason says why.
         """
         from automated_security_helper.utils.image_digest_resolver import (
             payload_digest,
@@ -881,7 +881,7 @@ def _regular_member_called(name):
     """A payload whose manifest.json is a regular member under another spelling.
 
     The member names another image than the regular index.json beside it does, as
-    the manifest.json a tool reads would.
+    a member the routing reads as manifest.json can.
     """
 
     def build(tmp_path):
@@ -925,16 +925,16 @@ MISREAD_MANIFEST_PAYLOADS = [
 
 @pytest.mark.parametrize("build", MISREAD_MANIFEST_PAYLOADS)
 class TestAMemberReadAsManifestJsonIsTheRecordOrTheArchiveNamesNoDigest:
-    """A tool reads an archive through the member the routing reads as manifest.json.
+    """The member the routing reads as manifest.json decides the archive's route.
 
     ``archive_scheme`` hands a tar that holds a member called manifest.json (once
     any leading run of dots and slashes is dropped, and whatever the member's type)
-    to grype and syft as a docker archive, and they read manifest.json from it, not
-    index.json. A regular index.json beside such a member can name the image of
-    another record than the one the tools scan, so the digest it names is not
-    taken: when a member the routing reads as manifest.json is not the regular,
-    exact-named record ``payload_digest`` reads, the archive names no digest, with
-    a reason that names manifest.json.
+    to grype and syft as a docker archive, not as an OCI archive. A regular
+    index.json beside such a member can name the image of another record than the
+    member that routed the archive, so the digest it names is not taken: when a
+    member the routing reads as manifest.json is not the regular, exact-named
+    record ``payload_digest`` reads, the archive names no digest, with a reason
+    that names manifest.json.
     """
 
     def test_the_archive_names_no_digest(self, tmp_path, build):

@@ -58,10 +58,10 @@ def reads_as_manifest_json(member_name: str) -> bool:
     ``.manifest.json``, ``../manifest.json`` and ``/manifest.json`` are all
     manifest.json here, and so is a link or a directory with one of those names.
     An archive with such a member is handed to grype and syft as a docker
-    archive, which they read through that member. The digest reader
-    (``utils/image_digest_resolver``) asks this same question of every member of
-    an archive, so it cannot take a digest from another record than the one the
-    tools read.
+    archive. Which member a tool then reads as manifest.json is up to the tool
+    and is not checked here. The digest reader (``utils/image_digest_resolver``)
+    asks this same question of every member: when one matches, it takes a digest
+    only from that member, and only when it is the regular record.
     """
     return _routing_name(member_name) == "manifest.json"
 

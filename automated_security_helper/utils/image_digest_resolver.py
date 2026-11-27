@@ -202,11 +202,11 @@ _READ_FLAGS = (
 #: The two member names a record is read from, once one leading ``./`` is gone.
 _RECORD_NAMES = ("manifest.json", "index.json")
 
-#: Why an archive names no digest when a member a tool reads as manifest.json is
-#: not the record read here (``reads_as_manifest_json``).
+#: Why an archive names no digest when a member ASH routes it by as manifest.json
+#: (``reads_as_manifest_json``) is not the record read here.
 _MISREAD_MANIFEST = (
-    "the archive holds a member that a tool reads as manifest.json but that is "
-    "not a regular file named exactly manifest.json"
+    "the archive holds a member that ASH reads as manifest.json when it picks "
+    "the archive format, but that is not a regular file named exactly manifest.json"
 )
 
 
@@ -379,15 +379,15 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
       removed; a member of any other spelling is not read, and two members
       of the same record name leave no digest, because a tool may read the
       other one;
-    - an archive with a member the tools read as ``manifest.json`` leaves no
-      digest unless that member is the record: ``archive_scheme`` hands an
-      archive to them as a docker archive for any member called
-      ``manifest.json`` once a leading run of ``.`` and ``/`` is dropped,
-      whatever its type (``reads_as_manifest_json`` is that one test), and
-      they read ``manifest.json`` from it. A link, or a name such as
-      ``.manifest.json`` or ``../manifest.json``, is such a member and not the
-      record, so the archive names no digest, even beside a regular
-      ``index.json``;
+    - an archive with a member whose name ``archive_scheme`` reads as
+      ``manifest.json`` leaves no digest unless that member is the record:
+      ``archive_scheme`` hands an archive to grype and syft as a docker
+      archive for any member called ``manifest.json`` once a leading run of
+      ``.`` and ``/`` is dropped, whatever its type (``reads_as_manifest_json``
+      is that one test); which member a tool then reads is not checked here.
+      A link, or a name such as ``.manifest.json`` or ``../manifest.json``, is
+      such a member and not the record, so the archive names no digest, even
+      beside a regular ``index.json``;
     - the digest is accepted only when the blob the record names (the config
       blob of a ``manifest.json`` entry, the manifest blob ``blobs/sha256/<hex>``
       of an ``index.json``) is in the payload as a regular file, is within
@@ -446,12 +446,12 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
                 if reads_as_manifest_json(member.name) and not (
                     name == "manifest.json" and member.isreg()
                 ):
-                    # The tools read this archive through this member
-                    # (archive_scheme sends it to them as a docker archive for
-                    # it), and it is not the record read here: a link, or a name
-                    # that needs more than one leading ./ dropped. A digest from
-                    # any other record could name another image than the one
-                    # they scan.
+                    # archive_scheme sends this archive to the tools as a docker
+                    # archive because of this member, and it is not the record
+                    # read here: it is not a regular file, or its name is not
+                    # manifest.json once one leading ./ is removed. A digest
+                    # from any other record could name another image than the
+                    # one they scan.
                     return None, _MISREAD_MANIFEST
                 if name not in _RECORD_NAMES:
                     continue
@@ -479,10 +479,10 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
                     return None, f"its {name} could not be read ({kind})"
             # manifest.json decides when there is one: a recent docker save
             # writes BOTH records, and archive_scheme sends such an archive to
-            # the tools as a docker archive, which they read through
-            # manifest.json. No other member archive_scheme reads as
-            # manifest.json got past the loop, so the one parsed here is the
-            # one they read.
+            # the tools as a docker archive because of its manifest.json. No
+            # other member archive_scheme reads as manifest.json got past the
+            # loop, so the one parsed here is the one member that chose that
+            # route.
             if "manifest.json" in records:
                 record = "manifest.json"
                 digest, why = _single_config_digest(records[record])
