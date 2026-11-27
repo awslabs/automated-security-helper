@@ -805,7 +805,10 @@ def test_a_load_through_the_model_logs_a_files_fold_once(
 
 _FOLD_VAR = "ASH_TEST_RETIRED_FOLD_VALUE"
 _FOLD_VALUE = "retired-fold-format-7c3e"
-_FOLD_KEY_VAR = "ASH_TEST_RETIRED_FOLD_KEY"
+# Not a name ending in _KEY: a config file may not read a variable whose name
+# ends in a credential suffix (core/constants.ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES),
+# and the loader would leave the key as written.
+_FOLD_KEY_VAR = "ASH_TEST_RETIRED_FOLD_SECTION"
 
 
 def _child_reading_the_environment(tmp_path, section):
@@ -919,9 +922,16 @@ def test_a_section_key_read_from_the_environment_keeps_its_references(
     import json
 
     from automated_security_helper.cli.mcp_tools import mcp_get_config
+    from automated_security_helper.config.ash_config import (
+        config_env_var_is_interpolatable,
+    )
     from automated_security_helper.config.resolve_config import (
         load_config_file_for_run,
     )
+
+    # The premise: a config file may read both variables.
+    assert config_env_var_is_interpolatable(_FOLD_KEY_VAR)
+    assert config_env_var_is_interpolatable(_FOLD_VAR)
 
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
@@ -960,12 +970,14 @@ def test_an_option_bandit_does_not_declare_under_the_retired_name_leaves_no_valu
     the configuration, not among the references and rewrites the load
     records, not in the results file's ash_config, and not in MCP
     get_config's answer. The canonical-control row writes the option under
-    bandit, which keeps it as an extra option, and the record and the answer
-    hold its reference in place of the value."""
+    bandit, where no fold drops it: the load is refused for an option bandit
+    does not declare, and the refusal names the option and does not hold the
+    variable's value."""
     import json
 
     from automated_security_helper.cli.mcp_tools import mcp_get_config
     from automated_security_helper.config.resolve_config import (
+        ConfigFileRefused,
         load_config_file_for_run,
     )
 
@@ -978,28 +990,35 @@ def test_an_option_bandit_does_not_declare_under_the_retired_name_leaves_no_valu
         encoding="utf-8",
     )
 
+    if section == "bandit":
+        with pytest.raises(ConfigFileRefused) as refused:
+            load_config_file_for_run(path)
+        text = str(refused.value)
+        assert "Unknown key 'retired_only_knob'" in text, text
+        assert _FOLD_VALUE not in text, text
+        return
+
     _, config = load_config_file_for_run(path)
 
     record = _record(config)
     assert _FOLD_VALUE not in json.dumps(record), record.get("scanners")
-    if section == "oldname":
-        assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
-        assert _FOLD_VALUE not in json.dumps(config.model_dump(mode="json"))
-        references = [
-            reference
-            for reference in (
-                *config._environment_references,
-                *config._displayed_environment_references,
-            )
-            if _FOLD_VALUE in (reference.resolved, reference.value)
-        ]
-        assert references == [], references
-        rewrites = [
-            rewrite
-            for rewrite in config._written_references or []
-            if rewrite.resolved == _FOLD_VALUE
-        ]
-        assert rewrites == [], rewrites
+    assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+    assert _FOLD_VALUE not in json.dumps(config.model_dump(mode="json"))
+    references = [
+        reference
+        for reference in (
+            *config._environment_references,
+            *config._displayed_environment_references,
+        )
+        if _FOLD_VALUE in (reference.resolved, reference.value)
+    ]
+    assert references == [], references
+    rewrites = [
+        rewrite
+        for rewrite in config._written_references or []
+        if rewrite.resolved == _FOLD_VALUE
+    ]
+    assert rewrites == [], rewrites
 
     _named_by_the_operator(tmp_path, monkeypatch)
     result = mcp_get_config(config_path=str(path))
@@ -1010,8 +1029,9 @@ def test_an_option_bandit_does_not_declare_under_the_retired_name_leaves_no_valu
 # An option bandit does not declare, written under the retired name, is dropped
 # as the file is read, before the file's own patch applies. An operation that
 # removes, replaces or tests it then finds nothing there: the load is refused,
-# and the refusal says the option was dropped. Under bandit the option is kept
-# as an extra, and the same operation applies.
+# and the refusal says the option was dropped. Under bandit no fold drops it,
+# so the same operation applies, and an option bandit does not declare is then
+# refused as it is in any file.
 
 _DROPPED_CLAUSE = (
     "The option it names was dropped when the file that wrote it was read: it "
@@ -1062,13 +1082,28 @@ def test_an_op_on_an_option_the_retired_name_fold_dropped_is_refused_with_its_ca
 def test_an_op_on_an_option_bandit_does_not_declare_under_bandit_applies(
     retired_oldname, tmp_path, monkeypatch, op
 ):
-    """The control: under bandit the option is kept as an extra one, and the
-    same operation applies, so the load succeeds."""
+    """The control: under bandit no fold drops the option, so the same
+    operation applies. A remove takes the option out, and the load succeeds
+    without it. After a replace or a test the option is still there, and the
+    load is refused as for any option bandit does not declare: the refusal
+    names the option, says nothing of a dropped option, and does not refuse
+    the patch entry."""
+    from automated_security_helper.config.resolve_config import ConfigFileRefused
+
     path = _file_patching_its_own_knob(tmp_path, "bandit", op)
 
-    config = _load(monkeypatch, path)
+    if op == "remove":
+        config = _load(monkeypatch, path)
+        assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+        return
 
-    assert config.scanners.bandit is not None
+    with pytest.raises(ConfigFileRefused) as refused:
+        _load(monkeypatch, path)
+
+    text = " ".join(str(refused.value).split())
+    assert "Unknown key 'retired_only_knob'" in text, text
+    assert _DROPPED_CLAUSE not in text, text
+    assert "'patch' entry 0 in" not in text, text
 
 
 # A value read from the environment in a section a ``patch`` adds under the
