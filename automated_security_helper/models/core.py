@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import fnmatch
-import warnings
 from typing import (
     Any,
     ClassVar,
@@ -21,7 +20,6 @@ from typing import (
     TYPE_CHECKING,
 )
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -32,6 +30,7 @@ from pydantic import (
 )
 from datetime import datetime, date
 
+from automated_security_helper.config.spellings import check_spellings, renamed_field
 from automated_security_helper.models.frame_model import RankEncoded
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
@@ -43,7 +42,6 @@ from automated_security_helper.utils.symbol_spans import is_valid_symbol
 from automated_security_helper.utils.unknown_keys import (
     refuse_unknown_keys,
     tolerated_notes,
-    warned_notes,
 )
 
 if TYPE_CHECKING:
@@ -51,31 +49,24 @@ if TYPE_CHECKING:
     from automated_security_helper.utils.symbol_spans import SymbolResolver
 
 
+#: The model the spelling table's row for ``expires`` names, by its dotted path
+#: (config/spellings.py): the table cannot name the class, since this module
+#: imports it to declare the field.
+_ENTRY_MODEL = "automated_security_helper.models.core.IgnorePathWithReason"
+
 #: What an entry setting both expiration spellings to different values records
 #: under TOLERATE_STORED_CONFIG (IgnorePathWithReason._one_expiration_spelling).
+#: The table builds the same text for the row (``spellings.disagreement_note``).
 BOTH_EXPIRATION_SPELLINGS_NOTE = "both expiration spellings, disagreeing"
 
 #: The deprecation a config read under the ``expiration`` spelling gets.
 #: ``expires`` is the canonical spelling; ``expiration`` is the accepted
-#: alternative until ASH v4 removes it.
+#: alternative until ASH v4 removes it. The table builds the same text for the
+#: row (``spellings.deprecation_message``), and a test pins the two equal.
 EXPIRATION_SPELLING_DEPRECATION = (
     "The 'expiration' key is a deprecated spelling of 'expires' and will be "
     "removed in ASH v4; write 'expires'."
 )
-
-
-def _warn_expiration_spelling() -> None:
-    """One ``DeprecationWarning`` per read of the ``expiration`` spelling.
-
-    A Python warning, not an ``ASH_LOGGER`` line: entries are validated
-    wherever a config or an override is read, so a logger line would land in
-    every command's output (and in the committed CLI snapshots) for a spelling
-    that still works. The schema, the reference docs and the validator wording
-    all name the deprecation too; the v4 removal turns the alias into the
-    ordinary unknown-key refusal. ``stacklevel`` is left at the default: the
-    caller is pydantic's validator machinery, so no user frame is nearer.
-    """
-    warnings.warn(EXPIRATION_SPELLING_DEPRECATION, DeprecationWarning)
 
 
 #: What an entry's expiration that is not a YYYY-MM-DD date records under
@@ -283,14 +274,16 @@ class IgnorePathWithReason(RedactedSection):
     reason: Annotated[str, Field(..., description="Reason for exclusion")]
     expires: Annotated[
         str | None,
-        Field(
-            None,
+        renamed_field(
+            "expires",
+            model=_ENTRY_MODEL,
+            default=None,
             # "expires" is the canonical spelling (the one written, stored and
             # documented); "expiration", the field's earlier name, is accepted
-            # as a deprecated alias until ASH v4 removes it
-            # (_warn_expiration_spelling). The name itself is the first choice,
-            # so no populate_by_name is needed.
-            validation_alias=AliasChoices("expires", "expiration"),
+            # as a deprecated alias until ASH v4 removes it. The table in
+            # config/spellings.py holds the old spelling and the release, and
+            # renamed_field reads it from there: the name itself is the first
+            # choice, so no populate_by_name is needed.
             description=(
                 "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying "
                 "on this date, by the local clock of the host running the scan. "
@@ -336,39 +329,13 @@ class IgnorePathWithReason(RedactedSection):
         not land in the extras. Under TOLERATE_STORED_CONFIG a disagreement is
         recorded and kept; the extra then marks the entry as one never applied.
 
-        Reading the ``expiration`` spelling at all is deprecated
-        (``_warn_expiration_spelling``): ``expires`` is canonical and the alias
-        is removed in ASH v4.
+        Reading the ``expiration`` spelling at all is deprecated: ``expires`` is
+        canonical and the alias is removed in ASH v4, a release the table in
+        ``config/spellings.py`` holds. The rule is that table's
+        (``check_spellings``), shared with the loader's fold of each file, which
+        reads the same row.
         """
-        if not isinstance(data, dict) or "expiration" not in data:
-            return data
-        if tolerated_notes(info) is None:
-            # A config an author wrote, not a stored results file (which this
-            # version and earlier ones wrote under the old spelling themselves).
-            _warn_expiration_spelling()
-            # The Python warning is dropped by the default filters outside
-            # __main__, so an `ash` run never showed it. A config load binds
-            # the warn-unknown-keys list (resolve_config), whose contents land
-            # on the config's _resolution_warnings and are printed at scan
-            # start, so the operator sees the deprecation once per entry; the
-            # rebuild-after-overrides dedup subtracts repeats by count there.
-            warned = warned_notes(info)
-            if warned is not None:
-                warned.append(f"In {cls.ENTRY_KIND}: {EXPIRATION_SPELLING_DEPRECATION}")
-        if "expires" not in data:
-            return data
-        if data["expiration"] == data["expires"]:
-            kept = dict(data)
-            del kept["expiration"]
-            return kept
-        notes = tolerated_notes(info)
-        if notes is not None:
-            notes.append(BOTH_EXPIRATION_SPELLINGS_NOTE)
-            return data
-        raise ValueError(
-            "expires and expiration are two spellings of one field and "
-            "disagree; keep one"
-        )
+        return check_spellings(cls, data, info)
 
     @field_validator("expires", mode="before")
     @classmethod
