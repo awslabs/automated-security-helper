@@ -274,6 +274,72 @@ def _field_map(model: type[BaseModel]) -> Dict[str, _Field]:
     return found
 
 
+def _twins(segment: str) -> Tuple[str, ...]:
+    """``segment`` with every ``-`` written as ``_``, and with every ``_`` written
+    as ``-``, each one that differs from ``segment``."""
+    return tuple(
+        twin
+        for twin in (segment.replace("-", "_"), segment.replace("_", "-"))
+        if twin != segment
+    )
+
+
+def field_at(model: type[BaseModel], segment: str) -> Optional[Tuple[_Field, str]]:
+    """The field of ``model`` that a key or a pointer segment names the way the
+    loader reads it, with the spelling of the field that matched; None when it
+    names no field.
+
+    In order: ``segment`` itself, as a spelling of a field (``_field_map``: its
+    name, its alias, a name of its ``AliasChoices``, an old spelling the table
+    gives it); its ``-``/``_`` twins, which the merge and a ``patch`` pointer read
+    as the same key (``config_sources._resolve_dict_key``); and, in a plugin's
+    segment (scanners, reporters and converters), the one section whose name folds
+    to the same name (``ash_config.section_fold_key``), which a pointer reads as
+    that section (``config_sources._normalize_pointer``). Two sections that fold
+    alike name none.
+    """
+    fields = _field_map(model)
+    field = fields.get(segment)
+    if field is not None:
+        return field, segment
+    for twin in _twins(segment):
+        field = fields.get(twin)
+        if field is not None:
+            return field, twin
+    # Imported here: ash_config imports this module as it loads.
+    from automated_security_helper.config.ash_config import (
+        _PluginConfigSegment,
+        section_fold_key,
+    )
+
+    if not issubclass(model, _PluginConfigSegment):
+        return None
+    wanted = section_fold_key(segment)
+    folding: Dict[str, Tuple[_Field, str]] = {}
+    for spelling, candidate in fields.items():
+        if section_fold_key(spelling) == wanted:
+            folding.setdefault(candidate.name, (candidate, spelling))
+    return next(iter(folding.values())) if len(folding) == 1 else None
+
+
+def key_in(model: type[BaseModel], mapping: Dict[Any, Any], key: str) -> Optional[str]:
+    """The key of ``mapping``, a mapping read as ``model``, that is the field
+    ``key`` names: ``key`` itself when ``mapping`` holds it, else the one other key
+    that reads as the same field (``field_at``). None when ``mapping`` holds no
+    such key, and when it holds more than one."""
+    if key in mapping:
+        return key
+    field = field_at(model, key)
+    if field is None:
+        return None
+    readers: List[str] = []
+    for name in mapping:
+        found = field_at(model, name) if isinstance(name, str) else None
+        if found is not None and found[0] is field[0]:
+            readers.append(name)
+    return readers[0] if len(readers) == 1 else None
+
+
 def _row_with_old(model: type[BaseModel], key: str) -> Optional[SpellingRow]:
     """The row of ``model`` that ``key`` is an old spelling of, or None."""
     for row in rows_for(model):
@@ -292,12 +358,14 @@ def _root_model() -> type[BaseModel]:
 def child_model(model: type[BaseModel], key: str) -> Optional[Shape]:
     """What the value at ``key`` of a ``model`` mapping is read as, or None.
 
-    ``key`` matches a field when it is the field's name, its alias, a name of its
-    ``AliasChoices`` or an old spelling the table gives it. A key the model does
-    not declare (an extra, a typo) names no shape and is not walked.
+    ``key`` matches a field as ``field_at`` reads it: it is the field's name, its
+    alias, a name of its ``AliasChoices`` or an old spelling the table gives it,
+    or the ``-``/``_`` twin of one, or another spelling of a plugin's section. A
+    key the model does not declare (an extra, a typo) names no shape and is not
+    walked.
     """
-    field = _field_map(model).get(key)
-    return None if field is None else field.shape
+    found = field_at(model, key)
+    return None if found is None else found[0].shape
 
 
 def _names_an_element(shape: Shape, segment: str) -> bool:
@@ -620,13 +688,17 @@ class _Fold:
         self, shape: Shape, segment: str, place: str
     ) -> Tuple[str, Optional[Shape]]:
         if shape.kind == "model":
-            field = _field_map(shape.model).get(segment)
-            if field is None:
+            found = field_at(shape.model, segment)
+            if found is None:
                 return segment, None
-            row = _row_with_old(shape.model, segment)
+            field, matched = found
+            row = _row_with_old(shape.model, matched)
             if row is None:
+                # Not an old spelling: the segment stays as written, a twin or a
+                # variant of a section included, which the loader resolves by its
+                # own rule, and the walk goes on through the field.
                 return segment, field.shape
-            self._met(row, segment, place)
+            self._met(row, matched, place)
             return row.canonical, field.shape
         if _names_an_element(shape, segment):
             return segment, Shape("model", shape.model)
@@ -732,9 +804,12 @@ def canonical_segments(segments: Sequence[str]) -> List[str]:
     and is kept; an index or ``-`` names it too. Any other glob (``**``, or a glob
     where a field is named) and any key the walk does not know make the model
     unknown, and from then on every row's old spelling is mapped to its canonical
-    one: a denial then covers more, never less. A segment that is not exactly an
-    old spelling is kept. Whether a row's old spelling is still read is not asked:
-    an operator's denial written under the old spelling keeps denying both.
+    one: a denial then covers more, never less. A segment that is not an old
+    spelling is kept as written, the ``-``/``_`` twin of a key and another
+    spelling of a plugin's section included: ``field_at`` reads each as the field,
+    so the model stays known past it. Whether a row's old spelling is still read
+    is not asked: an operator's denial written under the old spelling keeps
+    denying both.
     """
     index = _index()
     shape: Optional[Shape] = Shape("model", _root_model())
@@ -742,11 +817,10 @@ def canonical_segments(segments: Sequence[str]) -> List[str]:
     for segment in segments:
         if shape is not None and segment != "**":
             if shape.kind == "model":
-                field = (
-                    None if _is_glob(segment) else _field_map(shape.model).get(segment)
-                )
-                if field is not None:
-                    row = _row_with_old(shape.model, segment)
+                found = None if _is_glob(segment) else field_at(shape.model, segment)
+                if found is not None:
+                    field, matched = found
+                    row = _row_with_old(shape.model, matched)
                     result.append(segment if row is None else row.canonical)
                     shape = field.shape
                     continue

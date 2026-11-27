@@ -3019,15 +3019,19 @@ class ConfigLinter:
     ) -> None:
         """Follow the keys that remain from ``value``, a mapping read as
         ``model``: ``declared`` as the models name them, ``spelled`` as the file
-        writes them. A mapping the keys end at is added to ``sites``."""
+        writes them. A mapping the keys end at is added to ``sites``.
+
+        A key the file writes as the loader reads the declared one (its ``-``/``_``
+        twin, another spelling of a plugin's section: ``spellings.key_in``) is
+        followed too, and named as the file writes it."""
         if not isinstance(value, dict):
             return
         if not declared:
             sites.append(_SpellingSite(value, model, parts, shown))
             return
-        written = spelled[0]
         shape = spellings.child_model(model, declared[0])
-        if shape is None or written not in value:
+        written = spellings.key_in(model, value, spelled[0])
+        if shape is None or written is None:
             return
         named, _ = cls._named_key(references, parts, written)
         here = (*parts, written)
