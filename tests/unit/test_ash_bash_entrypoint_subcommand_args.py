@@ -6,8 +6,9 @@
 `ash` passes options given before a subcommand on to it when it takes them and
 refuses them otherwise, and `report` does not take --source-dir, so the bash
 entrypoint does not put `--source-dir /src --output-dir /out` before a subcommand: it
-passes the mounted paths as ASH_SOURCE_DIR and ASH_OUTPUT_DIR. CI runs
-`./ash report --format text` after every bash-entrypoint scan.
+passes the mounted paths as ASH_SOURCE_DIR and ASH_OUTPUT_DIR. The one exception is
+the source directory of `scan fs`, which is that subject's PATH argument, `/src`.
+CI runs `./ash report --format text` after every bash-entrypoint scan.
 
 A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_build_failure.py,
 and prints the argv it was given.
@@ -107,6 +108,36 @@ def test_the_mounted_paths_go_in_as_environment_variables(runner, tmp_path):
     assert "ASH_SOURCE_DIR=/src" in run_argv
     assert "ASH_OUTPUT_DIR=/out" in run_argv
     assert _inner_argv(run_argv) == ["ash", *SANDBOX_OFF, "--scanners", "bandit"]
+
+
+@pytest.mark.integration
+def test_scan_fs_is_given_the_source_directory_as_its_path_argument(runner, tmp_path):
+    run_argv = _run_argv(runner, tmp_path, "scan", "fs")
+
+    assert "ASH_SOURCE_DIR=/src" not in run_argv
+    assert "ASH_OUTPUT_DIR=/out" in run_argv
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["scan"], id="scan-with-no-subject"),
+        pytest.param(["report", "--format", "text"], id="report"),
+        pytest.param(["merge"], id="merge"),
+        pytest.param(["config", "get"], id="config"),
+    ],
+)
+def test_a_form_with_no_scan_subject_keeps_the_source_directory_variable(
+    runner, tmp_path, args
+):
+    """Only `scan fs` can be given a PATH argument. The form with no subject refuses
+    one, and the other commands read the directory from the variable."""
+    run_argv = _run_argv(runner, tmp_path, *args)
+
+    assert "ASH_SOURCE_DIR=/src" in run_argv
+    assert "/src" not in _inner_argv(run_argv)
 
 
 @pytest.mark.integration

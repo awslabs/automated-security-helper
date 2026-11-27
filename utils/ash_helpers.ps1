@@ -122,7 +122,8 @@ function Invoke-ASH {
     `--quiet`, and `-c` or `--no-color` passes `--no-color`. Every other argument is
     passed through unchanged. ASH's source and output directories reach the
     container as `ASH_SOURCE_DIR` and `ASH_OUTPUT_DIR`, so a subcommand such as
-    `report` can come first. A workspace scan is refused with exit 3, before anything
+    `report` can come first; `scan fs` is given the source directory as its PATH
+    argument, `/src`, instead. A workspace scan is refused with exit 3, before anything
     is built, whether it is asked for with `scan workspace` or with `--workspace` or
     `--workspace-config`: Invoke-ASH mounts the one directory it scans. Run `ash scan
     workspace <file> --mode container` for a workspace scan. A `--archive` among the
@@ -945,11 +946,13 @@ function Invoke-ASH {
             }
         }
         # `scan <subject> <path>`: the directory is -SourceDir here, which is mounted for
-        # the scan inside (given as ASH_SOURCE_DIR=/src). A path written after the
-        # subject would reach the container as a host path it cannot read, so it is
-        # refused, with the refusal code, before anything is built or mounted.
+        # the scan inside (given to `scan fs` as /src, its PATH argument, further down).
+        # A path written after the subject would reach the container as a host path it
+        # cannot read, so it is refused, with the refusal code, before anything is built
+        # or mounted. $scanSubjectAt is the subject's index in $forwardedAshArgs.
+        $scanSubject = ''
+        $scanSubjectAt = -1
         if ($subcommand -ceq 'scan') {
-            $scanSubject = ''
             $skipValue = $false
             for ($i = $subcommandAt + 1; $i -lt $forwardedAshArgs.Count; $i++) {
                 $word = $forwardedAshArgs[$i]
@@ -983,6 +986,7 @@ function Invoke-ASH {
                 if ($scanSubject -eq '') {
                     if ($word -cin $ashScanSubjects) {
                         $scanSubject = $word
+                        $scanSubjectAt = $i
                         # The workspace subject names a file, not the directory mounted
                         # here, so it is refused, whatever follows it, as the options
                         # of that scan are above.
@@ -1828,6 +1832,24 @@ function Invoke-ASH {
             }
         }
 
+        # The directory mounted at /src is given to `scan fs` as its PATH argument, right
+        # after the subject, so the scan inside reads it from the argument and not from
+        # ASH_SOURCE_DIR, a variable it tells the reader is deprecated as the way to name
+        # what a scan scans. Every other command takes the mount from ASH_SOURCE_DIR as
+        # before: report and merge read it, config reads it as the variable of its own
+        # --source-dir, and the form with no subject (`Invoke-ASH -AshArgs scan`, no
+        # subcommand at all) names its directory that way, since that form refuses a
+        # PATH. The subject is at $scanSubjectAt in $forwardedAshArgs, and what
+        # Invoke-ASH added after the command word moved it by the difference in length.
+        $sourceDirEnv = @('-e', 'ASH_SOURCE_DIR=/src')
+        $sourcePathAdded = $false
+        if ($subcommand -ceq 'scan' -and $scanSubject -ceq 'fs') {
+            $scanSubjectInArguments = $scanSubjectAt + ($ashArguments.Count - $forwardedAshArgs.Count)
+            $ashArguments.Insert($scanSubjectInArguments + 1, '/src')
+            $sourceDirEnv = @()
+            $sourcePathAdded = $true
+        }
+
         # OCI_RUNNER is what ./ash and the ash CLI read. ASH_OCI_RUNNER, a deprecated name
         # only this function reads, applies when OCI_RUNNER is unset and no -OCIRunner
         # was passed, so a profile that sets it keeps the runner it chose.
@@ -2285,8 +2307,9 @@ function Invoke-ASH {
                         # As variables rather than --source-dir and --output-dir ahead of the
                         # caller's arguments, which put options in front of a subcommand
                         # (-AshArgs 'report'). scan reads both; report and merge read
-                        # ASH_OUTPUT_DIR.
-                        "-e", "ASH_SOURCE_DIR=/src"
+                        # ASH_OUTPUT_DIR. `scan fs` is given the source directory as its
+                        # PATH argument instead ($sourceDirEnv is empty then).
+                        $sourceDirEnv
                         "-e", "ASH_OUTPUT_DIR=/out"
                     )
                     $runCmd += $ciRunnerMarkerArgs
@@ -2333,9 +2356,14 @@ function Invoke-ASH {
                     $callerWords = @($ashArguments)
                     if ($subcommand -eq '' -or $subcommand -cin $ashTakesSandbox) {
                         $sandboxOffAt = $subcommandAt + 1
-                        # After the subject when scan is followed by one (`scan fs`).
+                        # After the subject when scan is followed by one (`scan fs`), and
+                        # after the PATH argument given to it above, so the scan inside
+                        # reads `scan fs /src --sandbox off ...`.
                         if ($subcommand -ceq 'scan' -and $sandboxOffAt -lt @($ashArguments).Count -and @($ashArguments)[$sandboxOffAt] -cin $ashScanSubjects) {
                             $sandboxOffAt++
+                            if ($sourcePathAdded) {
+                                $sandboxOffAt++
+                            }
                         }
                         $callerWords = @($ashArguments | Select-Object -First $sandboxOffAt) + @('--sandbox', 'off') + @($ashArguments | Select-Object -Skip $sandboxOffAt)
                     }

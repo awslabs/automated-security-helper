@@ -2572,7 +2572,8 @@ def test_config_is_passed_as_config(tmp_path):
 def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     # Positional --source-dir/--output-dir came before the caller's words, so a
     # subcommand ended up after options it may not take. scan reads ASH_SOURCE_DIR and
-    # ASH_OUTPUT_DIR; report and merge read ASH_OUTPUT_DIR.
+    # ASH_OUTPUT_DIR, except `scan fs`, which is given /src as its PATH argument;
+    # report and merge read ASH_OUTPUT_DIR.
     result, calls = _invoke(
         tmp_path, "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -AshArgs 'report'"
     )
@@ -2582,6 +2583,89 @@ def test_source_and_output_dirs_reach_ash_as_environment_variables(tmp_path):
     env = _run_env(run)
     assert env.get("ASH_SOURCE_DIR") == "/src", run
     assert env.get("ASH_OUTPUT_DIR") == "/out", run
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    [
+        pytest.param(
+            "-AshArgs 'scan fs'",
+            ["scan", "fs", "/src", *SANDBOX_OFF],
+            id="the-subject-alone",
+        ),
+        pytest.param(
+            "-AshArgs 'scan fs --scanners bandit'",
+            ["scan", "fs", "/src", *SANDBOX_OFF, "--scanners", "bandit"],
+            id="an-option-after-the-subject",
+        ),
+        pytest.param(
+            "-AshArgs 'scan --scanners bandit fs'",
+            ["scan", *SANDBOX_OFF, "--scanners", "bandit", "fs", "/src"],
+            id="an-option-before-the-subject",
+        ),
+        pytest.param(
+            "-Config c.yaml -Scanners bandit -AshArgs 'scan fs'",
+            [
+                "scan",
+                *SANDBOX_OFF,
+                "--config",
+                "c.yaml",
+                "--scanners",
+                "bandit",
+                "fs",
+                "/src",
+            ],
+            id="the-options-the-wrapper-adds-stand-before-the-subject",
+        ),
+        pytest.param(
+            "scan fs",
+            ["scan", "fs", "/src", *SANDBOX_OFF],
+            id="after-the-parameters",
+        ),
+    ],
+)
+def test_scan_fs_is_given_the_mounted_directory_as_its_path_argument(
+    tmp_path, invocation, expected
+):
+    """After the subject wherever it stands, and ahead of the --sandbox off the wrapper
+    adds when the subject follows scan. The scan inside is told nothing by
+    ASH_SOURCE_DIR, which it would answer with a line."""
+    result, calls = _invoke(
+        tmp_path, f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {invocation}"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == expected, run
+    env = _run_env(run)
+    assert "ASH_SOURCE_DIR" not in env, run
+    assert env.get("ASH_OUTPUT_DIR") == "/out", run
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    [
+        pytest.param(
+            "-AshArgs 'scan'", ["scan", *SANDBOX_OFF], id="scan-with-no-subject"
+        ),
+        pytest.param("", [*SANDBOX_OFF], id="no-command-at-all"),
+        pytest.param("-AshArgs 'report'", ["report"], id="report"),
+        pytest.param("-AshArgs 'merge'", ["merge"], id="merge"),
+    ],
+)
+def test_a_form_with_no_scan_subject_is_still_given_the_variable(
+    tmp_path, invocation, expected
+):
+    """Only `scan fs` can be given a PATH argument. The form with no subject refuses
+    one, and the other commands read the directory from the variable."""
+    result, calls = _invoke(
+        tmp_path, f"Invoke-ASH -NoBuild -SourceDir src -OutputDir out {invocation}"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    run = _run_call(result, calls)
+    assert _inner_ash_args(run) == expected, run
+    assert _run_env(run).get("ASH_SOURCE_DIR") == "/src", run
 
 
 @pytest.mark.integration

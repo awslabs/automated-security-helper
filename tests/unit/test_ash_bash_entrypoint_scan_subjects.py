@@ -5,9 +5,11 @@
 
 ``ash scan fs <path>`` takes the directory as an argument. The entrypoint reads the word
 after the subject as its own source directory, mounts it, and does not forward it: a
-host path means nothing inside the container, where the scan is given
-ASH_SOURCE_DIR=/src. ``--source-dir`` still names the directory, with one deprecation
-line on stderr.
+host path means nothing inside the container, where the scan is given the mount as
+``/src``, the PATH argument of the subject, and no ASH_SOURCE_DIR. The forms that name no
+subject keep the variable: it is the only way they are told the directory, and a typed
+path is refused by the form with no subject. ``--source-dir`` still names the directory,
+with one deprecation line on stderr.
 
 ``ash scan workspace <file>`` names no directory: the entrypoint mounts one, so it
 refuses the subject, and the older ``--workspace`` and ``--workspace-config`` spellings
@@ -101,6 +103,11 @@ def _mounted_source(run_argv):
     return mounts[0].split(",")[0][len("source=") :]
 
 
+#: What the entrypoint gives a scan, right after the subject and the PATH argument it
+#: gives that: the scan in the image never sandboxes, the container is the boundary.
+SANDBOX_OFF = ["--sandbox", "off"]
+
+
 @pytest.mark.integration
 def test_the_path_after_the_subject_is_the_mount_and_is_not_forwarded(runner, tmp_path):
     source = tmp_path / "project"
@@ -110,10 +117,13 @@ def test_the_path_after_the_subject_is_the_mount_and_is_not_forwarded(runner, tm
     run_argv = _run_argv(result)
 
     assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
-    assert "ASH_SOURCE_DIR=/src" in run_argv
-    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "--sandbox", "off"], (
-        "the host path stays out of the container's command line, and --sandbox off "
-        "follows the subject"
+    assert "ASH_SOURCE_DIR=/src" not in run_argv, (
+        "the scan is given the mount as its PATH argument, not as the variable it "
+        "tells the reader is deprecated"
+    )
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF], (
+        "the host path stays out of the container's command line, the mount follows "
+        "the subject as its PATH argument, and --sandbox off follows that"
     )
     assert "Deprecated" not in result.stderr
 
@@ -131,12 +141,12 @@ def test_options_may_stand_between_scan_and_the_subject(runner, tmp_path):
     assert _inner_argv(run_argv) == [
         "ash",
         "scan",
-        "--sandbox",
-        "off",
+        *SANDBOX_OFF,
         "--scanners",
         "bandit",
         "fs",
-    ]
+        "/src",
+    ], "the mount is the PATH argument after the subject, wherever the subject stands"
 
 
 @pytest.mark.integration
@@ -147,7 +157,7 @@ def test_a_directory_named_like_a_subcommand_is_still_the_directory(runner, tmp_
     run_argv = _run_argv(_ash(runner, tmp_path, "scan", "fs", str(source)))
 
     assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
-    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "--sandbox", "off"]
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF]
 
 
 @pytest.mark.integration
@@ -163,11 +173,99 @@ def test_options_after_the_path_are_forwarded(runner, tmp_path):
         "ash",
         "scan",
         "fs",
-        "--sandbox",
-        "off",
+        "/src",
+        *SANDBOX_OFF,
         "--scanners",
         "bandit",
     ]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("words", "inner"),
+    [
+        pytest.param(
+            ["scan", "fs"],
+            ["ash", "scan", "fs", "/src", *SANDBOX_OFF],
+            id="the-subject-alone",
+        ),
+        pytest.param(
+            ["scan", "fs", "--scanners", "bandit"],
+            ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "--scanners", "bandit"],
+            id="an-option-after-the-subject",
+        ),
+        pytest.param(
+            ["scan", "--scanners", "bandit", "fs"],
+            ["ash", "scan", *SANDBOX_OFF, "--scanners", "bandit", "fs", "/src"],
+            id="an-option-before-the-subject",
+        ),
+        pytest.param(
+            ["--quiet", "scan", "fs"],
+            ["ash", "--quiet", "scan", "fs", "/src", *SANDBOX_OFF],
+            id="a-flag-of-this-script-before-scan",
+        ),
+        pytest.param(
+            ["scan fs --scanners bandit"],
+            ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "--scanners", "bandit"],
+            id="one-quoted-argument",
+        ),
+    ],
+)
+def test_scan_fs_is_given_the_mount_as_its_path_argument_and_no_variable(
+    runner, tmp_path, words, inner
+):
+    """Where the mount goes when the caller names no directory: after the subject
+    wherever it stands, and ahead of the --sandbox off the entrypoint adds. The scan
+    inside is told nothing by ASH_SOURCE_DIR, which it would answer with a line."""
+    result = _ash(runner, tmp_path, *words)
+    run_argv = _run_argv(result)
+
+    assert _inner_argv(run_argv) == inner
+    assert "ASH_SOURCE_DIR=/src" not in run_argv, run_argv
+    assert "ASH_OUTPUT_DIR=/out" in run_argv, run_argv
+    assert "Deprecated" not in result.stderr, result.stderr
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("words", "inner"),
+    [
+        pytest.param(
+            ["scan"], ["ash", "scan", *SANDBOX_OFF], id="scan-with-no-subject"
+        ),
+        pytest.param(
+            ["--scanners", "bandit"],
+            ["ash", *SANDBOX_OFF, "--scanners", "bandit"],
+            id="no-command-at-all",
+        ),
+        pytest.param(
+            ["report", "--format", "text"],
+            ["ash", "report", "--format", "text"],
+            id="report",
+        ),
+    ],
+)
+def test_a_form_with_no_scan_subject_is_still_given_the_variable(
+    runner, tmp_path, words, inner
+):
+    """Only `scan fs` can be given a PATH: the form with no subject refuses one, and
+    the other commands read the directory from the variable (config as its own
+    --source-dir's)."""
+    run_argv = _run_argv(_ash(runner, tmp_path, *words))
+
+    assert _inner_argv(run_argv) == inner
+    assert "ASH_SOURCE_DIR=/src" in run_argv, run_argv
+
+
+@pytest.mark.integration
+def test_a_path_typed_inside_one_quoted_argument_is_left_as_typed(runner, tmp_path):
+    """A path word that is already among the scan's words is the caller's own, and a
+    second one would be refused by the scan inside, so nothing is added and the scan
+    keeps the variable it had."""
+    run_argv = _run_argv(_ash(runner, tmp_path, "scan fs project"))
+
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", *SANDBOX_OFF, "project"]
+    assert "ASH_SOURCE_DIR=/src" in run_argv, run_argv
 
 
 @pytest.mark.integration
@@ -179,7 +277,7 @@ def test_source_dir_still_names_the_directory_and_warns_once(runner, tmp_path):
     run_argv = _run_argv(result)
 
     assert os.path.realpath(_mounted_source(run_argv)) == os.path.realpath(source)
-    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "--sandbox", "off"]
+    assert _inner_argv(run_argv) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF]
     deprecated = [
         line for line in result.stderr.splitlines() if line.startswith("Deprecated:")
     ]
@@ -217,7 +315,11 @@ def test_the_subject_less_form_still_forwards_its_words(runner, tmp_path):
     result = _ash(runner, tmp_path, "--source-dir", str(source), "scan")
     run_argv = _run_argv(result)
 
-    assert _inner_argv(run_argv) == ["ash", "scan", "--sandbox", "off"]
+    assert _inner_argv(run_argv) == ["ash", "scan", *SANDBOX_OFF]
+    assert "ASH_SOURCE_DIR=/src" in run_argv, (
+        "the form with no subject is told its directory by the variable, and refuses "
+        "a PATH argument"
+    )
     assert "Deprecated" not in result.stderr, (
         "the scan inside prints the one line for a subject-less scan, and it names "
         "the same replacement, so the entrypoint adds none of its own"
@@ -340,11 +442,11 @@ def test_an_option_value_named_like_the_workspace_subject_is_not_the_subject(
         assert inner == [
             "ash",
             "scan",
-            "--sandbox",
-            "off",
+            *SANDBOX_OFF,
             "--output-formats",
             "workspace",
             "fs",
+            "/src",
         ]
 
 

@@ -478,16 +478,17 @@ ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modul
 # inspect`, `--config config`). Walks the words the refusals checked and the
 # scan is given. When that subcommand is scan, the words after it are read once
 # more: the subject (ASH_SCAN_SUBJECTS) is in SUBJECT, with its index in SUBJECT_AT,
-# and the first --archive option is at ARCHIVE_AT (each "" or -1 when there is none).
-# These are read from ASH_ARG_WORDS, as the argument loop's words were split, so a
-# scan named inside one quoted argument (`./ash "scan workspace f"`) is read as it is
-# when its words are given one by one. SCAN_SUBJECT is the subject the argument loop
-# read as it went.
+# the word after it that names a path is at SUBJECT_PATH_AT, and the first --archive
+# option is at ARCHIVE_AT (each "" or -1 when there is none). These are read from
+# ASH_ARG_WORDS, as the argument loop's words were split, so a scan named inside one
+# quoted argument (`./ash "scan workspace f"`) is read as it is when its words are
+# given one by one. SCAN_SUBJECT is the subject the argument loop read as it went.
 detect_subcommand() {
   SUBCOMMAND=""
   SUBCOMMAND_AT=-1
   SUBJECT=""
   SUBJECT_AT=-1
+  SUBJECT_PATH_AT=-1
   ARCHIVE_AT=-1
   SUBJECT_WORD_SEEN="NO"
   SKIP_VALUE="NO"
@@ -552,11 +553,15 @@ detect_subcommand() {
           break
         fi
       done
-    elif [[ "${ASH_WORD}" != -* && "${SUBJECT_WORD_SEEN}" = "NO" ]]; then
-      SUBJECT_WORD_SEEN="YES"
-      if [[ " ${ASH_SCAN_SUBJECTS} " == *" ${ASH_WORD} "* ]]; then
-        SUBJECT="${ASH_WORD}"
-        SUBJECT_AT=${ASH_WORD_AT}
+    elif [[ "${ASH_WORD}" != -* ]]; then
+      if [[ "${SUBJECT_WORD_SEEN}" = "NO" ]]; then
+        SUBJECT_WORD_SEEN="YES"
+        if [[ " ${ASH_SCAN_SUBJECTS} " == *" ${ASH_WORD} "* ]]; then
+          SUBJECT="${ASH_WORD}"
+          SUBJECT_AT=${ASH_WORD_AT}
+        fi
+      elif ((SUBJECT_AT >= 0 && SUBJECT_PATH_AT < 0)); then
+        SUBJECT_PATH_AT=${ASH_WORD_AT}
       fi
     fi
   done
@@ -1153,7 +1158,8 @@ forward_word() {
     # `scan <subject> [PATH]`: the first word after scan that is not an option or an
     # option's value names the subject (ASH_SCAN_SUBJECTS), and the next one is the
     # directory to scan. The directory is this script's SOURCE_DIR, as --source-dir
-    # is, and is not forwarded: the scan inside finds it in ASH_SOURCE_DIR=/src.
+    # is, and is not forwarded: the scan inside is given the mount as /src, as the PATH
+    # argument of the subject.
     if [[ "${SCAN_SUBJECT}" = "" ]]; then
       if [[ " ${ASH_SCAN_SUBJECTS} " == *" $1 "* ]]; then
         SCAN_SUBJECT="$1"
@@ -2254,6 +2260,28 @@ else
       if [[ -n "${NO_COLOR_ARG}" ]] && [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_COLOR} " == *" ${TAKER} "* ]]; then
         ASH_FLAG_ARGS="${ASH_FLAG_ARGS} ${NO_COLOR_ARG}"
       fi
+      # The directory mounted at /src is given to `scan fs` as its PATH argument,
+      # right after the subject, so the scan inside reads it from the argument and not
+      # from ASH_SOURCE_DIR, a variable it tells the reader is deprecated as the way to
+      # name what a scan scans. Every other command takes the mount from
+      # ASH_SOURCE_DIR as before: report and merge read it, config reads it as the
+      # variable of its own --source-dir, and the form with no subject (`./ash scan`,
+      # `./ash --scanners bandit`) names its directory that way, since that form
+      # refuses a PATH. A scan whose words already hold a path after the subject (one
+      # typed inside a single quoted argument) is left as it was typed, with the
+      # variable.
+      SOURCE_DIR_RUN_ARGS=(-e "ASH_SOURCE_DIR=/src")
+      SOURCE_PATH_ADDED="NO"
+      if [[ "${SUBCOMMAND}" = "scan" && "${SUBJECT}" = "fs" ]] && ((SUBJECT_PATH_AT < 0)); then
+        AFTER_SUBJECT_AT=$((SUBJECT_AT + 1))
+        ASH_ARG_WORDS=(
+          "${ASH_ARG_WORDS[@]:0:AFTER_SUBJECT_AT}"
+          /src
+          "${ASH_ARG_WORDS[@]:AFTER_SUBJECT_AT}"
+        )
+        SOURCE_DIR_RUN_ARGS=()
+        SOURCE_PATH_ADDED="YES"
+      fi
       # --sandbox off goes right after the command word, or before every word when
       # no command is named, never after the caller's words: there a `--` would make
       # it scan's extra arguments, and a value-taking option left last
@@ -2266,10 +2294,14 @@ else
       ASH_RUN_WORDS=("${ASH_ARG_WORDS[@]}")
       if [[ -z "${SUBCOMMAND}" || " ${ASH_TAKES_SANDBOX} " == *" ${SUBCOMMAND} "* ]]; then
         SANDBOX_OFF_AT=$((SUBCOMMAND_AT + 1))
-        # After the subject when scan is followed by one (`scan fs`), so the
-        # scan inside reads `scan fs --sandbox off ...`.
+        # After the subject when scan is followed by one (`scan fs`), and after the
+        # PATH argument given to it above, so the scan inside reads
+        # `scan fs /src --sandbox off ...`.
         if [[ "${SUBCOMMAND}" = "scan" && -n "${ASH_ARG_WORDS[SANDBOX_OFF_AT]:-}" && " ${ASH_SCAN_SUBJECTS} " == *" ${ASH_ARG_WORDS[SANDBOX_OFF_AT]} "* ]]; then
           SANDBOX_OFF_AT=$((SANDBOX_OFF_AT + 1))
+          if [[ "${SOURCE_PATH_ADDED}" = "YES" ]]; then
+            SANDBOX_OFF_AT=$((SANDBOX_OFF_AT + 1))
+          fi
         fi
         # --offline is this script's option too, read by the argument loop and not
         # forwarded: it cut the container's network and set the image's build
@@ -2293,7 +2325,8 @@ else
       # arguments (`./ash report`) would otherwise be refused, because ash passes an
       # option given before a subcommand on to it only when it takes the option, and
       # only scan takes --source-dir. scan, report and merge read the variables;
-      # anything set on the command line still wins over them.
+      # anything set on the command line still wins over them. `scan fs` is given the
+      # source directory as its PATH argument instead (SOURCE_DIR_RUN_ARGS, above).
       # The image name is quoted, here and in the build, as is the build target that
       # names its default: either is the caller's value, and unquoted, a value with
       # spaces gave the runner options of its own (`-e ASH_CONFIG=...`) or gave the
@@ -2309,7 +2342,7 @@ else
           -e "ASH_ACTUAL_SOURCE_DIR=${SOURCE_DIR}"
           -e "ASH_ACTUAL_OUTPUT_DIR=${OUTPUT_DIR}"
           -e "ASH_DEBUG=${DEBUG}"
-          -e "ASH_SOURCE_DIR=/src"
+          "${SOURCE_DIR_RUN_ARGS[@]}"
           -e "ASH_OUTPUT_DIR=/out"
           --mount source="${SOURCE_DIR}",type=bind,destination=/src,readonly
           --mount source="${OUTPUT_DIR}",type=bind,destination=/out
