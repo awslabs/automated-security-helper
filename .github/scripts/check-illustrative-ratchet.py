@@ -783,12 +783,14 @@ def _case_command_seed_lost_and_left(r: _SelfRepo) -> list[tuple[str, str]]:
 def _case_seed_deleted_in_range(r: _SelfRepo) -> list[tuple[str, str]]:
     shutil.rmtree(r.path / ILLUSTRATIVE_SEED_DIR)
     removed = r.commit("the seed directory deleted, the .gitkeep with it")
+    r.commit("a later change that leaves it deleted")
     return [("", removed)]
 
 
 def _case_command_seed_deleted_in_range(r: _SelfRepo) -> list[tuple[str, str]]:
     (r.path / UNEXECUTED_SEED_FILE).unlink()
     removed = r.commit("the unexecuted-command seed deleted")
+    r.commit("a later change that leaves it deleted")
     return [("", removed)]
 
 

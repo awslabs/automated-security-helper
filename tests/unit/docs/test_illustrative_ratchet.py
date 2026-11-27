@@ -1158,7 +1158,9 @@ def test_a_fork_point_that_lost_a_seed_fails_while_the_range_leaves_it_gone(
 
     violations = _violations(repo)
 
-    assert [(v.seed, v.page, v.text) for v in violations] == [(seed, "", lost)]
+    assert [(v.seed, v.page, v.text, v.removed_in_range) for v in violations] == [
+        (seed, "", lost, False)
+    ]
 
 
 @pytest.mark.integration
@@ -1238,6 +1240,7 @@ def test_the_script_exits_one_when_the_fork_point_lost_a_seed(repo):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "::error" in result.stdout
     assert ".gitkeep" in result.stdout
+    assert "is gone at the fork point" in result.stdout
 
 
 @pytest.mark.integration
@@ -1253,13 +1256,40 @@ def test_a_range_that_deletes_a_seed_the_fork_point_holds_fails(repo, seed, cons
     """The fork point has the seed and the head holds none of its files. The head has no
     line to compare, which read as a range that adds nothing, so the range passed and
     the next range cut from it found a lost seed instead, in a pull request that had
-    deleted nothing."""
+    deleted nothing. The violation says the range deleted it, which is not what a seed
+    lost at the fork point says."""
     _delete(repo, getattr(checks(), constant))
     removed = repo.commit("the seed deleted in the range")
 
     violations = _violations(repo)
 
-    assert [(v.seed, v.page, v.text) for v in violations] == [(seed, "", removed)]
+    assert [(v.seed, v.page, v.text, v.removed_in_range) for v in violations] == [
+        (seed, "", removed, True)
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("seed", "constant"),
+    [
+        ("illustrative", "ILLUSTRATIVE_SEED_DIR"),
+        ("unexecuted", "UNEXECUTED_SEED_FILE"),
+    ],
+    ids=["the illustrative seed", "the unexecuted-command seed"],
+)
+def test_the_violation_for_a_deleted_seed_names_the_commit_that_deleted_it(
+    repo, seed, constant
+):
+    """The range holds commits after the one that deleted the seed. The violation names
+    the deleting commit, which is where the author looks, and not the head."""
+    _delete(repo, getattr(checks(), constant))
+    deleted = repo.commit("the seed deleted in the range")
+    repo.commit("an unrelated change after it")
+    repo.commit("and another")
+
+    violations = _violations(repo)
+
+    assert [(v.seed, v.text) for v in violations] == [(seed, deleted)]
 
 
 @pytest.mark.integration
@@ -1331,6 +1361,8 @@ def test_the_script_exits_one_when_a_range_deletes_a_seed(repo, constant, keeps)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "::error" in result.stdout
     assert keeps in result.stdout
+    assert "and gone at the head" in result.stdout
+    assert "is gone at the fork point" not in result.stdout
 
 
 @pytest.mark.unit

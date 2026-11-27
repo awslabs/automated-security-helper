@@ -80,7 +80,9 @@ USAGE_SHAPED = [
     "ash new [OPTIONS] [NAME]...",
 ]
 #: First commands that are no usage line, though they begin like one or hold ``[OPTIONS]``:
-#: an example is a command with values, and a usage line has none.
+#: an example is a command with values, and a usage line has none. Click prints
+#: ``[OPTIONS]`` first, so a command of placeholders alone, or with them before
+#: ``[OPTIONS]``, is none either.
 NOT_USAGE_SHAPED = [
     "ash scan",
     "ash config lint",
@@ -88,6 +90,8 @@ NOT_USAGE_SHAPED = [
     "ash scan --source-dir . [OPTIONS]",
     "ash scan [OPTIONS] --source-dir .",
     "ash scan [OPTIONS] src",
+    "ash config get [config_path]",
+    "ash scan [SOURCE_DIR] [OPTIONS]",
     "ash suppress add B602 --symbol Handler.run",
     "uvx ash scan [OPTIONS]",
 ]
@@ -685,8 +689,9 @@ def test_a_block_without_the_shape_of_a_usage_line_is_counted_in_a_generated_pag
     tmp_path, command
 ):
     """The controls for the case above: a command with values, one with flags before or
-    after ``[OPTIONS]``, a bare word where a placeholder belongs, and a command that
-    starts with another program. Each is something a person wrote, so each is counted."""
+    after ``[OPTIONS]``, a bare word where a placeholder belongs, placeholders with no
+    ``[OPTIONS]`` in front, and a command that starts with another program. Each is
+    something a person wrote, so each is counted."""
     dc = checks()
     _list_generators(tmp_path)
     text = _reference(_text(command), banner=BANNER + "\n")
