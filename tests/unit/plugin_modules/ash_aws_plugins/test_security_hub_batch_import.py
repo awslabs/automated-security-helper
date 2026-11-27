@@ -3638,15 +3638,17 @@ def test_a_destination_scope_the_operator_read_is_recorded_and_shown_by_its_refe
         assert _SCOPE_FROM_THE_ENVIRONMENT not in json.dumps(view)
 
 
-# A set member the operator's file read from the environment has no reference of
-# the file's own, and the results file and `ash config get` dump a set as a list
-# of plain strings, so nothing in them carries the loader's mark. These cells
-# guard that such a member is still recorded and shown by the reference the file
-# wrote, and that the value is in no log line either:
+# The loader's own record has no reference for a set member the operator's file
+# read from the environment, so the load describes it from the loader's mark, and
+# the results file and `ash config get` dump a set as a list of plain strings,
+# so nothing in them carries the mark. These cells guard that such a member is
+# recorded and shown by the reference the file wrote, and that the value is in
+# no log line either:
 #   - the destination cell: findings_scope is a destination option, copied into
 #     the section by the reporter confinement, once with a checkout that writes
 #     only the archive flag and once with a checkout that holds no config file,
-#     where nothing is confined and the load returns before any confinement.
+#     where nothing is confined and resolve_config returns before any
+#     confinement.
 #   - the other-option cells: a set under an option that is no destination at
 #     all, on a load with no file inside the tree: the checkout is an empty
 #     directory, and the named file sits outside it.
@@ -3749,11 +3751,12 @@ def test_a_set_member_under_an_option_that_is_no_destination_is_recorded_and_sho
     """ASH_CONFIG's file, outside the tree, writes an option of its own under the
     reporter's options, ``custom_labels``, as a set whose one member is read from
     a variable, and the checkout is an empty directory with no config file. No
-    file is inside the tree, so the load returns before any confinement, and the
-    loader's own record holds no reference for the member. The record of the
-    configuration and what `ash config get` shows hold the reference in a list of
-    one entry, the value is in neither, and the DEBUG line of the section's
-    lookup, which is logged, does not hold it."""
+    file is inside the tree, so resolve_config returns before any confinement.
+    The loader's own record holds no reference for the member, and the load of
+    the file describes it from its mark. The record of the configuration and what
+    `ash config get` shows hold the reference in a list of one entry, the value
+    is in neither, and the DEBUG line of the section's lookup, which is logged,
+    does not hold it."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     monkeypatch.setenv("ASH_TEST_SH_LABEL", _SET_LABEL)
@@ -3772,7 +3775,7 @@ def test_a_set_member_in_a_file_named_outside_the_tree_is_recorded_and_shown_by_
 ):
     """The same set, read from a file the caller names with ``config_path`` that
     sits outside the checkout, with ASH_CONFIG unset: the selected chain is wholly
-    the operator's, and that load returns before any confinement too."""
+    the operator's, and resolve_config returns before any confinement here too."""
     from automated_security_helper.config.resolve_config import resolve_config
 
     monkeypatch.setenv("ASH_TEST_SH_LABEL", _SET_LABEL)
@@ -3784,6 +3787,111 @@ def test_a_set_member_in_a_file_named_outside_the_tree_is_recorded_and_shown_by_
     config = resolve_config(config_path=named, source_dir=checkout)
 
     _no_label_in_either_view_or_log(config, caplog)
+
+
+# A set member a file inside the checkout read from the environment is described
+# when that file loads, before any confinement runs. These cells guard what that
+# early description must not do:
+#   - the replaced cell: the S3 reporter's bucket_name, a destination option the
+#     reporter confinement replaces with the operator's that is no operator-only
+#     option, is written by the checkout as a set with one member read from a
+#     variable and by the operator's file as a set with a literal member equal to
+#     the value. The description at that member names a value the configuration no
+#     longer holds, and left in place it would be read into the operator's
+#     literal. Both views hold the literal as written, and no reference.
+#   - the once cell: custom_labels, an option no confinement replaces, written by
+#     the checkout as a set with one member read from a variable. The step that
+#     describes set members runs at the end of the load and again after the
+#     confinement, and the member still has one reference, one displayed
+#     reference and one rewrite, with its value among those redacted once.
+@pytest.mark.unit
+def test_a_set_the_repository_read_is_replaced_by_the_operators_literal_without_a_reference(
+    tmp_path, monkeypatch
+):
+    """The checkout's file writes the S3 reporter's bucket_name as a set whose one
+    member is read from a variable. The operator's file, outside the tree, writes
+    it as a set whose one member is a literal equal to what the variable gave. The
+    configuration holds the operator's set, and neither the record nor `ash
+    config get` holds a reference at it: a reference there would turn the
+    operator's literal into the checkout's reference, and the record would tell
+    whether an operator's literal equals a value the repository's file read."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_S3_BUCKET_NAME", _SCOPE_FROM_THE_ENVIRONMENT)
+    operator = tmp_path / "operator" / "ash.yaml"
+    operator.parent.mkdir()
+    operator.write_text(
+        "reporters:\n"
+        "  s3:\n"
+        "    options:\n"
+        "      bucket_name: !!set\n"
+        f"        ? {_SCOPE_FROM_THE_ENVIRONMENT}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ASH_CONFIG", str(operator))
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  s3:\n"
+        "    options:\n"
+        "      bucket_name: !!set\n"
+        "        ? ${ASH_TEST_S3_BUCKET_NAME}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    # The control: the reporter's section holds the operator's set.
+    section = config.get_plugin_config(plugin_type="reporter", plugin_name="s3")
+    assert set(section["options"]["bucket_name"]) == {_SCOPE_FROM_THE_ENVIRONMENT}
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["s3"]["options"]
+        assert options["bucket_name"] == [_SCOPE_FROM_THE_ENVIRONMENT], options
+        assert "${ASH_TEST_S3_BUCKET_NAME}" not in json.dumps(view)
+
+
+@pytest.mark.unit
+def test_a_set_member_the_checkout_read_is_described_once_after_the_confinement(
+    tmp_path, monkeypatch
+):
+    """The checkout's file writes custom_labels as a set whose one member is read
+    from a variable. The load describes the member, and the step runs again once
+    the confinement has run: the second run finds the member described at its
+    place and adds nothing, so the configuration holds one reference, one
+    displayed reference and one rewrite for it, and its value once among the
+    values it redacts."""
+    from automated_security_helper.config.environment_record import UNKNOWN_INDEX
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.setenv("ASH_TEST_SH_LABEL", _SET_LABEL)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    checkout = _checkout_with_config(
+        tmp_path,
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      custom_labels: !!set\n"
+        "        ? ${ASH_TEST_SH_LABEL}\n",
+    )
+
+    config = resolve_config(source_dir=checkout)
+
+    def at_the_set(items):
+        return [
+            item
+            for item in items
+            if item.path
+            and item.path[-1] is UNKNOWN_INDEX
+            and item.resolved == _SET_LABEL
+        ]
+
+    # The control: the member is described, in the record and in the view.
+    for view in _recorded_and_shown(config):
+        options = view["reporters"]["aws-security-hub"]["options"]
+        assert options["custom_labels"] == ["${ASH_TEST_SH_LABEL}"], options
+    assert len(at_the_set(config._environment_references)) == 1
+    assert len(at_the_set(config._displayed_environment_references)) == 1
+    assert len(at_the_set(config._written_references)) == 1
+    assert config._environment_values.count(_SET_LABEL) == 1
 
 
 @pytest.mark.unit

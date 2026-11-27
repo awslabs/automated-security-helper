@@ -161,6 +161,36 @@ def test_a_profile_under_dot_ash_extending_past_it_adds_its_chain_values(
     assert "dot-ash-base-held-value" in values, values
 
 
+# A set member a profile's file read from the environment is described by the
+# load itself (load_config_file_for_run), so the redaction set a client-delivered
+# scan is given holds it. The loader's own pairing walks mappings and lists, so a
+# set member is in none of the profile's recorded reads:
+#   - the set cell: the profile writes an option of its own under a reporter's
+#     options as a set whose one member is read from a variable, and the helper's
+#     result holds the value.
+def test_a_set_member_the_profile_read_joins_the_redaction_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The profile writes ``custom_labels`` as a ``!!set`` with one member read
+    from a variable. The member is no mapping value and no list entry, and the
+    set is the only place the file holds the variable, so the helper holds the
+    value only if the load described the member."""
+    monkeypatch.setenv("ASH_TEST_PROFILE_SET_MEMBER", "profile-set-member-held-value")
+    profile = tmp_path / "profile.yaml"
+    profile.write_text(
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    options:\n"
+        "      custom_labels: !!set\n"
+        "        ? ${ASH_TEST_PROFILE_SET_MEMBER}\n",
+        encoding="utf-8",
+    )
+
+    values = _profile_environment_values(profile)
+
+    assert "profile-set-member-held-value" in values, values
+
+
 def test_no_profile_reads_nothing():
     assert _profile_environment_values(None) == ()
 

@@ -918,3 +918,124 @@ def test_a_bedrock_model_read_from_the_environment_is_logged_as_its_reference(
     client = reporter._make_model_client(object())
     assert client._model_id == CANARY
     assert client._model_label == "${ASH_PROBE_CANARY}"
+
+
+# ---------------------------------------------------------------------------
+# A set member a file read from the environment
+# ---------------------------------------------------------------------------
+
+# The loader's own pairing walks mappings and lists, so a set member a file read
+# from the environment has no reference, no rewrite and no redaction value of its
+# own. Every load a run makes (load_config_file_for_run) describes it, so each
+# writer that starts from such a configuration holds the reference and never the
+# value. These cells guard:
+#   - the load cell: the configuration's values hold the value, and the record of
+#     its JSON-mode dump, the form every writer starts from, holds the reference
+#     as a list of one entry and not the value.
+#   - the session cell: a registered profile's copy, written by
+#     materialize_session_config, holds the reference and not the value.
+#   - the client's copy cell: the profile is the base a client's patch applies
+#     to, and the copy written after an op elsewhere holds the reference too.
+SET_MEMBER = "operator-set-member-read-from-the-environment"
+SET_REFERENCE = "${ASH_TEST_SET_MEMBER}"
+SET_PROFILE = (
+    "project_name: set-profile\n"
+    "global_settings:\n"
+    "  mcp:\n"
+    "    runtime_overrides:\n"
+    "      enabled: true\n"
+    "      allowed_paths:\n"
+    "        - /project_name\n"
+    "      denied_paths: []\n"
+    "reporters:\n"
+    "  aws-security-hub:\n"
+    "    options:\n"
+    "      custom_labels: !!set\n"
+    "        ? ${ASH_TEST_SET_MEMBER}\n"
+)
+
+
+def _a_profile_with_a_set(tmp_path: Path, probe_env) -> Path:
+    probe_env.setenv("ASH_TEST_SET_MEMBER", SET_MEMBER)
+    probe_env.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    probe_env.setenv("ASH_MCP_TRANSPORT", "stdio")
+    return _operator_config(tmp_path, SET_PROFILE, "set.ash.yaml")
+
+
+def _security_hub_options(document: dict) -> dict:
+    return document["reporters"]["aws-security-hub"]["options"]
+
+
+def test_a_set_member_a_load_read_is_recorded_as_its_reference(tmp_path, probe_env):
+    """The load of a file that writes ``custom_labels`` as a set with one member
+    read from a variable: the configuration's values hold the value, so every
+    message of a run redacts it, and the record of its JSON-mode dump holds the
+    reference. The dump is read first (the control): it holds the value, so only
+    a rewrite the load made puts the reference in its place."""
+    from automated_security_helper.config.config_validator import record_of_config
+    from automated_security_helper.config.config_writer import user_config_data
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    profile = _a_profile_with_a_set(tmp_path, probe_env)
+
+    _document, config = load_config_file_for_run(profile)
+
+    assert SET_MEMBER in config._environment_values, config._environment_values
+    dumped = user_config_data(config)
+    assert _security_hub_options(dumped)["custom_labels"] == [SET_MEMBER]
+    recorded = record_of_config(config, dumped)
+    assert _security_hub_options(recorded)["custom_labels"] == [SET_REFERENCE]
+    assert SET_MEMBER not in json.dumps(recorded)
+
+
+def test_a_registered_profiles_set_member_is_written_to_the_session_copy_by_its_reference(
+    tmp_path, probe_env
+):
+    """The copy the MCP server writes into a session's sandbox for a registered
+    profile whose file reads a set member from the environment holds the
+    reference, and the text holds the value nowhere."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    profile = _a_profile_with_a_set(tmp_path, probe_env)
+    registry = profile_registry.register_profiles([f"sets={profile}"])
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-set", registry["sets"].config
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert SET_MEMBER not in text, text
+    assert SET_REFERENCE in text, text
+
+
+def test_a_patched_copy_of_a_profile_with_a_set_member_holds_its_reference(
+    tmp_path, probe_env
+):
+    """The base a client's patch applies to is loaded as a run loads a file. An
+    op elsewhere (the project's name) leaves the set alone, and the client's copy
+    written from the patched configuration holds the reference, not the value."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.runtime_patch import apply_runtime_patch
+
+    profile = _a_profile_with_a_set(tmp_path, probe_env)
+    base = profile_registry.register_profiles([f"sets={profile}"])["sets"].config
+
+    patched = apply_runtime_patch(
+        base,
+        [{"op": "replace", "path": "/project_name", "value": "patched"}],
+        allowlist=base.global_settings.mcp.runtime_overrides,
+    )
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-set", patched, client_patched=True
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert patched.project_name == "patched"
+    assert SET_MEMBER not in text, text
+    assert SET_REFERENCE in text, text

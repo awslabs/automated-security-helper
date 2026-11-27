@@ -271,9 +271,11 @@ _SHAPES = {
     "mapping-value": "findings_scope:\n  scope: ${ASH_TEST_GETCFG_VALUE}\n",
     "mapping-key": "findings_scope:\n  ${ASH_TEST_GETCFG_VALUE}: literal-entry\n",
     # The loader accepts a ``!!set``: the YAML loader builds a Python set, and
-    # its member resolves as any other scalar does. The configuration's record
-    # of what it read walks mappings, lists and strings only, so a set member
-    # is in no record of reads, and only the scalar's own mark says it was read.
+    # its member resolves as any other scalar does. The loader's own record of
+    # what a file read walks mappings, lists and strings only, so the file's
+    # record holds no reference for a set member; the load describes it once it
+    # ends, from the scalar's own mark (``load_config_file_for_run``), and the
+    # marker below reads the same mark.
     "set-member": "findings_scope: !!set\n  ? ${ASH_TEST_GETCFG_VALUE}\n",
 }
 
@@ -680,10 +682,10 @@ def test_a_scanner_option_with_a_surviving_reference_shows_the_reference(
 def test_a_set_member_read_from_the_environment_shows_its_reference_with_no_file(
     tmp_path, monkeypatch
 ):
-    """No reference is recorded for a set member, so none survives even where
-    the file's references are kept. The loader's mark on the member names the
-    reference the file wrote, so the marker shows it in a JSON list, where it
-    printed the set, value included."""
+    """A set member has no position for the loader's own record to name, so the
+    load describes it from the loader's mark on the member, which names the
+    reference the file wrote. The marker shows that reference in a JSON list,
+    where it printed the set, value included."""
     body = _section(_SHAPES["set-member"])
 
     result = _found_by_ash_config(tmp_path, monkeypatch, body)
