@@ -168,6 +168,15 @@
 
 ### Fixes
 
+- **`ash dependencies install` refuses a path inside the scanned tree whichever way the
+  tree is named.** A `--virtualenv-path` or `--binary-path` inside the scanned source
+  tree is refused unless `ASH_ALLOW_IN_TREE_TOOLS` admits it. Besides comparing real
+  paths as text, the check asks by device and inode whether the tree is the path or
+  one of its parents, as a scan does, so the tree named in another letter case on a
+  case-insensitive volume, or reached through a bind mount, counts as the tree. A path
+  that does not exist yet is judged by its nearest parent that does, and a filesystem
+  that reports no inode numbers is judged by the real path alone.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
