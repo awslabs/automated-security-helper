@@ -32,9 +32,12 @@ a program before the archive, bytes after its end record, a member the central
 directory leaves out, and local headers (a name or a flag included) and data
 descriptors that disagree with the central directory, and a zip64 end record that its
 locator does not place where it lies. Some are written byte by byte (``_Raw``), since
-no zip writer makes them. The controls hand both entry points every layout a writer does make: data
-descriptors with and without their signature, in four-byte and eight-byte sizes, zip64
-end records, an archive comment and an empty archive.
+no zip writer makes them. The controls hand both entry points every layout a writer does
+make: data descriptors with and without their signature, in four-byte and eight-byte
+sizes, zip64 end records, an archive comment and an empty archive. They also hand them
+archives that real writers made, ``git archive`` and Info-ZIP's ``zip`` (to a file and
+to a pipe), committed as bytes under ``tests/test_data/source_archive``, so the rules are
+held to what those tools write and not only to what zipfile and ``_Raw`` can.
 
 A member holds what it declares (rule 9). zipfile cuts a member at its declared size and
 checks the CRC-32 of what it returned, so ``_Raw`` and ``_deflated_raw`` write members
@@ -1664,7 +1667,86 @@ SECOND_NAMES = [
     ),
 ]
 
-#: Every layout a zip writer makes, which rule 6 has to admit: (archive, tree).
+#: The archives real zip writers made, committed as bytes (the README beside them says
+#: how each was made), and the tree each holds. The tree's two data files are built by
+#: formula: bytes that no zip writer can shrink, and one run of a line that deflates to
+#: a few hundred bytes and inflates past one step of ``_INFLATE_STEP_BYTES``.
+_WRITERS = Path(__file__).resolve().parents[2] / "test_data" / "source_archive"
+_FIXTURE_BLOB = b"".join(hashlib.sha256(bytes([at])).digest() for at in range(8))
+_FIXTURE_REPEATED = b"0123456789abcdef\n" * 5000
+_FIXTURE_TREE: Dict[str, Optional[bytes]] = {
+    "README.md": (
+        b"# Fixture project\n"
+        b"\n"
+        b"Small on purpose: a few text files, one empty file, one binary file and one\n"
+        b"file that compresses to almost nothing.\n"
+    ),
+    "app": None,
+    "app/main.py": (
+        b'"""Entry point of the fixture project."""\n'
+        b"\n"
+        b"from app.util.helpers import greeting, total\n"
+        b"\n"
+        b"\n"
+        b"def main(names):\n"
+        b'    """Print a greeting for each name and return how many there were."""\n'
+        b"    for name in names:\n"
+        b"        print(greeting(name))\n"
+        b"    return total(names)\n"
+        b"\n"
+        b"\n"
+        b'if __name__ == "__main__":\n'
+        b'    raise SystemExit(0 if main(["ada", "grace", "edsger"]) == 3 else 1)\n'
+    ),
+    "app/util": None,
+    "app/util/__init__.py": b"",
+    "app/util/helpers.py": (
+        b'"""Helpers the entry point uses."""\n'
+        b"\n"
+        b"\n"
+        b"def greeting(name):\n"
+        b'    """The line printed for one name."""\n'
+        b'    return f"hello, {name}"\n'
+        b"\n"
+        b"\n"
+        b"def total(names):\n"
+        b'    """How many names there are."""\n'
+        b"    return len(list(names))\n"
+    ),
+    "bin": None,
+    "bin/run.sh": (b'#!/bin/sh\nexec python3 -I -B "$(dirname "$0")/../app/main.py"\n'),
+    "data": None,
+    "data/blob.bin": _FIXTURE_BLOB,
+    "data/repeated.txt": _FIXTURE_REPEATED,
+    "docs": None,
+    "docs/guide.md": (
+        b"# Guide\n"
+        b"\n"
+        b"The entry point is `app/main.py`. It greets each name it is given and returns\n"
+        b"how many names there were.\n"
+        b"\n"
+        b"## Layout\n"
+        b"\n"
+        b"- `app/` holds the code.\n"
+        b"- `bin/run.sh` runs the entry point.\n"
+        b"- `data/` holds two files: one that compresses well and one that does not.\n"
+        b"- `docs/` holds this guide.\n"
+    ),
+    "empty": None,
+}
+#: git archives what git tracks, and git tracks no empty directory.
+_GIT_FIXTURE_TREE = {
+    path: held for path, held in _FIXTURE_TREE.items() if path != "empty"
+}
+
+
+def _writer_archive(name: str) -> bytes:
+    """The bytes of one archive a real zip writer made, from ``_WRITERS``."""
+    return (_WRITERS / name).read_bytes()
+
+
+#: Every layout a zip writer makes, which rules 6, 8 and 9 have to admit: the archive
+#: (or what builds it) and the tree both entry points extract from it.
 _PIPED = {"app.py": b"print('written to a pipe')\n", "pkg/mod.py": b"VALUE = 1\n"}
 _PIPED_TREE = {
     "app.py": _PIPED["app.py"],
@@ -1749,6 +1831,21 @@ ADMITTED = [
         _raw_zip([_deflated_raw(_NOISE)]),
         {"a.py": _NOISE},
         id="a-deflated-member-longer-than-one-read",
+    ),
+    pytest.param(
+        partial(_writer_archive, "git-archive.zip"),
+        _GIT_FIXTURE_TREE,
+        id="git-archive-with-the-commit-as-its-comment",
+    ),
+    pytest.param(
+        partial(_writer_archive, "info-zip-file.zip"),
+        _FIXTURE_TREE,
+        id="info-zip-written-to-a-file",
+    ),
+    pytest.param(
+        partial(_writer_archive, "info-zip-pipe.zip"),
+        _FIXTURE_TREE,
+        id="info-zip-written-to-a-pipe",
     ),
 ]
 
@@ -2139,11 +2236,14 @@ class TestOneZipIsAdmittedHoweverItsWriterLaysItOut:
 
     A data descriptor in each of the four shapes the format allows (its signature or
     none, four-byte or eight-byte sizes), one whose local header gives the sizes as
-    well, zip64 end records, an archive comment, and no members at all.
+    well, zip64 end records, an archive comment, and no members at all; then the
+    archives ``git archive`` and Info-ZIP's ``zip`` wrote, which also have to pass the
+    rules on the method and the size of each member (8 and 9).
     """
 
-    @pytest.mark.parametrize("payload,tree", ADMITTED)
-    def test_both_entry_points_extract_it(self, tmp_path, payload, tree):
+    @pytest.mark.parametrize("source,tree", ADMITTED)
+    def test_both_entry_points_extract_it(self, tmp_path, source, tree):
+        payload = _payload_of(source)
         extracted = sa.extract_source_archive(
             _archive_file(tmp_path, payload), tmp_path / "tree"
         )
@@ -2171,6 +2271,63 @@ class TestOneZipIsAdmittedHoweverItsWriterLaysItOut:
             members = sa.admit_zip_members(archive)
 
         assert [member.filename for member in members] == ["caf\xe9.py"]
+
+
+class TestTheWritersArchivesAreWhatTheirReadmeSays:
+    """Controls for the rows of ``ADMITTED`` that name a real zip writer.
+
+    A row means something only for an archive of the layout it names, and an archive
+    made again by another version of the tool could lose it. Green at the base: they
+    read the committed archives with zipfile alone.
+    """
+
+    WRITERS = ["git-archive.zip", "info-zip-file.zip", "info-zip-pipe.zip"]
+
+    @staticmethod
+    def _files(name: str) -> List[zipfile.ZipInfo]:
+        with zipfile.ZipFile(io.BytesIO(_writer_archive(name))) as archive:
+            return [info for info in archive.infolist() if not info.is_dir()]
+
+    @pytest.mark.parametrize("name", WRITERS)
+    def test_each_holds_stored_and_deflated_members(self, name):
+        assert {info.compress_type for info in self._files(name)} == {
+            zipfile.ZIP_STORED,
+            zipfile.ZIP_DEFLATED,
+        }
+
+    @pytest.mark.parametrize("name", WRITERS)
+    def test_each_holds_a_stream_that_takes_more_than_one_step_to_inflate(self, name):
+        """Admission inflates a member in steps of ``_INFLATE_STEP_BYTES`` of output, so
+        a real writer's stream has to be longer than one."""
+        (repeated,) = [
+            info for info in self._files(name) if info.filename == "data/repeated.txt"
+        ]
+
+        assert repeated.compress_type == zipfile.ZIP_DEFLATED
+        assert repeated.file_size > sa._INFLATE_STEP_BYTES
+        assert repeated.compress_size < sa._INFLATE_STEP_BYTES
+
+    def test_only_the_pipe_archive_gives_its_files_data_descriptors(self):
+        """A zip written to a pipe cannot go back to a local header, so each of its files
+        carries its CRC-32 and sizes after its data; the other two have them before."""
+        descriptors = {
+            name: {bool(info.flag_bits & 0x8) for info in self._files(name)}
+            for name in self.WRITERS
+        }
+
+        assert descriptors == {
+            "git-archive.zip": {False},
+            "info-zip-file.zip": {False},
+            "info-zip-pipe.zip": {True},
+        }
+
+    def test_git_writes_the_commit_it_archived_as_the_archive_comment(self):
+        payload = _writer_archive("git-archive.zip")
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            comment = archive.comment
+
+        assert len(comment) == 40
+        assert set(comment) <= set(b"0123456789abcdef")
 
 
 class TestAUnicodePathField:
