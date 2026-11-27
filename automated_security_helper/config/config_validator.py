@@ -3742,11 +3742,13 @@ def _is_directory_under(relative: str, project_root: Path) -> bool:
 _REPEATED_SLASHES = re.compile(r"/{2,}")
 
 
-def _relative_through_links(form: str, project_root: Path) -> str:
-    """The rest of the absolute ``form`` under the root when its literal part
+def _relative_through_links(form: str, project_root: Path) -> Optional[str]:
+    """The rest of the absolute ``form`` after the root when its literal part
     (before any glob) reaches the root through a symbolic link: the pattern
     spelled through a linked path to the scanned tree, where the root is
-    resolved (``source_dir.resolve()``). Empty when it does not."""
+    resolved (``source_dir.resolve()``). Empty when the link resolves to the root
+    itself and nothing follows it; None when the literal part does not reach the
+    root."""
     literal: List[str] = []
     tail: List[str] = []
     for part in form.split("/"):
@@ -3755,15 +3757,21 @@ def _relative_through_links(form: str, project_root: Path) -> str:
         else:
             literal.append(part)
     if len(literal) < 2 or _DOT_COMPONENTS & set(literal):
-        return ""
+        return None
     try:
         real = Path(os.path.realpath("/".join(literal))).as_posix()
     except (OSError, ValueError):
-        return ""
+        return None
     root = project_root.as_posix().rstrip("/") + "/"
-    if not real.startswith(root):
-        return ""
-    return "/".join([real[len(root) :], *tail]) if tail else real[len(root) :]
+    # The root itself is under it: its real path is the root with its slash left off.
+    under = real if real.endswith("/") else real + "/"
+    if not under.startswith(root):
+        return None
+    below = real[len(root) :]
+    if not below:
+        # The link resolves to the root itself: what is left is what follows it.
+        return "/".join(tail)
+    return "/".join([below, *tail]) if tail else below
 
 
 def absolute_path_warning(
@@ -3848,7 +3856,10 @@ def absolute_path_warning(
     elif _names_something_under(form.lstrip("/"), project_root):
         relative = form.lstrip("/")
     else:
-        relative = _relative_through_links(form, project_root)
+        linked = _relative_through_links(form, project_root)
+        # A link that resolves to the root is the root, as its own spelling is.
+        under_root = linked is not None
+        relative = linked or ""
     if not (
         under_root
         or relative
