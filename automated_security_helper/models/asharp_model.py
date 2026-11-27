@@ -965,12 +965,21 @@ _THIS_MACHINE_PATH_KINDS = frozenset({"same-os", "container", "wsl"})
 
 #: A path on the machine that wrote a notice: an absolute path (``/home/alice/.venv``),
 #: a home path (``~/.cache``, ``~alice``), a drive path (``C:\Users\alice``), a path
-#: from the root of the current drive (``\Users\alice``), a network share
-#: (``\\server\share``), an extended-length or device path (``\\?\C:\Users\alice``,
-#: ``\\.\C:\Users\alice``) or a file URI in any case (``file:///home/alice``,
-#: ``FILE:///home/alice``). It has to start a token, so a slash inside a word
-#: (``windows/arm64``, ``n/a``), the path of a URL and a relative path (``./check``)
-#: are not one.
+#: relative to a drive's own directory (``C:Users\alice``), a path from the root of the
+#: current drive (``\Users\alice``), a network share (``\\server\share``,
+#: ``//server/share``), a root whose leading separator is doubled (``//home/alice``),
+#: an extended-length or device path (``\\?\C:\Users\alice``, ``\\.\C:\Users\alice``)
+#: or a file URI in any case (``file:///home/alice``, ``FILE:///home/alice``). It has
+#: to start a token, so a slash inside a word (``windows/arm64``, ``n/a``), the path of
+#: a URL and a relative path (``./check``) are not one.
+#:
+#: Two separators in a row start a share or a doubled root whatever they are, slash or
+#: backslash in any mix, and however many, unless a colon comes before them: that is
+#: the ``//`` of a URL (``https://host/x``, ``s3://bucket/key``) and what follows it
+#: is the URL's. A protocol-relative URL (``//cdn.example/lib.js``) has the shape of a
+#: share and is refused with the shares. A letter before a colon is a drive only when
+#: it stands alone: the ``u`` that ends ``ubuntu:22.04`` and the ``s`` that ends
+#: ``polars:runtime-32`` follow a word character, so no token starts there.
 #:
 #: The drive in an extended-length path follows a backslash, which is never the start
 #: of a token, so the drive rule does not see it. The backslash after the ``?`` does
@@ -981,8 +990,10 @@ _LOCAL_PATH = re.compile(
     (?<![\w/.\\~])               # the start of a token
     (?:
         /[\w.~+@%-]              # /home/alice
+      | (?<!:)[/\\]{2,}[\w.?$]   # //server/share, //home/alice, /\server; not https://
       | ~(?:[/\\]|[A-Za-z_])     # ~/.cache or ~alice
       | [A-Za-z]:[\\/]           # C:\Users or c:/work
+      | [A-Za-z]:[\w.~$%@+-]     # C:Users, relative to the drive's own directory
       | \\\\[\w.$-]              # \\server\share and \\.\C:\Users
       | \\\w                     # \Users\alice, and the \C: of \\?\C:\Users
       | (?i:file:/)              # file:///home/alice, in any case
