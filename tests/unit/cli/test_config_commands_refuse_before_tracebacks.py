@@ -138,9 +138,10 @@ TAB_AFTER_PATH = (
     " with spaces before you move it: .ash.yaml is read as YAML, which refuses "
     "a tab (the parse error gives the tab's line and column)"
 )
-ENV_ADVICE = (
-    "Write a value that starts with ${ without quotes in YAML (or tag it !ENV), "
-    "or it is read as literal text, not from the environment"
+ENV_BEFORE_PATH = "In the YAML, put !ENV in front of each value from "
+ENV_AFTER_PATH = (
+    " that starts with ${ and keep its quotes: a quoted value without the tag is "
+    "read as literal text, not from the environment"
 )
 
 
@@ -167,9 +168,11 @@ def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
     assert "renaming the TOML file is not enough" in result.output, result.output
     assert "Move " not in result.output, result.output
     assert not (tmp_path / ".ash.yaml").exists()
-    # A TOML string that starts with `${` is read from the environment, and only a
-    # YAML value without quotes (or tagged !ENV) still is.
-    assert ENV_ADVICE in result.output, result.output
+    # A TOML string that starts with `${` is read from the environment. In YAML a
+    # quoted value is only when `!ENV` is in front of it, and without its quotes the
+    # value is cut short at a space and a hash, or refused: the advice keeps both.
+    assert ENV_BEFORE_PATH in result.output, result.output
+    assert ENV_AFTER_PATH in result.output, result.output
     assert EXTENDS_BEFORE_PATH not in result.output, result.output
     assert TAB_BEFORE_PATH not in result.output, result.output
 
@@ -189,7 +192,7 @@ def test_init_beside_a_json_source_says_a_file_with_a_tab_needs_spaces_first(
     assert TAB_BEFORE_PATH in result.output, result.output
     assert TAB_AFTER_PATH in result.output, result.output
     assert EXTENDS_BEFORE_PATH not in result.output, result.output
-    assert ENV_ADVICE not in result.output, result.output
+    assert ENV_BEFORE_PATH not in result.output, result.output
     assert "as YAML in .ash.yaml and delete" not in result.output, result.output
     assert not (tmp_path / ".ash.yaml").exists()
 
@@ -220,7 +223,7 @@ def test_init_beside_a_source_in_ash_says_to_rewrite_a_relative_extends(
         assert result.output.index(EXTENDS_BEFORE_PATH) < result.output.index(
             TAB_BEFORE_PATH
         )
-    assert ENV_ADVICE not in result.output, result.output
+    assert ENV_BEFORE_PATH not in result.output, result.output
 
 
 def test_init_beside_a_yaml_source_at_the_root_keeps_the_plain_advice(
@@ -235,7 +238,32 @@ def test_init_beside_a_yaml_source_at_the_root_keeps_the_plain_advice(
     assert " to .ash.yaml (the canonical config file), edit " in result.output
     assert EXTENDS_BEFORE_PATH not in result.output, result.output
     assert TAB_BEFORE_PATH not in result.output, result.output
-    assert ENV_ADVICE not in result.output, result.output
+    assert ENV_BEFORE_PATH not in result.output, result.output
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        pytest.param(".ash.yml", "project_name: old\n", id=".ash.yml"),
+        pytest.param("ash.json", '{"project_name": "old"}\n', id="ash.json"),
+        pytest.param(".ashrc.toml", 'project_name = "old"\n', id=".ashrc.toml"),
+    ],
+)
+def test_init_in_a_directory_named_ash_says_nothing_about_a_relative_extends(
+    tmp_path, monkeypatch, name, text
+):
+    """The file sits at the top of the directory `init` runs in, so moving it to
+    `.ash.yaml` beside it does not change the directory its bases are read from."""
+    scan_root = tmp_path / ".ash"
+    scan_root.mkdir()
+    (scan_root / name).write_text(text, encoding="utf-8")
+    monkeypatch.chdir(scan_root)
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert not (scan_root / ".ash.yaml").exists()
 
 
 def test_init_beside_a_pyproject_table_keeps_its_own_advice(tmp_path, monkeypatch):

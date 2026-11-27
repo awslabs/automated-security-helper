@@ -67,6 +67,9 @@ ASH_DIR_YAML = [location for location in YAML_LEGACY if location.startswith(".as
 ROOT_YAML = [location for location in YAML_LEGACY if location not in ASH_DIR_YAML]
 ASH_DIR_JSON = [location for location in JSON_LEGACY if location.startswith(".ash/")]
 ROOT_JSON = [location for location in JSON_LEGACY if location not in ASH_DIR_JSON]
+# The 13 names the top level of a directory can hold, whatever that directory is
+# called: a directory named `.ash` that ASH searches keeps its own files there.
+ROOT_LEGACY = ROOT_YAML + ROOT_JSON + TOML_LEGACY
 
 # The sentences the warning adds after its move advice, each for one kind of
 # file, in the order it adds them.
@@ -80,8 +83,9 @@ TAB_CAVEAT = (
     "tab's line and column)."
 )
 ENV_CAVEAT = (
-    "Write a value that starts with ${ without quotes in YAML (or tag it !ENV), "
-    "or it is read as literal text, not from the environment."
+    "In the YAML, put !ENV in front of each value from this file that starts "
+    "with ${ and keep its quotes: a quoted value without the tag is read as "
+    "literal text, not from the environment."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -161,6 +165,8 @@ def test_the_legacy_locations_by_language_are_there_to_test():
     assert sorted(ROOT_YAML + ASH_DIR_YAML) == sorted(YAML_LEGACY)
     assert sorted(ROOT_JSON + ASH_DIR_JSON) == sorted(JSON_LEGACY)
     assert len(ROOT_YAML) == 7 and len(ROOT_JSON) == 4
+    assert len(ROOT_LEGACY) == 13
+    assert sorted(ROOT_LEGACY + ASH_DIR_YAML + ASH_DIR_JSON) == sorted(LEGACY_LOCATIONS)
 
 
 class TestCanonicalIsFirst:
@@ -318,6 +324,30 @@ class TestWarnings:
             f"move this file to {canonical}. {EXTENDS_CAVEAT} {TAB_CAVEAT}"
         ), warning
 
+    @pytest.mark.parametrize("legacy", ROOT_LEGACY)
+    def test_a_file_at_the_top_of_a_scan_root_named_ash_stays_in_that_directory(
+        self, tmp_path, legacy
+    ):
+        """A directory that is itself named `.ash` holds the config at its top
+        level; moving it to `.ash.yaml` does not change directory."""
+        scan_root = tmp_path / ".ash"
+        _write(scan_root, legacy, "legacy")
+        [warning] = discovery_warnings(discover_config_source(scan_root))
+        assert (scan_root / ".ash.yaml").as_posix() in warning, warning
+        assert (tmp_path / ".ash.yaml").as_posix() not in warning, warning
+        assert EXTENDS_CAVEAT not in warning, warning
+
+    def test_a_file_in_the_ash_subdirectory_of_a_scan_root_named_ash_moves_up_into_it(
+        self, tmp_path
+    ):
+        scan_root = tmp_path / ".ash"
+        _write(scan_root, ".ash/.ash.yml", "legacy")
+        [warning] = discovery_warnings(discover_config_source(scan_root))
+        canonical = (scan_root / ".ash.yaml").as_posix()
+        assert warning.endswith(f"move this file to {canonical}. {EXTENDS_CAVEAT}"), (
+            warning
+        )
+
 
 #: JSON with one tab, each in a different place. `json.loads` accepts a tab
 #: between tokens, so each loads as `.ash.json`; the YAML loader skips only
@@ -405,10 +435,31 @@ class TestAMovedFileKeepsItsRelativeBasesOnlyIfTheyAreRewritten:
         assert resolve_config(source_dir=tmp_path).project_name == "from-base"
 
 
-class TestATomlReferenceToTheEnvironmentNeedsNoQuotesInYaml:
-    """Why the TOML advice says to write a `${...}` value without quotes: TOML
-    resolves every string that starts with `${`, YAML only a plain scalar (or one
-    tagged `!ENV`)."""
+#: TOML strings that start with a `${...}` reference, each as TOML writes it with
+#: its quotes, and the default the reference carries (what it reads when the
+#: variable is not set). The defaults hold a space and a hash, a colon and a
+#: space, a single quote, and a backslash, in a TOML literal string (none of its
+#: characters is an escape) and in a TOML basic string (the backslash is escaped).
+ENV_SPELLINGS = {
+    "hash": ('"${ASH_SERVICE_NAME:payments #api}"', "payments #api"),
+    "colon": ('"${ASH_SERVICE_NAME:a: b}"', "a: b"),
+    "single_quote": ('"${ASH_SERVICE_NAME:it\'s}"', "it's"),
+    "literal_backslash": ("'${ASH_SERVICE_NAME:a\\b}'", "a\\b"),
+    "escaped_backslash": ('"${ASH_SERVICE_NAME:a\\\\b}"', "a\\b"),
+}
+ENV_PAIRS = [
+    pytest.param(value, state, id=f"{value}-{state}")
+    for value in ENV_SPELLINGS
+    for state in ("set", "unset")
+]
+
+
+class TestATomlReferenceToTheEnvironmentInYaml:
+    """Why the TOML advice says to put `!ENV` in front of a `${...}` value and keep
+    its quotes: TOML resolves every string that starts with a reference; YAML
+    resolves a quoted value only when it is tagged `!ENV`; and without quotes it
+    cuts the value short at a space and a hash, and refuses one that holds a colon
+    and a space or sits inside brackets or braces."""
 
     REFERENCE = "${ASH_SERVICE_NAME:payments-api}"
 
@@ -440,6 +491,84 @@ class TestATomlReferenceToTheEnvironmentNeedsNoQuotesInYaml:
             f'project_name: "{self.REFERENCE}"\n', encoding="utf-8"
         )
         assert resolve_config(source_dir=tmp_path).project_name == self.REFERENCE
+
+    @pytest.mark.parametrize(("value", "state"), ENV_PAIRS)
+    def test_the_rewrite_with_env_in_front_and_its_toml_quotes_reads_what_toml_reads(
+        self, tmp_path, monkeypatch, value, state
+    ):
+        quoted, default = ENV_SPELLINGS[value]
+        if state == "unset":
+            monkeypatch.delenv("ASH_SERVICE_NAME")
+        expected = "from-env" if state == "set" else default
+        toml_root = tmp_path / "toml"
+        yaml_root = tmp_path / "yaml"
+        toml_root.mkdir()
+        yaml_root.mkdir()
+        (toml_root / ".ashrc.toml").write_text(
+            f"project_name = {quoted}\n", encoding="utf-8"
+        )
+        (yaml_root / ".ash.yaml").write_text(
+            f"project_name: !ENV {quoted}\n", encoding="utf-8"
+        )
+        assert resolve_config(source_dir=toml_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
+
+    @pytest.mark.parametrize("tag", ["", "!ENV "], ids=["untagged", "tagged"])
+    def test_the_rewrite_without_quotes_is_cut_short_at_a_space_and_hash(
+        self, tmp_path, ash_warnings, tag
+    ):
+        """A hash after a space starts a YAML comment, so the value ends there:
+        without a closing brace it is no reference, tagged or not, and is read as
+        the text it is, with no warning."""
+        (tmp_path / ".ash.yaml").write_text(
+            "project_name: " + tag + "${ASH_SERVICE_NAME:payments #api}\n",
+            encoding="utf-8",
+        )
+        config = resolve_config(source_dir=tmp_path)
+        assert config.project_name == "${ASH_SERVICE_NAME:payments"
+        assert ash_warnings() == []
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "project_name: ${ASH_SERVICE_NAME:a: b}\n",
+            "external_reports_to_include: [${ASH_SERVICE_NAME:payments-api}]\n",
+            "{project_name: ${ASH_SERVICE_NAME:payments-api}}\n",
+        ],
+        ids=["colon_space", "flow_list", "flow_mapping"],
+    )
+    def test_the_rewrite_without_quotes_is_refused(self, tmp_path, text):
+        (tmp_path / ".ash.yaml").write_text(text, encoding="utf-8")
+        with pytest.raises(ASHConfigValidationError):
+            resolve_config(source_dir=tmp_path)
+
+    @pytest.mark.parametrize(
+        ("text", "field", "expected"),
+        [
+            pytest.param(
+                'external_reports_to_include: [!ENV "${ASH_SERVICE_NAME:payments-api}"]\n',
+                "external_reports_to_include",
+                ["from-env"],
+                id="flow_list",
+            ),
+            pytest.param(
+                '{project_name: !ENV "${ASH_SERVICE_NAME:payments-api}"}\n',
+                "project_name",
+                "from-env",
+                id="flow_mapping",
+            ),
+        ],
+    )
+    def test_the_rewrite_with_env_in_front_and_its_quotes_is_read_in_flow_style(
+        self, tmp_path, text, field, expected
+    ):
+        (tmp_path / ".ash.yaml").write_text(text, encoding="utf-8")
+        value = getattr(resolve_config(source_dir=tmp_path), field)
+        if isinstance(value, list):
+            value = [str(entry) for entry in value]
+        else:
+            value = str(value)
+        assert value == expected
 
 
 class TestAMovedTomlFileIsRefused:
