@@ -260,6 +260,12 @@
   does in `--output-dir report` and `config` in `--source-dir config`, was kept off the
   daemon for that reason; the word is now read as the option's value and the scan can
   use the daemon.
+- **A container image scan whose configuration cannot be applied now records an end
+  time,** as a directory scan does for the same error. The configuration is also
+  applied once for each image scan, where it was applied twice.
+- **A reference skipped in offline mode is now logged as a warning.** The image is
+  still skipped and the report still carries its informational result; the skip was
+  logged at INFO before.
 
 ### Features
 

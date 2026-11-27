@@ -106,9 +106,16 @@ def _layout(tmp_path) -> Path:
 
 
 def _no_engine(monkeypatch, tmp_path):
-    """Point every default socket into this test's own empty tree."""
+    """Point every default socket into this test's own empty tree.
+
+    Offline mode is turned off as well: an image built for offline runs carries
+    ASH_OFFLINE, and the offline skip returns a reference before the tool is
+    started. No row built on this helper takes offline mode from the
+    environment; the rows that need it set it themselves.
+    """
     import automated_security_helper.core.container_engine as engine_module
 
+    monkeypatch.delenv("ASH_OFFLINE", raising=False)
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.delenv("CONTAINER_HOST", raising=False)
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
