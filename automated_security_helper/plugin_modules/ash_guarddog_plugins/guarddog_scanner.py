@@ -73,11 +73,12 @@ which sets ``max_hits`` on the rule objects GuardDog loaded
 (``guarddog.analyzer.sourcecode.SOURCECODE_RULES``) and then calls GuardDog's CLI
 entry point with the same arguments ASH would have given ``guarddog``. Through uv
 that is ``uv tool run --from <the scan's requirement> python``, the environment
-the scan's ``guarddog`` would run in; without uv, the interpreter beside, or named
-by, the ``guarddog`` executable. A GuardDog whose rules carry no ``max_hits``
-makes the bootstrap exit 3 with an ``ERROR:`` line, and one without those modules
-exits on the import error; either is a failed target, never a run with GuardDog's
-own limits.
+the scan's ``guarddog`` would run in; on a direct route, the interpreter beside, or
+named by, the ``guarddog`` executable; on the uv route while uv's availability
+check says no, the target is not run, as no uv run of the scan is. A GuardDog whose
+rules carry no ``max_hits`` makes the bootstrap exit 3 with an ``ERROR:`` line, and
+one without those modules exits on the import error; either is a failed target,
+never a run with GuardDog's own limits.
 
 Lowering a limit hides matches, so a value below a rule's own limit applies to it
 only when the operator set it (``set_by_operator``); from a config in the scanned
@@ -136,6 +137,8 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
     _restore_uv_route,
+    _uv_available,
+    _uv_unavailable,
     is_uv_form,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
@@ -1263,25 +1266,32 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         return True
 
     def _accept_binary_on_path(self, resolved: List[str]) -> bool:
-        """Whether the answer the resolver gave with uv unavailable may run the scan.
+        """Whether the answer the resolver gave with uv unavailable may run the scan,
+        and on which route.
 
-        A uv answer is the uv route, however uv is named: the resolver's own probe of
-        GuardDog through uv succeeded, whatever the runner's availability check
-        said. The route stays on, with what the uv probe recorded for it, and
-        ``_restore_uv_route`` makes that so whichever route the scanner entered
-        on. Anything else is a binary on PATH and the scan's GuardDog, with no
-        install to fall back on, so it is verified against the scan's
-        requirement as ``_select_tool_execution`` verifies one. Before this it
-        was declared satisfied unverified. One that falls short is MISSING with
-        the reason; one that cannot be verified runs, with a warning, since
-        nothing better is at hand. The copy that runs is the one whose version
-        is recorded: the uv probe's names another environment.
+        Every run of the scan passes the runner's availability check, the one that
+        just said no, and while it says no that check refuses a uv run and starts
+        nothing in its place. It says no for a probe that timed out or died on a
+        signal, for the length of the runner's retry window, and the resolver's own
+        probe of GuardDog through uv can succeed inside that window. So a uv answer,
+        however uv is named, is not a route the scan can run now: the copy the PATH
+        lookup finds, the one a direct run starts, is checked the way the copy a
+        binary answer names is checked. A copy that satisfies the scan's requirement
+        runs directly, and so does one that cannot be verified, with a warning, since
+        nothing better can run now. The copy that runs is the one whose version is
+        recorded: the uv probe's version names another environment. One that falls
+        short is not run. For a binary answer it is MISSING with the reason, since no
+        route is left. For a uv answer the scan keeps the uv route and the record that
+        route made, as it does when nothing is on PATH, and that route runs once the
+        check passes.
         """
-        if is_uv_form(resolved):
-            _restore_uv_route(self)
+        uv_answer = is_uv_form(resolved)
+        # The bare-name lookup a direct run starts, which the resolver's own direct
+        # arm uses too: the copy a uv answer leaves on PATH is the one that would run.
+        executable = find_executable(_COMMAND) if uv_answer else resolved[0]
+        if executable is None:
             self.dependencies_satisfied = True
             return True
-        executable = resolved[0]
         checked = verify_pre_installed_tool(
             executable,
             _COMMAND,
@@ -1291,6 +1301,18 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             values=self._values_to_redact(),
         )
         if checked.status == ToolInstallStatus.UNSATISFIED:
+            if uv_answer:
+                # The verdict's summary, not its detail: the summary carries no
+                # constraint text and no excerpt of the copy's output.
+                summary = getattr(checked, "summary", "") or "it falls short"
+                self._plugin_log(
+                    f"The guarddog on PATH ({executable}) does not meet the scan's "
+                    f"requirement ({summary}), so it is not run. The scan keeps the "
+                    "uv route, which runs once uv's availability check passes.",
+                    level=logging.WARNING,
+                )
+                self.dependencies_satisfied = True
+                return True
             reason = (
                 f"uv is not available and the guarddog on PATH ({executable}) "
                 f"cannot be used: {checked.detail}"
@@ -1584,10 +1606,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
 
         ``(None, None)`` when the option is unset, and GuardDog runs as ``guarddog``.
         Otherwise the prefix runs ``_HIT_LIMIT_BOOTSTRAP`` in GuardDog's own
-        interpreter, and GuardDog's arguments follow it. Through uv it is
+        interpreter, and GuardDog's arguments follow it. On the uv route it is
         ``uv tool run`` with the ``--python`` and ``--from`` the scan's
         ``guarddog`` would get from ``UVToolRunner.run_tool``, naming ``python``
-        instead; without uv, the interpreter of the ``guarddog`` on PATH.
+        instead; on a direct route, the interpreter of the ``guarddog`` on PATH. On
+        the uv route while uv's availability check says no, it is a failure: every uv
+        run of the scan is refused then, and the copy on PATH is not run in uv's place.
         """
         limit = self._hit_limit()
         if limit is None:
@@ -1596,22 +1620,32 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         tail = ["-c", _HIT_LIMIT_BOOTSTRAP, str(value), "set" if may_lower else "raise"]
         if self.use_uv_tool:
             runner = get_uv_tool_runner()
-            if runner.is_uv_available():
-                command = [runner.uv_executable, "tool", "run"]
-                if self._is_offline_mode():
-                    command.append("--offline")
-                python_request = self._get_tool_python_request()
-                if python_request:
-                    command += ["--python", python_request]
-                try:
-                    requirement = checked_requirement(
-                        build_requirement(
-                            _COMMAND, None, self._get_tool_version_constraint()
-                        )
+            available, failure = _uv_available(runner)
+            if not available:
+                # The run path refuses every uv run of the scan while this check says
+                # no and starts nothing in its place (plugin_base); the bootstrap is
+                # such a run. Falling through to the copy on PATH ran a copy no check
+                # had accepted, under a route and a version record that named uv.
+                return None, (
+                    "options.max_hits runs GuardDog's CLI through uv on this route, "
+                    f"and uv cannot run it now: {_uv_unavailable(runner, failure)}; "
+                    "the guarddog on PATH is not run in its place"
+                )
+            command = [runner.uv_executable, "tool", "run"]
+            if self._is_offline_mode():
+                command.append("--offline")
+            python_request = self._get_tool_python_request()
+            if python_request:
+                command += ["--python", python_request]
+            try:
+                requirement = checked_requirement(
+                    build_requirement(
+                        _COMMAND, None, self._get_tool_version_constraint()
                     )
-                except UVToolRunnerError as exc:
-                    return None, f"options.max_hits cannot be applied: {exc}"
-                return [*command, "--from", requirement, "python", *tail], None
+                )
+            except UVToolRunnerError as exc:
+                return None, f"options.max_hits cannot be applied: {exc}"
+            return [*command, "--from", requirement, "python", *tail], None
         executable = find_executable(_COMMAND)
         interpreter = find_tool_interpreter(executable) if executable else None
         if interpreter is None:
@@ -2116,6 +2150,15 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         for failure in failures:
             self.errors.append(failure)
             self._plugin_log(failure, target_type=target_type, level=logging.ERROR)
+
+        # A version probe the dependency check left owed is run here, before the run
+        # below names the version, as the base SARIF step runs it for the scanners
+        # that reach that step (GuardDog builds its own run). The check leaves it
+        # owed when uv's availability check said no and the scan kept the uv route,
+        # and such a run through uv named no version. Nothing is run when the check
+        # already recorded a version, or on a direct route, whose copy's version was
+        # recorded when the route was chosen.
+        self.resolve_deferred_tool_version()
 
         report = SarifReport(
             version="2.1.0",
