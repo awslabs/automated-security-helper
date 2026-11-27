@@ -1487,9 +1487,12 @@ class WorkspaceAggregator:
         # Credit findings to the scanner that produced them, so the rollup sums
         # what the per-project files say rather than re-deriving it.
         #
-        # The per-result readings (the scanner's folded name, the suppression
-        # state) stay on the host, in row order; the per-scanner counts are one
-        # frame of (name, counted) and two ordered counts over it. The partition
+        # The per-result readings (the scanner's folded name, whether the result
+        # is one of its findings) stay on the host, in row order; the per-scanner
+        # counts are one frame of (name, counted) and two ordered counts over it.
+        # A result is one of the scanner's findings when it is not suppressed and
+        # its kind does not state no finding, as in the project's own count
+        # (execution._reduce_project_scan), which this rollup sums. The partition
         # of the results by scanner is read only by the fallback below, so it is
         # built only when that branch is armed.
         import polars as pl
@@ -1515,7 +1518,10 @@ class WorkspaceAggregator:
             if fallback:
                 by_scanner.setdefault(name, []).append(result)
             wired_names.append(wire(name))
-            counted_flags.append(not result_is_suppressed(result))
+            counted_flags.append(
+                not result_is_suppressed(result)
+                and not result_states_no_finding(result)
+            )
         if wired_names:
             frame = _scanner_count_frame(wired_names, counted_flags)
             for wired, _ in ordered_counts(frame, "name").iter_rows():
