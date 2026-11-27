@@ -598,7 +598,22 @@ process of the block that itself ran the part of the scan that writes its result
 block's processes share its exit, so a block that runs a scan and then a command that
 refuses with exit 1 shows the scan and nothing of the command. A block marked
 `expect-exit=nonzero` or `expect-exit=any` never counts, and neither does one that shows
-`ash dependencies install` refusing a tool it cannot select.
+`ash dependencies install` refusing a tool it cannot select. The check goes by the
+command a line runs, not by its first word: an option typed before `dependencies` does
+not hide that command, and the word `dependencies` as an option's value is not it.
+
+A block counts only if it leaves nothing running. When a block's shell exits, the runner
+ends whatever still runs in the block's process group and fails the block, and its
+report names each process by its pid and command. A process left behind keeps the
+coverage context of the block that started it, so what it ran after the block ended
+would be credited to that block, though nothing in the block shows it. A reader's shell
+returns when the example's commands do, so such an example behaves differently for the
+reader too. A block that starts a process in the background ends with `wait`, or stops
+the process and waits for it to end; a block that cannot is marked `illustrative`. A
+process that leaves the group, such as a daemon that detaches into a session of its own,
+is not seen. ASH's express daemon is one, and it is not measured either: a daemon
+started on its own begins without the coverage variables, and one a scan starts for
+itself ends in `os._exit`, so it gives no credit.
 
 A command, scanner, reporter, converter, or MCP tool counts when a passing block runs its
 code. The code that counts starts after the function's leading guards, the early exits
@@ -632,9 +647,10 @@ that finds one adds it. The check does not see an exit written as a call, such a
 function it calls takes for it.
 
 Two plugins that share one work method, as `opengrep` and `semgrep` share the scan
-method of one base class, cannot be told apart by that method alone. Each also needs a
-method of its own, defined in its own class, that the shared method calls, and it counts
-only when a passing block ran that method as well. A plugin that shares its work method
+method of one base class, cannot be told apart by that method alone. Each also has
+methods of its own, defined in its own class, that the shared method calls, and it
+counts only when a passing block ran the shared method and every one of them: a run that
+reached one of two may have stopped between them. A plugin that shares its work method
 and has no such method makes the check exit 2 and names the plugin.
 
 An option counts when a passing block gives it on its command line and also runs the
@@ -704,6 +720,17 @@ block that writes files of the project, and run the scan in the same session wit
 changing directory. The check cannot see a file that a shell block writes, so it never
 counts one.
 
+The measurement sees only what coverage.py records. A process that is not Python, or
+that does not start coverage.py (a scanner's own tool, a container), is not measured,
+nor is the Python of a sandboxed scanner, nor a process that is killed before it saves
+its data. A process that ends in `os._exit` is not measured either: the runner has
+coverage.py re-arm itself in a forked child, but not save inside `os._exit`. A pool that
+is shut down by its `with` block ends the workers still alive with SIGTERM, one of them
+perhaps in the middle of that save, and the data file it leaves cannot be read, which
+stops the check. A pool worker and the forked scans of ASH's express daemon end there,
+so a feature that only such a process reaches can only read as not reached, never as
+reached.
+
 ### Read the report
 
 The check prints its report to the job summary, and writes `docs-feature-coverage.md`
@@ -749,12 +776,14 @@ those two are not checked, and a line for a feature an example reached is printe
 warning that says to delete it.
 
 The check exits 1 when the gate fails, and 2 when the run cannot show anything: no block
-records, no readable coverage data, no passing block, records from another version of
-the docs, an inventory that cannot be built the same way everywhere, or a function the
-check reads a block's reach from, such as config discovery, that it can no longer find or
-call. To measure the examples in a checkout, start from an empty data directory: a run
-adds to the data files already there under the same block names, so a block that no
-longer reaches a feature would still be credited with it by the earlier run.
+records, no readable coverage data (one data file that is empty or damaged is enough,
+and the check leaves every data file as it found it), no passing block, records from
+another version of the docs, an inventory that cannot be built the same way everywhere,
+or a function the check reads a block's reach from, such as config discovery, that it
+can no longer find or call. To measure the examples in a checkout, start from an empty
+data directory: a run adds to the data files already there under the same block names,
+so a block that no longer reaches a feature would still be credited with it by the
+earlier run.
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash

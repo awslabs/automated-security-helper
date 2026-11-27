@@ -2676,7 +2676,7 @@ jobs:
           name: docs-feature-coverage
           path: test-results/docs-feature-coverage
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error
       # A red run leaves per-test evidence rather than only the summary line.
       - name: Collect the docs examples report
         if: failure()

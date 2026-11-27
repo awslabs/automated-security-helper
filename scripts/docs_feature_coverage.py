@@ -47,6 +47,16 @@ refuses shows the scan and nothing of the command; a process that did not write 
 results (a worker a scanner runs in included) shows nothing on an exit-1 block. Any
 other expectation shows ASH refusing something or being stopped.
 
+A block passes only when it leaves nothing running. When a block's shell exits, the
+runner ends whatever still runs in the block's process group and fails the block,
+naming each process by its pid and command, so the block is no evidence: a process left
+running keeps the coverage context of the block that started it, and what it runs after
+that block ended would be credited to the block, though nothing of the block shows it.
+A process that leaves the group (``setsid``, a daemon that detaches into a session of
+its own) is not seen. ASH's express daemon is one, and it is not measured either: one
+started on its own begins without the coverage variables, and one a scan starts for
+itself ends in ``os._exit``, so it credits nothing.
+
 A feature measured in a function is reached by running its REGION: the statements that
 come after the function's leading guards (the early exits it opens with, before its
 first statement that is not one), each as its whole span, or all of the body when it
@@ -58,9 +68,11 @@ them, so a leading-guards region would be reached by each scan that skipped them
 the results write named above.
 
 Plugins that share one work method (``opengrep`` and ``semgrep``) cannot be told apart
-by line coverage of it. Each also needs a method of its own, defined in its class body,
-that the shared method calls on ``self``, and a plugin that shares its work method with
-no such method is an inventory error.
+by line coverage of it. Each also has methods of its own, defined in its class body,
+that the shared method calls on ``self``, and is covered only where a block ran the
+shared method and every one of them: a run that reached one of two may have stopped
+between them, so it does not show that plugin's work. A plugin that shares its work
+method with no such method is an inventory error.
 
 A saved configuration counts for a block that reached ``load_config_file`` only where
 the block can have read that file, and the file still held what the page saved: the
@@ -103,6 +115,13 @@ of environment variables, and ``COVERAGE_PROCESS_START`` is not on it), and a pr
 that is killed before it saves its data: the runner kills a block's processes with
 SIGKILL at its timeout, and coverage.py saves on SIGTERM only with ``sigterm = true`` in
 its ``[run]`` settings, which the rc file does not set.
+
+A process that ends in ``os._exit`` is not measured either. The rc file re-arms
+coverage.py in a forked child (``patch = fork``) but saves nothing inside ``os._exit``,
+where a pool shut down by its ``with`` block (detect-secrets' ``scan_files``) sends
+SIGTERM to a worker in the middle of the save and leaves a data file this check cannot
+read. A pool worker and the express daemon's forked scans end there, so a feature that
+only such a process reaches can only read as uncovered, never as covered.
 
 Refusals inside regions. Under the region rule an ``if`` after the function's first
 statement whose body ends in ``return`` or ``raise`` is inside its region, so a call
@@ -260,8 +279,9 @@ class Feature:
     #: For a plugin that shares its work method with another plugin: the regions of the
     #: methods it defines in its own class body that the shared method calls on
     #: ``self``. Line coverage cannot tell which plugin ran the shared code, so such a
-    #: feature is covered only when a block also reached one of these. Empty for every
-    #: other feature, and left out of the report.
+    #: feature is covered only when a block also reached every one of these: a run that
+    #: reached one of two may have stopped between them. Empty for every other feature,
+    #: and left out of the report.
     requires: tuple[Region, ...] = ()
     #: For a feature measured in a function: the bodies of the ways out of that function
     #: that its region holds (``_refusals``), less the late exits ``LATE_EXITS`` names.
@@ -851,7 +871,8 @@ def _own_methods_the_shared_one_calls(
 
     Reaching the shared method shows that one of the plugins ran, not which. A method
     one plugin defines and the shared code calls runs only for that plugin, so it is
-    what tells it apart. Each takes the region rule, one region per method.
+    what tells it apart, and the plugin counts only where every one of them ran. Each
+    takes the region rule, one region per method.
     """
     regions: dict[Region, None] = {}
     for name in sorted(_self_calls(shared)):
@@ -1422,6 +1443,13 @@ class _Coverage:
     uncovered, so every message the callback gets is an error naming the file. A file
     the combine skips as the duplicate of another (the same content) is no error.
 
+    An empty file is refused the same way, and before coverage.py opens it: coverage.py
+    reads an empty file as an empty database, writes its schema into it and takes it in
+    as a process that ran nothing, with no warning, so the combine would neither name
+    the file nor leave it as it was. A process killed as it opened its data file can
+    leave one. The check only reads the run's data: every file it refuses is left byte
+    for byte as it found it.
+
     The combined data cannot tell the processes of a block apart, and one data file is
     one process, so ``processes`` reads the files on their own, each opened in place
     and read before it is used (a ``CoverageData`` that was not read erases its file on
@@ -1442,6 +1470,12 @@ class _Coverage:
         if not files:
             raise MeasurementError(
                 f"no coverage data file under {directory}: nothing was measured"
+            )
+        empty = [path for path in files if path.stat().st_size == 0]
+        if empty:
+            raise MeasurementError(
+                "the coverage data cannot be read: "
+                + "; ".join(f"{path} is empty" for path in empty)
             )
         self.files = len(files)
         self._paths = files
@@ -1578,11 +1612,17 @@ class _Uses:
         That refusal exits with ASH_EXIT_BAD_SELECTION, which is also the scan's
         actionable-findings code, so the exit alone cannot tell it from a scan that
         found something; the command can (docs_checks.shows_a_selection_refusal).
+
+        Which command a line runs is the command path it resolves to, not its first
+        word: a root option before ``dependencies`` (``ash -c x dependencies install``)
+        still runs a command under it, and the word as an option's value
+        (``ash -c dependencies scan``) runs none.
         """
         if not _checks().shows_a_selection_refusal(block):
             return False
         return any(
-            inv.args[:1] == ["dependencies"] for inv, _path, _uses in self.of(block)
+            tuple(path[:2]) == ("ash", "dependencies")
+            for _invocation, path, _uses in self.of(block)
         )
 
 
@@ -1596,16 +1636,14 @@ def _option_keys(feature: Feature) -> tuple[tuple[tuple[str, ...], ...], str]:
 
 def _shows(reach: _Reach, feature: Feature) -> bool:
     """Whether what a block's processes ran shows a feature: any of its regions and,
-    when the feature requires methods of its own (``Feature.requires``), any of those
-    too, and no line of a way out its code takes before its work (``Feature.refusals``).
-    A block that ran a refusal's lines took it with one of its calls, whatever else the
-    block ran."""
+    when the feature requires methods of its own (``Feature.requires``), every one of
+    those too (a run that reached one of two may have stopped between them), and no
+    line of a way out its code takes before its work (``Feature.refusals``). A block
+    that ran a refusal's lines took it with one of its calls, whatever else the block
+    ran."""
     return (
         any(reach.reached(region) for region in feature.regions)
-        and (
-            not feature.requires
-            or any(reach.reached(region) for region in feature.requires)
-        )
+        and all(reach.reached(region) for region in feature.requires)
         and not any(reach.reached(region) for region in feature.refusals)
     )
 
