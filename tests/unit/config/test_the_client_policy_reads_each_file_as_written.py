@@ -5,8 +5,9 @@ merges the files, so the merged configuration holds one spelling per setting.
 What it records of each file, and what the client rules and every check of a
 delivered file judge, is the file as written, so a ``denied_value_patterns``
 regex that names a key's text refuses the key whichever spelling the file
-wrote. The rules' marking of the operator's entries reads a folded copy of each
-operator file, and nothing else reads that copy.
+wrote. The rules' marking of the operator's entries applies each operator
+file's own patch to a folded copy of that file, and nothing else reads that
+copy.
 """
 
 import json
@@ -205,9 +206,12 @@ def test_a_key_pattern_naming_the_old_spelling_refuses_an_operator_base_as_writt
 def test_the_marking_reads_a_folded_copy_and_leaves_each_file_as_written(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """With a delivered file in the chain, the operator's entry written in the old
-    spelling stays the operator's, while the checks of the delivered file and
-    the recorded documents still hold each file as written."""
+    """With a delivered file in the chain, the operator's entry stays the
+    operator's. The operator's file writes it in the old spelling and its own
+    patch rewrites its expiry through the canonical one, so only a copy of that
+    file with its old spellings read as the canonical ones, that patch applied to
+    it, holds the entry the configuration holds. The checks of the delivered file
+    and the recorded documents still hold each file as written."""
     org = _write(
         tmp_path / "cfg" / "org.yaml",
         {
@@ -220,7 +224,14 @@ def test_the_marking_reads_a_folded_copy_and_leaves_each_file_as_written(
                         "expiration": "2099-01-02",
                     }
                 ]
-            }
+            },
+            "patch": [
+                {
+                    "op": "replace",
+                    "path": "/global_settings/suppressions/0/expires",
+                    "value": "2099-06-30",
+                }
+            ],
         },
     )
     repo = _write(tmp_path / "cfg" / "repo.yaml", {"extends": "org.yaml", **_ORG})
@@ -241,10 +252,11 @@ def test_the_marking_reads_a_folded_copy_and_leaves_each_file_as_written(
         permit_base=None,
     )
 
-    # The marking ran: the operator's entry is the operator's, the delivered
-    # file's is the client's.
+    # The marking ran: the operator's entry, as its own patch left it, is the
+    # operator's, and the delivered file's is the client's.
     (suppression,) = marked.global_settings.suppressions
     (ignored,) = marked.global_settings.ignore_paths
+    assert suppression.expires == "2099-06-30"
     assert suppression.client_supplied is False
     assert ignored.client_supplied is True
     assert set(judged) == {repo.resolve()}

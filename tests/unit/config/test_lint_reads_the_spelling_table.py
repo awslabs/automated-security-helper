@@ -6,7 +6,8 @@ one of those lists. Lint reports it in each, and only where the key is the old
 spelling of that model's field: a content database staleness override's
 ``expiration`` is that model's own canonical key.
 
-Red at the base: an exclusion written with ``expiration`` drew no report.
+So an exclusion written with ``expiration`` is reported, as a suppression is,
+under its section's key or that key's ``-``/``_`` twin.
 """
 
 from pathlib import Path
@@ -52,6 +53,31 @@ def test_an_exclusion_written_with_the_old_spelling_is_reported(tmp_path: Path) 
     )
 
     assert _deprecated_spelling_paths(issues) == ["global_settings.exclusions[0]"]
+
+
+def test_an_exclusion_under_the_twin_of_its_sections_key_is_reported(
+    tmp_path: Path,
+) -> None:
+    """``global-settings`` is the ``-``/``_`` twin of the section's key. Lint
+    follows it to the exclusion, as it follows another spelling of a plugin's
+    section, and names the entry by the keys the file writes."""
+    issues = _lint(
+        tmp_path,
+        {
+            "global-settings": {
+                "exclusions": [
+                    {
+                        "rule_id": "B101",
+                        "path": "tests/",
+                        "reason": "asserts in tests",
+                        "expiration": "2099-01-01",
+                    }
+                ]
+            }
+        },
+    )
+
+    assert _deprecated_spelling_paths(issues) == ["global-settings.exclusions[0]"]
 
 
 def test_a_suppression_written_with_the_old_spelling_is_still_reported(

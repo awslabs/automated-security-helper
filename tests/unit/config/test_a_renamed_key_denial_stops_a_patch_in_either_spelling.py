@@ -7,12 +7,15 @@ under ``replace_default_denied_paths``, must see a runtime patch of the expiry
 refused in either spelling, by that denial. A runtime patch is applied to the
 configuration as dumped by field name, so it always meets ``expires``.
 
-Red at the base: a denial was matched in the spelling it was written in. A
-denial written ``.../expiration`` did not meet ``replace``, ``add`` and
-``remove`` at ``.../0/expires``; a denial written ``.../expires`` met an op at
-``.../0/expiration`` only by accident (a failed apply or a failed validation),
-never as the denial; and a glob that names no model,
-``/global_settings/*/0/expiration``, did not meet ``.../0/expires``.
+A denial is matched in both spellings of the key: one written
+``.../expiration`` refuses a ``replace``, an ``add`` and a ``remove`` at
+``.../0/expires``, and one written ``.../expires`` refuses a write at
+``.../0/expiration``, the refusal naming the denial rather than a failed apply
+or a failed validation of the patched configuration. A glob that names no
+model, ``/global_settings/*/0/expiration``, refuses a write at
+``.../0/expires`` too, and a glob that names a staleness override's own
+``expiration`` keeps denying that key. A denial written through the ``-``/``_``
+twin of the section's key, ``/global-settings/...``, refuses the same writes.
 """
 
 from typing import Any, Dict, List
@@ -30,6 +33,9 @@ pytestmark = pytest.mark.unit
 
 OLD_SPELLING_DENIAL = "/global_settings/suppressions/*/expiration"
 CANONICAL_DENIAL = "/global_settings/suppressions/*/expires"
+#: The old-spelling denial with its section written as the ``-``/``_`` twin of the
+#: section's key.
+TWIN_DENIAL = "/global-settings/suppressions/*/expiration"
 
 
 def _profile(denial: str) -> AshConfig:
@@ -96,6 +102,37 @@ def test_a_denial_in_the_old_spelling_stops_a_write_in_the_canonical_one(
     [
         {
             "op": "replace",
+            "path": "/global_settings/suppressions/0/expires",
+            "value": "2199-12-31",
+        },
+        {
+            "op": "add",
+            "path": "/global_settings/suppressions/0/expires",
+            "value": "2199-12-31",
+        },
+        {"op": "remove", "path": "/global_settings/suppressions/0/expires"},
+    ],
+    ids=["replace", "add", "remove"],
+)
+def test_a_denial_through_its_sections_twin_stops_a_canonical_write(
+    op: Dict[str, Any],
+) -> None:
+    """A section key and its ``-``/``_`` twin are one key to the loader, so a
+    denial written through the twin, in the entry's old spelling, refuses a write
+    at ``.../0/expires``, the refusal naming that denial."""
+    base = _profile(TWIN_DENIAL)
+
+    with pytest.raises(RuntimePatchDeniedError) as refused:
+        _patch(base, [op])
+
+    assert f"denied_paths entry {TWIN_DENIAL!r}" in refused.value.rule
+
+
+@pytest.mark.parametrize(
+    "op",
+    [
+        {
+            "op": "replace",
             "path": "/global_settings/suppressions/0/expiration",
             "value": "2199-12-31",
         },
@@ -144,7 +181,8 @@ def test_a_denial_in_the_old_spelling_still_holds_once_the_spelling_is_removed(
 
 
 def test_a_denial_in_the_spelling_the_write_uses_still_stops_it() -> None:
-    """The control: the denial and the write spelled alike, refused as always."""
+    """The control: the denial and the write spelled alike, and the denial
+    refuses the write."""
     base = _profile(CANONICAL_DENIAL)
     op = {
         "op": "replace",
@@ -250,7 +288,7 @@ def test_a_glob_denial_keeps_denying_a_model_whose_own_key_is_the_old_spelling()
 
 def test_a_glob_denial_in_the_old_spelling_also_stops_the_canonical_one() -> None:
     """Under a glob no model is known, so every row's spellings apply: the
-    denial can refuse more than before, never less."""
+    denial can refuse more than its pattern names as written, never less."""
     base = _glob_profile(SECTION_GLOB_DENIAL)
     op = {
         "op": "replace",

@@ -24,8 +24,10 @@ from pydantic import AliasChoices, BaseModel, ValidationError
 
 import automated_security_helper
 from automated_security_helper.config import spellings
+from automated_security_helper.models import spelling_table
 from automated_security_helper.config.ash_config import (
     AshConfig,
+    AshConfigGlobalSettingsSection,
     ContentDbStalenessOverride,
 )
 from automated_security_helper.config.ash_workspace_config import AshWorkspaceConfig
@@ -81,7 +83,9 @@ def _with_row(monkeypatch, **fields: Any) -> spellings.SpellingRow:
         note="a row added by a test",
         **fields,
     )
-    monkeypatch.setattr(spellings, "ROWS", (*spellings.ROWS, row))
+    rows = (*spelling_table.ROWS, row)
+    monkeypatch.setattr(spelling_table, "ROWS", rows)
+    monkeypatch.setattr(spellings, "ROWS", rows)
     return row
 
 
@@ -199,15 +203,42 @@ def test_every_rows_model_sits_in_the_configuration(
     assert spellings.entry_paths(spellings.row_model(row))
 
 
-def test_the_entry_model_sits_in_every_list_that_holds_it() -> None:
-    paths = set(spellings.entry_paths(IgnorePathWithReason))
+#: Every list in the configuration that holds the entry model or a subclass of
+#: it, by the keys a file writes to reach it. Each is written out from the field
+#: that declares it, named in the comment beside it, not read from the walk.
+ENTRY_LISTS = {
+    # AshConfigGlobalSettingsSection.ignore_paths (config/ash_config.py)
+    ("global_settings", "ignore_paths"),
+    # AshConfigGlobalSettingsSection.suppressions, a list of AshSuppression
+    ("global_settings", "suppressions"),
+    # AshConfigGlobalSettingsSection.exclusions, a list of AshExclusion
+    ("global_settings", "exclusions"),
+    # BanditScannerConfigOptions.excluded_paths (bandit_scanner.py)
+    ("scanners", "bandit", "options", "excluded_paths"),
+    # CheckovScannerConfigOptions.skip_path (checkov_scanner.py)
+    ("scanners", "checkov", "options", "skip_path"),
+    # SyftScannerConfigOptions.exclude (syft_scanner.py)
+    ("scanners", "syft", "options", "exclude"),
+    # GuardDogScannerConfigOptions.excluded_paths (guarddog_scanner.py), the
+    # exclusion option guarddog's manifest declares (plugin_manifests/alpha.py)
+    ("scanners", "guarddog", "options", "excluded_paths"),
+}
 
-    assert {
-        ("global_settings", "ignore_paths"),
-        ("global_settings", "suppressions"),
-        ("global_settings", "exclusions"),
-        ("scanners", "bandit", "options", "excluded_paths"),
-    } <= paths
+
+def test_the_entry_model_sits_in_every_list_that_holds_it() -> None:
+    """The walk finds every list of entries a configuration file can write, each
+    as a list, and no other place.
+
+    Lint's deprecated-spelling check reads its places from the walk
+    (``ConfigLinter._spelling_sites``), and the loader's fold reads the same
+    fields, so an old spelling in a list the walk misses is neither reported by
+    lint nor refused by the loader at its removal release. Compared for equality,
+    not as a superset: a list added to the configuration is added here too.
+    """
+    places = spellings.entry_places(IgnorePathWithReason)
+
+    assert {keys for keys, _ in places} == ENTRY_LISTS
+    assert {kind for _, kind in places} == {"list"}
 
 
 def test_field_spellings_name_every_spelling_a_field_is_read_under() -> None:
@@ -612,6 +643,100 @@ def test_the_written_view_is_folded_alike_with_no_line_and_no_refusal() -> None:
 
     assert renamed == _suppressions(_entry(expires="${EXPIRY}"))
     assert both == _suppressions(_entry(expires="${A}"))
+
+
+# ---------------------------------------------------------------------------
+# A section written in another spelling the loader reads
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "entries,entry",
+    [
+        pytest.param("/global_settings/suppressions", _entry(), id="canonical"),
+        pytest.param("/global-settings/suppressions", _entry(), id="twin"),
+        pytest.param(
+            "/scanners/bandit/options/excluded_paths",
+            {"path": "tests/", "reason": "r"},
+            id="canonical-plugin",
+        ),
+        pytest.param(
+            "/scanners/Bandit/options/excluded_paths",
+            {"path": "tests/", "reason": "r"},
+            id="plugin-variant",
+        ),
+    ],
+)
+def test_the_fold_reads_a_pointer_through_another_spelling_of_its_section(
+    entries: str, entry: Dict[str, Any]
+) -> None:
+    """The loader resolves a section key written as its ``-``/``_`` twin
+    (``global-settings``) or as another spelling of a plugin's name (``Bandit``),
+    and the fold reads the same pointer: it keeps those segments as written,
+    respells the old key after them, reads the value an op adds as the entry model
+    and says the deprecation once."""
+    document = _patching(
+        {"op": "replace", "path": f"{entries}/0/expiration", "value": "2099-01-01"},
+        {
+            "op": "add",
+            "path": f"{entries}/-",
+            "value": {**entry, "expiration": "2099-01-02"},
+        },
+    )
+
+    folded = spellings.fold_spellings(document, SOURCE)
+
+    replaced, added = folded.document["patch"]
+    assert replaced["path"] == f"{entries}/0/expires"
+    assert added["path"] == f"{entries}/-"
+    assert added["value"] == {**entry, "expires": "2099-01-02"}
+    assert folded.warnings == (f"Config {SOURCE}: {EXPIRATION_SPELLING_DEPRECATION}",)
+
+
+@pytest.mark.parametrize(
+    "key", ["global_settings", "global-settings"], ids=["canonical", "twin"]
+)
+def test_child_model_reads_a_section_under_its_twin_key(key: str) -> None:
+    """A key and its ``-``/``_`` twin name one section to the loader, so they
+    name one shape here."""
+    assert spellings.child_model(AshConfig, key) == spellings.Shape(
+        "model", AshConfigGlobalSettingsSection
+    )
+
+
+@pytest.mark.parametrize(
+    "segments,expected",
+    [
+        pytest.param(
+            ["global_settings", "suppressions", "0", "expiration"],
+            ["global_settings", "suppressions", "0", "expires"],
+            id="canonical",
+        ),
+        pytest.param(
+            ["global-settings", "suppressions", "0", "expiration"],
+            ["global-settings", "suppressions", "0", "expires"],
+            id="twin",
+        ),
+        pytest.param(
+            ["content_db_staleness_overrides", "0", "expiration"],
+            ["content_db_staleness_overrides", "0", "expiration"],
+            id="canonical-own-key",
+        ),
+        pytest.param(
+            ["content-db-staleness-overrides", "0", "expiration"],
+            ["content-db-staleness-overrides", "0", "expiration"],
+            id="twin-own-key",
+        ),
+    ],
+)
+def test_canonical_segments_read_a_section_under_its_twin_key(
+    segments: List[str], expected: List[str]
+) -> None:
+    """A section written as its ``-``/``_`` twin is read as that section, and the
+    twin is kept as written. Past it the model is known: a suppression's
+    ``expiration`` is the old spelling of ``expires``, and a staleness override's
+    ``expiration`` is that model's own key, which stays."""
+    assert spellings.canonical_segments(segments) == expected
 
 
 # ---------------------------------------------------------------------------

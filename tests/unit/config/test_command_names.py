@@ -1,6 +1,6 @@
 """The commands a hint or a message prints come from one registry below the CLI.
 
-``core/command_names.py`` names each ``ash`` command that a hint outside the CLI
+``config/command_names.py`` names each ``ash`` command that a hint outside the CLI
 prints, with the options and flags a printed one may carry, so a hint never names
 a command, an option or a flag the CLI does not register, and a rename is one
 edit. The walk below fails for any other. The loader, the models and lint read
@@ -22,13 +22,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-import click
 import pytest
 import typer.main
 import yaml
 
 from automated_security_helper.cli.main import app as ash_app
-from automated_security_helper.core import command_names
+from automated_security_helper.config import command_names
 from automated_security_helper.utils.terminal_text import ShownText, shown_on_one_line
 
 pytestmark = [
@@ -51,27 +50,36 @@ def _sentinel() -> command_names.Command:
     return dataclasses.replace(command_names.CONFIG_LINT, text=SENTINEL_TEXT)
 
 
-def _click_command(text: str) -> Optional[click.Command]:
-    """The command the CLI registers under ``text``, or None."""
+def _click_command(text: str) -> Optional[Any]:
+    """The command the CLI registers under ``text``, or None.
+
+    Walked by duck type, through each group's ``commands``: typer builds its
+    commands and options from its own copy of click, so they are not instances
+    of any click class a test imports.
+    """
     program, *words = text.split()
     if program != "ash" or not words:
         return None
     command: Any = typer.main.get_command(ash_app)
-    context = click.Context(command, info_name=program)
     for word in words:
-        if not isinstance(command, click.Group):
-            return None
-        sub = command.get_command(context, word)
+        commands = getattr(command, "commands", None)
+        sub = commands.get(word) if commands is not None else None
         if sub is None:
             return None
-        context = click.Context(sub, parent=context, info_name=word)
         command = sub
     return command
 
 
-def _takes_a_value(command: click.Command, name: str) -> bool:
+def _is_an_option(param: Any, name: str) -> bool:
+    return getattr(param, "param_type_name", "") == "option" and name in (
+        *param.opts,
+        *param.secondary_opts,
+    )
+
+
+def _takes_a_value(command: Any, name: str) -> bool:
     return any(
-        isinstance(param, click.Option)
+        _is_an_option(param, name)
         and name in param.opts
         and not param.is_flag
         and not param.count
@@ -80,12 +88,9 @@ def _takes_a_value(command: click.Command, name: str) -> bool:
     )
 
 
-def _is_a_flag(command: click.Command, name: str) -> bool:
+def _is_a_flag(command: Any, name: str) -> bool:
     return any(
-        isinstance(param, click.Option)
-        and param.is_flag
-        and param.is_bool_flag
-        and name in (*param.opts, *param.secondary_opts)
+        _is_an_option(param, name) and param.is_flag and param.is_bool_flag
         for param in command.params
     )
 
@@ -232,7 +237,8 @@ UNPASTEABLE = {
     "empty": "",
 }
 
-#: The names design 4.4 lists: each prints no command, and its argv is as given.
+#: Names that hold a command separator, a terminal escape with a carriage return,
+#: or a right-to-left override: each prints no command, and its argv is as given.
 HOSTILE = {
     "cmd-separator": "x & calc & .py",
     "escape-and-return": "cfg" + ESCAPE + "[31m" + CARRIAGE_RETURN + ".yaml",
@@ -331,9 +337,11 @@ def test_a_group_of_words_given_as_text_is_refused(
     ids=["render", "argv"],
 )
 def test_the_words_are_given_by_keyword(build: Any) -> None:
-    """A flag passed by position would land among the positionals."""
+    """A flag passed by position would land among the positionals. The words go
+    as a tuple, so only the keyword-only rule refuses them: bare text would meet
+    the group-as-text check first."""
     with pytest.raises(TypeError):
-        build(command_names.CONFIG_LINT, "--fix")
+        build(command_names.CONFIG_LINT, ("--fix",))
 
 
 @pytest.mark.parametrize(
@@ -366,8 +374,12 @@ def test_a_word_the_registry_does_not_list_is_a_coding_error(
     ids=["render", "argv"],
 )
 def test_a_value_that_is_not_text_is_refused(build: Any) -> None:
-    with pytest.raises(TypeError):
-        build(command_names.CONFIG_LINT, options=(("--config", Path("a.yaml")),))
+    """The registry's own check refuses it, by its message: a regex given a path
+    raises a TypeError too, and that one would pass a bare ``pytest.raises``."""
+    value = Path("a.yaml")
+    expected = f"a command's values are text, not {type(value).__name__}"
+    with pytest.raises(TypeError, match=re.escape(expected)):
+        build(command_names.CONFIG_LINT, options=(("--config", value),))
 
 
 @pytest.mark.parametrize(
@@ -428,9 +440,9 @@ BOTH_POINTED_AT = (
     " --source-dir <the directory the scan scanned>"
 )
 
-#: lint_hint's outputs, which are main's for every path: a path the plain set
-#: holds is printed, and when any printed path is outside it, neither is, and the
-#: line ends in ">", which no shell runs.
+#: lint_hint's output for each path: a path the plain set holds is printed, and
+#: when any printed path is outside it, neither is, and the line ends in ">",
+#: which no shell runs.
 LINT_HINTS = [
     ("cfg/.ash.yaml", None, "Run: ash config lint --config cfg/.ash.yaml"),
     ("C:/repo/.ash.yaml", None, "Run: ash config lint --config C:/repo/.ash.yaml"),
@@ -634,7 +646,9 @@ def test_no_printed_string_outside_the_registry_spells_a_listed_name() -> None:
     assert found == []
 
 
-#: The characters design 4.4 lists, with the escape each is written as.
+#: Control characters (C0, delete and C1), bidirectional marks, overrides and
+#: isolates, and the line and paragraph separators, each with the escape
+#: terminal_text writes it as.
 ESCAPED = {
     "tab": (0x09, "x09"),
     "line-feed": (0x0A, "x0a"),

@@ -3,9 +3,8 @@
 The loader folds a file's old spellings (``expiration`` for ``expires``) onto
 the canonical key before it layers the file over another. So:
 
-* the deprecation is said once per file and spelling, naming the file, rather
-  than once per entry with no file, and whether or not unknown entry keys are
-  fatal;
+* the deprecation is said once per file and spelling, naming the file, however
+  many entries use it, and whether or not unknown entry keys are fatal;
 * a file that writes both spellings with different values is refused naming
   that file, whichever file of the chain it is;
 * a ``patch`` pointer in either spelling reaches the key the merged document
@@ -18,12 +17,12 @@ the canonical key before it layers the file over another. So:
 * a value an old-spelling key reads from the environment is recorded at the
   canonical key, where the configuration holds it.
 
-Red at the base: three entries gave three unnamed lines, and
-``fail_on_unknown_keys: true`` gave none; a disagreement in a base was refused
-naming the extending file; a pointer in the other spelling than the base's
-failed to apply; an op's value was read by the entry model alone, with an
-unnamed line, and refused without naming the op; and an environment read was
-recorded under the old spelling.
+Each of these is pinned below: three entries in two files give two lines, one
+naming each file, and ``fail_on_unknown_keys: true`` gives the line too; a
+disagreement in a base is refused naming the base; a pointer in either spelling
+applies over a base in the other; an op's value is folded, its line naming the
+file, and a disagreement in it is refused naming the op; and an environment
+read is recorded at the canonical key.
 """
 
 from pathlib import Path

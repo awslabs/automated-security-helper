@@ -8,13 +8,12 @@ at every release: an entry built outside the loader, and a results file a scan
 already wrote, keep loading, and a stored record keeps applying.
 
 A ``patch`` op is part of its file: a pointer or an op's value that names the
-old spelling is refused at 4.0 as a key is, naming the file. A refusal ends with
-the sentence the command registry gives, which names the command that rewrites
-the file once one is registered.
-
-Red at the base: at 4.0 a config, a base it extends and an op's value all still
-loaded the old spelling, and a pointer in it failed to apply without naming
-either spelling.
+old spelling is refused at 4.0 as a key is, naming the file and both spellings.
+That holds whichever spelling the pointer gives a section on its way to the
+entry: the key itself, its ``-``/``_`` twin (``global-settings``), or a plugin
+section's case variant (``Bandit``). A refusal ends with the sentence the
+command registry gives, which names the command that rewrites the file once one
+is registered.
 """
 
 import warnings
@@ -53,6 +52,9 @@ BY_HAND_SENTENCE = (
 )
 
 _ENTRY = {"rule_id": "B101", "path": "src/app.py", "reason": "reviewed"}
+
+#: A Bandit excluded path, without its expiry.
+_EXCLUDED = {"path": "tests/", "reason": "reviewed"}
 
 
 @pytest.fixture
@@ -113,13 +115,19 @@ def test_a_base_writing_the_old_spelling_is_refused_naming_the_base(
     assert "'expires'" in message
 
 
+def _child_of(tmp_path: Path, base: Dict[str, Any], ops: Any) -> Path:
+    """A file whose ``patch`` ops run over the base ``base``."""
+    _write(tmp_path / "cfg" / "org.yaml", base)
+    return _write(tmp_path / "cfg" / "repo.yaml", {"extends": "org.yaml", "patch": ops})
+
+
 def _child_patching(tmp_path: Path, ops: Any) -> Path:
     """A file whose ``patch`` ops run over a base written in the new spelling."""
-    _write(
-        tmp_path / "cfg" / "org.yaml",
+    return _child_of(
+        tmp_path,
         {"global_settings": {"suppressions": [{**_ENTRY, "expires": "2099-01-01"}]}},
+        ops,
     )
-    return _write(tmp_path / "cfg" / "repo.yaml", {"extends": "org.yaml", "patch": ops})
 
 
 def test_a_patch_pointer_in_the_old_spelling_is_refused_at_the_removal_release(
@@ -197,6 +205,113 @@ def test_a_root_ops_value_in_the_old_spelling_is_refused_at_the_removal_release(
     assert "patch[0]" in message
     assert "'expiration'" in message
     assert "'expires'" in message
+
+
+def _excluded_paths_base(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """A base whose Bandit section, spelled as its manifest names it, holds
+    ``entry`` as its one excluded path."""
+    return {"scanners": {"bandit": {"options": {"excluded_paths": [entry]}}}}
+
+
+def _old_spelling_op(list_pointer: str, op: str, entry: Dict[str, Any]) -> Any:
+    """One ``op`` that writes the old spelling through ``list_pointer``, the
+    pointer to a list whose one entry the base writes in the new spelling.
+
+    A ``test`` holds that entry with its expiry in the old spelling, a
+    ``replace`` and a ``remove`` name the expiry in the old spelling, and an
+    ``add`` appends an entry that writes it. ``entry`` is the entry without its
+    expiry.
+    """
+    at_entry = f"{list_pointer}/0"
+    expiry = f"{at_entry}/expiration"
+    if op == "test":
+        value = {**entry, "expiration": "2099-01-01"}
+        return {"op": "test", "path": at_entry, "value": value}
+    if op == "replace":
+        return {"op": "replace", "path": expiry, "value": "2199-12-31"}
+    if op == "remove":
+        return {"op": "remove", "path": expiry}
+    value = {**entry, "path": "src/other.py", "expiration": "2099-02-02"}
+    return {"op": "add", "path": f"{list_pointer}/-", "value": value}
+
+
+#: The base's suppressions, by how a pointer spells the key that holds them: its
+#: ``-``/``_`` twin, and the key itself.
+_SUPPRESSIONS_TWIN = "/global-settings/suppressions"
+_SUPPRESSIONS = "/global_settings/suppressions"
+
+
+@pytest.mark.parametrize(
+    "suppressions,op",
+    [
+        (_SUPPRESSIONS_TWIN, "test"),
+        (_SUPPRESSIONS_TWIN, "replace"),
+        (_SUPPRESSIONS_TWIN, "remove"),
+        (_SUPPRESSIONS_TWIN, "add"),
+        # The guards: the key itself. Its ``replace`` and ``add`` are the pointer
+        # and value tests above.
+        (_SUPPRESSIONS, "test"),
+        (_SUPPRESSIONS, "remove"),
+    ],
+    ids=[
+        "twin-test",
+        "twin-replace",
+        "twin-remove",
+        "twin-add",
+        "canonical-test",
+        "canonical-remove",
+    ],
+)
+def test_an_op_through_either_spelling_of_global_settings_is_refused_at_removal(
+    tmp_path: Path, running, suppressions: str, op: str
+) -> None:
+    """An op whose pointer writes ``global-settings`` is read through that key as
+    one that writes ``global_settings`` is: the old spelling in its pointer or its
+    value is refused by the file's fold, naming the file and the op."""
+    running(REMOVAL_RELEASE)
+    child = _child_patching(tmp_path, [_old_spelling_op(suppressions, op, _ENTRY)])
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert REMOVAL in message
+    assert "repo.yaml" in message
+    assert "patch[0]" in message
+
+
+#: The base's Bandit excluded paths, by how a pointer spells the scanner's
+#: section: a case variant of its name, and the name its manifest declares.
+_EXCLUDED_PATHS_VARIANT = "/scanners/Bandit/options/excluded_paths"
+_EXCLUDED_PATHS = "/scanners/bandit/options/excluded_paths"
+
+
+@pytest.mark.parametrize("op", ["test", "replace", "remove", "add"])
+@pytest.mark.parametrize(
+    "excluded_paths",
+    [_EXCLUDED_PATHS_VARIANT, _EXCLUDED_PATHS],
+    ids=["case-variant", "canonical"],
+)
+def test_an_op_through_either_spelling_of_a_scanner_section_is_refused_at_removal(
+    tmp_path: Path, running, excluded_paths: str, op: str
+) -> None:
+    """The same through a scanner's section: an op whose pointer writes
+    ``Bandit`` is read through the section of a base that writes ``bandit``, as
+    one that writes ``bandit`` is. The canonical spelling is the guard."""
+    running(REMOVAL_RELEASE)
+    child = _child_of(
+        tmp_path,
+        _excluded_paths_base({**_EXCLUDED, "expires": "2099-01-01"}),
+        [_old_spelling_op(excluded_paths, op, _EXCLUDED)],
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert REMOVAL in message
+    assert "repo.yaml" in message
+    assert "patch[0]" in message
 
 
 def test_an_entry_validated_outside_the_loader_loads_at_the_removal_release(
@@ -345,7 +460,7 @@ def test_a_removed_rows_refusal_names_no_command_while_none_is_registered(
     """While the registry holds no command that rewrites a file, a refusal at the
     removal release carries the removal message and no command sentence."""
     from automated_security_helper.config import spellings
-    from automated_security_helper.core import command_names
+    from automated_security_helper.config import command_names
 
     monkeypatch.setattr(command_names, "CONFIG_UPGRADE", None, raising=False)
     running(REMOVAL_RELEASE)
@@ -391,7 +506,7 @@ def test_a_removed_rows_refusal_takes_its_command_sentence_from_the_registry(
 ) -> None:
     """Once the registry holds the command, a refusal at the removal release ends
     with its sentence: run it for a YAML file, edit by hand for a TOML one."""
-    from automated_security_helper.core import command_names
+    from automated_security_helper.config import command_names
 
     monkeypatch.setattr(
         command_names, "CONFIG_UPGRADE", command_names.Command(text=UPGRADE_SENTINEL)
@@ -413,7 +528,7 @@ def test_the_removal_message_ends_with_the_registrys_sentence(monkeypatch) -> No
     """The message builder reads the registry when it runs: no sentence while no
     command is registered, and the registered command's sentence once one is."""
     from automated_security_helper.config import spellings
-    from automated_security_helper.core import command_names
+    from automated_security_helper.config import command_names
 
     (row,) = [r for r in spellings.ROWS if r.canonical == "expires"]
 

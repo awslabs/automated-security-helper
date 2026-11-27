@@ -13,10 +13,11 @@ sets a list writes it as one value at the list's pointer, which a denial of
 anything inside the list already covers in any spelling. So every write here is
 at ``/global_settings/suppressions/0/<key>``, and no pattern starts with ``**``.
 
-Red at the base: a denial was matched over its pattern as written and with '-'
-read as '_' (``runtime_patch._denial_spellings``), so ``expires`` and
-``expiration`` never met. The controls (``..._spelled_as_...`` and
-``..._does_not_match_...``) pass at the base too.
+Each of these places matches a pattern as written, with '-' read as '_', and
+through the spelling table's rows, so ``expires`` and ``expiration`` are one key
+there. The controls (``..._spelled_as_...`` and ``..._does_not_match_...``) pin
+the rest: a pattern and a write spelled alike are refused, and a value pattern
+refuses by its regex, not by its place.
 """
 
 from typing import Any, Dict, List, Optional
@@ -136,8 +137,8 @@ def test_a_document_patch_op_meets_a_denial_written_in_the_other_spelling(
 def test_a_document_patch_op_spelled_as_its_denial_is_refused(
     denial: str, pointer: str
 ) -> None:
-    """The control, refused at the base too: the profile and the document reach
-    the denial when both are spelled alike."""
+    """The control: the profile and the document reach the denial when both are
+    spelled alike."""
     trusted = _profile(denied_paths=[denial])
 
     denials = _document_denials(trusted, _op("replace", pointer))
@@ -175,7 +176,7 @@ def test_a_value_pattern_refuses_a_runtime_write_in_the_other_spelling(
 def test_a_value_pattern_spelled_as_the_runtime_write_refuses_it(
     pattern: str, pointer: str
 ) -> None:
-    """The control, refused at the base too."""
+    """The control: a value pattern spelled as the write refuses it."""
     base = _profile(denied_paths=[], denied_value_patterns={pattern: REGEX})
 
     with pytest.raises(RuntimePatchDeniedError) as refused:
@@ -190,8 +191,8 @@ def test_a_value_pattern_spelled_as_the_runtime_write_refuses_it(
 def test_a_value_pattern_in_either_spelling_lets_a_value_it_does_not_match_through(
     pattern: str,
 ) -> None:
-    """The control, at the base too: a value pattern refuses by its regex, so the
-    cases above are refused for their value, not for their place."""
+    """The control: a value pattern refuses by its regex, so the cases above are
+    refused for their value, not for their place."""
     base = _profile(denied_paths=[], denied_value_patterns={pattern: REGEX})
 
     patched = _patch(base, _op("replace", CANONICAL_LEAF, UNMATCHED))
