@@ -137,8 +137,10 @@ Two checks hold the list to that:
   which fails on any line the list did not have where your branch left `main`. That
   catches the line added to cover a new marker, which the first check cannot, and it
   also fails a reworded reason, a second copy of a line, and a line moved to another
-  page. It fails too when the list itself is gone where your branch left `main`, which
-  is what deleting the last page's file does without the `.gitkeep` of step 3. A page
+  page. It fails too when a seed is gone, where your branch left `main` (what deleting
+  the last page's file does without the `.gitkeep` of step 3) or at your branch's head
+  (what deleting `docs/illustrative-seed`, or the command file named below, does; that
+  file stays, empty, when no line is left in it). A page
   that moves takes its lines with it only when you move them: do it in a pull request of
   its own that changes nothing else in the page, because git pairs a moved page with its
   old path from 50% similarity, and a page moved and rewritten at once reads as new

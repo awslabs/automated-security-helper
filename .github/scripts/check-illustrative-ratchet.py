@@ -45,6 +45,13 @@ a range that leaves the seed lost fails. Where the head has the seed again it is
 with the last commit that held it, so restoring a seed as it was passes and restoring it
 with a line it never had does not.
 
+A seed the fork point holds and the head holds none of the files of is a violation of
+its own. A range that deletes it (``git rm -r docs/illustrative-seed``, which takes the
+``.gitkeep`` with it, or removing the command seed) leaves the head no line to compare,
+and that must not read as a range that adds none: the next range cut from there would
+find the seed lost. No range removes a seed. The directory keeps a ``.gitkeep``, and the
+command seed stays as an empty file, when nothing is left in them.
+
 Files in the seed directory that are not a ``.tsv`` directly in it are not seeds, as
 docs_checks reads it.
 
@@ -138,15 +145,17 @@ class Entry:
 @dataclass(frozen=True)
 class Violation:
     """A line the head's seed holds that the fork point's does not or, with no page, a
-    seed that was lost at the fork point and is still gone at the head."""
+    seed that is gone: lost at the fork point and still gone at the head, or held at the
+    fork point and deleted by the range."""
 
     seed: str  # ILLUSTRATIVE or UNEXECUTED
-    file: str  # the seed file at the head that holds the line; a lost seed's path
-    page: str  # the page the line is for; empty for a lost seed
-    base_page: str  # the page it was looked up under at the fork point; empty if lost
+    file: str  # the seed file at the head that holds the line; a gone seed's path
+    page: str  # the page the line is for; empty for a gone seed
+    base_page: str  # the page it was looked up under at the fork point; empty if gone
     text: str  # the marker's reason, or the block's first command; the commit that
-    # removed a lost seed
+    # removed a gone seed
     number: int  # the line's number in ``file``
+    removed_in_range: bool = False  # the fork point holds the seed, the head does not
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +319,14 @@ def seed_pathspec(seed: str) -> str:
     return f"{ILLUSTRATIVE_SEED_DIR}/" if seed == ILLUSTRATIVE else UNEXECUTED_SEED_FILE
 
 
+def newest_touch(repo: Path, rev: str, seed: str) -> str:
+    """The newest commit in ``rev``'s history to touch ``seed``, empty when none did.
+
+    For a seed that ``rev`` does not have, it is the commit that removed it.
+    """
+    return git(repo, "log", "-1", "--format=%H", rev, "--", seed_pathspec(seed)).strip()
+
+
 def lost_seed(repo: Path, base: str, seed: str) -> tuple[str, str | None] | None:
     """How a seed that ``base`` does not have was lost, or None when it never existed.
 
@@ -317,9 +334,7 @@ def lost_seed(repo: Path, base: str, seed: str) -> tuple[str, str | None] | None
     is the one that removed it, and the commit just before it that still held the seed
     (None when no parent of the removing commit has it, which compare cannot use).
     """
-    removed = git(
-        repo, "log", "-1", "--format=%H", base, "--", seed_pathspec(seed)
-    ).strip()
+    removed = newest_touch(repo, base, seed)
     if not removed:
         return None
     parents = git(repo, "rev-list", "--parents", "-n", "1", removed).split()[1:]
@@ -336,7 +351,8 @@ def find_added_lines(
     nothing to be compared with, and a note says that this range introduces it. A seed
     that ``base`` lost (an earlier commit had it) is a violation while the head still
     lacks it; where the head has it again, the lines are compared with the last commit
-    that held it.
+    that held it. A seed that ``base`` holds and the head holds none of the files of is
+    a violation too: the range deleted it, and no line at the head is left to compare.
     """
     base_paths = seed_paths(repo, base)
     head_paths = seed_paths(repo, head)
@@ -368,6 +384,24 @@ def find_added_lines(
                 f"removed it, so this range is compared with {holder[:10]}, the last "
                 "commit that held it"
             )
+        elif not head_paths[seed]:
+            # The fork point holds the seed and the head holds none of its files, so the
+            # range deleted it. With no line at the head there is nothing to add, which
+            # is no reason to pass: a seed that is gone holds the blocks to nothing, and
+            # the next range cut from here would find it lost.
+            removed = newest_touch(repo, head, seed) or head
+            violations.append(
+                Violation(
+                    seed,
+                    seed_pathspec(seed).rstrip("/"),
+                    "",
+                    "",
+                    removed,
+                    1,
+                    removed_in_range=True,
+                )
+            )
+            continue
         if not head_entries:
             continue  # nothing can have been added
         if compared not in renames:
@@ -409,6 +443,14 @@ def explain(violation: Violation, base: str) -> str:
             restore = (
                 f"Restore {UNEXECUTED_SEED_FILE}, empty if no line is left: the file "
                 "is what arms the check, so an empty one still refuses every command."
+            )
+        if violation.removed_in_range:
+            return (
+                f"{violation.file}: {where} is at the fork point ({base[:10]}) and "
+                f"gone at the head, where {violation.text[:10]} removed it. A range "
+                "never deletes a seed: with it gone nothing holds the unrun blocks to "
+                "a count that only falls, and the docs checks are not held to a seed "
+                f"either. {restore}"
             )
         return (
             f"{violation.file}: {where} is gone at the fork point ({base[:10]}), "
