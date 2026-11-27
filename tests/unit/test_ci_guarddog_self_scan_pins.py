@@ -47,12 +47,15 @@ in which case a missing extra is a failure rather than a skip.
 """
 
 import os
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple
 
 import pytest
 import yaml
 
+from automated_security_helper.utils import symbol_spans
 from automated_security_helper.utils.suppression_matcher import file_path_matches
 
 pytestmark = pytest.mark.unit
@@ -89,17 +92,19 @@ def _key(entry: Dict[str, Any]) -> Tuple[Any, ...]:
 
 
 def _symbol_spans(entry: Dict[str, Any]) -> List[Tuple[int, int]]:
-    """The resolved spans of a symbol entry, skipping when the extra is missing."""
-    try:
-        from automated_security_helper.utils.symbol_spans import (
-            grammar_for_path,
-            index_symbols,
-        )
+    """The resolved spans of a symbol entry, skipping when the extra is missing.
 
-        grammar = grammar_for_path(entry["path"])
-        assert grammar is not None, f"no symbol grammar for {entry['path']}"
-        spans = index_symbols((REPO_ROOT / entry["path"]).read_bytes(), grammar)
-    except ImportError as exc:  # pragma: no cover - environment-dependent
+    symbol_spans imports tree-sitter only when it parses, and reports a missing
+    tree-sitter or grammar as SymbolsUnavailableError, never as ImportError, so
+    the skip catches that class.
+    """
+    grammar = symbol_spans.grammar_for_path(entry["path"])
+    assert grammar is not None, f"no symbol grammar for {entry['path']}"
+    try:
+        spans = symbol_spans.index_symbols(
+            (REPO_ROOT / entry["path"]).read_bytes(), grammar
+        )
+    except symbol_spans.SymbolsUnavailableError as exc:
         if os.environ.get("ASH_REQUIRE_SYMBOLS_EXTRA", "").strip().upper() in (
             "1",
             "YES",
@@ -113,6 +118,75 @@ def _symbol_spans(entry: Dict[str, Any]) -> List[Tuple[int, int]]:
     resolved = spans.get(entry["symbol"], ())
     assert resolved, f"{entry['path']}: symbol {entry['symbol']!r} resolves to nothing"
     return list(resolved)
+
+
+#: A symbol entry that names a definition in this very file, so the helper reads a
+#: real path and a real symbol without depending on either config file.
+_THIS_FILE: Dict[str, Any] = {
+    "path": Path(__file__).resolve().relative_to(REPO_ROOT).as_posix(),
+    "symbol": "_symbol_spans",
+}
+
+
+def _without_tree_sitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What an install without the [symbols] extra does to an import of tree-sitter."""
+    monkeypatch.setitem(sys.modules, "tree_sitter", None)
+    monkeypatch.setattr(symbol_spans, "_language_cache", {})
+
+
+def test_the_simulated_missing_extra_raises_symbols_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control: the simulation raises what a missing extra raises."""
+    _without_tree_sitter(monkeypatch)
+    grammar = symbol_spans.grammar_for_path("module.py")
+    assert grammar is not None
+    with pytest.raises(symbol_spans.SymbolsUnavailableError):
+        symbol_spans.index_symbols(b"def f():\n    pass\n", grammar)
+
+
+def test_a_missing_extra_skips_the_span_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without the extra, and without the CI flag, the check skips and names it."""
+    _without_tree_sitter(monkeypatch)
+    monkeypatch.delenv("ASH_REQUIRE_SYMBOLS_EXTRA", raising=False)
+    with pytest.raises(pytest.skip.Exception, match=r"\[symbols\] extra not installed"):
+        _symbol_spans(_THIS_FILE)
+
+
+def test_a_missing_extra_fails_the_span_check_under_the_ci_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With the CI flag set, a missing extra fails the check instead of skipping."""
+    _without_tree_sitter(monkeypatch)
+    monkeypatch.setenv("ASH_REQUIRE_SYMBOLS_EXTRA", "1")
+    # pytest.raises lets a skip through, and the run would then report this test as
+    # skipped. Accept both outcomes and fail on the skip below.
+    with pytest.raises((pytest.fail.Exception, pytest.skip.Exception)) as outcome:
+        _symbol_spans(_THIS_FILE)
+    assert outcome.type is pytest.fail.Exception, (
+        f"skipped instead of failing: {outcome.value}"
+    )
+    outcome.match("ASH_REQUIRE_SYMBOLS_EXTRA is set")
+
+
+def test_a_parse_error_is_not_read_as_a_missing_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Control: only a missing extra skips; a file that does not parse still fails."""
+    root = SimpleNamespace(
+        has_error=True, is_error=True, is_missing=False, start_point=(0, 0), children=[]
+    )
+    parser = SimpleNamespace(parse=lambda source: SimpleNamespace(root_node=root))
+    monkeypatch.setattr(symbol_spans, "_new_parser", lambda grammar: parser)
+    monkeypatch.delenv("ASH_REQUIRE_SYMBOLS_EXTRA", raising=False)
+    # As in the flag test: accept a skip so that it fails here instead of skipping.
+    with pytest.raises(
+        (symbol_spans.SymbolParseError, pytest.skip.Exception)
+    ) as outcome:
+        _symbol_spans(_THIS_FILE)
+    assert outcome.type is symbol_spans.SymbolParseError, (
+        f"a parse error was skipped as a missing extra: {outcome.value}"
+    )
 
 
 #: Text the pinned line must contain, by rule id: the shape of what each GuardDog

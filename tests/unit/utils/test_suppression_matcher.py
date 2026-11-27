@@ -23,7 +23,7 @@ def test_rule_id_matches_with_none():
     assert not _rule_id_matches(None, "TEST-001")
 
 
-def testfile_path_matches_with_none():
+def test_file_path_matches_with_none():
     """Test file path matching with None finding file path."""
     assert not file_path_matches(None, "src/file.py")
 
