@@ -219,7 +219,7 @@ def _stdin_conditions(
     condition reads, which the words do not show) is an error here, so a renamed option
     stops the generator instead of being rendered into a wrapper that keeps stdin open
     for the wrong runs."""
-    from automated_security_helper.cli.json_input import CLI_JSON_INPUT_FLAG
+    from automated_security_helper.core.constants import CLI_JSON_INPUT_FLAG
 
     filled = []
     for condition in declared:
