@@ -128,12 +128,13 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/cli/mcp/source_delivery.py
-  old_line_start: 2573
-  old_line_end: 2573
+  old_line_start: 2765
+  old_line_end: 2765
+  span_measured_at: d9407b54e3d
   symbol: _validate_zip_member
   span_at_migration:
-  - 2568
-  - 2596
+  - 2760
+  - 2788
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/path_matching.py
@@ -164,12 +165,13 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/interactions/run_ash_container.py
-  old_line_start: 4361
-  old_line_end: 4361
+  old_line_start: 4362
+  old_line_end: 4362
+  span_measured_at: d9407b54e3d
   symbol: _write_env_file
   span_at_migration:
-  - 4300
-  - 4405
+  - 4301
+  - 4406
 - config: .ash.yaml
   rule_id: threat-filesystem-destruction
   path: tests/snapshot/test_snapshot_normalizer.py
@@ -200,12 +202,13 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_artifact_contents_gate.py
-  old_line_start: 1477
-  old_line_end: 1477
+  old_line_start: 1484
+  old_line_end: 1484
+  span_measured_at: d9407b54e3d
   symbol: TestArchiveReading.test_an_escaping_symlink_in_a_real_tar_fails_the_gate
   span_at_migration:
-  - 1457
-  - 1482
+  - 1464
+  - 1489
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_defense_in_depth.py
@@ -218,12 +221,13 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: tests/unit/test_pinned_tool_version_check.py
-  old_line_start: 1178
-  old_line_end: 1178
+  old_line_start: 1182
+  old_line_end: 1182
+  span_measured_at: d9407b54e3d
   symbol: TestOnlyAllowlistedHttpsUrlsAreFetched.test_a_url_outside_the_allowlist_is_refused_unopened
   span_at_migration:
-  - 1175
-  - 1197
+  - 1179
+  - 1201
 - config: .ash.yaml
   rule_id: threat-runtime-obfuscation-base64exec
   path: tests/unit/utils/test_opengrep_pinned_download.py
@@ -236,21 +240,23 @@ entries:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 816
-  old_line_end: 816
+  old_line_start: 956
+  old_line_end: 956
+  span_measured_at: d9407b54e3d
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 815
-  - 853
+  - 955
+  - 993
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 818
-  old_line_end: 818
+  old_line_start: 958
+  old_line_end: 958
+  span_measured_at: d9407b54e3d
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 815
-  - 853
+  - 955
+  - 993
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
@@ -317,15 +323,15 @@ entries:
   # declared shell flag now lives in its own helper, and the entry names that.
   old_pin_stale_at_migration: true
   # This row's span and flagged_line were re-measured in one read of main
-  # e19cc22a5d6 (the span first recorded here, 972-979, came from a later
+  # d9407b54e3d (the span first recorded here, 972-979, came from a later
   # snapshot than the migration tip the header names); the old pin above is in
   # the migration tip's numbering and is not compared with either.
-  span_measured_at: e19cc22a5d6
-  flagged_line: 989
+  span_measured_at: d9407b54e3d
+  flagged_line: 1043
   symbol: _run_declared_install_command
   span_at_migration:
-  - 982
-  - 989
+  - 1036
+  - 1043
 - config: .ash.yaml
   rule_id: B608
   path: automated_security_helper/utils/content_db_refresh.py
@@ -374,30 +380,33 @@ entries:
 - config: .ash.yaml
   rule_id: B104
   path: automated_security_helper/cli/mcp/__init__.py
-  old_line_start: 953
-  old_line_end: 953
+  old_line_start: 954
+  old_line_end: 954
+  span_measured_at: d9407b54e3d
   symbol: _log_where_the_server_listens
   span_at_migration:
-  - 934
-  - 965
+  - 935
+  - 966
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B104
   path: automated_security_helper/cli/mcp/__init__.py
-  old_line_start: 940
-  old_line_end: 940
+  old_line_start: 941
+  old_line_end: 941
+  span_measured_at: d9407b54e3d
   symbol: _log_where_the_server_listens
   span_at_migration:
-  - 934
-  - 965
+  - 935
+  - 966
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/cli/mcp/source_delivery.py
-  old_line_start: 2573
-  old_line_end: 2573
+  old_line_start: 2765
+  old_line_end: 2765
+  span_measured_at: d9407b54e3d
   symbol: _validate_zip_member
   span_at_migration:
-  - 2568
-  - 2596
+  - 2760
+  - 2788
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/path_matching.py
@@ -473,30 +482,33 @@ entries:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/interactions/run_ash_container.py
-  old_line_start: 4361
-  old_line_end: 4361
+  old_line_start: 4362
+  old_line_end: 4362
+  span_measured_at: d9407b54e3d
   symbol: _write_env_file
   span_at_migration:
-  - 4300
-  - 4405
+  - 4301
+  - 4406
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 816
-  old_line_end: 816
+  old_line_start: 956
+  old_line_end: 956
+  span_measured_at: d9407b54e3d
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 815
-  - 853
+  - 955
+  - 993
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  old_line_start: 818
-  old_line_end: 818
+  old_line_start: 958
+  old_line_end: 958
+  span_measured_at: d9407b54e3d
   symbol: NpmAuditScanner._probe_npm_version
   span_at_migration:
-  - 815
-  - 853
+  - 955
+  - 993
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/utils/package_manager_child.py
