@@ -2140,8 +2140,24 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
     * a TOML string that starts with ``${`` is a reference to the environment. In
       YAML a quoted value is one only when it is tagged ``!ENV``, and an unquoted
       value ends at a space followed by ``#`` and is refused when it holds a ``:``
-      followed by a space or sits inside ``[...]`` or ``{...}``; the value tagged
-      ``!ENV`` with the TOML string's quotes kept is read as TOML reads it.
+      followed by a space or sits inside ``[...]`` or ``{...}``. A basic or literal
+      string, with one quote mark on each side, tagged ``!ENV`` with its quotes
+      kept is read as TOML reads it: a basic string's escapes mean the same in a
+      YAML double-quoted string, and YAML single quotes change only a single quote,
+      which a literal string cannot hold;
+    * a multi-line string, with three quote marks on each side on one line or more,
+      cannot keep them: YAML reads three single quote marks as a single-quoted
+      value with a quote mark at each end, which is no reference, and refuses three
+      double quote marks. Its text as TOML reads it leaves out a line break that
+      directly follows the opening marks and, in a basic one, a backslash that ends
+      a line with the spaces, tabs and line breaks after it. Written as a one-line
+      double-quoted string, with each other line break as the escape for a line
+      feed, each backslash and double quote of a literal one escaped, and a basic
+      one's escapes kept and its unescaped double quotes escaped, it is read as
+      TOML reads it. In either kind of string, a character YAML takes as a line
+      break inside quotes (U+0085, U+2028, U+2029) or refuses in a file (a C1
+      control other than U+0085, U+FFFE, U+FFFF) keeps its TOML meaning only when
+      it is written as an escape in a double-quoted string.
 
     A ``pyproject.toml`` table is edited where it is and has none.
     """
@@ -2159,9 +2175,21 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
         )
     if is_toml_file(source.path) and not is_pyproject(source.path):
         caveats.append(
-            f"In the YAML, put !ENV in front of each value from {subject} that "
-            "starts with ${ and keep its quotes: a quoted value without the tag "
-            "is read as literal text, not from the environment"
+            "In the YAML, put !ENV and a space before the opening quote of each "
+            f"string from {subject} whose text starts with "
+            "${, and keep its quotes if it has one quote mark on each side: a "
+            "quoted value without the tag is read as literal text, not from the "
+            "environment"
+        )
+        caveats.append(
+            "Write such a string that has three quote marks on each side as a "
+            "one-line double-quoted string with the text TOML reads: leave out a "
+            "line break that directly follows the opening marks and write each "
+            "other line break as \\n; from three single quote marks, also write "
+            'each backslash as \\\\ and each double quote as \\"; from three double '
+            "quote marks, keep each escape, write each unescaped double quote as "
+            '\\", and leave out a backslash that ends a line, with the spaces, tabs '
+            "and line breaks after it"
         )
     return caveats
 
