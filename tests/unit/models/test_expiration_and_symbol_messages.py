@@ -41,6 +41,13 @@ def _message(model, data) -> str:
     return error["msg"]
 
 
+def _date_key(model) -> str:
+    """The date field's name: ASH 4.0 removed the ``expiration`` spelling of
+    ``expires`` on suppressions and ignore paths; a content database override
+    still names its date ``expiration``."""
+    return "expiration" if model is ContentDbStalenessOverride else "expires"
+
+
 def _override(**fields):
     return {"database": "grype-db", "policy": "warn", "reason": "r", **fields}
 
@@ -57,7 +64,7 @@ EXPIRING = [
     "value", [date(2099, 1, 31), datetime(2099, 1, 31, 10, 0)], ids=["date", "datetime"]
 )
 def test_an_unquoted_date(model, data, value):
-    message = _message(model, {**data, "expiration": value})
+    message = _message(model, {**data, _date_key(model): value})
     assert "expiration must be a quoted YYYY-MM-DD string" in message, message
     assert value.isoformat() in message, message
     assert "put it in quotes" in message, message
@@ -69,7 +76,7 @@ def test_an_unquoted_date(model, data, value):
     [(20990131, "a number"), (["2099-01-31"], "a list"), (True, "true or false")],
 )
 def test_a_value_that_is_not_text_is_named_by_its_type(model, data, value, named):
-    message = _message(model, {**data, "expiration": value})
+    message = _message(model, {**data, _date_key(model): value})
     assert message.endswith(
         f"expiration must be a quoted YYYY-MM-DD string, not {named}"
     ), message
@@ -78,7 +85,7 @@ def test_a_value_that_is_not_text_is_named_by_its_type(model, data, value, named
 
 @pytest.mark.parametrize("model, data", EXPIRING)
 def test_a_string_that_is_not_a_date(model, data):
-    message = _message(model, {**data, "expiration": "31/01/2099"})
+    message = _message(model, {**data, _date_key(model): "31/01/2099"})
     assert message == "Value error, Invalid expiration date format. Use YYYY-MM-DD", (
         message
     )
@@ -90,7 +97,7 @@ def test_the_printed_message_states_the_rule_without_the_string():
             {
                 "project_name": "p",
                 "global_settings": {
-                    "suppressions": [{**SUPPRESSION, "expiration": "31/01/2099"}]
+                    "suppressions": [{**SUPPRESSION, "expires": "31/01/2099"}]
                 },
             },
             strict=True,
@@ -114,4 +121,4 @@ def test_a_symbol_that_is_not_a_qualified_name(value):
 
 @pytest.mark.parametrize("value", ["2099-01-31", None])
 def test_a_quoted_date_and_no_date_load(value):
-    assert IgnorePathWithReason(**ENTRY, expiration=value).expiration == value
+    assert IgnorePathWithReason(**ENTRY, expires=value).expires == value

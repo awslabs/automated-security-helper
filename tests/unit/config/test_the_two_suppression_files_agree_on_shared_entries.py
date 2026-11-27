@@ -16,8 +16,8 @@ What this checks
 ----------------
 An entry is shared when both files hold one with the same rule id, path, symbol,
 resource id and package name. Those say what the entry is about. The rest says what it
-decides, and every shared entry carries the same of it in both files: the expiry (the
-``expiration`` spelling counts as ``expires``), the line range, the package path and
+decides, and every shared entry carries the same of it in both files: the expiry (only
+``expires`` is read: ASH 4.0 removed the ``expiration`` spelling), the line range, the package path and
 the package version. A line range or install path edited in one file is therefore a
 disagreement, not a reason to stop comparing the pair. Which entries are shared is
 read from the files, so no count of them is written down here. The GuardDog pins have
@@ -56,7 +56,7 @@ def _key(entry: Dict[str, Any]) -> Key:
 
 
 def _expiry(entry: Dict[str, Any]) -> Any:
-    value = entry.get("expires", entry.get("expiration"))
+    value = entry.get("expires")
     return str(value) if value is not None else None
 
 
@@ -121,7 +121,6 @@ _BASE = {"rule_id": "X", "path": "a", "line_start": 1, "line_end": 1}
         ("line_end", 1, 2),
         ("package_path", "deploy/a", "deploy/b"),
         ("package_version", "1.0.0", "1.0.1"),
-        ("expiration", "2027-01-01", "2027-02-01"),
     ],
 )
 def test_the_comparison_sees_a_difference_in_each_claim(
@@ -132,11 +131,12 @@ def test_the_comparison_sees_a_difference_in_each_claim(
     assert list(_disagreements(default, alpha)) == [_key(_BASE)]
 
 
-def test_the_comparison_reads_the_expiration_spelling_as_expires() -> None:
+def test_the_comparison_does_not_read_the_removed_expiration_spelling() -> None:
+    """ASH 4.0 removed the ``expiration`` spelling, so an entry that still
+    carries it has no expiry here, and the other file's ``expires`` differs."""
     default = [{**_BASE, "expires": "2027-01-01"}]
     alpha = [{**_BASE, "expiration": "2027-01-01"}]
-    assert _disagreements(default, alpha) == {}
-    assert list(_disagreements(default, [{**_BASE, "expiration": "2027-02-01"}]))
+    assert list(_disagreements(default, alpha)) == [_key(_BASE)]
 
 
 def test_the_comparison_passes_entries_that_say_the_same_thing() -> None:

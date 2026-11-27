@@ -58,6 +58,10 @@ FIELDS = {
     "package_path": ("- **Package path**: `{}`", {"path": "app.py"}),
     "symbol": ("- **Symbol**: `{}`", {"path": "app.py"}),
 }
+#: The config key a report field is written under; ASH 4.0 removed the
+#: ``expiration`` spelling, so the config says ``expires`` while the report keeps
+#: its ``expiration`` key.
+CONFIG_KEY = {"expiration": "expires"}
 #: The fields the expiry warning names.
 WARNED = ("path", "rule_id", "expiration")
 #: The line fields, and the fields written as text beside each.
@@ -127,7 +131,7 @@ def _context(tmp_path: Path, entry: dict) -> PluginContext:
 
 def _entry(field: str, extra: dict | None = None, written: str = REFERENCE) -> dict:
     return {
-        field: written,
+        CONFIG_KEY.get(field, field): written,
         **FIELDS[field][1],
         "reason": "test fixture only",
         **(extra or {}),
@@ -153,7 +157,10 @@ def test_the_unused_suppressions_report_shows_the_field_by_its_reference(
     canary = _canary(monkeypatch, field)
     context = _context(tmp_path, _entry(field, written=reference))
     # The control: the config holds the value.
-    assert str(getattr(context.config.global_settings.suppressions[0], field)) == canary
+    held = getattr(
+        context.config.global_settings.suppressions[0], CONFIG_KEY.get(field, field)
+    )
+    assert str(held) == canary
 
     written, markdown = _report(context)
 
@@ -175,7 +182,7 @@ def test_the_expiry_warning_shows_the_field_by_its_reference(
     reference = FORMS[form]
     canary = _canary(monkeypatch, field)
     soon = (date.today() + timedelta(days=5)).isoformat()
-    extra = {} if field == "expiration" else {"expiration": f"'{soon}'"}
+    extra = {} if field == "expiration" else {"expires": f"'{soon}'"}
     context = _context(tmp_path, _entry(field, extra, written=reference))
 
     with caplog.at_level(logging.WARNING):
@@ -214,7 +221,7 @@ def test_a_line_read_from_the_environment_is_refused_without_its_value(
 
 def test_control_fields_written_as_text_are_shown_as_they_are(tmp_path) -> None:
     entry = {
-        key: f"'{value}'" if key == "expiration" else value
+        CONFIG_KEY.get(key, key): f"'{value}'" if key == "expiration" else value
         for key, value in TEXT.items()
     }
     context = _context(tmp_path, entry)

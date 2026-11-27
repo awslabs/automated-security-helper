@@ -51,7 +51,7 @@ REFUSED_FIELDS = {
         "    - rule_id: B101\n"
         "      path: app.py\n"
         "      reason: probe\n"
-        f"      expiration: {SECRET}\n"
+        f"      expires: {SECRET}\n"
     ),
 }
 

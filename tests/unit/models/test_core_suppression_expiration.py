@@ -26,9 +26,9 @@ def test_past_expiration_accepted_by_validator():
         rule_id="RULE-001",
         path="src/main.py",
         reason="known false positive",
-        expiration="2020-01-01",
+        expires="2020-01-01",
     )
-    assert s.expiration == "2020-01-01"
+    assert s.expires == "2020-01-01"
 
 
 def test_past_expiration_is_expired():
@@ -37,7 +37,7 @@ def test_past_expiration_is_expired():
         rule_id="RULE-001",
         path="src/main.py",
         reason="known false positive",
-        expiration="2020-01-01",
+        expires="2020-01-01",
     )
     assert s.is_expired is True
 
@@ -49,7 +49,7 @@ def test_malformed_expiration_rejected():
             rule_id="RULE-001",
             path="src/main.py",
             reason="test",
-            expiration="not-a-date",
+            expires="not-a-date",
         )
     assert "YYYY-MM-DD" in str(exc_info.value)
 
@@ -60,9 +60,9 @@ def test_future_expiration_not_expired():
         rule_id="RULE-001",
         path="src/main.py",
         reason="suppressed until next audit",
-        expiration="2099-12-31",
+        expires="2099-12-31",
     )
-    assert s.expiration == "2099-12-31"
+    assert s.expires == "2099-12-31"
     assert s.is_expired is False
 
 

@@ -2775,16 +2775,19 @@ class AshConfig(RedactedSection):
         Field(
             description=(
                 "Whether an unknown key in a suppression or ignore-path entry "
-                "refuses the config at load. False (the default) loads the "
-                "config with a warning that names the key, with a did-you-mean, "
-                "and the entry it sits in suppresses nothing until it is fixed, "
-                "so a typo can never widen a suppression. True refuses the "
-                "config, naming the same key. ASH v4 flips the default to True; "
-                "set it True now to adopt the error early."
+                "refuses the config at load. True (the default since ASH 4.0) "
+                "refuses the config, naming the key, with a did-you-mean. False "
+                "keeps the 3.x behavior: the config loads with a warning that "
+                "names the same key, and the entry it sits in suppresses nothing "
+                "until it is fixed, so a typo can never widen a suppression. The "
+                "same setting decides what a suppression's scope.engines block does "
+                "when a scan starts and the block names a scanner no plugin of the "
+                "run registers, or the named scanner refuses it: True refuses the "
+                "scan, False warns. Either way the block suppresses nothing."
             )
         ),
-        # The default is the one v4 gate (utils/unknown_keys.py), so the v4
-        # bump flips the field and the raw-document read together.
+        # The default is the one gate (utils/unknown_keys.py), so the field and
+        # the raw-document read agree.
     ] = UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
 
     honor_ignore_files: Annotated[
@@ -3579,9 +3582,8 @@ def _same_suppression(existing: Any, suppression: AshSuppression) -> bool:
     """
     if not isinstance(existing, dict):
         return False
-    for spelling in ("expires", "expiration"):
-        if isinstance(existing.get(spelling), date):
-            existing = {**existing, spelling: existing[spelling].isoformat()}
+    if isinstance(existing.get("expires"), date):
+        existing = {**existing, "expires": existing["expires"].isoformat()}
     try:
         existing_suppression = AshSuppression.model_validate(existing)
     except ValidationError:

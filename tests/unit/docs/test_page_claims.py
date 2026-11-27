@@ -6903,8 +6903,8 @@ def test_a_scan_whose_scanners_were_all_turned_off_reports_scan_ran_no_scanners(
         ),
         pytest.param(
             ("expires:", "expiry:"),
-            0,
-            "Configuration is valid! A scan accepts it.",
+            3,
+            "expiry",
             id="a-misspelled-key",
         ),
         pytest.param(
@@ -6931,10 +6931,9 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
     ``ash config validate`` as written and with one field broken in each way the
     page's sentence lists. A wrong value and a missing required field exit 3 and
     name the field, and a scan, resolving the same file, refuses it too. A typo
-    in an optional key (``expiry`` for ``expires``) is the warn-then-refuse
-    rollout's default: validate accepts the file, a scan accepts it too, the
-    scan's resolution warning names the key with a did-you-mean, and the entry
-    is kept but applies to nothing (``has_unknown_keys``). The page's ``sed``
+    in an optional key (``expiry`` for ``expires``) is refused the same way
+    since ASH 4.0 (``fail_on_unknown_keys`` is true by default): validate exits
+    3 naming the key, and a scan refuses the file too. The page's ``sed``
     makes a required-key typo (``reasn`` for ``reason``), which exits 3 because
     the required field then goes missing: the missing-required case here is that
     refusal's shape. The file as written is the control: it exits 0, with the
@@ -6945,12 +6944,13 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         "It checks the config a scan of the project would use, the way the scan loads it, "
         "and ends with `Configuration is valid! A scan accepts it.` It may also warn that "
         "`project_name` is not set, which a scan accepts. A typo in an optional key such as "
-        "`expiry` for `expires` does not make the file invalid: validate still accepts "
-        "it, the entry suppresses nothing until the key is fixed, and the scan that loads "
-        "the config warns, naming the key with a did-you-mean (`fail_on_unknown_keys: true` "
-        "makes it an error, the default from ASH v4). A wrong value or a missing required "
-        "field such as `reason` makes validate name the field and exit with code 3; a typo "
-        "in a required key does the same, because the required field then goes missing:",
+        "`expiry` for `expires` makes the file invalid, since ASH 4.0 refuses an unknown "
+        "key in a suppression: validate names the key with a did-you-mean and exits with "
+        "code 3 (`fail_on_unknown_keys: false` restores the 3.x behavior, where the scan "
+        "warns and the entry suppresses nothing until the key is fixed). A wrong value or "
+        "a missing required field such as `reason` makes validate name the field and exit "
+        "with code 3 too; a typo in a required key does the same, because the required "
+        "field then goes missing:",
     )
     assert_on_page(_CONFIG_AGENTS_PAGE, "sed 's/reason:/reasn:/' .ash.yaml > typo.yaml")
     text = _config_heredoc(_CONFIG_AGENTS_PAGE, ".ash.yaml")
@@ -6981,13 +6981,9 @@ def test_config_validate_names_a_wrong_suppression_field_and_exits_3(
         f"a scan {'refuses' if refused else 'accepts'} the file validate exited "
         f"{result.returncode} for"
     )
-    if change is not None and verdict == 0:
-        # The warn-mode half of the page's claim: the scan's resolution
-        # warning names the misspelled key, and the entry is kept but inert.
-        warnings = list(resolved._resolution_warnings)
-        assert any("'expiry'" in warning for warning in warnings), warnings
-        (entry,) = resolved.global_settings.suppressions
-        assert entry.has_unknown_keys is True
+    if change is None:
+        assert resolved is not None
+        assert not any("Unknown key" in w for w in resolved._resolution_warnings)
 
 
 # --------------------------------------------------------------------------- #

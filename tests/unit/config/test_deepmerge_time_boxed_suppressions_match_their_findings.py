@@ -109,8 +109,8 @@ def test_the_entries_have_not_expired() -> None:
     entries = _deepmerge_entries()
     assert entries, "no GHSA-gcqx-w48m-w2h4 entries in .ash.yaml"
     for entry in entries:
-        assert entry.expiration, f"{entry.package_path}: no expiration"
-        assert not expiration_has_passed(entry.expiration), (
-            f"{entry.package_path}: expired on {entry.expiration}; re-read the "
+        assert entry.expires, f"{entry.package_path}: no expiration"
+        assert not expiration_has_passed(entry.expires), (
+            f"{entry.package_path}: expired on {entry.expires}; re-read the "
             "advisory for a patched release before extending it"
         )

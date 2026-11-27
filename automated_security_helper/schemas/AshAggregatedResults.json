@@ -1708,8 +1708,8 @@
           "type": "boolean"
         },
         "fail_on_unknown_keys": {
-          "default": false,
-          "description": "Whether an unknown key in a suppression or ignore-path entry refuses the config at load. False (the default) loads the config with a warning that names the key, with a did-you-mean, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression. True refuses the config, naming the same key. ASH v4 flips the default to True; set it True now to adopt the error early.",
+          "default": true,
+          "description": "Whether an unknown key in a suppression or ignore-path entry refuses the config at load. True (the default since ASH 4.0) refuses the config, naming the key, with a did-you-mean. False keeps the 3.x behavior: the config loads with a warning that names the same key, and the entry it sits in suppresses nothing until it is fixed, so a typo can never widen a suppression. The same setting decides what a suppression's scope.engines block does when a scan starts and the block names a scanner no plugin of the run registers, or the named scanner refuses it: True refuses the scan, False warns. Either way the block suppresses nothing.",
           "title": "Fail On Unknown Keys",
           "type": "boolean"
         },
@@ -2628,19 +2628,6 @@
           "title": "Client Supplied",
           "type": "boolean"
         },
-        "expiration": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
-          "title": "Expiration"
-        },
         "expires": {
           "anyOf": [
             {
@@ -2651,7 +2638,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expires"
         },
         "path": {
@@ -2869,19 +2856,6 @@
           "title": "Client Supplied",
           "type": "boolean"
         },
-        "expiration": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
-          "title": "Expiration"
-        },
         "expires": {
           "anyOf": [
             {
@@ -2892,7 +2866,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expires"
         },
         "image": {
@@ -10820,19 +10794,6 @@
           "title": "Client Supplied",
           "type": "boolean"
         },
-        "expiration": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
-          "title": "Expiration"
-        },
         "expires": {
           "anyOf": [
             {
@@ -10843,7 +10804,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expires"
         },
         "path": {

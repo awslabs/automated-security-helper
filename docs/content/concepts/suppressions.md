@@ -50,7 +50,7 @@ global_settings:
         resource_type: "AWS::IAM::Policy"
 ```
 
-`resource_id` and `resource_type` are universal: ASH matches them itself against the identity the finding carries, whatever engine produced it. Both are literal matches first, then globs with `[` and `]` taken literally; `resource_id` is case-sensitive, `resource_type` is not. A finding that carries no resource identity never matches a resource-scoped entry, the same safe direction as a finding with no line and a line-scoped suppression, and an engine gains support by writing the `ash_resource_id` and `ash_resource_type` properties into its SARIF results, not by changing ASH. The common case has first-class sugar: a top-level `resource_id` on the entry is folded into `scope.resource_id` (setting both to different values is an error), and `expiration` is accepted as a deprecated alias of `expires` when a config is read; the alias is removed in ASH v4.
+`resource_id` and `resource_type` are universal: ASH matches them itself against the identity the finding carries, whatever engine produced it. Both are literal matches first, then globs with `[` and `]` taken literally; `resource_id` is case-sensitive, `resource_type` is not. A finding that carries no resource identity never matches a resource-scoped entry, the same safe direction as a finding with no line and a line-scoped suppression, and an engine gains support by writing the `ash_resource_id` and `ash_resource_type` properties into its SARIF results, not by changing ASH. The common case has first-class sugar: a top-level `resource_id` on the entry is folded into `scope.resource_id` (setting both to different values is an error), and ASH 4.0 removed the `expiration` spelling of `expires`: a config that writes `expiration` is refused as an unknown key, with `expires` as the did-you-mean. Results files that earlier ASH versions wrote still read `expiration` as `expires`.
 
 A scope may also carry per-engine blocks, keyed by scanner name and owned by that scanner's plugin:
 
@@ -78,9 +78,9 @@ ferret-scan's block takes `confidence_level` (one of `low`, `medium`, `high`, or
 
 Everything about a scope fails closed. An empty `scope`, an empty `engines` map and an empty engine block are refused: match-all is the absence of the field, never an empty dict.
 
-## Unknown keys: warn now, error at v4
+## Unknown keys: an error since ASH 4.0
 
-A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Today's default is to warn: the config loads, a warning names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs), and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error at config load instead. ASH v4 flips that default to true; the flag stays as an escape hatch. The warning says so itself: it ends with `This will become an error in ASH v4.`, so a config that warns today is one to fix before v4.
+A key a suppression or ignore-path entry does not declare is a defect to surface loudly: silently dropped (as ASH did through v3.7.x), a misspelled `rule_id` leaves a suppression covering every rule in its path. Since ASH 4.0 the default is to refuse: the config fails at load, and the error names the key with a did-you-mean (and, for a key that belongs elsewhere, where it belongs). `fail_on_unknown_keys: true` is that default. Setting `fail_on_unknown_keys: false` keeps the behavior of ASH 3.x: the config loads, a warning names the key, and the entry it sits in suppresses nothing until it is fixed, so a typo can only narrow what is suppressed.
 
 ## Order of application
 

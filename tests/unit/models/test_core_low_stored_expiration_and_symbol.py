@@ -52,14 +52,15 @@ def test_a_stored_expiration_that_is_not_text_is_kept_and_noted(model, data, val
     )
 
     assert notes == [UNREADABLE_EXPIRATION_NOTE]
-    assert isinstance(entry.expiration, str)
+    # The stored reader renames the old `expiration` key to `expires`.
+    assert isinstance(entry.expires, str)
     assert entry.is_expired is True
 
 
 @pytest.mark.parametrize("model, data", ENTRIES)
 def test_a_config_file_still_refuses_an_expiration_that_is_not_text(model, data):
     with pytest.raises(ValidationError) as excinfo:
-        model.model_validate({**data, "expiration": 209912}, strict=True)
+        model.model_validate({**data, "expires": 209912}, strict=True)
 
     assert "expiration must be a quoted YYYY-MM-DD string" in str(excinfo.value)
 
@@ -73,7 +74,7 @@ def test_a_stored_text_expiration_is_unchanged_by_the_tolerance(model, data):
     )
 
     assert notes == []
-    assert entry.expiration == "2099-01-31"
+    assert entry.expires == "2099-01-31"
 
 
 @pytest.mark.parametrize("symbol", ["Outer.method\n", "handler\n"])

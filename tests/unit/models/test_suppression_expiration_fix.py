@@ -21,9 +21,9 @@ def test_past_expiration_accepted_not_discarded():
         path="test.py",
         rule_id="TEST-001",
         reason="test",
-        expiration="2020-01-01",
+        expires="2020-01-01",
     )
-    assert s.expiration == "2020-01-01"
+    assert s.expires == "2020-01-01"
     assert s.is_expired is True
 
 
@@ -33,9 +33,9 @@ def test_future_expiration_accepted():
         path="test.py",
         rule_id="TEST-001",
         reason="test",
-        expiration="2099-12-31",
+        expires="2099-12-31",
     )
-    assert s.expiration == "2099-12-31"
+    assert s.expires == "2099-12-31"
     assert s.is_expired is False
 
 
@@ -45,7 +45,7 @@ def test_none_expiration_accepted():
         path="test.py",
         rule_id="TEST-001",
         reason="test",
-        expiration=None,
+        expires=None,
     )
-    assert s.expiration is None
+    assert s.expires is None
     assert s.is_expired is False

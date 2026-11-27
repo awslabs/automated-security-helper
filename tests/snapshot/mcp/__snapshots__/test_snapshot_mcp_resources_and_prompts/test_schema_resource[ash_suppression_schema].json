@@ -75,7 +75,7 @@
         }
       ],
       "default": null,
-      "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+      "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
       "title": "Expires"
     },
     "client_supplied": {
@@ -212,19 +212,6 @@
       "default": null,
       "description": "(Optional) Sugar for scope.resource_id: the entry-level spelling users reach for on their own. Folded into scope at validation; setting both to different values is an error.",
       "title": "Resource Id"
-    },
-    "expiration": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
-      "title": "Expiration"
     }
   },
   "required": [

@@ -682,7 +682,7 @@
       ]),
       'fail_on_findings': False,
       'fail_on_incomplete_scanners': True,
-      'fail_on_unknown_keys': False,
+      'fail_on_unknown_keys': True,
       'global_settings': dict({
         'deduplication': dict({
           'annotate': False,
@@ -1352,7 +1352,7 @@
       ]),
       'fail_on_findings': True,
       'fail_on_incomplete_scanners': True,
-      'fail_on_unknown_keys': False,
+      'fail_on_unknown_keys': True,
       'global_settings': dict({
         'deduplication': dict({
           'annotate': False,

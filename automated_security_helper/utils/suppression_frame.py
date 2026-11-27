@@ -114,7 +114,6 @@ def line_span_spec() -> "FrameSpec":
             "expires": "read on the host by is_expired, which the live column carries",
             "is_expired": "an input of the live column's predicate (_inert)",
             "has_unknown_keys": "an input of the live column's predicate (_inert)",
-            "expiration": "the deprecated spelling of expires, same fate",
             "days_until_expiry": "an expiry display helper over expires",
             "id": "the suppression's stable identifier for reports, not a "
             "matcher column",

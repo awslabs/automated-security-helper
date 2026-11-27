@@ -662,36 +662,6 @@ SHOWN_SUPPRESSION_FIELDS = (
 )
 
 
-def _expiry_under_both_spellings(shown: List[Dict[str, Any]]) -> None:
-    """Each of ``shown``'s entries with its expiry under the ``expiration``
-    alias too, before ``record_environment_references`` runs.
-
-    The record keys a reference by the key the FILE wrote the value at, and the
-    file may write the expiry under ``expires`` (canonical) or ``expiration``
-    (the deprecated alias, accepted until ASH v4). With only one key in the
-    dict, a reference written at the other spelling found no position and the
-    warning quoted the resolved environment value. Both keys hold the resolved
-    value here; ``_expiry_folded_to_expires`` keeps whichever the rewrite
-    replaced."""
-    for entry in shown:
-        entry["expiration"] = entry.get("expires")
-
-
-def _expiry_folded_to_expires(
-    entries: Sequence[Any], shown: List[Dict[str, Any]]
-) -> None:
-    """Drop the ``expiration`` alias key ``_expiry_under_both_spellings`` added,
-    keeping a reference the rewrite put under it as the ``expires`` value.
-
-    At most one of the two keys was rewritten: the loader accepts one spelling
-    per entry (an equal duplicate drops the alias before the record is made)."""
-    for model, entry in zip(entries, shown):
-        alias = entry.pop("expiration", None)
-        resolved = getattr(model, "expires", None)
-        if entry.get("expires") == resolved and alias != resolved:
-            entry["expires"] = alias
-
-
 def recorded_suppressions(config: Any) -> Dict[int, Dict[str, Any]]:
     """Each of ``config``'s suppressions, keyed by its ``id()``, as a dict of its
     shown fields (``SHOWN_SUPPRESSION_FIELDS``) in which each field the config
@@ -735,11 +705,9 @@ def recorded_suppressions(config: Any) -> Dict[int, Dict[str, Any]]:
             record_environment_references,
         )
 
-        _expiry_under_both_spellings(shown)
         shown = record_environment_references(
             shown, references, at=("global_settings", "suppressions")
         )
-        _expiry_folded_to_expires(suppressions, shown)
     return {id(s): entry for s, entry in zip(suppressions, shown)}
 
 
@@ -832,9 +800,7 @@ def recorded_ignore_paths(
             record_environment_references,
         )
 
-        _expiry_under_both_spellings(shown)
         shown = record_environment_references(shown, references, at=tuple(at))
-        _expiry_folded_to_expires(entries, shown)
     return {id(entry): fields for entry, fields in zip(entries, shown)}
 
 

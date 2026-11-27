@@ -294,12 +294,13 @@ ashx config validate
 
 It checks the config a scan of the project would use, the way the scan loads it, and ends
 with `Configuration is valid! A scan accepts it.` It may also warn that `project_name` is not
-set, which a scan accepts. A typo in an optional key such as `expiry` for `expires` does
-not make the file invalid: validate still accepts it, the entry suppresses nothing until the
-key is fixed, and the scan that loads the config warns, naming the key with a did-you-mean
-(`fail_on_unknown_keys: true` makes it an error, the default from ASH v4). A wrong value or a
-missing required field such as `reason` makes validate name the field and exit with code 3; a
-typo in a required key does the same, because the required field then goes missing:
+set, which a scan accepts. A typo in an optional key such as `expiry` for `expires` makes
+the file invalid, since ASH 4.0 refuses an unknown key in a suppression: validate names the
+key with a did-you-mean and exits with code 3 (`fail_on_unknown_keys: false` restores the
+3.x behavior, where the scan warns and the entry suppresses nothing until the key is fixed).
+A wrong value or a missing required field such as `reason` makes validate name the field and
+exit with code 3 too; a typo in a required key does the same, because the required field
+then goes missing:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash

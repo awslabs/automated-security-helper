@@ -72,6 +72,8 @@ def test_an_override_turning_the_flag_off_wins_over_the_file_in_either_spelling(
     assert [w for w in config._resolution_warnings if "expiraton" in w]
 
 
-def test_control_without_the_flag_the_added_entry_only_warns():
-    config = build_config(_clean(), config_overrides=[BAD_ENTRY])
-    assert [w for w in config._resolution_warnings if "expiraton" in w]
+def test_control_without_the_flag_the_added_entry_is_refused():
+    """Since ASH 4.0 the refusal is the default; only an explicit false warns."""
+    with pytest.raises(ValueError) as excinfo:
+        build_config(_clean(), config_overrides=[BAD_ENTRY])
+    assert "expiraton" in str(excinfo.value)

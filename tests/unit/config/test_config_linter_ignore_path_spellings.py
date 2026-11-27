@@ -23,7 +23,7 @@ from automated_security_helper.config.config_linter import (
 
 pytestmark = pytest.mark.unit
 
-EXPIRED = {"path": "old", "reason": "r", "expiration": "2020-01-01"}
+EXPIRED = {"path": "old", "reason": "r", "expires": "2020-01-01"}
 
 
 def _expired_messages(config_data) -> list:

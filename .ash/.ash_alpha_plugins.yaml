@@ -1919,8 +1919,8 @@ global_settings:
     # === Test fixtures the alpha-plugins legs read as credentials (expires 2027-05-06) ===
     # Each entry is per file and per rule, with no line range, because the lines move
     # whenever a test is edited. The tests hold made-up values on purpose, to check
-    # that ASH hides, refuses or confines them. The key is expires, the canonical
-    # spelling (expiration is a deprecated alias, models/core.py); the date is six
+    # that ASH hides, refuses or confines them. The key is expires, the only
+    # spelling a config accepts (ASH 4.0 removed expiration, models/core.py); the date is six
     # months out so the list is reviewed then and an entry whose fixture has been
     # restructured is dropped.
     - rule_id: API_KEY_OR_SECRET

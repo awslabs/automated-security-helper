@@ -192,7 +192,7 @@ def test_an_expired_ignore_path_no_longer_leaves_out_a_package(tmp_path):
     _package(source, "thirdparty/web")
     expired = [
         IgnorePathWithReason(
-            path="thirdparty/**", reason="ignored", expiration="2000-01-01"
+            path="thirdparty/**", reason="ignored", expires="2000-01-01"
         )
     ]
 

@@ -10,19 +10,6 @@
           "title": "Client Supplied",
           "type": "boolean"
         },
-        "expiration": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
-          "title": "Expiration"
-        },
         "expires": {
           "anyOf": [
             {
@@ -33,7 +20,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expires"
         },
         "image": {
@@ -193,19 +180,6 @@
           "title": "Client Supplied",
           "type": "boolean"
         },
-        "expiration": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "(Optional) Deprecated alias of 'expires', accepted when a config is read and removed in ASH v4; the entry is written and stored as 'expires'.",
-          "title": "Expiration"
-        },
         "expires": {
           "anyOf": [
             {
@@ -216,7 +190,7 @@
             }
           ],
           "default": null,
-          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan. 'expiration' is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4.",
+          "description": "(Optional) Expiration date (YYYY-MM-DD). The entry stops applying on this date, by the local clock of the host running the scan.",
           "title": "Expires"
         },
         "path": {

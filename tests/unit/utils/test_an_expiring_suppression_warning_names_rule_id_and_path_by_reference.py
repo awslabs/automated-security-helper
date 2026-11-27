@@ -72,7 +72,7 @@ def _messages(
     config_file.write_text(
         "project_name: demo\nglobal_settings:\n  suppressions:\n"
         f"    - rule_id: {rule_id}\n      path: {path}\n      reason: kept\n"
-        f"      expiration: {expiration}\n",
+        f"      expires: {expiration}\n",
         encoding="utf-8",
     )
     output = tmp_path / "out"

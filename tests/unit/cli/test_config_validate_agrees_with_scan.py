@@ -163,12 +163,12 @@ CASES = [
                 - rule_id: B101
                   path: tests/**
                   reason: asserts in tests
-                  expiration: 2099-01-31
+                  expires: 2099-01-31
             """
         ),
         scan_accepts=False,
         validate_mentions=[
-            "global_settings.suppressions[0].expiration",
+            "global_settings.suppressions[0].expires",
             "put it in quotes",
         ],
     ),
@@ -182,11 +182,11 @@ CASES = [
                 - rule_id: B101
                   path: tests/**
                   reason: asserts in tests
-                  expiration: "2099-13-45"
+                  expires: "2099-13-45"
             """
         ),
         scan_accepts=False,
-        validate_mentions=["global_settings.suppressions[0].expiration"],
+        validate_mentions=["global_settings.suppressions[0].expires"],
     ),
     Case(
         id="ignore-path-unquoted-date-expiration",
@@ -197,12 +197,12 @@ CASES = [
               ignore_paths:
                 - path: vendor/**
                   reason: third-party code
-                  expiration: 2099-01-31
+                  expires: 2099-01-31
             """
         ),
         scan_accepts=False,
         validate_mentions=[
-            "global_settings.ignore_paths[0].expiration",
+            "global_settings.ignore_paths[0].expires",
             "put it in quotes",
         ],
     ),
@@ -215,11 +215,11 @@ CASES = [
               ignore_paths:
                 - path: vendor/**
                   reason: third-party code
-                  expiration: "31/01/2099"
+                  expires: "31/01/2099"
             """
         ),
         scan_accepts=False,
-        validate_mentions=["global_settings.ignore_paths[0].expiration"],
+        validate_mentions=["global_settings.ignore_paths[0].expires"],
     ),
     Case(
         id="symbol-not-a-qualified-name",

@@ -122,7 +122,7 @@ ash_plugin_modules = ["${ASH_PROBE_CANARY_MODULE}", "${ASH_PROBE_CANARY_PAIR}", 
 rule_id = "R1"
 path = "${ASH_PROBE_CANARY_DIRECTORY}"
 reason = "probe"
-expiration = "${ASH_PROBE_CANARY_EXPIRATION}"
+expires = "${ASH_PROBE_CANARY_EXPIRATION}"
 symbol = "${ASH_PROBE_CANARY_SYMBOL}"
 line_start = "${ASH_PROBE_CANARY_SHORT}"
 
@@ -130,7 +130,7 @@ line_start = "${ASH_PROBE_CANARY_SHORT}"
 rule_id = "R2"
 path = "literalprobedir"
 reason = "probe"
-expiration = "${ASH_PROBE_CANARY_SHORT}"
+expires = "${ASH_PROBE_CANARY_SHORT}"
 
 [[global_settings.ignore_paths]]
 path = "${ASH_PROBE_CANARY_DIRECTORY_PATTERN}"
@@ -153,12 +153,12 @@ global_settings:
     - rule_id: R1
       path: {tag}${{ASH_PROBE_CANARY_DIRECTORY}}
       reason: probe
-      expiration: {tag}${{ASH_PROBE_CANARY_EXPIRATION}}
+      expires: {tag}${{ASH_PROBE_CANARY_EXPIRATION}}
       symbol: {tag}${{ASH_PROBE_CANARY_SYMBOL}}
     - rule_id: R2
       path: literalprobedir
       reason: probe
-      expiration: {tag}${{ASH_PROBE_CANARY_SHORT}}
+      expires: {tag}${{ASH_PROBE_CANARY_SHORT}}
   ignore_paths:
     - path: {tag}${{ASH_PROBE_CANARY_DIRECTORY_PATTERN}}
       reason: probe
@@ -217,7 +217,7 @@ def test_validate_names_values_read_from_the_environment_by_place(
     for index in (0, 1):
         assert any(
             e.startswith(
-                f"Invalid value at 'global_settings.suppressions[{index}].expiration'"
+                f"Invalid value at 'global_settings.suppressions[{index}].expires'"
             )
             for e in errors
         ), errors
@@ -305,7 +305,7 @@ def test_lint_names_values_a_toml_file_read_from_the_environment_by_place(
     assert (
         sum(
             m.startswith("Invalid value at 'global_settings.suppressions[")
-            and ".expiration'" in m
+            and ".expires'" in m
             for m in messages
         )
         == 2

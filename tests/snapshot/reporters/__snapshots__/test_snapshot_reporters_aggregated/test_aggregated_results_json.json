@@ -214,7 +214,7 @@
     },
     "fail_on_findings": true,
     "fail_on_incomplete_scanners": true,
-    "fail_on_unknown_keys": false,
+    "fail_on_unknown_keys": true,
     "honor_ignore_files": true,
     "sandbox": {
       "mode": "off",

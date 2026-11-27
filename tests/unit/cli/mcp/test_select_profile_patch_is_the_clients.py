@@ -549,7 +549,7 @@ _OPERATOR_SUPPRESSION = {
     "path": "src/vendored.py",
     "rule_id": "B101",
     "reason": "operator",
-    "expiration": "2099-12-31",
+    "expires": "2099-12-31",
 }
 _OPERATOR_IGNORE = {"path": "operator-ignored/**", "reason": "operator"}
 _CLIENT_SUPPRESSION = {"path": "src/app.py", "rule_id": "B102", "reason": "client"}

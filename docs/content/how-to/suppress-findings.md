@@ -29,7 +29,7 @@ global_settings:
 | `reason` | yes | Why the finding is suppressed. It appears in the reports. |
 | `rule_id` | no | The rule to suppress, as ASH reports it. Without it, the entry suppresses every rule in its path. |
 | `line_start`, `line_end` | no | Lines the finding must overlap, inclusive. `line_start` alone runs to the end of the file. |
-| `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. `expiration` is a deprecated alias, removed in ASH v4. |
+| `expires` | no | The date, `YYYY-MM-DD`, from which the suppression stops matching. ASH 4.0 removed the `expiration` spelling. |
 | `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
 | `image` | no | Only findings inside a container image whose submitted reference or resolved digest matches this case-insensitive glob; see [Scan container images](scan-container-images.md#findings-identity-and-suppressions). A finding that is not inside an image never matches |
@@ -40,7 +40,7 @@ global_settings:
 - A file whose name is not valid UTF-8 is reported with each such byte written as `\udcNN` (a latin-1 `secr\xe9t.py` as `secr\udce9t.py`). A `path` matches it written that way, since the `\` of a `\udcNN` escape is part of the name and not a separator, or with `?` for that `\` (`secr?udce9t.py`), or by a glob such as `secr*t.py`. An ignore path matches such a file the same way when ASH lists the files to scan. A UTF-8 file name that spells the same `\udcNN` text reads as the same name, so in a tree that holds both files, both are reported under that name, and a path that matches one matches both.
 - `rule_id` is a case-insensitive pattern with no scanner prefix. It matches any scanner that reports that rule ID.
 - Quote the `expires` date. YAML reads an unquoted `2027-01-31` as a date, not a string, and ASH then refuses the whole config (exit 3). `ashx config lint` and `ashx config get` name the problem.
-- A key that is not in the table warns at config load, and when a known key is close, the warning names it: `ruleId` warns with `Unknown key 'ruleId' (did you mean 'rule_id'?)`, and the entry suppresses nothing until the key is fixed, so a typo can only narrow what is suppressed. Set `fail_on_unknown_keys: true` to make it an error (exit 3) instead; ASH v4 makes that the default. The same holds for an ignore path.
+- A key that is not in the table is refused at config load (exit 3), and when a known key is close, the error names it: `ruleId` is refused with `Unknown key 'ruleId' (did you mean 'rule_id'?)`. Since ASH 4.0 this is the default (`fail_on_unknown_keys: true`). With `fail_on_unknown_keys: false`, which keeps the behavior of ASH 3.x, the config loads with a warning that names the key, and the entry suppresses nothing until the key is fixed, so a typo can only narrow what is suppressed. The same holds for an ignore path.
 
 To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
 
@@ -49,7 +49,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
-With `rule_id` misspelled, the entry suppresses nothing instead of suppressing every rule in `app.py`: the run warns, naming the key, and fails on the finding the entry was meant to suppress (exit 2). Set `fail_on_unknown_keys: true` to refuse the config outright (exit 3); ASH v4 makes that the default.
+With `rule_id` misspelled, the entry cannot suppress every rule in `app.py`: since ASH 4.0 the config is refused outright (exit 3), naming the key. With `fail_on_unknown_keys: false`, the 3.x behavior, the run warns, naming the key, and the entry suppresses nothing, so the run fails on the finding the entry was meant to suppress (exit 2).
 
 ### Suppress a finding in a harvested lockfile {#harvested}
 
@@ -80,7 +80,7 @@ ASH's own `.ash.yaml` carries the worked set of these entries (the rustls
 advisories in polars' harvested `Cargo.lock`), one per scanner spelling of the
 same GHSA id, each with the evidence in its reason.
 
-<!-- doctest: run expect-exit=2 -->
+<!-- doctest: run expect-exit=3 -->
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "ruleId": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
@@ -88,7 +88,7 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress \
 
 ### Expiration {#expiration}
 
-On its `expires` date, by the local clock of the machine that runs the scan (UTC in the container image, which sets `TZ=UTC`), a suppression stops matching, and the finding fails the next scan again. `expires` is the canonical spelling of the field; `expiration` is accepted as a deprecated alias when a config is read, and the alias is removed in ASH v4. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With `--ignore-suppressions`, these warnings leave suppressions out. `ashx config lint` reports suppressions that have expired, and `ashx config lint --fix` removes them.
+On its `expires` date, by the local clock of the machine that runs the scan (UTC in the container image, which sets `TZ=UTC`), a suppression stops matching, and the finding fails the next scan again. `expires` is the only spelling of the field: ASH 4.0 removed `expiration`, and a config that writes it is refused as an unknown key, with `expires` as the did-you-mean. At the start of a scan, ASH logs one warning that lists every suppression and ignore path that has expired, including those whose date is today, and then a warning for the ignore paths and one for the suppressions that expire within the next 30 days. With `--ignore-suppressions`, these warnings leave suppressions out. `ashx config lint` reports suppressions that have expired, and `ashx config lint --fix` removes them.
 
 An expired suppression no longer applies, so this run fails on the finding and names the entry:
 

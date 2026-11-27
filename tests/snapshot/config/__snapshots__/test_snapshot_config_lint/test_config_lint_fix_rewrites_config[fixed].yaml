@@ -33,7 +33,7 @@ global_settings:
     reason: Not a qualified name
   - path: src/app.py
     rule_id: B107
-    expiration: 31/01/2099
+    expires: 31/01/2099
     reason: Wrong date format
   - path: src/app.rb
     rule_id: B108

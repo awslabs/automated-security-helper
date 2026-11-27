@@ -309,7 +309,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
             rule_id="TEST001",
             path="to/test.py",
             reason="Expiring",
-            expiration=f"{current_year}-12-31",
+            expires=f"{current_year}-12-31",
         )
     ]
 
@@ -323,7 +323,7 @@ def test_apply_suppressions_with_expiring_suppressions(mock_check):
             rule_id="TEST001",
             path="to/test.py",
             reason="Expiring",
-            expiration=f"{current_year}-12-31",
+            expires=f"{current_year}-12-31",
         )
     ]
     plugin_context.ignore_suppressions = False

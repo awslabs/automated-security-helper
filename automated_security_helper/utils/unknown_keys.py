@@ -49,45 +49,40 @@ from pydantic import AliasChoices, AliasPath, BaseModel, ValidationInfo
 #: ``AshAggregatedResults.validate_ash_config``.
 TOLERATE_STORED_CONFIG = "tolerate_stored_config"
 
+#: Validation-context key set only by the stored-results date locator
+#: (``models/asharp_model._unreadable_expirations``). Bound to True, an entry
+#: model reads a stored ``expiration`` as ``expires`` without the rest of the
+#: tolerance, so the strict re-validation that locates an unreadable date sees
+#: the entry's date, not an unknown key.
+READ_STORED_EXPIRATION = "read_stored_expiration"
+
 #: Validation-context key for the warn-then-refuse rollout. Bound to a list, it
 #: makes :func:`refuse_unknown_keys` record the refusal's own message there as a
 #: warning and keep the data, instead of raising, for ENTRY models only (the
 #: suppression and ignore-path family, which allow extras and mark themselves
 #: ``has_unknown_keys`` so an entry that kept a key never applies). Passed by
-#: ``build_config`` (config/resolve_config.py) unless ``fail_on_unknown_keys``
-#: is set: the warn is the 3.x default, the refusal returns as the default at
-#: v4. Plugin options and every other model that refuses unknown keys are not
-#: covered: they cannot mark themselves inert, so a kept key there would be
-#: silently unread, the original defect class.
+#: ``build_config`` (config/resolve_config.py) only when ``fail_on_unknown_keys``
+#: is false: the warn was the 3.x default, and the refusal has been the default
+#: since ASH 4.0. Plugin options and every other model that refuses unknown
+#: keys are not covered: they cannot mark themselves inert, so a kept key there
+#: would be silently unread, the original defect class.
 WARN_UNKNOWN_KEYS = "warn_unknown_keys"
 
-#: The v4 flip, in one place. False on the 3.x line: an unknown key in a
-#: suppression or ignore-path entry warns and disables the entry, and
-#: ``fail_on_unknown_keys: true`` adopts the refusal early. Everything that
-#: decides the default reads this constant (the ``fail_on_unknown_keys`` field
-#: default on AshConfig, and the raw-document read in
-#: ``resolve_config._unknown_entry_keys_are_fatal``), so the v4 bump flips it
-#: here and nowhere else; the deprecation sentence the warning then carries
-#: (WARN_UNKNOWN_KEYS_TAIL's last sentence) is removed with the flip, alongside
-#: the ``expiration`` alias (DEPRECATED_KEYS).
-# TODO(v4): flip to True at the ASH v4 version bump.
-UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT: bool = False
+#: The default of ``fail_on_unknown_keys``, in one place. True since ASH 4.0: an
+#: unknown key in a suppression or ignore-path entry is refused, and
+#: ``fail_on_unknown_keys: false`` keeps the 3.x warn-and-disable behavior.
+#: Everything that decides the default reads this constant (the
+#: ``fail_on_unknown_keys`` field default on AshConfig, and the raw-document
+#: read in ``resolve_config._unknown_entry_keys_are_fatal``).
+UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT: bool = True
 
 #: What the warn-mode warning appends to the refusal's message, so the operator
-#: knows the entry is disabled rather than partially applied, how to get the
-#: error now, and that the error becomes the default (the deprecation sentence
-#: names the release, so a warned config is fixed before the v4 flip).
+#: knows the entry is disabled rather than partially applied, and how to get the
+#: error (the warn mode is reached only by ``fail_on_unknown_keys: false``).
 WARN_UNKNOWN_KEYS_TAIL = (
     " The entry is kept but applies to nothing until the key is fixed. Set "
-    "fail_on_unknown_keys: true to make this an error. This will become an "
-    "error in ASH v4."
+    "fail_on_unknown_keys: true to make this an error."
 )
-
-#: Accepted keys that are deprecated alias spellings. They still load (the
-#: refusal check honors them), but a "did you mean" and the "Accepted keys"
-#: listing leave them out: a typo's correction must not point at a spelling
-#: that is removed in ASH v4 ("expiration" is the alias of "expires").
-DEPRECATED_KEYS: FrozenSet[str] = frozenset({"expiration"})
 
 
 #: What a kept unknown key records under TOLERATE_STORED_CONFIG, once per key.
@@ -240,7 +235,8 @@ def closest_key(key: str, known: Iterable[str]) -> Optional[str]:
     matches = difflib.get_close_matches(key.lower(), known, n=1, cutoff=0.6)
     if matches:
         return matches[0]
-    # A shared stem difflib scores low: "expires" for "expiration".
+    # A shared stem difflib scores low: "expires" for "expiration". ASH 4.0
+    # removed the ``expiration`` spelling, so this steers an upgrader.
     prefix_lengths = {
         candidate: len(os.path.commonprefix([key.lower(), candidate.lower()]))
         for candidate in known
@@ -401,18 +397,15 @@ def refuse_unknown_keys(
     unknown = [key for key in data if isinstance(key, str) and key not in known]
     if not unknown:
         return data
-    # The message's suggestions and its "Accepted keys" listing steer to the
-    # canonical spellings only; a deprecated alias (DEPRECATED_KEYS) still
-    # loads, which the acceptance check above already covered.
-    suggestible = [key for key in known if key not in DEPRECATED_KEYS]
+    suggestible = list(known)
     notes = tolerated_notes(info)
     if notes is not None:
         notes.extend(UNKNOWN_KEY_NOTE for _ in unknown)
         return data
     warnings = warned_notes(info)
     if warnings is not None and _warnable_entry_model(model_cls):
-        # The warn-then-refuse rollout (fail_on_unknown_keys, off by default on
-        # 3.x): the refusal's own message, as a warning, and the data kept. The
+        # The warn mode (``fail_on_unknown_keys: false``, the 3.x default): the
+        # refusal's own message, as a warning, and the data kept. The
         # model keeps the keys as extras, which marks the entry as one that
         # never applies (IgnorePathWithReason.has_unknown_keys), the same
         # fail-closed direction the stored-config tolerance takes.

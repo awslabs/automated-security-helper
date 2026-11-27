@@ -70,7 +70,7 @@ global_settings:
         so this check never runs there.
     - path: src/app.py
       rule_id: B105
-      expiration: "2020-01-31"
+      expires: "2020-01-31"
       reason: Temporary test credential
     - path: src/app.py
       rule_id: B106
@@ -78,7 +78,7 @@ global_settings:
       reason: Not a qualified name
     - path: src/app.py
       rule_id: B107
-      expiration: "31/01/2099"
+      expires: "31/01/2099"
       reason: Wrong date format
     - path: src/app.rb
       rule_id: B108

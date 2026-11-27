@@ -48,6 +48,25 @@
 
 ### Breaking changes
 
+- **A config no longer accepts `expiration` as a spelling of `expires`.** A suppression,
+  an exclusion or an ignore path that writes `expiration` is refused as an unknown key,
+  with `expires` as the did-you-mean (`Unknown key 'expiration' (did you mean
+  'expires'?)`); with `fail_on_unknown_keys: false` it loads with a warning and the entry
+  applies to nothing. 3.x accepted the spelling with a deprecation warning. The
+  `expiration` attribute of the entry models is gone (read `expires`), the published
+  JSON schemas and the operator CRDs no longer list an `expiration` property, and
+  `ashx config lint` no longer reports a `deprecated-spelling` issue: it reports the
+  refusal as a schema error. Results files that earlier ASH versions wrote still read
+  `expiration` as `expires` without a warning (`results diff`, `trend`, `merge` and
+  `report` are unaffected).
+- **`fail_on_unknown_keys` defaults to `true`.** An unknown key in a suppression or an
+  ignore-path entry now refuses the config at load (exit 3), naming the key with a
+  did-you-mean. Set `fail_on_unknown_keys: false` for the 3.x behavior: the config loads,
+  a warning names the key, and the entry applies to nothing until the key is fixed. The
+  warning no longer ends with `This will become an error in ASH v4.` The same default
+  now refuses a scan whose suppression has a `scope.engines` block that names a scanner
+  no plugin of the run registers, or that the named scanner refuses; 3.x warned about
+  both. Either way such a block suppresses nothing.
 - **The spellings deprecated for removal in 4.0 are removed.** Each now fails the way
   any unknown command or value does:
   - `build-image` is no longer a command; `ashx container build` takes the same options.

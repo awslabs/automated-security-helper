@@ -199,7 +199,7 @@ class TestApplyConfigSuppression:
         return AshSuppression(
             rule_id=rule_id,
             path=path,
-            expiration=expiry,
+            expires=expiry,
             reason="test reason",
         )
 

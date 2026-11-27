@@ -8,7 +8,7 @@ or the move out of the options read more or less than the scanner did:
 
 * A trivy ignore-file ID was compared case-folded, while trivy compares the
   two exactly; an entry still applied on its expiry date, which trivy and
-  ASH's own ``expiration`` rule both drop it on; a plain-format line was cut
+  ASH's own ``expires`` rule both drop it on; a plain-format line was cut
   at its first ``#``, so an ``exp:`` field after one was lost and the entry
   applied though trivy drops it.
 * A finding whose path stayed absolute (the SARIF step could not make it
@@ -586,20 +586,20 @@ def test_an_operator_mapping_the_model_refuses_is_not_written_in_unvalidated():
 
     named = _spelled_like(client, "legacy")
     assert isinstance(named, IgnorePathWithReason)
-    assert (named.path, named.reason, named.expiration) == ("legacy", "client", None)
+    assert (named.path, named.reason, named.expires) == ("legacy", "client", None)
 
     refused = _spelled_like(
-        client, {"path": "legacy", "reason": ["not text"], "expiration": "2099-01-01"}
+        client, {"path": "legacy", "reason": ["not text"], "expires": "2099-01-01"}
     )
     assert isinstance(refused, IgnorePathWithReason)
     assert refused.reason == "client"
-    assert refused.expiration == "2099-01-01"
+    assert refused.expires == "2099-01-01"
 
     unreadable = _spelled_like(
-        client, {"path": "legacy", "reason": "op", "expiration": "soon"}
+        client, {"path": "legacy", "reason": "op", "expires": "soon"}
     )
-    assert unreadable.expiration == "soon"
-    assert unreadable.expiration != client.expiration
+    assert unreadable.expires == "soon"
+    assert unreadable.expires != client.expires
     assert unreadable.reason == "op"
 
 
@@ -623,18 +623,18 @@ def test_a_live_looking_expiration_the_model_refuses_keeps_the_operators_reason(
     assert not _entry_expired(written)
 
     refused = _spelled_like(
-        client, {"path": "legacy", "reason": "operator", "expiration": written}
+        client, {"path": "legacy", "reason": "operator", "expires": written}
     )
     control = _spelled_like(
-        client, {"path": "legacy", "reason": "operator", "expiration": "2099-01-01"}
+        client, {"path": "legacy", "reason": "operator", "expires": "2099-01-01"}
     )
 
     assert isinstance(refused, IgnorePathWithReason)
     assert refused.reason == "operator"
-    assert refused.expiration == written
+    assert refused.expires == written
     assert refused.is_expired
     assert control.reason == "operator"
-    assert control.expiration == "2099-01-01"
+    assert control.expires == "2099-01-01"
     assert not control.is_expired
 
 
@@ -934,10 +934,10 @@ def test_the_last_operator_file_to_write_an_entry_governs_it(tmp_path):
         IgnorePathWithReason(path="vendor", reason="client says"),
     ]
     earlier = _bandit_excluded(
-        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+        {"path": "vendor", "reason": "op1", "expires": "2099-01-01"}
     )
     later = _bandit_excluded(
-        {"path": "vendor", "reason": "op2", "expiration": "2020-01-01"}
+        {"path": "vendor", "reason": "op2", "expires": "2020-01-01"}
     )
 
     _strip_chain(config, [earlier, later], {}, tmp_path)
@@ -960,7 +960,7 @@ def test_a_pattern_a_later_operator_file_leaves_out_is_no_longer_the_operators(
         IgnorePathWithReason(path="vendor", reason="client says"),
     ]
     earlier = _bandit_excluded(
-        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+        {"path": "vendor", "reason": "op1", "expires": "2099-01-01"}
     )
     later = _bandit_excluded({"path": "other", "reason": "op2"})
 
@@ -979,7 +979,7 @@ def test_an_entry_a_later_operator_file_appends_leaves_the_earlier_entries(tmp_p
         IgnorePathWithReason(path="vendor", reason="client says"),
     ]
     earlier = _bandit_excluded(
-        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+        {"path": "vendor", "reason": "op1", "expires": "2099-01-01"}
     )
     later = {
         "patch": [
@@ -1006,7 +1006,7 @@ def test_a_later_operator_file_silent_on_the_option_leaves_earlier_entries(tmp_p
         IgnorePathWithReason(path="vendor", reason="client says"),
     ]
     earlier = _bandit_excluded(
-        {"path": "vendor", "reason": "op1", "expiration": "2099-01-01"}
+        {"path": "vendor", "reason": "op1", "expires": "2099-01-01"}
     )
     later = {"scanners": {"bandit": {"options": {"severity_threshold": "HIGH"}}}}
 
@@ -1071,7 +1071,7 @@ def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
             {
                 "op": "add",
                 "path": "/scanners/bandit/options/excluded_paths/-",
-                "value": {"path": "shared", "reason": "op", "expiration": "2099-01-01"},
+                "value": {"path": "shared", "reason": "op", "expires": "2099-01-01"},
             }
         ]
     }
@@ -1080,7 +1080,7 @@ def test_an_entry_an_operator_file_adds_by_a_patch_operation_is_the_operators(
 
     kept = config.scanners.bandit.options.excluded_paths
     assert [entry.path for entry in kept] == ["shared"]
-    assert kept[0].expiration == "2099-01-01"
+    assert kept[0].expires == "2099-01-01"
     assert kept[0].reason == "op"
     assert config._client_scanner_exclusions == []
 
@@ -1090,9 +1090,7 @@ def test_an_entry_held_in_a_mapping_that_is_not_a_dict_reads_whole():
     reading: an entry in a mapping type that is not a ``dict`` read as a
     pattern-less entry (kept untouched) while its expiration was read, so the
     two readings of one entry disagreed."""
-    entry = MappingProxyType(
-        {"path": "vendor", "reason": "r", "expiration": "2000-01-01"}
-    )
+    entry = MappingProxyType({"path": "vendor", "reason": "r", "expires": "2000-01-01"})
     assert _pattern_of(entry) == ("vendor", "r")
     assert _entry_fields(entry) == ("vendor", "r", "2000-01-01")
     assert _entry_fields({"path": "vendor"}) == ("vendor", None, None)
@@ -1109,7 +1107,7 @@ def test_a_client_entry_in_a_mapping_that_is_not_a_dict_takes_the_operators_fiel
     config = AshConfig()
     config.scanners.bandit.options.excluded_paths = [
         MappingProxyType(
-            {"path": "shared", "reason": "client says", "expiration": "2099-01-01"}
+            {"path": "shared", "reason": "client says", "expires": "2099-01-01"}
         ),
     ]
     operator = {
@@ -1117,7 +1115,7 @@ def test_a_client_entry_in_a_mapping_that_is_not_a_dict_takes_the_operators_fiel
             "bandit": {
                 "options": {
                     "excluded_paths": [
-                        {"path": "shared", "reason": "op", "expiration": "2098-12-31"}
+                        {"path": "shared", "reason": "op", "expires": "2098-12-31"}
                     ]
                 }
             }

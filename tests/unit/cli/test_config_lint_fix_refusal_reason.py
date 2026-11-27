@@ -31,7 +31,7 @@ ENV_CONFIG = (
     "    - path: src/a.py\n"
     "      rule_id: B101\n"
     "      reason: old\n"
-    '      expiration: "2020-01-01"\n'
+    '      expires: "2020-01-01"\n'
 )
 PLAIN_CONFIG = ENV_CONFIG.replace("${LINT_REFUSAL_PROJECT}", "demo")
 

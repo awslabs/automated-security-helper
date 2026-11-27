@@ -352,15 +352,14 @@ ERROR (3) Invalid configuration: Configuration validation failed for '/home/me/r
 
 Cause: the configuration file has a key ASH does not know below the top level, or a
 value of the wrong type anywhere, top level included. A plugin's options with a key ASH
-does not know is refused too. In a suppression or an ignore path an unknown key warns
-by default and the entry suppresses nothing until it is fixed; with
-`fail_on_unknown_keys: true` (the default from ASH v4) it is refused the same way, and
-the message lists the keys the entry accepts:
+does not know is refused too. An unknown key in a suppression or an ignore path is
+refused the same way since ASH 4.0 (`fail_on_unknown_keys: true` is the default), and the
+message lists the keys the entry accepts. With `fail_on_unknown_keys: false`, which keeps
+the 3.x behavior, it warns and the entry suppresses nothing until the key is fixed:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
 cat > .ash.yaml <<'EOF'
-fail_on_unknown_keys: true
 global_settings:
   suppressions:
     - rule: B602
@@ -372,11 +371,12 @@ ashx config validate
 
 ```text
 ❌ 1 error(s); a scan refuses the configuration because of these:
-  1. Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'rule' (did you mean 'rule_id'?) in a suppression. Accepted keys: expiration, expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
+  1. Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'rule' (did you mean 'rule_id'?) in a suppression. Accepted keys: expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
 ```
 
-A common case is an unquoted `expiration` date in a suppression: YAML reads it as a
-date, and ASH expects text. Quote it, as in `"2027-04-30"`.
+A common case is an unquoted `expires` date in a suppression: YAML reads it as a
+date, and ASH expects text. Quote it, as in `"2027-04-30"`. Another is a config from ASH
+3.x that still writes `expiration`: ASH 4.0 removed that spelling, so write `expires`.
 
 Fix: correct the key or value that the message names. `ashx config validate` and
 `ashx config lint` check the file the way a scan does and report the same errors, with
@@ -395,7 +395,7 @@ the scan refuses it with exit 3.
   the top level.
 - ASH found a different file first. `ashx config get` prints the configuration a scan
   would use.
-- A suppression's or an ignore path's `expiration` date has passed. The entry then
+- A suppression's or an ignore path's `expires` date has passed. The entry then
   stops applying, and the scan starts with a warning that names it (see below).
 - The setting is one a repository's file may not set; see the next entry.
 
@@ -409,7 +409,7 @@ global_settings:
   ignore_paths:
     - path: app.py
       reason: Generated file, scanned upstream
-      expiration: "2026-01-31"
+      expires: "2026-01-31"
 EOF
 ashx scan --scanners detect-secrets --no-progress
 ```

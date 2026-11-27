@@ -270,7 +270,7 @@ def test_error_location_reaches_into_lists(tmp_path):
         pytest.param(
             "global_settings:\n  suppressions:\n    - rule_id: B101\n"
             "      path: a.py\n      reason: r\n"
-            "      expiration: ${ASH_TEST_SECRET_VALUE:2099-01-01}",
+            "      expires: ${ASH_TEST_SECRET_VALUE:2099-01-01}",
             id="expiration",
         ),
     ],
@@ -388,8 +388,8 @@ def test_lint_fix_refuses_a_file_with_env_references(tmp_path):
         "global_settings: {suppressions: 5}",
         "global_settings: {suppressions: [5]}",
         "global_settings: {suppressions: [{path: 5, rule_id: 1, reason: r, line_start: x}]}",
-        "global_settings: {suppressions: [{path: a, rule_id: b, reason: r, expiration: 5}]}",
-        "global_settings: {suppressions: [{path: a, rule_id: b, reason: r, expiration: 2099-01-31}]}",
+        "global_settings: {suppressions: [{path: a, rule_id: b, reason: r, expires: 5}]}",
+        "global_settings: {suppressions: [{path: a, rule_id: b, reason: r, expires: 2099-01-31}]}",
         "global_settings: {suppressions: [{path: a, rule_id: b, reason: [1, 2]}]}",
         "global_settings: {suppressions: [{path: a, rule_id: b, reason: r, symbol: 5}]}",
         "global_settings: {ignore_paths: {a: 1}}",
@@ -570,13 +570,13 @@ def test_the_date_hint_is_not_typed_as_a_parse_error(tmp_path):
         config_content=(
             "project_name: demo\nglobal_settings:\n  suppressions:\n"
             "    - rule_id: B101\n      path: a.py\n      reason: r\n"
-            "      expiration: 2099-01-31\n"
+            "      expires: 2099-01-31\n"
         )
     )
 
     (error,) = result["errors"]
     assert error["type"] != "yaml_parse_error", error
-    assert error["field"] == "global_settings.suppressions[0].expiration", error
+    assert error["field"] == "global_settings.suppressions[0].expires", error
 
 
 def test_every_key_the_model_reads_is_a_known_top_level_field():

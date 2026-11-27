@@ -168,7 +168,7 @@ def test_an_accepted_input_error_is_kept_and_does_not_gate(world, tmp_path):
 
 def test_an_expired_acceptance_gates_again(world, tmp_path):
     _write_input(world, "lfs-pointer")
-    _accept_with(world, _accepting("analysis.ipynb", expiration="2020-01-01"))
+    _accept_with(world, _accepting("analysis.ipynb", expires="2020-01-01"))
     _through_uv(world)
 
     results, _progress = recorded._run_the_phase(world)

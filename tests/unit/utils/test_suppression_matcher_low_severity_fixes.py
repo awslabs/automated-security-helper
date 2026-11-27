@@ -73,10 +73,10 @@ class TestUnreadableExpiration:
     def test_one_bad_date_warns_once_not_once_per_finding(self, ash_warnings):
         """Red at the base: five findings wrote five warnings for one entry."""
         first = AshSuppression.model_construct(
-            path="src/a.py", rule_id="R1", reason="r", expiration="not-a-date"
+            path="src/a.py", rule_id="R1", reason="r", expires="not-a-date"
         )
         second = AshSuppression.model_construct(
-            path="src/b.py", rule_id="R2", reason="r", expiration="2026/13/45"
+            path="src/b.py", rule_id="R2", reason="r", expires="2026/13/45"
         )
 
         for _ in range(5):
@@ -97,7 +97,7 @@ class TestUnreadableExpiration:
         again."""
         for _ in range(2):
             entry = AshSuppression.model_construct(
-                path="src/a.py", rule_id="R1", reason="r", expiration="not-a-date"
+                path="src/a.py", rule_id="R1", reason="r", expires="not-a-date"
             )
             should_suppress_finding(_finding(), [entry])
             should_suppress_finding(_finding(), [entry])
@@ -120,13 +120,13 @@ class TestExpiringEntries:
                 "path": "a.py",
                 "rule_id": "R1",
                 "reason": "r",
-                "expiration": soon,
+                "expires": soon,
                 "bogus": 1,
             },
             context={TOLERATE_STORED_CONFIG: []},
         )
         assert kept.has_unknown_keys is True
-        plain = AshSuppression(path="b.py", rule_id="R2", reason="r", expiration=soon)
+        plain = AshSuppression(path="b.py", rule_id="R2", reason="r", expires=soon)
 
         expiring = check_for_expiring_suppressions([kept, plain])
 

@@ -319,9 +319,9 @@ So does a `--set` whose top-level key the configuration does not have, such as t
 ashx config update --set fail_on_finding=false
 ```
 
-A misspelled suppression key no longer makes the config invalid on its own: the entry is kept but suppresses nothing until the key is fixed, and a scan warns, naming the key with a did-you-mean. `ashx config validate` accepts the file (exit 0), here with `ruleId` for `rule_id`:
+Since ASH 4.0 a misspelled suppression key makes the config one a scan refuses, so `ashx config validate` names the key with a did-you-mean and exits 3, here with `ruleId` for `rule_id`:
 
-<!-- doctest: run expect-exit=0 -->
+<!-- doctest: run expect-exit=3 -->
 ```bash
 cat > misspelled.yaml <<'EOF'
 project_name: payments-api
@@ -334,20 +334,20 @@ EOF
 ashx config validate --config misspelled.yaml
 ```
 
-With `fail_on_unknown_keys: true` the same typo makes the config one a scan refuses, so `ashx config validate` names the key and exits 3. ASH v4 makes that the default:
+With `fail_on_unknown_keys: false`, the behavior of ASH 3.x, the entry is kept but suppresses nothing until the key is fixed, a scan warns, naming the key, and `ashx config validate` accepts the file (exit 0):
 
-<!-- doctest: run expect-exit=3 -->
+<!-- doctest: run expect-exit=0 -->
 ```bash
-cat > misspelled-strict.yaml <<'EOF'
+cat > misspelled-lenient.yaml <<'EOF'
 project_name: payments-api
-fail_on_unknown_keys: true
+fail_on_unknown_keys: false
 global_settings:
   suppressions:
     - path: app.py
       ruleId: SECRET-SECRET-KEYWORD
       reason: Fixture value, not a real password
 EOF
-ashx config validate --config misspelled-strict.yaml
+ashx config validate --config misspelled-lenient.yaml
 ```
 
 ## Other commands {#other}

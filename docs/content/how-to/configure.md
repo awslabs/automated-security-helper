@@ -262,7 +262,7 @@ A scan refuses a misspelled key in most of the config. It ignores an unknown top
 | Unknown key in `global_settings`, `sandbox`, `workspace`, or a `content_db_staleness_overrides` entry | `severity_treshold: HIGH` | Refuses the config, exit 3 |
 | Unknown key in a suppression or an ignore path | `ruleId: B602`, `expiry: "2027-01-31"` | Refuses the config, exit 3 |
 | Unknown key directly under a plugin's `options` | `confidance_level: high` | Refuses the config, exit 3. A key inside an option's value, such as an entry of cdk-nag's `nag_packs`, is not checked. |
-| Wrong value | `severity_threshold: high`, or an unquoted `expiration: 2027-01-31` | Refuses the config, exit 3 |
+| Wrong value | `severity_threshold: high`, or an unquoted `expires: 2027-01-31` | Refuses the config, exit 3 |
 | Missing required field | a suppression without `reason` | Refuses the config, exit 3 |
 | A plugin option written directly in the plugin's section, beside `enabled` | `severity_threshold: HIGH` beside `enabled: true` under `scanners.bandit` | Refuses the config, exit 3. The error says to move the key under `options`. |
 | Misspelled scanner, reporter, or converter name | `detect_secret:` | Ignores the section |
@@ -279,7 +279,7 @@ global_settings:
 ```
 
 ```text
-Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'ruleId' (did you mean 'rule_id'?) in a suppression. Accepted keys: expiration, line_end, line_start, package_name, package_path, package_version, path, reason, rule_id, symbol.
+Invalid value at 'global_settings.suppressions[0]': Value error, Unknown key 'ruleId' (did you mean 'rule_id'?) in a suppression. Accepted keys: expires, line_end, line_start, package_name, package_path, package_version, path, reason, resource_id, rule_id, scope, symbol.
 ```
 
 `ashx config validate`, `ashx config lint`, and `ashx config get` catch every mistake that ends in exit 3, with one exception: they do not load the plugins named in `ash_plugin_modules`, so only a scan checks those plugins' options, once it has loaded them. `validate` and `lint` also warn about the unknown top-level key. No command catches the last mistake. For that one, compare your keys with the [configuration reference](../reference/configuration.md) and the [scanner reference](../reference/scanners.md), and look for the value you meant to set in the output of `ashx config get`.

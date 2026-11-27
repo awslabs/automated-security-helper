@@ -225,7 +225,7 @@ class TestSuppressionMatcher:
             reason="Test suppression",
             rule_id="RULE-123",
             path="src/example.py",
-            expiration=tomorrow,
+            expires=tomorrow,
         )
 
         # Test with matching suppression
@@ -269,35 +269,35 @@ class TestSuppressionMatcher:
             reason="Test suppression",
             rule_id="RULE-1",
             path="src/example.py",
-            expiration=today,
+            expires=today,
         )
 
         suppression_tomorrow = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-2",
             path="src/example.py",
-            expiration=tomorrow,
+            expires=tomorrow,
         )
 
         suppression_next_week = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-3",
             path="src/example.py",
-            expiration=next_week,
+            expires=next_week,
         )
 
         suppression_next_month = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-4",
             path="src/example.py",
-            expiration=next_month,
+            expires=next_month,
         )
 
         suppression_next_year = AshSuppression(
             reason="Test suppression",
             rule_id="RULE-5",
             path="src/example.py",
-            expiration=next_year,
+            expires=next_year,
         )
 
         suppression_no_expiration = AshSuppression(

@@ -184,9 +184,9 @@ def test_a_policy_linking_out_of_the_roots_is_refused_unread(
         (
             (
                 "workspace:\n  suppressions:\n    - path: 'app/**'\n      reason: r\n"
-                f"      expiration: '{CANARY}'\n"
+                f"      expires: '{CANARY}'\n"
             ),
-            "expiration: invalid value (value_error)",
+            "expires: invalid value (value_error)",
         ),
         (f"workspace:\n  {CANARY}: 1\n", "workspace.<key>: Extra inputs"),
         (f"workspace:\n  suppressions: [{{path: '{CANARY}'\n", "line"),

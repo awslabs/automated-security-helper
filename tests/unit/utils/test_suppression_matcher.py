@@ -116,7 +116,7 @@ def test_check_for_expiring_suppressions_with_future_date():
         reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
-        expiration=future_date,
+        expires=future_date,
     )
 
     result = check_for_expiring_suppressions([suppression])
@@ -132,7 +132,7 @@ def test_check_for_expiring_suppressions_with_expiring_date():
         reason="Test suppression",
         rule_id="TEST-001",
         path="src/file.py",
-        expiration=expiring_date,
+        expires=expiring_date,
     )
 
     result = check_for_expiring_suppressions([suppression])

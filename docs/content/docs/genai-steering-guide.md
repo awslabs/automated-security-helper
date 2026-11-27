@@ -913,7 +913,7 @@ Array of suppression rules to mark findings as false positives or accepted risks
 - `line_start`: Optional - specific line number
 - `line_end`: Optional - end line for multi-line suppressions
 - `reason`: Required - explanation for suppression
-- `expires`: Optional - ISO date when suppression expires (`expiration` is accepted as a deprecated alias when a config is read; the alias is removed in ASH v4)
+- `expires`: Optional - ISO date when suppression expires (ASH 4.0 removed the `expiration` spelling; a config that writes it is refused as an unknown key)
 - `resource_id`: Optional - only suppress findings about this resource identity (for cdk-nag, the CDK construct path); sugar for `scope.resource_id`
 - `scope`: Optional - narrow the entry to a resource identity, a resource type, or named engines' findings:
 
@@ -931,7 +931,7 @@ suppressions:
           applies_to: 'Action::logs:*'
 ```
 
-An unknown key in a suppression warns and disables the entry (it suppresses nothing until fixed); `fail_on_unknown_keys: true` makes it an error at config load, which becomes the default at ASH v4.
+Since ASH 4.0 an unknown key in a suppression is an error at config load (`fail_on_unknown_keys: true` is the default); `fail_on_unknown_keys: false` keeps the 3.x behavior, where it warns and disables the entry (it suppresses nothing until fixed).
 
 #### global_settings.exclusions
 Array of rule+path exclusions, which DROP the matching results from SARIF instead of keeping them marked suppressed: for finding classes that are always benign in a known place, such as bandit B101 (`assert`) under `tests/`. Other rules under the path are still reported, which an `ignore_paths` entry would drop too.

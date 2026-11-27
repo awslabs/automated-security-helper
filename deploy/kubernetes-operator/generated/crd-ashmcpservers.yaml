@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 9cdcbf122207173c
+    ash.awslabs.github.io/ash-config-schema-sha256: 4cd125e58b31198c
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -172,9 +172,7 @@ spec:
                             expires:
                               type: string
                               description: (Optional) Expiration date (YYYY-MM-DD). The entry stops applying
-                                on this date, by the local clock of the host running the scan. 'expiration'
-                                is accepted as a deprecated alias when a config is read; the alias is
-                                removed in ASH v4.
+                                on this date, by the local clock of the host running the scan.
                               nullable: true
                             client_supplied:
                               x-kubernetes-preserve-unknown-fields: true
@@ -182,11 +180,6 @@ spec:
                                 MCP client delivered supplied this entry, so results show which suppressions
                                 and ignored paths came from the client. A value written in a config file
                                 is ignored.'
-                            expiration:
-                              type: string
-                              description: (Optional) Deprecated alias of 'expires', accepted when a config
-                                is read and removed in ASH v4; the entry is written and stored as 'expires'.
-                              nullable: true
                           required:
                           - path
                           - reason
@@ -207,9 +200,7 @@ spec:
                             expires:
                               type: string
                               description: (Optional) Expiration date (YYYY-MM-DD). The entry stops applying
-                                on this date, by the local clock of the host running the scan. 'expiration'
-                                is accepted as a deprecated alias when a config is read; the alias is
-                                removed in ASH v4.
+                                on this date, by the local clock of the host running the scan.
                               nullable: true
                             client_supplied:
                               x-kubernetes-preserve-unknown-fields: true
@@ -315,11 +306,6 @@ spec:
                                 users reach for on their own. Folded into scope at validation; setting
                                 both to different values is an error.'
                               nullable: true
-                            expiration:
-                              type: string
-                              description: (Optional) Deprecated alias of 'expires', accepted when a config
-                                is read and removed in ASH v4; the entry is written and stored as 'expires'.
-                              nullable: true
                           required:
                           - path
                           - reason
@@ -382,9 +368,7 @@ spec:
                             expires:
                               type: string
                               description: (Optional) Expiration date (YYYY-MM-DD). The entry stops applying
-                                on this date, by the local clock of the host running the scan. 'expiration'
-                                is accepted as a deprecated alias when a config is read; the alias is
-                                removed in ASH v4.
+                                on this date, by the local clock of the host running the scan.
                               nullable: true
                             client_supplied:
                               x-kubernetes-preserve-unknown-fields: true
@@ -402,11 +386,6 @@ spec:
                               description: (Optional) Only drop this scanner's findings, by its registered
                                 name (case-insensitive), e.g. 'bandit'. Omit it to drop the rule from
                                 any scanner.
-                              nullable: true
-                            expiration:
-                              type: string
-                              description: (Optional) Deprecated alias of 'expires', accepted when a config
-                                is read and removed in ASH v4; the entry is written and stored as 'expires'.
                               nullable: true
                           required:
                           - path
@@ -545,12 +524,14 @@ spec:
                       instead, for the same reason as fail_on_findings.'
                   fail_on_unknown_keys:
                     x-kubernetes-preserve-unknown-fields: true
-                    description: Whether an unknown key in a suppression or ignore-path entry refuses
-                      the config at load. False (the default) loads the config with a warning that names
-                      the key, with a did-you-mean, and the entry it sits in suppresses nothing until
-                      it is fixed, so a typo can never widen a suppression. True refuses the config, naming
-                      the same key. ASH v4 flips the default to True; set it True now to adopt the error
-                      early.
+                    description: 'Whether an unknown key in a suppression or ignore-path entry refuses
+                      the config at load. True (the default since ASH 4.0) refuses the config, naming
+                      the key, with a did-you-mean. False keeps the 3.x behavior: the config loads with
+                      a warning that names the same key, and the entry it sits in suppresses nothing until
+                      it is fixed, so a typo can never widen a suppression. The same setting decides what
+                      a suppression''s scope.engines block does when a scan starts and the block names
+                      a scanner no plugin of the run registers, or the named scanner refuses it: True
+                      refuses the scan, False warns. Either way the block suppresses nothing.'
                   honor_ignore_files:
                     x-kubernetes-preserve-unknown-fields: true
                     description: 'Whether the .gitignore and .ignore files in the scanned tree decide
@@ -1375,8 +1356,7 @@ spec:
                                       type: string
                                       description: (Optional) Expiration date (YYYY-MM-DD). The entry
                                         stops applying on this date, by the local clock of the host running
-                                        the scan. 'expiration' is accepted as a deprecated alias when
-                                        a config is read; the alias is removed in ASH v4.
+                                        the scan.
                                       nullable: true
                                     client_supplied:
                                       x-kubernetes-preserve-unknown-fields: true
@@ -1384,12 +1364,6 @@ spec:
                                         file an MCP client delivered supplied this entry, so results show
                                         which suppressions and ignored paths came from the client. A value
                                         written in a config file is ignored.'
-                                    expiration:
-                                      type: string
-                                      description: (Optional) Deprecated alias of 'expires', accepted
-                                        when a config is read and removed in ASH v4; the entry is written
-                                        and stored as 'expires'.
-                                      nullable: true
                                   required:
                                   - path
                                   - reason
@@ -1776,8 +1750,7 @@ spec:
                                       type: string
                                       description: (Optional) Expiration date (YYYY-MM-DD). The entry
                                         stops applying on this date, by the local clock of the host running
-                                        the scan. 'expiration' is accepted as a deprecated alias when
-                                        a config is read; the alias is removed in ASH v4.
+                                        the scan.
                                       nullable: true
                                     client_supplied:
                                       x-kubernetes-preserve-unknown-fields: true
@@ -1785,12 +1758,6 @@ spec:
                                         file an MCP client delivered supplied this entry, so results show
                                         which suppressions and ignored paths came from the client. A value
                                         written in a config file is ignored.'
-                                    expiration:
-                                      type: string
-                                      description: (Optional) Deprecated alias of 'expires', accepted
-                                        when a config is read and removed in ASH v4; the entry is written
-                                        and stored as 'expires'.
-                                      nullable: true
                                   required:
                                   - path
                                   - reason
@@ -2471,8 +2438,7 @@ spec:
                                       type: string
                                       description: (Optional) Expiration date (YYYY-MM-DD). The entry
                                         stops applying on this date, by the local clock of the host running
-                                        the scan. 'expiration' is accepted as a deprecated alias when
-                                        a config is read; the alias is removed in ASH v4.
+                                        the scan.
                                       nullable: true
                                     client_supplied:
                                       x-kubernetes-preserve-unknown-fields: true
@@ -2480,12 +2446,6 @@ spec:
                                         file an MCP client delivered supplied this entry, so results show
                                         which suppressions and ignored paths came from the client. A value
                                         written in a config file is ignored.'
-                                    expiration:
-                                      type: string
-                                      description: (Optional) Deprecated alias of 'expires', accepted
-                                        when a config is read and removed in ASH v4; the entry is written
-                                        and stored as 'expires'.
-                                      nullable: true
                                   required:
                                   - path
                                   - reason

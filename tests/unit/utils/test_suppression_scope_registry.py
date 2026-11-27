@@ -233,6 +233,71 @@ class TestEngineCheckRefusal:
             ScanExecutionEngine._check_suppression_scope_engines(fake_engine)
         assert "no-such-engine" in str(excinfo.value)
 
+    def test_the_default_refuses_a_scope_problem(self):
+        """fail_on_unknown_keys defaults to true since ASH 4.0, so a config that
+        does not set it refuses a scope problem too (3.x warned)."""
+        from types import SimpleNamespace
+
+        from automated_security_helper.config.resolve_config import build_config
+        from automated_security_helper.core.exceptions import (
+            ASHConfigValidationError,
+        )
+        from automated_security_helper.core.execution_engine import (
+            ScanExecutionEngine,
+        )
+
+        config = build_config(
+            {
+                "project_name": "engine-check",
+                "global_settings": {
+                    "suppressions": [
+                        {
+                            "rule_id": "R",
+                            "path": "a.py",
+                            "reason": "r",
+                            "scope": {"engines": {"no-such-engine": {"x": 1}}},
+                        }
+                    ]
+                },
+            }
+        )
+        fake_engine = SimpleNamespace(
+            _context=SimpleNamespace(config=config), plugins={}
+        )
+        with pytest.raises(ASHConfigValidationError) as excinfo:
+            ScanExecutionEngine._check_suppression_scope_engines(fake_engine)
+        assert "no-such-engine" in str(excinfo.value)
+
+    def test_false_warns_and_does_not_refuse(self):
+        from types import SimpleNamespace
+
+        from automated_security_helper.config.resolve_config import build_config
+        from automated_security_helper.core.execution_engine import (
+            ScanExecutionEngine,
+        )
+
+        config = build_config(
+            {
+                "project_name": "engine-check",
+                "fail_on_unknown_keys": False,
+                "global_settings": {
+                    "suppressions": [
+                        {
+                            "rule_id": "R",
+                            "path": "a.py",
+                            "reason": "r",
+                            "scope": {"engines": {"no-such-engine": {"x": 1}}},
+                        }
+                    ]
+                },
+            }
+        )
+        fake_engine = SimpleNamespace(
+            _context=SimpleNamespace(config=config), plugins={}
+        )
+        ScanExecutionEngine._check_suppression_scope_engines(fake_engine)
+        assert any("no-such-engine" in str(w) for w in config._resolution_warnings)
+
 
 class TestLoadTimeProblems:
     def test_an_unknown_engine_name_gets_a_did_you_mean(self, fake_engine):

@@ -979,7 +979,7 @@ for run in data.get('runs', []):
                 'rule_id': rule_id,
                 'path': file_path,
                 'reason': 'Baseline finding - review and update',
-                'expiration': expiration
+                'expires': expiration
             }
             suppressions.append(suppression)
 
@@ -1687,7 +1687,7 @@ jq '[.runs[].results[]
      | {rule_id: .ruleId,
         path: .locations[0].physicalLocation.artifactLocation.uri,
         reason: "Baseline finding: review it before the suppression expires",
-        expiration: (now + 90 * 86400 | strftime("%Y-%m-%d"))}]
+        expires: (now + 90 * 86400 | strftime("%Y-%m-%d"))}]
     | unique' .ash/ash_output/reports/ash.sarif > suppressions.json
 
 # Review suppressions.json, then append the entries to global_settings.suppressions

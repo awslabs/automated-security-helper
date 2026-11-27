@@ -192,7 +192,7 @@ def test_a_wrapped_suppression_reason_does_not_start_a_command(
                     "rule_id": "R1",
                     "path": "src/app.py",
                     "reason": "w w w w w w w w w ::add-mask::hidden",
-                    "expiration": soon,
+                    "expires": soon,
                 }
             ]
         },

@@ -89,7 +89,7 @@ def test_suppression_model_minimal():
     assert suppression.line_start is None
     assert suppression.line_end is None
     assert suppression.reason == "Test suppression"
-    assert suppression.expiration is None
+    assert suppression.expires is None
 
 
 def test_suppression_model_with_line_range():
@@ -118,12 +118,12 @@ def test_suppression_model_with_future_expiration():
         reason="Test suppression",
         rule_id="TEST001",
         path="src/main.py",
-        expiration=future_date,
+        expires=future_date,
     )
 
     assert suppression.rule_id == "TEST001"
     assert suppression.path == "src/main.py"
-    assert suppression.expiration == future_date
+    assert suppression.expires == future_date
 
 
 def test_suppression_model_invalid_line_range():
@@ -147,7 +147,7 @@ def test_suppression_model_invalid_expiration_format():
             reason="Test suppression",
             rule_id="TEST001",
             path="src/main.py",
-            expiration="01/01/2025",  # Wrong format
+            expires="01/01/2025",  # Wrong format
         )
 
     assert "Invalid expiration date format. Use YYYY-MM-DD" in str(excinfo.value)
@@ -165,8 +165,8 @@ def test_suppression_model_past_expiration():
         reason="Test suppression",
         rule_id="TEST001",
         path="src/main.py",
-        expiration=past_date,
+        expires=past_date,
     )
 
-    assert suppression.expiration == past_date
+    assert suppression.expires == past_date
     assert suppression.is_expired is True

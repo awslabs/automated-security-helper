@@ -397,7 +397,7 @@ class TestSuppressionEndToEnd:
             path="deploy/cdk/package-lock.json",
             package_path="**/node_modules/aws-cdk-lib/node_modules/brace-expansion",
             reason="expired",
-            expiration="2020-01-01",
+            expires="2020-01-01",
         )
         out = apply_suppressions_to_sarif(
             self._two_copies(), self._context(test_source_dir, test_output_dir, supp)

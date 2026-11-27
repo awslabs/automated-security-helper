@@ -505,7 +505,7 @@ BAD_EXPIRY = (
     "    - rule_id: B101\n"
     "      path: 'tests/**'\n"
     "      reason: asserts in tests\n"
-    f"      expiration: '{EXPIRY_CANARY}'\n"
+    f"      expires: '{EXPIRY_CANARY}'\n"
 )
 
 
@@ -520,7 +520,7 @@ def test_a_validators_own_message_is_reported_by_its_type(_server) -> None:
     outcome = _scan_resolution(source)
 
     assert isinstance(outcome, ASHConfigValidationError), outcome
-    assert "expiration: invalid value (value_error)" in str(outcome), outcome
+    assert "expires: invalid value (value_error)" in str(outcome), outcome
     assert EXPIRY_CANARY not in str(outcome)
 
 

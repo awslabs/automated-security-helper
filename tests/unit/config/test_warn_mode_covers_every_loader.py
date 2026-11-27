@@ -1,19 +1,21 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Every production loader accepts what a scan accepts (warn-then-refuse rollout).
+"""Every production loader reads ``fail_on_unknown_keys`` the way a scan does.
 
-``build_config`` warns about an unknown suppression or ignore-path key and
-disables the entry (test_fail_on_unknown_keys_warn_mode.py). The other loaders
-that validate a config "as a scan validates it" went on refusing the same file
-with exit 3: ``validate_config_document`` ran a strict validation with no
-context, which its callers inherit -- the ASH_CONFIG pre-run load
-(``run_ash_scan._host_resolved_config`` via ``_load_single_config_file``), the
-MCP config-input check (``sandbox.check_config_input``) and the operator
+``build_config`` refuses an unknown suppression or ignore-path key by default
+(since ASH 4.0) and, under ``fail_on_unknown_keys: false``, warns and disables
+the entry (test_fail_on_unknown_keys_warn_mode.py). The other loaders that
+validate a config "as a scan validates it" once refused the same file with exit
+3 even in the 3.x warn mode: ``validate_config_document`` ran a strict
+validation with no context, which its callers inherit -- the ASH_CONFIG pre-run
+load (``run_ash_scan._host_resolved_config`` via ``_load_single_config_file``),
+the MCP config-input check (``sandbox.check_config_input``) and the operator
 overlay's own validation (``_load_overlay``) -- and the overlay-alone fallback
 validated with its own bare ``model_validate``. Each loader now builds the same
-context (``_entry_warn_context``): the file loads with the warning under the
-default, and still refuses under ``fail_on_unknown_keys: true``.
+context (``_entry_warn_context``): the file is refused by default, loads with
+the warning under ``fail_on_unknown_keys: false``, and is refused under
+``fail_on_unknown_keys: true`` (the explicit spelling of the default).
 """
 
 from pathlib import Path
@@ -63,15 +65,25 @@ class TestSingleFileLoad:
     """``_load_single_config_file``: the loader behind the ASH_CONFIG pre-run
     read (``run_ash_scan._host_resolved_config``) and ``AshConfig.from_file``."""
 
-    def test_an_unknown_entry_key_warns_and_loads(self, tmp_path):
-        path = _write(tmp_path / "ash.yaml", _config_data())
+    def test_an_unknown_entry_key_warns_and_loads_when_the_flag_is_false(
+        self, tmp_path
+    ):
+        path = _write(tmp_path / "ash.yaml", _config_data(fail_on_unknown_keys=False))
 
         loaded = _load_single_config_file(path)
 
         assert len(_the_warning(loaded)) == 1
         assert loaded.global_settings.suppressions[0].has_unknown_keys
 
-    def test_fail_on_unknown_keys_still_refuses(self, tmp_path):
+    def test_an_unknown_entry_key_is_refused_by_default(self, tmp_path):
+        path = _write(tmp_path / "ash.yaml", _config_data())
+
+        with pytest.raises(ASHConfigValidationError) as raised:
+            _load_single_config_file(path)
+
+        assert "Unknown key 'expiraton'" in str(raised.value)
+
+    def test_fail_on_unknown_keys_true_refuses(self, tmp_path):
         path = _write(tmp_path / "ash.yaml", _config_data(fail_on_unknown_keys=True))
 
         with pytest.raises(ASHConfigValidationError) as raised:
@@ -102,10 +114,14 @@ class TestMcpConfigInputCheck:
         (scan / "app.py").write_text("x = 1\n", encoding="utf-8")
         return scan
 
-    def test_an_unknown_entry_key_passes_the_check(self, scan_root, tmp_path):
+    def test_an_unknown_entry_key_passes_the_check_when_the_flag_is_false(
+        self, scan_root, tmp_path
+    ):
         from automated_security_helper.cli.mcp.sandbox import check_config_input
 
-        config = _write(tmp_path / "ops" / "ash.yaml", _config_data())
+        config = _write(
+            tmp_path / "ops" / "ash.yaml", _config_data(fail_on_unknown_keys=False)
+        )
 
         checked = check_config_input(str(config), source_dir=scan_root)
 
@@ -113,7 +129,17 @@ class TestMcpConfigInputCheck:
         assert checked.load_error is None, str(checked.load_error)
         assert checked.document is not None
 
-    def test_fail_on_unknown_keys_still_refuses(self, scan_root, tmp_path):
+    def test_an_unknown_entry_key_is_refused_by_default(self, scan_root, tmp_path):
+        from automated_security_helper.cli.mcp.sandbox import check_config_input
+
+        config = _write(tmp_path / "ops" / "ash.yaml", _config_data())
+
+        checked = check_config_input(str(config), source_dir=scan_root)
+
+        assert checked.load_error is not None
+        assert "Unknown key 'expiraton'" in str(checked.load_error)
+
+    def test_fail_on_unknown_keys_true_refuses(self, scan_root, tmp_path):
         from automated_security_helper.cli.mcp.sandbox import check_config_input
 
         config = _write(
@@ -135,9 +161,13 @@ class TestOperatorOverlay:
         monkeypatch.delenv("ASH_CONFIG", raising=False)
         monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
 
-    def test_an_unknown_entry_key_in_the_overlay_warns_and_loads(self, tmp_path):
+    def test_an_unknown_entry_key_in_the_overlay_warns_when_the_flag_is_false(
+        self, tmp_path
+    ):
         project = _write(tmp_path / "repo" / ".ash.yaml", {})
-        operator = _write(tmp_path / "operator" / "ash.yaml", _config_data())
+        operator = _write(
+            tmp_path / "operator" / "ash.yaml", _config_data(fail_on_unknown_keys=False)
+        )
 
         config = resolve_config(
             config_path=project,
@@ -148,7 +178,20 @@ class TestOperatorOverlay:
         assert len(_the_warning(config)) == 1
         assert config.global_settings.suppressions[0].has_unknown_keys
 
-    def test_fail_on_unknown_keys_in_the_overlay_still_refuses(self, tmp_path):
+    def test_an_unknown_entry_key_in_the_overlay_is_refused_by_default(self, tmp_path):
+        project = _write(tmp_path / "repo" / ".ash.yaml", {})
+        operator = _write(tmp_path / "operator" / "ash.yaml", _config_data())
+
+        with pytest.raises(ASHConfigValidationError) as raised:
+            resolve_config(
+                config_path=project,
+                source_dir=tmp_path / "repo",
+                overlay_config_path=operator,
+            )
+
+        assert "Unknown key 'expiraton'" in str(raised.value)
+
+    def test_fail_on_unknown_keys_true_in_the_overlay_refuses(self, tmp_path):
         project = _write(tmp_path / "repo" / ".ash.yaml", {})
         operator = _write(
             tmp_path / "operator" / "ash.yaml", _config_data(fail_on_unknown_keys=True)
@@ -163,20 +206,32 @@ class TestOperatorOverlay:
 
         assert "Unknown key 'expiraton'" in str(raised.value)
 
-    def test_the_overlay_used_alone_warns_and_loads(self, tmp_path, monkeypatch):
+    def test_the_overlay_used_alone_warns_and_loads_when_the_flag_is_false(
+        self, tmp_path, monkeypatch
+    ):
         """The fallback arm: no source, no config, the overlay stands alone."""
         (tmp_path / "cwd").mkdir()
         monkeypatch.chdir(tmp_path / "cwd")
-        operator = _write(tmp_path / "operator" / "ash.yaml", _config_data())
+        operator = _write(
+            tmp_path / "operator" / "ash.yaml", _config_data(fail_on_unknown_keys=False)
+        )
 
         config = resolve_config(overlay_config_path=operator)
 
         assert len(_the_warning(config)) == 1
         assert config.global_settings.suppressions[0].has_unknown_keys
 
-    def test_the_overlay_used_alone_still_refuses_under_the_flag(
-        self, tmp_path, monkeypatch
-    ):
+    def test_the_overlay_used_alone_is_refused_by_default(self, tmp_path, monkeypatch):
+        (tmp_path / "cwd").mkdir()
+        monkeypatch.chdir(tmp_path / "cwd")
+        operator = _write(tmp_path / "operator" / "ash.yaml", _config_data())
+
+        with pytest.raises(ASHConfigValidationError) as raised:
+            resolve_config(overlay_config_path=operator)
+
+        assert "Unknown key 'expiraton'" in str(raised.value)
+
+    def test_the_overlay_used_alone_refuses_under_the_flag(self, tmp_path, monkeypatch):
         (tmp_path / "cwd").mkdir()
         monkeypatch.chdir(tmp_path / "cwd")
         operator = _write(

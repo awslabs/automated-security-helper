@@ -110,7 +110,7 @@ class TestLinterAddsSuppressionChecksOnTop:
                 - path: src/
                   rule_id: TEST001
                   reason: test fixture
-                  expiration: "2020-01-01"
+                  expires: "2020-01-01"
             """)
         )
 

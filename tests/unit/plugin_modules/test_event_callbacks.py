@@ -56,7 +56,7 @@ class TestSuppressionExpirationChecker:
             AshSuppression(
                 rule_id="B101",
                 path="test.py",
-                expiration=(datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
+                expires=(datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
                 reason="Test suppression",
             )
         ]
@@ -79,7 +79,7 @@ class TestSuppressionExpirationChecker:
         expiring_suppression = AshSuppression(
             rule_id="B101",
             path="test.py",
-            expiration=(datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
+            expires=(datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d"),
             reason="Test suppression",
         )
 
@@ -127,7 +127,7 @@ class TestSuppressionExpirationChecker:
         future_suppression = AshSuppression(
             rule_id="B101",
             path="test.py",
-            expiration=(datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d"),
+            expires=(datetime.now() + timedelta(days=60)).strftime("%Y-%m-%d"),
             reason="Test suppression",
         )
 

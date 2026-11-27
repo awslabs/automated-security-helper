@@ -160,7 +160,7 @@ ash_config:
   external_reports_to_include: []
   fail_on_findings: true
   fail_on_incomplete_scanners: true
-  fail_on_unknown_keys: false
+  fail_on_unknown_keys: true
   global_settings:
     deduplication:
       annotate: false

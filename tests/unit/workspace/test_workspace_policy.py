@@ -467,7 +467,7 @@ def test_everything_except_the_path_survives_the_push_down_unchanged():
                 rule_id="B101",
                 line_start=10,
                 line_end=20,
-                expiration="2099-01-01",
+                expires="2099-01-01",
             )
         ]
     )
@@ -484,7 +484,7 @@ def test_everything_except_the_path_survives_the_push_down_unchanged():
     assert pushed.rule_id == "B101"
     assert pushed.line_start == 10
     assert pushed.line_end == 20
-    assert pushed.expiration == "2099-01-01"
+    assert pushed.expires == "2099-01-01"
 
 
 def test_the_pushed_down_suppression_is_a_copy_not_the_policy_object():

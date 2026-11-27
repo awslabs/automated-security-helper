@@ -1034,11 +1034,11 @@ def _unknown_entry_keys_are_fatal(
     Read from the raw document before the model is built, because the entry
     validators run inside that build: the flag's own field is still validated
     strictly, so a value that is not a bool refuses the config either way (a
-    non-bool read here only chooses the line's default, which on 3.x is warn
-    mode, the direction that marks the entry inert). An absent flag takes the
-    line's default, ``UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT`` (the one
-    constant the v4 bump flips; AshConfig's field default reads it too, so the
-    raw read and the validated model cannot disagree). An override that sets
+    non-bool read here only chooses the line's default). An absent flag takes
+    the line's default, ``UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT`` (True since
+    ASH 4.0; AshConfig's field default reads the same constant, so the raw read
+    and the validated model cannot disagree; ``false`` keeps the 3.x warn mode,
+    which marks the entry inert). An override that sets
     the flag counts too, last one wins, so ``--config-overrides
     fail_on_unknown_keys=true`` adopts the refusal for one run.
     """

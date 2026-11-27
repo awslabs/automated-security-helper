@@ -122,7 +122,7 @@ class TestGlobalIgnorePathsFiltering:
             IgnorePathWithReason(
                 path="temp_secret.json",
                 reason="Temporary file",
-                expiration="2027-12-31",  # Future date
+                expires="2027-12-31",  # Future date
             )
         ]
 

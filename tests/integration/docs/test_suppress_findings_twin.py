@@ -22,9 +22,10 @@ findings each scan wrote:
   ``expires``) exits 0 and leaves no finding of ``app.py`` in the results at all, which
   is the page's other sentence: "An ignore path drops findings in a path from the
   results entirely";
-- the page's misspelled ``ruleId``, its expired suppression and its expired ignore path
-  each exit 2, and the first two print the warning the page quotes (``Unknown key
-  'ruleId' (did you mean 'rule_id'?)``, and the line naming the expired entry);
+- the page's misspelled ``ruleId`` exits 3 and prints the refusal the page quotes
+  (``Unknown key 'ruleId' (did you mean 'rule_id'?)``); its expired suppression and
+  its expired ignore path exit 2, and the expired suppression prints the line naming
+  the entry;
 - the page's ``vendor/`` run passes, and ``--ignore-suppressions`` exits 2 again.
 
 ``--config-overrides`` is what the page uses to try a suppression before writing it into

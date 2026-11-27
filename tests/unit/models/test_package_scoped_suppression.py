@@ -179,7 +179,7 @@ class TestExpiry:
             package_name="brace-expansion",
             package_version="5.0.9",
             package_path=BUNDLED_PATH,
-            expiration=(date.today() + timedelta(days=days_from_today)).isoformat(),
+            expires=(date.today() + timedelta(days=days_from_today)).isoformat(),
         )
         assert supp.is_expired is True
         for finding in (_bundled(), _top_level(), _top_level("5.0.9"), _finding()):
@@ -188,7 +188,7 @@ class TestExpiry:
     def test_unexpired_still_matches(self):
         supp = _suppression(
             package_path=BUNDLED_PATH,
-            expiration=(date.today() + timedelta(days=1)).isoformat(),
+            expires=(date.today() + timedelta(days=1)).isoformat(),
         )
         assert supp.matches(_bundled()) is True
 

@@ -31,7 +31,7 @@ CANONICAL = {
     "rule_id": "AwsSolutions-IAM5",
     "path": "cdk.out/*.template.json",
     "reason": "Wildcard is scoped to the collector's own log group prefix",
-    "expiration": "2099-06-30",
+    "expires": "2099-06-30",
     "scope": {
         "resource_id": "Stack/CollectorTaskRole/DefaultPolicy/Resource",
         "resource_type": "AWS::IAM::Policy",
