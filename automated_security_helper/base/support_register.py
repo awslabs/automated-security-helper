@@ -1228,8 +1228,10 @@ _ADAPTATIONS: tuple[Polyfill, ...] = (
         ),
         difference=None,
         code_sites=(
-            f"{_PACKAGE}/plugin_modules/ash_builtin/scanners/checkov_scanner.py:"
-            "_known_ignore_skip_pattern",
+            (
+                f"{_PACKAGE}/plugin_modules/ash_builtin/scanners/checkov_scanner.py:"
+                "_known_ignore_skip_pattern"
+            ),
         ),
     ),
     Polyfill(
@@ -1327,8 +1329,10 @@ _ADAPTATIONS: tuple[Polyfill, ...] = (
         ),
         difference=None,
         code_sites=(
-            f"{_PACKAGE}/plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py:"
-            "DetectSecretsScanner._ensure_fork_multiprocessing",
+            (
+                f"{_PACKAGE}/plugin_modules/ash_builtin/scanners/detect_secrets_scanner.py:"
+                "DetectSecretsScanner._ensure_fork_multiprocessing"
+            ),
             f"{_PACKAGE}/config/client_scanner_exclusions.py:_process_context",
         ),
     ),
