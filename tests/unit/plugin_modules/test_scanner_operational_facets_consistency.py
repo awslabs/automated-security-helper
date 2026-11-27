@@ -811,6 +811,14 @@ def _planted(name: str, **image) -> opsf.ScannerOperationalFacets:
     return facets.model_copy(update={"image": opsf.ImageFacet(**image)})
 
 
+def _planted_pinned(name: str, tool: str) -> opsf.ScannerOperationalFacets:
+    """Scanner *name* as the release asset *tool*, its runtime pinning *tool* too, so
+    that what is left to report is the tool and not the two rows disagreeing."""
+    facets = _planted(name, route=opsf.ImageRoute.RELEASE_ASSET, tool=tool)
+    runtime = facets.runtime.model_copy(update={"tool_versions_key": tool})
+    return facets.model_copy(update={"runtime": runtime})
+
+
 def test_the_image_routes_are_the_seven_the_register_names() -> None:
     assert [route.value for route in opsf.ImageRoute] == [
         "release_asset",
@@ -1003,6 +1011,37 @@ def test_a_shared_tool_that_only_the_scanner_itself_installs_fails() -> None:
     assert any("no other scanner's row installs 'trivy'" in p for p in problems)
     assert "trivy" in _tools_other_rows_install("trivy-repo")
     assert "trivy" not in _tools_other_rows_install("trivy")
+
+
+def test_a_shared_tool_that_is_not_the_one_the_scanner_runs_fails() -> None:
+    """trivy-repo runs trivy, and another row installs syft, so a row that borrowed
+    syft passes the check that someone installs it. Only the runtime says the scanner
+    would run another tool."""
+    other_rows = _tools_other_rows_install("trivy-repo")
+    borrowed = _planted("trivy-repo", route=opsf.ImageRoute.SHARED_TOOL, tool="syft")
+    own = _planted("trivy-repo", route=opsf.ImageRoute.SHARED_TOOL, tool="trivy")
+
+    problems = image_route_problems(borrowed, other_rows, frozenset())
+
+    assert "syft" in other_rows
+    assert len(problems) == 1, problems
+    assert "the scanner runs 'trivy', not 'syft'" in problems[0]
+    assert image_route_problems(own, other_rows, frozenset()) == []
+
+
+def test_a_pinned_tool_with_no_download_table_fails(monkeypatch) -> None:
+    """A pin says which release and the table says which files, so a tool can have
+    the first and not the second. The row is planted without the table, which is
+    reported, and with it, which is not."""
+    monkeypatch.setitem(tool_downloads.TOOL_VERSIONS, "pinned-only", "v1.0.0")
+    planted = _planted_pinned("gitleaks", "pinned-only")
+
+    problems = image_route_problems(planted, frozenset(), frozenset())
+
+    assert len(problems) == 1, problems
+    assert "'pinned-only' has no release-asset download table" in problems[0]
+    monkeypatch.setattr(tool_downloads, "downloadable_tools", lambda: ["pinned-only"])
+    assert image_route_problems(planted, frozenset(), frozenset()) == []
 
 
 def test_a_gem_bundle_on_a_pinned_binary_fails() -> None:
