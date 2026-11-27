@@ -292,8 +292,9 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
     with the `fs` subject (3.9 and later) and ``directory_without_subject`` the one
     for an older ASH. Both are the arms of the handler's `directory = [...] if ...
     else [...]` assignment, which `argv` carries as `*directory`, so a handler
-    that stops carrying it, or stops assigning it as two lists, is refused rather
-    than derived as if it still named a directory. The changed-files pair is
+    that stops carrying it, stops assigning it as two lists, or assigns it a
+    second time is refused rather than derived as if it still named a directory.
+    The changed-files pair is
     added when ASH_CHANGED_FILES_ONLY is on, and the severity pair when
     ASH_MIN_SEVERITY is set. Only literal strings are collected; the values
     beside them are runtime data (a temp directory, a commit id) and are not part
@@ -342,19 +343,31 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
             for element in getattr(node, "elts", [])
         )
 
+    def names_directory(target: ast.AST) -> bool:
+        return isinstance(target, ast.Name) and target.id == "directory"
+
     base: list[str] = []
     changed_files_only: list[str] = []
     min_severity: list[str] = []
     directory_arms: list[list[str]] = []
+    directory_assignments = 0
     argv_carries_directory = False
 
     for node in ast.walk(handler):
+        # Every assignment to `directory`, of whatever value: a later one overrides
+        # the first, so the gate would name its path one way whatever its ASH has.
+        if (
+            isinstance(node, ast.Assign)
+            and any(names_directory(t) for t in node.targets)
+        ) or (
+            isinstance(node, (ast.AugAssign, ast.AnnAssign))
+            and names_directory(node.target)
+        ):
+            directory_assignments += 1
         # `directory = [...] if has_subject else [...]`: how the scan names its path
         if (
             isinstance(node, ast.Assign)
-            and any(
-                isinstance(t, ast.Name) and t.id == "directory" for t in node.targets
-            )
+            and any(names_directory(t) for t in node.targets)
             and isinstance(node.value, ast.IfExp)
         ):
             directory_arms = [words_of(node.value.body), words_of(node.value.orelse)]
@@ -384,12 +397,17 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
             "flag set cannot be derived and must not be reported as empty"
         )
 
-    if len(directory_arms) != 2 or not all(directory_arms):
+    if (
+        directory_assignments != 1
+        or len(directory_arms) != 2
+        or not all(directory_arms)
+    ):
         raise AssertionError(
-            "handler() no longer assigns `directory` as one list with a literal word "
-            "for an ASH with the `fs` subject and one for an ASH without it, so the "
-            "words that name the directory the gate scans cannot be derived and must "
-            "not be reported as absent. Update this derivation with the handler."
+            "handler() no longer assigns `directory` exactly once, as one list with a "
+            "literal word for an ASH with the `fs` subject and one for an ASH without "
+            "it, so the words that name the directory the gate scans cannot be derived "
+            "and must not be reported as absent. Update this derivation with the "
+            "handler."
         )
     if not argv_carries_directory:
         raise AssertionError(

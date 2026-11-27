@@ -309,6 +309,22 @@ def test_a_handler_that_assigns_one_directory_spelling_is_refused():
         gate_contract.derive_scan_flags(planted)
 
 
+def test_a_handler_that_assigns_directory_again_is_refused():
+    """Planted control. A later plain assignment overrides the first, so the gate would
+    name its path one way whatever its ASH has, while the contract still read the two
+    arms of the assignment it overrides."""
+    import gate_contract
+
+    planted = _handler_with(
+        'min_severity = os.environ.get("ASH_MIN_SEVERITY")',
+        'directory = ["--source-dir", source_dir]\n'
+        '    min_severity = os.environ.get("ASH_MIN_SEVERITY")',
+    )
+
+    with pytest.raises(AssertionError, match="assigns `directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
 def test_the_directory_words_are_read_from_the_handler_not_carried():
     """Planted control. A word the handler changes is the word the derivation reports."""
     import gate_contract
@@ -414,7 +430,8 @@ posix_only = pytest.mark.skipif(
 #: ``with-subject`` (ASH 3.9), ``without-subject`` (an older ASH, which shows the
 #: subject-less scan's help for ``scan fs --help`` since click reads ``--help`` before
 #: it refuses the extra argument), ``refusing`` (an older ASH that refuses the word
-#: ``fs`` with the usage error instead) and ``crashing``.
+#: ``fs`` with the usage error instead), ``crashing`` and ``names-it-and-fails`` (an
+#: ASH that prints the usage line, which names the command, and then dies).
 _STAND_IN_ASH = """\
 import json
 import os
@@ -425,6 +442,10 @@ release = os.environ["ASH_STUB_RELEASE"]
 if argv == ["scan", "fs", "--help"]:
     if release == "crashing":
         sys.stderr.write("Traceback (most recent call last):\\nMemoryError\\n")
+        sys.exit(1)
+    if release == "names-it-and-fails":
+        sys.stdout.write("Usage: ash scan fs [OPTIONS] [PATH]\\n")
+        sys.stderr.write("Error: it broke after printing its usage\\n")
         sys.exit(1)
     if release == "with-subject":
         sys.stdout.write("Usage: ash scan fs [OPTIONS] [PATH]\\n")
@@ -547,10 +568,21 @@ def test_the_script_scans_the_way_its_ash_does(tmp_path, release, spelling):
 
 
 @posix_only
-def test_the_script_does_not_read_a_crashed_probe_as_an_older_ash(tmp_path):
-    """A crash says nothing about the image's ASH. Read as an older one, it would scan
-    with the older spelling on an ASH that has the new one and score that run."""
-    calls, finished, _, _ = _run_inner_scan(tmp_path, "crashing")
+@pytest.mark.parametrize(
+    "release, printed",
+    [
+        ("crashing", "MemoryError"),
+        # The usage line names the command, but the exit status is not 0: the help is
+        # not an answer, so the status is read before the words are.
+        ("names-it-and-fails", "it broke after printing its usage"),
+    ],
+)
+def test_the_script_does_not_read_a_failed_probe_as_an_older_ash(
+    tmp_path, release, printed
+):
+    """A failure says nothing about the image's ASH. Read as an older one, it would
+    scan with the older spelling on an ASH that has the new one and score that run."""
+    calls, finished, _, _ = _run_inner_scan(tmp_path, release)
 
     assert calls == [], calls
     assert finished.returncode == 70, finished.stderr
@@ -558,7 +590,7 @@ def test_the_script_does_not_read_a_crashed_probe_as_an_older_ash(tmp_path):
     assert "ASH_EXIT=" not in finished.stdout, finished.stdout
     assert "could not tell whether this ASH has 'ash scan fs'" in finished.stderr
     assert "'ash scan fs --help' exited 1" in finished.stderr
-    assert "MemoryError" in finished.stderr
+    assert printed in finished.stderr
 
 
 @posix_only

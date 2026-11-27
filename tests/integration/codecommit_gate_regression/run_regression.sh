@@ -147,10 +147,14 @@ for spec in "vulnerable:feat/unsafe-subprocess" "clean:feat/safe-math"; do
   if [ -z "$code" ]; then
     echo "FAIL: the container produced no ASH_EXIT marker; ash never ran."
     echo "      (a probe that could not tell which spelling this image's ASH has"
-    echo "      stops the scan with exit 70 and says why at the top of the log)"
+    echo "      stops the scan with exit 70 and prints why)"
     echo "      full log: $log"
+    # The probe's own line comes first: a long traceback pushes it out of the tail.
+    grep -m1 '^ash: could not tell' "$log" | sed 's/^/        /' || true
     echo "      last lines of $log:"
     tail -15 "$log" | sed 's/^/        /'
+    # Keep the log: a run that never ran has nothing else to show why.
+    KEEP_WORKDIR=1
     OVERALL=1
     VERDICTS[$case_name]="<no-run>"
     echo
@@ -186,7 +190,12 @@ done
 echo "--- cross-case divergence ---"
 echo "vulnerable -> ${VERDICTS[vulnerable]:-<unset>}"
 echo "clean      -> ${VERDICTS[clean]:-<unset>}"
-if [ "${VERDICTS[vulnerable]:-a}" = "${VERDICTS[clean]:-b}" ]; then
+if [ "${VERDICTS[vulnerable]:-<no-run>}" = "<no-run>" ] \
+    || [ "${VERDICTS[clean]:-<no-run>}" = "<no-run>" ]; then
+  # Two cases that never ran have the same non-verdict, which is not a divergence
+  # check's finding; the run has already failed above.
+  echo "NOT COMPARED: a case never ran, so there is no verdict to compare."
+elif [ "${VERDICTS[vulnerable]:-a}" = "${VERDICTS[clean]:-b}" ]; then
   echo "FAIL: both cases produced the same verdict. A gate that returns one"
   echo "      verdict for every input is broken whichever verdict it picks."
   echo "      This is exactly the 2026-08-28 state (both 'passed')."
