@@ -48,30 +48,58 @@
 
 ### Breaking changes
 
-- **Bare `ash`, `ash scan` with no subject, `--source-dir`, the top-level results
-  commands and `ash build-image` are deprecated and will be removed in ASH v4.0.** Each
-  still runs the same command and prints one line to stderr (stdout and the exit code
-  are unchanged) that names its replacement. A scan moves under `ash scan fs`:
+- **Bare `ash`, `ash scan` with no subject, `--source-dir`, a workspace scan with no
+  subject, the top-level results commands and `ash build-image` are deprecated and will
+  be removed in ASH v4.0.** Each still runs the same command and prints one line to
+  stderr (stdout and the exit code are unchanged) that names its replacement. A scan
+  moves under a subject. A directory scan becomes `ash scan fs [PATH]`:
   `ash scan --source-dir X` becomes `ash scan fs X` (in a `--cli-json-input`
   document, the `path` key in place of `source_dir`), and `ash --mode container ...`
-  becomes `ash scan fs . --mode container ...`. The commands that read saved results
-  move under `ash results`: `ash report`, `ash merge` and `ash inspect` become
-  `ash results report`, `ash results merge` and `ash results inspect`, with the same
-  options. `ash results diff` and `ash results trend` are new in this release and have
-  no top-level spelling. `ash build-image` becomes `ash container build`.
-  The moved commands are hidden from the root `--help`. `ASH_SOURCE_DIR` is not
-  deprecated, and `ash scan --workspace` and `ash --workspace` have no subject to move
-  to yet, so they print nothing. Check `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar
-  pass-through settings, which are not rewritten for you. ASH's own workflows, actions,
-  pre-commit hooks and the examples on the docs site still use the old spellings and
-  move in a later change.
+  becomes `ash scan fs . --mode container ...`. A workspace scan becomes
+  `ash scan workspace FILE`: `ash --workspace FILE` and `ash scan --workspace FILE`
+  move to it, and `--workspace-config`, `--allow-missing-projects` and `--dry-run` go
+  with them. The commands that read saved results move under `ash results`:
+  `ash report`, `ash merge` and `ash inspect` become `ash results report`,
+  `ash results merge` and `ash results inspect`, with the same options.
+  `ash results diff` and `ash results trend` are new in this release and have no
+  top-level spelling. `ash build-image` becomes `ash container build`. The moved
+  commands are hidden from the root `--help`. `--scanners` and `ASH_SCANNERS` are
+  deprecated too: `--only-scanners` states the whole scanner selection and
+  `--add-scanners` adds to the mode's default set. `--scanners` keeps its behavior and
+  prints one `DeprecationWarning:` line to stderr, which names no removal release.
+  Check `ash-args`, `ASH_SCAN_EXTRA_ARGS` and similar pass-through settings, which are
+  not rewritten for you. The page
+  [Move to the scan subjects](docs/content/how-to/migrate-to-scan-subjects.md) lists
+  each old spelling with the line it prints.
   `./ash` accepts `scan fs <path>` and reads the path as the directory to mount (a
   second path is refused). `Invoke-ASH` takes the directory as `-SourceDir`, and refuses
-  a path after `scan fs`.
+  a path after `scan fs`. A workspace scan does not run through either wrapper: they
+  refuse `scan workspace FILE`, `--workspace` and `--workspace-config` with exit 3 and
+  name `ash scan workspace FILE --mode container`. They refuse `scan fs --archive FILE`
+  with exit 3 as well and name the Python CLI, which reads the archive.
+
+  `ASH_SOURCE_DIR`, `ASH_WORKSPACE` and `ASH_WORKSPACE_CONFIG` are deprecated as the
+  way to name what a scan subject scans. A scan that reads one of them because no
+  argument names the same thing prints one line to stderr that gives the replacement
+  (`ash scan fs <path>`, `ash scan workspace <file>`, `--workspace-config <path>`), and
+  ASH v4.0 stops reading them for that. A scan that was given the argument prints
+  nothing, and neither does a form with no subject, whose own line already names the
+  subject. `ash config` still reads `ASH_SOURCE_DIR`. A directory scan that `./ash` or
+  `Invoke-ASH` starts passes the scan inside the container `/src` as its path argument
+  in place of the variable, so it prints no line for it; a scan of a clone, an image or
+  a `--cli-json-input` document still sets the variable.
 - **A 3.8 `ash` cannot drive a 3.9 image, or the reverse.** The command ASH runs inside
-  its container (container mode) and inside a Nix shell (nix mode) is now `ash scan fs`,
-  which a 3.8 `ash` does not parse, so `--ash-revision-to-install` and a published image
-  must come from the same release line as the `ash` that starts them.
+  its container (container mode) and inside a Nix shell (nix mode) is now `ash scan fs`
+  (`ash scan workspace` for a workspace scan), which a 3.8 `ash` does not parse, so
+  `--ash-revision-to-install` and a published image must come from the same release line
+  as the `ash` that starts them. ASH's own callers keep working when you pin an ASH
+  before 3.9: the reusable scan workflow, the CDK stacks and constructs, the Terraform
+  executor and CodeCommit gate modules, the Homebrew formula test and the CodeBuild
+  example ask the installed ASH whether it has `ash scan fs`, `ash results merge` and
+  `ash results report`, and run the older spelling when it does not. A pre-commit hook
+  runs the ASH of its `rev:` and takes its definition from that revision, so the
+  published hooks, which run `ashv3 scan fs`, apply once `rev:` is 3.9 or later; an
+  older `rev:` keeps its own hook definitions.
 
 ### Behavior changes
 
@@ -105,6 +133,58 @@
   baseline or a suppression keyed by that id needs refreshing. A suppression written
   against the config file's path and lines is not affected. A result that has a line in
   the generated script with no sidecar row is unchanged.
+- **ASH's own callers use the new spellings.** The published pre-commit hooks (`ash`,
+  `ash-simple-scan` and `ash-full-scan`) run `ashv3 scan fs`, and the container image's
+  default command is `ash scan fs`, so `docker run <image>` still scans the working
+  directory and prints no deprecation line. The reusable scan workflow, the CDK stacks
+  and constructs, the Terraform executor and CodeCommit gate modules, the Homebrew
+  formula test and the CodeBuild example ask the installed ASH which spelling it takes
+  and run the older one when it lacks the new one. With ASH 3.9 or later the new
+  spellings run and no deprecation line is printed. The default pins stay at v3.8.0 (the
+  construct's ASH ref and the stacks' `AshVersion`), and older `AshVersion`,
+  `ash_version` and `RELEASE_TAG` values keep working. A spelling check that gets no
+  answer ends the step with status 70, which ASH never gives, and prints the last 20
+  lines of its output.
+- **The CodeCommit gates bound the spelling check at 120 seconds, refuse the scan when it
+  cannot start, and log the spelling they chose on every scan.** With ASH 3.9 or later
+  both gates pass the cloned repository as the `fs` path. The Terraform gate puts it
+  ahead of `ASH_SCAN_EXTRA_ARGS` (the module's `ash_scan_extra_args`), so a bare word
+  there is now refused as a second path instead of becoming the scanned directory. With
+  an older ASH both gates keep `--source-dir`.
+- **The reusable scan workflow refuses an `ash-args` option that takes a value and has
+  none after it**, such as a trailing `--source-dir`, with an error that names its
+  position. A `--source-dir` in `ash-args` still names the directory scanned.
+- **A `--source-dir DIR` in the `extraScanArguments` of the CDK `ASHScanStep` names the
+  directory scanned on ASH 3.9 as well**, as `ash scan fs DIR`; the build failed with a
+  usage error before. The step refuses these at synth and says what to write instead: a
+  `--source-dir` with no directory or followed by an option, one mixed with other options
+  in a single element, a single element of three or more words, a one-element directory
+  that holds a quote, `$`, backtick, backslash or leading dash, a directory that holds a
+  second `--source-dir`, and a directory written like a long option. Write
+  `['--source-dir', 'DIR']` and each other option as its own element; a directory whose
+  name starts with a dash is written `./NAME`. The one-element `'--source-dir DIR'` is
+  accepted when DIR is one plain word.
+- **MCP zip uploads are read by the rules `ash scan fs --archive` uses, and those refuse
+  more archives.** Besides the absolute, backslash, `..` and symlink members they already
+  refused, `set_source_zip_finalize` now refuses a member whose name holds a NUL or a `.`
+  or empty path component (and, on Windows, a name Windows cannot hold), a Unicode path
+  field that names another file, two members that extract to one path (on Windows and
+  macOS, names that differ only in case or Unicode normalization count as one), a member
+  under a path another member holds as a file, an encrypted member, a compression method
+  other than stored and deflate, a member whose data is not the size it declares, and a
+  file that holds anything besides one zip: bytes before, between or after its members,
+  an end record that does not match the file, or a local header that disagrees with the
+  central directory. A zip that cannot be read is refused in the same words by both, the
+  upload is removed, and the answer names no exception class. The MCP tool descriptions
+  use the 3.9 spellings: `resolve_ash_workspace` and `run_ash_workspace_scan` are the MCP
+  equivalents of `ash scan workspace FILE` (they said `ash --workspace FILE`), and
+  `set_source_zip_finalize` lists what it refuses. Tool names and parameters do not
+  change.
+- **The AI-DLC `ash-scan` plugin reads `ash --version` before it names a scan.** Its two
+  fragments give `ash scan fs ...` for ASH 3.9 and later and `ash scan ...` for an older
+  ASH, and their exit-code tables list exit 5 (a command line ASH did not accept), so an
+  agent no longer reads a summary an earlier run left as the result of a scan that never
+  ran.
 
 ### Maintenance
 
@@ -143,6 +223,16 @@
   `utils/content_databases.py` are `StalenessPolicy` members, and the three
   `*_CHECKPOINT` constants of `utils/inner_run_outcome.py` are `InnerRunRecordType`
   members. The wire spellings themselves do not change.
+- A docs page rendered for a release before 3.9 has only its fenced code and inline code
+  respelled for that release's commands, so a page that pins 3.8.0 shows `ash scan
+  --source-dir`, `ash report` and the other spellings that release takes, and the prose
+  around them is the template's. The respelling reads a command continued after a
+  backslash or written as a list of arguments, and no longer takes a redirection
+  (`2>&1`), a usage placeholder (`[OPTIONS]`) or an ellipsis after `ash scan fs` for a
+  path. `scripts/version_template_manager.py convert --overwrite` replaces a template
+  only with one that renders back to the page it was written from; otherwise it names
+  the first differing line or the releases the page pins, fails the run and leaves the
+  template.
 
 ### Deprecations
 
@@ -160,41 +250,45 @@
   refuse the old `Community plugins` / `Community scanners` column headings and name
   the new one. ASH 3.9.0 stops accepting the old spellings.
 
-### Fixes
-
-- `ash results trend` is no longer sent to an express daemon as a scan.
-- **`./ash --no-color` and `--quiet` now reach the command under `results`.** `./ash
-  --no-color results report` dropped `--no-color` while the older `./ash --no-color
-  report` kept it, so following the deprecation message lost the option. A command under
-  a group takes what its table entry takes, and the groups and their commands are
-  generated into both wrappers.
-- **`Invoke-ASH` puts the options it adds after the command under `container` and
-  `results`.** `Invoke-ASH -Offline -AshArgs 'container build'` ran `ash container
-  --offline build`, which is a usage error (exit 5), and `results merge` dropped `--config`
-  and `--ignore-suppressions` with a warning, which changes what merge gates on.
-- **`./ash scan fs DIR --workspace FILE` is refused as a workspace scan (exit 3), not as
-  an extra argument.** A spaced `--workspace` value is no longer read as a second
-  directory, and a second directory is refused instead of being forwarded to the scan
-  inside, which would have scanned it while the first was mounted.
-- **`ash scan -- DIR` names no subject and is refused.** The message gives the command
-  to run, `ash scan fs -- DIR` when the directory starts with a dash.
-- **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
-  It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
-  set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
-  a newline is refused with exit 3 before anything is built), so a scan started by
-  `Invoke-ASH` inside GitHub Actions sees the runner's variable as the other two
-  entrypoints do. And a relative path in the `OCI_RUNNER` environment variable (or the
-  deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
-  being run from the working directory, which is usually the repository being scanned.
-  The same path given as `-OCIRunner` is used as written, as before.
-
 ### Features
 
-- **`ash scan` takes a subject: `ash scan fs [PATH]` scans a directory.** `scan` is now
-  a group, and `fs` is its first subject. The directory is its argument (it defaults to
-  the working directory), and `--source-dir` and `ASH_SOURCE_DIR` still name it. `fs`
-  takes every option `ash scan` took. `ash scan --help` shows `fs`'s help, which ends
-  with the list of subjects.
+- **`ash scan` takes a subject: `ash scan fs [PATH]` scans a directory and
+  `ash scan workspace FILE` scans a workspace.** `scan` is now a group, and `fs` and
+  `workspace` are its subjects. The directory is the argument of `fs` (it defaults to the
+  working directory), and `--source-dir` and `ASH_SOURCE_DIR` still name it; the option
+  is a deprecated spelling. `fs` takes every option `ash scan` took except the four
+  workspace options, which `workspace` takes. `ash scan --help` shows the help of the
+  form with no subject, which takes every option the scan took and ends with the list of
+  subjects. The `--generate-cli-skeleton` template of each subject leaves out the
+  deprecated `source_dir` and `scanners` keys; a `--cli-json-input` document that names
+  either is still read and prints its deprecation line, and the form with no subject
+  keeps its template.
+- **`ash scan workspace FILE` scans the projects of a `.code-workspace` file.** It takes
+  `--workspace-config`, `--allow-missing-projects` and `--dry-run` beside the options
+  every scan takes, and `--changed-files-only` and `--base-ref` (`ASH_CHANGED_FILES_ONLY`
+  and `ASH_BASE_REF` set them): each project is judged on the files changed in its own
+  git repository, a project with no change is skipped, and a project outside a
+  repository is scanned in full with a warning, as `ash --workspace FILE
+  --changed-files-only` does. `--mode container` refuses `--changed-files-only` for a
+  workspace scan, as for every scan (exit code 5). The subject refuses the options that
+  read one directory (`--source-dir`, `--use-existing`, `--staged`, `--baseline`,
+  `--shard-index` and `--shard-count`), an image or a remote repository. A refusal that
+  told the reader to type a deprecated form (a workspace option with no workspace file,
+  `auto` with none or several workspace files, a workspace folder that is the workspace
+  root, a shard selection beside a workspace) now names the subjects, and its exit code
+  is unchanged. The container and Nix runs that ASH starts for a workspace scan call the
+  subject.
+- **`ash scan fs --archive FILE` scans a zip of source code.** ASH checks the zip against
+  its size, name and link rules, extracts it to a temporary directory that is removed
+  when the command ends, and scans that directory. Results go to `.ash/ash_output` in
+  the working directory unless `--output-dir` names another. An archive can be at most
+  100 MiB, hold at most 500 MiB uncompressed and at most 50,000 members. Only zip is
+  read: a tar or gzip file is refused as not a zip, and a saved container image goes to
+  `--image-archive`. `--archive` cannot be combined with the PATH argument,
+  `--source-dir`, `--source-git`, the image options, `--staged`, `--use-existing` or
+  `--changed-files-only`. Each refusal names both options and exits with 5, as does an
+  archive the rules refuse; a disk problem exits with 1. The rules are the ones MCP zip
+  uploads use (see Behavior changes).
 - **`ash results` holds the commands that read saved scan results.** `ash results
   report`, `diff`, `trend`, `merge` and `inspect` work on results a scan already wrote,
   and none of them runs a scan. `report`, `merge` and `inspect` are the commands that
@@ -214,7 +308,7 @@
   on to `build`, as they did for `build-image`. Move scripts and CI jobs to the new
   spelling in this release; the old one stops working in v4.
 - **Tab completion is covered for both ways of running ASH.** `ash scan <TAB>` offers
-  `fs`, and `fs`'s options complete; `ash --install-completion` and `ash
+  `fs` and `workspace`, and their options complete; `ash --install-completion` and `ash
   --show-completion` are documented. `./ash --show-completion` prints a bash completion
   function (it runs on bash 3.2) and `Invoke-ASH` completes `-AshArgs`, both generated
   from the tables the wrappers parse with (`scripts/generate_wrapper_tables.py`). They
@@ -372,6 +466,35 @@
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.
+- **A `--cli-json-input` document that names the scan directory twice is refused.** The
+  two names are `path` with `source_dir`, `source_dir` beside `source_git`, or a
+  document name beside the other name typed on the command line. The same two typed on
+  the command line are refused too, so no scan picks one directory and drops the other
+  without a message.
+- **`./ash --no-color` and `--quiet` now reach the command under `results`.** `./ash
+  --no-color results report` dropped `--no-color` while the older `./ash --no-color
+  report` kept it, so following the deprecation message lost the option. A command under
+  a group takes what its table entry takes, and the groups and their commands are
+  generated into both wrappers.
+- **`Invoke-ASH` puts the options it adds after the command under `container` and
+  `results`.** `Invoke-ASH -Offline -AshArgs 'container build'` ran `ash container
+  --offline build`, which is a usage error (exit 5), and `results merge` dropped `--config`
+  and `--ignore-suppressions` with a warning, which changes what merge gates on.
+- **`./ash scan fs DIR --workspace FILE` is refused as a workspace scan (exit 3), not as
+  an extra argument.** A spaced `--workspace` value is no longer read as a second
+  directory, and a second directory is refused instead of being forwarded to the scan
+  inside, which would have scanned it while the first was mounted.
+- **`ash scan -- DIR` names no subject and is refused.** The message gives the command
+  to run, `ash scan fs -- DIR` when the directory starts with a dash.
+- **`Invoke-ASH` now matches `./ash` and the `ash` CLI on two container-run details.**
+  It passes `GITHUB_ACTIONS`, `TF_BUILD` and `TEAMCITY_VERSION` into the container when
+  set (by name, or with their values when `OCI_RUNNER_WRAPPER` is set; a value that holds
+  a newline is refused with exit 3 before anything is built), so a scan started by
+  `Invoke-ASH` inside GitHub Actions sees the runner's variable as the other two
+  entrypoints do. And a relative path in the `OCI_RUNNER` environment variable (or the
+  deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
+  being run from the working directory, which is usually the repository being scanned.
+  The same path given as `-OCIRunner` is used as written, as before.
 
 ## v3.8.0 (2026-11-12)
 
