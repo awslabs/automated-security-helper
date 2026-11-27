@@ -49,7 +49,11 @@ says so because the function said so.
 
 `derive_scan_flags` reads the argv construction out of the syntax tree, so a flag
 added to or removed from the handler changes the derived set without anyone
-editing a fixture.
+editing a fixture. The handler names the directory it scans one of two ways, by what
+the image's ASH has: `ash scan fs PATH` from ASH 3.9, `ash scan --source-dir PATH`
+before it. Both words come from the `directory = [...] if ... else [...]` assignment
+that `argv` carries as `*directory`, and the derivation refuses a handler whose argv
+does not carry it, so a change that drops the directory from the argv is not silent.
 """
 
 from __future__ import annotations
@@ -177,6 +181,8 @@ def corroboration_lines(source: str | None = None) -> list[str]:
             wanted.append(stripped)
         elif stripped.startswith("argv") and "--" in stripped:
             wanted.append(stripped)
+        elif stripped.startswith("directory = "):
+            wanted.append(stripped)
         elif stripped.startswith('"--'):
             wanted.append(stripped)
     return wanted
@@ -280,12 +286,18 @@ def derive_verdict_mapping(source: str | None = None) -> dict[str, str]:
 def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
     """Read the flags out of the handler's argv construction.
 
-    Three groups, matching the three ways the handler builds argv: the
-    unconditional base, the changed-files pair added when
-    ASH_CHANGED_FILES_ONLY is on, and the severity pair added when
-    ASH_MIN_SEVERITY is set. Only literal `--flag` strings are collected; the
-    values beside them are runtime data (a temp directory, a commit id) and are
-    not part of the contract.
+    Five groups. ``base`` is the unconditional literal flags of `argv = [...]`.
+    The handler names the directory it scans by what the image's ASH has:
+    ``directory_with_subject`` is the literal word ahead of the path for an ASH
+    with the `fs` subject (3.9 and later) and ``directory_without_subject`` the one
+    for an older ASH. Both are the arms of the handler's `directory = [...] if ...
+    else [...]` assignment, which `argv` carries as `*directory`, so a handler
+    that stops carrying it, or stops assigning it as two lists, is refused rather
+    than derived as if it still named a directory. The changed-files pair is
+    added when ASH_CHANGED_FILES_ONLY is on, and the severity pair when
+    ASH_MIN_SEVERITY is set. Only literal strings are collected; the values
+    beside them are runtime data (a temp directory, a commit id) and are not part
+    of the contract.
     """
     code = source if source is not None else extract_handler_source()
     tree = ast.parse(code)
@@ -312,16 +324,48 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
                 found.append(child.value)
         return found
 
+    def words_of(node: ast.AST) -> list[str]:
+        """The literal strings of a list display, in order: the words that name the
+        directory. The path beside them is runtime data and is left out."""
+        return [
+            element.value
+            for element in getattr(node, "elts", [])
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        ]
+
+    def carries_directory(node: ast.AST) -> bool:
+        """Whether a list display holds `*directory`."""
+        return any(
+            isinstance(element, ast.Starred)
+            and isinstance(element.value, ast.Name)
+            and element.value.id == "directory"
+            for element in getattr(node, "elts", [])
+        )
+
     base: list[str] = []
     changed_files_only: list[str] = []
     min_severity: list[str] = []
+    directory_arms: list[list[str]] = []
+    argv_carries_directory = False
 
     for node in ast.walk(handler):
+        # `directory = [...] if has_subject else [...]`: how the scan names its path
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "directory" for t in node.targets
+            )
+            and isinstance(node.value, ast.IfExp)
+        ):
+            directory_arms = [words_of(node.value.body), words_of(node.value.orelse)]
         # `argv = [...]`
         if isinstance(node, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "argv" for t in node.targets
         ):
             base.extend(flags_of(node.value))
+            argv_carries_directory = argv_carries_directory or carries_directory(
+                node.value
+            )
         # `argv += [...]`, each inside the `if` that guards it
         if (
             isinstance(node, ast.AugAssign)
@@ -340,8 +384,25 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
             "flag set cannot be derived and must not be reported as empty"
         )
 
+    if len(directory_arms) != 2 or not all(directory_arms):
+        raise AssertionError(
+            "handler() no longer assigns `directory` as one list with a literal word "
+            "for an ASH with the `fs` subject and one for an ASH without it, so the "
+            "words that name the directory the gate scans cannot be derived and must "
+            "not be reported as absent. Update this derivation with the handler."
+        )
+    if not argv_carries_directory:
+        raise AssertionError(
+            "the argv assignment in handler() no longer carries `*directory`, so the "
+            "scan is not told which directory to scan. A contract derived from it "
+            "would witness no directory at all."
+        )
+
+    with_subject, without_subject = directory_arms
     return {
         "base": base,
+        "directory_with_subject": with_subject,
+        "directory_without_subject": without_subject,
         "changed_files_only": changed_files_only,
         "min_severity": min_severity,
     }
@@ -378,7 +439,9 @@ def build_contract() -> dict:
             "                         CODECOMMIT_GATE_HANDLER for each code in",
             "                         ASH_EXIT_CODES, so the fallback arm is",
             "                         covered and exit code 4 appears.",
-            "  scan_flags          -- from the argv construction in handler().",
+            "  scan_flags          -- from the argv construction in handler(), and",
+            "                         from the two words that name the directory",
+            "                         (`fs` from ASH 3.9, `--source-dir` before it).",
             "  min_severity_default-- from the MinSeverity parameter of the",
             "                         synthesized AshCodeCommitGate template.",
             "",

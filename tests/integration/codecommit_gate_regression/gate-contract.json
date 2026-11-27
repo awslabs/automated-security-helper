@@ -8,7 +8,9 @@
     "                         CODECOMMIT_GATE_HANDLER for each code in",
     "                         ASH_EXIT_CODES, so the fallback arm is",
     "                         covered and exit code 4 appears.",
-    "  scan_flags          -- from the argv construction in handler().",
+    "  scan_flags          -- from the argv construction in handler(), and",
+    "                         from the two words that name the directory",
+    "                         (`fs` from ASH 3.9, `--source-dir` before it).",
     "  min_severity_default-- from the MinSeverity parameter of the",
     "                         synthesized AshCodeCommitGate template.",
     "",
@@ -32,6 +34,12 @@
     "changed_files_only": [
       "--changed-files-only",
       "--base-ref"
+    ],
+    "directory_with_subject": [
+      "fs"
+    ],
+    "directory_without_subject": [
+      "--source-dir"
     ],
     "min_severity": [
       "--min-severity"

@@ -262,6 +262,67 @@ def test_the_derived_flags_include_every_flag_the_gate_always_sends():
     assert flags["min_severity"] == ["--min-severity"]
 
 
+def test_the_contract_names_the_directory_both_ways_the_gate_can():
+    """The gate scans `ash scan fs PATH` on an ASH with the `fs` subject (3.9 and
+    later) and `ash scan --source-dir PATH` on one without. Both words are in the
+    contract, so a gate that stops naming the directory either way changes it."""
+    import gate_contract
+
+    flags = gate_contract.load_contract()["scan_flags"]
+
+    assert flags["directory_with_subject"] == ["fs"]
+    assert flags["directory_without_subject"] == ["--source-dir"]
+
+
+def _handler_with(old: str, new: str) -> str:
+    """The extracted handler with one planted edit, which must have changed it."""
+    import gate_contract
+
+    source = gate_contract.extract_handler_source()
+    planted = source.replace(old, new)
+    assert planted != source, f"the handler no longer holds {old!r}; update this plant"
+    return planted
+
+
+def test_a_handler_whose_argv_drops_the_directory_is_refused():
+    """Planted control. Dropping `*directory` from argv leaves a scan with no
+    directory, and a derivation that read only literal flags out of argv would
+    report the same contract for it."""
+    import gate_contract
+
+    planted = _handler_with('["ash", "scan", *directory,', '["ash", "scan",')
+
+    with pytest.raises(AssertionError, match="`\\*directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+def test_a_handler_that_assigns_one_directory_spelling_is_refused():
+    """Planted control. One list for every ASH is not the two the contract names."""
+    import gate_contract
+
+    planted = _handler_with(
+        '["fs", source_dir] if has_subject else ["--source-dir", source_dir]',
+        '["--source-dir", source_dir]',
+    )
+
+    with pytest.raises(AssertionError, match="assigns `directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+def test_the_directory_words_are_read_from_the_handler_not_carried():
+    """Planted control. A word the handler changes is the word the derivation reports."""
+    import gate_contract
+
+    planted = _handler_with(
+        '["--source-dir", source_dir]', '["--source-tree", source_dir]'
+    )
+
+    flags = gate_contract.derive_scan_flags(planted)
+
+    assert flags["directory_without_subject"] == ["--source-tree"]
+    assert flags["directory_with_subject"] == ["fs"]
+
+
 def test_the_min_severity_default_comes_from_the_stack():
     """'medium' is the MinSeverity parameter's default, not an invented value.
 
