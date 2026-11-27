@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -291,6 +293,134 @@ def test_a_file_whose_name_encodes_no_page_fails_the_seed_check(tmp_path):
     assert "not the name of a page's seed file" in findings[0].message
 
 
+NEEDS_A_TOKEN = "needs a token"
+RUNNER_NONE = f'runner=none reason="{NEEDS_A_TOKEN}"'
+
+
+def _pipeline(*keys: str) -> str:
+    """A GitHub Actions block under a marker that carries ``keys``."""
+    marker = " ".join(("config", "kind=github-actions", *keys))
+    return f"<!-- doctest: {marker} -->\n{FENCE}yaml\non: push\n{FENCE}\n"
+
+
+def _saved(path: str, lang: str = "bash", mode: str = "") -> str:
+    """A block under a marker that saves it at ``path``, and runs it when ``mode`` says."""
+    marker = f"{mode} save-as={path}".strip()
+    return f"<!-- doctest: {marker} -->\n{FENCE}{lang}\nash scan\n{FENCE}\n"
+
+
+@pytest.mark.unit
+def test_a_pipeline_no_runner_runs_needs_a_seed_line(tmp_path):
+    """``runner=none`` keeps a block out of the runs as ``illustrative`` does, and its
+    reason follows the same rules, so the seed counts it, with its reason."""
+    _armed(tmp_path)
+    page = _write(tmp_path, "docs/page.md", "# Page\n\n" + _pipeline(RUNNER_NONE))
+
+    findings = _problems(tmp_path, page)
+
+    assert [(f.path, f.line) for f in findings] == [("docs/page.md", 3)]
+    assert "not in the illustrative seed" in findings[0].message
+    assert NEEDS_A_TOKEN in findings[0].message
+
+    _seed(tmp_path, "docs/page.md", f"runner=none: {NEEDS_A_TOKEN}")
+    assert _problems(tmp_path, page) == []
+
+
+@pytest.mark.unit
+def test_a_pipeline_a_runner_now_runs_leaves_its_old_seed_line_behind(tmp_path):
+    seed = _seed(tmp_path, "docs/page.md", f"runner=none: {NEEDS_A_TOKEN}")
+    page = _write(tmp_path, "docs/page.md", "# Page\n\n" + _pipeline())
+
+    findings = _problems(tmp_path, page)
+
+    assert [(f.path, f.line) for f in findings] == [
+        (seed.relative_to(tmp_path).as_posix(), 1)
+    ]
+    assert "no illustrative marker" in findings[0].message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("lang", "path"),
+    [
+        ("bash", "tools/check.sh"),
+        ("python", "tools/check.py"),
+        ("powershell", "tools/check.ps1"),
+    ],
+    ids=["shell", "python", "powershell"],
+)
+def test_a_block_saved_and_never_run_needs_a_seed_line(tmp_path, lang, path):
+    """``save-as=`` alone saves a shell or Python block and does not run it, which takes
+    it out of the runs without an ``illustrative`` marker."""
+    _armed(tmp_path)
+    page = _write(tmp_path, "docs/page.md", "# Page\n\n" + _saved(path, lang))
+
+    findings = _problems(tmp_path, page)
+
+    assert [(f.path, f.line) for f in findings] == [("docs/page.md", 3)]
+    assert "not in the illustrative seed" in findings[0].message
+
+    _seed(tmp_path, "docs/page.md", f"save-as={path}")
+    assert _problems(tmp_path, page) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("block", "why"),
+    [
+        (_saved("tools/check.sh", "bash", "run"), "it is saved and run"),
+        (_saved("tools/check.py", "python", "run"), "it is saved and run"),
+        (_saved(".ash.yaml", "yaml"), "a config block is still validated"),
+        (_saved("docs/usage.md", "markdown"), "it is a file, not a command"),
+        (_saved("notes.txt", "text"), "it is a file, not a command"),
+    ],
+    ids=["run shell", "run python", "config", "markdown", "text"],
+)
+def test_a_saved_block_that_is_run_or_is_no_command_has_no_seed_line(
+    tmp_path, block, why
+):
+    """The controls for the case above: each is saved with ``save-as=`` and none is a
+    shell or Python block that is saved and never run."""
+    _armed(tmp_path)
+    page = _write(tmp_path, "docs/page.md", "# Page\n\n" + block)
+
+    assert _problems(tmp_path, page) == [], why
+
+
+@pytest.mark.unit
+def test_the_seed_lists_every_marker_that_keeps_a_block_out_of_the_runs(tmp_path):
+    dc = checks()
+    text = "\n".join(
+        [
+            "# Page\n",
+            _block(NEEDS_DOCKER),
+            _pipeline(RUNNER_NONE),
+            _saved("tools/check.sh"),
+            _saved("tools/ok.sh", "bash", "run"),
+        ]
+    )
+    page = _write(tmp_path, "docs/page.md", text)
+
+    seed = dc.illustrative_seed_lines(dc.load_pages([page], tmp_path))
+
+    assert seed == {
+        dc.illustrative_seed_file("docs/page.md"): [
+            f"docs/page.md\t{NEEDS_DOCKER}",
+            f"docs/page.md\trunner=none: {NEEDS_A_TOKEN}",
+            "docs/page.md\tsave-as=tools/check.sh",
+        ]
+    }
+
+
+@pytest.mark.unit
+def test_a_runner_none_marker_in_an_example_fence_binds_no_block(tmp_path):
+    dc = checks()
+    example = f"````markdown\n{_pipeline(RUNNER_NONE)}{_saved('tools/check.sh')}````\n"
+    page = _write(tmp_path, "docs/page.md", f"# Page\n\n{example}")
+
+    assert dc.illustrative_seed_lines(dc.load_pages([page], tmp_path)) == {}
+
+
 @pytest.mark.unit
 def test_a_root_with_no_seed_directory_is_not_held_to_one(tmp_path):
     """The control for the arming rule: the checks the unit tests run on a page they
@@ -313,6 +443,12 @@ def test_the_ratchets_are_armed_on_this_checkout():
         f"{dc.ILLUSTRATIVE_SEED_DIR} is gone, and the seed check with it. Deleting the "
         "last seed file leaves no directory in git: keep a .gitkeep in it, so that an "
         "empty seed still refuses every marker"
+    )
+    assert (REPO_ROOT / dc.ILLUSTRATIVE_SEED_DIR / ".gitkeep").is_file(), (
+        f"{dc.ILLUSTRATIVE_SEED_DIR}/.gitkeep is gone. It is what keeps the directory in "
+        "git once the last page's file is deleted: without it the seed check turns "
+        "itself off, and the fork-point check reads every later range as one that "
+        "introduces the seed and compares nothing"
     )
     assert (REPO_ROOT / dc.UNEXECUTED_SEED_FILE).is_file(), (
         f"{dc.UNEXECUTED_SEED_FILE} is gone, and the check of commands in blocks "
@@ -819,6 +955,289 @@ def test_a_range_that_introduces_the_seed_has_nothing_to_compare_with(tmp_path):
     assert any("not in the base" in note for note in notes), notes
 
 
+def _violations(repo: _Repo):
+    """What the script finds in the range from the repository's base to its head."""
+    violations, _notes = ratchet().find_added_lines(repo.path, repo.base, repo.head())
+    return violations
+
+
+def _lose(repo: _Repo, *rels: str) -> str:
+    """Delete each of ``rels`` (a file, or a directory with what it holds) and commit
+    that, then make the commit the fork point: a base that has lost them. Its sha."""
+    for rel in rels:
+        target = repo.path / rel
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    repo.base = repo.commit("the seed deleted")
+    return repo.base
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("seed", "constant"),
+    [
+        ("illustrative", "ILLUSTRATIVE_SEED_DIR"),
+        ("unexecuted", "UNEXECUTED_SEED_FILE"),
+    ],
+    ids=["the illustrative seed", "the unexecuted-command seed"],
+)
+def test_a_fork_point_that_lost_a_seed_fails_while_the_range_leaves_it_gone(
+    repo, seed, constant
+):
+    """Converting the last page deletes its file, and git keeps no empty directory, so the
+    seed is gone from every commit after it. A range cut there has no seed at its fork
+    point. That used to read as a range that introduces one, with nothing to compare, so
+    a marker and the line that covers it were never held to anything again."""
+    lost = _lose(repo, getattr(checks(), constant))
+    repo.commit("a change that leaves the seed gone")
+
+    violations = _violations(repo)
+
+    assert [(v.seed, v.page, v.text) for v in violations] == [(seed, "", lost)]
+
+
+@pytest.mark.integration
+def test_a_range_that_restores_a_lost_seed_as_it_was_passes(repo):
+    dc = checks()
+    before = repo.base
+    _lose(repo, dc.ILLUSTRATIVE_SEED_DIR, dc.UNEXECUTED_SEED_FILE)
+    repo.git(
+        "checkout",
+        "-q",
+        before,
+        "--",
+        dc.ILLUSTRATIVE_SEED_DIR,
+        dc.UNEXECUTED_SEED_FILE,
+    )
+    repo.commit("the seeds restored")
+
+    assert _violations(repo) == []
+
+
+@pytest.mark.integration
+def test_a_range_that_restores_a_lost_seed_with_an_added_line_fails_for_that_line(repo):
+    dc = checks()
+    before = repo.base
+    _lose(repo, dc.ILLUSTRATIVE_SEED_DIR)
+    repo.git("checkout", "-q", before, "--", dc.ILLUSTRATIVE_SEED_DIR)
+    _seed(repo.path, "docs/b.md", NEEDS_DOCKER, "an added reason")
+    repo.commit("the seed restored, with a line added")
+
+    assert repo.added() == [("docs/b.md", "an added reason")]
+
+
+@pytest.mark.integration
+def test_a_range_that_restores_a_lost_seed_empty_passes(repo):
+    dc = checks()
+    _lose(repo, dc.ILLUSTRATIVE_SEED_DIR)
+    _write(repo.path, f"{dc.ILLUSTRATIVE_SEED_DIR}/.gitkeep", "")
+    repo.commit("the directory back, with nothing in it")
+
+    assert _violations(repo) == []
+
+
+@pytest.mark.integration
+def test_converting_every_page_leaves_an_armed_seed_when_a_gitkeep_holds_the_directory(
+    repo,
+):
+    """The control for the lost seed: with a ``.gitkeep``, deleting the last page's file
+    leaves the directory in git, the next range is held to an empty seed, and a marker
+    with a line of its own is a line the base did not have."""
+    dc = checks()
+    _write(repo.path, f"{dc.ILLUSTRATIVE_SEED_DIR}/.gitkeep", "")
+    repo.base = repo.commit("the directory kept")
+    for page in ("docs/a.md", "docs/b.md"):
+        (repo.path / _seed_file(page)).unlink()
+        _write(repo.path, page, _long_page())
+    head = repo.commit("every page converted")
+
+    assert _violations(repo) == []
+    assert ratchet().seed_paths(repo.path, head)["illustrative"] == [
+        f"{dc.ILLUSTRATIVE_SEED_DIR}/.gitkeep"
+    ]
+
+    repo.base = head
+    _write(repo.path, "docs/c.md", _long_page(NEEDS_DOCKER))
+    _seed(repo.path, "docs/c.md", NEEDS_DOCKER)
+    repo.commit("a marker and its line, against the empty seed")
+    assert repo.added() == [("docs/c.md", NEEDS_DOCKER)]
+
+
+@pytest.mark.integration
+def test_the_script_exits_one_when_the_fork_point_lost_a_seed(repo):
+    _lose(repo, checks().ILLUSTRATIVE_SEED_DIR)
+    head = repo.commit("a change that leaves the seed gone")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            str(RATCHET_PATH),
+            "--repo",
+            str(repo.path),
+            "--base",
+            repo.base,
+            "--head",
+            head,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "::error" in result.stdout
+    assert ".gitkeep" in result.stdout
+
+
+@pytest.mark.unit
+def test_the_failure_for_a_command_line_names_console_for_prompts():
+    module = ratchet()
+    violation = module.Violation(
+        module.UNEXECUTED, "seed.tsv", "docs/x.md", "docs/x.md", "ash scan", 3
+    )
+
+    message = module.explain(violation, "0123456789abcdef")
+
+    assert "bash" in message and "console" in message
+
+
+@pytest.mark.unit
+def test_the_failure_for_a_moved_page_says_to_move_the_seed_file_and_the_lines_too():
+    """Moving the page is not all of it: its seed file takes the new page's name, and each
+    line the new page's path, or ``markers`` fails on both. "No other edit" was wrong."""
+    module = ratchet()
+    violation = module.Violation(
+        module.ILLUSTRATIVE, "seed.tsv", "docs/new.md", "docs/old.md", NEEDS_DOCKER, 1
+    )
+
+    message = module.explain(violation, "0123456789abcdef")
+
+    assert "no other edit" not in message
+    assert "seed file" in message
+    assert "each of its lines" in message
+
+
+@pytest.mark.unit
+def test_the_failure_for_a_lost_seed_says_how_to_restore_it():
+    module = ratchet()
+    lost = module.Violation(
+        module.ILLUSTRATIVE, "docs/illustrative-seed", "", "", "a" * 40, 1
+    )
+
+    message = module.explain(lost, "0123456789abcdef")
+
+    assert ".gitkeep" in message
+    assert "a" * 10 in message
+
+
+def _plain_git(path: Path, *args: str) -> str:
+    """git on a repository this test made, with none of the variables a hook exports."""
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "-c",
+            "user.name=ratchet-test",
+            "-c",
+            "user.email=ratchet-test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_clean_environment(),
+    )
+    return proc.stdout
+
+
+def _clean_environment() -> dict[str, str]:
+    """This process's environment without the variables git exports to a hook, and with
+    no global or system git configuration: what a test's git and script processes get."""
+    clean = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith("GIT_")
+    }
+    clean["GIT_CONFIG_GLOBAL"] = os.devnull
+    clean["GIT_CONFIG_NOSYSTEM"] = "1"
+    return clean
+
+
+@pytest.mark.integration
+def test_what_git_exports_to_a_hook_does_not_reach_the_repositories_a_test_builds(
+    tmp_path, monkeypatch
+):
+    """pytest started by a pre-commit or pre-push hook inherits GIT_DIR, GIT_WORK_TREE
+    and GIT_INDEX_FILE, which override ``git -C``. Every ``add -A`` and ``commit`` of
+    the temporary repositories below would then land in the developer's own repository.
+    The variables are planted here at a second repository that this test makes under
+    its own tmp_path, and at nothing else."""
+    other = tmp_path / "other"
+    other.mkdir()
+    _plain_git(other, "init", "-q")
+    _write(other, "kept.txt", "kept\n")
+    _plain_git(other, "add", "-A")
+    _plain_git(other, "commit", "-q", "-m", "other")
+    before = (
+        _plain_git(other, "rev-parse", "HEAD"),
+        _plain_git(other, "status", "--porcelain"),
+        _plain_git(other, "ls-files", "--stage"),
+    )
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(other / ".git" / "index"))
+
+    repo = _Repo(tmp_path / "repo")
+    _seed(repo.path, "docs/b.md", NEEDS_DOCKER, "an added reason")
+    repo.commit("a line added")
+
+    assert repo.added() == [("docs/b.md", "an added reason")]
+    assert _plain_git(repo.path, "log", "--format=%s").split("\n")[:-1] == [
+        "a line added",
+        "base",
+    ]
+    after = (
+        _plain_git(other, "rev-parse", "HEAD"),
+        _plain_git(other, "status", "--porcelain"),
+        _plain_git(other, "ls-files", "--stage"),
+    )
+    assert after == before
+
+
+@pytest.mark.integration
+def test_no_seed_line_holds_the_current_version():
+    """A line is compared as it is written, and a release bump renders the version into
+    every template page again. A line that holds the current version would then be
+    stale and its block unlisted, and the only repair is a new line, which the fork-point
+    check refuses."""
+    dc = checks()
+    version = dc.current_version(str(REPO_ROOT))
+    texts = [
+        line.partition("\t")[2]
+        for lines in _committed_seed().values()
+        for line in lines
+    ]
+    texts += [
+        line.partition("\t")[2]
+        for line in (REPO_ROOT / dc.UNEXECUTED_SEED_FILE)
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+
+    holders = [text for text in texts if version in text]
+
+    assert holders == [], holders
+
+
 @pytest.mark.integration
 def test_the_script_exits_one_on_an_added_line_and_zero_on_a_clean_range(repo):
     clean = repo.commit("nothing")
@@ -994,3 +1413,64 @@ def test_the_contract_page_says_what_fails_how_to_convert_and_that_the_seed_shri
         "%2F",
     ):
         assert needle in text, f"{CONTRACT_PAGE} does not mention {needle}"
+
+
+def _contract_text() -> str:
+    return (REPO_ROOT / CONTRACT_PAGE).read_text(encoding="utf-8")
+
+
+def _ratchet_section() -> str:
+    text = _contract_text()
+    start = text.index("### The illustrative ratchet")
+    return text[start : text.index("### Output samples")]
+
+
+@pytest.mark.unit
+def test_the_contract_page_keeps_the_seed_directory_in_git():
+    """Step 3 and the findings table said to delete a page's file once it has no line
+    left. For the last page that deletes the directory, which turns the seed check off.
+    Each place that says so says to keep the ``.gitkeep``."""
+    text = _contract_text()
+
+    assert ".gitkeep" in text
+    for paragraph in text.split("\n\n"):
+        if "once it has no line left" in paragraph:
+            assert ".gitkeep" in paragraph, paragraph
+
+
+@pytest.mark.unit
+def test_the_contract_page_sends_no_one_to_a_marker_the_ratchet_refuses():
+    text = _contract_text()
+
+    for advice in (
+        "mark the Windows, zsh, or fish block `illustrative` with a reason",
+        "must be marked `illustrative`",
+        "must be `illustrative`",
+        "or mark it `illustrative`",
+        "The block then runs as `run`, like its neighbors.",
+        "use a marker without a mode to save a block that must not run",
+    ):
+        assert advice not in text, advice
+
+
+@pytest.mark.unit
+def test_the_contract_page_names_console_for_prompts_and_what_else_is_counted():
+    text = _contract_text()
+    row = next(
+        line
+        for line in text.splitlines()
+        if line.startswith("| shows a command that nothing runs")
+    )
+    section = _ratchet_section()
+
+    assert "`console`" in row
+    for needle in ("runner=none", "save-as=", "`console`"):
+        assert needle in section, needle
+
+
+@pytest.mark.unit
+def test_the_contract_page_says_a_moved_page_takes_its_seed_file_and_its_lines():
+    section = _ratchet_section()
+
+    assert "seed file" in section
+    assert "each of its lines" in section

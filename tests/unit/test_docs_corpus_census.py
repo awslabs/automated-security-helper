@@ -545,24 +545,87 @@ def executed_blocks_floor(seed_lines_on_run_pages_now: int) -> int:
     return EXECUTED_BLOCKS_AT_MAIN + converted - SEED_LINES_RETIRED_NOT_RUN
 
 
+def executed_blocks_problems(
+    executed: int, seed_lines_on_run_pages_now: int
+) -> list[str]:
+    """What is wrong with the count of executed blocks, given the seed as it is now."""
+    floor = executed_blocks_floor(seed_lines_on_run_pages_now)
+    if executed >= floor:
+        return []
+    return [
+        (
+            f"the runner executes {executed} blocks, down from {floor}: the "
+            f"{EXECUTED_BLOCKS_AT_MAIN} it ran at main, and one more for each line the "
+            "illustrative seed has lost "
+            f"({SEED_LINES_ON_RUN_PAGES_AT_MAIN} sat on pages it runs then, "
+            f"{seed_lines_on_run_pages_now} do now). A marked block that is converted "
+            "runs; one that was deleted instead raises SEED_LINES_RETIRED_NOT_RUN in "
+            "the same commit, with the reason in its message."
+        )
+    ]
+
+
 @pytest.mark.integration
 def test_the_runner_runs_no_fewer_examples_than_it_did(runner_pages):
     executed = sum(len(runner.runnable_blocks(page)) for page in runner_pages)
-    floor = executed_blocks_floor(seed_lines_on_run_pages())
     assert len(runner_pages) >= RUNNABLE_PAGES_FLOOR, (
         f"{len(runner_pages)} pages have a runnable example, down from "
         f"{RUNNABLE_PAGES_FLOOR}. If that is deliberate, lower RUNNABLE_PAGES_FLOOR in "
         "the same commit and say which examples stopped running and why."
     )
-    assert executed >= floor, (
-        f"the runner executes {executed} blocks, down from {floor}: the "
-        f"{EXECUTED_BLOCKS_AT_MAIN} it ran at main, and one more for each line the "
-        "illustrative seed has lost "
-        f"({SEED_LINES_ON_RUN_PAGES_AT_MAIN} sat on pages it runs then, "
-        f"{seed_lines_on_run_pages()} do now). A marked block that is converted runs; "
-        "one that was deleted instead raises SEED_LINES_RETIRED_NOT_RUN in the same "
-        "commit, with the reason in its message."
+    problems = executed_blocks_problems(executed, seed_lines_on_run_pages())
+    assert not problems, problems
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("delta", [0, -1, 1, 3])
+def test_the_executed_count_is_checked_from_both_sides(delta):
+    """A floor read from one side only has slack: blocks added since main raise the count
+    over it, and a block deleted instead of converted then hides in that slack. So a
+    count above the floor is as much a failure as one below it, and each names the
+    counter that accounts for the difference."""
+    now = SEED_LINES_ON_RUN_PAGES_AT_MAIN - 2
+    executed = executed_blocks_floor(now) + delta
+
+    problems = executed_blocks_problems(executed, now)
+
+    if delta == 0:
+        assert problems == []
+    elif delta < 0:
+        assert len(problems) == 1
+        assert "SEED_LINES_RETIRED_NOT_RUN" in problems[0]
+    else:
+        assert len(problems) == 1
+        assert "EXECUTED_BLOCKS_ADDED_SINCE_MAIN" in problems[0]
+
+
+@pytest.mark.unit
+def test_a_deleted_block_cannot_hide_behind_blocks_added_earlier():
+    """Three blocks that run are added, so the runner executes three more than the floor
+    says. Two marked blocks are then deleted with their seed lines instead of converted:
+    the floor rises by two and stays under the count, so a floor read from one side
+    passes. Read from both sides, each change has to raise the counter that accounts for
+    it."""
+    accounted = executed_blocks_floor(SEED_LINES_ON_RUN_PAGES_AT_MAIN)
+    executed = accounted + 3
+
+    assert executed_blocks_problems(executed, SEED_LINES_ON_RUN_PAGES_AT_MAIN) != []
+    assert executed_blocks_problems(executed, SEED_LINES_ON_RUN_PAGES_AT_MAIN - 2) != []
+
+
+@pytest.mark.unit
+def test_a_seed_line_of_a_pipeline_no_runner_runs_does_not_move_the_floor(tmp_path):
+    """Converting a ``runner=none`` pipeline hands it to a CI runner, which the count of
+    blocks the docs runner executes does not include. A shell or Python block saved and
+    not run is one that runs once converted, so its line counts."""
+    (tmp_path / "docs%2Fa.md.tsv").write_text(
+        "docs/a.md\tneeds Docker\n"
+        "docs/a.md\trunner=none: needs a token\n"
+        "docs/a.md\tsave-as=tools/check.sh\n",
+        encoding="utf-8",
     )
+
+    assert seed_lines_on_run_pages(tmp_path) == 2
 
 
 @pytest.mark.unit

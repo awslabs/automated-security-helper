@@ -327,6 +327,148 @@ def test_the_first_command_of_a_block_is_how_the_seed_names_it(tmp_path):
     ]
 
 
+#: A line of a block nothing runs, and the command the seed names for it: the line
+#: without its prompt. Each starts a line in a way an ``ash`` line or a ``$`` prompt
+#: line does not.
+SHOWN = [
+    ("uvx ash scan --source-dir .", "uvx ash scan --source-dir ."),
+    (
+        "uvx --from git+https://github.com/awslabs/automated-security-helper ash scan",
+        "uvx --from git+https://github.com/awslabs/automated-security-helper ash scan",
+    ),
+    ("uv run ash scan", "uv run ash scan"),
+    ("sudo ash scan", "sudo ash scan"),
+    ("sudo -E ash scan", "sudo -E ash scan"),
+    ("env ASH_OFFLINE=true ash scan", "env ASH_OFFLINE=true ash scan"),
+    (
+        "ASH_OFFLINE=true ash scan --source-dir .",
+        "ASH_OFFLINE=true ash scan --source-dir .",
+    ),
+    ("PS> ash scan", "ash scan"),
+    ("PS C:\\Users\\me> ash scan", "ash scan"),
+    ("% ash scan", "ash scan"),
+    ("docker run --rm -v .:/src ash scan", "docker run --rm -v .:/src ash scan"),
+    ("podman run ash scan", "podman run ash scan"),
+    ("finch run ash scan", "finch run ash scan"),
+    ("nerdctl run ash scan", "nerdctl run ash scan"),
+    ("pip install automated-security-helper", "pip install automated-security-helper"),
+    (
+        "git clone https://github.com/awslabs/automated-security-helper.git",
+        "git clone https://github.com/awslabs/automated-security-helper.git",
+    ),
+    ("aws s3 ls", "aws s3 ls"),
+    ("automated-security-helper scan", "automated-security-helper scan"),
+    ("ashv3 scan", "ashv3 scan"),
+]
+#: Lines that mention a program and show no command.
+NOT_SHOWN = [
+    "ash",
+    "git",
+    "docker",
+    "pip",
+    "uvx",
+    "sudo ash",
+    "time ash",
+    "Run docker ps to list them",
+    "the git command",
+    "gitlab ci",
+    "pip.conf is read",
+    "docker-compose up",
+    "uvicorn app:app",
+    "aws-cli/2.15.0 Python/3.11",
+    "% complete",
+    "PS C:\\Users\\me> dir",
+    "# git status",
+    "> git log",
+    "echo git status",
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("line", "command"), SHOWN, ids=[line for line, _ in SHOWN])
+def test_a_command_in_a_block_nothing_runs_is_counted_whatever_starts_the_line(
+    tmp_path, line, command
+):
+    """A bash block fenced as text leaves the runs with no marker, and its seed line can
+    then be deleted as if it were converted. Only an ``ash`` line and a ``$`` prompt line
+    were counted, so a block got away by starting its line another way: through uvx or
+    uv run, behind sudo or an environment assignment, after a ``%`` or ``PS>`` prompt, or
+    as a container, pip, git or aws command."""
+    dc = checks()
+    page = _write(tmp_path, "docs/page.md", _page(_text(f"Run it:\n{line}\ndone")))
+
+    blocks = dc.unexecuted_command_blocks(dc.parse_page(page, tmp_path), {})
+
+    assert [(block.fence_line, found) for block, found in blocks] == [(3, command)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("line", NOT_SHOWN)
+def test_a_line_that_only_mentions_a_program_shows_no_command(tmp_path, line):
+    """The controls for the case above: a program as a word, a name that starts like one,
+    and a prompt before something that is none of them."""
+    _seed(tmp_path)
+    page = _write(tmp_path, "docs/page.md", _page(_text(f"Output:\n{line}\ndone")))
+
+    assert _problems(tmp_path, page) == []
+
+
+@pytest.mark.unit
+def test_relabeling_a_container_block_as_text_is_caught_with_no_ash_line_or_prompt(
+    tmp_path,
+):
+    """The swap the review planted: a bash block marked illustrative for Docker, fenced
+    as text with its marker dropped and its seed line deleted. It shows no ``ash`` line
+    and no ``$`` prompt, so no seed counted it."""
+    _seed(tmp_path)
+    block = _text('docker run --rm -v "$PWD":/src automated-security-helper scan')
+    page = _write(tmp_path, "docs/page.md", _page(block))
+
+    findings = _problems(tmp_path, page)
+
+    assert [(f.path, f.line) for f in findings] == [("docs/page.md", 3)]
+    assert "docker run" in findings[0].message
+
+
+@pytest.mark.unit
+def test_the_finding_for_a_command_in_a_text_block_names_console_for_prompts(tmp_path):
+    _seed(tmp_path)
+    page = _write(tmp_path, "docs/page.md", _page(_text("$ ash --version\nash 3.8.0")))
+
+    findings = _problems(tmp_path, page)
+
+    assert len(findings) == 1
+    assert "bash" in findings[0].message
+    assert "console" in findings[0].message
+
+
+@pytest.mark.unit
+def test_a_seed_line_for_a_page_that_exists_but_was_not_handed_over_is_left_alone(
+    tmp_path,
+):
+    """One seed file names every page, so a run over some of the pages is where a false
+    "no block on this page shows this command" would come from."""
+    _seed(tmp_path, f"docs/other.md\t{SCAN}", f"docs/page.md\t{SCAN}")
+    page = _write(tmp_path, "docs/page.md", _page(_text(SCAN)))
+    _write(tmp_path, "docs/other.md", _page(_text(SCAN)))
+
+    assert _problems(tmp_path, page) == []
+
+
+@pytest.mark.unit
+def test_a_template_and_the_page_it_renders_each_need_their_own_seed_line(tmp_path):
+    page = _write(tmp_path, "docs/page.md", _page(_text(SCAN)))
+    template = _write(tmp_path, "docs/page.md.template", _page(_text(SCAN)))
+    _seed(tmp_path, f"docs/page.md\t{SCAN}")
+
+    findings = _problems(tmp_path, page, template)
+
+    assert [(f.path, f.line) for f in findings] == [("docs/page.md.template", 3)]
+
+    _seed(tmp_path, f"docs/page.md\t{SCAN}", f"docs/page.md.template\t{SCAN}")
+    assert _problems(tmp_path, page, template) == []
+
+
 # ---------------------------------------------------------------------------
 # A page a generator writes is not read
 # ---------------------------------------------------------------------------
