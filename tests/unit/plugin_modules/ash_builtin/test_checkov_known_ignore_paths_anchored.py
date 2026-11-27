@@ -50,11 +50,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scann
     CheckovScanner,
     CheckovScannerConfig,
     CheckovScannerConfigOptions,
-    _config_file_sets_all_files_secret_scan,
     _known_directories_checkov_skips,
     _known_directory_skip_values,
     _module_finder_compiles,
-    _secrets_all_files_may_be_on,
     _skip_path_root,
     _skip_path_text,
     _under_a_known_ignore_path,
@@ -724,21 +722,23 @@ def test_nothing_is_sent_on_windows_and_a_link_under_a_known_directory_refuses(
 
 
 # ---------------------------------------------------------------------------
-# Windows: a link under a known directory refuses unless checkov skips it
+# Windows: a link under a known directory refuses unless CKV_IGNORED_DIRECTORIES
+# names the directory
 # ---------------------------------------------------------------------------
 
-#: The variables checkov's own directory rules read.
+#: The variables checkov's own directory rules read. Only the first decides what
+#: ASH counts as skipped; the other two are unset in every row, and a row that sets
+#: one pins that it changes nothing.
 _CHECKOV_DIRECTORY_VARIABLES = (
     "CKV_IGNORED_DIRECTORIES",
     "CKV_IGNORE_HIDDEN_DIRECTORIES",
     "CKV_SECRETS_SCAN_ENABLE_ALL",
 )
 
-#: What checkov skips of the known directories on its own: both under its defaults,
-#: one when the rule for the other is off.
-_BOTH = frozenset({"node_modules", ".venv"})
+#: What ASH counts checkov as skipping of the known directories: ``node_modules``
+#: under checkov's defaults, and each name a ``CKV_IGNORED_DIRECTORIES`` list names.
 _ONLY_NODE_MODULES = frozenset({"node_modules"})
-_ONLY_DOT_VENV = frozenset({".venv"})
+_ALL_THREE = frozenset({"node_modules", ".venv", "venv"})
 
 
 @pytest.fixture
@@ -757,20 +757,18 @@ def _as_on_windows(monkeypatch) -> None:
 
 @posix_only
 @needs_symlinks
-def test_on_windows_links_checkov_never_reads_need_no_value_and_do_not_refuse(
+def test_on_windows_a_link_under_node_modules_needs_no_value_and_does_not_refuse(
     tmp_path, monkeypatch, checkov_defaults
 ):
-    """checkov's own rules skip ``node_modules`` and dot-named directories, so a link
-    to a file under ``node_modules`` or ``.venv`` is never read: the scan runs, with
-    no ``--skip-path`` value of ASH's."""
-    source = _source(
-        tmp_path / "linked", "node_modules/pkg/index.js", ".venv/bin/python"
-    )
+    """With checkov's defaults ``CKV_IGNORED_DIRECTORIES`` names ``node_modules``, so
+    checkov never reads a link to a file under it: the scan runs, with no
+    ``--skip-path`` value of ASH's."""
+    source = _source(tmp_path / "linked", "node_modules/pkg/index.js")
     scanner = _scanner(source, tmp_path / "out")
-    # The links are there to be found, and both leave the tree.
+    # The link is there to be found, and leaves the tree.
     assert CheckovScanner._links_leaving_tree(
         source, skipped_directories=frozenset(), tf_files_skipped=True
-    ) == [".venv/bin/python", "node_modules/pkg/index.js"]
+    ) == ["node_modules/pkg/index.js"]
     _as_on_windows(monkeypatch)
 
     argv, _, _ = scanner._execute_scan(source, "source", [])
@@ -783,54 +781,68 @@ def test_on_windows_links_checkov_never_reads_need_no_value_and_do_not_refuse(
 @pytest.mark.parametrize(
     ("variables", "link", "refused"),
     [
+        pytest.param(
+            {}, "node_modules/pkg/index.js", False, id="node_modules-by-default"
+        ),
+        pytest.param({}, ".venv/bin/python", True, id="dot-venv-is-read"),
         pytest.param({}, "venv/bin/python", True, id="venv-is-read"),
         pytest.param({}, "node_modules/pkg/main.tf", True, id="tf-under-node_modules"),
         pytest.param({}, ".venv/lib/x.tf", True, id="tf-under-dot-venv"),
+        pytest.param({}, "venv/lib/x.tf", True, id="tf-under-venv"),
+        *(
+            pytest.param(
+                {"CKV_IGNORED_DIRECTORIES": "node_modules,.venv,venv"},
+                link,
+                False,
+                id=f"a-list-naming-it-leaves-out-{link.split('/')[0]}",
+            )
+            for link in (
+                "node_modules/pkg/index.js",
+                ".venv/bin/python",
+                "venv/bin/python",
+            )
+        ),
+        pytest.param(
+            {"CKV_IGNORED_DIRECTORIES": "node_modules,.venv,venv"},
+            ".venv/lib/x.tf",
+            True,
+            id="a-tf-link-is-kept-under-a-directory-the-list-names",
+        ),
         pytest.param(
             {"CKV_IGNORED_DIRECTORIES": ".terraform"},
             "node_modules/pkg/index.js",
             True,
-            id="node_modules-left-out-of-the-ignored-list",
+            id="node_modules-left-out-of-the-list",
         ),
         pytest.param(
-            {"CKV_IGNORE_HIDDEN_DIRECTORIES": "false"},
-            ".venv/bin/python",
-            True,
-            id="hidden-directories-are-not-ignored",
-        ),
-        pytest.param(
-            {"CKV_IGNORE_HIDDEN_DIRECTORIES": "false"},
-            "node_modules/pkg/index.js",
-            False,
-            id="node_modules-does-not-depend-on-the-hidden-rule",
-        ),
-        pytest.param(
-            {"CKV_SECRETS_SCAN_ENABLE_ALL": "true"},
-            ".venv/bin/python",
-            True,
-            id="secrets-all-files-reads-dot-venv",
-        ),
-        pytest.param(
-            {"CKV_SECRETS_SCAN_ENABLE_ALL": "true"},
-            "node_modules/pkg/index.js",
-            False,
-            id="secrets-all-files-still-skips-node_modules",
-        ),
-        pytest.param(
-            {"CKV_IGNORED_DIRECTORIES": "node_modules,venv"},
+            {"CKV_IGNORED_DIRECTORIES": "node_modules,.venv"},
             "venv/bin/python",
             True,
-            id="a-list-naming-venv-is-not-counted",
+            id="a-list-not-naming-venv-leaves-it-read",
+        ),
+        pytest.param(
+            {"CKV_IGNORE_HIDDEN_DIRECTORIES": "true"},
+            ".venv/bin/python",
+            True,
+            id="the-hidden-directories-variable-changes-nothing",
+        ),
+        pytest.param(
+            {"CKV_SECRETS_SCAN_ENABLE_ALL": "false"},
+            ".venv/bin/python",
+            True,
+            id="the-secrets-all-files-variable-changes-nothing",
         ),
     ],
 )
-def test_on_windows_a_link_refuses_exactly_when_checkov_reads_the_file(
+def test_on_windows_a_link_refuses_unless_ckv_ignored_directories_names_its_directory(
     tmp_path, monkeypatch, checkov_defaults, variables, link, refused
 ):
     """With no value of ASH's to leave one file out, a link that leaves the tree
-    stops the scan unless checkov itself skips the directory it is under and the
-    file is not one the terraform module finder reads. The variables checkov reads
-    for that are the row's."""
+    stops the scan unless ``CKV_IGNORED_DIRECTORIES`` names the directory it is under
+    (by default only ``node_modules``) and the file is not one the terraform module
+    finder reads. The variables in the row are the ones set. The two other
+    variables checkov's directory rules read decide nothing: with checkov's defaults
+    ``.venv`` is read, whether or not they are set."""
     for name, value in variables.items():
         monkeypatch.setenv(name, value)
     source = _source(tmp_path / "linked", link)
@@ -851,30 +863,24 @@ def test_on_windows_a_link_refuses_exactly_when_checkov_reads_the_file(
 
 @posix_only
 @needs_symlinks
-def test_on_windows_a_config_file_that_scans_all_secret_files_makes_dot_venv_refuse(
+def test_on_windows_a_config_file_does_not_make_dot_venv_count_as_skipped(
     tmp_path, monkeypatch, checkov_defaults
 ):
-    """checkov's secrets framework walks ``.venv`` when the operator's config file
-    sets ``enable-secret-scan-all-files``. The files are outside the scanned
-    directory: a config file inside it is not passed to checkov."""
-    on_file = tmp_path / "conf-on" / ".checkov.yaml"
+    """checkov's secrets framework walks ``.venv`` when its all-files mode is on, and
+    a config file can turn that on where ASH does not read: in the home or the
+    working directory, under the key ``--enable-secret-scan-all-files``, in an
+    encoding ASH reads differently. So the file ASH passes, which says the mode is
+    off, changes nothing: ``.venv`` is read, as without a file. The file is outside
+    the scanned directory: a config file inside it is not passed to checkov."""
     off_file = tmp_path / "conf-off" / ".checkov.yaml"
-    for path, text in ((on_file, "true"), (off_file, "false")):
-        path.parent.mkdir()
-        path.write_text(f"enable-secret-scan-all-files: {text}\n", encoding="utf-8")
-    on = _source(tmp_path / "on", ".venv/bin/python")
+    off_file.parent.mkdir()
+    off_file.write_text("enable-secret-scan-all-files: false\n", encoding="utf-8")
     off = _source(tmp_path / "off", ".venv/bin/python")
-    scanner_on = _scanner(on, tmp_path / "out-on", config_file=str(on_file))
-    scanner_off = _scanner(off, tmp_path / "out-off", config_file=str(off_file))
-    # What each scanner read from its file.
-    assert scanner_on._config_file_secrets_all_files is True
-    assert scanner_off._config_file_secrets_all_files is False
+    scanner = _scanner(off, tmp_path / "out", config_file=str(off_file))
     _as_on_windows(monkeypatch)
 
     with pytest.raises(ScannerError, match=re.escape(".venv/bin/python")):
-        scanner_on._execute_scan(on, "source", [])
-    argv, _, _ = scanner_off._execute_scan(off, "source", [])
-    assert _argv_skip_values(argv) == []
+        scanner._execute_scan(off, "source", [])
 
 
 @posix_only
@@ -906,12 +912,12 @@ def test_on_posix_the_known_values_skip_the_directories_whatever_checkov_is_set_
 
 
 @posix_only
-def test_the_debug_line_on_windows_names_checkovs_variables_and_not_skip_path(
+def test_the_debug_line_on_windows_names_checkovs_variable_and_not_skip_path(
     tmp_path, monkeypatch, caplog
 ):
-    """The line says what checkov skips on its own by the variables that decide it,
-    and gives no advice to add the directories to ``skip_path``: those values cannot
-    match Windows paths either."""
+    """The line says what checkov skips on its own by the one variable that decides
+    it, names no variable ASH does not read, and gives no advice to add the
+    directories to ``skip_path``: those values cannot match Windows paths either."""
     source = _source(tmp_path / "plain")
     scanner = _scanner(source, tmp_path / "out")
     _as_on_windows(monkeypatch)
@@ -922,15 +928,16 @@ def test_the_debug_line_on_windows_names_checkovs_variables_and_not_skip_path(
     lines = [record.getMessage() for record in caplog.records]
     named = [line for line in lines if "CKV_IGNORED_DIRECTORIES" in line]
     assert named, lines
-    assert "CKV_IGNORE_HIDDEN_DIRECTORIES" in named[0], named
+    assert "CKV_IGNORE_HIDDEN_DIRECTORIES" not in named[0], named
     assert not [line for line in lines if "skip_path" in line], lines
 
 
 @needs_symlinks
 def test_a_tf_link_stays_in_the_list_unless_tf_files_are_skipped(tmp_path):
-    """checkov's terraform module finder reads every ``.tf`` file in every directory,
-    so where no value skips a directory whole, a ``.tf`` link under a directory
-    checkov skips in its framework walks is kept."""
+    """checkov's terraform module finder reads every ``.tf`` file in every directory
+    when checkov is given no ``--skip-path`` value, so where no value skips a
+    directory whole, a ``.tf`` link under a directory checkov skips in its framework
+    walks is kept."""
     source = _source(
         tmp_path,
         "node_modules/pkg/index.js",
@@ -938,12 +945,42 @@ def test_a_tf_link_stays_in_the_list_unless_tf_files_are_skipped(tmp_path):
         ".venv/bin/python",
         "venv/lib/x.tf",
     )
+    named = frozenset({"node_modules", ".venv"})
     assert CheckovScanner._links_leaving_tree(
-        source, skipped_directories=_BOTH, tf_files_skipped=False
+        source, skipped_directories=named, tf_files_skipped=False
     ) == ["node_modules/pkg/main.tf", "venv/lib/x.tf"]
     assert CheckovScanner._links_leaving_tree(
-        source, skipped_directories=_BOTH, tf_files_skipped=True
+        source, skipped_directories=named, tf_files_skipped=True
     ) == ["venv/lib/x.tf"]
+
+
+@needs_symlinks
+def test_links_leaving_tree_judges_the_list_it_is_given_without_walking(
+    tmp_path, monkeypatch
+):
+    """A caller that already walked the tree passes the walk's links, and nothing is
+    walked a second time; the answer is the same as from its own walk."""
+    source = _source(
+        tmp_path, "node_modules/pkg/index.js", "app/link.tf", "venv/lib/x.tf"
+    )
+    walked = CheckovScanner._links_leaving_tree(
+        source, skipped_directories=_KNOWN_DIRECTORY_NAMES, tf_files_skipped=True
+    )
+    assert walked == ["app/link.tf"]
+
+    def not_called(*args, **kwargs):
+        raise AssertionError("the tree was walked a second time")
+
+    monkeypatch.setattr(checkov_scanner, "file_links_leaving_tree", not_called)
+
+    given = CheckovScanner._links_leaving_tree(
+        source,
+        skipped_directories=_KNOWN_DIRECTORY_NAMES,
+        tf_files_skipped=True,
+        links=["app/link.tf", "node_modules/pkg/index.js", "venv/lib/x.tf"],
+    )
+
+    assert given == walked
 
 
 def test_under_a_known_ignore_path_takes_the_names_it_is_given():
@@ -960,181 +997,118 @@ def test_under_a_known_ignore_path_takes_the_names_it_is_given():
     assert _under_a_known_ignore_path(".venv/bin/python")
 
 
-def test_a_scan_reads_the_environment_once(tmp_path, monkeypatch):
+@posix_only
+@needs_symlinks
+def test_a_scan_reads_the_environment_once(tmp_path, monkeypatch, checkov_defaults):
     """The environment that decides which known directories checkov skips on its own
-    is the one checkov is started with: one read serves the whole scan."""
-    source = _source(tmp_path / "plain")
+    is the one checkov is started with: one read serves the whole scan.
+
+    The decision is made on Windows, so the separator is faked. The host's variable
+    lists ``.terraform`` and the one read's lists ``node_modules,.venv``. A scan that
+    asked the host again for the decision would refuse the link under ``.venv``;
+    this one runs, and the environment it returns for checkov holds the list the
+    decision read.
+    """
+    source = _source(tmp_path / "linked", ".venv/bin/python")
     scanner = _scanner(source, tmp_path / "out")
+    monkeypatch.setenv("CKV_IGNORED_DIRECTORIES", ".terraform")
     reads = []
     snapshot = checkov_scanner.snapshot_environ
+    listed = "node_modules,.venv"
 
     def counted():
         reads.append(None)
-        return snapshot()
+        return {**snapshot(), "CKV_IGNORED_DIRECTORIES": listed}
 
     monkeypatch.setattr(checkov_scanner, "snapshot_environ", counted)
+    _as_on_windows(monkeypatch)
 
-    scanner._execute_scan(source, "source", [])
+    argv, _, checkov_environment = scanner._execute_scan(source, "source", [])
 
     assert len(reads) == 1
+    assert checkov_environment["CKV_IGNORED_DIRECTORIES"] == listed
+    assert _argv_skip_values(argv) == []
 
 
 # ---------------------------------------------------------------------------
-# What checkov skips on its own, from its environment and its config file
+# What ASH counts checkov as skipping on its own, from CKV_IGNORED_DIRECTORIES
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("env", "expected"),
     [
-        pytest.param({}, _BOTH, id="defaults"),
+        pytest.param({}, _ONLY_NODE_MODULES, id="defaults"),
         pytest.param(
             {"CKV_IGNORED_DIRECTORIES": ".terraform"},
-            _ONLY_DOT_VENV,
+            frozenset(),
             id="node_modules-left-out-of-the-list",
         ),
+        *(
+            pytest.param(
+                {"CKV_IGNORED_DIRECTORIES": f"{name},.terraform"},
+                frozenset({name}),
+                id=f"a-list-naming-{name}",
+            )
+            for name in ("node_modules", ".venv", "venv")
+        ),
         pytest.param(
-            {"CKV_IGNORED_DIRECTORIES": "node_modules,venv"},
-            _BOTH,
-            id="a-list-naming-venv-adds-nothing",
+            {"CKV_IGNORED_DIRECTORIES": "node_modules,.venv,venv"},
+            _ALL_THREE,
+            id="a-list-naming-all-three",
         ),
         pytest.param(
             {"CKV_IGNORED_DIRECTORIES": " node_modules"},
-            _ONLY_DOT_VENV,
-            id="the-list-is-split-without-stripping",
+            frozenset(),
+            id="a-leading-space-makes-another-name",
+        ),
+        pytest.param(
+            {"CKV_IGNORED_DIRECTORIES": "node_modules, venv"},
+            _ONLY_NODE_MODULES,
+            id="a-space-after-a-comma-makes-another-name",
         ),
         pytest.param(
             {"CKV_IGNORED_DIRECTORIES": ""},
-            _ONLY_DOT_VENV,
+            frozenset(),
             id="an-empty-list-names-nothing",
         ),
-        *(
-            pytest.param(
-                {"CKV_IGNORE_HIDDEN_DIRECTORIES": value},
-                _ONLY_NODE_MODULES,
-                id=f"hidden-{value}",
-            )
-            for value in ("false", "0", "OFF", "maybe")
-        ),
-        *(
-            pytest.param(
-                {"CKV_IGNORE_HIDDEN_DIRECTORIES": value}, _BOTH, id=f"hidden-{value}"
-            )
-            for value in ("TRUE", "yes", "1")
-        ),
         pytest.param(
-            {"ckv_ignored_directories": ".terraform"},
-            _ONLY_DOT_VENV,
+            {"ckv_ignored_directories": ".venv"},
+            frozenset({".venv"}),
             id="a-lower-case-key-is-the-same-variable",
         ),
         pytest.param(
             {
                 "CKV_IGNORED_DIRECTORIES": "node_modules",
-                "ckv_ignored_directories": ".terraform",
+                "ckv_ignored_directories": ".venv",
             },
-            _ONLY_DOT_VENV,
+            frozenset(),
             id="two-spellings-with-different-values-cannot-be-told",
         ),
         pytest.param(
             {
-                "CKV_IGNORE_HIDDEN_DIRECTORIES": "true",
-                "ckv_ignore_hidden_directories": "false",
+                "CKV_IGNORED_DIRECTORIES": "venv",
+                "ckv_ignored_directories": "venv",
             },
-            _ONLY_NODE_MODULES,
-            id="hidden-two-spellings-with-different-values-cannot-be-told",
-        ),
-        pytest.param(
-            {
-                "CKV_IGNORE_HIDDEN_DIRECTORIES": "true",
-                "ckv_ignore_hidden_directories": "true",
-            },
-            _BOTH,
+            frozenset({"venv"}),
             id="two-spellings-with-the-same-value-can-be-told",
         ),
-    ],
-)
-def test_the_known_directories_checkov_skips_follow_its_variables(env, expected):
-    assert _known_directories_checkov_skips(env, secrets_all_files=False) == expected
-
-
-def test_the_secrets_all_files_mode_leaves_only_node_modules():
-    skipped = _known_directories_checkov_skips({}, secrets_all_files=True)
-    assert skipped == _ONLY_NODE_MODULES
-
-
-@pytest.mark.parametrize(
-    ("env", "expected"),
-    [
-        pytest.param({}, False, id="unset"),
-        *(
-            pytest.param(
-                {"CKV_SECRETS_SCAN_ENABLE_ALL": value}, False, id=f"off-{value}"
-            )
-            for value in ("false", "No", "0")
-        ),
-        *(
-            pytest.param(
-                {"CKV_SECRETS_SCAN_ENABLE_ALL": value},
-                True,
-                id=f"on-{value or 'empty'}",
-            )
-            for value in ("true", "1", "yes", "anything", "")
+        pytest.param(
+            {"CKV_IGNORE_HIDDEN_DIRECTORIES": "true"},
+            _ONLY_NODE_MODULES,
+            id="the-hidden-directories-variable-counts-nothing",
         ),
         pytest.param(
-            {"ckv_secrets_scan_enable_all": "true"}, True, id="a-lower-case-key"
-        ),
-        pytest.param(
-            {
-                "CKV_SECRETS_SCAN_ENABLE_ALL": "false",
-                "ckv_secrets_scan_enable_all": "true",
-            },
-            True,
-            id="two-spellings-with-different-values-cannot-be-told",
+            {"CKV_SECRETS_SCAN_ENABLE_ALL": "false"},
+            _ONLY_NODE_MODULES,
+            id="the-secrets-all-files-variable-counts-nothing",
         ),
     ],
 )
-def test_the_secrets_all_files_mode_may_be_on_by_its_variable(env, expected):
-    assert _secrets_all_files_may_be_on(env, config_file_sets_it=False) is expected
-
-
-def test_a_config_file_that_sets_the_mode_counts_whatever_the_variable_says():
-    assert _secrets_all_files_may_be_on({}, config_file_sets_it=True) is True
-    off = {"CKV_SECRETS_SCAN_ENABLE_ALL": "false"}
-    assert _secrets_all_files_may_be_on(off, config_file_sets_it=True) is True
-
-
-@pytest.mark.parametrize(
-    ("file_values", "expected"),
-    [
-        pytest.param({}, False, id="absent"),
-        pytest.param({"framework": ["terraform"]}, False, id="another-key"),
-        pytest.param({"enable-secret-scan-all-files": True}, True, id="true"),
-        pytest.param({"enable_secret_scan_all_files": True}, True, id="underscores"),
-        pytest.param({"enable-secret-scan-all-files": "true"}, True, id="string-true"),
-        pytest.param({"enable-secret-scan-all-files": 1}, True, id="one"),
-        pytest.param({"enable-secret-scan-all-files": ""}, True, id="empty-string"),
-        pytest.param({"enable-secret-scan-all-files": False}, False, id="false"),
-        pytest.param({"enable-secret-scan-all-files": None}, False, id="none"),
-        pytest.param({"enable-secret-scan-all-files": 0}, False, id="zero"),
-        pytest.param(
-            {"enable-secret-scan-all-files": "False"}, False, id="string-false"
-        ),
-        pytest.param({"enable-secret-scan-all-files": "No"}, False, id="string-no"),
-        pytest.param({"enable-secret-scan-all-files": "0"}, False, id="string-zero"),
-        pytest.param(
-            {
-                "enable-secret-scan-all-files": False,
-                "enable_secret_scan_all_files": True,
-            },
-            True,
-            id="either-spelling-sets-it",
-        ),
-    ],
-)
-def test_a_config_file_sets_the_all_files_mode_unless_it_plainly_says_off(
-    file_values, expected
+def test_the_known_directories_checkov_skips_follow_ckv_ignored_directories(
+    env, expected
 ):
-    assert _config_file_sets_all_files_secret_scan(file_values) is expected
+    assert _known_directories_checkov_skips(env) == expected
 
 
 # ---------------------------------------------------------------------------

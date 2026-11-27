@@ -250,19 +250,20 @@
   a project inside one, such as a package under a virtualenv's `site-packages`,
   every file was skipped and checkov reported nothing. The values now start with
   the scanned directory's path, so they skip those directories below it only. On
-  Windows no such value is sent, and checkov's own rules skip `node_modules` and
-  dot-named directories there. A file link from one of the three directories that
-  points outside the scanned directory stops the checkov scan of that directory
-  when checkov would read the file: always under `venv`, for any `.tf` link,
-  under `node_modules` when `CKV_IGNORED_DIRECTORIES` leaves that name out, and
-  under `.venv` when `CKV_IGNORE_HIDDEN_DIRECTORIES` is false or the secrets
-  framework scans all files. Also on Windows,
-  `scanners.checkov.options.skip_path` values are now checked against checkov's
-  terraform module finder without ASH's values before them, so a value such as
-  `tests/*`, which stopped the scan before, now reaches checkov there, and one
-  such as `(a[b]c)` now stops it. In checkov's default mode its secrets framework
-  keeps its own unanchored list of these names and still skips such a project;
-  with `--enable-secret-scan-all-files` it reads it.
+  Windows no such value is sent. A file link from one of the three directories
+  that points outside the scanned directory is left out there only under a
+  directory `CKV_IGNORED_DIRECTORIES` names (by default `node_modules`) and when
+  it is not a `.tf` file; otherwise it stops the checkov scan of that directory.
+  On every platform, a file link that checkov's terraform parser reads because a
+  local module source names its directory (a `.tf`, `.hcl`, `terraform.tfvars`,
+  `terraform.tfvars.json`, `*.auto.tfvars` or `*.auto.tfvars.json` file) now
+  stops the scan, since checkov applies no `--skip-path` value there. Also on
+  Windows, `scanners.checkov.options.skip_path` values are now checked against
+  checkov's terraform module finder without ASH's values before them, so a value
+  such as `tests/*`, which stopped the scan before, now reaches checkov there, and
+  one such as `(a[b]c)` now stops it. In checkov's default mode its secrets
+  framework keeps its own unanchored list of these names and still skips such a
+  project; with `--enable-secret-scan-all-files` it reads it.
 
 ### Features
 

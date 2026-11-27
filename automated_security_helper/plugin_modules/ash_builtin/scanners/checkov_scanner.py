@@ -74,7 +74,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners import (
 from automated_security_helper.utils.package_identity import ASH_RESOURCE_ID_KEY
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_atomic_write
-from automated_security_helper.utils.scanned_tree import REASON_LINK_LEAVES_TREE
+from automated_security_helper.utils.scanned_tree import (
+    REASON_LINK_LEAVES_TREE,
+    resolves_inside,
+)
 from automated_security_helper.utils.suppression_matcher import active_ignore_paths
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 
@@ -403,19 +406,10 @@ def _under_a_known_ignore_path(
     return False
 
 
-#: checkov's default for ``CKV_IGNORED_DIRECTORIES``, and the spellings its
-#: ``strtobool`` reads as true (lower-cased), for
+#: checkov's default for ``CKV_IGNORED_DIRECTORIES``, for
 #: ``_known_directories_checkov_skips``. ``checkov/common/runners/base_runner.py``
-#: lines 47-50 read both.
+#: lines 47-50 read it.
 _CHECKOV_IGNORED_DIRECTORIES_DEFAULT = "node_modules,.terraform,.serverless"
-_CHECKOV_TRUE_SPELLINGS = frozenset({"y", "yes", "t", "true", "on", "1"})
-
-#: The keys of an operator's checkov config file that turn on the secrets
-#: framework's all-files mode: the option's name, and the same with underscores.
-_ALL_FILES_CONFIG_KEYS = (
-    "enable-secret-scan-all-files",
-    "enable_secret_scan_all_files",
-)
 
 
 class _AmbiguousEnvironmentValue(ValueError):
@@ -439,108 +433,226 @@ def _environment_value(env: Mapping[str, str], name: str) -> Optional[str]:
     return next(iter(values), None)
 
 
-def _config_file_sets_all_files_secret_scan(file_values: Mapping[str, Any]) -> bool:
-    """Whether the operator's checkov config file, read as ``file_values``, turns on
-    the secrets framework's all-files mode (``enable-secret-scan-all-files``).
-
-    Read as the answer that refuses the target: set unless the key is absent, or
-    its value is ``None``, ``False`` or ``0``, or a string that reads ``false``,
-    ``no`` or ``0`` in any case. The spelling with underscores counts too.
-    """
-    for key in _ALL_FILES_CONFIG_KEYS:
-        if key not in file_values:
-            continue
-        value = file_values[key]
-        if isinstance(value, str):
-            if value.lower() not in {"false", "no", "0"}:
-                return True
-        elif value is not None and value != 0:
-            return True
-    return False
-
-
-def _secrets_all_files_may_be_on(
-    env: Mapping[str, str], *, config_file_sets_it: bool
-) -> bool:
-    """Whether checkov's secrets framework may run in its all-files mode.
-
-    True when the operator's checkov config file sets it (``config_file_sets_it``),
-    or when ``CKV_SECRETS_SCAN_ENABLE_ALL`` is set to anything whose lower-cased
-    value is not ``false``, ``no`` or ``0`` (an empty value included), or when the
-    variable cannot be told (``_environment_value``). False when it is unset or one
-    of those three. In that mode the framework filters with ``filter_excluded_paths``
-    in place of ``filter_ignored_paths``, and that has no rule against dot-named
-    directories, so it walks ``.venv`` (``checkov/secrets/runner.py`` lines 246-260,
-    ``checkov/secrets/utils.py``). A value that is not plainly off counts as on,
-    the answer that refuses the target.
-    """
-    if config_file_sets_it:
-        return True
-    try:
-        value = _environment_value(env, "CKV_SECRETS_SCAN_ENABLE_ALL")
-    except _AmbiguousEnvironmentValue:
-        return True
-    return value is not None and value.lower() not in {"false", "no", "0"}
-
-
-def _known_directories_checkov_skips(
-    env: Mapping[str, str], *, secrets_all_files: bool
-) -> FrozenSet[str]:
+def _known_directories_checkov_skips(env: Mapping[str, str]) -> FrozenSet[str]:
     """The ``KNOWN_IGNORE_PATHS`` names checkov skips on its own when ASH sends no
-    ``--skip-path`` value for them (Windows), with ``env`` as checkov's environment
-    and ``secrets_all_files`` from ``_secrets_all_files_may_be_on``.
+    ``--skip-path`` value for them (Windows), with ``env`` as checkov's environment.
 
-    A name is counted only when checkov skips it with the operator's variables
-    and with their defaults: a sandboxed run hands checkov a ``CKV_`` variable only
-    when the sandbox grants environment variables (``utils/sandbox/policy.py``),
-    so checkov may start with the operator's variable dropped and its default in
-    place. A variable ``_environment_value`` cannot tell leaves its name uncounted.
+    A name counts when it is one of the items of ``CKV_IGNORED_DIRECTORIES``, split
+    at each comma with no stripping, default ``node_modules,.terraform,.serverless``.
+    So by default only ``node_modules`` counts, ``.venv`` and ``venv`` count when
+    the list names them, an empty value names nothing, and a space before a name
+    makes it another name. checkov's framework walks remove a directory whose name
+    is on the list (``filter_ignored_paths``, ``checkov/common/runners/base_runner.py``
+    lines 47-50 and 227-232), and its secrets framework removes the same names in
+    both of its modes (``checkov/secrets/utils.py`` line 10, ``EXCLUDED_PATHS``).
+    checkov reads the variable from the environment only, and ASH starts it with
+    the environment this reads. A variable ``_environment_value`` cannot tell (two
+    keys that differ only in case hold different values) counts no name.
 
-    ``node_modules``: ``filter_ignored_paths`` removes a directory whose name is
-    one of the items of ``CKV_IGNORED_DIRECTORIES``, split at each comma with no
-    stripping, default ``node_modules,.terraform,.serverless``
-    (``checkov/common/runners/base_runner.py`` lines 47-50 and 227-232). An empty
-    value names nothing, and a space before the name makes it another name.
+    Dot-named directories are not counted through ``CKV_IGNORE_HIDDEN_DIRECTORIES``,
+    though the framework walks skip them while it reads true, as it does by
+    default. The secrets framework's all-files mode has no dot-name rule
+    (``checkov/secrets/runner.py`` lines 246-260, ``checkov/secrets/utils.py``), so
+    there checkov reads ``.venv``, and ASH cannot tell whether that mode is on.
+    checkov loads ``.checkov.yaml`` and ``.checkov.yml`` from the home directory and
+    the working directory as well as the file ASH passes it
+    (``checkov/common/util/config_utils.py`` lines 20-26), opens config files in the
+    locale encoding (configargparse's plain ``open()``), and accepts the key
+    ``--enable-secret-scan-all-files`` as well as ``enable-secret-scan-all-files``.
+    ASH reads none of that as checkov does, and does not try: a name counts only
+    when ``CKV_IGNORED_DIRECTORIES`` lists it, which fails closed.
 
-    ``.venv``: the same function removes every name that starts with a dot while
-    ``CKV_IGNORE_HIDDEN_DIRECTORIES`` reads true, as it does by default. checkov's
-    ``strtobool`` reads ``y``, ``yes``, ``t``, ``true``, ``on`` and ``1`` in any
-    case as true; any other value is false or stops checkov at start, so it is not
-    counted (``base_runner.py`` lines 47-50). Not counted either when the secrets
-    framework scans all files (``secrets_all_files``): it then filters with
-    ``filter_excluded_paths``, which has no dot-name rule
-    (``checkov/secrets/runner.py`` lines 246-260, ``checkov/secrets/utils.py``).
-
-    ``venv`` is never counted: neither rule above skips it under checkov's
-    defaults, and an operator's ``CKV_IGNORED_DIRECTORIES`` that names it can be
-    dropped by the sandbox, which leaves checkov reading it.
-
-    These are checkov's framework walks. Its terraform module finder reads every
-    ``.tf`` file in every directory whatever its name
-    (``checkov/terraform/module_loading/module_finder.py`` lines 63-75), which
-    ``_links_leaving_tree`` accounts for.
+    These are checkov's framework walks and its secrets walk. Its terraform module
+    finder reads every ``.tf`` file in every directory when checkov is given no
+    ``--skip-path`` value (``checkov/terraform/module_loading/module_finder.py``
+    lines 63-75; with any value its joined expression matches every path), which
+    ``_links_leaving_tree`` accounts for. Its terraform parser loads the directory a
+    local module source names with none of the values, whatever this returns
+    (``_module_load_link``).
     """
-    skipped: set[str] = set()
     try:
         listed = _environment_value(env, "CKV_IGNORED_DIRECTORIES")
     except _AmbiguousEnvironmentValue:
-        pass
-    else:
-        if listed is None:
-            listed = _CHECKOV_IGNORED_DIRECTORIES_DEFAULT
-        if "node_modules" in listed.split(","):
-            skipped.add("node_modules")
-    if not secrets_all_files:
+        return frozenset()
+    if listed is None:
+        listed = _CHECKOV_IGNORED_DIRECTORIES_DEFAULT
+    return frozenset(listed.split(",")) & _KNOWN_DIRECTORY_NAMES
+
+
+#: What checkov's terraform parser reads in the directory a local module source
+#: names, by file name and by suffix: ``terraform.tfvars.json`` and
+#: ``terraform.tfvars``, ``*.auto.tfvars`` and ``*.auto.tfvars.json``, then every
+#: ``*.tf`` and ``*.hcl`` file, each followed through a link to a file
+#: (``checkov/terraform/tf_parser.py`` lines 569-604, checkov 3.4.7). That load
+#: passes the directory no ``excluded_paths``, so no ``--skip-path`` value applies
+#: to it (``_module_load_link``).
+_MODULE_LOAD_FILE_NAMES = frozenset({"terraform.tfvars", "terraform.tfvars.json"})
+_MODULE_LOAD_FILE_SUFFIXES = (".tf", ".hcl", ".auto.tfvars", ".auto.tfvars.json")
+
+#: A ``source = "<value>"`` attribute in Terraform text: ``source`` at a word
+#: boundary, spaces or tabs around the ``=``, and a double-quoted value on the one
+#: line. It does not tell a module block from any other block.
+_MODULE_SOURCE_ATTRIBUTE = re.compile(r'\bsource[ \t]*=[ \t]*"([^"\n]*)"')
+
+
+def _module_load_reads(name: str) -> bool:
+    """Whether checkov's terraform parser reads a file called ``name`` when it loads
+    the directory a local module source names (``_MODULE_LOAD_FILE_NAMES`` and
+    ``_MODULE_LOAD_FILE_SUFFIXES``)."""
+    return name in _MODULE_LOAD_FILE_NAMES or name.endswith(_MODULE_LOAD_FILE_SUFFIXES)
+
+
+def _is_local_module_source(value: str) -> bool:
+    """Whether checkov's local-path module loader takes ``value`` as a module source:
+    ``.``, or a path that starts with ``./``, ``../`` or ``/``
+    (``checkov/terraform/module_loading/loaders/local_path_loader.py`` line 31)."""
+    return value == "." or value.startswith(("./", "../", "/"))
+
+
+def _is_same_directory(path: str, other: str) -> bool:
+    """Whether ``path`` and ``other`` are one directory, by device and inode, links
+    followed; False when either cannot be read."""
+    try:
+        return os.path.samefile(path, other)
+    except OSError:
+        return False
+
+
+def _module_load_links_by_directory(
+    root: str, links: Iterable[str]
+) -> dict[str, List[str]]:
+    """The links in ``links`` whose name the module load reads
+    (``_module_load_reads``), by the real path of the directory that holds each, in
+    ``links`` order. ``links`` are paths below ``root`` with ``/`` separators, as
+    ``file_links_leaving_tree`` returns them. A directory's key is its real path
+    through ``os.path.normcase``, as ``_module_load_link`` spells it."""
+    by_directory: dict[str, List[str]] = {}
+    real_of: dict[str, str] = {}
+    for link in links:
+        if not _module_load_reads(link.rsplit("/", 1)[-1]):
+            continue
+        parent = os.path.dirname(os.path.join(root, link))
+        if parent not in real_of:
+            real_of[parent] = os.path.normcase(os.path.realpath(parent))
+        by_directory.setdefault(real_of[parent], []).append(link)
+    return by_directory
+
+
+def _module_load_link(
+    target: Path, links: List[str], all_files: List[str]
+) -> Optional[Tuple[str, str]]:
+    """The first link, or module source, through which checkov's terraform parser
+    would read a file outside ``target`` whatever ``--skip-path`` says, as
+    ``(link or source, file)``, or None.
+
+    checkov loads the directory a local module source names with
+    ``_internal_dir_load`` and no ``excluded_paths`` (``checkov/terraform/tf_parser.py``
+    lines 253, 263-269 and 546-549, checkov 3.4.7), whether or not a directory walk
+    skipped it, and there reads the files ``_MODULE_LOAD_FILE_NAMES`` and
+    ``_MODULE_LOAD_FILE_SUFFIXES`` name, through links to files. So on every
+    platform a link of that name that leaves the tree and sits directly in such a
+    directory is read, and the ``--skip-path`` value ``_link_skip_patterns`` gives
+    it, or the rule that leaves a link under a directory checkov skips out of the
+    list (``_links_leaving_tree``), does not stop it. A source that reaches its
+    directory through a link to a directory that leaves the tree is read the same
+    way, whatever the files in it are called.
+
+    Every ``.tf`` and ``.hcl`` file of the walk that is a regular file and not a link
+    that leaves the tree (one of ``links``) is read as UTF-8 text
+    (``errors="replace"``; a file that cannot be read is skipped), in path order. A
+    link that stays inside the tree is read: checkov reads it, what it points at is
+    inside the tree, and its sources are joined to the link's own directory, as
+    checkov joins them. Each ``source = "<value>"`` in it whose value
+    is ``.`` or starts with ``./``, ``../`` or ``/`` names a directory: the value
+    joined to the file's directory, an absolute value as it is, normalized as text
+    (``os.path.normpath``). Blocks are not told apart, so a ``source`` in any block
+    counts, which errs toward refusing. That directory is skipped when it is not
+    ``target`` or below it as text, or is not a directory. Otherwise, when its real
+    path is not ``target`` or below it, the source reaches it through a link and
+    ``(value, file)`` is returned. Otherwise the first link in ``links`` that sits
+    directly in a directory with the same real path and has a name the module load
+    reads is returned as ``(link, file)``.
+
+    Args:
+        target: The scanned directory, absolute.
+        links: Every link to a file whose target leaves ``target``, as
+            ``file_links_leaving_tree`` returns them: all of them, not the list
+            ``_links_leaving_tree`` leaves the known directories out of. Paths below
+            ``target`` with ``/`` separators.
+        all_files: Every file of the same walk, links included
+            (``file_links_leaving_tree``'s ``all_files`` argument), in the same form.
+
+    Returns:
+        ``(link, file)`` or ``(source, file)``, with ``file`` the file that holds
+        the source, in the form of ``all_files``; a link never starts with ``./``,
+        ``../`` or ``/``, and a source always does or is ``.``, so the two tell
+        apart. None when no source reaches such a link.
+
+    Limits. A module source that leaves ``target`` as text (``../`` past its root)
+    and no link in it is not refused. A value spelled with interpolation is not
+    resolved. A file that is a link leaving the tree is not read, so its sources are
+    not looked at: ASH reads nothing outside the tree. Only ``.tf`` and ``.hcl``
+    files are read, and only for a double-quoted ``source`` on one line. A ``..``
+    after a link to a directory is judged as normalized text, not as the operating
+    system resolves it.
+    """
+    root = os.path.abspath(os.fspath(target))
+    root_cased = os.path.normcase(root)
+    judged: set[str] = set()
+    held: Optional[dict[str, List[str]]] = None
+    leaving = set(links)
+    files = sorted(name for name in all_files if name.endswith((".tf", ".hcl")))
+    for relative in files:
+        candidate = os.path.join(root, relative)
+        if relative in leaving or not os.path.isfile(candidate):
+            continue
         try:
-            hidden = _environment_value(env, "CKV_IGNORE_HIDDEN_DIRECTORIES")
-        except _AmbiguousEnvironmentValue:
-            pass
-        else:
-            if hidden is None:
-                hidden = "True"
-            if hidden.lower() in _CHECKOV_TRUE_SPELLINGS:
-                skipped.add(".venv")
-    return frozenset(skipped) & _KNOWN_DIRECTORY_NAMES
+            text = Path(candidate).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        directory = os.path.dirname(candidate)
+        for match in _MODULE_SOURCE_ATTRIBUTE.finditer(text):
+            source = match.group(1)
+            if not _is_local_module_source(source):
+                continue
+            module_directory = os.path.normpath(os.path.join(directory, source))
+            if module_directory in judged:
+                continue
+            judged.add(module_directory)
+            if not _within(os.path.normcase(module_directory), root_cased):
+                continue
+            if not os.path.isdir(module_directory):
+                continue
+            if not (
+                resolves_inside(module_directory, root)
+                or _is_same_directory(module_directory, root)
+            ):
+                return source, relative
+            if held is None:
+                held = _module_load_links_by_directory(root, links)
+            readable = held.get(os.path.normcase(os.path.realpath(module_directory)))
+            if readable:
+                return readable[0], relative
+    return None
+
+
+def _module_load_refusal(
+    target: Path, subject: str, where: str, *, links: Collection[str]
+) -> str:
+    """The refusal for a ``_module_load_link`` result: ``subject`` is a link when it
+    is one of ``links`` and a module source otherwise, in ``where``, the file that
+    holds the source."""
+    named = f"Not running checkov on {Path(target).as_posix()}: {subject!r}: "
+    loads = (
+        "checkov's terraform parser loads the directory a module source names "
+        f"({where!r}) with none of its --skip-path values, so checkov would read "
+    )
+    if subject in links:
+        return f"{named}{REASON_LINK_LEAVES_TREE}, and {loads}the file it points at."
+    return (
+        f"{named}this module source reaches a directory that leaves the scanned "
+        f"tree through a link, and {loads}the files in it."
+    )
 
 
 def _skip_path_root(target: Path) -> str:
@@ -1660,11 +1772,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     #: after the ``skip-path`` values of the operator's checkov config file and
     #: before the operator's ``skip_path`` (set by ``_process_config_options``).
     _known_directory_skip_at: Optional[int] = PrivateAttr(default=None)
-    #: Whether the operator's checkov config file, when one is passed to checkov,
-    #: turns on the secrets framework's all-files mode (set by
-    #: ``_process_config_options``). checkov then walks ``.venv``, which its
-    #: framework walks skip otherwise (``_secrets_all_files_may_be_on``).
-    _config_file_secrets_all_files: bool = PrivateAttr(default=False)
 
     def model_post_init(self, context):
         if self.config is None:
@@ -1869,9 +1976,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         return parsed if isinstance(parsed, dict) else {}
 
     def _process_config_options(self):
-        # Set below from the config file passed to checkov, if there is one; reset
-        # here so a second call starts clean.
-        self._config_file_secrets_all_files = False
         # Checkov config path
         configured_file = self.config.options.config_file
         if configured_file is not None and not str(configured_file).strip():
@@ -1970,12 +2074,6 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     ToolExtraArg(key="--config-file", value=candidate.as_posix())
                 )
                 file_values = self._config_file_values(candidate.as_posix())
-                # checkov reads this key from the file itself. ASH reads it to know
-                # whether the secrets framework scans all files, which makes
-                # checkov walk .venv (_secrets_all_files_may_be_on).
-                self._config_file_secrets_all_files = (
-                    _config_file_sets_all_files_secret_scan(file_values)
-                )
                 break
             if configured:
                 # Refused: the configured value takes no discovered
@@ -2193,14 +2291,30 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 "compile its regex. ASH drops checkov's findings there.",
                 extra=NO_MARKUP,
             )
+        # One walk serves the module-load check below and the links left out after
+        # it: every link to a file whose target leaves the tree, and every file the
+        # walk found.
+        all_files: List[str] = []
+        all_links = file_links_leaving_tree(target, all_files=all_files)
+        # checkov's terraform parser loads the directory a local module source names
+        # with none of the --skip-path values, on every platform. So a link in that
+        # directory, or a source that reaches it through a link to a directory,
+        # would have checkov read a file outside the tree whatever is left out below
+        # (_module_load_link).
+        module_read = _module_load_link(target, all_links, all_files)
+        if module_read is not None:
+            raise ScannerError(
+                _module_load_refusal(target, *module_read, links=all_links)
+            )
         # What is left out of the links to files that leave the tree. On POSIX the
         # known-directory values skip those directories whole, in every walk, so a
         # link under one gets no value of its own. On Windows no such value is sent
-        # and a value cannot leave out a single file, so a link is left out only when
-        # checkov itself does not read the file (_known_directories_checkov_skips);
-        # every other link refuses the target (_link_skip_patterns).
+        # and a value cannot leave out a single file, so a link is left out only
+        # when it is under a directory CKV_IGNORED_DIRECTORIES names and is not a
+        # .tf file (_known_directories_checkov_skips); every other link refuses the
+        # target (_link_skip_patterns).
         link_paths = self._links_checkov_would_read(
-            target, known_sent=bool(known), env=subprocess_env
+            target, known_sent=bool(known), env=subprocess_env, links=all_links
         )
         links = self._link_skip_patterns(target, link_paths)
         # A link has to be left out, so a target whose link values break the
@@ -2397,13 +2511,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
 
         None on Windows, where checkov's walked paths are not ``/``-joined, as for
         ``_ignore_skip_patterns`` and ``_output_dir_skip_patterns``. On every
-        platform checkov's own rules skip some of these directories in its
-        framework walks: those named in ``CKV_IGNORED_DIRECTORIES``
-        (``node_modules`` by default) and, by default, dot-named ones
-        (``CKV_IGNORE_HIDDEN_DIRECTORIES``). They do not skip ``venv``, they do not
-        reach its terraform module finder (which reads every ``.tf`` file in every
-        directory), and the secrets framework reads ``.venv`` when it scans all
-        files; ``_known_directories_checkov_skips`` has the rules.
+        platform checkov's own rules skip the directories ``CKV_IGNORED_DIRECTORIES``
+        names in its framework walks (``node_modules`` by default) and its secrets
+        walk. They do not reach its terraform module finder, which reads every
+        ``.tf`` file in every directory when checkov is given no ``--skip-path``
+        value (``module_finder.py`` lines 63-75; with any value its joined
+        expression matches every path), and they do not reach the module load
+        (``_module_load_link``). ``_known_directories_checkov_skips`` has the rule.
         ``_execute_scan`` tells ``_links_checkov_would_read`` whether any are sent.
         """
         if os.sep != "/":
@@ -2415,10 +2529,11 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             ASH_LOGGER.debug(
                 "Not sending checkov a --skip-path value for the .venv, venv and "
                 "node_modules directories below the target on Windows. checkov's own "
-                "rules skip node_modules (CKV_IGNORED_DIRECTORIES) and dot-named "
-                "directories (CKV_IGNORE_HIDDEN_DIRECTORIES) and read venv, so a "
-                "link from one of them that leaves the tree stops the scan when "
-                "checkov would read the file."
+                "rules skip the directories CKV_IGNORED_DIRECTORIES names "
+                "(node_modules by default), so a link from one of the three "
+                "directories that leaves the tree is left out only when that list "
+                "names the directory and the link is not a .tf file, and otherwise "
+                "stops the scan."
             )
             return []
         return _known_directory_skip_values(_skip_path_root(target))
@@ -2459,9 +2574,13 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         *,
         skipped_directories: Collection[str],
         tf_files_skipped: bool,
+        links: Optional[List[str]] = None,
     ) -> List[str]:
         """The links to files whose target leaves ``target``, as checkov walks them,
         except those checkov does not read.
+
+        ``links`` is the list ``file_links_leaving_tree`` found, when the caller
+        already walked the tree; without it the walk runs here.
 
         A link under a directory named in ``skipped_directories`` is left out. On
         POSIX ASH's values skip the three ``KNOWN_IGNORE_PATHS`` directories whole,
@@ -2469,47 +2588,59 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         value of its own, and a value per link only lengthened the command line (a
         ``node_modules`` with thousands of links reached the argument-list limit):
         the caller passes all three names and ``tf_files_skipped=True``. On Windows
-        no such value is sent, so the caller passes only the directories checkov's
-        own rules skip (``_known_directories_checkov_skips``), and with
-        ``tf_files_skipped`` False a link whose file name ends in ``.tf`` is kept
-        even under them, because checkov's terraform module finder reads every
-        ``.tf`` file in every directory. Every link kept gets a value of its own or
-        refuses the target (``_link_skip_patterns``), so in the walks named here
-        checkov reads no file a link points at outside the tree.
+        no such value is sent, so the caller passes only the directories
+        ``CKV_IGNORED_DIRECTORIES`` names (``_known_directories_checkov_skips``), by
+        default ``node_modules``, and with ``tf_files_skipped`` False a link whose
+        file name ends in ``.tf`` is kept even under them, because checkov's
+        terraform module finder reads every ``.tf`` file in every directory when
+        checkov is given no ``--skip-path`` value (``module_finder.py`` lines 63-75;
+        with any value its joined expression matches every path). Every link kept
+        gets a value of its own or refuses the target (``_link_skip_patterns``), so
+        in the walks named here checkov reads no file a link points at outside the
+        tree. The load of a directory a local module source names is not one of
+        them: a link there is read whatever this returns (``_module_load_link``).
         """
+        if links is None:
+            links = file_links_leaving_tree(target)
         return [
             relative
-            for relative in file_links_leaving_tree(target)
+            for relative in links
             if not _under_a_known_ignore_path(relative, skipped_directories)
             or (not tf_files_skipped and relative.endswith(".tf"))
         ]
 
     def _links_checkov_would_read(
-        self, target: Path, *, known_sent: bool, env: Mapping[str, str]
+        self,
+        target: Path,
+        *,
+        known_sent: bool,
+        env: Mapping[str, str],
+        links: Optional[List[str]] = None,
     ) -> List[str]:
         """The links to files whose target leaves ``target`` that checkov would read.
 
         With ``known_sent`` (the scan sends the known-directory values, as on POSIX)
         the links under those directories are left out. Without it (Windows) a link
-        is left out only when it is under a directory checkov skips on its own, with
-        ``env`` as its environment, and is not a ``.tf`` file: see
-        ``_links_leaving_tree`` and ``_known_directories_checkov_skips``.
+        is left out only when it is under a directory ``CKV_IGNORED_DIRECTORIES``
+        names in ``env``, checkov's environment, and is not a ``.tf`` file: see
+        ``_links_leaving_tree`` and ``_known_directories_checkov_skips``. ``links``
+        is the list ``file_links_leaving_tree`` found, when the caller already
+        walked the tree; without it the walk runs here. A link in a directory a
+        local module source names is read whatever this returns
+        (``_module_load_link``).
         """
         if known_sent:
             return self._links_leaving_tree(
                 target,
                 skipped_directories=_KNOWN_DIRECTORY_NAMES,
                 tf_files_skipped=True,
+                links=links,
             )
         return self._links_leaving_tree(
             target,
-            skipped_directories=_known_directories_checkov_skips(
-                env,
-                secrets_all_files=_secrets_all_files_may_be_on(
-                    env, config_file_sets_it=self._config_file_secrets_all_files
-                ),
-            ),
+            skipped_directories=_known_directories_checkov_skips(env),
             tf_files_skipped=False,
+            links=links,
         )
 
     def _link_skip_patterns(
