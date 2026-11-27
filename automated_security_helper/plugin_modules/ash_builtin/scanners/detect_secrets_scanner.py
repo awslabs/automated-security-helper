@@ -1415,21 +1415,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     ) -> None:
         """Say once that the baseline in use set no plugins or filters, and which.
 
-        Names only the plugin names and filter paths, never a pattern or a limit
-        the baseline holds.
+        Names only the plugin names and filter paths that are strings, never a
+        pattern, a limit or any other value the baseline holds. A baseline is
+        the repository's file, so its settings can be any JSON: a list is read
+        as a list only when it is one, an entry as a mapping only when it is
+        one, and a name or a path only when it is a non-empty string. Nothing
+        here raises on a malformed baseline, because the baseline's ``results``
+        still mark candidates whatever its settings hold.
         """
         if not isinstance(baseline_data, dict):
             return
-        plugins = [
-            str(item["name"])
-            for item in baseline_data.get("plugins_used") or []
-            if isinstance(item, dict) and item.get("name")
-        ]
-        filters = [
-            str(item["path"])
-            for item in baseline_data.get("filters_used") or []
-            if isinstance(item, dict) and item.get("path")
-        ]
+        plugins = self._listed_strings(baseline_data.get("plugins_used"), "name")
+        filters = self._listed_strings(baseline_data.get("filters_used"), "path")
         if not plugins and not filters:
             return
         ASH_LOGGER.warning(
@@ -1442,9 +1439,38 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 f"Filters not applied: {', '.join(filters) or 'none'}. "
                 "To use its settings, name the baseline file with baseline_file "
                 "from outside the scanned tree.",
-                values,
+                self._baseline_redaction_needles(values),
             )
         )
+
+    @staticmethod
+    def _listed_strings(entries: Any, key: str) -> List[str]:
+        """The non-empty string values of ``key`` in the mapping entries of a list.
+
+        Anything else (a value that is not a list, an entry that is not a
+        mapping, a ``key`` that is missing, empty or not a string) is skipped
+        and never printed.
+        """
+        if not isinstance(entries, list):
+            return []
+        return [
+            item[key]
+            for item in entries
+            if isinstance(item, dict) and isinstance(item.get(key), str) and item[key]
+        ]
+
+    def _baseline_redaction_needles(self, values: Collection[str]) -> Tuple[str, ...]:
+        """What a line that names the baseline hides, besides the environment values.
+
+        The baseline's path can be a value read from the environment. A line
+        prints it with forward slashes (``as_posix``), so a Windows value
+        written with backslashes is hidden in that spelling too, and it prints
+        as the scan resolves it, so a value written as ``../x`` or through a
+        link is hidden in the resolved spelling.
+        """
+        named = environment_strings(values)
+        forward = tuple(v.replace("\\", "/") for v in named if "\\" in v)
+        return (*named, *forward, *self._baseline_path_needles(named))
 
     def _drop_in_tree_settings_paths(
         self,
@@ -3265,14 +3291,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     )
                 # The baseline's path can be a value read from the environment,
                 # and this text is quoted in the error the filter raises:
-                # redacted like every other line here that names the baseline.
-                # The path prints with forward slashes (as_posix), so a Windows
-                # value written with backslashes is hidden in that spelling too,
-                # and it prints as the scan resolves it, so a value written as
-                # ``../x`` or through a link is hidden in the resolved spelling.
-                named = environment_strings(values)
-                forward = tuple(v.replace("\\", "/") for v in named if "\\" in v)
-                needles = (*named, *forward, *self._baseline_path_needles(named))
+                # redacted like every other line here that names the baseline
+                # (_baseline_redaction_needles).
+                needles = self._baseline_redaction_needles(values)
                 own_source = text_without_values(own_source, needles)
                 baseline_source = text_without_values(baseline_source, needles)
                 # A run with no patterns keeps every file and is not made, so

@@ -155,8 +155,10 @@ The repository can still affect results in other ways:
 - Its `.gitignore` and `.ignore` files, which decide which files ASH scans, committed files
   included.
 - The tool config files some scanners read from the repository, such as detect-secrets'
-  `.secrets.baseline`, whose plugin and filter settings apply unless your file sets
-  `scanners.detect-secrets.options.scan_settings.plugins_used`.
+  `.secrets.baseline`, which only marks the candidates it lists. Its plugin and filter
+  settings apply only when your own config names the baseline with
+  `scanners.detect-secrets.options.baseline_file` from outside the scanned tree and any git
+  checkout that holds it.
   [What the trust model does not protect](../concepts/trust-model.md#not-protected) lists
   the scanners whose own config files ASH keeps from being read, semgrep's and opengrep's
   `.semgrepignore` included.
