@@ -52,6 +52,7 @@ import json
 import math
 import operator
 import re
+import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
@@ -1323,26 +1324,28 @@ def flatten_text(text: str) -> str:
     """``text`` as one run, for a scan that must not be fooled by a wrap.
 
     Every escape sequence (not only SGR), every control character (the carriage
-    return and line feed of a wrap among them) and every box-drawing character
-    (U+2500 to U+257F, the borders of a table) is removed, with the spaces beside a
-    removed control or box-drawing character. Nothing else is removed or moved, and
-    the text is read in stream order, so a token is read as the token again only when
-    nothing but those characters lies between its halves.
+    return and line feed of a wrap among them), every box-drawing character (U+2500
+    to U+257F, the borders of a table) and every invisible format character (Unicode
+    category Cf: the zero-width space and joiners, the soft hyphen, the byte-order
+    mark, the direction marks) is removed. So are the spaces beside a removed control
+    or box-drawing character. Nothing else is removed or moved, and the text is read
+    in stream order, so a token is read as the token again only when nothing but those
+    characters lies between its halves.
 
     It rejoins a path that a cursor movement, a title, a link or a color change cut, a
-    path that wraps onto the next line, and a path that wraps inside a table with
-    box-drawing borders or none, when the table has one column or the wrapped cell is
-    the last one filled on its row.
+    path that wraps onto the next line, a path with an invisible format character
+    inside it, and a path that wraps inside a table with box-drawing borders or none,
+    when the table has one column or the wrapped cell is the last one filled on its
+    row.
 
     It does not rejoin a path with anything else between its halves: a cell that
     wraps with another column to its right, in the first column or a middle one, since
     the text of that column lies between the halves; a log line wrapped beside a
-    right-hand column, for the same reason; a table drawn with ASCII bars (``|``), even
-    of one column, since those bars are kept; and a token with a zero-width space or
-    another invisible format character inside it. A recording therefore has to be made
-    at a width where nothing wraps beside other text; this view is no substitute for
-    that. It can also join words that were apart, which only makes a scan that looks
-    for a token stricter.
+    right-hand column, for the same reason; and a table drawn with ASCII bars (``|``),
+    even of one column, since those bars are kept. A recording therefore has to be
+    made at a width where nothing wraps beside other text; this view is no substitute
+    for that. It can also join words that were apart, which only makes a scan that
+    looks for a token stricter.
     """
     kept: list[str] = []
     in_gap = False
@@ -1352,6 +1355,8 @@ def flatten_text(text: str) -> str:
             while kept and kept[-1] == " ":
                 kept.pop()
             in_gap = True
+        elif unicodedata.category(char) == "Cf":
+            continue
         elif in_gap and char == " ":
             continue
         else:
