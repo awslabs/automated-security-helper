@@ -3672,8 +3672,10 @@ def test_the_repositorys_reference_inside_the_operators_region_is_not_recorded(
 def test_a_region_the_operators_chain_file_read_is_shown_under_every_section_spelling(
     tmp_path, monkeypatch
 ):
-    """The operator's --config, outside every checkout, extends the checkout's
-    .ash.yaml, which spells the reporter ``AwsSecurityHub`` and turns it off.
+    """The operator's --config, ``ops/ash.yaml``, extends the checkout's
+    .ash.yaml one directory below it (``ops/checkout``, which the loader allows:
+    a base must sit inside the extending file's directory). That file spells
+    the reporter ``AwsSecurityHub`` and turns it off.
     The operator's file reads aws_region from a variable under
     ``aws-security-hub``. The confinement copies that option into every section
     key the configuration holds for the reporter, ``AwsSecurityHub`` included,
@@ -3685,13 +3687,12 @@ def test_a_region_the_operators_chain_file_read_is_shown_under_every_section_spe
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     monkeypatch.setenv("ASH_TEST_SH_OPERATOR_REGION", "xx-test-9")
     checkout = _checkout_with_config(
-        tmp_path,
+        tmp_path / "ops",
         "reporters:\n  AwsSecurityHub:\n    enabled: false\n",
     )
     operator = tmp_path / "ops" / "ash.yaml"
-    operator.parent.mkdir()
     operator.write_text(
-        f"extends: {(checkout / '.ash.yaml').as_posix()}\n"
+        "extends: checkout/.ash.yaml\n"
         "reporters:\n"
         "  aws-security-hub:\n"
         "    options:\n"
@@ -4564,8 +4565,8 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
     file counts as the repository's by the name it was given or by its target,
     and so does a base it extends. A scope the file reads from the
     environment is shown as ignored too, and never by the value: the load
-    drops the reference at the place, so the marker is
-    `<from the environment>`. The rest of the section (aws_region) is the
+    drops the reference at the place, but the loader's mark on the value the
+    file read names it, so the marker is `<from ${ASH_TEST_SH_SCOPE}>`. The rest of the section (aws_region) is the
     operator's too and is confined for a file in another checkout, so it is
     absent rather than shown as applied
     (docs/content/docs/plugins/aws/security-hub-reporter.md, "Options only the
@@ -4608,12 +4609,13 @@ def test_get_config_marks_the_operator_only_options_a_repository_file_sets(
         )
     else:
         # The confinement settles the place and drops the reference the file
-        # wrote there, so the marker has none to show: it is the placeholder,
-        # which says the file set an option the scan ignores and holds no part
-        # of the server's environment value.
+        # wrote there, but the file wrote a reference, so the loader's mark on
+        # the value it read shows it: the marker says the file set an option
+        # the scan ignores, by the reference, and holds no part of the server's
+        # environment value.
         assert "victim-from-the-environment" not in json.dumps(result), result
         assert options["findings_scope"] == (
-            "<operator only; ignored from this file: <from the environment>>"
+            "<operator only; ignored from this file: <from ${ASH_TEST_SH_SCOPE}>>"
         ), options
     assert options["archive_resolved_findings"] == (
         "<operator only; ignored from this file: true>"

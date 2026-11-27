@@ -1103,6 +1103,17 @@ def test_get_config_of_a_named_file_loads_past_the_tree_s_ash_config_limit(
 
 _SERVER_VALUE = "server-value-read-from-the-environment"
 
+#: The marker a file's own reference is shown as, whatever route get_config
+#: answers by, and the marker of a literal that only equals or contains a value
+#: the configuration read (it says nothing of where the value came from).
+_REFERENCE_MARKER = (
+    "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
+)
+_WITHHELD_MARKER = (
+    "<operator only; ignored from this file: "
+    "<withheld: may hold a value read from the environment>>"
+)
+
 #: Each operator-only option a checkout's file can write as ${VAR}: the
 #: section text and the place the marker sits at in get_config's answer.
 _ENV_OPTIONS = {
@@ -1137,9 +1148,10 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
     ASH_CONFIG naming one inside the searched tree, get_config shows the option
     ignored and shows what the file wrote as the reference, `<from ${VAR}>`,
     never the value the server's environment gave it. Through a named file in a
-    checkout the session does not scan, the reference is no longer at the place,
-    so the marker shows `<from the environment>` in its place: the option is
-    still shown as ignored, and the answer holds no line with the value."""
+    checkout the session does not scan, the load's reference is no longer at the
+    place, but the loader's mark on the value the file read still names it: the
+    marker shows the same `<from ${VAR}>` on both routes, the option is still
+    shown as ignored, and the answer holds no line with the value."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
     from tests.utils.helpers import mark_git_checkout
 
@@ -1164,15 +1176,8 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
     import json
 
     assert _SERVER_VALUE not in json.dumps(result), result
-    if route == "named-file":
-        assert _marker_at(result, place) == (
-            "<operator only; ignored from this file: <from the environment>>"
-        ), result
-        return
     marker = _marker_at(result, place)
-    assert marker == (
-        "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
-    ), marker
+    assert marker == _REFERENCE_MARKER, marker
 
 
 @pytest.mark.parametrize(
@@ -1195,8 +1200,8 @@ def test_get_config_never_answers_with_an_in_tree_file_s_read_scope(
     The row naming .ash/.ash.yaml exercises the deprecated legacy location.
     By every route get_config takes for it, the answer holds no value the
     environment gave. Where it marks the scope ignored, the marker is the
-    reference, or `<from the environment>` where the load left none at the
-    place. Where the file is the one a scan of the tree finds, it is
+    reference the file wrote, `<from ${VAR}>`, whether the load kept it at the
+    place or the loader's mark on the value carries it. Where the file is the one a scan of the tree finds, it is
     resolved as that scan resolves it, and the scope is the one the scan
     applies."""
     import json
@@ -1239,32 +1244,30 @@ def test_get_config_never_answers_with_an_in_tree_file_s_read_scope(
         # left out at the load, and the answer holds no scope at all.
         assert "findings_scope" not in options, options
     else:
-        assert options["findings_scope"] == (
-            "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
-        ), options
+        assert options["findings_scope"] == _REFERENCE_MARKER, options
     if route.startswith("named"):
         # Without the target, the session's stand-in is not the scan's tree:
-        # the file is judged by its own confinement root, and the reference is
-        # no longer at the place, so the marker shows `<from the environment>`
-        # in its place: the option is shown as ignored, and the answer holds
-        # no line with the value.
+        # the file is judged by its own confinement root, and the load's
+        # reference is no longer at the place, but the file wrote a reference,
+        # so the loader's mark on the value shows the same `<from ${VAR}>`: the
+        # option is shown as ignored, and the answer holds no line with the
+        # value.
         control = mcp_get_config(config_path=str(named))
         assert _SERVER_VALUE not in json.dumps(control), control
         control_options = control["reporters"]["aws-security-hub"]["options"]
-        assert control_options["findings_scope"] == (
-            "<operator only; ignored from this file: <from the environment>>"
-        ), control_options
+        assert control_options["findings_scope"] == _REFERENCE_MARKER, control_options
 
 
-def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
+def test_get_config_shows_a_literal_scope_equal_to_a_read_value_as_the_placeholder(
     tmp_path, monkeypatch
 ):
     """A checkout's file reads project_name from ${VAR} and writes
-    findings_scope as a literal that happens to be the same text. The marker
-    cannot tell that literal from the read, and errs toward showing less
-    (`mark_operator_only_options` gives a value that equals or contains one the
-    configuration read the placeholder): the scope is shown as ignored, as
-    `<from the environment>`, and the answer holds the text nowhere."""
+    findings_scope as a literal that happens to be the same text. Nothing at
+    findings_scope says it was read, so the marker cannot tell that literal from
+    the read, and errs toward showing less (`mark_operator_only_options` gives a
+    value that equals or contains one the configuration read the placeholder):
+    the scope is shown as ignored, as the withheld placeholder that names no
+    source, and the answer holds the text nowhere."""
     import json
 
     from automated_security_helper.cli.mcp_tools import mcp_get_config
@@ -1289,9 +1292,7 @@ def test_get_config_shows_a_literal_scope_as_written_beside_a_read_value(
 
     assert "same-text" not in json.dumps(result), result
     options = result["reporters"]["aws-security-hub"]["options"]
-    assert options["findings_scope"] == (
-        "<operator only; ignored from this file: <from the environment>>"
-    ), options
+    assert options["findings_scope"] == _WITHHELD_MARKER, options
 
 
 def test_get_config_shows_a_literal_written_over_a_read_value_as_the_literal(
@@ -1343,8 +1344,9 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     """The checkout's base file is swapped for a symlink out of the checkout
     right after the resolution reads the chain, as a writer can between the
     read and the answer. get_config answers from that one read: the base's
-    env-read option is shown as ignored, with `<from the environment>` because
-    the reference is no longer at the place, and nothing walks the live
+    env-read option is shown as ignored, by the reference the file wrote
+    (`<from ${VAR}>`, from the loader's mark on the value, since the load's own
+    reference is no longer at the place), and nothing walks the live
     filesystem again to raise past the structured refusals or to read what the
     link points at now."""
     import json
@@ -1388,14 +1390,10 @@ def test_a_chain_file_swapped_for_a_link_after_the_resolve_still_answers(
     assert _SERVER_VALUE not in text, result
     assert "swapped-in-after-the-read" not in text, result
     options = result["reporters"]["aws-security-hub"]["options"]
-    assert options["findings_scope"] == (
-        "<operator only; ignored from this file: <from the environment>>"
-    ), options
+    assert options["findings_scope"] == _REFERENCE_MARKER, options
 
 
-def test_get_config_shows_an_aliased_environment_value_by_its_reference(
-    tmp_path, monkeypatch
-):
+def test_get_config_refuses_an_aliased_environment_value(tmp_path, monkeypatch):
     """A checkout's file reads project_name from ${VAR} under a YAML anchor
     and points findings_scope at it with an alias. The loader refuses YAML
     aliases (`load_config_yaml`), so get_config answers a refusal for the file:
