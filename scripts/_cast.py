@@ -20,7 +20,8 @@ What it holds
   scene's own budget. Output is shortened to fit and never stretched.
 * the scrub scan: ``scan_text`` and ``scan_cast`` look for tokens that must not appear
   in a recording (home directories, user and host names) and name each hit by its
-  kind, never by its value.
+  kind, never by its value. A token that a color change, a line wrap or a cursor
+  movement splits is found in the text with those taken out (``flatten_text``).
 * the run record: dataclasses for what a recording run observed, and
   ``canonical_json``, the one JSON form the record is written in.
 
@@ -1217,6 +1218,16 @@ def build_cast(
 MATCH_MODES = ("substring", "path-component", "word")
 
 _SGR = re.compile(r"\x1b\[[0-9;:]*m")
+#: Every escape sequence a terminal reads, in the 7-bit and the 8-bit forms of the
+#: introducers: a control string (OSC, DCS, SOS, PM or APC, up to its terminator), a
+#: control sequence (CSI), or any other escape. One that the text cuts short is read as
+#: far as it goes.
+_ESCAPE = re.compile(
+    r"(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?"
+    r"|(?:\x1b[PX^_]|[\x90\x98\x9e\x9f])[^\x1b\x9c]*(?:\x1b\\|\x9c)?"
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]?"
+    r"|\x1b[ -/]*[0-~]?"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1264,7 +1275,9 @@ class ForbiddenHit:
     kind: str
     where: str
     #: ``raw`` is the text as recorded; ``plain`` is the text with SGR color runs
-    #: removed, which finds a token that color changes split.
+    #: removed, which finds a token that color changes split; ``flat`` is the text with
+    #: every escape sequence, control character, line break and box-drawing character
+    #: removed, which finds a token that a line wrap or a cursor movement split.
     view: str
 
     def __str__(self) -> str:
@@ -1286,6 +1299,33 @@ def strip_sgr(text: str) -> str:
     return _SGR.sub("", text)
 
 
+def flatten_text(text: str) -> str:
+    """``text`` as one unbroken run, for a scan that must not be fooled by a wrap.
+
+    Every escape sequence (not only SGR), every control character (the carriage
+    return and line feed of a wrap among them) and every box-drawing character
+    (U+2500 to U+257F, the borders of a table) is removed, with the spaces beside a
+    removed control or box-drawing character, so the two halves of a path that a table
+    cell wrapped, or that a cursor movement parted, read as the path again. It can
+    join words that were apart, which only makes a scan that looks for a token
+    stricter.
+    """
+    kept: list[str] = []
+    in_gap = False
+    for char in _ESCAPE.sub("", text):
+        code = ord(char)
+        if code < 0x20 or 0x7F <= code <= 0x9F or 0x2500 <= code <= 0x257F:
+            while kept and kept[-1] == " ":
+                kept.pop()
+            in_gap = True
+        elif in_gap and char == " ":
+            continue
+        else:
+            in_gap = False
+            kept.append(char)
+    return "".join(kept)
+
+
 def _scan(
     text: str,
     compiled: Sequence[tuple[ForbiddenToken, re.Pattern[str]]],
@@ -1296,9 +1336,12 @@ def _scan(
     hits: list[ForbiddenHit] = []
     seen = set(skip)
     plain = strip_sgr(text)
+    flat = flatten_text(text)
     views = [("raw", text)]
     if plain != text:
         views.append(("plain", plain))
+    if flat not in (text, plain):
+        views.append(("flat", flat))
     for view, body in views:
         for token, pattern in compiled:
             if token.kind not in seen and pattern.search(body):
@@ -1312,8 +1355,10 @@ def scan_text(
 ) -> list[ForbiddenHit]:
     """The forbidden tokens in ``text``, one hit per kind.
 
-    The text is read as recorded and, when it holds color sequences, again with them
-    removed, so a path that color changes split into pieces is still found.
+    The text is read as recorded, again with its color sequences removed and again
+    flattened (see ``flatten_text``), so a path that color changes, a line wrap or a
+    cursor movement split into pieces is still found. A view that equals an earlier
+    one is not read twice.
     """
     return _scan(text, [(token, token.pattern()) for token in tokens], where)
 
