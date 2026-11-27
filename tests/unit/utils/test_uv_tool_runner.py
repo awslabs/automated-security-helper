@@ -2862,6 +2862,7 @@ class TestGetUvToolCommand:
                 "tool",
                 "run",
                 "--offline",
+                "--no-env-file",
                 "bandit",
                 "--version",
             ]
@@ -2871,6 +2872,7 @@ class TestGetUvToolCommand:
                 UV_PATH,
                 "tool",
                 "run",
+                "--no-env-file",
                 "bandit",
                 "--version",
             ]
