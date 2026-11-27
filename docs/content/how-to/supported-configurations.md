@@ -325,8 +325,11 @@ backend is sandbox-exec, the same configuration as Betterleaks below.
 GuardDog runs without its own kernel sandbox, because the kernel offers none here.
 
 Level: degraded. ASH carries on. When the scanner's options require the sandbox, the scan
-of that target fails instead. It applies on Linux, where the way out is a kernel setting.
-Way out: [enable Landlock](#enable-landlock).
+of that target fails instead. It applies where the scanners run on Linux. The kernel that
+lacks Landlock is the one that runs them: this machine's, where the way out is a kernel
+setting, or the container engine's virtual machine, when a Mac or a Windows PC scans in
+container mode. Ways out: [enable Landlock](#enable-landlock) on a Linux host, or
+[use a container engine with Landlock](#engine-landlock) from any other host.
 
 ### Betterleaks with a private home directory {#scanner-betterleaks-private-home}
 
@@ -499,6 +502,17 @@ Use a Linux kernel with Landlock enabled (add landlock to the lsm= kernel parame
 GuardDog's own sandbox needs.
 
 On this machine, on Linux.
+
+### Use a container engine with Landlock {#engine-landlock}
+
+Use a container engine whose Linux virtual machine runs a kernel with Landlock enabled,
+which GuardDog's own sandbox needs.
+
+On this machine, in container mode, and offered from a host that is not Linux. The scanners
+then run in the Linux virtual machine of the container engine, so the kernel that needs
+Landlock is that machine's and not the host's. See
+[Run ASH in a container](run-in-a-container.md), and
+[Windows and macOS](run-in-a-container.md#platforms) for those hosts.
 
 ### Run the wrapper from PowerShell 7 {#pwsh7}
 
