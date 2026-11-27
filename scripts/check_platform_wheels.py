@@ -386,11 +386,16 @@ def load_register(path: Path) -> Any:
 
 
 def load_blocks(path: Path) -> Mapping[str, Any]:
-    """``{scanner: provisioning block}`` from the register at *path*."""
+    """``{scanner: provisioning block}`` from the register at *path*.
+
+    A register that cannot be read, because it fails to load or has no PROVISIONING,
+    raises ValueError and leaves no module behind.
+    """
     module = load_register(path)
     try:
         return module.PROVISIONING
     except AttributeError as exc:
+        sys.modules.pop(module.__name__, None)
         raise ValueError(
             f"cannot read the plugin register {path}: it has no PROVISIONING"
         ) from exc
