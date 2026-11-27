@@ -14,7 +14,8 @@ ubuntu-24.04-arm Homebrew leg was excluded, install-validation went from 33 legs
 warm-image-layers, sandbox and sandbox-scanner-parity, which landed after the run the
 chain is anchored on.
 
-This expands each job's matrix the way GitHub does and holds the comments to it: the
+This expands each job's matrix the way GitHub does (scripts/_ci_matrix.py, the one
+expansion the tests that read these matrices share) and holds the comments to it: the
 per-job list names every job with its leg count, the totals are its sum, and the
 merge-queue figures leave out the jobs whose ``if`` runs them only on a push.
 
@@ -39,8 +40,9 @@ direction is a slower pull request rather than a missing leg.
 
 from __future__ import annotations
 
-import itertools
+import importlib.util
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -70,68 +72,44 @@ def _jobs(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
 
 
+def _load_ci_matrix() -> Any:
+    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
+    name = "_ash_ci_matrix"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
+        )
+        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+ci_matrix = _load_ci_matrix()
+
+# The expansion is the shared reader's. The names below are the ones this module's tests
+# read it by.
+
 #: The one shape of event-conditioned matrix entry this workflow uses: the value on a
 #: pull request, the empty string (matching no combination) on every other event.
-PULL_REQUEST_OVERLAY = re.compile(
-    r"^\$\{\{ github\.event_name == 'pull_request' && '([^']*)' \|\| '' \}\}$"
-)
+PULL_REQUEST_OVERLAY = ci_matrix.PULL_REQUEST_OVERLAY
 
+#: The value a matrix entry has under an event; None when the entry is void. A plain value
+#: is itself on every event. The overlay expression is its quoted value on a pull request
+#: and void everywhere else, because GitHub evaluates it to '' there and no combination
+#: has an empty axis value.
+_resolve = ci_matrix.resolve_overlay
 
-def _resolve(value: Any, event: str) -> Any:
-    """The value a matrix entry has under ``event``; None when the entry is void.
-
-    A plain value is itself on every event. The overlay expression is its quoted value
-    on a pull request and void everywhere else, because GitHub evaluates it to '' there
-    and no combination has an empty axis value.
-    """
-    if isinstance(value, str):
-        match = PULL_REQUEST_OVERLAY.match(value)
-        if match:
-            return match.group(1) if event == "pull_request" else None
-    return value
-
-
-def _cells(job: dict[str, Any], event: str = "push") -> list[dict[str, Any]]:
-    """The jobs GitHub creates for one entry under ``jobs:``, as matrix cells.
-
-    The axes' product, less the cells an ``exclude`` entry matches. An ``include``
-    entry merges into every cell whose axis values it matches, adding none, and is a
-    cell of its own only when it matches none (the matrix rules in GitHub's workflow
-    syntax reference). A job with no matrix is one empty cell. Exclude entries are
-    resolved for ``event`` first (see ``_resolve``); an entry with a void value matches
-    nothing, which is what the empty string does on GitHub.
-    """
-    matrix = (job.get("strategy") or {}).get("matrix")
-    if not matrix:
-        return [{}]
-    assert isinstance(matrix, dict), f"a matrix this test cannot expand: {matrix!r}"
-    axes = {k: v for k, v in matrix.items() if k not in ("include", "exclude")}
-    for name, values in axes.items():
-        assert isinstance(values, list), f"axis {name} is not a list: {values!r}"
-    cells = (
-        [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
-        if axes
-        else []
-    )
-    for excluded in matrix.get("exclude") or []:
-        resolved = {k: _resolve(v, event) for k, v in excluded.items()}
-        if any(v is None for v in resolved.values()):
-            continue
-        cells = [
-            c for c in cells if not all(c.get(k) == v for k, v in resolved.items())
-        ]
-    added = []
-    for included in matrix.get("include") or []:
-        matching = [
-            cell
-            for cell in cells
-            if all(cell[k] == v for k, v in included.items() if k in axes)
-        ]
-        for cell in matching:
-            cell.update(included)
-        if not matching:
-            added.append(dict(included))
-    return cells + added
+#: The jobs GitHub creates for one entry under ``jobs:``, as matrix cells: the axes'
+#: product, less the cells an ``exclude`` entry matches. An ``include`` entry merges into
+#: every cell whose axis values it matches, adding none, and is a cell of its own only
+#: when it matches none (the matrix rules in GitHub's workflow syntax reference). A job
+#: with no matrix is one empty cell. Exclude entries are resolved for the event first
+#: (see ``_resolve``); an entry with a void value matches nothing, which is what the
+#: empty string does on GitHub.
+_cells = ci_matrix.cells
 
 
 def _legs(job: dict[str, Any], event: str = "push") -> int:
@@ -692,32 +670,13 @@ def _needs(job: dict[str, Any]) -> list[str]:
 
 
 def _runner_images(job: dict[str, Any]) -> set[str]:
-    """The runner images a job runs on: its os axis, or the literal runs-on."""
-    runs_on = str(job["runs-on"])
-    if "matrix.os" in runs_on:
-        # The one override shape the workflow uses: a leg of one method on one axis
-        # image runs on another label (the finch legs on ubuntu-24.04). The image
-        # setup-uv keys its cache on is the label the leg runs on, not the axis value.
-        override = FINCH_LABEL_OVERRIDE.search(runs_on)
-        images = set()
-        for cell in _cells(job):
-            image = cell["os"]
-            if (
-                override
-                and cell.get(override["axis"]) == override["value"]
-                and image == override["os"]
-            ):
-                image = override["label"]
-            images.add(image)
-        return images
-    return {runs_on}
+    """The runner images a job runs on: the label each of its legs' runs-on resolves to.
 
-
-#: ``(matrix.<axis> == '<value>' && matrix.os == '<os>') && '<label>' || matrix.os``.
-FINCH_LABEL_OVERRIDE = re.compile(
-    r"\(matrix\.(?P<axis>[\w-]+) == '(?P<value>[^']+)' && "
-    r"matrix\.os == '(?P<os>[^']+)'\) && '(?P<label>[^']+)' \|\| matrix\.os"
-)
+    The reader resolves the one override shape the workflow uses: a leg of one method on
+    one axis image runs on another label (the finch legs on ubuntu-24.04). The image
+    setup-uv keys its cache on is the label the leg runs on, not the axis value.
+    """
+    return {ci_matrix.runs_on(job, cell) for cell in _cells(job)}
 
 
 SETUP_ASH_CALLERS = [
