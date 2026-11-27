@@ -538,7 +538,7 @@ global_settings:
     # a generated or vendored file nobody hand-edits, a format with no comment
     # syntax, or a pattern spread over more lines than is reasonable to mark.
     #
-    # There are no directory-wide entries left. `SECRET-*` over `tests/**` and
+    # No directory-wide entry covers committed files. `SECRET-*` over `tests/**` and
     # `scripts/**` hid 31 findings; each is now a pragma on its line, and
     # tests/unit/config/test_no_directory_glob_secret_suppressions.py fails if a
     # directory glob for this rule family comes back. Some sit on the line above
@@ -3303,13 +3303,6 @@ global_settings:
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"
       reason: "ASH requires Python 3.10+ (pyproject.toml) — older-version warnings not applicable"
-    # === semgrep/opengrep Python security audit ===
-    - rule_id: "python.lang.security.audit.non-literal-import.non-literal-import"
-      path: "automated_security_helper/**/*.py"
-      reason: "Plugin loading uses hardcoded module paths from registry, not user input"
-    - rule_id: "python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected"
-      path: "automated_security_helper/**/*.py"
-      reason: "URLs are constructed from trusted config values, not user input"
     # === Checkov Dockerfile: HEALTHCHECK not applicable (CLI tool, not a service) ===
     - rule_id: "CKV_DOCKER_2"
       path: "Dockerfile"
@@ -3762,8 +3755,15 @@ global_settings:
         input the code under test must refuse or report, or as a harness
         fallback. Here /tmp/app.tar and friends are CLI argument fixtures the
         classifier under test parses; no file is created under them.
+    # === The sdist-lock harvester's output: files the scan writes for itself ===
+    # The harvester writes these files into the scan's own output while the scan
+    # runs, one directory per harvested package and version, so no committed file
+    # sits in this layout and no file-scoped entry can name them. The manifest entry
+    # below is the one directory pattern a secret rule carries in this file, and
+    # tests/unit/config/test_no_directory_glob_secret_suppressions.py admits that
+    # rule on that path and no other.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: "**/sdist-lock-harvester/sdist-locks/**/harvest-manifest.json"
+      path: "**/sdist-lock-harvester/sdist-locks/*/*/harvest-manifest.json"
       reason: >-
         False positive. The provenance manifests the sdist-lock harvester
         writes beside each harvested lockfile record the sdist's sha256 package
@@ -3862,24 +3862,62 @@ global_settings:
       reason: >-
         grype's id for a zip 8.6.0 advisory in ruff 0.16.10's sdist-embedded
         Cargo.lock. Upstream ruff's build input.
+    # pyo3 in three harvested lockfiles: one entry per advisory and lockfile, each
+    # held to the pyo3 version that lockfile carries. The trailing `*` on the rule
+    # id takes trivy's bare GHSA id and grype's id with -pyo3 appended. A parent
+    # release that moves pyo3 to another affected version reports the advisory
+    # again; one that moves it to a fixed version leaves the entry unused.
     - rule_id: "GHSA-36hh-v3qg-5jq4*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
+      path: "**/sdist-lock-harvester/sdist-locks/pydantic-core/*/Cargo.lock"
       package_name: pyo3
+      package_version: "0.28.3"
       expires: "2026-12-27"
       reason: >-
-        pyo3 advisory inside the sdist-embedded Cargo.locks of pydantic-core
-        2.46.5, rpds-py 0.30.0 and rtoml 0.13.0 (trivy's bare GHSA id and
-        grype's -pyo3 suffixed id alike). The pin is each upstream's build
-        input; taken when those projects release against the fixed pyo3.
+        pyo3 0.28.3 inside pydantic-core 2.46.5's sdist-embedded Cargo.lock.
+        Upstream pydantic-core's build input; taken when a release built against
+        a fixed pyo3 is adopted.
+    - rule_id: "GHSA-36hh-v3qg-5jq4*"
+      path: "**/sdist-lock-harvester/sdist-locks/rpds-py/*/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.27.2"
+      expires: "2026-12-27"
+      reason: >-
+        pyo3 0.27.2 inside rpds-py 0.30.0's sdist-embedded Cargo.lock. Upstream
+        rpds-py's build input; taken when a release built against a fixed pyo3
+        is adopted.
+    - rule_id: "GHSA-36hh-v3qg-5jq4*"
+      path: "**/sdist-lock-harvester/sdist-locks/rtoml/*/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.26.0"
+      expires: "2026-12-27"
+      reason: >-
+        pyo3 0.26.0 inside rtoml 0.13.0's sdist-embedded Cargo.lock. Upstream
+        rtoml's build input; taken when a release built against a fixed pyo3 is
+        adopted.
     - rule_id: "GHSA-chgr-c6px-7xpp*"
-      path: "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"
+      path: "**/sdist-lock-harvester/sdist-locks/pydantic-core/*/Cargo.lock"
       package_name: pyo3
+      package_version: "0.28.3"
       expires: "2026-12-27"
       reason: >-
-        pyo3 advisory inside the sdist-embedded Cargo.locks of pydantic-core
-        2.46.5, rpds-py 0.30.0 and rtoml 0.13.0 (trivy's bare GHSA id and
-        grype's -pyo3 suffixed id alike). The pin is each upstream's build
-        input.
+        pyo3 0.28.3 inside pydantic-core 2.46.5's sdist-embedded Cargo.lock.
+        Upstream pydantic-core's build input.
+    - rule_id: "GHSA-chgr-c6px-7xpp*"
+      path: "**/sdist-lock-harvester/sdist-locks/rpds-py/*/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.27.2"
+      expires: "2026-12-27"
+      reason: >-
+        pyo3 0.27.2 inside rpds-py 0.30.0's sdist-embedded Cargo.lock. Upstream
+        rpds-py's build input.
+    - rule_id: "GHSA-chgr-c6px-7xpp*"
+      path: "**/sdist-lock-harvester/sdist-locks/rtoml/*/Cargo.lock"
+      package_name: pyo3
+      package_version: "0.26.0"
+      expires: "2026-12-27"
+      reason: >-
+        pyo3 0.26.0 inside rtoml 0.13.0's sdist-embedded Cargo.lock. Upstream
+        rtoml's build input.
     # rustls in polars' harvested Cargo.lock: rustls 0.23.43 is statically
     # linked into the polars-runtime-32 wheel, so only a polars release built
     # against a fixed rustls (0.23.45 for GHSA-2mjx-qc3c-rqvc, 0.23.46 for
@@ -3938,9 +3976,10 @@ global_settings:
     - rule_id: "GHSA-c8m5-c952-6cm4*"
       path: "**/sdist-lock-harvester/sdist-locks/uv/*/Cargo.lock"
       package_name: rustls
+      package_version: "0.23.45"
       expires: "2026-12-27"
       reason: >-
-        rustls advisory inside uv 0.13.5's sdist-embedded Cargo.lock (trivy's
+        rustls 0.23.45 inside uv 0.13.5's sdist-embedded Cargo.lock (trivy's
         bare GHSA id and grype's -rustls suffixed id alike). Upstream uv's build
         input; polars' copy of the same advisory has its own entries above.
     # No GitHub Actions entries. `yaml.github-actions.security.*` was suppressed

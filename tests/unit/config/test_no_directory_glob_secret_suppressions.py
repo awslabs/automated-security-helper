@@ -32,6 +32,11 @@ in one directory.
 A rule pattern belongs to a guarded family if it matches any probe rule id below
 under ASH's own rule matcher. That includes a missing rule id and ``*``, which
 match every rule and so hide secrets as well as anything else.
+
+One kind of entry is admitted, in ``WRITTEN_BY_THE_SCAN``: a pattern for files a
+scan writes into its own output while it runs. No committed file stands for
+them and no file-scoped entry can name them. Each admitted row is one rule on
+one path, and a test below fails if the entry it admits is gone.
 """
 
 from pathlib import Path
@@ -39,6 +44,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from automated_security_helper.utils.sdist_harvest import (
+    HARVEST_DIR_NAME,
+    HARVEST_MANIFEST_NAME,
+)
 from automated_security_helper.utils.suppression_matcher import _rule_id_matches
 
 pytestmark = pytest.mark.unit
@@ -93,6 +102,30 @@ def broad_guarded_suppressions(config: dict) -> list[dict]:
     ]
 
 
+#: The directory-pattern entries the guard admits, by (rule_id, path), with the
+#: reason no file-scoped entry can name their files. Each row is a place where a
+#: new finding of its rule goes unreported, so a row names only files a scan
+#: writes into its own output, which no commit holds.
+WRITTEN_BY_THE_SCAN: dict[tuple[str, str], str] = {
+    (
+        "SECRET-HEX-HIGH-ENTROPY-STRING",
+        f"**/sdist-lock-harvester/{HARVEST_DIR_NAME}/*/*/{HARVEST_MANIFEST_NAME}",
+    ): (
+        "the provenance manifest the sdist-lock harvester writes beside each "
+        "harvested lockfile, one directory per package and version; it records "
+        "the sdist's sha256 digest and lives only in a scan's output"
+    ),
+}
+
+
+def unallowed_guarded_suppressions(config: dict) -> list[dict]:
+    return [
+        s
+        for s in broad_guarded_suppressions(config)
+        if (s.get("rule_id"), s.get("path")) not in WRITTEN_BY_THE_SCAN
+    ]
+
+
 def test_the_repository_ships_config_files_to_check():
     # Without this the parametrized test below collects zero cases and passes.
     names = {p.name for p in _config_files()}
@@ -104,7 +137,7 @@ def test_no_directory_glob_suppresses_secret_or_actions_rules(config_path):
     config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     offenders = [
         f"{s.get('rule_id') or '*'} on {s['path']}"
-        for s in broad_guarded_suppressions(config)
+        for s in unallowed_guarded_suppressions(config)
     ]
     assert offenders == [], (
         f"{config_path.name} suppresses secret or GitHub Actions findings across a "
@@ -185,3 +218,50 @@ def test_the_guard_reads_a_config_on_disk_the_same_way(tmp_path):
     )
     config = yaml.safe_load(planted.read_text(encoding="utf-8"))
     assert [s["path"] for s in broad_guarded_suppressions(config)] == ["tests/**"]
+
+
+# The allowance: each row admits one rule on one path, and nothing beside it.
+
+
+@pytest.mark.parametrize("rule_id, path", sorted(WRITTEN_BY_THE_SCAN))
+def test_an_allowed_entry_is_a_directory_glob_the_allowance_admits(rule_id, path):
+    # A row the guard would not report anyway admits nothing and should go.
+    entry = {"rule_id": rule_id, "path": path, "reason": "probe"}
+    config = {"global_settings": {"suppressions": [entry]}}
+    assert broad_guarded_suppressions(config) == [entry]
+    assert unallowed_guarded_suppressions(config) == []
+
+
+def test_every_allowance_names_an_entry_a_config_carries():
+    # A row whose entry is gone would admit the next entry written with that rule
+    # and path, without anyone reading it.
+    carried = set()
+    for config_path in _config_files():
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        carried |= {
+            (s.get("rule_id"), s.get("path"))
+            for s in broad_guarded_suppressions(config)
+        }
+    assert set(WRITTEN_BY_THE_SCAN) <= carried
+
+
+@pytest.mark.parametrize(
+    "rule_id, path",
+    [
+        # Another rule on the allowed path.
+        (
+            "SECRET-SECRET-KEYWORD",
+            f"**/sdist-lock-harvester/{HARVEST_DIR_NAME}/*/*/{HARVEST_MANIFEST_NAME}",
+        ),
+        # The allowed rule on a wider path.
+        (
+            "SECRET-HEX-HIGH-ENTROPY-STRING",
+            f"**/sdist-lock-harvester/{HARVEST_DIR_NAME}/**/{HARVEST_MANIFEST_NAME}",
+        ),
+        ("SECRET-HEX-HIGH-ENTROPY-STRING", f"**/{HARVEST_MANIFEST_NAME}"),
+    ],
+)
+def test_an_entry_beside_an_allowance_is_still_reported(rule_id, path):
+    entry = {"rule_id": rule_id, "path": path, "reason": "probe"}
+    config = {"global_settings": {"suppressions": [entry]}}
+    assert unallowed_guarded_suppressions(config) == [entry]
