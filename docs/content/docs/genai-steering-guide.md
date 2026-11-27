@@ -1588,8 +1588,9 @@ these fields: `id`, `title`, `description`, `severity`, `scanner`, `rule_id`, `f
 suppressed findings, `suppression_kind` and `suppression_justification`. Fields with no
 value are left out, so read them with a default. `tags`, `properties`, and `raw_data` hold
 JSON encoded as strings. A record whose `result_kind` is `pass`, `notApplicable` or
-`informational` states no finding (the `ASH-container-image-not-scanned` note is one):
-read it as information.
+`informational` and whose `severity` is `INFO` states no finding (the
+`ASH-container-image-not-scanned` note is one): read it as information. A record of one of
+those kinds with a `severity` above `INFO` reports a problem, and counts as a finding.
 
 ```python
 import json
@@ -1599,7 +1600,10 @@ report = json.loads(Path(".ash/ash_output/reports/ash.flat.json").read_text())
 for finding in report["findings"]:
     if finding.get("is_suppressed"):
         continue
-    if finding.get("result_kind") in ("pass", "notApplicable", "informational"):
+    if (
+        finding.get("result_kind") in ("pass", "notApplicable", "informational")
+        and finding.get("severity") == "INFO"
+    ):
         continue
     print(
         finding["severity"],

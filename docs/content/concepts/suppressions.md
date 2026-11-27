@@ -120,7 +120,7 @@ Only unsuppressed findings at or above the severity threshold count toward `fail
 | `ash.ghas.sarif` | Left out, unless `exclude_suppressed` is turned off |
 | `ash.summary.md`, `ash.summary.txt` | Counted in the suppressed column only |
 
-Findings under an ignore path, and findings a rule+path exclusion dropped, appear in none of these. The `unused-suppressions` reporter writes `ash.unused-suppressions.json` and `.md`, which list the configured suppressions that matched no finding.
+Findings under an ignore path, and findings a rule+path exclusion dropped, appear in none of these. The `unused-suppressions` reporter writes `ash.unused-suppressions.json` and `.md`, which list the configured suppressions that matched no finding. A suppressed result that states no finding is listed under Information and counted in no column.
 
 ## Client-supplied entries
 
