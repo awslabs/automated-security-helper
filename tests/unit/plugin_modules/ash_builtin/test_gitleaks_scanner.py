@@ -1987,3 +1987,86 @@ def test_an_operator_path_outside_the_tree_may_be_a_link(tmp_path):
     (tmp_path / "b.json").symlink_to(tmp_path / "real.json")
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     assert f"--baseline-path={(tmp_path / 'real.json').resolve().as_posix()}" in args
+
+
+# --- a config's [extend] path reads nothing from the scanned tree -----------------
+
+_RELATIVE_EXTEND = "[extend]\npath = 'common.toml'\n"
+_TREE_COMMON = "[[allowlists]]\npaths = ['''.*''']\n"
+
+
+def _extend_scanner(tmp_path, monkeypatch, how: str, extend_text: str):
+    """A scanner whose config is chosen as ``how``, holding ``extend_text``.
+
+    The scanned tree holds ``common.toml``: the file a relative extend path
+    would open from gitleaks' working directory.
+    """
+    for name in ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"):
+        monkeypatch.delenv(name, raising=False)
+    operator_dir = tmp_path / "op"
+    operator_dir.mkdir()
+    options = {}
+    if how == "config_file":
+        (operator_dir / "gitleaks.toml").write_text(extend_text)
+        options["config_file"] = str(operator_dir / "gitleaks.toml")
+    elif how == "env_path":
+        (operator_dir / "gitleaks.toml").write_text(extend_text)
+        monkeypatch.setenv("GITLEAKS_CONFIG", str(operator_dir / "gitleaks.toml"))
+    elif how == "env_toml":
+        monkeypatch.setenv("GITLEAKS_CONFIG_TOML", extend_text)
+    elif how == "chain":
+        (operator_dir / "mid.toml").write_text(extend_text)
+        (operator_dir / "gitleaks.toml").write_text(
+            f"[extend]\npath = '{(operator_dir / 'mid.toml').as_posix()}'\n"
+        )
+        options["config_file"] = str(operator_dir / "gitleaks.toml")
+    else:
+        raise AssertionError(how)
+    scanner = _scanner(tmp_path, operator=True, **options)
+    (scanner.context.source_dir / "common.toml").write_text(_TREE_COMMON)
+    return scanner
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_relative_extend_path_is_refused(tmp_path, monkeypatch, how):
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
+    with pytest.raises(ScannerError, match="extend"):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_an_absolute_extend_path_is_passed_as_config(tmp_path, monkeypatch, how):
+    """The control: the same shape with an absolute extend path builds an argv."""
+    common = tmp_path / "op" / "common.toml"
+    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, absolute)
+    common.write_text(_TREE_COMMON)
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert any(a.startswith("--config=") for a in args)
+
+
+@pytest.mark.unit
+def test_an_env_config_is_passed_as_config_outside_the_tree(tmp_path, monkeypatch):
+    """With the config in the environment gitleaks would otherwise set its own
+    config path to ``<source>/.gitleaks.toml``; ASH passes ``--config``."""
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "env_toml", "[extend]\nuseDefault = true\n"
+    )
+    source = scanner.context.source_dir
+    args = scanner._build_arguments(source, tmp_path / "o.sarif")
+    configs = [a for a in args if a.startswith("--config=")]
+    assert len(configs) == 1
+    written = Path(configs[0].split("=", 1)[1])
+    assert not written.resolve().is_relative_to(Path(source).resolve())
+    assert written.read_text() == "[extend]\nuseDefault = true\n"
+
+
+@pytest.mark.unit
+def test_an_absolute_env_path_is_passed_as_config(tmp_path, monkeypatch):
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "env_path", "[extend]\nuseDefault = true\n"
+    )
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert f"--config={(tmp_path / 'op' / 'gitleaks.toml').as_posix()}" in args

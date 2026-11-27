@@ -196,6 +196,38 @@ def test_version_output_without_a_version_number_is_unknown(
     assert version is None
 
 
+@patch(
+    "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
+)
+def test_the_version_probe_reads_no_config_from_its_working_directory(
+    mock_find_executable, mock_plugin_context
+):
+    """ferret-scan loads a config from its working directory before it handles
+    ``--version``, so the probe runs outside the scanned tree and is given a
+    ``--config`` the way the scan run is."""
+    mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
+    scanner = FerretScanScanner(context=mock_plugin_context)
+
+    with patch(
+        "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.spawn_run"
+    ) as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="ferret-scan 2.6.2")
+        assert scanner._get_installed_version() == "2.6.2"
+
+    argv = mock_run.call_args.args[0]
+    cwd = mock_run.call_args.kwargs.get("cwd")
+    assert cwd is not None
+    assert not Path(os.path.abspath(cwd)).is_relative_to(
+        Path(os.path.abspath(mock_plugin_context.source_dir))
+    )
+    assert "--config" in argv
+    assert (
+        not Path(argv[argv.index("--config") + 1])
+        .resolve()
+        .is_relative_to(Path(mock_plugin_context.source_dir).resolve())
+    )
+
+
 # --- options --------------------------------------------------------------------------
 
 

@@ -829,3 +829,65 @@ class TestPinnedRelease:
             "automated_security_helper.plugin_modules.ash_betterleaks_plugins"
             in self._dockerfile()
         )
+
+
+# --- a config's [extend] path reads nothing from the scanned tree -----------------
+
+_RELATIVE_EXTEND = "[extend]\npath = 'common.toml'\n"
+_TREE_COMMON = "[[allowlists]]\npaths = ['''.*''']\n"
+
+_EXTEND_SOURCES = [
+    "config_file",
+    "BETTERLEAKS_CONFIG",
+    "GITLEAKS_CONFIG",
+    "BETTERLEAKS_CONFIG_TOML",
+    "GITLEAKS_CONFIG_TOML",
+    "chain",
+]
+
+
+def _extend_scanner(tree, tmp_path, monkeypatch, how: str, extend_text: str):
+    """A scanner whose config is chosen as ``how``, holding ``extend_text``.
+
+    The scanned tree holds ``common.toml``: the file a relative extend path
+    would open from Betterleaks' working directory.
+    """
+    operator_dir = tmp_path / "op"
+    operator_dir.mkdir()
+    options = {}
+    if how == "config_file":
+        (operator_dir / "betterleaks.toml").write_text(extend_text)
+        options["config_file"] = str(operator_dir / "betterleaks.toml")
+    elif how.endswith("_TOML"):
+        monkeypatch.setenv(how, extend_text)
+    elif how == "chain":
+        (operator_dir / "mid.toml").write_text(extend_text)
+        (operator_dir / "betterleaks.toml").write_text(
+            f"[extend]\npath = '{(operator_dir / 'mid.toml').as_posix()}'\n"
+        )
+        options["config_file"] = str(operator_dir / "betterleaks.toml")
+    else:
+        (operator_dir / "betterleaks.toml").write_text(extend_text)
+        monkeypatch.setenv(how, str(operator_dir / "betterleaks.toml"))
+    (tree / "common.toml").write_text(_TREE_COMMON)
+    return _scanner(tree, tmp_path, **options)
+
+
+@pytest.mark.parametrize("how", _EXTEND_SOURCES)
+def test_a_relative_extend_path_is_refused(tree, tmp_path, monkeypatch, how):
+    scanner = _extend_scanner(tree, tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
+    with pytest.raises(ScannerError, match="extend"):
+        scanner._build_arguments(tree, tmp_path / "o.sarif")
+
+
+@pytest.mark.parametrize("how", _EXTEND_SOURCES)
+def test_an_absolute_extend_path_builds_an_argv(tree, tmp_path, monkeypatch, how):
+    """The control: the same shape with an absolute extend path builds an argv,
+    with ``--config=`` where ASH passes the config (an operator file)."""
+    common = tmp_path / "op" / "common.toml"
+    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
+    scanner = _extend_scanner(tree, tmp_path, monkeypatch, how, absolute)
+    common.write_text(_TREE_COMMON)
+    args = scanner._build_arguments(tree, tmp_path / "o.sarif")
+    if how in ("config_file", "chain"):
+        assert any(a.startswith("--config=") for a in args)
