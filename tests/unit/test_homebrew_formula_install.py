@@ -670,3 +670,123 @@ class TestTheInstallLeavesNoBuildPathBehind:
         # The formula's own message, with the count: "automated_security_helper"
         # alone also matches the source line in a Ruby traceback.
         assert f"automated_security_helper dist-info, found {dist_infos}" in proc.stderr
+
+
+# ---------------------------------------------------------------------------
+# The formula's test chooses how ASH names a directory from an answer only
+# ---------------------------------------------------------------------------
+
+#: A stand-in ``ash`` that answers ``ash scan fs --help`` as each kind of ASH does,
+#: by $ASH_STUB_RELEASE: ``with-subject`` (ASH 3.9), ``without-subject`` (an older
+#: ASH, which shows the subject-less scan's help since click reads ``--help`` before
+#: it refuses the extra argument), ``refusing`` (an older ASH that refuses the word
+#: ``fs`` with a usage error instead), and anything else, a crash.
+STAND_IN_ASH_FOR_THE_PROBE = """#!/bin/sh
+case "$ASH_STUB_RELEASE" in
+  with-subject) echo "Usage: ash scan fs [OPTIONS] [PATH]"; exit 0 ;;
+  without-subject) echo "Usage: ash scan [OPTIONS]"; exit 0 ;;
+  refusing)
+    echo "Usage: ash scan [OPTIONS]" >&2
+    echo "Error: Got unexpected extra argument (fs)" >&2
+    exit 2 ;;
+esac
+printf '%s\\n' 'Traceback (most recent call last):' 'MemoryError' >&2
+exit 1
+"""
+
+
+def _directory_word_probe() -> str:
+    """The lines of the formula's test that choose the word before the scan's path.
+
+    From the probe's command to the first line of the scan that uses the word.
+    """
+    match = re.search(
+        r"^  test do\n(?P<body>.*?)^  end\n", _formula(), re.DOTALL | re.MULTILINE
+    )
+    assert match, "Formula/ash.rb has no `test do ... end`"
+    body = match["body"]
+    start = body.index("fs_help = ")
+    end = body.index('(testpath/"src/sample.py")')
+    return body[start:end]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name == "nt" or shutil.which("ruby") is None,
+    reason="Homebrew runs on macOS and Linux only",
+)
+class TestTheFormulaTestChoosesTheDirectoryWordFromAnAnswer:
+    """`brew test` scans with `fs` or `--source-dir`, and only an answer picks the older.
+
+    A probe that crashes says nothing about the installed ASH's commands. Read as an
+    ASH older than 3.9, it made the test scan with the older spelling on an ASH that
+    has the new one, so a broken `ash scan fs` passed. The probe is run here as the
+    formula holds it, under Ruby, against a stand-in ash.
+    """
+
+    @staticmethod
+    def _run(tmp_path: Path, release: str) -> subprocess.CompletedProcess:
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        ash = bin_dir / "ash"
+        ash.write_text(STAND_IN_ASH_FOR_THE_PROBE, encoding="utf-8")
+        ash.chmod(0o755)
+        script = (
+            "bin = Pathname(ARGV.fetch(0))\n"
+            f"{_directory_word_probe()}\n"
+            "puts directory_word\n"
+        )
+        return subprocess.run(  # nosec B603 B607 - ruby on the formula's own lines
+            ["ruby", "-rpathname", "-e", script, str(bin_dir)],
+            env={**os.environ, "ASH_STUB_RELEASE": release},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    @pytest.mark.parametrize(
+        "release, word",
+        [
+            ("with-subject", "fs"),
+            ("without-subject", "--source-dir"),
+            ("refusing", "--source-dir"),
+        ],
+    )
+    def test_an_answer_picks_the_word(self, tmp_path, release, word):
+        proc = self._run(tmp_path, release)
+
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.strip() == word
+
+    def test_a_crashed_probe_picks_no_word_and_fails_the_test(self, tmp_path):
+        proc = self._run(tmp_path, "crashing")
+
+        assert proc.returncode != 0, proc.stdout
+        assert proc.stdout == "", "a word was chosen by guess"
+        assert "could not tell whether this ASH has 'ash scan fs'" in proc.stderr
+        assert "MemoryError" in proc.stderr
+
+    @pytest.mark.parametrize(
+        "release, said",
+        [
+            ("with-subject", "scanning with 'ash scan fs': its help names 'scan fs'"),
+            (
+                "without-subject",
+                (
+                    "scanning with the older spelling: the help of "
+                    "'ash scan fs --help' does not name 'scan fs'"
+                ),
+            ),
+            (
+                "refusing",
+                "scanning with the older spelling: this ASH refused the word 'fs'",
+            ),
+        ],
+    )
+    def test_the_test_says_which_spelling_it_chose_and_why(
+        self, tmp_path, release, said
+    ):
+        proc = self._run(tmp_path, release)
+
+        assert f"ash: {said}" in proc.stderr, proc.stderr
