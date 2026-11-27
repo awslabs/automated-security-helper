@@ -14,6 +14,8 @@ and the runner's records:
 * a shell block's python grandchild carries the block's coverage context;
 * a forked child that ends in ``os._exit`` saves no coverage data, so no pool's
   shutdown can cut a save off and leave a file the check cannot read;
+* a block that leaves a process running fails, naming it, and counts for nothing,
+  while one that waits for the process it started counts;
 * a block that reaches the function and then fails its expected exit does not count;
 * nor does a block that reaches it while it shows ASH refusing something (its marker
   expects the usage-error exit), nor one whose output sample no longer matches;
@@ -39,6 +41,7 @@ import importlib.util
 import inspect
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -360,6 +363,82 @@ print("pids", os.getpid(), child)
     names = [part.name for part in (coverage.directory / "data").glob(".coverage.*")]
     assert any(f".pid{parent}." in name for name in names), names
     assert not [name for name in names if f".pid{child}." in name], names
+
+
+def _starts_in_the_background(seconds: int) -> str:
+    """A shell line that starts a measured python process in the background, its
+    output sent away from the block's: after ``seconds`` it reaches the planted
+    function's region."""
+    return (
+        f'python -c "import time; time.sleep({seconds}); '
+        "import automated_security_helper.core.constants as c; "
+        f"c.is_blank_bin_path('{REACHES_THE_REGION}')\" > /dev/null 2>&1 &"
+    )
+
+
+def test_a_block_that_leaves_a_process_running_fails_names_it_and_counts_for_nothing(
+    tmp_path,
+):
+    """A process a block leaves running keeps the block's coverage context: it read
+    the context from its environment when coverage started in it, so what it runs
+    after the block ended would count for that block, though nothing of the block
+    shows it. So once a block's shell has exited, the block's process group must hold
+    no process: a block that leaves one fails, the runner names the process it left,
+    and the block is no evidence. The process here reaches the planted function only
+    after its block ended."""
+    pid_file = tmp_path / "left-running.pid"
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        IMPORTS_THE_MODULE
+        + f"""
+{FENCE}bash
+{_starts_in_the_background(30)}
+echo "$!" > "{pid_file}"
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True, False], runner.failure_report(results)
+    left = pid_file.read_text(encoding="utf-8").strip()
+    assert left.isdigit(), left
+    # The pid is named by the runner, not by a line of the block's own text.
+    shown = {text.strip() for text in results[1].command.splitlines()}
+    named = [
+        text
+        for text in results[1].report().splitlines()
+        if text.strip() not in shown and re.search(rf"(?<!\d){left}(?!\d)", text)
+    ]
+    assert named, results[1].report()
+    code, report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 1
+    assert feature["covered"] is False
+    assert report["gate"]["failures"]["F1"] == [PLANTED_ID]
+
+
+def test_a_block_that_waits_for_the_process_it_started_counts(tmp_path):
+    """The control: a block that starts a process in the background and waits for it
+    leaves nothing running, passes, and counts for what that process reached."""
+    coverage = _coverage(tmp_path)
+    page, results = _run_page(
+        tmp_path,
+        f"""{FENCE}bash
+{_starts_in_the_background(1)}
+wait
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    (line,) = _fence_lines(page)
+    assert _region_contexts(coverage.directory) == {f"page.md::{line}"}
+    code, _report, feature, _markdown = _check(tmp_path, coverage, page)
+
+    assert code == 0
+    assert feature["covered"] is True
 
 
 def test_a_block_that_reaches_the_planted_function_and_then_fails_does_not_count(

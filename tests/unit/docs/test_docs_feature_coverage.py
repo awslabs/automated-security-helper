@@ -2013,6 +2013,97 @@ def test_a_plugin_that_shares_its_work_method_is_covered_where_its_own_method_ra
     assert result == {ids[name] for name in covered}
 
 
+#: Two scanners that share a work method which calls two methods on ``self``, each
+#: scanner defining both of them in its own class body.
+SHARED_WITH_TWO_METHODS_OF_ITS_OWN = """\
+from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+
+class _SharedTemplate(ScannerPluginBase):
+    def _execute_scan(self, target, target_type, global_ignore_paths):
+        args = self._arguments(target)
+        variables = self._variables(target)
+        return args, target, variables
+
+
+class FirstShared(_SharedTemplate):
+    def _arguments(self, target):
+        found = ["first", str(target)]
+        return found
+
+    def _variables(self, target):
+        found = {"FIRST": str(target)}
+        return found
+
+
+class SecondShared(_SharedTemplate):
+    def _arguments(self, target):
+        found = ["second", str(target)]
+        return found
+
+    def _variables(self, target):
+        found = {"SECOND": str(target)}
+        return found
+
+
+ASH_SCANNERS = [FirstShared, SecondShared]
+"""
+
+
+@pytest.mark.parametrize(
+    ("reached", "covered"),
+    [
+        pytest.param(
+            ("shared", "arguments"), False, id="the-shared-method-and-one-of-its-own"
+        ),
+        pytest.param(
+            ("shared", "variables"),
+            False,
+            id="the-shared-method-and-the-other-of-its-own",
+        ),
+        pytest.param(
+            ("shared", "arguments", "variables"),
+            True,
+            id="the-shared-method-and-both-of-its-own",
+        ),
+    ],
+)
+def test_a_plugin_that_shares_its_work_method_needs_every_method_of_its_own_reached(
+    tmp_path, synthetic_package, reached, covered
+):
+    """Where the shared method calls two methods a plugin defines of its own, a run
+    that reached it and only one of them may have stopped between the two, so it
+    does not show that plugin's work: a plugin that shares its work method is covered
+    only where every method of its own that the shared method calls ran too. Of the
+    two readings, any of them or all of them, this is the one that cannot count a
+    plugin whose work did not run."""
+    cov = _cov()
+    checks = _checks()
+    package = synthetic_package({"scanners": SHARED_WITH_TWO_METHODS_OF_ITS_OWN})
+    features = _keyed_by_id(cov.plugin_features(package))
+    scanners = sys.modules[f"{package.__name__}.scanners"]
+    first = f"scanner:{checks._declared_plugin_name(scanners.FirstShared)}"
+    regions = {
+        "shared": cov.function_region(scanners.FirstShared._execute_scan),
+        "arguments": cov.function_region(scanners.FirstShared._arguments),
+        "variables": cov.function_region(scanners.FirstShared._variables),
+    }
+    requires = features[first].requires
+    assert len(requires) == 2, requires
+    assert regions["arguments"] in requires and regions["variables"] in requires, (
+        requires
+    )
+    run = Run(tmp_path)
+    (line,) = run.page("page.md", ONE_BLOCK)
+    run.record("page.md", _block("page.md", line))
+    for name in reached:
+        run.hit(f"page.md::{line}", regions[name].path, {min(regions[name].lines)})
+
+    result = _covered(run, [features[first]])
+
+    assert (first in result) is covered
+
+
 #: Two scanners that share a work method, one of which defines none of the methods
 #: that work method calls on ``self``: it inherits the template's.
 SHARED_WITHOUT_A_METHOD_OF_ITS_OWN = """\
@@ -3416,6 +3507,9 @@ def test_an_exit_1_example_on_these_pages_counts_only_when_its_scan_wrote_its_re
     assert _expected_exit(block) == str(int(AshExitCode.SCAN_ERRORS)), (
         f"{rel}:{block.fence_line} no longer expects exit 1; this case is stale"
     )
+    assert _checks().runner_runs(block), (
+        f"{rel}:{block.fence_line} is no longer run by the runner; this case is stale"
+    )
     context = f"{rel}::{block.fence_line}"
     run.record(rel, _block(rel, block.fence_line, expected=_expected_exit(block)))
     if wrote_results:
@@ -3558,9 +3652,19 @@ def test_an_exit_1_block_is_evidence_only_through_a_process_that_wrote_the_resul
             id="a-refused-tool-selection-of-dependencies-install",
         ),
         pytest.param(
+            "ash -c x dependencies install --tool y",
+            False,
+            id="a-refused-tool-selection-after-a-root-option",
+        ),
+        pytest.param(
             "ash scan --offline",
             True,
             id="a-scan-whose-exit-is-the-findings-code",
+        ),
+        pytest.param(
+            "ash -c dependencies scan --offline",
+            True,
+            id="a-scan-whose-root-option-value-is-the-word-dependencies",
         ),
     ],
 )
@@ -3570,8 +3674,15 @@ def test_a_block_that_shows_dependencies_install_refusing_a_selection_is_no_evid
     """The bad-selection exit of ``ash dependencies install --tool <unknown>`` is the
     number of the scan's actionable-findings code, which counts as evidence; but that
     command never scans, so such a block shows a refusal. The same code on a scan is
-    findings."""
+    findings. Which command ran is the command path the line resolves to, not its
+    first word: a root option before ``dependencies`` still runs ``dependencies
+    install``, and the word ``dependencies`` as an option's value runs no such
+    command."""
     selection = str(_checks().bad_selection_exit())
+    assert selection == str(int(AshExitCode.ACTIONABLE_FINDINGS)), (
+        f"the bad-selection exit {selection} is no longer the actionable-findings "
+        "code, so a block expecting it would not count anyway; this test is stale"
+    )
     run = Run(tmp_path)
     (line,) = run.page(
         "page.md",
@@ -3808,6 +3919,9 @@ def test_ash_version_on_these_pages_covers_the_version_option_and_not_the_scan(
     run = Run(tmp_path)
     page = run.real_page(rel)
     (block,) = [block for block in page.blocks if block.body.strip() == "ash --version"]
+    assert _checks().runner_runs(block), (
+        f"{rel}:{block.fence_line} is no longer run by the runner; this case is stale"
+    )
     context = f"{rel}::{block.fence_line}"
     run.record(rel, _block(rel, block.fence_line, expected=_expected_exit(block)))
     first = _without_docstring(node.body)[0].lineno
@@ -4606,6 +4720,10 @@ def _changes_directory_before_the_scan(moves: str) -> str:
         pytest.param(
             _changes_directory_before_the_scan("if [ -d sub ]; then cd sub; fi"),
             id="cd-after-then",
+        ),
+        pytest.param(
+            _changes_directory_before_the_scan("if false; then :; else cd sub; fi"),
+            id="cd-after-else",
         ),
         pytest.param(
             _changes_directory_before_the_scan('for d in sub; do cd "$d"; done'),
@@ -5936,6 +6054,10 @@ def test_the_keys_suppress_findings_gives_inside_an_override_value_are_covered(
     entry no longer covers."""
     run = Run(tmp_path)
     block = _the_block(run.real_page(SUPPRESS_FINDINGS), *needles)
+    assert _checks().runner_runs(block), (
+        f"{SUPPRESS_FINDINGS}:{block.fence_line} is no longer run by the runner; "
+        "this case is stale"
+    )
     run.record(
         SUPPRESS_FINDINGS,
         _block(SUPPRESS_FINDINGS, block.fence_line, expected=_expected_exit(block)),
@@ -6269,7 +6391,7 @@ def test_a_measurement_that_measured_nothing_or_came_from_another_tree_exits_2(
     assert _check(run, [_planted()]) == 2
 
 
-@pytest.mark.parametrize("damage", ["garbage", "truncated"])
+@pytest.mark.parametrize("damage", ["garbage", "truncated", "empty"])
 def test_a_coverage_data_file_that_cannot_be_read_exits_2_naming_it(
     tmp_path, capsys, damage
 ):
@@ -6277,11 +6399,19 @@ def test_a_coverage_data_file_that_cannot_be_read_exits_2_naming_it(
     warning callback, so the lines of a process killed while it saved its data (a
     truncated file) would drop out without a word, and the features only that
     process reached would read as uncovered: a flaky gate failure. Every data file
-    must read, or the measurement cannot be trusted."""
+    must read, or the measurement cannot be trusted.
+
+    An empty file, which a process killed before it wrote its first table leaves,
+    holds no data either: coverage.py opens it as an empty database, writes a fresh
+    schema into it and takes it in as a file that ran nothing. It is refused the
+    same way. The check only reads the data, so every damaged file is left as it
+    was."""
     run, line = _valid_run(tmp_path)
     damaged = run.data / "data" / ".coverage.damaged.4242"
     if damage == "garbage":
         damaged.write_bytes(b"not a coverage data file\n" * 64)
+    elif damage == "empty":
+        damaged.write_bytes(b"")
     else:
         data = CoverageData(
             basename=str(run.data / "data" / ".coverage"), suffix="damaged.4242"
@@ -6291,9 +6421,11 @@ def test_a_coverage_data_file_that_cannot_be_read_exits_2_naming_it(
         data.write()
         data.close()
         damaged.write_bytes(damaged.read_bytes()[:1024])
+    before = damaged.read_bytes()
 
     assert _check(run, [_planted()]) == 2
     assert damaged.name in capsys.readouterr().err
+    assert damaged.read_bytes() == before
 
 
 @pytest.mark.parametrize("text", MALFORMED_BASELINES)
