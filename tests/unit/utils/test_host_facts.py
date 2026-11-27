@@ -2920,6 +2920,52 @@ def test_a_prefix_spelled_through_a_link_is_matched_after_resolving_it(
     assert channel(tmp_path, prefix=prefix, env=env, realpath=realpath) == expected
 
 
+@pytest.mark.parametrize(
+    ("host", "prefix", "expected"),
+    [
+        pytest.param(
+            "linux",
+            "/home/u/.local/share/uv/tools/automated-security-helper",
+            "uv-tool",
+            id="a-uv-tool-environment",
+        ),
+        pytest.param(
+            "linux",
+            "/home/u/.cache/uv/archive-v0/rZ0pJnA3yqDy7sd4mvNm1",
+            "uvx",
+            id="a-uvx-environment",
+        ),
+        pytest.param(
+            "linux",
+            "/home/u/.local/pipx/venvs/automated-security-helper",
+            "pipx",
+            id="a-pipx-environment",
+        ),
+        pytest.param(
+            "windows",
+            "C:\\Users\\u\\AppData\\Roaming\\uv\\data\\tools\\automated-security-helper",
+            "uv-tool",
+            id="a-windows-environment-that-is-a-junction",
+        ),
+    ],
+)
+def test_an_environment_that_is_itself_a_link_is_matched_as_it_is_spelled(
+    tmp_path, host, prefix, expected
+):
+    # The interpreter keeps the spelling an environment was made at, even where the
+    # environment's own directory is a link to another disk. The prefix is compared as
+    # written first, so the place the link leads to (outside every channel directory)
+    # does not take the channel away; it is resolved only when the spelling is not under
+    # the directory.
+    target = "D:\\envs\\ash" if host == "windows" else "/mnt/big/envs/ash"
+    resolve = junction_resolver if host == "windows" else link_resolver
+    realpath = resolve(prefix, target)
+    assert realpath(prefix) == target
+    assert channel(tmp_path, prefix=prefix, host=host, realpath=realpath) == expected
+    # The control: the same spelling with no link in the way is the same channel.
+    assert channel(tmp_path / "plain", prefix=prefix, host=host) == expected
+
+
 def test_a_prefix_beside_the_link_but_not_under_this_home_is_no_tool_of_it(tmp_path):
     realpath = link_resolver("/home", "/data/home")
     prefix = "/home/other/.local/share/uv/tools/automated-security-helper"
