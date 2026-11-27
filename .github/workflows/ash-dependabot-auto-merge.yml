@@ -121,6 +121,7 @@ on:
       - "Install Method Validation"
       - "ASH - Offline-capable scanners (non-blocking)"
       - "ASH - Package Build"
+      - "ASH - Platform Wheels"
       - "ASH - PR Title Check"
       - "ASH - Scan-Time Benchmark"
       - "Run ASH (pull request head, informational)"
