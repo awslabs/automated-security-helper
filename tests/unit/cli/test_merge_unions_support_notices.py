@@ -10,15 +10,18 @@ kernel below ABI 6 on another. A merge that kept shard 0's notices alone would s
 host's story about a scan that ran on several.
 
 The merge records every shard's notices united by id, in shard order. A notice that
-two shards met is recorded once, and what it holds of what the shards read is what
-every one of them read: the facts they recorded alike, and the ``found`` text when
-they recorded the same. Two hosts that meet one row do not read the same of it (the
-processor flags that are missing, the level the processor is at), and the first
-shard's record alone would publish one host's read as the scan's. The merge says so
-when it leaves something out: one warning for each notice the shards did not read
-alike, naming the notice, the shards that recorded it and what the record leaves out.
-The key is absent when no shard recorded a notice, so the merge of shards that ran on a
-supported configuration is written as it was before the field existed.
+two shards met is recorded once, and what it holds of what the shards read, and of the
+paths the register offered them, is what every one of them recorded: the facts they
+recorded alike, the ``found`` text when they recorded the same, and the paths every
+shard was offered. Two hosts that meet one row do not read the same of it (the
+processor flags that are missing, the level the processor is at) and are not offered
+the same paths (the compatibility runtime goes to a uv tool and not to a Homebrew
+install), and the first shard's record alone would publish one host's read and one
+host's offer as the scan's. The merge says so when it leaves something out: one warning
+for each notice the shards did not read alike, naming the notice, the shards that
+recorded it and what the record leaves out. The key is absent when no shard recorded a
+notice, so the merge of shards that ran on a supported configuration is written as it
+was before the field existed.
 
 The controls are the same merge with no notice in any shard, and the merge of shards
 that all met the same notice.
@@ -33,11 +36,14 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from tests.unit.cli.merge_shard_support import as_loaded, build_shards
 from tests.unit.models._support_notice_helpers import (
     AGREED_CPU_FACTS,
+    COMPAT_RUNTIME,
     CPU_ID,
+    OFFERED_EVERYWHERE,
     POLYFILL_ID,
     SANDBOX_ID,
     cpu_notice,
     cpu_notice_of_two_hosts,
+    cpu_notices_of_two_installs,
     polyfill_notice,
     said_about,
     sandbox_notice,
@@ -105,6 +111,39 @@ class TestEveryShardsNoticesAreRecorded:
         assert "shard 1 and shard 2" in said[0]
         assert "found" in said[0]
         assert "facts.cpu_level" in said[0]
+
+    def test_a_path_only_some_shards_were_offered_is_left_out_of_the_record(
+        self, tmp_path
+    ):
+        uv_tool, homebrew = cpu_notices_of_two_installs()
+        shards = build_shards(3)
+        shards[1].metadata.support_notices = [uv_tool]
+        shards[2].metadata.support_notices = [homebrew]
+
+        # Passed in reverse, so the paths do not depend on the argument order either.
+        merged = merge_shard_results(list(reversed(as_loaded(shards))))
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(merged.model_dump_json(indent=2), encoding="utf-8")
+        written = json.loads(path.read_text("utf-8"))["metadata"]["support_notices"]
+
+        # The compatibility runtime was offered to shard 1's host and not to shard 2's,
+        # so the file does not offer it.
+        offered = [entry["id"] for entry in written[0]["paths"]]
+        assert offered == OFFERED_EVERYWHERE
+        assert COMPAT_RUNTIME not in json.dumps(written)
+
+    def test_a_path_only_some_shards_were_offered_is_named_in_the_log(self, capture):
+        uv_tool, homebrew = cpu_notices_of_two_installs()
+        shards = build_shards(3)
+        shards[1].metadata.support_notices = [uv_tool]
+        shards[2].metadata.support_notices = [homebrew]
+
+        merge_shard_results(as_loaded(shards))
+
+        said = said_about(capture, CPU_ID)
+        assert len(said) == 1, said
+        assert "shard 1 and shard 2" in said[0]
+        assert f"paths.{COMPAT_RUNTIME}" in said[0]
 
     def test_control_shards_that_met_a_notice_alike_record_it_whole(self):
         near, _ = cpu_notice_of_two_hosts()

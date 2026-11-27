@@ -7,20 +7,27 @@ The two outputs that combine runs, the workspace results file (its projects) and
 different hosts, and a notice records what its own host read: the processor flags that
 were missing, the level the processor is at. Two hosts that meet the same row do not
 read the same of it, so a list that kept the first run's record would publish one
-host's flags and facts as if they were the scan's. Both outputs build the combined
-list with ``combined_support_notices``, which this file pins on its own so each
-output's own test can say only what it adds.
+host's flags and facts as if they were the scan's. The paths a notice offers are the
+register's for the host that wrote it, and the register does not offer every path on
+every host: the compatibility runtime is offered to a uv tool and not to a Homebrew
+install, nor to a processor below that runtime. A list that kept the first run's paths
+would offer a path to a scan one of whose hosts the register never offers it to, and
+would offer a different list of paths when the runs came in another order. Both
+outputs build the combined list with ``combined_support_notices``, which this file
+pins on its own so each output's own test can say only what it adds.
 
 The rule: one record per notice id, the first run's in every field the row declares,
-except that what the runs read is only what every run read. ``facts`` holds the pairs
-every run recorded, ``found`` is kept when every run recorded the same text and is
-None when they did not, and nothing else is added to the record.
+except that what the runs read, and what the register offered them, is only what every
+run recorded. ``facts`` holds the pairs every run recorded, ``found`` is kept when
+every run recorded the same text and is None when they did not, and ``paths`` holds the
+paths every run was offered, compared by path id, in the first run's order. Nothing
+else is added to the record.
 
 A record that leaves something out says so, so that the omission is not silent: one
 warning for each notice that more than one run recorded and the runs did not read
 alike. It names the notice, the runs that recorded it (by the names the caller gives
-them, and by position when it gives none) and what the record leaves out, ``found`` and
-``facts.<name>``, and it does not repeat what a run read.
+them, and by position when it gives none) and what the record leaves out, ``found``,
+``facts.<name>`` and ``paths.<id>``, and it does not repeat what a run read.
 """
 
 import logging
@@ -33,12 +40,19 @@ from automated_security_helper.models.asharp_model import (
 )
 from tests.unit.models._support_notice_helpers import (
     AGREED_CPU_FACTS,
+    BELOW_COMPAT,
+    COMPAT_RUNTIME,
     CPU_ID,
     DOCS_PAGE,
+    HOMEBREW,
+    OFFERED_EVERYWHERE,
     POLYFILL_ID,
     SANDBOX_ID,
+    UV_TOOL,
     cpu_notice,
     cpu_notice_of_two_hosts,
+    cpu_notice_on,
+    cpu_notices_of_two_installs,
     polyfill_notice,
     sandbox_notice,
 )
@@ -166,9 +180,123 @@ def test_the_facts_kept_stay_in_the_order_of_the_first_run():
     assert list(united[0].facts) == ["libc", "arch", "wsl"]
 
 
+def _path_ids(notice) -> list[str]:
+    return [path.id for path in notice.paths]
+
+
+def test_control_the_compat_runtime_is_offered_to_a_uv_tool_and_not_to_the_others():
+    """What the tests of the paths rest on. If the register offered other paths on these
+    hosts, this fails first and says so."""
+    uv_tool, homebrew = cpu_notices_of_two_installs()
+    below_compat = cpu_notice_on(BELOW_COMPAT, found=AVX2_AND_FMA)
+
+    assert _path_ids(uv_tool) == [COMPAT_RUNTIME, *OFFERED_EVERYWHERE]
+    assert _path_ids(homebrew) == OFFERED_EVERYWHERE
+    assert _path_ids(below_compat) == OFFERED_EVERYWHERE
+    # The paths are all that sets the first two apart.
+    assert (uv_tool.facts, uv_tool.found) == (homebrew.facts, homebrew.found)
+
+
+def test_a_path_only_some_runs_were_offered_is_left_out_of_the_record():
+    uv_tool, homebrew = cpu_notices_of_two_installs()
+
+    united = combined_support_notices([[uv_tool], [homebrew]])
+
+    assert _path_ids(united[0]) == OFFERED_EVERYWHERE
+
+
+def test_the_paths_are_the_same_whichever_run_comes_first():
+    uv_tool, homebrew = cpu_notices_of_two_installs()
+
+    uv_tool_first = combined_support_notices([[uv_tool], [homebrew]])
+    homebrew_first = combined_support_notices([[homebrew], [uv_tool]])
+
+    assert uv_tool_first[0].paths == homebrew_first[0].paths
+    assert _path_ids(uv_tool_first[0]) == OFFERED_EVERYWHERE
+
+
+@pytest.mark.parametrize(
+    "hosts",
+    [
+        pytest.param([UV_TOOL, UV_TOOL, HOMEBREW], id="the last run lacks it"),
+        pytest.param([UV_TOOL, HOMEBREW, UV_TOOL], id="the middle run lacks it"),
+        pytest.param([HOMEBREW, UV_TOOL, UV_TOOL], id="the first run lacks it"),
+    ],
+)
+def test_a_path_one_of_three_runs_was_not_offered_is_left_out(hosts):
+    runs = [[cpu_notice_on(host, found=AVX2)] for host in hosts]
+
+    united = combined_support_notices(runs)
+
+    assert _path_ids(united[0]) == OFFERED_EVERYWHERE
+
+
+def test_the_paths_kept_stay_in_the_order_of_the_first_run():
+    first = cpu_notice()
+    second = cpu_notice(paths=[first.paths[3], first.paths[1]])
+
+    united = combined_support_notices([[first], [second]])
+
+    assert _path_ids(first) == [COMPAT_RUNTIME, *OFFERED_EVERYWHERE]
+    assert _path_ids(united[0]) == ["x86-host-with-features", "ci-runner"]
+
+
+def test_a_level_and_an_offer_that_differ_are_both_left_out(capture):
+    compat_only = cpu_notice_on(UV_TOOL, found=AVX2)
+    below_compat = cpu_notice_on(BELOW_COMPAT, found=AVX2_AND_FMA)
+
+    united = combined_support_notices([[compat_only], [below_compat]])
+
+    record = united[0]
+    assert record.found is None
+    assert record.facts == AGREED_CPU_FACTS
+    assert _path_ids(record) == OFFERED_EVERYWHERE
+    said = _the_one_said(capture)
+    assert "found" in said
+    assert "facts.cpu_level" in said
+    assert f"paths.{COMPAT_RUNTIME}" in said
+
+
+def test_control_the_same_paths_in_another_order_say_nothing(capture):
+    first = cpu_notice()
+    second = cpu_notice(paths=list(reversed(first.paths)))
+
+    united = combined_support_notices([[first], [second]])
+
+    assert _path_ids(united[0]) == _path_ids(first)
+    assert _said(capture) == []
+
+
+def test_control_a_path_worded_differently_keeps_the_first_runs_wording(capture):
+    first = cpu_notice()
+    reworded = [
+        path.model_copy(update={"summary": "Another wording of the same path."})
+        for path in first.paths
+    ]
+    second = cpu_notice(paths=reworded)
+
+    united = combined_support_notices([[first], [second]])
+
+    assert united[0].paths == first.paths
+    assert _said(capture) == []
+
+
+def test_a_record_that_left_paths_out_shares_no_object_with_a_run():
+    uv_tool, homebrew = cpu_notices_of_two_installs()
+
+    united = combined_support_notices([[uv_tool], [homebrew]])
+    united[0].paths[0].summary = "changed"
+
+    assert uv_tool == cpu_notices_of_two_installs()[0]
+    assert homebrew == cpu_notices_of_two_installs()[1]
+
+
 def test_every_other_field_is_the_first_runs():
-    """A row says the same of itself in every run of one ASH. A run of another version
-    may word it otherwise, and the record is then the first run's, whole."""
+    """What the register declares of a row is the same in every run of one ASH: its id,
+    scope, dimension, level, behavior, polyfill, moment, sentence and docs anchor. A run
+    of another version may word it otherwise, and the record then says it as the first
+    run does. The three fields that hold what a run read or was offered, the facts, the
+    found text and the paths, are the exception, and hold what every run recorded."""
     first = cpu_notice()
     second = cpu_notice(
         message="Another wording of the same row.",
@@ -180,7 +308,9 @@ def test_every_other_field_is_the_first_runs():
 
     assert united[0].message == first.message
     assert united[0].docs == first.docs
-    assert united[0].paths == first.paths
+    # The second run was offered no path, so no path is one both were offered: the
+    # paths are not the first run's.
+    assert united[0].paths == []
 
 
 def test_the_order_is_the_order_the_runs_are_given_and_each_runs_own_order():
@@ -272,6 +402,8 @@ def test_a_notice_met_differently_is_named_with_its_runs_and_what_it_lost(captur
     assert "shard 1 and shard 3" in said
     assert "found" in said
     assert "facts.cpu_level" in said
+    # The two hosts were offered the same paths, so the record keeps them all.
+    assert "paths" not in said
 
 
 def test_the_warning_names_what_differed_and_never_what_the_runs_read(capture):
@@ -297,6 +429,7 @@ def test_only_the_found_text_is_named_when_only_it_differed(capture):
     said = _the_one_said(capture)
     assert "found" in said
     assert "facts." not in said
+    assert "paths" not in said
 
 
 @pytest.mark.parametrize(
@@ -347,6 +480,40 @@ def test_only_the_facts_that_differed_are_named(capture, per_run, named, not_nam
     assert all(f"facts.{name}" in said for name in named), said
     assert not any(f"facts.{name}" in said for name in not_named), said
     assert "found" not in said
+    assert "paths" not in said
+
+
+@pytest.mark.parametrize(
+    "uv_tool_first", [True, False], ids=["uv tool first", "homebrew first"]
+)
+def test_a_path_not_every_run_was_offered_is_named_in_the_log(capture, uv_tool_first):
+    uv_tool, homebrew = cpu_notices_of_two_installs()
+    runs = [[uv_tool], [homebrew]] if uv_tool_first else [[homebrew], [uv_tool]]
+
+    combined_support_notices(runs, labels=["shard 0", "shard 1"])
+
+    said = _the_one_said(capture)
+    assert CPU_ID in said
+    assert "shard 0 and shard 1" in said
+    assert f"paths.{COMPAT_RUNTIME}" in said
+    # The runs recorded the same facts and the same text, and the paths both were
+    # offered stay in the record, so none of those is named.
+    assert "found" not in said
+    assert "facts." not in said
+    assert not any(path in said for path in OFFERED_EVERYWHERE)
+
+
+def test_each_path_left_out_is_named_and_none_that_is_kept(capture):
+    first = cpu_notice()
+    second = cpu_notice(paths=[first.paths[3], first.paths[1]])
+
+    combined_support_notices([[first], [second]])
+
+    said = _the_one_said(capture)
+    assert f"paths.{COMPAT_RUNTIME}" in said
+    assert "paths.arm64-host" in said
+    assert "paths.x86-host-with-features" not in said
+    assert "paths.ci-runner" not in said
 
 
 def test_each_notice_that_lost_something_is_named_once_and_no_other_is(capture):

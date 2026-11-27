@@ -5,11 +5,15 @@ default runtime (unsupported, raised at the start of a run, with paths on this m
 and elsewhere), a Landlock kernel below ABI 6 (degraded, raised at a decision) and the
 sandbox GuardDog runs in instead of its own (polyfilled, raised at a decision). The
 tests of the model, of the workspace root and of ``ash merge`` share them, so each
-states only what it is about.
+states only what it is about. ``cpu_notice_on`` builds the processor row from the
+register for one host, with the paths the register offers there: that is how two hosts
+come to be offered different paths.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from automated_security_helper.models.asharp_model import (
@@ -28,6 +32,19 @@ _THIS_MACHINE = ("same-os", "container", "wsl")
 
 #: What both hosts of ``cpu_notice_of_two_hosts`` read, and nothing else.
 AGREED_CPU_FACTS = {"arch": "amd64", "polars_runtime": "runtime-32"}
+
+#: Three hosts of the processor row, by the facts that set each apart from the
+#: register's reference host, a uv tool on a processor with every instruction. The
+#: first two are on a processor only the compatibility runtime runs on; the third is
+#: below even that runtime.
+UV_TOOL = {"cpu_level": "compat-only"}
+HOMEBREW = {"cpu_level": "compat-only", "install_channel": "brew"}
+BELOW_COMPAT = {"cpu_level": "below-compat"}
+
+#: The path the register offers to the uv tool and to neither of the other two hosts,
+#: and the paths it offers to all three.
+COMPAT_RUNTIME = "polars-compat-runtime"
+OFFERED_EVERYWHERE = ["x86-host-with-features", "arm64-host", "ci-runner"]
 
 
 def upgrade_path(
@@ -121,6 +138,49 @@ def cpu_notice_of_two_hosts() -> tuple[SupportNotice, SupportNotice]:
         },
     )
     return near, far
+
+
+def cpu_notice_on(host: Mapping[str, str], **changes: Any) -> SupportNotice:
+    """The processor row's notice for one host, as the register builds it.
+
+    ``host`` holds the facts of that host that differ from the register's reference
+    host, which runs ASH as a uv tool on a processor with every instruction: the
+    processor level and the install channel. The notice holds the tokens the row
+    matched there and the upgrade paths the register offers there, in the row's order.
+    So two hosts that meet the row can be offered different paths: the compatibility
+    runtime goes to an environment ASH can add a package to, and not to a Homebrew
+    install nor to a processor below even that runtime. ``changes`` is what a writer
+    adds that the register does not say, such as ``found``.
+
+    The register is imported here, not at the top, so a test that does not read it
+    does not build it.
+    """
+    from automated_security_helper.base.support_register import (
+        REFERENCE_FACTS,
+        REGISTER,
+        settle,
+    )
+
+    facts = settle(replace(REFERENCE_FACTS, **host))
+    met = [item for item in REGISTER.evaluate(facts) if item.row.id == CPU_ID]
+    assert len(met) == 1, f"the processor row does not match {dict(host)}"
+    fields = notice_of_row(met[0].row).model_dump(mode="json")
+    offered = {path.id for path in met[0].paths}
+    fields["facts"] = dict(met[0].matched)
+    fields["paths"] = [path for path in fields["paths"] if path["id"] in offered]
+    fields.update(changes)
+    return SupportNotice.model_validate(fields)
+
+
+def cpu_notices_of_two_installs() -> tuple[SupportNotice, SupportNotice]:
+    """The processor row as a uv tool and a Homebrew install record it.
+
+    The same facts and the same found text, and not the same paths: the register offers
+    the compatibility runtime to the first and not to the second, so the paths are all
+    that sets the two notices apart.
+    """
+    found = "avx2 is missing (polars-runtime-32 1.44.2)."
+    return cpu_notice_on(UV_TOOL, found=found), cpu_notice_on(HOMEBREW, found=found)
 
 
 def sandbox_notice(**changes: Any) -> SupportNotice:
