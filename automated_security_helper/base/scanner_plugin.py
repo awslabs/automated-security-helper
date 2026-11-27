@@ -29,6 +29,7 @@ from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDX
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    Notification,
     SarifReport,
 )
 from automated_security_helper.schemas.scanner_output_ingest import (
@@ -2127,6 +2128,30 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         if not added:
             return extras
         return {**extras, "toolExecutionNotifications": [*carried, *added]}
+
+    def _noting_the_ingest(self, invocation: Invocation) -> Invocation:
+        """*invocation*, which a scanner built itself, with the warning for what
+        reading the report repaired added to its notifications.
+
+        ``_inject_invocation`` adds the warning to ASH's own record; a scanner that
+        writes its own invocation passes it through here instead. The warning goes
+        after the notifications the invocation already holds and is not added twice,
+        and nothing is set when nothing was repaired, so an invocation with no
+        notifications keeps none.
+        """
+        notes = [
+            Notification.model_validate(note)
+            for note in self._ingest_record.notifications(self._ingest_source_name())
+        ]
+        if not notes:
+            return invocation
+        carried = list(invocation.toolExecutionNotifications or [])
+        said = {_notification_text(note) for note in carried}
+        invocation.toolExecutionNotifications = [
+            *carried,
+            *[note for note in notes if _notification_text(note) not in said],
+        ]
+        return invocation
 
     def _handle_empty_results(self) -> SarifReport:
         """Decide what an empty results file means, after an accepted exit code.

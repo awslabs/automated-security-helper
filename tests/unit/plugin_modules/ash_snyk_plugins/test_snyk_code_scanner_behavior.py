@@ -564,21 +564,21 @@ def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):
 
 
 @pytest.mark.unit
-def test_malformed_results_file_logs_an_error_and_returns_none(
-    scanner, snyk_on_path, populated_source, subprocess_double, caplog
+def test_a_results_file_that_is_json_but_not_sarif_is_refused_with_the_reason(
+    scanner, snyk_on_path, populated_source, subprocess_double
 ):
-    """A results file that is JSON but not SARIF is reported, not raised."""
+    """A results file that is JSON but not SARIF is refused, so the row says why.
+
+    It used to be logged and returned as None, which the executor graded as
+    "returned no result" with the cause only in the scanner's own log.
+    """
     subprocess_double.side_effect = writes_sarif(json.dumps({"not": "sarif"}))
 
-    with caplog.at_level(logging.ERROR):
-        result = scanner.scan(target=populated_source, target_type="source")
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=populated_source, target_type="source")
 
-    assert result is None
-    assert any(
-        "Failed to parse SnykCodeScanner results as SARIF" in record.message
-        for record in caplog.records
-    ), f"expected a parse error; got {[r.message for r in caplog.records]}"
-    assert any("Failed to parse" in err for err in scanner.errors)
+    assert "Snyk Code scan failed" in str(raised.value)
+    assert "not SARIF ASH can read" in str(raised.value)
 
 
 @pytest.mark.unit

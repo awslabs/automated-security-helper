@@ -86,6 +86,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    ingest_sarif,
+    read_json_tolerant,
+)
 from automated_security_helper.base.uv_tool_mixin import (
     _tool_name,
     guarded_values_read,
@@ -2058,6 +2062,9 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
+        # What reading this target's report repairs, started again for each target
+        # for the same reason.
+        self._start_ingest_record()
         self.targets_attempted = None
         self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
@@ -2371,8 +2378,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
             scanner_results = None
             try:
-                with open(results_file, "r", encoding="utf-8") as f:
-                    scanner_results = json.load(f)
+                # Read as bytes and parsed tolerantly: a byte-order mark, a byte
+                # that is not UTF-8 and a control character inside a string are
+                # read as the tool meant them and noted on the scanner's record.
+                with open(results_file, "rb") as f:
+                    scanner_results = read_json_tolerant(f.read(), self._ingest_record)
             except json.JSONDecodeError as e:
                 self._plugin_log(
                     f"Failed to parse Ferret output as JSON: {e}",
@@ -2380,7 +2390,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     level=logging.ERROR,
                     append_to_stream="stderr",
                 )
-                return
+                # Refused, not returned as no result: the row would then read only
+                # "returned no result", with the cause left in the log line above.
+                raise ScannerError(
+                    "ferret-scan's results file is not SARIF ASH can read "
+                    "(it is not valid JSON), so its findings could not be graded"
+                )
 
             _resolve_sarif_uri_base_ids(scanner_results)
 
@@ -2389,7 +2404,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # invocation) is ASH's own and is reported as what it is by the outer
             # handler, not as a results file that is not SARIF.
             try:
-                sarif_report: SarifReport = SarifReport.model_validate(scanner_results)
+                # The smallest out-of-spec part is dropped or rewritten and the
+                # other findings are kept (schemas.scanner_output_ingest); what
+                # cannot be repaired is refused below.
+                sarif_report: SarifReport = ingest_sarif(
+                    scanner_results, self._ingest_record
+                )
             except ValidationError as e:
                 # Not returned as it is: the executor would store the raw document
                 # in additional_reports, outside the masking that keeps matched
@@ -2401,6 +2421,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     f"({e.error_count()} validation error(s)), so its findings "
                     "could not be graded"
                 )
+            self._say_what_the_ingest_repaired(target_type)
 
             # Attach scanner details
             sarif_report = attach_scanner_details(
@@ -2431,20 +2452,25 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     for notification in invocation.toolExecutionNotifications or []
                 ]
                 sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=recorded_command_line,
-                        arguments=recorded_arguments,
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=self.exit_code == 0,
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors)
-                        if self.errors
-                        else None,
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                        toolExecutionNotifications=notifications or None,
+                    # What reading the file repaired is said in the report as a
+                    # warning, which the not-evaluated gate does not read as a
+                    # failure.
+                    self._noting_the_ingest(
+                        Invocation(
+                            commandLine=recorded_command_line,
+                            arguments=recorded_arguments,
+                            startTimeUtc=self.start_time,
+                            endTimeUtc=self.end_time,
+                            executionSuccessful=self.exit_code == 0,
+                            exitCode=self.exit_code,
+                            exitCodeDescription="\n".join(self.errors)
+                            if self.errors
+                            else None,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target),
+                            ),
+                            toolExecutionNotifications=notifications or None,
+                        )
                     )
                 ]
 

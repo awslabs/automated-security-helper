@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,8 +39,12 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    ingest_sarif,
+    read_json_tolerant,
+)
 from automated_security_helper.base.uv_tool_mixin import guarded_values_read
-from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
@@ -482,6 +485,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
+        # What reading this target's report repairs, started again for each target
+        # for the same reason.
+        self._start_ingest_record()
         global_ignore_paths = list(global_ignore_paths or [])
         # Check if the target directory is empty or doesn't exist
         if self._target_is_empty(target):
@@ -658,42 +664,63 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
 
             # SARIF mode - parse SARIF results
             if Path(results_file).exists():
-                with open(results_file, mode="r", encoding="utf-8") as f:
-                    scanner_results = json.load(f)
+                # Read as bytes and parsed tolerantly: a byte-order mark, a byte
+                # that is not UTF-8 and a control character inside a string are
+                # read as the tool meant them and noted on the scanner's record.
+                with open(results_file, mode="rb") as f:
+                    scanner_results = read_json_tolerant(f.read(), self._ingest_record)
+                # Only the validation sits in this try: an error raised after the
+                # SARIF validated (attaching the package identity, building the
+                # invocation) is ASH's own and is reported as what it is by the
+                # handler below, not as a results file that is not SARIF.
                 try:
-                    sarif_report: SarifReport = SarifReport.model_validate(
-                        scanner_results
+                    # The smallest out-of-spec part is dropped or rewritten and
+                    # the other findings are kept (schemas.scanner_output_ingest).
+                    sarif_report: SarifReport = ingest_sarif(
+                        scanner_results, self._ingest_record
                     )
-                    sarif_report = self._attach_package_identity(sarif_report, target)
-                    sarif_report = self._attach_misconfig_resources(
-                        sarif_report, final_args
+                except Exception as e:
+                    # Refused, not returned as no result: the row would then read
+                    # only "returned no result". error_text names the field and
+                    # the problem and quotes no input.
+                    raise ScannerError(
+                        "trivy's results file is not SARIF ASH can read, so its "
+                        f"findings could not be graded: {error_text(e)}"
                     )
-                    # trivy's own per-result severity, as the builtin trivy scanner
-                    # reports it: without it ASH buckets the CVE rule's last CVSS
-                    # score, which is another package's rating for the same CVE.
-                    sarif_report = self._attach_trivy_severity(sarif_report)
+                self._say_what_the_ingest_repaired(target_type)
+                sarif_report = self._attach_package_identity(sarif_report, target)
+                sarif_report = self._attach_misconfig_resources(
+                    sarif_report, final_args
+                )
+                # trivy's own per-result severity, as the builtin trivy scanner
+                # reports it: without it ASH buckets the CVE rule's last CVSS
+                # score, which is another package's rating for the same CVE.
+                sarif_report = self._attach_trivy_severity(sarif_report)
 
-                    # Attach scanner details for proper identification
-                    sarif_report = attach_scanner_details(
-                        sarif_report=sarif_report,
-                        scanner_name=self.config.name,
-                        scanner_version=getattr(self, "tool_version", None),
-                        invocation_details={
-                            "command_line": shown_command,
-                            "arguments": recorded_arguments,
-                            "working_directory": get_shortest_name(input=target),
-                            "start_time": self.start_time.isoformat()
-                            if self.start_time
-                            else None,
-                            "end_time": self.end_time.isoformat()
-                            if self.end_time
-                            else None,
-                            "exit_code": self.exit_code,
-                        },
-                    )
+                # Attach scanner details for proper identification
+                sarif_report = attach_scanner_details(
+                    sarif_report=sarif_report,
+                    scanner_name=self.config.name,
+                    scanner_version=getattr(self, "tool_version", None),
+                    invocation_details={
+                        "command_line": shown_command,
+                        "arguments": recorded_arguments,
+                        "working_directory": get_shortest_name(input=target),
+                        "start_time": self.start_time.isoformat()
+                        if self.start_time
+                        else None,
+                        "end_time": self.end_time.isoformat()
+                        if self.end_time
+                        else None,
+                        "exit_code": self.exit_code,
+                    },
+                )
 
-                    if sarif_report.runs:
-                        sarif_report.runs[0].invocations = [
+                if sarif_report.runs:
+                    sarif_report.runs[0].invocations = [
+                        # What reading the file repaired is said in the report as
+                        # a warning, which fails no run.
+                        self._noting_the_ingest(
                             Invocation(
                                 commandLine=recorded_command_line,
                                 arguments=recorded_arguments,
@@ -706,16 +733,9 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                                     uri=get_shortest_name(input=target),
                                 ),
                             )
-                        ]
-                    return sarif_report
-                except Exception as e:
-                    self._plugin_log(
-                        f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
-                        target_type=target_type,
-                        level=logging.ERROR,
-                        append_to_stream="stderr",
-                    )
-                    return
+                        )
+                    ]
+                return sarif_report
             else:
                 self._plugin_log(
                     f"No results file found at {results_file}",

@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import logging
@@ -39,6 +38,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    IngestRecord,
+    ingest_sarif,
+    read_json_tolerant,
+)
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.log import VERBOSE_LEVEL
 from automated_security_helper.utils.get_scan_set import (
@@ -49,7 +53,7 @@ from automated_security_helper.base.uv_tool_mixin import (
     _tool_name,
     guarded_values_read,
 )
-from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.error_text import error_text, text_without_values
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.link_exclusions import walked_files
 from automated_security_helper.utils.sarif_utils import (
@@ -270,15 +274,42 @@ def _sweep_abandoned_copies(
             os.close(fd)
 
 
-def _sarif_result_count(document: Any) -> int:
-    """How many results a parsed SARIF document holds, counting suppressed ones."""
+def _sarif_result_count(document: Any, record: Optional[IngestRecord] = None) -> int:
+    """How many results a parsed SARIF document holds, counting suppressed ones.
+
+    A result counts only when it is an object inside a ``results`` list inside a
+    run that is an object inside the ``runs`` list. A container of any other kind
+    holds no result ASH can read: it counts for none (a string was counted by its
+    length and a dict by its keys, and ``runs`` that was not a list raised a
+    ``TypeError``), and it is noted on *record*, by where it sits and never by
+    what it holds, when one is given.
+    """
     if not isinstance(document, dict):
         return 0
-    return sum(
-        len(run.get("results") or [])
-        for run in document.get("runs") or []
-        if isinstance(run, dict)
-    )
+    runs = document.get("runs")
+    if runs is None:
+        return 0
+    if not isinstance(runs, list):
+        if record is not None:
+            record.note("dropped", "runs_not_a_list", ("runs",))
+        return 0
+    count = 0
+    for run_index, run in enumerate(runs):
+        if not isinstance(run, dict):
+            if record is not None:
+                record.note("dropped", "run_not_an_object", ("runs", run_index))
+            continue
+        results = run.get("results")
+        if results is None:
+            continue
+        if not isinstance(results, list):
+            if record is not None:
+                record.note(
+                    "dropped", "results_not_a_list", ("runs", run_index, "results")
+                )
+            continue
+        count += sum(1 for result in results if isinstance(result, dict))
+    return count
 
 
 #: A CWE as snyk writes it in a rule's ``properties.cwe``: ``CWE-798``.
@@ -298,11 +329,16 @@ def normalize_rule_cwe_into_tags(document: Any) -> Any:
     entry that is not exactly ``CWE-<n>`` is skipped, a value that is not a list
     attaches nothing, and a CWE the tags already name is not added again. The
     native ``cwe`` value stays where snyk put it. A document of any other shape
-    is returned as it came. The document is edited in place and returned.
+    is returned as it came (``runs`` that is a number raised a ``TypeError`` here,
+    before the reader could refuse it with its own reason). The document is edited
+    in place and returned.
     """
     if not isinstance(document, dict):
         return document
-    for run in document.get("runs") or []:
+    runs = document.get("runs")
+    if not isinstance(runs, list):
+        return document
+    for run in runs:
         if not isinstance(run, dict):
             continue
         tool = run.get("tool")
@@ -906,6 +942,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
+        # What reading this target's report repairs, started again for each target
+        # for the same reason.
+        self._start_ingest_record()
         self._staged_refused = 0
         # Check if the target directory is empty or doesn't exist
         if self._target_is_empty(target):
@@ -1117,41 +1156,65 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
             # SARIF mode - parse SARIF results
             if Path(results_file).exists():
-                with open(results_file, mode="r", encoding="utf-8") as f:
-                    scanner_results = json.load(f)
+                # Read as bytes and parsed tolerantly: a byte-order mark, a byte
+                # that is not UTF-8 and a control character inside a string are
+                # read as the tool meant them and noted on the scanner's record.
+                with open(results_file, mode="rb") as f:
+                    scanner_results = read_json_tolerant(f.read(), self._ingest_record)
                 # Snyk exits 1 only when it found issues, so a run that exits 1 and
                 # reports none has not shown what it scanned: not a clean scan.
-                if self.exit_code == 1 and not _sarif_result_count(scanner_results):
+                if self.exit_code == 1 and not _sarif_result_count(
+                    scanner_results, self._ingest_record
+                ):
                     raise ScannerError(
                         "snyk exited with exit code 1, which it uses for issues "
                         f"found, but its SARIF file holds no results: {results_file}"
                     )
+                # Only the reading of the document sits in this try: an error raised
+                # after the SARIF validated (attaching the scanner details,
+                # building the invocation) is ASH's own and is reported as what it
+                # is by the handler below, not as a results file that is not SARIF.
                 try:
-                    sarif_report: SarifReport = SarifReport.model_validate(
-                        normalize_rule_cwe_into_tags(scanner_results)
+                    # The smallest out-of-spec part is dropped or rewritten and
+                    # the other findings are kept (schemas.scanner_output_ingest).
+                    sarif_report: SarifReport = ingest_sarif(
+                        normalize_rule_cwe_into_tags(scanner_results),
+                        self._ingest_record,
                     )
-
-                    # Attach scanner details for proper identification
-                    sarif_report = attach_scanner_details(
-                        sarif_report=sarif_report,
-                        scanner_name=self.config.name,
-                        scanner_version=getattr(self, "tool_version", None),
-                        invocation_details={
-                            "command_line": recorded_attach_line,
-                            "arguments": recorded_arguments,
-                            "working_directory": get_shortest_name(input=target),
-                            "start_time": self.start_time.isoformat()
-                            if self.start_time
-                            else None,
-                            "end_time": self.end_time.isoformat()
-                            if self.end_time
-                            else None,
-                            "exit_code": self.exit_code,
-                        },
+                except Exception as e:
+                    # Refused, not returned as no result: the row would then read
+                    # only "returned no result". error_text names the field and
+                    # the problem and quotes no input.
+                    raise ScannerError(
+                        "snyk-code's results file is not SARIF ASH can read, so its "
+                        f"findings could not be graded: {error_text(e)}"
                     )
+                self._say_what_the_ingest_repaired(target_type)
 
-                    if sarif_report.runs:
-                        sarif_report.runs[0].invocations = [
+                # Attach scanner details for proper identification
+                sarif_report = attach_scanner_details(
+                    sarif_report=sarif_report,
+                    scanner_name=self.config.name,
+                    scanner_version=getattr(self, "tool_version", None),
+                    invocation_details={
+                        "command_line": recorded_attach_line,
+                        "arguments": recorded_arguments,
+                        "working_directory": get_shortest_name(input=target),
+                        "start_time": self.start_time.isoformat()
+                        if self.start_time
+                        else None,
+                        "end_time": self.end_time.isoformat()
+                        if self.end_time
+                        else None,
+                        "exit_code": self.exit_code,
+                    },
+                )
+
+                if sarif_report.runs:
+                    sarif_report.runs[0].invocations = [
+                        # What reading the file repaired is said in the report as
+                        # a warning, which fails no run.
+                        self._noting_the_ingest(
                             Invocation(
                                 commandLine=recorded_command_line,
                                 arguments=recorded_arguments,
@@ -1164,16 +1227,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                                     uri=get_shortest_name(input=target),
                                 ),
                             )
-                        ]
-                    return sarif_report
-                except Exception as e:
-                    self._plugin_log(
-                        f"Failed to parse {self.__class__.__name__} results as SARIF: {str(e)}",
-                        target_type=target_type,
-                        level=logging.ERROR,
-                        append_to_stream="stderr",
-                    )
-                    return
+                        )
+                    ]
+                return sarif_report
             else:
                 self._plugin_log(
                     f"No results file found at {results_file}",
