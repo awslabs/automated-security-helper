@@ -36,7 +36,7 @@ from automated_security_helper.config.operator_only_options import reporter_sect
 from automated_security_helper.config.plugin_section_names import ascii_lower
 from automated_security_helper.config.recorded_config import (
     HOW_TO_SUPPLY,
-    _sets,
+    operator_named,
     take_own_values,
 )
 from automated_security_helper.config.reporter_trust import (
@@ -1200,21 +1200,8 @@ def report_command(
     # column shape back can get it (only a field the configuration names
     # counts: a defaulted False never turns a recorded setting off).
     #
-    # The fields the configuration names are read from the configuration this
-    # command resolved, through recorded_config._sets. With no override that
-    # is what the document wrote. With an override it is the record
-    # apply_config_overrides stamps: what the configuration file wrote, less
-    # what a replacing override overwrote (the whole subtree under the key it
-    # landed on), plus the keys each override wrote, each spelled as the key
-    # it landed on (global-settings counts as global_settings). An object
-    # value counts only for the keys inside it:
-    # global_settings.deduplication={"annotate": false} writes annotate and not
-    # fold, and global_settings={"severity_threshold": "HIGH"} writes neither.
-    # The append form on a scalar (annotate+=false) is applied as a plain set,
-    # so it counts as one; an append to a list leaves the record as it was.
-    # Without the record, the rebuild's round trip through a dump and a
-    # validate, which marks every default as set, would make every default
-    # count. No second resolution is made.
+    # The fields the configuration names, under an override too:
+    # recorded_config.operator_named. No second resolution is made.
     recorded_dedup = getattr(
         getattr(getattr(model, "ash_config", None), "global_settings", None),
         "deduplication",
@@ -1226,7 +1213,7 @@ def report_command(
     own_set = {
         name
         for name in ("annotate", "fold")
-        if _sets(ash_config, ("global_settings", "deduplication", name))
+        if operator_named(ash_config, ("global_settings", "deduplication", name))
     }
     requested = {
         "annotate": annotate_duplicates,

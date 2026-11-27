@@ -366,6 +366,32 @@ def test_an_object_value_at_the_parent_without_deduplication_leaves_the_recorded
     assert tuple(header[-3:]) == ANNOTATION_COLUMNS
 
 
+def test_an_override_replacing_global_settings_takes_a_config_files_annotate_with_it(
+    tmp_path,
+):
+    # The config file names annotate: false, and the override replaces
+    # global_settings with an object that leaves deduplication out. A
+    # replacing override drops what the file wrote under the key it replaced
+    # (recorded_config.override_field_paths), so the operator's configuration
+    # names neither annotate nor fold and holds annotate's default False,
+    # which must not be taken for the file's explicit false: the recorded True
+    # stands.
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        "project_name: p\nglobal_settings:\n  deduplication:\n    annotate: false\n",
+        encoding="utf-8",
+    )
+    header = _cli_csv(
+        tmp_path,
+        "--config",
+        str(config),
+        "--config-overrides",
+        'global_settings={"severity_threshold": "HIGH"}',
+    )
+    assert tuple(header[-3:]) == ANNOTATION_COLUMNS
+
+
 def test_a_config_file_naming_false_turns_the_recorded_setting_off(tmp_path):
     _write(tmp_path, _model(annotate=True))
     # Without the file the recorded setting stands.
@@ -492,7 +518,10 @@ def test_a_resolution_warning_is_printed_once_with_or_without_an_override(
 ):
     # A config file inside the working directory may not choose
     # honor_ignore_files, and resolving the configuration says so in one
-    # warning. The command resolves it once, whatever overrides it is given.
+    # warning. The command resolves it once, whatever overrides it is given:
+    # the resolutions are counted directly, since a process that remembers a
+    # warning it printed for a file would print it once for two resolutions
+    # too.
     monkeypatch.chdir(tmp_path)
     (tmp_path / "ash.yaml").write_text(
         "project_name: p\nhonor_ignore_files: false\n", encoding="utf-8"
@@ -500,11 +529,22 @@ def test_a_resolution_warning_is_printed_once_with_or_without_an_override(
     results = tmp_path / "out"
     results.mkdir()
     _write(results, _model())
+    from automated_security_helper.cli import report as report_module
+
+    resolutions = []
+    real_resolve_config = report_module.resolve_config
+
+    def counted(*args, **kwargs):
+        resolutions.append(args)
+        return real_resolve_config(*args, **kwargs)
+
+    monkeypatch.setattr(report_module, "resolve_config", counted)
     with caplog.at_level(logging.WARNING, logger="ash"):
         result = _invoke_report_csv(
             results, "--config", "ash.yaml", *override, log_level="INFO"
         )
     assert result.exit_code == 0, result.output
+    assert len(resolutions) == 1, resolutions
     warned = [
         record
         for record in caplog.records
