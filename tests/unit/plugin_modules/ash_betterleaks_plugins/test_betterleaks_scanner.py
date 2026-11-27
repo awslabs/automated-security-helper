@@ -950,6 +950,56 @@ def test_a_relative_extend_path_in_any_key_spelling_is_refused(
         scanner._build_arguments(tree, tmp_path / "o.sarif")
 
 
+#: The UTF-8 byte order mark some editors save at the start of a file.
+_BYTE_ORDER_MARK = chr(0xFEFF)
+
+
+def _with_byte_order_mark(tree, tmp_path, monkeypatch, how: str, text: str):
+    """``_extend_scanner`` with the config ``how`` names saved behind a byte order mark.
+
+    For ``chain`` the mark is on the extended file, which ASH reads the same way.
+    Files are written as bytes: ``write_text`` uses the locale's encoding, which on
+    Windows cannot encode the mark.
+    """
+    scanner = _extend_scanner(tree, tmp_path, monkeypatch, how, text)
+    if how.endswith("_TOML"):
+        monkeypatch.setenv(how, _BYTE_ORDER_MARK + text)
+    else:
+        name = "mid.toml" if how == "chain" else "betterleaks.toml"
+        (tmp_path / "op" / name).write_bytes((_BYTE_ORDER_MARK + text).encode("utf-8"))
+    return scanner
+
+
+@pytest.mark.parametrize("how", _EXTEND_SOURCES)
+def test_a_relative_extend_path_behind_a_byte_order_mark_is_refused(
+    tree, tmp_path, monkeypatch, how
+):
+    """A config saved with a byte order mark is still read, so its relative extend
+    path is refused for what it is, not as text ASH could not parse."""
+    scanner = _with_byte_order_mark(tree, tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(tree, tmp_path / "o.sarif")
+
+
+@pytest.mark.parametrize("how", _EXTEND_SOURCES)
+def test_an_absolute_extend_path_behind_a_byte_order_mark_builds_an_argv(
+    tree, tmp_path, monkeypatch, how
+):
+    """The control: with an absolute extend path the argv is the one built without
+    the mark."""
+    common = tmp_path / "op" / "common.toml"
+    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
+    scanner = _with_byte_order_mark(tree, tmp_path, monkeypatch, how, absolute)
+    common.write_text(_TREE_COMMON)
+    args = scanner._build_arguments(tree, tmp_path / "o.sarif")
+    configs = [a for a in args if a.startswith("--config")]
+    if how in ("config_file", "chain"):
+        operator = (tmp_path / "op" / "betterleaks.toml").resolve()
+        assert configs == [f"--config={operator.as_posix()}"]
+    else:
+        assert configs == []
+
+
 #: Values under ``extend`` that ASH cannot read the way the tools do, with the
 #: words of the refusal.
 _UNREADABLE_EXTEND = {

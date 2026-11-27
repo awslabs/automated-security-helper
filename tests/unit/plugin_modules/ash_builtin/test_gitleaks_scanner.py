@@ -2136,6 +2136,58 @@ def test_a_relative_extend_path_in_any_key_spelling_is_refused(
         scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
 
 
+#: The UTF-8 byte order mark some editors save at the start of a file.
+_BYTE_ORDER_MARK = chr(0xFEFF)
+
+
+def _with_byte_order_mark(tmp_path, monkeypatch, how: str, text: str):
+    """``_extend_scanner`` with the config ``how`` names saved behind a byte order mark.
+
+    For ``chain`` the mark is on the extended file, which ASH reads the same way.
+    Files are written as bytes: ``write_text`` uses the locale's encoding, which on
+    Windows cannot encode the mark.
+    """
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, text)
+    if how == "env_toml":
+        monkeypatch.setenv("GITLEAKS_CONFIG_TOML", _BYTE_ORDER_MARK + text)
+    else:
+        name = "mid.toml" if how == "chain" else "gitleaks.toml"
+        (tmp_path / "op" / name).write_bytes((_BYTE_ORDER_MARK + text).encode("utf-8"))
+    return scanner
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_relative_extend_path_behind_a_byte_order_mark_is_refused(
+    tmp_path, monkeypatch, how
+):
+    """A config saved with a byte order mark is still read, so its relative extend
+    path is refused for what it is, not as text ASH could not parse."""
+    scanner = _with_byte_order_mark(tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_an_absolute_extend_path_behind_a_byte_order_mark_is_passed_as_config(
+    tmp_path, monkeypatch, how
+):
+    """The control: with an absolute extend path the operator's config is passed,
+    and text from the environment is passed as given, mark and all."""
+    common = tmp_path / "op" / "common.toml"
+    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
+    scanner = _with_byte_order_mark(tmp_path, monkeypatch, how, absolute)
+    common.write_text(_TREE_COMMON)
+    source = scanner.context.source_dir
+    passed = _passed_config(scanner._build_arguments(source, tmp_path / "o.sarif"))
+    if how == "env_toml":
+        assert _ashs_own(passed, source)
+        assert passed.read_text(encoding="utf-8") == _BYTE_ORDER_MARK + absolute
+    else:
+        assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
+
+
 #: Values under ``extend`` that ASH cannot read the way gitleaks does, with the
 #: words of the refusal. viper decodes with weak typing, so ``path = 42`` opens a
 #: file named ``42`` in the scanned tree; what the others would open is not ASH's
