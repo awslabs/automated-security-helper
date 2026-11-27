@@ -548,15 +548,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 654
-      line_end: 654
+      line_start: 656
+      line_end: 656
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 901
-      line_end: 901
+      line_start: 903
+      line_end: 903
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -603,8 +603,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 448
-      line_end: 600
+      line_start: 397
+      line_end: 549
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -629,8 +629,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 1123
-      line_end: 1169
+      line_start: 1033
+      line_end: 1079
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of
@@ -1441,7 +1441,7 @@ global_settings:
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
       symbol: version_output
-      reason: "subprocess.run of `<tool> --version` on an installed binary in a throwaway HOME; nothing downloaded is executed."
+      reason: "subprocess.run of the tool's version command on an installed binary in a throwaway HOME; nothing downloaded is executed."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/assets/install-pinned-tool.py
       symbol: _uv_tool_dir
@@ -1696,6 +1696,55 @@ global_settings:
         the filesystem root, as gitlab-ci-local's own helper image does. The
         file's checkov:skip=CKV_DOCKER_3 header records the same decision for
         checkov; this entry is trivy's spelling of it.
+    # === Alpha self-scan detections of 2026-11-26, each pinned to its line ===
+    # Measured with ferret-scan 2.6.2, GuardDog 3.2.0 (max_hits: 0) and zizmor 1.33.1
+    # over the tree as the alpha self-scan runs it. Each was read at the reported line
+    # and is pinned to that line alone, so a new hit elsewhere in the same file still
+    # reports. tests/unit/test_ci_ferret_self_scan_pins.py names the line each
+    # ferret-scan pin and the zizmor pin was written for, and
+    # tests/unit/test_ci_guarddog_self_scan_pins.py holds the GuardDog pin to a line that
+    # carries the flagged text. The GuardDog and zizmor entries are kept in step with
+    # .ash.yaml. Reasons paraphrase the flagged text, so this file does not flag itself.
+    - path: automated_security_helper/plugin_modules/ash_builtin/scanners/mcp_config_scanner.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 169
+      line_end: 169
+      reason: >-
+        False positive. The constant that names one of the MCP config scanner's own
+        rule ids; its value is that rule id, not a credential. The inline pragma on the
+        line is detect-secrets', which ferret-scan does not read.
+    - path: tests/snapshot/mcp/test_snapshot_mcp_image_delivery.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 30
+      line_end: 31
+      reason: >-
+        False positive. The two module constants holding the MCP request header the
+        snapshot calls send, one with a path-traversal id the tools must refuse and one
+        with a made-up id. A header name and fixture ids, not credentials.
+    - path: tests/unit/cli/mcp/test_image_delivery_names_one_subject.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 33
+      line_end: 33
+      reason: >-
+        False positive. The module constant naming the made-up MCP session the image
+        delivery tests use; a fixture id, not a credential.
+    - path: tests/unit/cli/mcp/test_run_ash_scan_anchors_an_image_scan_in_its_own_directory.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 29
+      line_end: 29
+      reason: >-
+        False positive. The module constant naming the made-up MCP session the image
+        scan anchoring tests use; a fixture id, not a credential.
+    - rule_id: threat-process-download-exec
+      path: automated_security_helper/utils/install_providers.py
+      line_start: 293
+      line_end: 293
+      reason: "A tuple comparison in classify_install_command that recognizes a declared install command of the shape <interpreter> -m pip install, so the command is classed as a Python environment install; nothing is downloaded or run here. Pinned to its line, not scoped to the function as the GuardDog entries that name a definition are: the function is the whole install-command parser, longer than the line budget a symbol scope is held to (tests/unit/config/test_symbol_migration_record.py), and a scope over all of it would excuse a download-and-run shape added anywhere in the parser."
+    - rule_id: zizmor/dangerous-triggers
+      path: .github/workflows/ash-dependabot-auto-merge.yml
+      line_start: 113
+      line_end: 113
+      reason: "Reviewed. The workflow_run trigger is the point of the file: it approves a dependabot bump only after every required check on the head is green. The header of the workflow, under THE SAFETY OF THE TRIGGER, names why nothing the audit warns about can happen there. ASH runs zizmor without its inline ignore comments, so the decision is recorded here, pinned to the trigger's own line: zizmor 1.33.1 reports that line, a release that reports the whole on: block still overlaps it, and a dangerous trigger reported on another line of the file is not covered. .ash.yaml carries the same entry."
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

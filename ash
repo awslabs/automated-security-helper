@@ -371,7 +371,7 @@ ASH_DASH_O_IS_THE_SUBCOMMANDS="get-genai-guide config"
 # (`--phases report`, `--phases inspect`), so the token after one of these is
 # the option's value, not the subcommand.
 # BEGIN generated: sh-root-value-options (scripts/generate_wrapper_tables.py)
-ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --strategy --workspace --workspace-config -c -f -g -o -u"
+ASH_ROOT_VALUE_OPTIONS="--add-scanners --ash-config-from-host --ash-plugin-modules --ash-revision-to-install --base-ref --baseline --build-target --config --config-file-from-another-checkout --config-file-from-scanned-repository --config-overrides --container-gid --container-uid --custom-build-arg --custom-containerfile --exclude-scanners --format --formats --git-depth --git-ref --image --image-archive --image-layout --log-level --min-severity --mode --oci --oci-runner --offline-semgrep-rulesets --only-scanners --output-dir --output-format --output-formats --phases --require-scanner-selection --runner --sandbox --scanners --shard-count --shard-index --source-dir --source-git --strategy --workspace --workspace-config -c -f -g -o -u"
 # END generated: sh-root-value-options
 
 # The first word of ASH_ARG_WORDS that names an ash subcommand, in SUBCOMMAND,
@@ -412,6 +412,71 @@ detect_subcommand() {
       done
     fi
   done
+}
+
+# Whether a run of the command that reads stdin named $1 reads it. $1 is the command's
+# entry in ASH_READS_STDIN (`config:lint`) and $2 the index in ASH_ARG_WORDS of the
+# first word after the command's own words. A command with no entry in
+# ASH_STDIN_CONDITIONS reads it in every run. An entry reads `command=asks/spares/
+# values`, each of the three a list of options joined with ",": the run reads stdin
+# when one of the options in asks is among the words after the command's own and none
+# of the options in spares is, as `config lint` asks only under --fix or --fix-unused
+# and not when --non-interactive (--yes, -y) is given. The words are read as the CLI's
+# parser reads them, which is how detect_subcommand reads the root's: the word after an
+# option in values is that option's value and is passed over (`--config --fix` names a
+# config file, it is not --fix), `--opt=value` carries its value in the same word, and
+# a cluster of short options is read letter by letter, the first letter that takes a
+# value taking the rest of the word or, when it is last, the next word. Status 0 when
+# the run reads stdin.
+run_reads_stdin() {
+  local entry fields asks spares values word at letter skip="NO" asked="NO" spared="NO"
+  # Set to empty first, so the environment variable reference does not read this array,
+  # which `read -a` fills, as a variable ASH takes from the environment.
+  STDIN_CONDITION_ENTRIES=()
+  read -r -d '' -a STDIN_CONDITION_ENTRIES <<< "${ASH_STDIN_CONDITIONS}"
+  for entry in "${STDIN_CONDITION_ENTRIES[@]}"; do
+    if [[ "${entry%%=*}" != "$1" ]]; then
+      continue
+    fi
+    fields="${entry#*=}"
+    asks="${fields%%/*}"
+    fields="${fields#*/}"
+    spares="${fields%%/*}"
+    values="${fields#*/}"
+    asks="${asks//,/ }"
+    spares="${spares//,/ }"
+    values="${values//,/ }"
+    for ((at = $2; at < ${#ASH_ARG_WORDS[@]}; at++)); do
+      word="${ASH_ARG_WORDS[at]}"
+      if [[ "${skip}" = "YES" ]]; then
+        skip="NO"
+      elif [[ " ${values} " == *" ${word} "* ]]; then
+        skip="YES"
+      elif [[ " ${asks} " == *" ${word} "* ]]; then
+        asked="YES"
+      elif [[ " ${spares} " == *" ${word} "* ]]; then
+        spared="YES"
+      elif [[ "${word}" == -[!-]?* ]]; then
+        for ((letter = 1; letter < ${#word}; letter++)); do
+          if [[ " ${values} " == *" -${word:letter:1} "* ]]; then
+            if ((letter + 1 == ${#word})); then
+              skip="YES"
+            fi
+            break
+          elif [[ " ${asks} " == *" -${word:letter:1} "* ]]; then
+            asked="YES"
+          elif [[ " ${spares} " == *" -${word:letter:1} "* ]]; then
+            spared="YES"
+          fi
+        done
+      fi
+    done
+    if [[ "${asked}" = "YES" && "${spared}" = "NO" ]]; then
+      return 0
+    fi
+    return 1
+  done
+  return 0
 }
 
 # The output of a command, in OUTPUT_KEPT, with a trailing line feed of its own
@@ -1953,25 +2018,62 @@ else
       if [[ "${COLOR_OUTPUT}" = "true" ]] && [ -t 1 ]; then
         DOCKER_RUN_EXTRA_ARGS="${DOCKER_RUN_EXTRA_ARGS} -t"
       fi
-      # The container's stdin is kept open (-i) only for a run that reads it. The
-      # subcommands that read stdin are ASH_READS_STDIN: mcp, whose default stdio
-      # transport is driven by the client over stdin; inspect, the Textual app, which
-      # reads keys; and config, whose init and fix steps prompt for answers. Any
-      # subcommand reads stdin when given `--cli-json-input -`, which takes its
+      # The container's stdin is kept open (-i) only for a run that reads it. Those
+      # are the commands in ASH_READS_STDIN, each written as the words that name it
+      # joined with ":": mcp, whose default stdio transport is driven by the client
+      # over stdin; inspect findings and results inspect findings, the Textual app,
+      # which reads keys; config wizard, which asks before it changes a file; and
+      # config lint, which asks only under --fix or --fix-unused and not when
+      # --non-interactive (--yes, -y) is given: ASH_STDIN_CONDITIONS gives it those
+      # options, and run_reads_stdin (above) judges the words after its own. The list
+      # names commands, not the groups they sit in. The rest of config and of results
+      # reads nothing, and -i on a run that reads nothing makes the container consume
+      # the caller's input: `while read d; do ./ash --source-dir "$d"; done < dirs.txt`
+      # ended after one directory, a job script fed to bash on stdin lost the commands
+      # after ./ash, and `./ash scan &` from an interactive shell had the runner read
+      # the terminal and stopped on SIGTTIN; so did a plain `./ash config lint` in
+      # such a loop, which asks nothing.
+      # Any command reads stdin when given `--cli-json-input -`, which takes its
       # parameters as a JSON document from stdin. Without -i none of them got any
-      # input. No other run reads stdin, and -i on one makes the container consume
-      # the caller's input: `while read d; do ./ash --source-dir "$d"; done
-      # < dirs.txt` ended after one directory, a job script fed to bash on stdin lost
-      # the commands after ./ash, and `./ash scan &` from an interactive shell had the
-      # runner read the terminal and stopped on SIGTTIN. SUBCOMMAND is the first of
-      # ash's words that names a subcommand (detect_subcommand, above). The list
-      # must name the subcommands that read stdin;
-      # tests/unit/test_ash_bash_entrypoint_subcommand_args.py checks it against the
-      # CLI's own readers.
-      ASH_READS_STDIN="config inspect mcp"
+      # input. A run reads stdin when the words from SUBCOMMAND on (the first of ash's
+      # words that names a subcommand, detect_subcommand above) spell one of the listed
+      # commands: a group's own commands are named right after it, so each word of an
+      # entry is compared with the word in the same place. utils/ash_helpers.ps1 never
+      # passes -i, so it has no such list.
+      # tests/unit/test_ash_bash_entrypoint_subcommand_args.py reads each command's code
+      # and fails when a command reads stdin and is not listed, or is listed and does
+      # not.
+      # BEGIN generated: sh-reads-stdin (scripts/generate_wrapper_tables.py)
+      ASH_READS_STDIN="config:lint config:wizard inspect:findings mcp results:inspect:findings"
+      ASH_STDIN_CONDITIONS="config:lint=--fix,--fix-unused/--non-interactive,--yes,-y/--config,--output-dir,--source-dir,-c,-o"
+      # END generated: sh-reads-stdin
+      # Run again rather than reused, as below: SUBCOMMAND_AT must index the words as
+      # they stand now.
+      detect_subcommand
       KEEP_STDIN="NO"
-      if [[ -n "${SUBCOMMAND}" && " ${ASH_READS_STDIN} " == *" ${SUBCOMMAND} "* ]]; then
-        KEEP_STDIN="YES"
+      if [[ -n "${SUBCOMMAND}" ]]; then
+        # Set to empty first, so the environment variable reference does not read these
+        # two arrays, which `read -a` fills, as variables ASH takes from the environment.
+        STDIN_COMMANDS=()
+        read -r -d '' -a STDIN_COMMANDS <<< "${ASH_READS_STDIN}"
+        for STDIN_COMMAND in "${STDIN_COMMANDS[@]}"; do
+          STDIN_COMMAND_WORDS=()
+          read -r -d '' -a STDIN_COMMAND_WORDS <<< "${STDIN_COMMAND//:/ }"
+          STDIN_NAMED="YES"
+          for ((STDIN_STEP = 0; STDIN_STEP < ${#STDIN_COMMAND_WORDS[@]}; STDIN_STEP++)); do
+            if [[ "${ASH_ARG_WORDS[SUBCOMMAND_AT + STDIN_STEP]:-}" != "${STDIN_COMMAND_WORDS[STDIN_STEP]}" ]]; then
+              STDIN_NAMED="NO"
+              break
+            fi
+          done
+          if [[ "${STDIN_NAMED}" = "YES" ]]; then
+            # A command with a condition reads stdin in some runs only
+            # (ASH_STDIN_CONDITIONS), judged by the words after its own.
+            if run_reads_stdin "${STDIN_COMMAND}" $((SUBCOMMAND_AT + ${#STDIN_COMMAND_WORDS[@]})); then
+              KEEP_STDIN="YES"
+            fi
+          fi
+        done
       fi
       for ((STDIN_WORD_AT = 0; STDIN_WORD_AT < ${#ASH_ARG_WORDS[@]}; STDIN_WORD_AT++)); do
         case "${ASH_ARG_WORDS[STDIN_WORD_AT]}" in

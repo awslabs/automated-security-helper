@@ -1337,6 +1337,8 @@ class FindingsExplorerApp(App):
         self._table_layout: Optional[tuple] = None
         self._table_fields: list = []
         self._selected_finding = None
+        # Set by on_mount: a handler called on an app that never ran is not torn down.
+        self._has_mounted = False
         self.sub_title = "Findings explorer"
 
     def _get_unique_scanners(self) -> list:
@@ -1419,6 +1421,7 @@ class FindingsExplorerApp(App):
 
     def on_mount(self) -> None:
         """Set up the table when the app is mounted."""
+        self._has_mounted = True
         table = self.query_one("#findings_table", DataTable)
         self.register_theme(textual_theme())
         self.theme = "ash"
@@ -1431,7 +1434,18 @@ class FindingsExplorerApp(App):
         self._populate_table()
         table.focus()
 
+    def _torn_down(self) -> bool:
+        """True once the app has run and has stopped running.
+
+        Textual's _shutdown clears _running (which is_running reads) before it
+        prunes the screen, so a message still queued then reaches a handler
+        whose widgets are gone: App.run_test shuts down with the loop still live.
+        """
+        return self._has_mounted and not self.is_running
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        if self._torn_down():
+            return False
         # The app's bindings stay live under a screen it pushed, so under the
         # detail screen and the suppress dialog they are refused: a j or k
         # that reached the hidden table moved its cursor, and the dialog's
@@ -1527,6 +1541,8 @@ class FindingsExplorerApp(App):
         return True
 
     def on_resize(self, event: events.Resize) -> None:
+        if self._torn_down():
+            return
         # The event's size, not self.size: when this handler runs, self.size
         # can still hold the previous event's value, which skipped the resize
         # and then applied it one event late.
@@ -1606,6 +1622,8 @@ class FindingsExplorerApp(App):
             self._selected_finding = self.filtered_findings[selected_index]
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        if self._torn_down():
+            return
         index = event.row_key.value
         if not isinstance(index, int) or index >= len(self.filtered_findings):
             return
@@ -1680,6 +1698,8 @@ class FindingsExplorerApp(App):
         findings the entry covers Active, and the summary's counts wrong, until a
         rescan.
         """
+        if self._torn_down():
+            return
         if result in (SuppressDialog.SAVED, SuppressDialog.ALREADY_SUPPRESSED):
             status_bar = self.query_one("#status_bar", Static)
             if finding is None:
@@ -1749,6 +1769,8 @@ class FindingsExplorerApp(App):
         that is no row of the current list (the table is repopulated while a
         selection event is in flight) is no finding to show.
         """
+        if self._torn_down():
+            return
         index = event.row_key.value
         if not isinstance(index, int) or not 0 <= index < len(self.filtered_findings):
             return
@@ -1822,6 +1844,8 @@ class FindingsExplorerApp(App):
 
     def on_select_changed(self, event) -> None:
         """Handle changes to filter or sort selects."""
+        if self._torn_down():
+            return
         if event.select.id == "severity_select":
             self.current_filter = event.value
             self.severity_filter = event.value
@@ -2019,12 +2043,16 @@ class FindingsExplorerApp(App):
 
     def on_input_changed(self, event) -> None:
         """Handle changes to the search input."""
+        if self._torn_down():
+            return
         if event.input.id == "search_input":
             self.search_query = event.value
             self._populate_table()
 
     def on_data_table_header_selected(self, event) -> None:
         """Handle column header selection for sorting."""
+        if self._torn_down():
+            return
         # In Textual 3.2.0, the event already contains the label
         # Convert the Text object to a string
         column_name = str(event.label)

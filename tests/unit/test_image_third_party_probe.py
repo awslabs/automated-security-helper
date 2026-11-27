@@ -392,3 +392,11 @@ def test_the_host_spec_lists_no_executables_for_probed_entries():
             assert by_tool[tool]["executables"] == [], tool
         else:
             assert by_tool[tool]["executables"], tool
+
+
+def test_the_host_spec_lists_crane_as_an_executable_on_path():
+    """crane is asked for its version with other arguments than --version, which is
+    no reason to drop it from the executables the image check accounts for."""
+    spec = host.build_spec(host._load_pins())
+    by_tool = {t["tool"]: t for t in spec["tools"]}
+    assert by_tool["crane"]["executables"] == ["crane"]
