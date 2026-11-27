@@ -3,13 +3,24 @@
 
 """Which directories opengrep's child is told git may trust, and who decides.
 
-The scanned directory is always named. A parent is named only when it is the top of the
-checkout the directory sits in, its ``.git`` entry belongs to the same user as the
-scanned directory, and it is a directory a ``safe.directory`` entry may name (never a
-filesystem root). One list, computed from the scan target, reaches the unsandboxed
-child and the sandboxed one; no environment variable carries it, so an inherited value
-cannot choose entries. A ``GIT_CONFIG_*`` entry in the operator's environment list is
-refused for this scanner, which writes that block itself.
+The scanned directory is named. A parent is named only when it is the top of the
+checkout the directory sits in; the top, its ``.git`` entry, what a ``.git`` link
+resolves to and the git directory a ``.git`` file names each belong to the user who
+owns the scanned directory or to the effective uid; and it is a directory a
+``safe.directory`` entry may name (never a filesystem root). Where the platform has
+user ids, a scan of the checkout's top itself is held to the same test, and the top is
+left out when it fails. git's own ownership check reads the top, the ``.git`` and the
+git directory, and git reads the repository through a ``.git`` link, so a top,
+``.git``, link target or git directory that a third user owns is never named. One
+list, computed from the scan target, reaches the unsandboxed child and the sandboxed
+one; no environment variable carries it, so an inherited value cannot choose entries.
+
+Of git's configuration variables the sandboxed child gets the
+``GIT_CONFIG_COUNT``/``KEY_<n>``/``VALUE_<n>`` block ASH writes, and only what can take
+configuration away besides: ``GIT_CONFIG_NOSYSTEM``, and ``GIT_CONFIG_GLOBAL`` or
+``GIT_CONFIG_SYSTEM`` set to the null device. An entry in the operator's environment
+list that could add configuration is refused for this scanner, in words that say what
+the entry would do.
 
 Where the platform has no user ids (Windows: no ``os.geteuid``, and ``os.lstat``
 reports uid 0 for every file), no ``.git`` can be shown to belong to either user, so
@@ -18,6 +29,7 @@ The tests that pin the owner rule need user ids; the ``without_user_ids`` tests 
 the other reading on every platform by taking ``os.geteuid`` away.
 """
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -32,7 +44,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scan
 from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
     SemgrepScanner,
 )
+from automated_security_helper.utils.sandbox import policy as policy_module
 from automated_security_helper.utils.sandbox.policy import (
+    SandboxRequirements,
     SandboxUnavailable,
     build_scanner_policy,
 )
@@ -142,6 +156,23 @@ def _owned_by_someone_else(monkeypatch, path):
     monkeypatch.setattr(os, "lstat", lstat)
 
 
+def _owned_by(monkeypatch, owners):
+    """``os.lstat`` reports, for each path in ``owners``, the uid given for it; every
+    other path keeps its real owner, and nothing but the owner changes."""
+    wanted = {os.path.realpath(path): uid for path, uid in owners.items()}
+
+    def lstat(candidate, *args, **kwargs):
+        real = _REAL_LSTAT(candidate, *args, **kwargs)
+        uid = wanted.get(os.fspath(candidate))
+        if uid is None:
+            return real
+        fields = list(real)[:10]
+        fields[4] = uid
+        return os.stat_result(tuple(fields))
+
+    monkeypatch.setattr(os, "lstat", lstat)
+
+
 def _checkout(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -185,11 +216,43 @@ def walk_messages():
         ASH_LOGGER.setLevel(previous_level)
 
 
+@pytest.fixture
+def walk_records():
+    """The log records ASH's logger emits while a test runs, with their levels."""
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    records = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Capture(level=logging.DEBUG)
+    previous_level = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous_level)
+
+
+def _unnamed_top_records(records):
+    return [
+        record
+        for record in records
+        if "safe_directories_for: not naming" in record.getMessage()
+    ]
+
+
 def test_a_parent_whose_git_entry_belongs_to_another_user_is_not_named(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
     repo, sub = _checkout(only_staged_checkouts)
-    _owned_by_someone_else(monkeypatch, repo / ".git")
+    _owned_by_someone_else(monkeypatch, os.path.realpath(repo / ".git"))
     scanner = _scanner(test_plugin_context)
 
     envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
@@ -233,6 +296,545 @@ def test_a_parent_git_entry_owned_by_the_effective_uid_is_named_for_a_foreign_ta
         assert _named(env) == [os.path.realpath(sub), os.path.realpath(repo)], name
 
 
+#: The owners of the scan target, the checkout's top and its ``.git`` entry, as
+#: offsets from the effective uid (0 is the effective uid, 1 another user, who owns
+#: the scan target in most rows, 2 a third user), and whether the walk names the top.
+#: git trusts a work tree only when its top and its ``.git`` (and the git directory a
+#: ``.git`` file names; see the git-file test below) belong to the user running it, and
+#: the walk names the top in git's place only when each of them belongs to the scan
+#: target's owner or to the effective uid: a third user who owns the top could replace
+#: its ``.git``, whoever owns the ``.git`` today.
+_TOP_OWNERS = [
+    pytest.param(1, 0, 0, True, id="top-and-git-the-effective-uids"),
+    pytest.param(1, 1, 1, True, id="top-and-git-the-target-owners"),
+    pytest.param(1, 1, 0, True, id="top-the-target-owners-git-the-effective-uids"),
+    pytest.param(1, 0, 1, True, id="top-the-effective-uids-git-the-target-owners"),
+    pytest.param(1, 2, 0, False, id="top-a-third-users-git-the-effective-uids"),
+    pytest.param(0, 2, 0, False, id="own-target-top-a-third-users"),
+    pytest.param(1, 2, 1, False, id="top-a-third-users-git-the-target-owners"),
+    pytest.param(1, 1, 2, False, id="git-a-third-users"),
+]
+
+
+@needs_user_ids
+@pytest.mark.parametrize("target_uid, top_uid, git_uid, top_named", _TOP_OWNERS)
+def test_the_top_is_named_only_when_it_and_its_git_entry_belong_to_a_trusted_user(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    target_uid,
+    top_uid,
+    git_uid,
+    top_named,
+):
+    repo, sub = _checkout(only_staged_checkouts)
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {
+            sub: effective + target_uid,
+            repo: effective + top_uid,
+            repo / ".git": effective + git_uid,
+        },
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+
+    top = os.path.realpath(repo)
+    expected = [os.path.realpath(sub), *([top] if top_named else [])]
+    for name, env in envs.items():
+        assert _named(env) == expected, name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        assert all("is owned by uid" in m for m in refusals), refusals
+
+
+def _checkout_with_a_git_file(tmp_path, spelling):
+    """A checkout whose ``.git`` is a file, as a linked work tree's and a submodule's
+    are, naming a git directory kept elsewhere: ``spelling`` is ``absolute`` or
+    ``relative`` (read against the ``.git`` file's directory, as git reads it)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    gitdir = tmp_path / "store" / "worktrees" / "repo"
+    gitdir.mkdir(parents=True)
+    named = (
+        os.path.realpath(gitdir)
+        if spelling == "absolute"
+        else "../store/worktrees/repo"
+    )
+    (repo / ".git").write_text(f"gitdir: {named}\n", encoding="utf-8")
+    sub = repo / "pkg" / "inner"
+    sub.mkdir(parents=True)
+    return repo, sub, gitdir
+
+
+@needs_user_ids
+@pytest.mark.parametrize("spelling", ["absolute", "relative"])
+@pytest.mark.parametrize(
+    "gitdir_uid, top_named",
+    [
+        pytest.param(0, True, id="gitdir-the-effective-uids"),
+        pytest.param(1, True, id="gitdir-the-target-owners"),
+        pytest.param(2, False, id="gitdir-a-third-users"),
+    ],
+)
+def test_a_git_files_git_directory_must_belong_to_a_trusted_user_too(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    spelling,
+    gitdir_uid,
+    top_named,
+):
+    """git's own ownership check reads the git directory a ``.git`` file names as
+    well as the file and the work tree's top, so the walk does too: a git directory a
+    third user owns, which holds configuration that user can change, keeps the top
+    unnamed even when the top and the ``.git`` file belong to trusted users."""
+    repo, sub, gitdir = _checkout_with_a_git_file(only_staged_checkouts, spelling)
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {
+            sub: effective + 1,
+            repo: effective + 1,
+            repo / ".git": effective + 1,
+            gitdir: effective + gitdir_uid,
+        },
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+
+    top = os.path.realpath(repo)
+    expected = [os.path.realpath(sub), *([top] if top_named else [])]
+    for name, env in envs.items():
+        assert _named(env) == expected, name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        assert all(
+            f"{os.path.realpath(gitdir)} is owned by uid" in m for m in refusals
+        ), refusals
+
+
+@needs_user_ids
+@pytest.mark.parametrize("points_at", ["a-git-directory", "a-git-file"])
+@pytest.mark.parametrize(
+    "resolved_uid, top_named",
+    [
+        pytest.param(0, True, id="resolved-the-effective-uids"),
+        pytest.param(1, True, id="resolved-the-target-owners"),
+        pytest.param(2, False, id="resolved-a-third-users"),
+    ],
+)
+def test_what_a_git_link_resolves_to_must_belong_to_a_trusted_user_too(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    points_at,
+    resolved_uid,
+    top_named,
+):
+    """git reads the repository through a ``.git`` link, so the walk tests what the
+    link resolves to as well as the link: a git directory or a ``.git`` file that a
+    third user owns keeps the top unnamed, even when the link and the top belong to
+    trusted users. A link to an entry a trusted user owns is followed, and the top is
+    named."""
+    repo = only_staged_checkouts / "repo"
+    sub = repo / "pkg" / "inner"
+    sub.mkdir(parents=True)
+    store = only_staged_checkouts / "store"
+    gitdir = store / "repo.git"
+    gitdir.mkdir(parents=True)
+    if points_at == "a-git-directory":
+        resolved = gitdir
+    else:
+        resolved = store / "repo.gitfile"
+        resolved.write_text(f"gitdir: {os.path.realpath(gitdir)}\n", encoding="utf-8")
+    (repo / ".git").symlink_to(resolved)
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {sub: effective + 1, repo: effective + 1, resolved: effective + resolved_uid},
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
+
+    top = os.path.realpath(repo)
+    expected = [os.path.realpath(sub), *([top] if top_named else [])]
+    for name, env in envs.items():
+        assert _named(env) == expected, name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        assert all(
+            f"{os.path.realpath(resolved)} is owned by uid" in m for m in refusals
+        ), refusals
+
+
+#: A scan pointed at the checkout's top: the owners of the top, which is the scan
+#: target, and of its ``.git`` entry, as offsets from the effective uid, and whether the
+#: top is named.
+_SCANNED_TOP_OWNERS = [
+    pytest.param(0, 0, True, id="own-top-own-git"),
+    pytest.param(1, 0, True, id="foreign-top-git-the-effective-uids"),
+    pytest.param(1, 1, True, id="foreign-top-git-the-top-owners"),
+    pytest.param(0, 2, False, id="own-top-git-a-third-users"),
+    pytest.param(1, 2, False, id="foreign-top-git-a-third-users"),
+]
+
+
+@needs_user_ids
+@pytest.mark.parametrize("top_uid, git_uid, top_named", _SCANNED_TOP_OWNERS)
+def test_a_scan_of_the_checkout_top_names_it_only_when_its_git_entry_passes(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    top_uid,
+    git_uid,
+    top_named,
+):
+    """git compares ``safe.directory`` with the work tree's top, so a scan pointed at
+    the top is the one where naming the scanned directory tells git to trust the
+    checkout. The top is held to the test a parent top is held to, and both spawn
+    paths leave it out when its ``.git`` belongs to a third user."""
+    repo, _sub = _checkout(only_staged_checkouts)
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {repo: effective + top_uid, repo / ".git": effective + git_uid},
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, repo), repo)
+
+    top = os.path.realpath(repo)
+    for name, env in envs.items():
+        assert _named(env) == ([top] if top_named else []), name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        git_entry = os.path.join(top, ".git")
+        assert all(f"{git_entry} is owned by uid" in m for m in refusals), refusals
+
+
+@needs_user_ids
+@pytest.mark.parametrize(
+    "gitdir_uid, top_named",
+    [
+        pytest.param(0, True, id="gitdir-the-effective-uids"),
+        pytest.param(1, True, id="gitdir-the-top-owners"),
+        pytest.param(2, False, id="gitdir-a-third-users"),
+    ],
+)
+def test_a_scan_of_the_checkout_top_tests_the_git_directory_its_git_file_names(
+    test_plugin_context,
+    monkeypatch,
+    only_staged_checkouts,
+    walk_messages,
+    gitdir_uid,
+    top_named,
+):
+    """A scanned top whose ``.git`` is a file (a linked work tree, a submodule) is
+    named only when the git directory that file names belongs to a trusted user, as
+    for a parent top."""
+    repo, _sub, gitdir = _checkout_with_a_git_file(only_staged_checkouts, "absolute")
+    effective = os.geteuid()
+    _owned_by(
+        monkeypatch,
+        {
+            repo: effective + 1,
+            repo / ".git": effective + 1,
+            gitdir: effective + gitdir_uid,
+        },
+    )
+    scanner = _scanner(test_plugin_context)
+
+    envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, repo), repo)
+
+    top = os.path.realpath(repo)
+    for name, env in envs.items():
+        assert _named(env) == ([top] if top_named else []), name
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    if top_named:
+        assert not refusals, refusals
+    else:
+        assert refusals, walk_messages
+        assert all(
+            f"{os.path.realpath(gitdir)} is owned by uid" in m for m in refusals
+        ), refusals
+
+
+def _a_link_to_itself(path):
+    path.symlink_to(path)
+
+
+def _an_unreadable_git_file(path):
+    path.write_text("gitdir: elsewhere\n", encoding="utf-8")
+    path.chmod(0)
+
+
+def _a_git_file_naming(make_named):
+    """A ``.git`` file whose ``gitdir:`` line names what ``make_named`` makes in the
+    ``.git`` file's directory."""
+
+    def make(path):
+        path.write_text(f"gitdir: {make_named(path.parent)}\n", encoding="utf-8")
+
+    return make
+
+
+def _nothing(directory):
+    return directory / "missing"
+
+
+def _a_loop(directory):
+    loop = directory / "loop"
+    loop.symlink_to(loop)
+    return loop
+
+
+#: A process that reads every file whatever its mode (root) cannot be shown a ``.git``
+#: file it may not open.
+_READS_ANY_FILE = hasattr(os, "geteuid") and os.geteuid() == 0
+
+#: The two frames of an unreadable entry: the ``.git`` itself, which git would not read
+#: as a git directory or a ``gitdir:`` file, and the git directory a ``.git`` file names.
+_ITSELF = "cannot be read the way git reads it"
+_WHAT_IT_NAMES = "names cannot be read"
+
+
+@needs_user_ids
+@pytest.mark.parametrize(
+    "make_git, frame, reason",
+    [
+        pytest.param(
+            lambda path: path.write_text("not a gitfile\n", encoding="utf-8"),
+            _ITSELF,
+            "it is not a gitdir: file",
+            id="not-a-gitdir-file",
+        ),
+        pytest.param(
+            lambda path: path.write_text("gitdir: \n", encoding="utf-8"),
+            _ITSELF,
+            "it names no directory",
+            id="names-no-directory",
+        ),
+        pytest.param(
+            lambda path: path.write_bytes(
+                b"gitdir: " + b"x" * policy_module._GITFILE_MAX_BYTES
+            ),
+            _ITSELF,
+            "it is larger than git reads",
+            id="larger-than-git-reads",
+        ),
+        pytest.param(
+            lambda path: os.mkfifo(path),
+            _ITSELF,
+            "it is neither a directory nor a file",
+            id="a-pipe",
+        ),
+        pytest.param(
+            lambda path: path.symlink_to(path.parent / "missing"),
+            _ITSELF,
+            os.strerror(errno.ENOENT),
+            id="a-dangling-link",
+        ),
+        pytest.param(
+            _a_link_to_itself,
+            _ITSELF,
+            os.strerror(errno.ELOOP),
+            id="a-link-to-itself",
+        ),
+        pytest.param(
+            _an_unreadable_git_file,
+            _ITSELF,
+            os.strerror(errno.EACCES),
+            marks=pytest.mark.skipif(_READS_ANY_FILE, reason="root reads any file"),
+            id="a-git-file-it-may-not-open",
+        ),
+        pytest.param(
+            _a_git_file_naming(_nothing),
+            _WHAT_IT_NAMES,
+            os.strerror(errno.ENOENT),
+            id="a-git-file-naming-nothing",
+        ),
+        pytest.param(
+            _a_git_file_naming(_a_loop),
+            _WHAT_IT_NAMES,
+            os.strerror(errno.ELOOP),
+            id="a-git-file-naming-a-loop",
+        ),
+    ],
+)
+def test_a_git_entry_git_cannot_read_leaves_the_top_unnamed(
+    only_staged_checkouts, walk_messages, make_git, frame, reason
+):
+    """A ``.git`` that git would not read as a git directory or a ``gitdir:`` file, and
+    a ``.git`` file whose git directory cannot be followed, leave the top unnamed, and
+    the walk says why, in words that tell the ``.git`` itself from the directory it
+    names. A link is followed, and a loop of links stops at the kernel's limit instead
+    of naming the top; a pipe is never opened for reading, so it cannot stall the walk;
+    a ``.git`` file larger than git reads is refused unread, as git refuses it."""
+    repo = only_staged_checkouts / "repo"
+    sub = repo / "pkg" / "inner"
+    sub.mkdir(parents=True)
+    make_git(repo / ".git")
+
+    assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
+    top = os.path.realpath(repo)
+    git_entry = os.path.join(top, ".git")
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    assert refusals, walk_messages
+    assert all(f"{git_entry} {frame} ({reason})" in m for m in refusals), refusals
+
+
+@needs_user_ids
+def test_a_git_directory_realpath_cannot_resolve_leaves_the_top_unnamed(
+    monkeypatch, only_staged_checkouts, walk_messages
+):
+    """``os.path.realpath`` follows links by recursing, and on Python 3.11 and 3.12 a
+    long enough chain raises ``RecursionError``. A git directory that cannot be
+    resolved is one the walk cannot test, so the top is left unnamed with the reason
+    logged, and the scan goes on instead of failing."""
+    repo, sub, gitdir = _checkout_with_a_git_file(only_staged_checkouts, "absolute")
+    named = os.path.realpath(gitdir)
+    real_realpath = os.path.realpath
+
+    def realpath(path, *args, **kwargs):
+        if os.fspath(path) == named:
+            raise RecursionError("maximum recursion depth exceeded")
+        return real_realpath(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+
+    assert policy_module.safe_directories_for(sub) == [real_realpath(sub)]
+    top = real_realpath(repo)
+    git_entry = os.path.join(top, ".git")
+    refusals = [
+        m for m in walk_messages if f"safe_directories_for: not naming {top}:" in m
+    ]
+    assert refusals, walk_messages
+    assert all(f"{git_entry} {_WHAT_IT_NAMES}" in m for m in refusals), refusals
+
+
+@needs_user_ids
+def test_a_top_whose_path_a_safe_directory_entry_cannot_carry_is_logged(
+    only_staged_checkouts, walk_messages
+):
+    """A top whose path holds a ``*`` passes the owner test but cannot be written as a
+    ``safe.directory`` entry, and neither can a target inside it; the walk names
+    nothing and says why for the top."""
+    repo = only_staged_checkouts / "re*po"
+    (repo / ".git").mkdir(parents=True)
+    sub = repo / "pkg" / "inner"
+    sub.mkdir(parents=True)
+
+    assert policy_module.safe_directories_for(sub) == []
+    refusals = [m for m in walk_messages if "safe_directories_for: not naming" in m]
+    assert refusals, walk_messages
+    assert all("* or a line break" in m for m in refusals), refusals
+
+
+@needs_user_ids
+def test_an_owner_the_walk_cannot_read_is_logged_as_unreadable(
+    monkeypatch, only_staged_checkouts, walk_messages
+):
+    """A ``.git`` whose owner cannot be read stops the walk, and the log says so in
+    those words instead of reporting an owner of ``None``."""
+    repo, sub = _checkout(only_staged_checkouts)
+    git_entry = os.path.join(os.path.realpath(repo), ".git")
+    staged_lexists = os.path.lexists
+
+    def lexists(path):
+        return True if os.fspath(path) == git_entry else staged_lexists(path)
+
+    def lstat(candidate, *args, **kwargs):
+        if os.fspath(candidate) == git_entry:
+            raise PermissionError(13, "Permission denied", git_entry)
+        return _REAL_LSTAT(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "lexists", lexists)
+    monkeypatch.setattr(os, "lstat", lstat)
+
+    assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
+    refusals = [m for m in walk_messages if "safe_directories_for: not naming" in m]
+    assert refusals, walk_messages
+    assert all(f"the owner of {git_entry} cannot be read" in m for m in refusals), (
+        refusals
+    )
+    assert not [m for m in refusals if "uid None" in m], refusals
+
+
+@needs_user_ids
+def test_a_filesystem_root_top_is_logged_in_its_own_words(
+    monkeypatch, only_staged_checkouts, walk_messages
+):
+    """A ``.git`` at the filesystem root that reads as a directory, and whose owners
+    pass, stops the walk on the root test alone, and the log names that reason
+    rather than an owner or an unreadable entry."""
+    target = only_staged_checkouts / "plain"
+    target.mkdir()
+    root_git = os.path.join(os.sep, ".git")
+    staged_lexists = os.path.lexists
+
+    monkeypatch.setattr(
+        os.path,
+        "lexists",
+        lambda p: True if os.fspath(p) == root_git else staged_lexists(p),
+    )
+
+    def lstat(candidate, *args, **kwargs):
+        if os.fspath(candidate) in (root_git, os.sep):
+            return _REAL_LSTAT(target)
+        return _REAL_LSTAT(candidate, *args, **kwargs)
+
+    real_stat = os.stat
+
+    def fake_stat(candidate, *args, **kwargs):
+        # The root's ``.git`` reads as a directory, so no git directory is looked up.
+        if os.fspath(candidate) == root_git:
+            return real_stat(target)
+        return real_stat(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.setattr(os, "stat", fake_stat)
+
+    assert policy_module.safe_directories_for(target) == [os.path.realpath(target)]
+    refusals = [m for m in walk_messages if "safe_directories_for: not naming" in m]
+    assert refusals, walk_messages
+    assert all("filesystem root" in m for m in refusals), refusals
+    assert not [m for m in refusals if "is owned by uid" in m], refusals
+    assert not [m for m in refusals if "cannot be read" in m], refusals
+
+
 def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
@@ -253,7 +855,7 @@ def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
     ASH_LOGGER.setLevel(logging.DEBUG)
     try:
         repo, sub = _checkout(only_staged_checkouts)
-        _owned_by_someone_else(monkeypatch, repo / ".git")
+        _owned_by_someone_else(monkeypatch, os.path.realpath(repo / ".git"))
         scanner = _scanner(test_plugin_context)
         _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
     finally:
@@ -265,6 +867,47 @@ def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
     assert any(".git" in m for m in refusals)
 
 
+@needs_user_ids
+def test_a_top_the_owner_test_leaves_out_is_logged_as_a_warning(
+    monkeypatch, only_staged_checkouts, walk_records
+):
+    """A top left out of the list can make git refuse the checkout, and then opengrep
+    cannot list its files, so the walk says why at warning level, where an operator
+    sees it, and says what follows."""
+    import logging
+
+    repo, sub = _checkout(only_staged_checkouts)
+    _owned_by_someone_else(monkeypatch, os.path.join(os.path.realpath(repo), ".git"))
+
+    assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
+    refusals = _unnamed_top_records(walk_records)
+    assert refusals, [record.getMessage() for record in walk_records]
+    assert all(record.levelno == logging.WARNING for record in refusals), [
+        (record.levelname, record.getMessage()) for record in refusals
+    ]
+    assert all(
+        "opengrep cannot list its files" in record.getMessage() for record in refusals
+    ), [record.getMessage() for record in refusals]
+
+
+def test_without_user_ids_the_stop_is_logged_at_debug_level(
+    monkeypatch, only_staged_checkouts, walk_records
+):
+    """Where the platform has no user ids git's own ownership check decides from the
+    start, so the walk's stop is a debug line, not a warning."""
+    import logging
+
+    _repo, sub = _checkout(only_staged_checkouts)
+    _without_user_ids(monkeypatch)
+
+    assert policy_module.safe_directories_for(sub) == [os.path.realpath(sub)]
+    refusals = _unnamed_top_records(walk_records)
+    assert refusals, [record.getMessage() for record in walk_records]
+    assert all(record.levelno == logging.DEBUG for record in refusals), [
+        (record.levelname, record.getMessage()) for record in refusals
+    ]
+
+
 def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
@@ -274,9 +917,10 @@ def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(
     real_lexists = os.path.lexists
     real_lstat = os.lstat
 
-    # Every ancestor of the target lacks a ``.git`` but the filesystem root, whose
-    # entry is made to belong to the target's own owner, so only the root check
-    # stands between the walk and a ``safe.directory`` entry for ``/``.
+    # Every ancestor of the target lacks a ``.git`` but the filesystem root, which
+    # and whose entry are made to belong to the target's own owner, the entry reading
+    # as a directory, so only the root check stands between the walk and a
+    # ``safe.directory`` entry for ``/``.
     monkeypatch.setattr(
         os.path,
         "lexists",
@@ -284,11 +928,19 @@ def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(
     )
 
     def lstat(candidate, *args, **kwargs):
-        if os.fspath(candidate) == root_git:
+        if os.fspath(candidate) in (root_git, os.sep):
             return real_lstat(target)
         return real_lstat(candidate, *args, **kwargs)
 
+    real_stat = os.stat
+
+    def fake_stat(candidate, *args, **kwargs):
+        if os.fspath(candidate) == root_git:
+            return real_stat(target)
+        return real_stat(candidate, *args, **kwargs)
+
     monkeypatch.setattr(os, "lstat", lstat)
+    monkeypatch.setattr(os, "stat", fake_stat)
     scanner = _scanner(test_plugin_context)
 
     envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, target), target)
@@ -301,8 +953,6 @@ def test_a_filesystem_root_parent_is_refused_on_both_spawn_paths(
 def test_scanning_a_filesystem_root_names_nothing_on_both_spawn_paths(
     test_plugin_context, only_staged_checkouts
 ):
-    from automated_security_helper.utils.sandbox import policy as policy_module
-
     scanner = _scanner(test_plugin_context)
     # The hook the unsandboxed spawn reads, called directly: a scan of ``/`` itself
     # would list the whole filesystem.
@@ -377,9 +1027,22 @@ def test_a_scanner_without_the_declaration_gets_no_list(only_staged_checkouts):
         ["GIT_CONFIG_COUNT"],
         ["GIT_CONFIG_PARAMETERS='safe.directory'='*'"],
         ["GIT_CONFIG_GLOBAL=/elsewhere/gitconfig"],
+        ["GIT_CONFIG_SYSTEM=/elsewhere/gitconfig"],
+        ["GIT_CONFIG_GLOBAL"],
         ["GIT_CONFIG_SYSTEM"],
-        ["GIT_CONFIG_NOSYSTEM=1"],
+        ["GIT_CONFIG_GLOBAL="],
+        ["GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_GLOBAL"],
+        ["GIT_CONFIG_SYSTEM=/dev/null", "GIT_CONFIG_SYSTEM=/elsewhere/gitconfig"],
         ["GIT_CONFIG=/elsewhere/gitconfig"],
+        ["GIT_CONFIG"],
+        ["GIT_CONFIG_UNKNOWN=1"],
+        pytest.param(
+            ["GIT_CONFIG_GLOBAL=NUL"],
+            marks=pytest.mark.skipif(
+                os.name == "nt", reason="NUL is the null device on Windows"
+            ),
+            id="nul-names-a-file-off-windows",
+        ),
     ],
 )
 def test_a_listed_git_config_entry_is_refused_naming_it(only_staged_checkouts, entries):
@@ -390,8 +1053,181 @@ def test_a_listed_git_config_entry_is_refused_naming_it(only_staged_checkouts, e
         _policy(only_staged_checkouts, target, environment=entries)
 
     first = entries[0].partition("=")[0]
-    assert first in str(refused.value)
-    assert "=" not in str(refused.value), "the message shows a name, never a value"
+    message = str(refused.value)
+    assert first in message
+    assert "=" not in message, "the message shows a name, never a value"
+    assert "/elsewhere" not in message, "the message never shows a value"
+
+
+@pytest.mark.parametrize(
+    "entry, says, never_says",
+    [
+        pytest.param("GIT_CONFIG_COUNT=1", "ASH writes", None, id="count"),
+        pytest.param("GIT_CONFIG_KEY_0=safe.directory", "ASH writes", None, id="key"),
+        pytest.param("GIT_CONFIG_VALUE_0=*", "ASH writes", None, id="value"),
+        pytest.param(
+            "GIT_CONFIG_PARAMETERS='safe.directory'='*'",
+            "git -c",
+            "ASH writes",
+            id="parameters",
+        ),
+        pytest.param(
+            "GIT_CONFIG_GLOBAL=/elsewhere/gitconfig",
+            "null device",
+            "ASH writes",
+            id="global-file",
+        ),
+        pytest.param(
+            "GIT_CONFIG_SYSTEM=/elsewhere/gitconfig",
+            "null device",
+            "ASH writes",
+            id="system-file",
+        ),
+        pytest.param(
+            "GIT_CONFIG_GLOBAL", "the caller's value", "ASH writes", id="global-passed"
+        ),
+        pytest.param(
+            "GIT_CONFIG_GLOBAL=",
+            "is empty",
+            "names a configuration file",
+            id="global-empty",
+        ),
+        pytest.param(
+            "GIT_CONFIG=/elsewhere/gitconfig",
+            "git config command",
+            "ASH writes",
+            id="bare",
+        ),
+        pytest.param(
+            "GIT_CONFIG_UNKNOWN=1", "GIT_CONFIG_NOSYSTEM", "ASH writes", id="unknown"
+        ),
+    ],
+)
+def test_each_refused_git_config_entry_is_refused_in_its_own_words(
+    only_staged_checkouts, entry, says, never_says
+):
+    """The refusal says what the named entry would do. ASH writes the
+    ``GIT_CONFIG_COUNT``/``KEY_<n>``/``VALUE_<n>`` block, but no global or system
+    file, which an entry may point only at the null device."""
+    target = only_staged_checkouts / "plain"
+    target.mkdir()
+
+    with pytest.raises(SandboxUnavailable) as refused:
+        _policy(only_staged_checkouts, target, environment=[entry])
+
+    message = str(refused.value)
+    assert says in message, message
+    if never_says is not None:
+        assert never_says not in message, message
+
+
+@pytest.mark.parametrize(
+    "entries, passed",
+    [
+        pytest.param(
+            ["GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"],
+            {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"},
+            id="the-hardening-pair",
+        ),
+        pytest.param(
+            ["GIT_CONFIG_SYSTEM=/dev/null"],
+            {"GIT_CONFIG_SYSTEM": "/dev/null"},
+            id="no-system-file",
+        ),
+        pytest.param(
+            [f"GIT_CONFIG_GLOBAL={os.devnull}", f"GIT_CONFIG_SYSTEM={os.devnull}"],
+            {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull},
+            id="this-platforms-null-device",
+        ),
+        pytest.param(
+            ["GIT_CONFIG_GLOBAL=/elsewhere/gitconfig", "GIT_CONFIG_GLOBAL=/dev/null"],
+            {"GIT_CONFIG_GLOBAL": "/dev/null"},
+            id="the-last-entry-wins",
+        ),
+    ],
+)
+def test_a_listed_entry_that_only_takes_configuration_away_is_passed(
+    only_staged_checkouts, entries, passed
+):
+    """The common hardening pair keeps opengrep running: an entry that can only stop
+    git reading a configuration file is taken, and it reaches the sandboxed child
+    beside the block ASH writes."""
+    repo, sub = _checkout(only_staged_checkouts)
+
+    policy = _policy(only_staged_checkouts, sub, environment=entries)
+    child = policy.filter_env({"PATH": "/usr/bin"})
+
+    for name, value in passed.items():
+        assert child.get(name) == value, name
+    assert _named(child) == [os.path.realpath(sub), *_checkout_top(repo)]
+
+
+def test_a_listed_git_config_nosystem_passes_the_callers_value(only_staged_checkouts):
+    """No value of ``GIT_CONFIG_NOSYSTEM`` adds configuration, so a listed name passes
+    the caller's value."""
+    target = only_staged_checkouts / "plain"
+    target.mkdir()
+
+    policy = _policy(only_staged_checkouts, target, environment=["GIT_CONFIG_NOSYSTEM"])
+    child = policy.filter_env({"PATH": "/usr/bin", "GIT_CONFIG_NOSYSTEM": "true"})
+
+    assert child["GIT_CONFIG_NOSYSTEM"] == "true"
+    assert _named(child) == [os.path.realpath(target)]
+
+
+@pytest.mark.parametrize(
+    "value, windows, admitted",
+    [
+        ("/dev/null", False, True),
+        ("/dev/null", True, True),
+        ("NUL", True, True),
+        ("nul", True, True),
+        ("Nul", True, True),
+        ("NUL", False, False),
+        ("nul", False, False),
+        ("", False, False),
+        ("", True, False),
+        ("/dev/null/", False, False),
+        ("/dev//null", False, False),
+        ("/elsewhere/gitconfig", False, False),
+        ("C:\\Users\\someone\\.gitconfig", True, False),
+        ("NUL.txt", True, False),
+    ],
+)
+def test_the_null_device_is_read_as_each_platform_spells_it(value, windows, admitted):
+    """``/dev/null`` on every platform, as git's documentation spells it, and ``NUL``
+    in any case on Windows only: elsewhere ``NUL`` names a file in the scanner's
+    working directory, the scanned tree."""
+    assert policy_module._names_null_device(value, windows=windows) is admitted
+
+
+def test_this_platforms_null_device_is_the_null_device():
+    assert policy_module._names_null_device(os.devnull) is True
+
+
+def test_an_inherited_entry_that_only_takes_configuration_away_is_screened_like_any_other(
+    only_staged_checkouts,
+):
+    """A scanner whose declared prefix covers them passes an inherited
+    ``GIT_CONFIG_NOSYSTEM`` and a ``GIT_CONFIG_GLOBAL`` naming the null device, as it
+    would any other variable, and drops a ``GIT_CONFIG_SYSTEM`` that names a file."""
+    target = only_staged_checkouts / "plain"
+    target.mkdir()
+    requirements = SandboxRequirements(git_safe_directory=True, env_prefixes=("GIT_",))
+    policy = _policy(only_staged_checkouts, target, requirements=requirements)
+
+    child = policy.filter_env(
+        {
+            "PATH": "/usr/bin",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/elsewhere/gitconfig",
+        }
+    )
+
+    assert child["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert child["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert "GIT_CONFIG_SYSTEM" not in child
 
 
 def test_a_listed_git_config_entry_is_still_allowed_for_other_scanners(
@@ -415,23 +1251,36 @@ def test_an_ambient_git_config_variable_never_reaches_the_sandboxed_child(
 ):
     """The child's ``GIT_CONFIG_*`` block is the one ASH writes; git's other
     config channels in the caller's environment are dropped, so no inherited
-    ``safe.directory`` or config file can reach the child beside it."""
+    ``safe.directory`` or config file can reach the child beside it.
+
+    The scanner here declares a ``GIT_`` prefix, which would pass all of them: a
+    ``GIT_`` variable that is not a configuration channel reaches the child, so
+    what keeps the channels out is the policy's own screen, not the allowlist."""
     repo, sub = _checkout(only_staged_checkouts)
-    policy = _policy(only_staged_checkouts, sub)
+    requirements = SandboxRequirements(git_safe_directory=True, env_prefixes=("GIT_",))
+    policy = _policy(only_staged_checkouts, sub, requirements=requirements)
 
     child = policy.filter_env(
         {
             "PATH": "/usr/bin",
+            "GIT_TERMINAL_PROMPT": "0",
             "GIT_CONFIG_PARAMETERS": "'safe.directory'='*'",
             "GIT_CONFIG_GLOBAL": "/elsewhere/gitconfig",
+            "GIT_CONFIG_SYSTEM": "/elsewhere/gitconfig",
             "GIT_CONFIG": "/elsewhere/gitconfig",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": "*",
         }
     )
 
+    assert child["GIT_TERMINAL_PROMPT"] == "0", "the prefix passes a plain GIT_ name"
     assert "GIT_CONFIG_PARAMETERS" not in child
     assert "GIT_CONFIG_GLOBAL" not in child
+    assert "GIT_CONFIG_SYSTEM" not in child
     assert "GIT_CONFIG" not in child
     assert _named(child) == [os.path.realpath(sub), *_checkout_top(repo)]
+    assert "*" not in child.values()
 
 
 def test_without_user_ids_the_checkout_top_is_left_to_gits_own_check(

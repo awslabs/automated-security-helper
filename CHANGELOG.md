@@ -428,9 +428,26 @@
   resource's other line range starts to fail. An id that a file gives at two line
   ranges is dropped from its findings, and the checks that passed now count as
   places, as the ones that failed already did.
-- Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
-  git `safe.directory` (opengrep); remove the entry from the environment list to
-  run such a scanner.
+- The `safe.directory` entries ASH gives opengrep's git name the directory it scans
+  and, when that directory sits in a checkout, the checkout's top, and no other
+  directory. The top is named only when it, its `.git`, what a `.git` link resolves to
+  and, for a `.git` file, the git directory that file names each belong to the
+  scanned directory's owner or to the effective uid, and a scan of the top itself
+  names it only then. A top the test leaves out is logged as a warning that says
+  why. git's own ownership check then decides about that checkout, and when git
+  refuses it, opengrep cannot list the files there and fails; to have the top named,
+  give it and its `.git` to the user running ASH or to the scanned directory's
+  owner. Where the platform has no user ids (Windows), a top above the scanned
+  directory is never named, a scan of the top names it without the test, and git's
+  own ownership check decides. With the sandbox
+  on, a `GIT_CONFIG_*` entry in `sandbox.environment` that could add git
+  configuration is refused for opengrep, which is then reported MISSING with the
+  entry named: `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`,
+  `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`, any other `GIT_CONFIG_` name, and
+  `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_SYSTEM` naming anything but the null device or
+  listed without a value. `GIT_CONFIG_NOSYSTEM`, and `GIT_CONFIG_GLOBAL` or
+  `GIT_CONFIG_SYSTEM` set to the null device (`/dev/null`, or `NUL` on Windows), are
+  passed to it.
 - `ash config validate` and `ash config lint` no longer warn that an absolute `path` in
   `ignore_paths` or `suppressions` matches nothing when it can name a file outside the
   scan root, such as a converted file under a container scan's `/out` or a path inside
