@@ -424,6 +424,10 @@
 - A saved image archive whose `manifest.json` or `index.json` is a link, and a saved
   image or OCI layout whose record is JSON nested too deeply to parse, now name no digest
   instead of raising; their ids key on the payload path.
+- The `resource_id` of a checkov finding no longer changes when a check at the
+  resource's other line range starts to fail. An id that a file gives at two line
+  ranges is dropped from its findings, and the checks that passed now count as
+  places, as the ones that failed already did.
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.
