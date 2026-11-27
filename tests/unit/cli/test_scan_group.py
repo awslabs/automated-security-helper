@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan`` is a group of subjects, and ``fs`` is the one that scans a directory.
+"""``ash scan`` is a group of subjects: ``fs`` scans a directory, ``workspace`` the
+projects of a workspace file (tests/unit/cli/test_scan_workspace_subject.py).
 
 What is pinned here:
 
@@ -9,7 +10,8 @@ What is pinned here:
   deprecation line.
 * The three older spellings still run the scan and print ONE line to stderr, never
   stdout, with the exit code unchanged: bare ``ash [options]``, ``ash scan
-  [options]`` with no subject, and ``--source-dir`` on ``fs``.
+  [options]`` with no subject, and ``--source-dir`` on ``fs``. A workspace scan with
+  no subject prints its own line, which the file named above pins.
 * A subject may follow options, as ``ash --output-dir out scan fs .`` hands the
   root's option on in front of it.
 * Two different directories, one as the argument and one with ``--source-dir``,
@@ -51,6 +53,10 @@ def _deprecation_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith("Deprecated:")]
 
 
+def _one_line(text: str) -> str:
+    return " ".join(text.split())
+
+
 def test_scan_help_still_lists_the_scan_options():
     # Tools read `ash scan --help` for the scan's options (the deploy gates probe it
     # for --fail-on-incomplete-scanners), so a no-subject --help is fs's.
@@ -60,9 +66,15 @@ def test_scan_help_still_lists_the_scan_options():
     assert "Usage: ash scan fs [OPTIONS] [PATH]" in result.output
     assert "--shard-count" in result.output
     assert "--mode" in result.output
+    # The form with no subject still takes the workspace options, so a tool that reads
+    # this help for what `ash scan` accepts finds them.
+    assert "--allow-missing-projects" in result.output
     # The subjects are listed in the epilog: this help is `fs`'s, so the group's own
     # command list is never printed.
     assert "Subjects of `ash scan`: fs" in result.output
+    assert "workspace (scan the projects of a .code-workspace file)" in _one_line(
+        result.output
+    )
 
 
 def test_a_path_key_in_a_json_document_is_accepted_without_a_subject(engine, tmp_path):
@@ -88,17 +100,27 @@ def test_a_dashed_directory_after_a_double_dash_is_suggested_with_one(engine):
 
     assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
     assert "ash scan fs -- -build" in result.output
-    assert "(subjects: fs)" in result.output
+    assert "(subjects: fs, workspace)" in result.output
     assert engine.calls == []
 
 
-def test_fs_help_takes_a_path_argument_and_every_scan_option():
+def test_fs_help_takes_a_path_argument_and_every_option_of_a_directory_scan():
     result = _invoke(["scan", "fs", "--help"])
 
     assert result.exit_code == 0, result.output
     assert "Usage: ash scan fs [OPTIONS] [PATH]" in result.output
     assert "--mode" in result.output
     assert "--shard-index" in result.output
+    # The options of a workspace scan are the workspace subject's, and its help says
+    # where they went.
+    for option in (
+        "--workspace",
+        "--workspace-config",
+        "--allow-missing-projects",
+        "--dry-run",
+    ):
+        assert option not in result.output, option
+    assert "ash scan workspace" in _one_line(result.output)
 
 
 def test_fs_prints_no_deprecation_line():
@@ -373,5 +395,23 @@ def test_every_scan_subject_is_known_to_the_group_and_not_a_non_scan_command():
 
     group = typer.main.get_command(app).commands["scan"]
 
-    assert list(group.commands) == ["fs"]
+    assert list(group.commands) == ["fs", "workspace"]
+    assert list(group.commands) == list(scan_group.SUBJECTS)
     assert not set(group.commands) & set(NON_SCAN_SUBCOMMANDS)
+
+
+def test_the_command_that_runs_the_form_with_no_subject_is_not_a_subject():
+    """It takes every option of the engine, so it is not `fs`; it is kept out of the
+    commands every tool lists the subjects from."""
+    import typer.main
+
+    group = typer.main.get_command(app).commands["scan"]
+    legacy = group.legacy_command()
+
+    assert "legacy" not in group.commands
+    assert legacy is not group.commands["fs"]
+    taken = {param.name for param in legacy.params}
+    assert set(scan_group.WORKSPACE_OPTIONS) <= taken
+    assert set(scan_group.WORKSPACE_OPTIONS).isdisjoint(
+        {param.name for param in group.commands["fs"].params}
+    )

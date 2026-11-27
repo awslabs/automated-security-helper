@@ -420,6 +420,52 @@ class TestSkeleton:
         }
         assert set(skeleton) == expected
 
+    def test_the_workspace_subject_skeleton_lists_the_parameters_it_takes(self, runner):
+        result = runner.invoke(app, ["scan", "workspace", "--generate-cli-skeleton"])
+        assert result.exit_code == 0, result.output
+        skeleton = json.loads(result.stdout)
+        params = typer.utils.get_params_from_function(run_ash_scan_cli_command)
+        hidden = {
+            name
+            for name, meta in params.items()
+            if getattr(meta.default, "hidden", False)
+        }
+        # What a workspace scan does not take: the options that read one directory,
+        # an image or a remote repository, and the engine's `workspace`, which is
+        # the subject's FILE argument there.
+        not_taken = {
+            "source_dir",
+            "use_existing",
+            "changed_files_only",
+            "base_ref",
+            "staged",
+            "baseline",
+            "shard_index",
+            "shard_count",
+            "image",
+            "image_archive",
+            "image_layout",
+            "source_git",
+            "git_ref",
+            "git_depth",
+            "workspace",
+        }
+        expected = (
+            {
+                name
+                for name, meta in params.items()
+                if meta.annotation is not typer.Context
+            }
+            - hidden
+            - ARGV_ONLY_PARAMETERS
+            - not_taken
+        ) | {"file"}
+        assert set(skeleton) == expected
+        assert skeleton["file"] is None
+        assert {"workspace_config", "allow_missing_projects", "dry_run"} <= set(
+            skeleton
+        )
+
     def test_the_express_key_is_refused_with_the_flag_to_use(self, runner, tmp_path):
         """The thin client decides express/cold from the raw argv before any
         JSON document is opened, so an "express" key could only ever be

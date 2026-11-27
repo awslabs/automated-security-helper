@@ -31,6 +31,12 @@ from automated_security_helper.utils.content_db_staleness import ContentDbAgeRec
 pytestmark = pytest.mark.unit
 
 SCAN = ["scan", "fs", "--no-progress"]
+#: The scan of a workspace file, by its subject, which takes the file as its argument.
+WORKSPACE = ["scan", "workspace", "--no-progress"]
+#: The scan with no subject. It still takes the workspace options beside a directory
+#: scan's, so it is the one form that reaches the engine's refusals of that pairing;
+#: it prints its deprecation line before any of them.
+NO_SUBJECT = ["scan", "--no-progress"]
 
 
 def _write(path: Path, text: str) -> Path:
@@ -107,16 +113,20 @@ def _report_orchestrator_reached(*_args, source_dir, **_kwargs):
 
 class TestShardSelectionRefusals:
     @pytest.mark.parametrize(
-        "args",
+        "argv",
         [
-            pytest.param(["--shard-index", "0"], id="index_without_count"),
-            pytest.param(["--shard-count", "3"], id="count_without_index"),
-            pytest.param(["--shard-index", "0", "--shard-count", "0"], id="count_zero"),
+            pytest.param([*SCAN, "--shard-index", "0"], id="index_without_count"),
+            pytest.param([*SCAN, "--shard-count", "3"], id="count_without_index"),
             pytest.param(
-                ["--shard-index", "3", "--shard-count", "3"], id="index_out_of_range"
+                [*SCAN, "--shard-index", "0", "--shard-count", "0"], id="count_zero"
+            ),
+            pytest.param(
+                [*SCAN, "--shard-index", "3", "--shard-count", "3"],
+                id="index_out_of_range",
             ),
             pytest.param(
                 [
+                    *NO_SUBJECT,
                     "--shard-index",
                     "0",
                     "--shard-count",
@@ -128,36 +138,43 @@ class TestShardSelectionRefusals:
             ),
         ],
     )
-    def test_refused(self, run_cli, snapshot, args):
-        assert run_cli([*SCAN, *args]) == snapshot
+    def test_refused(self, run_cli, snapshot, argv):
+        assert run_cli(argv) == snapshot
 
 
 class TestWorkspaceRefusals:
     @pytest.mark.parametrize(
-        "args",
+        "argv",
         [
-            pytest.param(["--dry-run"], id="dry_run_outside_workspace_mode"),
             pytest.param(
-                ["--allow-missing-projects", "--workspace-config", "policy.yaml"],
+                [*NO_SUBJECT, "--dry-run"], id="dry_run_outside_workspace_mode"
+            ),
+            pytest.param(
+                [
+                    *NO_SUBJECT,
+                    "--allow-missing-projects",
+                    "--workspace-config",
+                    "policy.yaml",
+                ],
                 id="two_workspace_flags_outside_workspace_mode",
             ),
             pytest.param(
-                ["--workspace", "auto", "--source-dir", "."],
+                [*NO_SUBJECT, "--workspace", "auto", "--source-dir", "."],
                 id="workspace_with_source_dir",
             ),
-            pytest.param(["--workspace", "auto"], id="auto_with_no_workspace_file"),
+            pytest.param([*WORKSPACE, "auto"], id="auto_with_no_workspace_file"),
             pytest.param(
-                ["--workspace", "missing.code-workspace"],
+                [*WORKSPACE, "missing.code-workspace"],
                 id="workspace_file_does_not_exist",
             ),
         ],
     )
-    def test_refused(self, run_cli, snapshot, args):
-        assert run_cli([*SCAN, *args]) == snapshot
+    def test_refused(self, run_cli, snapshot, argv):
+        assert run_cli(argv) == snapshot
 
     def test_workspace_file_is_not_json(self, run_cli, snapshot, in_tmp):
         _write(in_tmp / "broken.code-workspace", "{ not json")
-        assert run_cli([*SCAN, "--workspace", "broken.code-workspace"]) == snapshot
+        assert run_cli([*WORKSPACE, "broken.code-workspace"]) == snapshot
 
     def test_project_folder_missing(self, run_cli, snapshot, in_tmp):
         _write(
@@ -165,7 +182,7 @@ class TestWorkspaceRefusals:
             json.dumps({"folders": [{"path": "service-a"}, {"path": "service-b"}]}),
         )
         (in_tmp / "service-a").mkdir()
-        assert run_cli([*SCAN, "--workspace", "team.code-workspace"]) == snapshot
+        assert run_cli([*WORKSPACE, "team.code-workspace"]) == snapshot
 
     def test_project_config_invalid(self, run_cli, snapshot, in_tmp):
         from automated_security_helper.config.resolve_config import pasteable_path
@@ -184,7 +201,7 @@ class TestWorkspaceRefusals:
             in_tmp / "service-a" / ".ash.yaml",
             "project_name: service-a\nfail_on_findings: sometimes\n",
         )
-        assert run_cli([*SCAN, "--workspace", "team.code-workspace"]) == snapshot
+        assert run_cli([*WORKSPACE, "team.code-workspace"]) == snapshot
 
 
 class TestCliJsonInputRefusals:

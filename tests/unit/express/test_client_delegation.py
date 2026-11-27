@@ -31,13 +31,17 @@ class TestClassification:
         [
             ["scan"],
             ["scan", "--source-dir", "x"],
-            # A subject is a scan: `scan` leads, and `fs` (like any subject) is
-            # never one of NON_SCAN_SUBCOMMANDS.
+            # A subject is a scan: `scan` leads, and `fs` and `workspace` (like any
+            # subject) are never one of NON_SCAN_SUBCOMMANDS.
             ["scan", "fs"],
             ["scan", "fs", "."],
             ["scan", "fs", "report"],
             ["scan", "fs", ".", "--express"],
             ["scan", "--mode", "local", "fs", "."],
+            ["scan", "workspace", "dev.code-workspace"],
+            ["scan", "workspace", "report"],
+            ["scan", "workspace", "dev.code-workspace", "--express"],
+            ["scan", "--mode", "local", "workspace", "dev.code-workspace"],
             [],
             ["--source-dir", "x", "--mode", "precommit"],
             ["--express"],
@@ -56,10 +60,12 @@ class TestClassification:
             ["--help"],
             ["scan", "--help"],
             ["scan", "fs", "--help"],
+            ["scan", "workspace", "--help"],
             ["results", "trend", "a.json", "b.json"],
             ["--version"],
             ["scan", "--no-express"],
             ["scan", "fs", "--no-express"],
+            ["scan", "workspace", "dev.code-workspace", "--no-express"],
             # A token that merely looks like a subcommand classifies the whole
             # invocation as not-a-scan: the cold run parses the truth, so the
             # mistake costs warmth, never correctness.

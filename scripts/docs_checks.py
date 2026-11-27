@@ -2065,7 +2065,13 @@ def _command_from_click(cmd: Any, path: tuple[str, ...]) -> CliCommand:
     if legacy_default in subcommands:
         # `ash scan [options]` with no subject runs the default subject, so its
         # options are the group's too, and it takes no positional argument that way.
+        # The form with no subject takes every option of the scan, the workspace ones
+        # included, which the subject itself no longer takes: a group that has such a
+        # command says which it is.
         default = subcommands[legacy_default]
+        legacy_command = getattr(cmd, "legacy_command", None)
+        if legacy_command is not None:
+            default = _command_from_click(legacy_command(), path + (legacy_default,))
         for name, option in default.options.items():
             options.setdefault(name, option)
         forwards_unknown = forwards_unknown or default.forwards_unknown
@@ -6835,12 +6841,16 @@ def cli_section(of: str) -> tuple[Section | None, str | None]:
     default_subject = getattr(command, "legacy_default_subject", None)
     if default_subject is not None:
         # `ash scan [options]` with no subject runs the default subject, so its
-        # options are the group's; its positional PATH is not.
-        params.extend(
-            p
-            for p in command.commands[default_subject].params
-            if p.param_type_name == "option"
+        # options are the group's; its positional PATH is not. The form with no
+        # subject takes every option of the scan, the workspace ones included, so the
+        # group names that command where it has one.
+        legacy_command = getattr(command, "legacy_command", None)
+        default = (
+            legacy_command()
+            if legacy_command is not None
+            else command.commands[default_subject]
         )
+        params.extend(p for p in default.params if p.param_type_name == "option")
     for param in params:
         if param.param_type_name == "option":
             names = tuple(param.opts) + tuple(param.secondary_opts)

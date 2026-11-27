@@ -1584,7 +1584,7 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--workspace",
             rich_help_panel="Workspace",
-            help="Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir.",
+            help="Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. Deprecated as an option, removed in ASH v4.0: give it as the FILE argument of `ash scan workspace`.",
             envvar="ASH_WORKSPACE",
         ),
     ] = None,
@@ -1809,10 +1809,9 @@ def run_ash_scan_cli_command(
         raise typer.Exit
 
     # Bare `ash [options]` and `ash scan [options]` reach here without a subject;
-    # `ash scan fs` sets the subject in ctx.meta first and prints nothing. A
-    # workspace scan has no subject to move to yet, so it is not told to use one.
-    if workspace is None:
-        warn_if_legacy_scan_form(ctx)
+    # `ash scan fs` and `ash scan workspace` set theirs in ctx.meta first and print
+    # nothing. A workspace scan reached without its subject is told which one.
+    warn_if_legacy_scan_form(ctx, workspace)
 
     # envvar= above documents ASH_VERBOSE/ASH_DEBUG in --help, but click would
     # also let the variable set the flag outright, so ASH_DEBUG=true would beat

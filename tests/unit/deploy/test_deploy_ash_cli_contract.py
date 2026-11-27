@@ -120,10 +120,18 @@ class Invocation:
 def _option(command, spelling: str):
     # `ash scan [options]` with no subject runs the scan's default subject, so that
     # subject's options are the group's too (the form every deployment still uses).
+    # The form with no subject takes every option of the scan, which the subject
+    # itself no longer does (the workspace options are the workspace subject's), so
+    # a group that has a command for it names it.
     candidates = [command]
     default = getattr(command, "legacy_default_subject", None)
     if default is not None:
-        candidates.append(command.commands[default])
+        legacy_command = getattr(command, "legacy_command", None)
+        candidates.append(
+            legacy_command()
+            if legacy_command is not None
+            else command.commands[default]
+        )
     for candidate in candidates:
         for param in candidate.params:
             if spelling in getattr(param, "opts", ()) or spelling in getattr(

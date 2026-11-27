@@ -3,9 +3,10 @@
 
 """The 3.9 contract for every command spelling that moved, and the hints that name one.
 
-ASH 3.9 moves the directory scan under ``ash scan fs``, the commands that read saved
-results under ``ash results`` and the image build under ``ash container build``. Each
-old spelling keeps working through 3.x:
+ASH 3.9 moves the directory scan under ``ash scan fs``, the scan of a workspace file
+under ``ash scan workspace``, the commands that read saved results under ``ash
+results`` and the image build under ``ash container build``. Each old spelling keeps
+working through 3.x:
 
 * it prints exactly one deprecation line, on stderr and never on stdout, that names
   the spelling replacing it and the 4.0 removal;
@@ -97,6 +98,12 @@ def _results_argv(verb: str) -> Callable[[Path], List[str]]:
     return build
 
 
+def _missing_workspace_file(tmp_path: Path) -> str:
+    """A workspace file that is not there, which every spelling refuses at once with the
+    workspace error code, so no row plans or scans anything."""
+    return str(tmp_path / "gone.code-workspace")
+
+
 def _document_naming_the_directory(key: str) -> Callable[[Path], List[str]]:
     """``ash scan fs`` handed the directory by the *key* of a --cli-json-input document.
 
@@ -137,6 +144,28 @@ SPELLINGS = {
         legacy=_document_naming_the_directory("--source-dir"),
         noun=lambda _: ["scan", "fs", "src", *FAILS_FAST],
         names="ash scan fs",
+    ),
+    "workspace-option-on-bare-ash": Spelling(
+        legacy=lambda tmp_path: ["--workspace", _missing_workspace_file(tmp_path)],
+        noun=lambda tmp_path: [
+            "scan",
+            "workspace",
+            _missing_workspace_file(tmp_path),
+        ],
+        names="ash scan workspace",
+    ),
+    "workspace-option-on-scan-without-subject": Spelling(
+        legacy=lambda tmp_path: [
+            "scan",
+            "--workspace",
+            _missing_workspace_file(tmp_path),
+        ],
+        noun=lambda tmp_path: [
+            "scan",
+            "workspace",
+            _missing_workspace_file(tmp_path),
+        ],
+        names="ash scan workspace",
     ),
     **{
         verb: Spelling(
@@ -270,12 +299,6 @@ STDOUT_SPELLINGS = {
         names="ash results report",
         prints="ASH SECURITY SCAN REPORT",
     ),
-    "scan-skeleton": Spelling(
-        legacy=lambda _: ["scan", "--generate-cli-skeleton"],
-        noun=lambda _: ["scan", "fs", "--generate-cli-skeleton"],
-        names="ash scan fs",
-        prints='"path"',
-    ),
     "build-image-skeleton": Spelling(
         legacy=lambda _: ["build-image", "--generate-cli-skeleton"],
         noun=lambda _: ["container", "build", "--generate-cli-skeleton"],
@@ -315,6 +338,29 @@ def test_a_legacy_spelling_that_prints_keeps_the_nouns_stdout(name, tmp_path, is
         assert spelling.names in lines[0], lines[0]
     else:
         assert lines == [], legacy.stderr
+    assert _deprecation_lines(noun.stderr) == [], noun.stderr
+
+
+def test_the_skeleton_of_scan_without_a_subject_is_the_fs_one_plus_the_workspace_keys():
+    """The one stdout an old spelling does not share with its noun. ``ash scan`` with
+    no subject still takes the workspace options, as it always did, and ``fs`` does
+    not, so its skeleton lists the four keys of those options as well. Everything else
+    is the same, and neither prints a line: a skeleton only lists what a command takes."""
+    legacy = _invoke(["scan", "--generate-cli-skeleton"])
+    noun = _invoke(["scan", "fs", "--generate-cli-skeleton"])
+
+    assert legacy.exit_code == noun.exit_code == 0, (legacy.output, noun.output)
+    legacy_keys, noun_keys = json.loads(legacy.stdout), json.loads(noun.stdout)
+    assert set(legacy_keys) - set(noun_keys) == {
+        "workspace",
+        "workspace_config",
+        "allow_missing_projects",
+        "dry_run",
+    }
+    assert set(noun_keys) <= set(legacy_keys)
+    assert {key: legacy_keys[key] for key in noun_keys} == noun_keys
+    assert '"path"' in noun.stdout
+    assert _deprecation_lines(legacy.stderr) == [], legacy.stderr
     assert _deprecation_lines(noun.stderr) == [], noun.stderr
 
 
@@ -617,9 +663,16 @@ def test_the_next_steps_after_a_scan_with_findings_name_results_report_and_inspe
 
 def test_the_scan_help_says_to_review_the_result_with_results_inspect():
     from automated_security_helper.cli.scan import run_ash_scan_cli_command
-    from automated_security_helper.cli.scan_group import run_ash_scan_fs_cli_command
+    from automated_security_helper.cli.scan_group import (
+        run_ash_scan_fs_cli_command,
+        run_ash_scan_workspace_cli_command,
+    )
 
-    for args in (["scan", "fs", "--help"], ["scan", "--help"]):
+    for args in (
+        ["scan", "fs", "--help"],
+        ["scan", "workspace", "--help"],
+        ["scan", "--help"],
+    ):
         result = _invoke(args)
         assert result.exit_code == 0, result.output
         assert "Review the result with: ash results inspect findings" in (
@@ -627,7 +680,11 @@ def test_the_scan_help_says_to_review_the_result_with_results_inspect():
         ), args
     # The root's scan callback carries the same docstring as `fs`, which is built
     # from it; `ash --help` shows the app's own help instead.
-    for function in (run_ash_scan_fs_cli_command, run_ash_scan_cli_command):
+    for function in (
+        run_ash_scan_fs_cli_command,
+        run_ash_scan_workspace_cli_command,
+        run_ash_scan_cli_command,
+    ):
         assert "Review the result with: ash results inspect findings" in (
             _one_line(function.__doc__)
         ), function.__name__
@@ -674,8 +731,8 @@ def test_the_merge_warning_about_ignore_paths_names_scan_fs(monkeypatch):
 
 
 #: The subjects of ``ash scan``, read from the CLI's own scan group: a subject a later
-#: change adds (``workspace``) is accepted as soon as the group has it, and a subject
-#: a page names before then is a command that does not exist.
+#: change adds is accepted as soon as the group has it, and a subject a page names
+#: before then is a command that does not exist.
 _SCAN_SUBJECTS = tuple(typer.main.get_command(app).commands["scan"].commands)
 
 
@@ -702,10 +759,8 @@ _MOVED_COMMAND = re.compile(
     r"(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|merge|inspect|build-image)\b"
 )
 _SCAN_FS = re.compile(r"\b(?:ash|ashv3) scan fs\b")
-#: A help request never warns. A ``--workspace`` scan has no subject to move to yet,
-#: so the forms with no subject print nothing for it either.
+#: A help request never warns.
 _HELP = re.compile(r"(?<!\S)--help(?=\s|$)")
-_WORKSPACE = re.compile(r"(?<!\S)--workspace(?=[=\s]|$)")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 
 #: The markdown under the package that is a dated record, not documentation a reader
@@ -720,16 +775,16 @@ _NOT_DOCUMENTATION = (
 def _is_legacy(command: str, fenced: bool = False) -> bool:
     """Whether *command*, as a reader is shown it, runs a spelling that warns.
 
-    A help request never warns, whatever it follows. A scan with ``--workspace`` has
-    no subject to move to yet, so the forms with no subject print nothing for it. The
-    program alone is the bare scan only as a line of a fenced block.
+    A help request never warns, whatever it follows. A scan with ``--workspace`` and
+    no subject warns too, naming ``ash scan workspace``. The program alone is the bare
+    scan only as a line of a fenced block.
     """
     if _HELP.search(command):
         return False
     no_subject = _NO_SUBJECT.search(command) or (
         fenced and _BARE_PROGRAM.search(command)
     )
-    if no_subject and not _WORKSPACE.search(command):
+    if no_subject:
         return True
     if _MOVED_COMMAND.search(command):
         return True
@@ -809,9 +864,13 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
         ("ash -c x.yaml", True),
         ("uv run ash -c x.yaml --mode container", True),
         ("ash scan nosuchsubject src", True),
-        # A workspace scan has no subject to move to, but a deprecated option on
-        # a subject still warns.
-        ("ash scan fs --workspace ws.yaml --source-dir src", True),
+        # A deprecated option on a subject still warns.
+        ("ash scan fs --mode container --source-dir src", True),
+        # A workspace scan with no subject warns, and names the subject it moved to.
+        ("ash scan --workspace ws.yaml", True),
+        ("ash --workspace ws.yaml", True),
+        ("ash --workspace=ws.yaml --mode container", True),
+        ("uv run ash scan --workspace ws.code-workspace --dry-run", True),
         ("ash scan fs --ash-plugin-modules x", False),
         ("uv run ash scan fs /path/to/project --scanners trivy-repo", False),
         ("ash config get --source-dir src", False),
@@ -819,12 +878,12 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
         ("ash --install-completion", False),
         ("ash --show-completion", False),
         ("uv run ash plugin list --ash-plugin-modules x", False),
-        # A workspace scan has no subject to move to yet, and a help request never
+        # The workspace subject, with its own options, and a help request, which never
         # warns, on any spelling.
-        ("ash scan --workspace ws.yaml", False),
-        ("ash --workspace ws.yaml", False),
-        ("ash --workspace=ws.yaml --mode container", False),
+        ("ash scan workspace ws.code-workspace --dry-run", False),
+        ("uv run ash scan workspace ws.code-workspace --allow-missing-projects", False),
         ("ash scan --help", False),
+        ("ash scan --workspace --help", False),
         ("ash --help", False),
         ("ash report --help", False),
         # Every subject the scan group has is one a page may name.
@@ -865,8 +924,13 @@ def _fenced(*lines: str) -> str:
         ),
         pytest.param(
             _fenced("ash scan \\", "    --workspace ws.yaml"),
+            [(2, "ash scan --workspace ws.yaml")],
+            id="a-workspace-scan-with-no-subject-continued",
+        ),
+        pytest.param(
+            _fenced("ash scan workspace ws.yaml \\", "    --dry-run"),
             [],
-            id="a-workspace-scan-continued",
+            id="a-workspace-subject-continued",
         ),
         pytest.param(
             _fenced("uv run ash scan \\"),
