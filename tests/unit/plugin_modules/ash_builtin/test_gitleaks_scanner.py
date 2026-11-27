@@ -1963,13 +1963,19 @@ def test_an_operator_path_in_the_tree_cannot_link_out_of_it(tmp_path, option, sh
     assert "symbolic link" in message and MARKER not in message
 
 
+#: What the operator's file holds for each option. gitleaks reads a config as TOML,
+#: and ASH parses it the same way to check its [extend] path; a baseline is a JSON
+#: report, which ASH does not parse.
+_OPERATOR_FILE_TEXT = {"config_file": "title = 'operator'\n", "baseline_path": "[]"}
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
 @pytest.mark.unit
 def test_a_link_inside_the_tree_to_a_file_inside_it_is_still_honored(tmp_path, option):
     scanner = _scanner(tmp_path, operator=True, **{option: "named.json"})
     source = Path(scanner.context.source_dir)
-    _write(source, "real/file.json", "[]")
+    _write(source, "real/file.json", _OPERATOR_FILE_TEXT[option])
     (source / "named.json").symlink_to(source / "real" / "file.json")
     args = scanner._build_arguments(source, tmp_path / "o.sarif")
     flag = "--config=" if option == "config_file" else "--baseline-path="
@@ -1987,7 +1993,7 @@ def test_an_operator_path_that_leaves_the_tree_by_dot_dot_is_honored(
     source = tmp_path / "src"
     value = "../shared.toml" if written == "relative" else f"{source}/../shared.toml"
     scanner = _scanner(tmp_path, operator=True, **{option: value})
-    (tmp_path / "shared.toml").write_text("[]")
+    (tmp_path / "shared.toml").write_text(_OPERATOR_FILE_TEXT[option])
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     flag = "--config=" if option == "config_file" else "--baseline-path="
     assert f"{flag}{(tmp_path / 'shared.toml').resolve().as_posix()}" in args
