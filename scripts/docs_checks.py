@@ -1438,6 +1438,44 @@ _OTHER_PROMPT = re.compile(r"^\s*(?:%\s+|PS(?: [^>\n]*)?>\s*)")
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: Words that run the next word as a command, and so may stand in front of a program.
 _WRAPPERS = frozenset({"sudo", "env", "time", "nohup", "exec", "command"})
+#: The options of each wrapper that take a value, as its manual page lists them: the next
+#: word, or the rest of the word an option is written in (``-uroot``), is that value and no
+#: program, so ``sudo -u ash ls`` runs ``ls`` as the user ``ash``. Every other option of a
+#: wrapper (``-E``, ``-H``, ``-i``, ``-p``, ``--``) stands alone.
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset(
+        {
+            "-C",
+            "-D",
+            "-R",
+            "-T",
+            "-U",
+            "-g",
+            "-p",
+            "-r",
+            "-t",
+            "-u",
+            "--chdir",
+            "--chroot",
+            "--close-from",
+            "--command-timeout",
+            "--group",
+            "--host",
+            "--other-user",
+            "--prompt",
+            "--role",
+            "--type",
+            "--user",
+        }
+    ),
+    "env": frozenset(
+        {"-C", "-S", "-a", "-u", "--argv0", "--chdir", "--split-string", "--unset"}
+    ),
+    "time": frozenset({"-f", "-o", "--format", "--output"}),
+    "exec": frozenset({"-a"}),
+    "nohup": frozenset(),
+    "command": frozenset(),
+}
 #: The programs a line may start with, besides ASH_PROGRAMS and CONTAINER_RUNTIMES, to
 #: show a command in a block nothing runs.
 _OTHER_PROGRAMS = frozenset({"uv", "uvx", "pip", "git", "aws"})
@@ -1521,24 +1559,56 @@ def _continued(lines: list[str], index: int, command: str) -> str:
     return command
 
 
+def _after_options(words: list[str], index: int, takes_value: frozenset[str]) -> int:
+    """The index of the first word of ``words`` from ``index`` on that is no option of a
+    wrapper, nor the value of one.
+
+    An option is a word that starts with ``-``. A long option written ``--user=root``
+    carries its value; one written ``--user root`` is in ``takes_value`` and takes the
+    next word; a cluster of short options (``-Eu root``) ends at the first letter that is
+    in ``takes_value``, which takes the rest of the word (``-uroot``) or, as the last
+    letter, the next word. ``--`` ends the options. A value with a space in it, quoted,
+    is read as two words.
+    """
+    while index < len(words) and words[index].startswith("-") and words[index] != "-":
+        word = words[index]
+        index += 1
+        if word == "--":
+            break
+        if word.startswith("--"):
+            if "=" not in word and word in takes_value:
+                index += 1
+            continue
+        for position, letter in enumerate(word[1:], start=2):
+            if f"-{letter}" in takes_value:
+                if position == len(word):
+                    index += 1
+                break
+    return index
+
+
 def _program_line(line: str) -> str | None:
     """The command ``line`` shows when it starts with a program, or None.
 
     A program is ASH under any of its names, a container runtime, ``uv``, ``uvx``,
     ``pip``, ``git`` or ``aws``, and it may follow a ``%`` or ``PS>`` prompt (a ``$``
     prompt is read by _PROMPT_LINE, for any command), environment assignments, and a
-    wrapper such as ``sudo`` with its options. It must have an argument: a word alone is
-    prose. The command is the line after its prompt, which is how the seed names it.
+    wrapper such as ``sudo`` with all its options and their values (``sudo -E -H``,
+    ``sudo -u root``): the program is the first word after those, so a user named ``ash``
+    is no program. It must have an argument: a word alone is prose. The command is the
+    line after its prompt, which is how the seed names it.
     """
     text = _OTHER_PROMPT.sub("", line, count=1).strip()
     words = text.split()
     index = 0
-    while index < len(words) and (
-        _ENV_ASSIGNMENT.match(words[index])
-        or words[index] in _WRAPPERS
-        or (index > 0 and words[index - 1] in _WRAPPERS and words[index][0] == "-")
-    ):
-        index += 1
+    while index < len(words):
+        if _ENV_ASSIGNMENT.match(words[index]):
+            index += 1
+        elif words[index] in _WRAPPERS:
+            takes_value = _WRAPPER_VALUE_OPTIONS.get(words[index], frozenset())
+            index = _after_options(words, index + 1, takes_value)
+        else:
+            break
     if index + 1 >= len(words):
         return None
     program = words[index]
