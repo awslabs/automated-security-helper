@@ -48,6 +48,9 @@ Known limitations
   comment lines dropped. A form reached through an ``ARG`` is not seen; ``FROM
   ${BASE_IMAGE}`` hides the platform and the operating system of the base image.
 * ``ADD`` tells an archive by its content and this check tells it by its name.
+* An ``ADD`` written as a JSON array of strings is read as one, and its last string is
+  the destination. Text that does not decode as an array of strings is read as the
+  shell form, a list of words.
 * A quoted string is one word, so a form inside quotes is not found, and a quote left
   open makes the rest of the instruction one word.
 * ``ONBUILD`` is not unwrapped, and a ``# escape=`` directive is not honored: a line
@@ -66,6 +69,7 @@ Known limitations
 from __future__ import annotations
 
 import codecs
+import json
 import re
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -207,10 +211,31 @@ def _is_remote(source: str) -> bool:
     return "://" in source or source.startswith("git@")
 
 
+# ADD and COPY may be written as a JSON array of strings. BuildKit reads the text after
+# the flags that way when it decodes as one, and as a list of words when it does not
+# decode as JSON. An array that holds anything but strings is an error there, and is
+# read as a list of words here. Read at v0.35.1 in parser.go (dispatch table, lines 209
+# and 212) and line_parsers.go (parseJSON, line 278; parseMaybeJSONToList, line 333),
+# both under https://github.com/moby/buildkit/tree/v0.35.1/frontend/dockerfile/parser
+def _exec_form(item: Instruction) -> list[str] | None:
+    """The strings of an instruction written as a JSON array, else None."""
+    if not item.words or not item.words[0].startswith("["):
+        return None
+    try:
+        strings = json.loads(" ".join(item.words))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(strings, list) and all(isinstance(s, str) for s in strings):
+        return strings
+    return None
+
+
 def _local_sources(item: Instruction) -> list[str]:
     """The local sources of an ADD or COPY: no URL, and not the destination."""
-    names = [word.strip("\"'") for word in item.words[:-1]]
-    return [name for name in names if not _is_remote(name)]
+    listed = _exec_form(item)
+    if listed is None:
+        listed = [word.strip("\"'") for word in item.words]
+    return [name for name in listed[:-1] if not _is_remote(name)]
 
 
 def _adds_a_local_xz_archive(item: Instruction) -> bool:
