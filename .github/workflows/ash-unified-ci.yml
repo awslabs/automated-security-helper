@@ -215,6 +215,13 @@ jobs:
         # fails here until `uv run python scripts/generate_wrapper_tables.py` is run and
         # its output committed.
         run: uv run python scripts/generate_wrapper_tables.py --check
+      - name: Verify the support matrices match the code
+        # The support-matrix reference page, and every table a hand-written page takes
+        # from it, is generated from the scanner manifests, the operational facets
+        # register and each scanner's own platform refusal. A change to any of them
+        # fails here until `uv run python scripts/generate_support_matrices.py` is run
+        # and its output committed.
+        run: uv run python scripts/generate_support_matrices.py --check
 
       # Attached to `lint` rather than given its own job, deliberately. A new job
       # here has to be added to required-checks' `needs` AND have

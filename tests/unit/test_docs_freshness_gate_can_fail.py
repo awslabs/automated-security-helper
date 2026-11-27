@@ -113,6 +113,7 @@ NON_VACUITY_COVERAGE = {
     "Shell variables in docs examples are set in the session that reads them": "test_docs_session_variables_can_fail.py::test_a_variable_set_on_another_fixture_is_reported_where_it_is_read",
     "Values docs examples pass the scan workflow pass its input check": "test_docs_workflow_inputs_can_fail.py::test_a_multi_line_ash_args_is_reported",
     "Journey pages match their journey files": "docs/test_journey_pages.py::test_the_gate_check_can_fail",
+    "Support matrices still refuse what they must and list what ASH ships": "test_support_matrices.py::test_the_second_source_goes_red_when_the_renderer_drops_a_row",
 }
 
 
@@ -1163,6 +1164,10 @@ GATE_WIRING = {
         "check_workflow_inputs",
     ),
     "Journey pages match their journey files": ("gate", "check_doc_journeys"),
+    "Support matrices still refuse what they must and list what ASH ships": (
+        "gate",
+        "check_support_matrices",
+    ),
 }
 
 
