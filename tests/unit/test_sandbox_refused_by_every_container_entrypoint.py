@@ -321,7 +321,7 @@ class TestTheBashEntrypoint:
 
         assert proc.returncode == 5, proc.stdout + proc.stderr
         assert REFUSAL in proc.stderr, proc.stderr
-        assert "--mode local" in proc.stderr, proc.stderr
+        assert "ash scan fs --mode local --sandbox" in proc.stderr, proc.stderr
         assert calls == [], calls
         assert not (tmp_path / "out").exists()
 
@@ -997,7 +997,7 @@ class TestThePowerShellEntrypoint:
         assert result.how == "threw", (result.how, result.code)
         assert result.code == "5", result.code
         assert REFUSAL in result.message, result.message
-        assert "--mode local" in result.message, result.message
+        assert "ash scan fs --mode local --sandbox" in result.message, result.message
         assert result.calls == [], result.calls
         assert not (tmp_path / "out").exists()
 
@@ -1385,7 +1385,7 @@ class TestThePowerShellEntrypoint:
         assert result.code == "3", result.code
         message = " ".join(result.message.split())
         assert "is outside the source directory and has an extends entry" in message
-        assert "Run ash --mode container, which mounts the chain" in message
+        assert "Run ash scan fs --mode container, which mounts the chain" in message
         assert result.calls == [], result.calls
 
     def _refused_before_any_call(self, result, fragment):

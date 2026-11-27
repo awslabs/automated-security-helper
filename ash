@@ -237,10 +237,10 @@ refuse_sandbox_unless_off() {
       return 0
       ;;
     auto | bwrap | firejail | landlock | sandbox-exec)
-      echo "ERROR: --sandbox ${shown_mode} cannot be used with ASH in a container: the scanners run unsandboxed inside the container. Run 'ash scan --mode local --sandbox ${shown_mode}' to sandbox each scanner, or drop --sandbox." >&2
+      echo "ERROR: --sandbox ${shown_mode} cannot be used with ASH in a container: the scanners run unsandboxed inside the container. Run 'ash scan fs --mode local --sandbox ${shown_mode}' to sandbox each scanner, or drop --sandbox." >&2
       ;;
     *)
-      echo "ERROR: --sandbox '${shown_mode}' cannot be used with ASH in a container: it is not a sandbox mode, and off is the only one a container takes, since the scanners run unsandboxed inside it. To sandbox each scanner, run 'ash scan --mode local --sandbox <mode>' with one of auto, bwrap, firejail, landlock, sandbox-exec." >&2
+      echo "ERROR: --sandbox '${shown_mode}' cannot be used with ASH in a container: it is not a sandbox mode, and off is the only one a container takes, since the scanners run unsandboxed inside it. To sandbox each scanner, run 'ash scan fs --mode local --sandbox <mode>' with one of auto, bwrap, firejail, landlock, sandbox-exec." >&2
       ;;
   esac
   exit 5
@@ -1094,7 +1094,7 @@ carry_config_file() {
       flat="${flat#$'\xef\xbb\xbf'}"
       if printf '%s' "${flat}" | grep -Eq '(^|[[:space:].{,])["'"'"']?extends["'"'"']?[[:space:]]*[:=]' \
         || printf '%s' "${flat}" | grep -Eq '"[^"]*\\[^"]*"[[:space:]]*[:=]'; then
-        refuse "The ${label} '$(shown "${given}")' is outside the source directory and has an extends entry. ./ash mounts such a config on its own, without the files it extends. Run ash --mode container, which mounts the chain, or put the config inside the source directory."
+        refuse "The ${label} '$(shown "${given}")' is outside the source directory and has an extends entry. ./ash mounts such a config on its own, without the files it extends. Run ash scan fs --mode container, which mounts the chain, or put the config inside the source directory."
       fi
       kept_output basename -- "${real}"
       CARRIED_INNER="${mount_root}/${OUTPUT_KEPT}"
