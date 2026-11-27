@@ -1458,8 +1458,11 @@ class TestTheByPathLoader:
         assert _own_loaders(tmp_path, quiet) == {}
         text = "spec_from_file_location('_ash_ci_matrix', where\n"
         broken = _plant(tmp_path, {"tests/test_broken.py": text})
-        with pytest.raises(SyntaxError, match=r"tests/test_broken\.py"):
+        with pytest.raises(SyntaxError) as caught:
             _own_loaders(tmp_path, broken)
+        # str() of a SyntaxError holds the file's base name only, so the path is read
+        # from the error.
+        assert caught.value.filename == "tests/test_broken.py"
 
     def test_the_scan_reads_the_test_modules_of_the_checkout(self):
         """The denominator: a walk that found none would find no loader."""
