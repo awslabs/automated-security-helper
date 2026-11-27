@@ -2572,6 +2572,37 @@ def test_snyk_starts_in_the_tree_and_warns_when_no_private_directory_is_outside_
 
 
 @pytest.mark.unit
+@SCOPE_MODES
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the privacy check reads POSIX modes"
+)
+def test_snyk_does_not_start_when_no_private_directory_is_available(
+    private_umask, tmp_path, monkeypatch, snyk_on_path, snyk_run_record, scoped
+):
+    """A source directory other accounts can write leaves no private directory.
+    TMPDIR and the default output directory are both under it, and another account
+    could swap a directory made under a group-writable one for its own between its
+    creation and its use, so both are passed over. The scan then fails and the CLI
+    never starts: the error names each directory and says to set TMPDIR to one only
+    this account can write, on its own and inside a scope."""
+    context, scanner = default_layout(tmp_path)
+    context.source_dir.chmod(0o775)
+    temp = context.source_dir / "tmp"
+    temp.mkdir(mode=0o700)
+    point_tmpdir_at(monkeypatch, temp)
+
+    with in_run_scope(context, scoped):
+        with pytest.raises(ScannerError, match="Snyk Code scan failed") as raised:
+            scanner.scan(target=context.work_dir, target_type="converted")
+
+    message = str(raised.value)
+    assert "Set TMPDIR to a directory only this account can write" in message, message
+    for passed_over in (temp, context.output_dir):
+        assert passed_over.as_posix() in message, message
+    assert snyk_run_record == []
+
+
+@pytest.mark.unit
 def test_the_directory_snyk_starts_in_is_removed_when_the_scanner_run_ends(
     scanner, snyk_on_path, plugin_context, snyk_run_record
 ):
