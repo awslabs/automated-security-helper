@@ -177,8 +177,9 @@
   as the tools read them (any case, a dotted key split into its parts). A config is
   also refused when its extend path is not a string or is set twice, or has a root
   but no drive on Windows, and when ASH cannot read the file (missing, not a regular
-  file, larger than 4 MiB, not UTF-8 or not valid TOML); a byte order mark at the
-  start of a config is skipped, not refused. A config from the environment is now
+  file, larger than 4 MiB, not UTF-8 or not valid TOML). A gitleaks config that starts
+  with a UTF-8 byte order mark is refused, naming the file, because gitleaks cannot read
+  past the mark; for betterleaks the mark is skipped. A config from the environment is now
   passed to gitleaks as `--config`, so gitleaks no longer looks for `.gitleaks.toml`
   in the tree. ferret-scan's `--version` check now runs outside the tree with an
   empty config.
