@@ -151,6 +151,13 @@ def _matrix_of(job):
     return (job.get("strategy") or {}).get("matrix") or {}
 
 
+def _shown(name):
+    """A name as the report shows it. The suite's output redaction masks any twelve
+    characters of the running test's id wherever they are printed, so the dashes and
+    the extension of a workflow name, which the id holds, would print as <value>."""
+    return name.replace(".yml", "").replace("-", " ")
+
+
 ALL_WORKFLOWS = sorted(WORKFLOWS.glob("*.yml"))
 
 # ---------------------------------------------------------------------------
@@ -179,8 +186,8 @@ def test_the_effective_cells_equal_the_old_ones_on_every_event_the_cover_is_void
             assert before == after, (name, job_id, event, method)
             per_method[method] = len(before)
         print(
-            f"DIFFERENTIAL site1 {name} {job_id} {event}: methods={len(methods)} "
-            f"cells={sum(per_method.values())} {per_method}"
+            f"counts site1 {_shown(name)} {_shown(job_id)} {event}: "
+            f"methods={len(methods)} cells={sum(per_method.values())} {per_method}"
         )
 
 
@@ -198,8 +205,8 @@ def test_a_pull_request_reads_fewer_cells_than_the_old_expander_did(name, job_id
         pull_request += len(after)
     assert pull_request < static, (static, pull_request)
     print(
-        f"DIFFERENTIAL site1 {name} {job_id} pull_request: cells={pull_request} "
-        f"(the old expander read {static})"
+        f"counts site1 {_shown(name)} {_shown(job_id)} pull_request: "
+        f"cells={pull_request} (the old expander read {static})"
     )
 
 
@@ -226,13 +233,20 @@ def test_the_effective_cells_comparison_can_fail():
 # ---------------------------------------------------------------------------
 
 
+def _includes_only(matrix):
+    """A matrix with no axis and several includes. GitHub adds an include to the
+    original combinations only (a combination an earlier include created is not one),
+    and such a matrix has none, so each include is a run of its own."""
+    axes = [key for key in matrix if key not in ("include", "exclude")]
+    return not axes and len(matrix.get("include") or []) > 1
+
+
 @pytest.mark.parametrize("path", ALL_WORKFLOWS, ids=lambda path: path.name)
-def test_the_matrix_entries_equal_the_old_ones_on_every_event_the_cover_is_void_on(
-    path,
-):
+def test_the_matrix_entries_equal_the_old_ones_but_for_the_include_only_matrices(path):
     old = yaml.safe_load(path.read_text(encoding="utf-8"))
     new = ci.load_workflow(path)
     compared = 0
+    include_only = []
     totals = dict.fromkeys(ci.EVENTS, 0)
     old_total = 0
     for job_id, job in new["jobs"].items():
@@ -242,21 +256,23 @@ def test_the_matrix_entries_equal_the_old_ones_on_every_event_the_cover_is_void_
         assert isinstance(matrix, dict), (path.name, job_id, matrix)
         before = _old_matrix_entries(copy.deepcopy(matrix))
         for event in STATIC_EVENTS:
-            assert _adapted_entries(copy.deepcopy(matrix), event) == before, (
-                path.name,
-                job_id,
-                event,
-            )
+            after = _adapted_entries(copy.deepcopy(matrix), event)
+            if _includes_only(matrix):
+                assert after == [dict(entry) for entry in matrix["include"]]
+                assert len(before) == 1 < len(after), (path.name, job_id, event)
+            else:
+                assert after == before, (path.name, job_id, event)
+        if _includes_only(matrix):
+            include_only.append(_shown(job_id))
         for event in ci.EVENTS:
             totals[event] += len(ci.cells(job, event))
         old_total += len(before)
         compared += 1
-    if compared:
-        assert totals["workflow_dispatch"] == old_total, (path.name, totals, old_total)
     shown = " ".join(f"{event}={count}" for event, count in totals.items())
     print(
-        f"DIFFERENTIAL site2 {path.name}: jobs={len(new['jobs'])} matrices={compared} "
-        f"{shown} old_expander={old_total}"
+        f"counts site2 {_shown(path.name)}: jobs={len(new['jobs'])} "
+        f"matrices={compared} {shown} old_expander={old_total} "
+        f"include_only={len(include_only)} {include_only}"
     )
 
 
@@ -267,7 +283,7 @@ def test_every_matrix_the_workflows_hold_is_compared():
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         count += sum(1 for job in document["jobs"].values() if _matrix_of(job))
     assert count >= 20, count
-    print(f"DIFFERENTIAL site2 matrices in {len(ALL_WORKFLOWS)} workflows: {count}")
+    print(f"counts site2 matrices in {len(ALL_WORKFLOWS)} workflows: {count}")
 
 
 PLANTED_MATRICES = {
@@ -286,7 +302,7 @@ PLANTED_MATRICES = {
         "os": ["a"],
         "include": [{"os": "b", "extra": 1}],
     },
-    "includes only": {"include": [{"x": 1}, {"x": 2}]},
+    "a single include": {"include": [{"x": 1}]},
     "an exclude only": {"exclude": [{"os": "a"}]},
     "an empty axis": {"os": []},
     "a later include overwriting an earlier one": {
@@ -314,6 +330,24 @@ def test_an_overlay_exclude_is_void_when_static_and_applies_on_a_pull_request():
     assert _old_matrix_entries(matrix) == [{"os": "a"}, {"os": "b"}]
     assert _adapted_entries(matrix, STATIC_EVENT) == [{"os": "a"}, {"os": "b"}]
     assert _adapted_entries(matrix, "pull_request") == [{"os": "b"}]
+
+
+def test_an_include_never_joins_a_run_an_earlier_include_added():
+    """The one difference on a live matrix. GitHub adds an include entry to the
+    original combinations only ("the {fruit: banana, animal: cat} entry does not add to
+    the {fruit: banana} matrix combination because that combination was not one of the
+    original"). The old expander matched a later include against the runs an earlier one
+    had appended, so it merged them: two includes and no axis counted as one run."""
+    only = {"include": [{"x": 1}, {"x": 2}]}
+    assert _old_matrix_entries(only) == [{"x": 2}]
+    assert _adapted_entries(only) == [{"x": 1}, {"x": 2}]
+    later = {"os": ["a"], "include": [{"os": "b", "x": 1}, {"os": "b", "y": 2}]}
+    assert _old_matrix_entries(later) == [{"os": "a"}, {"os": "b", "x": 1, "y": 2}]
+    assert _adapted_entries(later) == [
+        {"os": "a"},
+        {"os": "b", "x": 1},
+        {"os": "b", "y": 2},
+    ]
 
 
 def test_the_matrix_entries_comparison_can_fail():
@@ -380,7 +414,7 @@ def test_the_cover_check_equals_the_old_one_on_every_exclude_value(path):
                 for event in STATIC_EVENTS:
                     assert ci.resolve_overlay(value, event) is None
     print(
-        f"DIFFERENTIAL site3 {path.name}: exclude_values={values} covers={covers} "
+        f"counts site3 {_shown(path.name)}: excludes={values} covers={covers} "
         f"static={values - covers}"
     )
 
@@ -394,7 +428,7 @@ def test_the_tier_jobs_carry_the_covers_the_comparison_reads():
         if job_id.startswith(("unit-test-", "integration-test-", "e2e-test-"))
     }
     assert sum(covers.values()) >= 15, covers
-    print(f"DIFFERENTIAL site3 tier jobs of ash-unified-ci.yml: {covers}")
+    print(f"counts site3 tier jobs of the unified CI: {covers}")
 
 
 def test_the_cover_check_comparison_can_fail():
