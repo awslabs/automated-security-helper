@@ -310,6 +310,7 @@ from automated_security_helper.core.exceptions import (
     ASHConfigUnparsedError,
     ASHConfigUnsetVariableError,
 )
+from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.error_text import os_error_without_named_file
 from automated_security_helper.utils.link_chain import (
     LINK_HOPS,
@@ -320,6 +321,7 @@ from automated_security_helper.utils.link_chain import (
 )
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 
 # tomllib is stdlib only from Python 3.11; requires-python starts at 3.10. There
 # it is tomli, the parser tomllib was taken from, which pyproject.toml declares
@@ -3602,6 +3604,48 @@ def _escape(segment: str) -> str:
     return segment.replace("~", "~0").replace("/", "~1")
 
 
+def _plugin_section_key(
+    sections: Dict[Any, Any], segment: str, held: Optional[Set[str]]
+) -> str:
+    """The key of ``sections``, a top-level plugin segment's mapping, that
+    the pointer segment ``segment`` lands on by _normalize_pointer's rules,
+    or ``segment`` as typed when none applies.
+
+    ``held`` is the section keys the patching file's own chain wrote, as
+    written (``owned``'s entry for the plugin segment, an empty set when it
+    has none), or None to resolve without ownership.
+    """
+    from automated_security_helper.config.ash_config import section_fold_key
+
+    resolved = _resolve_dict_key(sections, segment)
+    fold = section_fold_key(segment)
+    if held is not None and not any(section_fold_key(key) == fold for key in held):
+        # The patching file's own chain wrote no spelling of this section, so
+        # there is no owned key a repository twin could capture the pointer
+        # from: the segment resolves as it does without ownership. Restricting
+        # here made the load refuse a variant pointer at a section only the
+        # repository's files wrote, while the exact spelling landed on the
+        # same key.
+        held = None
+    if resolved in sections and (
+        held is None or _spelled_by_an_owned_write(resolved, held, sections)
+    ):
+        return resolved
+    # No exact or "-"/"_" match the patching file's own chain wrote: fold onto
+    # the one key it did write with this identity. Without ownership, over
+    # every key, as before.
+    matches = [
+        existing
+        for existing in sections
+        if isinstance(existing, str)
+        and section_fold_key(existing) == fold
+        and (held is None or _spelled_by_an_owned_write(existing, held, sections))
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return segment
+
+
 def _normalize_pointer(
     document: Any, pointer: str, owned: Optional[Dict[str, Set[str]]] = None
 ) -> str:
@@ -3639,9 +3683,28 @@ def _normalize_pointer(
     POINTER's section (the fold identity): a pointer at a section the
     operator's files never spelled has no owned key a twin could capture
     it from, and resolves as it does without ownership.
-    """
-    from automated_security_helper.config.ash_config import section_fold_key
 
+    A segment directly under the top-level ``scanners`` key that lands on
+    no key the document holds, by the rules above, and that is a retired
+    scanner's name (``canonical_scanner_name``) lands on the key the
+    serving plugin's name lands on by the same rules. The loader folds each
+    base's retired sections onto the serving plugin before the extending
+    file is layered over it (``fold_document_scanner_aliases``), so a
+    file's patch naming the section its base wrote, in the spelling the
+    base wrote, found no such key: an operation inside that section, or a
+    ``remove`` of it, refused the whole load, and an ``add`` of the whole
+    section made a second key, which the model merged key by key over the
+    folded one, so settings the add meant to drop stayed. Ownership applies
+    to the serving name as to any other spelling, over the owned keys as
+    their files wrote them: where the patching file's own chain wrote a
+    spelling of the serving plugin, the serving name lands only on a key
+    one of those writes made; where the chain wrote the section only under
+    its retired name, no owned key spells the serving plugin, so the
+    serving name resolves as it does without ownership, onto the one key of
+    that plugin the document holds. A key the typed segment lands on itself
+    still wins (the file's own sections are left unfolded), and a name the
+    table does not retire stays as typed.
+    """
     if not isinstance(pointer, str) or not pointer.startswith("/"):
         return pointer
     current = document
@@ -3650,43 +3713,21 @@ def _normalize_pointer(
     for position, raw in enumerate(pointer[1:].split("/")):
         segment = _unescape(raw)
         if isinstance(current, dict):
-            resolved = _resolve_dict_key(current, segment)
             if position == 1 and parent in PLUGIN_SEGMENT_KEYS:
                 held = None if owned is None else owned.get(parent) or set()
-                fold = section_fold_key(segment)
-                if held is not None and not any(
-                    section_fold_key(key) == fold for key in held
-                ):
-                    # The patching file's own chain wrote no spelling of this
-                    # section, so there is no owned key a repository twin
-                    # could capture the pointer from: the segment resolves as
-                    # it does without ownership. Restricting here made the
-                    # load refuse a variant pointer at a section only the
-                    # repository's files wrote, while the exact spelling
-                    # landed on the same key.
-                    held = None
-                if resolved in current and (
-                    held is None or _spelled_by_an_owned_write(resolved, held, current)
-                ):
-                    segment = resolved
-                else:
-                    # No exact or "-"/"_" match the patching file's own chain
-                    # wrote: fold onto the one key it did write with this
-                    # identity. Without ownership, over every key, as before.
-                    matches = [
-                        existing
-                        for existing in current
-                        if isinstance(existing, str)
-                        and section_fold_key(existing) == fold
-                        and (
-                            held is None
-                            or _spelled_by_an_owned_write(existing, held, current)
-                        )
-                    ]
-                    if len(matches) == 1:
-                        segment = matches[0]
+                typed = segment
+                segment = _plugin_section_key(current, typed, held)
+                if segment not in current and parent == PluginKind.SCANNER.section:
+                    # The base the section came from was folded before this
+                    # file was layered over it, so its retired spelling is
+                    # now the serving plugin's key.
+                    serving = canonical_scanner_name(typed)
+                    if serving and serving != typed:
+                        landed = _plugin_section_key(current, serving, held)
+                        if landed in current:
+                            segment = landed
             else:
-                segment = resolved
+                segment = _resolve_dict_key(current, segment)
             parent = segment
             current = current.get(segment)
         elif isinstance(current, list) and segment.isascii() and segment.isdigit():

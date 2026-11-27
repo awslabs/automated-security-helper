@@ -262,6 +262,153 @@ def test_a_files_own_patch_still_names_the_retired_section_it_wrote(
     assert _load(monkeypatch, path).scanners.bandit.enabled is False
 
 
+# A child's ``patch`` naming the retired section its BASE wrote. The base is
+# folded before the child is layered over it, so the section is the serving
+# plugin's by then, and the pointer lands there.
+
+
+def _child_patching_its_base(tmp_path, base_scanners, *ops):
+    _write(tmp_path / "base.yaml", {"scanners": base_scanners})
+    return _write(tmp_path / "child.yaml", {"extends": "base.yaml", "patch": list(ops)})
+
+
+def test_a_childs_replace_under_the_retired_name_reaches_its_bases_section(
+    retired_oldname, tmp_path, monkeypatch
+):
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": True}},
+        {"op": "replace", "path": "/scanners/oldname/enabled", "value": False},
+    )
+
+    assert _load(monkeypatch, child).scanners.bandit.enabled is False
+
+
+def test_a_childs_remove_of_the_retired_name_removes_its_bases_section(
+    retired_oldname, tmp_path, monkeypatch
+):
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": False, "options": {"confidence_level": "high"}}},
+        {"op": "remove", "path": "/scanners/oldname"},
+    )
+
+    config = _load(monkeypatch, child)
+
+    # The base's section is gone, so what it set is back to bandit's default.
+    assert config.scanners.bandit.enabled is True
+    assert config.scanners.bandit.options.confidence_level == "all"
+
+
+def test_a_childs_add_of_the_whole_retired_section_replaces_its_bases(
+    retired_oldname, tmp_path, monkeypatch
+):
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": False, "options": {"confidence_level": "high"}}},
+        {
+            "op": "add",
+            "path": "/scanners/oldname",
+            "value": {"options": {"confidence_level": "low"}},
+        },
+    )
+
+    config = _load(monkeypatch, child)
+
+    # An add of a whole object replaces the section: the child's setting
+    # holds, and the base's other setting is back to its default instead of
+    # surviving a key-by-key merge.
+    assert config.scanners.bandit.options.confidence_level == "low"
+    assert config.scanners.bandit.enabled is True
+
+
+def test_a_childs_add_inside_the_retired_section_sets_the_option_on_bandit(
+    retired_oldname, tmp_path, monkeypatch
+):
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": True, "options": {"confidence_level": "high"}}},
+        {
+            "op": "add",
+            "path": "/scanners/oldname/options/ignore_nosec",
+            "value": True,
+        },
+    )
+
+    config = _load(monkeypatch, child)
+
+    assert config.scanners.bandit.options.ignore_nosec is True
+    # The add is inside the section, so the base's own option stays.
+    assert config.scanners.bandit.options.confidence_level == "high"
+
+
+def test_a_childs_test_op_under_the_retired_name_reads_its_bases_section(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The guard's test and the write it guards aim at the one section."""
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": True}},
+        {"op": "test", "path": "/scanners/oldname/enabled", "value": True},
+        {"op": "replace", "path": "/scanners/oldname/enabled", "value": False},
+    )
+
+    assert _load(monkeypatch, child).scanners.bandit.enabled is False
+
+
+def test_a_childs_test_op_under_the_retired_name_compares_its_bases_value(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The control for the test above: the op compares the base's value, so a
+    value the base did not write is refused."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": True}},
+        {"op": "test", "path": "/scanners/oldname/enabled", "value": False},
+    )
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        _load(monkeypatch, child)
+
+    text = " ".join(str(refused.value).split())
+    assert "'patch' entry 0 in" in text, text
+    assert "does not equal the value the test op gives" in text, text
+
+
+def test_a_pointer_at_a_name_neither_held_nor_retired_is_still_refused(
+    retired_oldname, tmp_path, monkeypatch
+):
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    child = _child_patching_its_base(
+        tmp_path,
+        {"oldname": {"enabled": True}},
+        {"op": "replace", "path": "/scanners/nosuchname/enabled", "value": False},
+    )
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        _load(monkeypatch, child)
+
+    text = " ".join(str(refused.value).split())
+    assert "'patch' entry 0 in" in text, text
+    assert "(replace at '/scanners/nosuchname/enabled') failed:" in text, text
+    assert "the path does not fit the document it patches" in text, text
+
+
+def test_a_childs_patch_of_the_canonical_section_its_base_wrote_still_lands(
+    retired_oldname, tmp_path, monkeypatch
+):
+    child = _child_patching_its_base(
+        tmp_path,
+        {"bandit": {"enabled": True}},
+        {"op": "replace", "path": "/scanners/bandit/enabled", "value": False},
+    )
+
+    assert _load(monkeypatch, child).scanners.bandit.enabled is False
+
+
 def test_one_file_holding_both_spellings_reads_the_retired_one_last(
     retired_oldname, tmp_path, monkeypatch
 ):
