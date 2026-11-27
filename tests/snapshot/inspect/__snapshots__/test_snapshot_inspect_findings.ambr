@@ -13,6 +13,7 @@
       'rule_id': 'B105',
       'scanner': 'bandit',
       'severity': 'critical',
+      'states_no_finding': False,
       'suppressed': False,
     }),
     dict({
@@ -26,6 +27,7 @@
       'rule_id': 'CKV_AWS_18',
       'scanner': 'checkov',
       'severity': 'medium',
+      'states_no_finding': False,
       'suppressed': True,
       'suppression_reason': 'Access logs go to a central account',
     }),
@@ -38,6 +40,7 @@
       'rule_id': 'javascript.lang.security.audit.unsafe-eval',
       'scanner': 'semgrep',
       'severity': 'low',
+      'states_no_finding': False,
       'suppressed': False,
     }),
     dict({
@@ -48,6 +51,7 @@
       'rule_id': 'GHSA-0000-fixture',
       'scanner': 'unknown',
       'severity': 'info',
+      'states_no_finding': False,
       'suppressed': False,
     }),
   ])
