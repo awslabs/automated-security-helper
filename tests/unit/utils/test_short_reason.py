@@ -11,6 +11,7 @@ from automated_security_helper.utils.short_reason import (
     SHORT_REASON_LIMIT,
     is_short_reason,
     names_a_local_path,
+    short_error_reason,
 )
 
 pytestmark = pytest.mark.unit
@@ -119,6 +120,61 @@ class TestWhatLooksLikeALocalPath:
     )
     def test_a_word_with_a_slash_inside_is_not_a_path(self, text):
         assert not names_a_local_path(text)
+
+
+class TestAFileUriIsAPath:
+    """``file:///home/me/x``, ``file:/etc/x`` and ``file:///C:/x`` name a local path
+    whose every start follows a colon or a slash, so the leading-character rule that
+    lets ``https://...`` through let them through as well."""
+
+    FORMS = [
+        "file:///home/me/x",
+        "file:/etc/x",
+        "file:///C:/Users/me/x",
+        "file:C:/x",
+        "FILE:///home/me/x",
+        "file:\\\\host\\share",
+    ]
+
+    @pytest.mark.parametrize("uri", FORMS)
+    def test_the_uri_alone_is_refused(self, uri):
+        assert names_a_local_path(uri)
+        assert not is_short_reason(uri)
+
+    @pytest.mark.parametrize("uri", FORMS)
+    def test_the_uri_after_a_verb_is_refused(self, uri):
+        sentence = f"could not read {uri}"
+        assert names_a_local_path(sentence)
+        assert not is_short_reason(sentence)
+
+    @pytest.mark.parametrize("uri", FORMS)
+    def test_a_scan_phase_error_holding_the_uri_has_no_first_sentence(self, uri):
+        prefix = "Failed to execute x scanner on source: "
+        assert short_error_reason(prefix + f"could not read {uri}") is None
+        assert (
+            short_error_reason(prefix + f"x scan failed: could not read {uri}") is None
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "https://example.com/x",
+            "see https://example.com/x?a=file",
+            "the profile:/x word is not the scheme",
+            "its file: option names no file",
+            "its file:name option is not a path",
+            "a.file://x is not the scheme either",
+        ],
+    )
+    def test_a_web_address_and_a_word_ending_in_file_still_pass(self, text):
+        assert not names_a_local_path(text)
+        assert is_short_reason(text)
+
+    def test_a_web_address_still_gives_a_first_sentence(self):
+        prefix = "Failed to execute x scanner on source: "
+        assert short_error_reason(prefix + "could not fetch https://example.com/x") == (
+            "could not fetch https://example.com/x"
+        )
 
 
 def test_the_reporter_uses_the_same_limit_and_check():

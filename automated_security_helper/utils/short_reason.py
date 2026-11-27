@@ -32,9 +32,19 @@ SHORT_REASON_LIMIT = 200
 LOCAL_PATH = re.compile(r"(?:\A|[\s'\"=(\[`<,])(?:/|~/|[A-Za-z]:[\\/]|\\\\)")
 
 
+#: A ``file:`` URI names a path on the local machine too ("file:///home/me/x",
+#: "file:/etc/x", "file:///C:/x", "file:C:/x"), but every path start in it follows
+#: a colon or a slash, which :data:`LOCAL_PATH` leaves alone so that a web URL
+#: passes. The scheme is refused on its own; a word that only ends in "file"
+#: ("profile:/x") is not the scheme.
+FILE_URI = re.compile(
+    r"(?<![A-Za-z0-9+.\-])file:(?:/|\\|[A-Za-z]:[\\/])", re.IGNORECASE
+)
+
+
 def names_a_local_path(text: str) -> bool:
     """Whether ``text`` holds something that looks like a local path."""
-    return LOCAL_PATH.search(text) is not None
+    return LOCAL_PATH.search(text) is not None or FILE_URI.search(text) is not None
 
 
 def is_short_reason(text: object) -> bool:
