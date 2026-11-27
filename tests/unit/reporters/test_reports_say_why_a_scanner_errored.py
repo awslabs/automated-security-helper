@@ -528,7 +528,15 @@ class TestAPathInARecordedReasonIsNotShown:
         }
 
     def test_control_without_the_check_the_path_is_listed(self, monkeypatch):
-        """The check at render is what keeps the planted path out: remove it and it shows."""
+        """The check is what keeps the planted path out: remove it, at the read-back
+        of the row and at render, and it shows."""
+        from automated_security_helper.core import unified_metrics
+
+        monkeypatch.setattr(
+            unified_metrics,
+            "is_short_reason",
+            lambda text: isinstance(text, str) and bool(text),
+        )
         monkeypatch.setattr(
             report_content_emitter,
             "is_short_reason",

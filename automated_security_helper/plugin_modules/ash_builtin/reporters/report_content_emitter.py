@@ -16,8 +16,8 @@ from automated_security_helper.models.flat_vulnerability import (
 from automated_security_helper.models.vocab import Disposition
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.core.enums import ScannerStatus
-from automated_security_helper.core.exceptions import is_reason_code
 from automated_security_helper.core.unified_metrics import (
+    fit_error_reason,
     get_unified_scanner_metrics,
     recorded_error_sentence,
 )
@@ -477,11 +477,9 @@ class ReportContentEmitter:
             # so a row built any other way cannot put a path or a malformed code
             # into ash.flat.json or the YAML report. A pair that fails is dropped
             # whole: a sentence is never shown under a code it was not recorded with.
+            fit_pair = fit_error_reason(metrics.error_reason_code, metrics.error_reason)
             reason_fit_to_copy = (
-                (metrics.error_reason, metrics.error_reason_code)
-                if is_short_reason(metrics.error_reason)
-                and is_reason_code(metrics.error_reason_code)
-                else (None, None)
+                (fit_pair[1], fit_pair[0]) if fit_pair is not None else (None, None)
             )
             results.append(
                 {

@@ -526,8 +526,20 @@ def _reason_pair(holder: object) -> tuple[str, str] | None:
     else:
         code = getattr(holder, "error_reason_code", None)
         sentence = getattr(holder, "error_reason", None)
+    return fit_error_reason(code, sentence)
+
+
+def fit_error_reason(code: object, sentence: object) -> tuple[str, str] | None:
+    """``(code, sentence)`` when the pair is fit to copy into an output, else None.
+
+    The check the scan phase writes a reason by: the code is written as a reason
+    code (``is_reason_code``) and the sentence is a short reason
+    (``is_short_reason``). A pair is whole or nothing, so a fit sentence under an
+    unfit code (or the other way round) is dropped with it. The report emitter asks
+    it again where it copies a row's pair into the flat outputs.
+    """
     if is_reason_code(code) and is_short_reason(sentence):
-        return code, sentence
+        return code, sentence  # type: ignore[return-value]
     return None
 
 

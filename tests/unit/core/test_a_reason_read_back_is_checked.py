@@ -44,7 +44,7 @@ UNFIT = [
     pytest.param(("timed_out", "x" * 201), id="over-the-limit"),
     pytest.param(("Not A Code!", "it timed out"), id="a-malformed-code"),
     pytest.param(("../../etc/x", "it timed out"), id="a-path-as-the-code"),
-    pytest.param(("timed_out ", "it timed out"), id="a-code-with-a-space"),
+    pytest.param(("timed out", "it timed out"), id="a-code-with-a-space"),
 ]
 
 
