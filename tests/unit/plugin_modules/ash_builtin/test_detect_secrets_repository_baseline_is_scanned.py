@@ -312,9 +312,9 @@ def test_the_real_worker_reports_nothing_on_a_baseline_that_only_lists(
     tmp_path, monkeypatch
 ):
     """The common case: a committed baseline of two entries and nothing else.
-    Scanned by the real worker with the three detectors the baseline lists (AWS
-    keys, hex entropy and keywords) it reports nothing on the file, as it did
-    before the baseline was scanned at all."""
+    Scanned by the real worker with the default plugins, which include the three
+    the baseline lists (AWS keys, hex entropy and keywords), it reports nothing
+    on the file, as it did before the baseline was scanned at all."""
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)

@@ -155,11 +155,13 @@ def test_a_baseline_filter_file_is_refused_beside_the_operators_filters(
     tmp_path, monkeypatch
 ):
     """The counterpart of the test above: the same ``file://`` filter under the
-    scan's output directory, named by the tree's own baseline rather than by the
-    operator. It is the repository's, so it is not loaded, while the operator's
-    own filter beside it is kept. Authorship by entry has to cut both ways: a
-    reading that kept every ``file://`` entry once an operator filter was
-    present would hand the worker a file the repository chose."""
+    scan's output directory, named by the baseline rather than by the
+    operator's own settings. The baseline here is one the operator named from
+    outside the scanned tree, so its filters load; the entry is still the
+    baseline's, not the operator's, and a derived directory refuses it, while the
+    operator's own filter beside it is kept. Authorship by entry has to cut both
+    ways: a reading that kept every ``file://`` entry once an operator filter
+    was present would hand the worker a file the baseline chose."""
     monkeypatch.chdir(tmp_path)
     filter_file = tmp_path / "out" / "filters" / "theirs.py"
     context = _context_with_baseline(

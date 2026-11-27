@@ -602,8 +602,9 @@ def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directo
     wrote from ``repo``: its result keys read ``service/settings.py`` and its
     ``should_exclude_file`` pattern ``^service/tests/``. Matched relative to the
     scanned subdirectory, no key met a finding (the listed candidate was
-    reported unsuppressed) and no pattern met a file (``service/tests`` was
-    scanned). Both are now matched relative to the baseline's own directory."""
+    reported unsuppressed). The keys are now matched relative to the baseline's
+    own directory. The pattern is no longer read at all: a baseline found in the
+    tree sets no filters, so ``service/tests`` is scanned."""
     from detect_secrets.core.potential_secret import PotentialSecret
 
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
@@ -801,15 +802,13 @@ def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchor
     tmp_path, monkeypatch
 ):
     """The monorepo above, with the operator's own ``^tests/`` and the
-    baseline's ``^service/docs/``. The operator's ``should_exclude_file`` entry
-    takes precedence over the baseline's for that path (the baseline's entry is
-    not loaded beside it; test_detect_secrets_operator_filters_keep_precedence),
-    so the one pattern in play is the operator's, written relative to the
-    scanned directory, and it is matched there. Matched against the checkout,
-    the anchor of the baseline's keys, ``^tests/`` was tested against
+    baseline's ``^service/docs/``. The baseline is the tree's own, so it sets no
+    filters and the one pattern in play is the operator's, written relative to
+    the scanned directory, and it is matched there. Matched against the
+    checkout, the anchor of the baseline's keys, ``^tests/`` was tested against
     ``service/tests/fixture.py``, stopped matching, and that file was scanned
-    with no warning. ``docs/notes.py`` stays scanned: the baseline's pattern
-    yielded to the operator's entry by the precedence rule, not by the anchor."""
+    with no warning. ``docs/notes.py`` stays scanned: the baseline's pattern is
+    not read."""
     monkeypatch.chdir(tmp_path)
     service, context = _monorepo_service(
         tmp_path, json.dumps(_shared_baseline_excluding("^service/docs/"))

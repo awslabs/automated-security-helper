@@ -109,7 +109,11 @@ from automated_security_helper.utils.error_text import (
     timeout_limit_token,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, VERBOSE_LEVEL
-from automated_security_helper.utils.terminal_text import shown_on_one_line
+from automated_security_helper.utils.terminal_text import (
+    escape_for,
+    is_shown_as_escape,
+    shown_on_one_line,
+)
 from automated_security_helper.utils.sandbox.fs_guard import (
     OutputLinkRefused,
     open_for_write,
@@ -231,6 +235,12 @@ WORDLIST_DEFAULT_MIN_LENGTH = 3
 #: (``DetectSecretsScanner._baseline_hash_echoes``; the keyword detector reads
 #: them as well, as "Secret Keyword", so the echo drop does not look at the type).
 HEX_HIGH_ENTROPY_TYPE = "Hex High Entropy String"
+
+#: The most plugin names and filter paths the baseline warning lists in one
+#: group, and the most characters it prints of one of them. The lists are the
+#: baseline's, so they can be any length; the rest of a group is counted.
+BASELINE_WARNING_MAX_LISTED = 20
+BASELINE_WARNING_MAX_NAME_CHARS = 80
 
 
 def _module_importable(name: str) -> bool:
@@ -604,6 +614,11 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     _operator_filter_positions: Set[int] = PrivateAttr(default_factory=set)
     _operator_filter_total: int = PrivateAttr(default=0)
 
+    # The hashes of the baseline-settings lines this scanner has logged
+    # (_report_baseline_settings_not_applied), so processing the options again
+    # does not repeat a line it already logged.
+    _reported_baseline_settings: Set[str] = PrivateAttr(default_factory=set)
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = DetectSecretsScannerConfig()
@@ -656,13 +671,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         reads as unverified, nothing is dropped, and the sandboxed scan reports
         more findings than the unsandboxed one. A property rather than a class
         attribute because only the instance knows its settings, which
-        ``_process_config_options`` has already merged from the baseline by the
+        ``_process_config_options`` has already merged from the baseline the
+        operator named (a baseline found in the scanned tree sets none) by the
         time the executor asks. Under --offline no scanner gets a network, so
         there the extra, unverified findings are reported.
 
         The need is declared with ``network_requires_grant``: the settings come
-        from a baseline or ASH config that the scanned repository can write,
-        and the same baseline can load a plugin from the repository, so a
+        from a baseline or ASH config that the scanned repository may be able
+        to write, and such a config can load a plugin from the repository, so a
         repository could otherwise give its own code a network. The sandbox
         grants it only when ``sandbox.network_scanners`` names detect-secrets.
         """
@@ -1252,6 +1268,9 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             list(self.config.options.scan_settings.plugins_used),
             list(self.config.options.scan_settings.filters_used),
         )
+        # The parsed baseline when its settings were not applied, reported once
+        # the plugins the scan runs are known (_report_baseline_settings_not_applied).
+        unapplied_baseline_data: Any = None
         if self._baseline_in_use() and self._baseline_real is not None:
             try:
                 # Read once, bound to the resolved path the gate checked
@@ -1272,16 +1291,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 #
                 # Only a baseline the operator named, whose file is outside the
                 # scanned tree and any git checkout that holds the scan root,
-                # sets them (_baseline_entries_trusted). A baseline the scan
-                # found in the tree is the repository's: its ``results`` still
-                # mark known candidates, but its plugin list and filters would
-                # let the repository choose what the scan detects and what it
-                # leaves out, so the scan runs the plugins the configuration
-                # names (the default plugins when it names none) with the
-                # configuration's own filters.
-                settings_trusted = self._baseline_entries_trusted()
+                # sets them (_baseline_settings_trusted). A baseline the scan
+                # found in the tree is one of the repository's own files, and
+                # only its ``results`` apply, as for every baseline: they still
+                # mark known candidates. The scan runs the plugins the
+                # configuration names (the default plugins when it names none)
+                # with the configuration's own filters. What the configuration
+                # itself may set follows the tier table in
+                # docs/content/concepts/trust-model.md, which this gate does
+                # not change.
+                settings_trusted = self._baseline_settings_trusted()
                 if not settings_trusted:
-                    self._warn_baseline_settings_not_applied(baseline_data, values)
+                    unapplied_baseline_data = baseline_data
                 if (
                     settings_trusted
                     and len(self.config.options.scan_settings.plugins_used) == 0
@@ -1388,8 +1409,8 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # the way to fixing the first.
         #
         # The baseline block above is gated on the same empty ``plugins_used``,
-        # so a run that reaches this line with a baseline has the baseline's
-        # filters loaded, and the merge keeps them.
+        # so a run that reaches this line with a baseline the operator named
+        # has that baseline's filters loaded, and the merge keeps them.
         #
         # The class mapping is reached through ``_detect_secrets_api()`` rather than
         # a module-level import, so a missing detect-secrets records a reason and
@@ -1411,58 +1432,161 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 text_without_values(f"Default settings identified: {settings}", values)
             )
 
+        if unapplied_baseline_data is not None:
+            self._report_baseline_settings_not_applied(unapplied_baseline_data, values)
+
         return super()._process_config_options()
 
-    def _warn_baseline_settings_not_applied(
+    def _baseline_settings_trusted(self) -> bool:
+        """Whether the baseline in use may set the scan's plugins and filters.
+
+        Only a baseline the operator named may, and only from a file outside
+        the scanned tree and any git checkout that holds the scan root. That is
+        the answer ``_baseline_entries_trusted`` gives for the candidates a
+        baseline may remove from the report, and the two are asked under their
+        own names so that a later change to one is a choice made for that one:
+        what a baseline may remove and what it may set are different powers.
+        """
+        return self._baseline_entries_trusted()
+
+    def _report_baseline_settings_not_applied(
         self, baseline_data: Any, values: Collection[str]
     ) -> None:
-        """Say once that the baseline in use set no plugins or filters, and which.
+        """Say what the baseline in use lists that the scan does not run as listed.
+
+        Called once the plugins the scan runs are known, because the comparison
+        is against those: a baseline written by ``detect-secrets scan`` lists
+        every plugin with the parameters it has by default and the default
+        filters, which the scan runs whether or not the baseline sets them, so
+        naming them would say that plugins which are running are not applied.
+        What is named is what differs: a plugin the scan does not run, a plugin
+        that runs with other parameters (the plugin's name only), and a filter
+        that does not apply. A baseline that differs in none of these is
+        reported at INFO.
 
         Names only the plugin names and filter paths that are strings, never a
-        pattern, a limit or any other value the baseline holds. A baseline is
-        the repository's file, or a file a config the operator did not write
-        names, so its settings can be any JSON: a list is read as a list only
-        when it is one, an entry as a mapping only when it is one, and a name
-        or a path only when it is a non-empty string. Nothing here raises on a
-        malformed baseline, because the baseline's ``results`` still mark
-        candidates whatever its settings hold.
+        pattern, a limit or any other value the baseline holds, at most
+        ``BASELINE_WARNING_MAX_LISTED`` per group and
+        ``BASELINE_WARNING_MAX_NAME_CHARS`` characters of each: the lists are
+        the baseline's, so they can be any JSON and any length. A list is read
+        as a list only when it is one, an entry as a mapping only when it is
+        one, and a name or a path only when it is a non-empty string. Nothing
+        here raises on a malformed baseline, because the baseline's ``results``
+        still mark candidates whatever its settings hold.
 
         The text names the plugins and filters the scan runs instead (the
         configuration's own, or the default plugins when it names none) and
         what a baseline has to be for its settings to apply, which fits each
         case this fires for. It is logged as one line of text, because the
-        names and paths in it are the baseline's.
+        names and paths in it are the baseline's, and once per scanner: the
+        same text is not logged again when the options are processed again.
         """
         if not isinstance(baseline_data, dict):
             return
-        plugins = self._listed_strings(baseline_data.get("plugins_used"), "name")
-        filters = self._listed_strings(baseline_data.get("filters_used"), "path")
-        if not plugins and not filters:
+        plugin_entries = self._listed_entries(baseline_data.get("plugins_used"), "name")
+        filter_entries = self._listed_entries(baseline_data.get("filters_used"), "path")
+        if not plugin_entries and not filter_entries:
             return
-        ASH_LOGGER.warning(
-            shown_on_one_line(
-                text_without_values(
-                    f"The detect-secrets baseline {Path(self._baseline_file_path()).as_posix()} "
-                    "was not taken as the operator's, so its plugins and filters were "
-                    "not applied; the scan runs the plugins the configuration names, "
-                    "or the default plugins when it names none, with the "
-                    "configuration's own filters, and the baseline still marks the "
-                    "candidates it lists. "
-                    f"Plugins not applied: {', '.join(plugins) or 'none'}. "
-                    f"Filters not applied: {', '.join(filters) or 'none'}. "
-                    "A baseline's plugins and filters apply only when the baseline "
-                    "file is outside the scanned tree and any git checkout that "
-                    "holds the scan root, and the operator's own settings name it "
-                    "with baseline_file.",
-                    self._baseline_redaction_needles(values),
-                )
-            ),
-            extra=NO_MARKUP,
+        not_run, other_parameters, not_applied = self._baseline_settings_differences(
+            plugin_entries, filter_entries
         )
+        lead = (
+            f"The detect-secrets baseline {Path(self._baseline_file_path()).as_posix()} "
+            "was not taken as the operator's, so its plugins and filters were "
+            "not applied; "
+        )
+        groups = [
+            f"{label}: {self._listed_names(names)}"
+            for label, names in (
+                ("plugins that do not run", not_run),
+                ("plugins that run with other parameters", other_parameters),
+                ("filters that do not apply", not_applied),
+            )
+            if names
+        ]
+        if groups:
+            message = (
+                f"{lead}the scan runs the plugins the configuration names, or the "
+                "default plugins when it names none, with the configuration's own "
+                "filters, and the baseline still marks the candidates it lists. "
+                f"What differs: {'; '.join(groups)}. "
+                "A baseline's plugins and filters apply only when the baseline "
+                "file is outside the scanned tree and any git checkout that "
+                "holds the scan root, the operator's own settings name it with "
+                "baseline_file, and scan_settings.plugins_used is empty. To keep "
+                "a baseline's exclusions without naming it, set them in "
+                "scan_settings.filters_used or ignore_paths."
+            )
+            log = ASH_LOGGER.warning
+        else:
+            message = f"{lead}they match what the scan runs."
+            log = ASH_LOGGER.info
+        text = shown_on_one_line(
+            text_without_values(message, self._baseline_redaction_needles(values))
+        )
+        key = hashlib.sha256(str(text).encode("utf-8", "replace")).hexdigest()
+        if key in self._reported_baseline_settings:
+            return
+        self._reported_baseline_settings.add(key)
+        log(text, extra=NO_MARKUP)
+
+    def _baseline_settings_differences(
+        self,
+        plugin_entries: List[Dict[str, Any]],
+        filter_entries: List[Dict[str, Any]],
+    ) -> Tuple[List[str], List[str], List[str]]:
+        """What a baseline lists that the scan, as configured now, does not run as listed.
+
+        Returns the names of the plugins the scan does not run, of the plugins
+        it runs with parameters other than the baseline lists, and the paths of
+        the filters it does not apply. Parameters are compared as the plugin
+        runs with them: its own defaults, then what the entry sets, so a
+        baseline's ``limit: 4.5`` on a plugin whose default is 4.5 is no
+        difference. The baseline's file-name filter (``IS_BASELINE_FILE_FILTER``)
+        is never handed to the worker for any baseline, and the baseline file
+        is scanned like any file, so it is not counted.
+        """
+        settings = self.config.options.scan_settings
+        defaults = self._plugin_default_parameters()
+        running = {
+            item.name: self._effective_plugin_parameters(
+                defaults, item.name, item.model_dump(exclude_none=True)
+            )
+            for item in settings.plugins_used
+            if isinstance(item.name, str)
+        }
+        not_run: List[str] = []
+        other_parameters: List[str] = []
+        seen_plugins: Set[str] = set()
+        for entry in plugin_entries:
+            name = entry["name"]
+            if name in seen_plugins:
+                continue
+            seen_plugins.add(name)
+            if name not in running:
+                not_run.append(name)
+            elif (
+                self._effective_plugin_parameters(defaults, name, entry)
+                != running[name]
+            ):
+                other_parameters.append(name)
+
+        applied = self._applied_filter_paths(settings.filters_used)
+        not_applied: List[str] = []
+        seen_filters: Set[str] = set()
+        for entry in filter_entries:
+            path = entry["path"]
+            if path in seen_filters:
+                continue
+            seen_filters.add(path)
+            if path in applied or path == IS_BASELINE_FILE_FILTER:
+                continue
+            not_applied.append(path)
+        return not_run, other_parameters, not_applied
 
     @staticmethod
-    def _listed_strings(entries: Any, key: str) -> List[str]:
-        """The non-empty string values of ``key`` in the mapping entries of a list.
+    def _listed_entries(entries: Any, key: str) -> List[Dict[str, Any]]:
+        """The mapping entries of a list whose ``key`` is a non-empty string.
 
         Anything else (a value that is not a list, an entry that is not a
         mapping, a ``key`` that is missing, empty or not a string) is skipped
@@ -1471,10 +1595,98 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         if not isinstance(entries, list):
             return []
         return [
-            item[key]
+            item
             for item in entries
             if isinstance(item, dict) and isinstance(item.get(key), str) and item[key]
         ]
+
+    @staticmethod
+    def _listed_names(names: List[str]) -> str:
+        """The first names of a group, each cut short, and how many were left out."""
+        text = ", ".join(
+            DetectSecretsScanner._cut_for_display(name)
+            for name in names[:BASELINE_WARNING_MAX_LISTED]
+        )
+        if len(names) > BASELINE_WARNING_MAX_LISTED:
+            text += f", and {len(names) - BASELINE_WARNING_MAX_LISTED} more"
+        return text
+
+    @staticmethod
+    def _cut_for_display(name: str) -> str:
+        """*name*, cut where what it shows passes ``BASELINE_WARNING_MAX_NAME_CHARS``.
+
+        A control character is shown as an escape of up to ten characters
+        (utils/terminal_text.py), so the cut counts what the line will show,
+        not what the name holds.
+        """
+        width = 0
+        for index, character in enumerate(name):
+            width += len(escape_for(character)) if is_shown_as_escape(character) else 1
+            if width > BASELINE_WARNING_MAX_NAME_CHARS:
+                return name[:index] + "..."
+        return name
+
+    @staticmethod
+    def _plugin_default_parameters() -> Dict[str, Dict[str, Any]]:
+        """Each detect-secrets plugin's parameters when none are given.
+
+        As ``detect-secrets scan`` writes them into a baseline: the plugin's
+        own ``json()`` less its name (``limit: 4.5`` for Base64HighEntropyString,
+        ``keyword_exclude: ""`` for KeywordDetector). A plugin that cannot be
+        built without arguments is left out, and its entry is then compared on
+        the parameters it sets.
+        """
+        try:
+            _, _, secret_type_to_class = _detect_secrets_api()
+            plugin_types = list(secret_type_to_class().values())
+        except Exception:  # pragma: no cover - the library is present here
+            return {}
+        defaults: Dict[str, Dict[str, Any]] = {}
+        for plugin_type in plugin_types:
+            try:
+                parameters = plugin_type().json()
+            except Exception:  # pragma: no cover - every shipped plugin builds bare
+                continue
+            defaults[plugin_type.__name__] = {
+                key: value for key, value in parameters.items() if key != "name"
+            }
+        return defaults
+
+    @staticmethod
+    def _effective_plugin_parameters(
+        defaults: Dict[str, Dict[str, Any]], name: str, entry: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """The parameters a plugin runs with: its defaults, then what the entry sets."""
+        return {
+            **defaults.get(name, {}),
+            **{
+                key: value
+                for key, value in entry.items()
+                if key != "name" and value is not None
+            },
+        }
+
+    @staticmethod
+    def _applied_filter_paths(filters: Iterable[Any]) -> Set[str]:
+        """The filter paths the worker applies for these ``filters_used`` entries.
+
+        With none listed, detect-secrets keeps its default filters. With any
+        listed it keeps its two always-on filters and the ones listed, and
+        drops the rest of its defaults (``Settings.configure_filters``); ASH
+        hands the worker a ``filters_used`` only when the list is not empty.
+        """
+        listed = {
+            item.path
+            for item in filters
+            if isinstance(getattr(item, "path", None), str)
+        }
+        try:
+            from detect_secrets.settings import Settings
+        except ImportError:  # pragma: no cover - the library is present here
+            return listed
+        if listed:
+            return {*Settings.DEFAULT_FILTERS, *listed}
+        return set(Settings().filters)
 
     def _baseline_redaction_needles(self, values: Collection[str]) -> Tuple[str, ...]:
         """What a line that names the baseline hides, besides the environment values.
@@ -2003,11 +2215,14 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
 
         resolve_config has already removed them from the settings of a config the
         operator did not write, and recorded what the operator's settings name. Here
-        the same rule is applied to the baseline's settings, which resolve_config
+        the same rule is applied to the settings of a baseline, which resolve_config
         never sees, and offline mode turns verification off whatever any source
-        says. The rest of the
-        settings, the baseline's exclusions included, still apply, and candidates the
-        filter would have dropped as rejected by their issuer are reported.
+        says. Only a baseline the operator named sets any (a baseline found in the
+        scanned tree sets none, ``_baseline_settings_trusted``), so the refusal
+        for a baseline that is not the operator's repeats that gate's test and
+        has no caller that reaches it today. The rest of the settings, a named
+        baseline's exclusions included, still apply, and candidates the filter
+        would have dropped as rejected by their issuer are reported.
 
         Args:
             settings_from_baseline: The plugins and filters were loaded from the
@@ -3328,10 +3543,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 before_baseline = len(scannable)
                 if baseline_patterns:
                     # A baseline the repository controls is scanned like any
-                    # other file (above), so its own exclusion patterns do not
-                    # apply to it: a committed ``^\.secrets\.baseline$`` would
-                    # take it out of the scan set again. The operator's
-                    # patterns still do.
+                    # other file (above), so a pattern that is not the
+                    # operator's does not apply to it (a pattern of a config
+                    # read from the repository's own files, or one the scanner
+                    # was handed after it was configured): a committed
+                    # ``^\.secrets\.baseline$`` would take it out of the scan
+                    # set again. The operator's patterns still do.
                     kept_apart: Set[str] = (
                         {
                             item

@@ -334,14 +334,15 @@ def test_an_untrusted_baselines_word_list_is_refused_before_it_is_read(
             tmp_path, monkeypatch, words=True, importable=True, trusted=False
         )
     assert _wordlist_entries(scanner) == []
-    assert "Filters not applied: " + WORDLIST_FILTER in caplog.text
+    assert "filters that do not apply: " + WORDLIST_FILTER in caplog.text
     assert "words.txt" not in caplog.text
     assert _handed_wordlists(scanner, monkeypatch) == []
 
 
 def _configured_wordlist_scanner(tmp_path, monkeypatch, *, config_file: bool):
     """A config-written wordlist entry beside the tree's own baseline, whose
-    filters are loaded beside it. With ``config_file`` the config was read from
+    filters are not loaded, so the entry is the config's alone. With
+    ``config_file`` the config was read from
     ``<tmp>/cfg/ash.yaml`` and the list sits beside that file; otherwise the
     config has no file and the list sits in the source directory."""
     monkeypatch.chdir(tmp_path)
