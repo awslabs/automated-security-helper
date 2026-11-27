@@ -939,26 +939,34 @@ def test_get_config_marks_the_limit_only_where_a_checkout_s_file_writes_it(
         assert limit == f"<operator only; ignored from this file: {writes}>", limit
 
 
-def test_get_config_shows_a_checkout_s_limit_as_ignored():
+def test_get_config_shows_a_checkout_s_limit_as_ignored(tmp_path):
     """MCP get_config shows a file in a checkout as a scan of that checkout
     applies it, so the limit that file sets is shown ignored, as the reporter
-    options are. The scanner's other options are shown as they are."""
+    options are. The scanner's other options are shown as they are. The record
+    is the one a chain whose one file is the client's leaves."""
     from automated_security_helper.config.operator_only_options import (
         mark_operator_only_options,
+        scan_repository_settings,
     )
 
-    shown = mark_operator_only_options(
-        {
-            "scanners": {
-                "detect-secrets": {
-                    "options": {
-                        "max_worker_output_mib": 1024,
-                        "skip_generated_lockfiles": False,
-                    }
+    data = {
+        "scanners": {
+            "detect-secrets": {
+                "options": {
+                    "max_worker_output_mib": 1024,
+                    "skip_generated_lockfiles": False,
                 }
             }
         }
-    )
+    }
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    config = tree / ".ash.yaml"
+    config.write_text("{}\n", encoding="utf-8")
+    record = scan_repository_settings([tree])
+    record.confine(config, config, data)
+
+    shown = mark_operator_only_options(data, record)
 
     options = shown["scanners"]["detect-secrets"]["options"]
     assert options["max_worker_output_mib"] == (
@@ -1104,14 +1112,9 @@ def test_get_config_of_a_named_file_loads_past_the_tree_s_ash_config_limit(
 _SERVER_VALUE = "server-value-read-from-the-environment"
 
 #: The marker a file's own reference is shown as, whatever route get_config
-#: answers by, and the marker of a literal that only equals or contains a value
-#: the configuration read (it says nothing of where the value came from).
+#: answers by.
 _REFERENCE_MARKER = (
     "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
-)
-_WITHHELD_MARKER = (
-    "<operator only; ignored from this file: "
-    "<withheld: may hold a value read from the environment>>"
 )
 
 #: Each operator-only option a checkout's file can write as ${VAR}: the
@@ -1258,18 +1261,13 @@ def test_get_config_never_answers_with_an_in_tree_file_s_read_scope(
         assert control_options["findings_scope"] == _REFERENCE_MARKER, control_options
 
 
-def test_get_config_shows_a_literal_scope_equal_to_a_read_value_as_the_placeholder(
+def test_get_config_shows_a_literal_scope_equal_to_a_read_value_as_written(
     tmp_path, monkeypatch
 ):
     """A checkout's file reads project_name from ${VAR} and writes
-    findings_scope as a literal that happens to be the same text. Nothing at
-    findings_scope says it was read, so the marker cannot tell that literal from
-    the read, and errs toward showing less (`mark_operator_only_options` gives a
-    value that equals or contains one the configuration read the placeholder):
-    the scope is shown as ignored, as the withheld placeholder that names no
-    source, and the answer holds the text nowhere."""
-    import json
-
+    findings_scope as a literal that happens to be the same text. The marker
+    shows the literal exactly as written, as it shows one that equals nothing
+    the server read, so a guess at the value is answered as a miss is."""
     from automated_security_helper.cli.mcp_tools import mcp_get_config
     from tests.utils.helpers import mark_git_checkout
 
@@ -1290,9 +1288,11 @@ def test_get_config_shows_a_literal_scope_equal_to_a_read_value_as_the_placehold
 
     result = mcp_get_config(config_path=str(checkout / ".ash.yaml"))
 
-    assert "same-text" not in json.dumps(result), result
     options = result["reporters"]["aws-security-hub"]["options"]
-    assert options["findings_scope"] == _WITHHELD_MARKER, options
+    assert options["findings_scope"] == (
+        '<operator only; ignored from this file: "same-text">'
+    ), options
+    assert result["project_name"] == "<from ${ASH_TEST_MARKER_VAR}>", result
 
 
 def test_get_config_shows_a_literal_written_over_a_read_value_as_the_literal(

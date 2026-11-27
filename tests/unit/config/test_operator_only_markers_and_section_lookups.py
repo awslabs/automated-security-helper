@@ -21,24 +21,40 @@
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 from typing import Annotated
 
 import pytest
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.config.environment_record import EnvironmentReference
 from automated_security_helper.config.operator_only_options import (
     RepositorySettings,
     _confine_scanner_options,
     _sections_in,
     ignored_operator_only_options,
     mark_operator_only_options,
+    scan_repository_settings,
 )
+from automated_security_helper.utils.redacted_model import env_resolved_scalar
+from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
 
 SH = "aws-security-hub"
+
+
+def _the_clients_record(tmp_path: Path, data: object) -> RepositorySettings:
+    """The record of a chain whose one file, inside a scanned tree, is the
+    client's and holds *data*: what *data* writes for the operator-only options
+    is recorded as the client's and shown."""
+    tree = tmp_path / "tree"
+    tree.mkdir(exist_ok=True)
+    config = tree / ".ash.yaml"
+    config.write_text("{}\n", encoding="utf-8")
+    record = scan_repository_settings([tree])
+    record.confine(config, config, data)
+    return record
 
 
 def _outside_tree_limit(value: object) -> RepositorySettings:
@@ -265,87 +281,171 @@ def test_an_extra_scanner_section_the_model_never_reads_is_not_marked():
 
 
 @pytest.mark.parametrize("spelling", ["detect-secrets", "detect_secrets"])
-def test_a_scanner_section_the_model_reads_is_marked(spelling):
+def test_a_scanner_section_the_model_reads_is_marked(tmp_path, spelling):
     """The control for the case above: the declared section, and a spelling
-    that folds to it, are the scanner's, so the operator-only option a file
-    wrote there is shown as ignored, with the file's value as JSON."""
-    shown = mark_operator_only_options(
-        {"scanners": {spelling: {"options": {"max_worker_output_mib": 7}}}}
-    )
+    that folds to it, are the scanner's, so the operator-only option the
+    client's file wrote there is shown as ignored, with the file's value as
+    JSON."""
+    data = {"scanners": {spelling: {"options": {"max_worker_output_mib": 7}}}}
+
+    shown = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
 
     assert shown["scanners"][spelling]["options"]["max_worker_output_mib"] == (
         "<operator only; ignored from this file: 7>"
     )
 
 
-def test_a_list_holding_an_environment_read_value_shows_the_reference():
-    reference = EnvironmentReference(
-        path=("reporters", SH, "options", "findings_scope", 0),
-        written="${ASH_PLANTED_SCOPE}",
-        resolved="planted-scope-value",
-        value="planted-scope-value",
-    )
-    shown = mark_operator_only_options(
-        {
-            "reporters": {
-                SH: {"options": {"findings_scope": ["planted-scope-value", "all"]}}
+def test_a_list_holding_an_environment_read_value_shows_the_reference(tmp_path):
+    data = {
+        "reporters": {
+            SH: {
+                "options": {
+                    "findings_scope": [
+                        env_resolved_scalar("planted-scope-value", "ASH_PLANTED_SCOPE"),
+                        "all",
+                    ]
+                }
             }
-        },
-        references=[reference],
-    )
+        }
+    }
+
+    shown = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
 
     marker = shown["reporters"][SH]["options"]["findings_scope"]
-    assert "planted-scope-value" not in marker, marker
-    assert "${ASH_PLANTED_SCOPE}" in marker and '"all"' in marker, marker
-
-
-def test_a_date_a_yaml_file_wrote_is_shown_as_text():
-    shown = mark_operator_only_options(
-        {"reporters": {SH: {"options": {"findings_scope": datetime.date(2099, 1, 31)}}}}
+    assert marker == (
+        "<operator only; ignored from this file: "
+        '["<from ${ASH_PLANTED_SCOPE}>", "all"]>'
     )
+
+
+def test_a_date_a_yaml_file_wrote_is_shown_as_text(tmp_path):
+    data = {
+        "reporters": {SH: {"options": {"findings_scope": datetime.date(2099, 1, 31)}}}
+    }
+
+    shown = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
 
     marker = shown["reporters"][SH]["options"]["findings_scope"]
     assert marker.startswith("<operator only; ignored from this file: ")
     assert "2099-01-31" in marker, marker
 
 
-def test_a_date_keyed_mapping_a_yaml_file_wrote_is_shown_as_text():
+def test_a_date_keyed_mapping_a_yaml_file_wrote_is_shown_as_text(tmp_path):
     """``json.dumps`` applies ``default=`` to values, not to mapping keys, so
     a date key (an unquoted ``2099-01-31:`` in YAML) raised out of the marking
     where a date value was shown as text; the key is shown as text too."""
-    shown = mark_operator_only_options(
-        {
-            "reporters": {
-                SH: {"options": {"findings_scope": {datetime.date(2099, 1, 31): "all"}}}
-            }
+    data = {
+        "reporters": {
+            SH: {"options": {"findings_scope": {datetime.date(2099, 1, 31): "all"}}}
         }
-    )
+    }
+
+    shown = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
 
     marker = shown["reporters"][SH]["options"]["findings_scope"]
     assert marker.startswith("<operator only; ignored from this file: ")
     assert "2099-01-31" in marker and '"all"' in marker, marker
 
 
-def test_a_mapping_key_read_from_the_environment_shows_the_reference():
-    """A key reference is recorded at its mapping's place; a key the file read
-    from the environment is shown as the reference, as a read value is, never
-    as the key's text."""
-    reference = EnvironmentReference(
-        path=("reporters", SH, "options", "findings_scope"),
-        written="${ASH_PLANTED_KEY}",
-        resolved="planted-key-text",
-        value="planted-key-text",
-        key=True,
-    )
-    shown = mark_operator_only_options(
-        {
-            "reporters": {
-                SH: {"options": {"findings_scope": {"planted-key-text": "all"}}}
+def test_a_mapping_key_read_from_the_environment_shows_the_reference(tmp_path):
+    """A key the file read from the environment is shown as the reference its
+    loader mark carries, as a read value is, never as the key's text."""
+    data = {
+        "reporters": {
+            SH: {
+                "options": {
+                    "findings_scope": {
+                        env_resolved_scalar(
+                            "planted-key-text", "ASH_PLANTED_KEY"
+                        ): "all"
+                    }
+                }
             }
-        },
-        references=[reference],
-    )
+        }
+    }
+
+    shown = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
 
     marker = shown["reporters"][SH]["options"]["findings_scope"]
-    assert "planted-key-text" not in marker, marker
-    assert "${ASH_PLANTED_KEY}" in marker and '"all"' in marker, marker
+    assert marker == (
+        '<operator only; ignored from this file: {"<from ${ASH_PLANTED_KEY}>": "all"}>'
+    )
+
+
+def test_an_option_marked_with_no_record_is_withheld(tmp_path):
+    """With no record of what the chain wrote, nothing is known to be the
+    client's file's, so every marked option is the placeholder."""
+    shown = mark_operator_only_options(
+        {"scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 7}}}}
+    )
+
+    assert shown["scanners"]["detect-secrets"]["options"]["max_worker_output_mib"] == (
+        "<operator only; ignored from this file: <withheld>>"
+    )
+
+
+# A place a file that is not the client's also writes is withheld whatever the
+# value is, in the order the files are met. The cells guard: a file outside every
+# checkout met before the client's file withholds the places the client's file
+# writes, and the other order withholds only the outside file's place, so the
+# client's own place is shown as written.
+def _a_file_in_a_checkout(tmp_path: Path) -> Path:
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    path = checkout / ".ash.yaml"
+    path.write_text("{}\n", encoding="utf-8")
+    return path
+
+
+def _a_file_outside_every_checkout(tmp_path: Path) -> Path:
+    path = tmp_path / "plain" / "base.yaml"
+    path.parent.mkdir()
+    path.write_text("{}\n", encoding="utf-8")
+    return path
+
+
+def _document(**options: object) -> dict:
+    return {"reporters": {SH: {"options": dict(options)}}}
+
+
+_WITHHELD = "<operator only; ignored from this file: <withheld>>"
+
+
+def test_places_a_file_outside_every_checkout_also_writes_are_withheld(tmp_path):
+    outside = _a_file_outside_every_checkout(tmp_path)
+    inside = _a_file_in_a_checkout(tmp_path)
+    record = scan_repository_settings([], every_file=True)
+    record.confine(outside, outside, _document(findings_scope="base-scope"))
+    record.confine(
+        inside,
+        inside,
+        _document(findings_scope="own-scope", archive_resolved_findings=True),
+    )
+
+    dump = _document(findings_scope="x", archive_resolved_findings=False)
+
+    options = mark_operator_only_options(dump, record)["reporters"][SH]["options"]
+
+    assert options["findings_scope"] == _WITHHELD
+    assert options["archive_resolved_findings"] == _WITHHELD
+
+
+def test_the_other_order_withholds_only_the_places_the_outside_file_writes(tmp_path):
+    outside = _a_file_outside_every_checkout(tmp_path)
+    inside = _a_file_in_a_checkout(tmp_path)
+    record = scan_repository_settings([])
+    record.confine(
+        inside,
+        inside,
+        _document(findings_scope="own-scope", archive_resolved_findings=True),
+    )
+    record.confine(outside, outside, _document(findings_scope="base-scope"))
+
+    dump = _document(findings_scope="x", archive_resolved_findings=False)
+    options = mark_operator_only_options(dump, record)["reporters"][SH]["options"]
+
+    assert options["findings_scope"] == _WITHHELD
+    assert (
+        options["archive_resolved_findings"]
+        == "<operator only; ignored from this file: true>"
+    )

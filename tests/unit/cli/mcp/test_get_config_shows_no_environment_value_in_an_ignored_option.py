@@ -6,34 +6,33 @@
 get_config shows the operator-only options a file in a git checkout sets
 (aws-security-hub ``findings_scope`` and ``archive_resolved_findings``,
 detect-secrets ``max_worker_output_mib``) as ``<operator only; ignored from this
-file: VALUE>``, because a scan of that checkout ignores them. A value the file
-read from the environment (``${VAR}``) belongs to the server, so VALUE is the
-reference the file wrote (``<from ${VAR}>``), on both routes: from the
-reference the load kept at that place, or else, where the load dropped it (as
-it does for a file in a checkout the session does not scan), from the loader's
-own mark on the value, which carries the reference. Only a literal that equals
-or contains a value the configuration read elsewhere is withheld, with a
-placeholder that says nothing of where the value came from; for a number or a
-boolean only an equal text counts.
+file: VALUE>``, because a scan of that checkout ignores them. VALUE shows every
+literal the client's file wrote exactly as written. A value the file wrote as a
+reference (``${VAR}``, ``${VAR:default}``, with or without text after it) is
+shown as ``<from ${VAR}>`` whether or not the variable is set, from the
+variable's name the loader's own mark carries, so the answer never depends on
+what the server's environment holds: a literal that equals or contains a value
+the server read is shown as written, the same as one that does not, and a guess
+gets the same answer as a miss.
 
-The marker used to be compared whole with each environment value and withdrawn
-on a match. That caught a string and missed every other shape: a list entry, a
-mapping value or key and a set member printed the value inside the marker. It
-also hid from the client that the file set an option the scan ignores. The
-decision now sits in ``mark_operator_only_options``, which walks the value the
-file wrote.
+The one condition is where a value came from. A place that a file of the chain
+that is not the client's (the operator's own file, or a base outside every
+checkout) also writes is shown as ``<withheld>`` whatever the value is, because
+the client's file merged over that file's document and what it holds there may
+be a value the other file wrote. That decision depends on the chain's structure
+only, never on a value.
 
 The cells drive get_config through a file in another checkout, named from a
-working directory elsewhere, once for each shape a read value can take. They
-keep the controls that must not change (a literal, a reference that survives, an
-option left unmarked), pin the refusal for a load that did not record exactly
-one set of settings, and call ``mark_operator_only_options`` directly.
+working directory elsewhere, once for each shape a value can take. They keep the
+controls that must not change (a literal, a reference, an option left
+unmarked), pin the refusal for a load that did not record exactly one set of
+settings, and call ``mark_operator_only_options`` directly with a record built
+from the data.
 
 Two more pin what the marker is made of. A value the operator's own file read
 from the environment is never replaced inside a marker written at the place its
 reference sits, because the display walk runs on the dump before the markers go
-in. And a default the loader supplied for an unset variable is the file's own
-text, shown as written and not as the placeholder.
+in. And a default reference is shown by its reference, the variable set or not.
 """
 
 import contextlib
@@ -47,10 +46,10 @@ from typing import Any, Callable, Dict, Iterator, List
 import pytest
 
 from automated_security_helper.cli.mcp_tools import mcp_get_config
-from automated_security_helper.config.environment_record import EnvironmentReference
 from automated_security_helper.config.operator_only_options import (
     RepositorySettings,
     mark_operator_only_options,
+    scan_repository_settings,
 )
 from automated_security_helper.utils.redacted_model import env_resolved_scalar
 from tests.utils.helpers import mark_git_checkout
@@ -62,17 +61,13 @@ pytestmark = pytest.mark.unit
 #: _TOKEN, _SECRET or _PASSWORD, which it refuses.
 _VAR = "ASH_TEST_GETCFG_VALUE"
 _VALUE = "getcfg-env-test-value-5c1e"
-_REFERENCE = "${" + _VAR + "}"
 _SECTION = "aws-security-hub"
 _ABSENT = "<absent>"
 
 _IGNORED = "<operator only; ignored from this file: "
-#: What a literal that only equals or contains a value the configuration read
-#: is shown as: no word of where the value came from, and none of the value.
-_WITHHELD = (
-    "<operator only; ignored from this file: "
-    "<withheld: may hold a value read from the environment>>"
-)
+#: What a value is shown as where it cannot be shown: no word of where it came
+#: from, and none of the value.
+_WITHHELD = "<operator only; ignored from this file: <withheld>>"
 _FROM_THE_VARIABLE = "<from ${ASH_TEST_GETCFG_VALUE}>"
 _BY_REFERENCE = _IGNORED + _FROM_THE_VARIABLE + ">"
 
@@ -196,6 +191,49 @@ def _named_beside_the_operators_file(
     return mcp_get_config(config_path=str(named))
 
 
+#: The variable and the distinctive text the cells whose chain has a base outside
+#: every checkout use. Neither name ends in _KEY, _TOKEN, _SECRET or _PASSWORD.
+_BASE_VAR = "ASH_TEST_GETCFG_BASE"
+_BASE_SCOPE = "base-only-scope-4f9a"
+_ROOT_SCOPE = "root-own-scope-8c3e"
+
+
+def _named_over_a_base_outside_every_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    base_options: str,
+    root_options: str = "",
+) -> Dict[str, Any]:
+    """get_config of ``checkout/.ash.yaml``, a link to ``plain/root.yaml``, which
+    extends ``base.yaml`` beside it, named from a working directory elsewhere.
+
+    The name sits in a checkout and the link leads out of it, so the file is the
+    client's, by its name. The file and its base are in a plain
+    directory outside every checkout, which the loader admits as the file's own
+    confinement root (a base must stay inside the directory of the file that
+    names it) and which the operator's allowed config roots hold. So the base is
+    a file that is not the client's, and the client's file merges over its
+    document. The base holds *base_options*, the client's file *root_options*."""
+    monkeypatch.setenv(_BASE_VAR, _BASE_SCOPE)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "base.yaml").write_text(_section(base_options), encoding="utf-8")
+    root = "extends: base.yaml\n"
+    if root_options:
+        root += _section(root_options)
+    (plain / "root.yaml").write_text(root, encoding="utf-8")
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    named = checkout / ".ash.yaml"
+    named.symlink_to(plain / "root.yaml")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+    return mcp_get_config(config_path=str(named))
+
+
 def _options(result: Dict[str, Any]) -> Dict[str, Any]:
     return result["reporters"][_SECTION]["options"]
 
@@ -241,11 +279,12 @@ _SHAPES = {
 
 
 # What the answer shows for findings_scope in each of those shapes: the
-# reference the file wrote, at the place the value sits. A set shows as a JSON
-# list in the order of its shown members.
+# reference the file wrote, at the place the value sits, and none of the text
+# the file wrote after it. A set shows as a JSON list in the order of its shown
+# members.
 _SHAPE_MARKERS = {
     "whole-value": _BY_REFERENCE,
-    "interpolated-value": _IGNORED + _FROM_THE_VARIABLE + "-acct>",
+    "interpolated-value": _BY_REFERENCE,
     "list-entry": _IGNORED + '["literal-entry", "' + _FROM_THE_VARIABLE + '"]>',
     "mapping-value": _IGNORED + '{"scope": "' + _FROM_THE_VARIABLE + '"}>',
     "mapping-key": _IGNORED + '{"' + _FROM_THE_VARIABLE + '": "literal-entry"}>',
@@ -351,21 +390,62 @@ def test_a_literal_beside_a_read_value_is_shown_as_written(tmp_path, monkeypatch
     [_VALUE, f"prefix-{_VALUE}-suffix"],
     ids=["equal", "containing"],
 )
-def test_a_literal_that_is_or_contains_a_read_value_shows_the_placeholder(
+def test_a_literal_that_is_or_contains_a_read_value_is_shown_as_written(
     tmp_path, monkeypatch, scope
 ):
     """The file reads project_name from the variable and writes findings_scope
-    as a literal that equals the value, or holds it. Nothing at findings_scope
-    says it was read: no reference of the load sits there and the loader put no
-    mark on it, so the marker cannot tell the literal from the read and shows
-    less: the placeholder, which names no source."""
+    as a literal that equals the value, or holds it. The marker shows the
+    literal exactly as the file wrote it, as it shows a literal that matches
+    nothing: nothing in the answer depends on whether the text equals, or
+    contains, a value the server read."""
     body = "project_name: ${ASH_TEST_GETCFG_VALUE}\n" + _section(
         f"findings_scope: {scope}\n"
     )
 
     result = _named_from_elsewhere(tmp_path, monkeypatch, body)
 
-    assert not _wrong(result, _scope(result), _WITHHELD), result
+    assert _scope(result) == _IGNORED + json.dumps(scope) + ">", result
+    assert result["project_name"] == _FROM_THE_VARIABLE, result
+
+
+# A guess at the server's value and a miss get the same answer. The cells below
+# guard that: the guess and the miss are each run through the same file (the
+# value the variable holds, and other text), and in a list. Each marker is the
+# literal as written, in the same form for the guess and the miss. The twin for
+# a value the operator's own file read is with the destination cells further
+# down.
+@pytest.mark.parametrize(
+    "guess", [_VALUE, "other-text"], ids=["equal-to-the-read", "not-equal"]
+)
+def test_a_guess_at_a_read_value_and_a_miss_are_answered_in_the_same_form(
+    tmp_path, monkeypatch, guess
+):
+    """findings_scope is written as the value the variable holds, and as other
+    text, in two runs of the same file. Each marker is the literal as written
+    (the same form), and project_name is shown by reference in both: a client
+    that guesses the variable's value learns nothing from the marker."""
+    body = "project_name: ${ASH_TEST_GETCFG_VALUE}\n" + _section(
+        f"findings_scope: {guess}\n"
+    )
+
+    result = _named_from_elsewhere(tmp_path, monkeypatch, body)
+
+    assert _scope(result) == _IGNORED + json.dumps(guess) + ">", result
+    assert result["project_name"] == _FROM_THE_VARIABLE, result
+
+
+def test_a_list_of_guesses_is_shown_entry_by_entry_as_written(tmp_path, monkeypatch):
+    """One entry equals the value the server read and one does not: the list is
+    shown as written, entry by entry, with no entry replaced or withheld."""
+    body = "project_name: ${ASH_TEST_GETCFG_VALUE}\n" + _section(
+        f"findings_scope:\n  - {_VALUE}\n  - other-entry\n"
+    )
+
+    result = _named_from_elsewhere(tmp_path, monkeypatch, body)
+
+    assert _scope(result) == _IGNORED + json.dumps([_VALUE, "other-entry"]) + ">", (
+        result
+    )
 
 
 def test_the_same_reference_is_shown_alike_with_no_file_and_as_a_named_files_base(
@@ -412,17 +492,31 @@ def _flag(result: Dict[str, Any]) -> Any:
             _IGNORED + "false>",
             id="boolean-holding-the-read-text",
         ),
+        pytest.param(
+            "scanners:\n  detect-secrets:\n    options:\n"
+            "      max_worker_output_mib: 256\n",
+            "256",
+            _limit,
+            _IGNORED + "256>",
+            id="number-equal-to-the-read-text",
+        ),
+        pytest.param(
+            _section("archive_resolved_findings: false\n"),
+            "false",
+            _flag,
+            _IGNORED + "false>",
+            id="boolean-equal-to-the-read-text",
+        ),
     ],
 )
-def test_a_number_or_boolean_literal_is_withheld_only_by_an_equal_text(
+def test_a_number_or_boolean_literal_is_shown_as_written_whether_or_not_a_read_equals_it(
     tmp_path, monkeypatch, literal, read_text, option, shown
 ):
     """The file writes a literal number or boolean at an ignored option and
-    reads project_name from the variable. The read text ("25", "als") sits
-    inside the literal's text ("256", "false") but is not equal to it. A value
-    interpolated from the environment is a string and carries the loader's mark,
-    so a number or a boolean can only be a read when its text equals one: each
-    literal is shown as its JSON inside the marker, not withheld."""
+    reads project_name from the variable. The read text sits inside the
+    literal's text ("25", "als"), or equals it ("256", "false"): each literal is
+    shown as its JSON inside the marker either way, because the marker does not
+    depend on what the server read."""
     body = "project_name: ${ASH_TEST_GETCFG_VALUE}\n" + literal
 
     result = _named_from_elsewhere(tmp_path, monkeypatch, body, value=read_text)
@@ -437,23 +531,48 @@ def test_a_number_or_boolean_literal_is_withheld_only_by_an_equal_text(
         pytest.param(_found_by_ash_config, id="ash-config-no-file-named"),
     ],
 )
-def test_a_default_the_loader_supplied_is_shown_as_written_not_as_the_placeholder(
-    tmp_path, monkeypatch, answer
+@pytest.mark.parametrize(
+    "written, default, tail",
+    [
+        pytest.param(
+            "${ASH_TEST_UNSET_SCOPE:a-default-scope}",
+            "a-default-scope",
+            "",
+            id="default",
+        ),
+        pytest.param(
+            "${ASH_TEST_UNSET_SCOPE:a-default}-tail",
+            "a-default",
+            "-tail",
+            id="default-and-tail",
+        ),
+    ],
+)
+@pytest.mark.parametrize("variable_set", [False, True], ids=["unset", "set"])
+def test_a_reference_with_a_default_is_shown_by_its_reference_whether_or_not_the_variable_is_set(
+    tmp_path, monkeypatch, answer, written, default, tail, variable_set
 ):
-    """``${VAR:default}`` with VAR unset resolves to the default, which is the
-    file's own text. The loader marks that scalar as not read from the
-    environment (``EnvResolvedScalar.from_environment`` is False), and the
-    record of what the chain read lists no value for it
-    (``config_validator._interpolated_pairs`` pairs a reference only when its
-    variable is set), so no reference and no environment value matches it.
-    Nothing was read, so the marker shows the default as JSON, as it shows any
-    literal, and not the placeholder."""
-    monkeypatch.delenv("ASH_TEST_UNSET_SCOPE", raising=False)
-    body = _section("findings_scope: ${ASH_TEST_UNSET_SCOPE:a-default-scope}\n")
+    """``${VAR:default}`` resolves to the default with VAR unset and to VAR's
+    value with it set, and the loader's mark records different text for the two.
+    The marker is built from the variable's name alone, so both read
+    ``<from ${ASH_TEST_UNSET_SCOPE}>`` on both routes: the answer does not tell
+    whether the server sets the variable. Neither the default, nor the
+    variable's value, nor the text after the reference is in the answer."""
+    set_value = "set-scope-value-8e1f"
+    if variable_set:
+        monkeypatch.setenv("ASH_TEST_UNSET_SCOPE", set_value)
+    else:
+        monkeypatch.delenv("ASH_TEST_UNSET_SCOPE", raising=False)
+    body = _section(f"findings_scope: {written}\n")
 
     result = answer(tmp_path, monkeypatch, body)
 
-    assert not _wrong(result, _scope(result), _IGNORED + '"a-default-scope">'), result
+    assert _scope(result) == _IGNORED + "<from ${ASH_TEST_UNSET_SCOPE}>" + ">", result
+    text = json.dumps(result, default=str)
+    assert default not in text, result
+    assert set_value not in text, result
+    if tail:
+        assert tail not in _scope(result), result
 
 
 def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(
@@ -572,38 +691,85 @@ def test_a_set_member_read_from_the_environment_shows_its_reference_with_no_file
     assert not _wrong(result, _scope(result), _SHAPE_MARKERS["set-member"]), result
 
 
-def test_the_answer_with_no_file_hides_a_value_only_the_first_read_recorded(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize(
+    "scope",
+    [_VALUE, f"prefix-{_VALUE}-suffix"],
+    ids=["equal", "containing"],
+)
+def test_the_answer_with_no_file_shows_a_literal_that_holds_a_read_value_as_written(
+    tmp_path, monkeypatch, scope
 ):
-    """With no file named, the references the marking uses come from the first
-    read of ASH_CONFIG's chain, and the answer's own configuration is the second,
-    scan-confined read. The values read from the environment join the same way:
-    the first read's with the answer's. The second read here records none, so
-    only the first read's value can withhold the literal that holds it. The
-    cell also pins that the wrapper ran and that the config it returned reports
-    no values, so the withheld text cannot come from the answer's own read."""
-    from automated_security_helper.config import resolve_config as resolve_module
-    from automated_security_helper.utils.error_text import config_environment_values
-
-    real_resolve = resolve_module.resolve_config
-    returned = []
-
-    def resolve_and_forget_the_reads(*args, **kwargs):
-        config = real_resolve(*args, **kwargs)
-        config._environment_values = []
-        returned.append(config)
-        return config
-
-    monkeypatch.setattr(resolve_module, "resolve_config", resolve_and_forget_the_reads)
+    """With no file named, ASH_CONFIG's file in the searched checkout reads
+    project_name from the variable and writes findings_scope as a literal that
+    equals the value, or holds it. The route that keeps the file's references at
+    their places shows the literal as written too: the marker is the same as
+    the one a literal that matches nothing gets, so a guess is answered as a
+    miss is."""
     body = "project_name: ${ASH_TEST_GETCFG_VALUE}\n" + _section(
-        f"findings_scope: prefix-{_VALUE}-suffix\n"
+        f"findings_scope: {scope}\n"
     )
 
     result = _found_by_ash_config(tmp_path, monkeypatch, body)
 
-    assert len(returned) >= 1, "resolve_config was never called through the wrapper"
-    assert all(not config_environment_values(config) for config in returned)
-    assert not _wrong(result, _scope(result), _WITHHELD), result
+    assert _scope(result) == _IGNORED + json.dumps(scope) + ">", result
+
+
+# A value that did not come from the client's file is never shown, whatever it
+# equals. The client's file merges over the document of a base outside every
+# checkout, so a place that base also writes may hold the base's value there,
+# and the marker for that place is the placeholder. The cells guard: the base's
+# literal and the base's reference are each withheld, a literal the client's
+# file also writes over the base's is withheld too (the place is one the base
+# writes), and a place only the client's file writes is still shown as written.
+_BASE_PLACES = {
+    "base-literal": (f"findings_scope: {_BASE_SCOPE}\n", ""),
+    "base-reference": ("findings_scope: ${ASH_TEST_GETCFG_BASE}\n", ""),
+    "base-literal-and-own-literal": (
+        f"findings_scope: {_BASE_SCOPE}\n",
+        f"findings_scope: {_ROOT_SCOPE}\n",
+    ),
+}
+
+
+@pytest.mark.parametrize("layout", list(_BASE_PLACES))
+def test_a_place_a_base_outside_every_checkout_also_writes_is_withheld(
+    tmp_path, monkeypatch, layout
+):
+    """The named file in a checkout extends a base in a plain directory outside
+    every checkout, which writes findings_scope; the named file writes no scope,
+    or its own literal over the base's. What the named file's document holds at
+    findings_scope may be the base's, so the marker is the placeholder and
+    neither the base's literal, nor its reference, nor the named file's own
+    literal is in the answer."""
+    base_options, root_options = _BASE_PLACES[layout]
+
+    result = _named_over_a_base_outside_every_checkout(
+        tmp_path, monkeypatch, base_options, root_options
+    )
+
+    assert _scope(result) == _WITHHELD, result
+    text = json.dumps(result, default=str)
+    assert _BASE_SCOPE not in text, result
+    assert _ROOT_SCOPE not in text, result
+    assert "<from ${" + _BASE_VAR + "}>" not in text, result
+
+
+def test_a_place_only_the_clients_file_writes_is_shown_beside_a_withheld_one(
+    tmp_path, monkeypatch
+):
+    """The control for the cell above: the base writes the archive flag and the
+    named file writes findings_scope. The flag is a place the base writes, so it
+    is the placeholder; the scope is the named file's alone, so it is shown as
+    written."""
+    result = _named_over_a_base_outside_every_checkout(
+        tmp_path,
+        monkeypatch,
+        "archive_resolved_findings: true\n",
+        f"findings_scope: {_ROOT_SCOPE}\n",
+    )
+
+    assert _scope(result) == _IGNORED + json.dumps(_ROOT_SCOPE) + ">", result
+    assert _flag(result) == _WITHHELD, result
 
 
 @contextlib.contextmanager
@@ -685,37 +851,31 @@ def test_a_load_that_records_other_than_one_set_of_settings_is_refused(
 _FLAGGED = "flag-only-value-3d7a"
 
 
-def _a_reference(
-    *below: Any, resolved: str = _VALUE, key: bool = False
-) -> EnvironmentReference:
-    """A reference the chain recorded at findings_scope, or *below* it."""
-    return EnvironmentReference(
-        path=("reporters", _SECTION, "options", "findings_scope", *below),
-        written=_REFERENCE,
-        resolved=resolved,
-        value=resolved,
-        key=key,
-    )
+def _the_clients_record(tmp_path: Path, data: Any) -> RepositorySettings:
+    """The record of one chain whose only file is the client's: a file inside a
+    scanned tree, whose document is *data*, confined as the load confines it.
+
+    A file inside the trees is the repository's whatever else the chain holds,
+    so what *data* writes for the operator-only options is recorded and shown.
+    ``confine`` copies the document, so *data* itself is left as it is."""
+    tree = tmp_path / "tree"
+    tree.mkdir(exist_ok=True)
+    config = tree / ".ash.yaml"
+    config.write_text("{}\n", encoding="utf-8")
+    record = scan_repository_settings([tree])
+    record.confine(config, config, data)
+    return record
 
 
-def _mark(scope: Any, references=(), **environment) -> Any:
-    """The marker written for a findings_scope of *scope*. No record of what
-    the files wrote is given, so every option the data holds is marked.
-    *environment* is passed on as it is, so a call that gives no environment
-    values is made as it was before the parameter existed."""
+def _mark(tmp_path: Path, scope: Any) -> Any:
+    """The marker written for a findings_scope of *scope*, with the record of a
+    chain whose one file, the client's, wrote it."""
     data = {"reporters": {_SECTION: {"options": {"findings_scope": scope}}}}
-    marked = mark_operator_only_options(data, None, references, **environment)
+    marked = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
     return marked["reporters"][_SECTION]["options"]["findings_scope"]
 
 
-@pytest.mark.parametrize(
-    "environment_values",
-    [False, True],
-    ids=["references-only", "with-environment-values"],
-)
-def test_marking_changes_neither_its_input_nor_anything_nested_in_it(
-    environment_values,
-):
+def test_marking_changes_neither_its_input_nor_anything_nested_in_it(tmp_path):
     """The marker is written into a copy: the caller's dict, and every dict and
     list inside it, keep what they held, and the leaf the loader marked as read
     is the same object."""
@@ -734,9 +894,8 @@ def test_marking_changes_neither_its_input_nor_anything_nested_in_it(
         "scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 256}}},
     }
     before = copy.deepcopy(data)
-    environment = {"environment_values": [_VALUE]} if environment_values else {}
 
-    marked = mark_operator_only_options(data, None, [_a_reference(1)], **environment)
+    marked = mark_operator_only_options(data, _the_clients_record(tmp_path, data))
 
     assert data == before
     assert scope == ["literal-entry", read] and scope[1] is read
@@ -755,28 +914,59 @@ def test_marking_changes_neither_its_input_nor_anything_nested_in_it(
 
 
 @pytest.mark.parametrize(
-    "scope, environment_values",
+    "scope, expected",
     [
-        pytest.param(_VALUE, [_VALUE], id="equal-string"),
-        pytest.param(f"prefix-{_VALUE}-suffix", [_VALUE], id="string-containing-it"),
-        pytest.param(["literal-entry", _VALUE], [_VALUE], id="list-entry"),
-        pytest.param(("literal-entry", _VALUE), [_VALUE], id="tuple-entry"),
-        pytest.param({"scope": _VALUE}, [_VALUE], id="mapping-value"),
-        pytest.param({_VALUE: "literal-entry"}, [_VALUE], id="mapping-key"),
-        pytest.param({"literal-member", _VALUE}, [_VALUE], id="set-member"),
-        pytest.param(frozenset({"literal-member", _VALUE}), [_VALUE], id="frozenset"),
-        pytest.param({"scopes": [{"deep": _VALUE}]}, [_VALUE], id="nested"),
-        pytest.param(73191, ["73191"], id="number"),
+        pytest.param(_VALUE, _IGNORED + json.dumps(_VALUE) + ">", id="equal-string"),
+        pytest.param(
+            f"prefix-{_VALUE}-suffix",
+            _IGNORED + json.dumps(f"prefix-{_VALUE}-suffix") + ">",
+            id="string-containing-it",
+        ),
+        pytest.param(
+            ["literal-entry", _VALUE],
+            _IGNORED + json.dumps(["literal-entry", _VALUE]) + ">",
+            id="list-entry",
+        ),
+        pytest.param(
+            ("literal-entry", _VALUE),
+            _IGNORED + json.dumps(["literal-entry", _VALUE]) + ">",
+            id="tuple-entry",
+        ),
+        pytest.param(
+            {"scope": _VALUE},
+            _IGNORED + json.dumps({"scope": _VALUE}) + ">",
+            id="mapping-value",
+        ),
+        pytest.param(
+            {_VALUE: "literal-entry"},
+            _IGNORED + json.dumps({_VALUE: "literal-entry"}) + ">",
+            id="mapping-key",
+        ),
+        pytest.param(
+            {"literal-member", _VALUE},
+            _IGNORED + json.dumps(sorted(["literal-member", _VALUE])) + ">",
+            id="set-member",
+        ),
+        pytest.param(
+            frozenset({"literal-member", _VALUE}),
+            _IGNORED + json.dumps(sorted(["literal-member", _VALUE])) + ">",
+            id="frozenset",
+        ),
+        pytest.param(
+            {"scopes": [{"deep": _VALUE}]},
+            _IGNORED + json.dumps({"scopes": [{"deep": _VALUE}]}) + ">",
+            id="nested",
+        ),
+        pytest.param(73191, _IGNORED + "73191>", id="number"),
     ],
 )
-def test_a_value_that_is_or_contains_an_environment_value_shows_the_placeholder(
-    scope, environment_values
+def test_a_literal_is_shown_as_written_whatever_it_equals_or_contains(
+    tmp_path, scope, expected
 ):
-    """No part of the value is shown: the whole marker value is the placeholder,
-    the literal entries beside a read one included. A literal that equals or
-    contains a value the configuration read cannot be told from the read, so it
-    gets the placeholder too, which shows less rather than more."""
-    assert _mark(scope, environment_values=environment_values) == _WITHHELD
+    """Every literal the file wrote is shown exactly as written, in every shape
+    a value can take, whether or not its text equals or contains a value the
+    server read: no entry is replaced and no part of the marker is withheld."""
+    assert _mark(tmp_path, scope) == expected
 
 
 @pytest.mark.parametrize(
@@ -808,111 +998,143 @@ def test_a_value_that_is_or_contains_an_environment_value_shows_the_placeholder(
     ],
 )
 def test_a_leaf_the_loader_marked_as_read_shows_the_reference_its_mark_carries(
-    scope, expected
+    tmp_path, scope, expected
 ):
-    """The loader marks each scalar it read from the environment
-    (``EnvResolvedScalar.from_environment``) and the mark carries the text the
-    file wrote (``shown``). That is enough to show the reference: no references
-    and no environment values are given here, as for a read the load kept no
-    reference for and the configuration's record of values does not hold (a set
-    member). The value is in none of the texts."""
-    assert _mark(scope) == expected
-    assert _FLAGGED not in _mark(scope)
+    """The loader marks each scalar it read from the environment and the mark
+    carries the variable's name. That is enough to show the reference, in any
+    shape the value takes, a set member and a mapping key included. The value is
+    in none of the texts."""
+    shown = _mark(tmp_path, scope)
 
-
-def test_a_leaf_the_loader_marked_as_read_with_no_shown_text_is_withheld():
-    """A mark that carries no text of what the file wrote cannot be shown as a
-    reference. It is still a read, so the marker withholds the whole value, with
-    a placeholder that names no source."""
-    read = env_resolved_scalar(_FLAGGED, _VAR)
-    read.shown = ""
-
-    assert _mark(["literal-entry", read]) == _WITHHELD
-
-
-def test_a_default_that_supplied_a_value_is_shown_as_written():
-    """A ``${VAR:default}`` whose variable is unset resolves to the file's own
-    text, which the loader marks as not read from the environment."""
-    default = env_resolved_scalar("a-default-scope", _VAR, from_environment=False)
-
-    assert _mark(default) == _IGNORED + '"a-default-scope">'
+    assert shown == expected
+    assert _FLAGGED not in shown
 
 
 @pytest.mark.parametrize(
-    "scope, reference, expected",
+    "written_with",
     [
-        pytest.param(_VALUE, _a_reference(), _BY_REFERENCE, id="whole-value"),
         pytest.param(
-            ["literal-entry", _VALUE],
-            _a_reference(1),
-            _IGNORED + '["literal-entry", "' + _FROM_THE_VARIABLE + '"]>',
-            id="list-entry",
+            lambda: env_resolved_scalar(
+                "a-default-scope", _VAR, from_environment=False
+            ),
+            id="default-supplied-the-text",
         ),
         pytest.param(
-            {_VALUE: "literal-entry"},
-            _a_reference(key=True),
-            _IGNORED + '{"' + _FROM_THE_VARIABLE + '": "literal-entry"}>',
-            id="mapping-key",
+            lambda: env_resolved_scalar(
+                "a-default-scope-tail", _VAR, "a-default-scope-tail", False
+            ),
+            id="default-and-tail-supplied-the-text",
+        ),
+        pytest.param(
+            lambda: env_resolved_scalar(
+                _FLAGGED + "-tail", _VAR, "${" + _VAR + "}-tail"
+            ),
+            id="variable-read-with-a-tail",
         ),
     ],
 )
-def test_a_leaf_a_reference_shows_keeps_the_reference_beside_environment_values(
-    scope, reference, expected
+def test_a_reference_is_shown_by_its_variable_whatever_branch_the_loader_took(
+    tmp_path, written_with
 ):
-    """The reference is tried first: a value the surviving references show
-    entirely is shown as them, and the environment values, which hold it, add
-    nothing."""
-    assert _mark(scope, [reference], environment_values=[_VALUE]) == expected
+    """The loader's ``shown`` text is the reference plus the file's text after
+    it when the variable was read, and the value itself (the default plus that
+    text) when the default supplied it. The marker is built from the variable's
+    name alone, so each of them reads ``<from ${VAR}>``: the answer does not say
+    which branch the loader took, nor print the default, the value or the text
+    after the reference."""
+    shown = _mark(tmp_path, written_with())
+
+    assert shown == _BY_REFERENCE
+    assert "a-default" not in shown and "tail" not in shown
 
 
-def test_one_leaf_only_matching_a_read_turns_the_whole_value_into_the_placeholder():
-    """Two entries: the first is read and a reference shows it. The second is a
-    literal that only equals a value the configuration read, and nothing shows
-    it, so the marker shows nothing of itself, and nothing of the first either."""
-    first = env_resolved_scalar(_VALUE, _VAR)
+def test_two_keys_that_differ_only_after_the_reference_become_one_key(tmp_path):
+    """The text after a reference is not shown, so two keys of one mapping that
+    differ only there are one key in the shown mapping, the later one kept."""
+    scope = {
+        env_resolved_scalar("first-tail", _VAR, "${" + _VAR + "}-a"): "first-entry",
+        env_resolved_scalar("second-tail", _VAR, "${" + _VAR + "}-b"): "second-entry",
+    }
 
-    assert (
-        _mark([first, _FLAGGED], [_a_reference(0)], environment_values=[_FLAGGED])
-        == _WITHHELD
+    assert _mark(tmp_path, scope) == (
+        _IGNORED + '{"' + _FROM_THE_VARIABLE + '": "second-entry"}>'
     )
 
 
-def test_two_read_leaves_are_each_shown_by_the_reference_they_carry():
-    """Both entries are read. A reference of the load shows the first, and the
-    loader's mark shows the second, so neither is withheld."""
-    first = env_resolved_scalar(_VALUE, _VAR)
-    second = env_resolved_scalar(_FLAGGED, _VAR)
+@pytest.mark.parametrize(
+    "scope",
+    [
+        pytest.param(lambda read: read, id="whole-value"),
+        pytest.param(lambda read: ["literal-entry", read], id="list-entry"),
+        pytest.param(lambda read: {"scope": read}, id="mapping-value"),
+        pytest.param(lambda read: {read: "literal-entry"}, id="mapping-key"),
+        pytest.param(lambda read: {"literal-member", read}, id="set-member"),
+    ],
+)
+def test_a_leaf_the_loader_marked_with_no_variable_name_withholds_the_whole_value(
+    tmp_path, scope
+):
+    """A mark with no variable name cannot be shown as a reference, so the whole
+    value is the placeholder, the literal entries beside it included, with a
+    placeholder that names no source. The shape of the value makes no
+    difference."""
+    read = env_resolved_scalar(_FLAGGED, _VAR)
+    read.variable = ""
 
-    assert _mark([first, second], [_a_reference(0)]) == (
-        _IGNORED + '["' + _FROM_THE_VARIABLE + '", "' + _FROM_THE_VARIABLE + '"]>'
+    shown = _mark(tmp_path, scope(read))
+
+    assert shown == _WITHHELD
+    assert _FLAGGED not in shown
+
+
+def test_two_read_leaves_are_each_shown_by_the_reference_they_carry(tmp_path):
+    """Both entries are read, from two variables: each is shown by its own
+    reference."""
+    first = env_resolved_scalar(_VALUE, _VAR)
+    second = env_resolved_scalar(_FLAGGED, "ASH_TEST_GETCFG_OTHER")
+
+    assert _mark(tmp_path, [first, second]) == (
+        _IGNORED + '["' + _FROM_THE_VARIABLE + '", "<from ${ASH_TEST_GETCFG_OTHER}>"]>'
     )
 
 
 @pytest.mark.parametrize("kind", [set, frozenset])
-def test_a_set_is_shown_as_a_json_list_in_sorted_order(kind):
+def test_a_set_is_shown_as_a_json_list_in_sorted_order(tmp_path, kind):
     """A set has no order, and its repr is Python's: it is shown as a JSON list,
     in the order of the shown members, the same text whatever the order the
     members were added in."""
-    shown = _mark(kind(["c-member", "a-member", "b-member"]))
+    shown = _mark(tmp_path, kind(["c-member", "a-member", "b-member"]))
 
     assert shown == _IGNORED + '["a-member", "b-member", "c-member"]>'
 
 
-def test_environment_values_given_as_one_string_are_one_value():
-    """A lone string is the one value, never the list of its characters: read
-    as characters, every literal holding an "a" would be the placeholder."""
-    assert _mark("a-literal-scope", environment_values=_VALUE) == (
-        _IGNORED + '"a-literal-scope">'
-    )
-    assert _mark(_VALUE, environment_values=_VALUE) == _WITHHELD
+def test_with_no_record_of_what_the_chain_wrote_every_marked_option_is_withheld(
+    tmp_path,
+):
+    """No caller leaves the record out, but a call that does has no file it can
+    call the client's, so nothing is shown: every option the data holds is the
+    placeholder, whatever it is, and an option the data does not hold is not
+    marked."""
+    data = {
+        "reporters": {
+            _SECTION: {
+                "options": {
+                    "findings_scope": "a-literal-scope",
+                    "aws_region": "us-west-2",
+                }
+            }
+        },
+        "scanners": {"detect-secrets": {"options": {"max_worker_output_mib": 256}}},
+    }
 
+    marked = mark_operator_only_options(data)
 
-def test_an_empty_environment_value_marks_nothing():
-    """The empty string is in every text: it is no value read from the
-    environment, and no literal becomes the placeholder because of it."""
-    assert _mark("a-literal-scope", environment_values=[""]) == (
-        _IGNORED + '"a-literal-scope">'
-    )
+    options = marked["reporters"][_SECTION]["options"]
+    assert options["findings_scope"] == _WITHHELD
+    assert "archive_resolved_findings" not in options
+    assert options["aws_region"] == "us-west-2"
+    limit = marked["scanners"]["detect-secrets"]["options"]["max_worker_output_mib"]
+    assert limit == _WITHHELD
 
 
 # The operator's own file sets a destination option of the off-host reporter
@@ -1204,6 +1426,37 @@ def test_a_literal_in_another_checkout_does_not_tell_whether_it_equals_the_value
     assert _options(result).get("aws_region", _ABSENT) == (
         _OPERATOR_REGION_REFERENCE
     ), result
+
+
+# An operator-only option a file in another checkout writes as a literal is
+# shown as written, whether or not the text equals what the operator's own file
+# read at that option: the answer to a guess is the answer to a miss, and the
+# operator's reference is in neither marker.
+@pytest.mark.parametrize(
+    "written",
+    [_OPERATOR_SCOPE_VALUE, "another-scope"],
+    ids=["a-literal-equal-to-the-operators-read", "a-different-literal"],
+)
+def test_a_guess_at_a_value_the_operators_file_read_is_shown_as_written(
+    tmp_path, monkeypatch, written
+):
+    """The operator's file (ASH_CONFIG, outside every checkout) reads
+    findings_scope from a variable, and the file in another checkout writes
+    findings_scope as a literal equal to that value, or another literal. The
+    marker shows the literal as written in both, and the operator's reference is
+    in neither marker."""
+    monkeypatch.setenv(_OPERATOR_SCOPE_VAR, _OPERATOR_SCOPE_VALUE)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("findings_scope: ${ASH_TEST_OPERATOR_SCOPE}\n"),
+        _section(f"findings_scope: {written}\n"),
+    )
+
+    scope = _scope(result)
+    assert scope == _IGNORED + json.dumps(written) + ">", result
+    assert _OPERATOR_SCOPE_REFERENCE not in scope, result
 
 
 def test_a_reference_at_a_case_variant_of_a_destination_is_not_read_into_the_option(
