@@ -122,24 +122,29 @@ _UNGATED: dict[str, str] = {
         "runs in the gated e2e tier."
     ),
     "matrix-comment-checks": (
-        "renders what the gated jobs did into the pull request's comment, so it needs "
-        "the gated jobs of its group and cannot be among the gate's own `needs`; its "
-        "result says whether the view was written, never whether code passed."
+        "the first link of the matrix comment chain, which renders what the gated jobs "
+        "did into the pull request's comment. It runs only for a pull request from this "
+        "repository (its `if:`), so on every other run it reads `skipped`, which the "
+        "gate refuses; its result says whether the view was written, never whether "
+        "code passed."
     ),
     "matrix-comment-scans": (
         "the second link of the matrix comment chain: it needs the first link and the "
-        "scan jobs, so it cannot be among the gate's `needs`; its result says whether "
-        "the view was written, never whether code passed."
+        "scan jobs. It runs only for a pull request from this repository (its `if:`), "
+        "so on every other run it reads `skipped`, which the gate refuses; its result "
+        "says whether the view was written, never whether code passed."
     ),
     "matrix-comment-tiers": (
         "the third link of the matrix comment chain: it needs the second link and the "
-        "install and unit jobs, so it cannot be among the gate's `needs`; its result "
-        "says whether the view was written, never whether code passed."
+        "install and unit jobs. It runs only for a pull request from this repository "
+        "(its `if:`), so on every other run it reads `skipped`, which the gate "
+        "refuses; its result says whether the view was written, never whether code "
+        "passed."
     ),
     "matrix-comment": (
         "the last link of the matrix comment chain: it needs the gate itself and every "
-        "other link, so it cannot be among the gate's `needs`; its result says whether "
-        "the view was written, never whether code passed."
+        "other link, so it could not be among the gate's `needs` in any case; its "
+        "result says whether the view was written, never whether code passed."
     ),
 }
 

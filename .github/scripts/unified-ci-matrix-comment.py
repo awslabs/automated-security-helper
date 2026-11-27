@@ -38,8 +38,9 @@ a job that finished between two links cannot lose a cell, and the chain lets onl
 link at a time touch the comment. The last link also runs when an earlier job failed
 (``!cancelled()``), reads the runner log heads, and draws the run as completed, with a
 conclusion derived from the jobs it lists, since the run itself is still in progress
-while the link runs. Its table is also appended to the run's job summary, on every event
-and for a pull request from a fork too.
+while the link runs; a success is drawn as unknown while a job still reads unfinished
+after the job list was read again. Its table is also appended to the run's job summary,
+on every event and for a pull request from a fork too.
 
 A chain, not a concurrency group, serializes the links. A job superseded in a
 concurrency group is cancelled, and one cancelled job turns the whole run's conclusion
@@ -92,11 +93,13 @@ from __future__ import annotations
 import argparse
 import base64
 import html
+import http.client
 import itertools
 import json
 import math
 import os
 import re
+import ssl
 import sys
 import time
 import unicodedata
@@ -1067,13 +1070,12 @@ def place_jobs(model: Model, jobs: list[dict], *, run_completed: bool) -> Placem
             # shared template is the n-th workflow job with nothing placed yet.
             while waiting:
                 job_id = waiting.pop(0)
-                targets = [
-                    cell
-                    for cell in model.cells()
-                    if cell.job_id == job_id
-                    and cell.excluded is None
-                    and cell.id not in placed
-                ]
+                cells = [cell for cell in model.cells() if cell.job_id == job_id]
+                if any(cell.id in placed for cell in cells):
+                    # GitHub expanded this job, so a leg it did not create is a leg
+                    # that is missing, not the raw entry of another job.
+                    continue
+                targets = [cell for cell in cells if cell.excluded is None]
                 if targets:
                     used.add(id(job))
                     for cell in targets:
@@ -1618,14 +1620,21 @@ def render_within_limit(
     source: str,
 ) -> str:
     """The richest body that fits: every icon linked, then only the ones worth a click,
-    then none; past that, a cut body that says it was cut."""
+    then none; past that, a body cut after its last whole line that fits, with the
+    ``<details>`` block the cut left open closed, and a note that it was cut."""
     body = ""
     for mode in ("all", "problems", "none"):
         body = render_comment(model, run, jobs, facts, source=source, mode=mode)
         if len(body) <= BODY_BUDGET:
             return body
     note = "\n\n_The matrix is too large for one comment; see the run for the rest._\n"
-    return body[: BODY_BUDGET - len(note)] + note
+    # A cut inside a line could leave a code span open, and the renderer never nests
+    # ``<details>``, so one closing tag is the most a cut can need room for.
+    close = "\n</details>\n"
+    kept = body[: body.rfind("\n", 0, BODY_BUDGET - len(note) - len(close)) + 1]
+    lines = kept.splitlines()
+    opened = sum(line.startswith("<details") for line in lines)
+    return kept + close * (opened - lines.count("</details>")) + note
 
 
 # --------------------------------------------------------------------------------------
@@ -1683,7 +1692,15 @@ def urllib_transport(
         return Response(
             err.code, {k.lower(): v for k, v in (err.headers or {}).items()}, data
         )
-    except (urllib.error.URLError, TimeoutError, ConnectionError) as err:
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        ConnectionError,
+        # read() raises these when a body ends early or the TLS stream breaks, and the
+        # clauses above do not name either.
+        http.client.HTTPException,
+        ssl.SSLError,
+    ) as err:
         raise TransientError(
             f"{method} {urllib.parse.urlsplit(url).path}: {err}"
         ) from err
@@ -2089,7 +2106,8 @@ def build_publish_body(
 ) -> tuple[str, dict]:
     """The comment body for the run as it is now, and the run object it was read from.
 
-    ``notes`` collects what was left undone because the time budget ran out.
+    ``notes`` collects what was left undone because the time budget ran out, and says
+    when a job still read unfinished at the last read of the job list.
     """
     run = client.get_json(f"/repos/{repo}/actions/runs/{run_id}")
     if not isinstance(run, dict):
@@ -2138,12 +2156,15 @@ def build_publish_body(
         )
         return [job for job in listed if str(job.get("name")) not in own_names]
 
+    def unfinished() -> bool:
+        return any(job.get("status") != "completed" for job in jobs)
+
     jobs = read_jobs()
     facts: dict[str, RunnerFacts] = {}
     shown_run = run
     if final:
         for _ in range(SETTLE_READS):
-            if all(job.get("status") == "completed" for job in jobs):
+            if not unfinished():
                 break
             if client.time_left() <= SETTLE_SECONDS + WRITE_RESERVE_SECONDS:
                 notes.append(
@@ -2152,11 +2173,22 @@ def build_publish_body(
                 break
             sleep(SETTLE_SECONDS)
             jobs = read_jobs()
+        else:
+            # Every re-read is spent, and the last one can still show an unfinished job.
+            if unfinished():
+                notes.append(
+                    "a job still read unfinished after the last read of the job list"
+                )
         if not read_runner_facts(client, repo, jobs, facts, {}, log):
             notes.append("the remaining runner headers were not read")
         # The run is still in progress while this job runs, so the table shows it as
-        # completed with the conclusion its jobs add up to.
-        shown_run = dict(run, status="completed", conclusion=derived_conclusion(jobs))
+        # completed with the conclusion its jobs add up to. A job that still reads
+        # unfinished could turn a success into something else, so then a success is
+        # not known; a cancelled or failed job already decides the conclusion.
+        conclusion = derived_conclusion(jobs)
+        if conclusion == "success" and unfinished():
+            conclusion = "unknown"
+        shown_run = dict(run, status="completed", conclusion=conclusion)
     sha = workflow_sha
     body = render_within_limit(
         model, shown_run, jobs, facts, source=f"commit {code(sha[:7], table=False)}"

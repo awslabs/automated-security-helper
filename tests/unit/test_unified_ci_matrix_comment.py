@@ -37,18 +37,21 @@ nothing removed):
 Controls
 --------
 A check that cannot fail proves nothing, so the census of the rendered cells and the
-markup check each have a test that hands them a body with one cell removed, or rendered
-with the escaping switched off, and asserts that they fail.
+markup check each have a test that hands them a body with one cell removed, one cell
+drawn twice in place of another of the same state, or rendered with the escaping
+switched off, and asserts that they fail.
 """
 
 from __future__ import annotations
 
 import base64
 import copy
+import http.client
 import importlib.util
 import itertools
 import json
 import re
+import ssl
 import sys
 import urllib.parse
 from collections import Counter
@@ -164,6 +167,54 @@ def _table_icons(body: str) -> Counter:
 def _assert_census(body: str, expected: Counter) -> None:
     found = _table_icons(body)
     assert found == expected, f"drawn {dict(found)}, expected {dict(expected)}"
+
+
+def _cells_with_a_job_of_their_name(model, jobs: list[dict]) -> list[tuple]:
+    """(group, cell, job) for each cell the matrices run whose job the run lists under
+    the cell's own name. The pairing is by name alone, so it does not rest on
+    place_jobs, the code the rendered body is checked against."""
+    by_name = {job["name"]: job for job in jobs}
+    return [
+        (group, cell, by_name[cell.name])
+        for group in model.groups
+        for cell in group.cells
+        if cell.excluded is None and cell.name in by_name
+    ]
+
+
+def _section_of(body: str, group) -> str:
+    """The part of ``body`` that draws ``group``: its own table when its jobs have a
+    matrix, else the one table of the jobs that have none."""
+    heading = (
+        f"<b>{m.html_code(group.title)}</b>"
+        if group.has_matrix
+        else "<b>Jobs without a matrix</b>"
+    )
+    return body.split(heading, 1)[1].split("</details>", 1)[0]
+
+
+def _link_of(group, cell, job: dict) -> str:
+    """The link the renderer draws for ``cell``: the icon of its job's state, the job's
+    address, and the hover text that names the cell's leg in its table."""
+    fold = next((axis for axis in m.FOLD_AXES if axis in group.dims), None)
+    column = next((axis for axis in m.COLUMN_AXES if axis in group.dims), None)
+    leg = ", ".join(
+        f"{axis} {m.to_string(cell.values[axis])}"
+        for axis in (fold, column)
+        if axis and axis in cell.values
+    )
+    return m._icon(m.job_state(job), job, leg or cell.name or cell.job_id, True)
+
+
+def _assert_each_cell_drawn_once(body: str, named: list[tuple]) -> None:
+    """Each cell of ``named`` is drawn once, as its own job's link, in its own table.
+
+    The icon census cannot see a cell drawn twice while another cell of the same state
+    is dropped, because the icons still add up. A link names its job, so counting each
+    cell's own link can."""
+    for group, cell, job in named:
+        drawn = _section_of(body, group).count(_link_of(group, cell, job))
+        assert drawn == 1, f"{cell.name!r} is drawn {drawn} times in {group.title!r}"
 
 
 def _outside_code(text: str) -> str:
@@ -452,6 +503,46 @@ class TestTheModelOfARealRun:
         rows = _other_rows(body)
         assert len(rows) == 1 and "a leg a pull request adds" in rows[0]
 
+    def test_a_never_expanded_job_goes_to_a_job_with_nothing_placed_yet(self):
+        """Two workflow jobs share one name template. GitHub made one of the first
+        job's two legs, and listed the second job, whose condition was false, once under
+        the raw template. That entry is the second job's. The first job's other leg is
+        missing from the run, and before this change it took the entry."""
+        template = "t (${{ matrix.os }})"
+        workflow = {
+            "name": "w",
+            "on": {"pull_request": {}},
+            "jobs": {
+                job_id: {
+                    "name": template,
+                    "runs-on": "${{ matrix.os }}",
+                    "strategy": {"matrix": {"os": legs}},
+                }
+                for job_id, legs in (("first", ["a", "b"]), ("second", ["c"]))
+            },
+        }
+        model = _model(workflow)
+        made = {
+            "id": 1,
+            "name": "t (a)",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        raw = {
+            "id": 2,
+            "name": template,
+            "status": "completed",
+            "conclusion": "skipped",
+        }
+        placement = m.place_jobs(model, [made, raw], run_completed=True)
+        cells = {(cell.job_id, cell.values["os"]): cell for cell in model.cells()}
+        assert placement.jobs.get(cells["first", "a"].id) is made
+        assert placement.jobs.get(cells["second", "c"].id) is raw
+        assert cells["first", "b"].id not in placement.jobs
+        assert placement.state(cells["first", "b"]) is m.NOT_IN_RUN
+        assert placement.collapsed == {cells["second", "c"].id}
+        assert placement.others == []
+
 
 # ---------------------------------------------------------------------------------------
 # The rendered comment
@@ -472,7 +563,12 @@ class TestTheComment:
         model = _model()
         for run_id in (COMPLETED, IN_PROGRESS):
             body = _render(run_id)
-            _assert_census(body, _expected_icons(model, _jobs(run_id), _run(run_id)))
+            jobs = _jobs(run_id)
+            named = _cells_with_a_job_of_their_name(model, jobs)
+            # Every job but the never-expanded entry that stands for two cells.
+            assert len(named) == len(jobs) - 1
+            _assert_each_cell_drawn_once(body, named)
+            _assert_census(body, _expected_icons(model, jobs, _run(run_id)))
 
     def test_control_the_census_fails_when_one_cell_is_not_drawn(self):
         body = _render(COMPLETED)
@@ -480,6 +576,24 @@ class TestTheComment:
         first_link = re.search(r"\[❌\]\([^)]*\)", body).group(0)
         with pytest.raises(AssertionError):
             _assert_census(body.replace(first_link, "", 1), expected)
+
+    def test_control_the_check_fails_when_one_cell_is_drawn_twice_in_place_of_another(
+        self,
+    ):
+        """Two failed cells, the second's link replaced by the first's: the icons add up
+        as before, so the census cannot tell, and each cell's own link can."""
+        model, jobs = _model(), _jobs(COMPLETED)
+        body = _render(COMPLETED)
+        named = _cells_with_a_job_of_their_name(model, jobs)
+        _assert_each_cell_drawn_once(body, named)
+        icon = re.escape(m.FAILED.icon)
+        links = re.findall(rf'\[{icon}\]\(https://github\.com/[^ )]+ "[^"]*"\)', body)
+        first, second = links[:2]
+        twice = body.replace(second, first, 1)
+        assert first != second and twice != body
+        _assert_census(twice, _expected_icons(model, jobs, _run(COMPLETED)))
+        with pytest.raises(AssertionError):
+            _assert_each_cell_drawn_once(twice, named)
 
     def test_the_shards_of_one_os_and_version_sit_in_one_cell_in_order(self):
         body = _render(COMPLETED)
@@ -556,6 +670,50 @@ class TestTheComment:
             _model(), _run(COMPLETED), _jobs(COMPLETED), {}, source="x"
         )
         assert len(cut) <= 3000 and cut.rstrip().endswith("see the run for the rest._")
+
+    def test_a_body_cut_for_size_ends_at_a_line_with_its_blocks_closed(
+        self, monkeypatch
+    ):
+        """A body too large for one comment is cut between two lines, whatever the
+        budget: no code span is left open, the ``<details>`` block the cut passes is
+        closed, and the note ends the body. Before this change the cut fell on a
+        character, so a code span or a block could be left open above the note."""
+        rows = [
+            f"| {m.code(f'row {i}')} | {m.code(f'a`b {i}')} | x |" for i in range(80)
+        ]
+        body = "\n".join(
+            [
+                m.MARKER,
+                "",
+                "<details open><summary><b>t</b> 80 cells</summary>",
+                "",
+                *rows,
+                "",
+                "</details>",
+                "",
+                "<details><summary>Legend</summary>",
+                "",
+                "some text",
+                "",
+                "</details>",
+                "",
+            ]
+        )
+        monkeypatch.setattr(m, "render_comment", lambda *args, **kwargs: body)
+        whole_lines = set(body.splitlines())
+        for budget in range(300, len(body), 23):
+            monkeypatch.setattr(m, "BODY_BUDGET", budget)
+            cut = m.render_within_limit(None, {}, [], {}, source="x")
+            lines = cut.splitlines()
+            assert len(cut) <= budget, budget
+            assert cut.startswith(m.MARKER), budget
+            assert cut.rstrip().endswith("see the run for the rest._"), budget
+            for line in lines:
+                whole = line in whole_lines or line.endswith("for the rest._")
+                assert whole, (budget, line)
+                assert "`" not in _outside_code(line), (budget, line)
+            opened = sum(line.startswith("<details") for line in lines)
+            assert opened == lines.count("</details>"), budget
 
 
 # ---------------------------------------------------------------------------------------
@@ -725,6 +883,44 @@ def _client(api: FakeAPI, sleeps: list | None = None):
     return m.GitHubClient(
         "t0ken", transport=api, sleep=(sleeps if sleeps is not None else []).append
     )
+
+
+class _Reply:
+    """What ``opener.open`` gives back: a context manager with a status and headers,
+    whose body reads as the answer's, or fails the way a dropped connection does."""
+
+    def __init__(self, answer: m.Response, make_error=None):
+        self.status = answer.status
+        self.headers = answer.headers
+        self._body = answer.body
+        self._make_error = make_error
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def read(self, size=None):
+        if self._make_error is not None:
+            raise self._make_error()
+        return self._body[:size] if size else self._body
+
+
+class _Opener:
+    """Stands in for the opener ``urllib_transport`` builds: it answers from a FakeAPI,
+    and the body of every answer from one host fails when it is read."""
+
+    def __init__(self, api: FakeAPI, failing_host: str, make_error):
+        self._api = api
+        self._failing_host = failing_host
+        self._make_error = make_error
+
+    def open(self, request, timeout=None):
+        url = request.full_url
+        answer = self._api(request.get_method(), url, {}, request.data, None)
+        failing = urllib.parse.urlsplit(url).netloc == self._failing_host
+        return _Reply(answer, self._make_error if failing else None)
 
 
 class TestTheClient:
@@ -1219,6 +1415,30 @@ class TestThePublish:
         )
         assert _table_icons(api.posted_body())[m.RUNNING.icon] >= 1
 
+    @pytest.mark.parametrize(
+        ("other", "shown"),
+        [("success", "unknown"), ("failure", "failure"), ("cancelled", "cancelled")],
+    )
+    def test_a_job_that_never_finishes_leaves_only_a_success_unknown(
+        self, tmp_path, other, shown
+    ):
+        """A job still unfinished at the last read could end any way, so the header does
+        not call the run a success; a failed or cancelled job elsewhere still decides
+        the conclusion, and a note says why. Before this change the first case read
+        ``completed: success`` while that job's cell was drawn running."""
+        jobs = [
+            dict(j, status="completed", conclusion="success") for j in _jobs(COMPLETED)
+        ]
+        jobs[0] = dict(jobs[0], status="in_progress", conclusion=None)
+        jobs[1] = dict(jobs[1], conclusion=other)
+        api = _Publish(tmp_path, reads=[jobs + _post_jobs(COMPLETED)])
+        assert api.publish(final=True) == 0
+        body = api.posted_body()
+        assert f"**`completed: {shown}`**" in body
+        assert "completed: success" not in body
+        assert api.sleeps == [m.SETTLE_SECONDS] * m.SETTLE_READS
+        assert any("still read unfinished" in warning for warning in api.warnings)
+
     def test_an_intermediate_link_does_not_wait_for_a_running_job(self, tmp_path):
         done = _jobs(COMPLETED) + _post_jobs(COMPLETED)
         stuck = [
@@ -1256,6 +1476,35 @@ class TestThePublish:
         assert out.startswith("::warning title=Unified CI matrix comment::")
         assert "could not be built" in api.summary_text()
         assert api.requests_under("/issues/") == []
+
+    @pytest.mark.parametrize(
+        "make_error",
+        [
+            pytest.param(
+                lambda: http.client.IncompleteRead(b"half a header"),
+                id="IncompleteRead",
+            ),
+            pytest.param(lambda: ssl.SSLError("bad record mac"), id="SSLError"),
+        ],
+    )
+    def test_a_log_read_that_breaks_mid_response_costs_only_the_runner_headers(
+        self, tmp_path, monkeypatch, make_error
+    ):
+        """``read()`` raises IncompleteRead when a body ends early and SSLError when the
+        TLS stream breaks. Neither was a TransientError, so one such log read ended the
+        publish before any table was written. Now the transport turns both into one, and
+        the publish skips that label's header, says so in the log, and writes the rest."""
+        api = _Publish(tmp_path)
+        opener = _Opener(api.api, "logs.example.invalid", make_error)
+        monkeypatch.setattr(m.urllib.request, "build_opener", lambda *handlers: opener)
+        client = m.GitHubClient(
+            "t0ken", transport=m.urllib_transport, sleep=lambda seconds: None
+        )
+        assert api.publish(final=True, client=client) == 0
+        assert api.api.count("POST", f"/repos/{REPO}/issues/1209/comments") == 1
+        assert api.summary_text().startswith(m.MARKER)
+        assert any("could not read the runner header" in line for line in api.logs)
+        assert api.warnings == []
 
     def test_a_write_to_the_summary_that_fails_is_a_warning_too(self, tmp_path):
         api = _Publish(tmp_path)
@@ -1699,6 +1948,26 @@ class TestTheLiveLinks:
                 assert "github.token" not in str(step), link
             for step in job["steps"]:
                 assert "${{" not in str(step.get("run", "")), link
+
+    def test_no_workflow_level_env_or_default_hands_the_token_or_a_secret_to_a_link(
+        self,
+    ):
+        """A workflow-level ``env`` reaches every step of every job, the links' checkout
+        and install steps included, and ``defaults`` shapes every ``run`` step. The token
+        belongs to the publish step alone, as the test above pins for each job, so it
+        and the secrets stay out of both. The names are read as a set and each value on
+        its own, so a failure prints no whole mapping."""
+        workflow = _unified()
+        env = workflow.get("env") or {}
+        names = set(env)
+        assert "GITHUB_TOKEN" not in names
+        for name in sorted(names):
+            value = str(env[name])
+            assert "github.token" not in value, name
+            assert "secrets." not in value, name
+        defaults = str(workflow.get("defaults") or {})
+        assert "github.token" not in defaults
+        assert "secrets." not in defaults
 
     def test_every_action_is_pinned_to_a_full_commit_sha(self):
         jobs = _unified()["jobs"]

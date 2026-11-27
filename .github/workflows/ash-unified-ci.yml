@@ -3505,10 +3505,12 @@ jobs:
   # setup and the package install). And the script gives itself a time budget well inside
   # the job's timeout, because a job that reaches its timeout is cancelled, and one
   # cancelled job turns the run's conclusion to `cancelled`. Each step has its own limit,
-  # below the job's, so a hung step fails instead of the job reaching its timeout. These jobs are not in the gate's `needs` for
-  # the same reason: their result says whether the view was written, never whether the
-  # code passed, and each of them needs the gate's jobs or a link that does, so none of
-  # them could be in its `needs`. The census script names them in its `_UNGATED` map. The
+  # below the job's, so a hung step fails instead of the job reaching its timeout. None of
+  # these jobs is in the gate's `needs`: their result says whether the view was written,
+  # never whether the code passed. The first three also run only for a pull request from
+  # this repository (their `if:`), so on every other run they read `skipped`, which the
+  # gate refuses, and the last needs `required-checks` itself, so it could not be in its
+  # `needs` in any case. The census script names them in its `_UNGATED` map. The
   # pull-request comment has no earlier "pending" version, because writing one before any
   # job finished would need a runner of its own at the start of every run.
   #
