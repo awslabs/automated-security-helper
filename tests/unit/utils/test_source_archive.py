@@ -44,11 +44,14 @@ zipfile did before 3.12.
 What zipfile cannot read is classified once, for both entry points (``open_zip`` and
 ``extract_zip_members``). The rows of ``UNREADABLE`` give both an archive that needs a
 newer reader than zipfile implements, a name in the central directory that is not the
-UTF-8 it claims, a member with damaged data, a method whose module this Python lacks
-and a link whose data cannot be read, and each has to reach one verdict, in one set of
-words, with the refused upload removed. An encrypted member, a link too, is a row of
-``REFUSED``, since its flag is read before anything else. What the module's own code
-raises is not about the archive and is not caught.
+UTF-8 it claims, a member with damaged data and a link whose data cannot be read, and
+each has to reach one verdict, in one set of words, with the refused upload removed.
+What zipfile raises as it extracts a member is driven by a stand-in that raises each
+exception it can. An encrypted member, a link too, is a row of ``REFUSED``, since its
+flag is read before anything else, and so is a member in any compression method but
+stored and deflated (rule 8), which is refused before any data is read, whether or not
+this Python was built with the method's module. What the module's own code raises is
+not about the archive and is not caught.
 
 Names that differ only in case or in Unicode normalization are read as one path on
 Windows and macOS. The rows that turn on it say what those platforms would, whatever
@@ -72,6 +75,7 @@ import warnings
 import zipfile
 import zlib
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -285,19 +289,6 @@ def _with_version_needed(payload: bytes, version: int) -> bytes:
     return bytes(data)
 
 
-def _with_first_data_byte_flipped(payload: bytes) -> bytes:
-    """``payload``, a zip of one member, with the first byte of that member's data changed.
-
-    The data starts after the 30-byte local header, the name and the extra field, whose
-    lengths are at offsets 26 and 28 of the header.
-    """
-    data = bytearray(payload)
-    assert data[:4] == b"PK\x03\x04"
-    name_length, extra_length = struct.unpack("<HH", data[26:30])
-    data[30 + name_length + extra_length] ^= 0xFF
-    return bytes(data)
-
-
 def _with_local_name(payload: bytes, name: str, local: bytes) -> bytes:
     """``payload``, whose one member is named ``name``, with ``local`` (as many bytes) as
     the name in its local header. The central directory still spells ``name``, so the
@@ -478,6 +469,47 @@ def _with_compressed_size(payload: bytes, size: int) -> bytes:
     entry = _central_entry_at(payload, 0)
     patched = _patched(payload, entry + 20, struct.pack("<L", size))
     return _patched(patched, 18, struct.pack("<L", size))
+
+
+def _with_declared_size(payload: bytes, size: int) -> bytes:
+    """``payload``, a zip of one member, whose local header (at 22) and central entry
+    (at 24) both give ``size`` for the member's size once uncompressed."""
+    entry = _central_entry_at(payload, 0)
+    patched = _patched(payload, entry + 24, struct.pack("<L", size))
+    return _patched(patched, 22, struct.pack("<L", size))
+
+
+def _with_method(payload: bytes, method: int) -> bytes:
+    """``payload``, a zip of one member, whose local header (at 8) and central entry
+    (at 10) both give ``method`` for its compression; its data stays as it was."""
+    entry = _central_entry_at(payload, 0)
+    patched = _patched(payload, entry + 10, struct.pack("<H", method))
+    return _patched(patched, 8, struct.pack("<H", method))
+
+
+def _declared_small(method: int) -> bytes:
+    """A zip of one member, ``a.py``, compressed with ``method`` and made to declare 10
+    bytes.
+
+    The member holds 4 MiB of one byte, which each of these methods packs into a few
+    hundred bytes, and both headers give a size of 10. A reader that cuts the output to
+    the size a member declares does it after the whole of the output was made. Built
+    when a row runs, since a Python built without a method's module cannot write one.
+    """
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("a.py", bytes(4 * MiB), compress_type=method)
+    return _with_declared_size(buffer.getvalue(), 10)
+
+
+def _bzip2_link() -> bytes:
+    """A zip of one symbolic link, ``evil``, whose target is compressed with bzip2."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        info = zipfile.ZipInfo("evil")
+        info.external_attr = 0o120777 << 16
+        archive.writestr(info, _LINK_TARGET, compress_type=zipfile.ZIP_BZIP2)
+    return buffer.getvalue()
 
 
 def _with_header_offset(payload: bytes, index: int, offset: int) -> bytes:
@@ -1316,6 +1348,67 @@ REFUSED = [
         "zip entry 'a.py' is encrypted: an encrypted member cannot be read",
         id="an-encrypted-member-after-a-name-that-is-refused",
     ),
+    # Rule 8: a method but stored and deflated is refused before any member is read,
+    # whatever size it declares. Each declares 10 bytes and holds 4 MiB of one byte,
+    # which the decompressor makes whole before zipfile cuts it to 10. Red at the base:
+    # each was admitted, and refused as an unreadable member once extraction reached it
+    # (a Zstandard member only on a Python whose zipfile reads that method).
+    pytest.param(
+        partial(_declared_small, zipfile.ZIP_BZIP2),
+        Kind.UNSUPPORTED_COMPRESSION,
+        "zip entry 'a.py' is compressed with bzip2 (method 12): only stored and "
+        "deflated members are read",
+        id="a-bzip2-member-declared-small",
+    ),
+    pytest.param(
+        partial(_declared_small, zipfile.ZIP_LZMA),
+        Kind.UNSUPPORTED_COMPRESSION,
+        "zip entry 'a.py' is compressed with LZMA (method 14): only stored and "
+        "deflated members are read",
+        id="an-lzma-member-declared-small",
+    ),
+    pytest.param(
+        partial(_declared_small, 93),
+        Kind.UNSUPPORTED_COMPRESSION,
+        "zip entry 'a.py' is compressed with Zstandard (method 93): only stored and "
+        "deflated members are read",
+        marks=pytest.mark.skipif(
+            getattr(zipfile, "zstd", None) is None,
+            reason="this zipfile has no Zstandard support (Python 3.14 adds it)",
+        ),
+        id="a-zstandard-member-declared-small",
+    ),
+    pytest.param(
+        # The read of a link's target was the one place admission handed data to a
+        # decompressor: 4096 bytes in, and the whole output made before it was cut.
+        _bzip2_link,
+        Kind.UNSUPPORTED_COMPRESSION,
+        "zip entry 'evil' is compressed with bzip2 (method 12): only stored and "
+        "deflated members are read",
+        id="a-link-whose-target-is-compressed-with-bzip2",
+    ),
+    pytest.param(
+        _with_method(_stored(), 9),
+        Kind.UNSUPPORTED_COMPRESSION,
+        "zip entry 'a.py' is compressed with Deflate64 (method 9): only stored and "
+        "deflated members are read",
+        id="a-method-no-tool-here-writes",
+    ),
+    pytest.param(
+        _with_method(_stored(), 7),
+        Kind.UNSUPPORTED_COMPRESSION,
+        "zip entry 'a.py' is compressed with method 7: only stored and deflated "
+        "members are read",
+        id="a-method-with-no-name",
+    ),
+    pytest.param(
+        # Control for the order: the encryption flag is read first, and AES-encrypted
+        # members carry method 99.
+        _flagged_encrypted(_with_method(_zip({"a.py": b"x"}), 99)),
+        Kind.ENCRYPTED_MEMBER,
+        "zip entry 'a.py' is encrypted: an encrypted member cannot be read",
+        id="an-encrypted-member-of-another-method-is-refused-as-encrypted",
+    ),
 ]
 
 #: Rule 3, run under this Python's zipfile and under one that ignores the field.
@@ -1533,8 +1626,14 @@ ADMITTED = [
 ]
 
 
-def _payload(request: pytest.FixtureRequest, source: Union[str, bytes]) -> bytes:
-    return request.getfixturevalue(source) if isinstance(source, str) else source
+def _payload(
+    request: pytest.FixtureRequest,
+    source: Union[str, bytes, Callable[[], bytes]],
+) -> bytes:
+    """The archive of a row: a fixture's name, the bytes, or what builds them."""
+    if isinstance(source, str):
+        return request.getfixturevalue(source)
+    return _payload_of(source)
 
 
 class TestEachRuleRefusesBeforeAnythingIsWritten:
@@ -1601,6 +1700,52 @@ class TestEachRuleRefusesBeforeAnythingIsWritten:
             _sparse(tmp_path / "big.zip", 100 * MiB + 1), tmp_path / "tree"
         )
         assert _verdict(delivered.value) == _verdict(shared)
+
+
+class TestAMethodButStoredAndDeflatedIsNeverDecompressed:
+    """Rule 8: no data of a member in another method reaches a decompressor, so what
+    the member declares bounds nothing. Red at the base: a link's target went through
+    zipfile's decompressor in admission, and a plain member's on extraction."""
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            pytest.param(partial(_declared_small, zipfile.ZIP_BZIP2), id="bzip2"),
+            pytest.param(partial(_declared_small, zipfile.ZIP_LZMA), id="lzma"),
+            pytest.param(_bzip2_link, id="a-link-compressed-with-bzip2"),
+        ],
+    )
+    def test_no_decompressor_is_made_for_one(self, monkeypatch, tmp_path, source):
+        payload = source()
+
+        def refusing(method):
+            raise AssertionError(f"a decompressor was made for method {method}")
+
+        monkeypatch.setattr(zipfile, "_get_decompressor", refusing)
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.UNSUPPORTED_COMPRESSION
+
+    def test_the_verdict_does_not_depend_on_the_module_this_python_has(
+        self, monkeypatch, tmp_path
+    ):
+        """Before this rule an LZMA member was one verdict on a Python with the module
+        and another on one built without it."""
+        payload = _declared_small(zipfile.ZIP_LZMA)
+        with_the_module = _verdict(
+            _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "with")
+        )
+        _without_lzma(monkeypatch)
+
+        without_it = _verdict(
+            _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "without")
+        )
+
+        assert without_it == with_the_module
+        assert with_the_module[0] is Kind.UNSUPPORTED_COMPRESSION
 
 
 class TestASecondNameIsRefusedWhicheverNameZipfileTakes:
@@ -2343,43 +2488,58 @@ class TestWhatZipfileCannotReadIsARefusal:
 
         assert _tree(destination) == {"a.py": b"x"}
 
-    @pytest.mark.skipif(
-        getattr(zipfile, "zstd", None) is None,
-        reason="this zipfile has no Zstandard support (Python 3.14 adds it)",
+    @pytest.mark.parametrize(
+        "error,words",
+        [
+            pytest.param(
+                RuntimeError("a compression module is missing"),
+                "a compression module is missing",
+                id="a-runtime-error",
+            ),
+            pytest.param(
+                NotImplementedError("That compression method is not supported"),
+                "That compression method is not supported",
+                id="a-method-zipfile-does-not-implement",
+            ),
+            pytest.param(
+                UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+                "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+                id="a-name-that-does-not-decode",
+            ),
+            pytest.param(
+                zlib.error("Error -3 while decompressing data"),
+                "Error -3 while decompressing data",
+                id="a-damaged-stream",
+            ),
+            pytest.param(
+                zipfile.BadZipFile("Bad CRC-32 for file 'a.py'"),
+                "Bad CRC-32 for file 'a.py'",
+                id="a-bad-zip-file",
+            ),
+        ],
     )
-    def test_a_damaged_zstandard_member_is_refused(self, tmp_path):
-        """compression.zstd.ZstdError, neither a ValueError nor an OSError."""
-        content = b"print('a source line')\n" * 50
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as archive:
-            archive.writestr("a.py", content, compress_type=zipfile.ZIP_ZSTANDARD)
-        payload = _with_first_data_byte_flipped(buffer.getvalue())
-
-        refused = _extraction_refusal(
-            _archive_file(tmp_path, payload), tmp_path / "tree"
-        )
-
-        assert refused.kind is Kind.UNREADABLE_MEMBER
-        assert str(refused).startswith("zip entry 'a.py' cannot be read: ")
-
-    def test_a_method_whose_module_this_python_lacks_is_refused(
-        self, monkeypatch, tmp_path
+    def test_what_zipfile_raises_as_it_extracts_a_member_is_refused_by_both(
+        self, monkeypatch, tmp_path, error, words
     ):
-        """RuntimeError, which zipfile raises for an LZMA member when the lzma module
-        is missing: a Python built without it reads the archive this way."""
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_LZMA) as archive:
-            archive.writestr("a.py", b"print(1)\n")
-        archive_path = _archive_file(tmp_path, buffer.getvalue())
-        monkeypatch.setattr(zipfile, "lzma", None)
+        """The classification of what extraction raises, driven with each exception
+        zipfile can raise there, now that a method it cannot read is refused in
+        admission (rule 8) and no archive built from bytes reaches most of them. A stand
+        in for ``extractall`` raises it, as zipfile does when it reaches the member."""
 
-        refused = _extraction_refusal(archive_path, tmp_path / "tree")
+        def raising(self, *args, **kwargs):
+            raise error
 
-        assert refused.kind is Kind.UNREADABLE_MEMBER
-        assert str(refused) == (
-            "zip entry 'a.py' cannot be read: "
-            "Compression requires the (missing) lzma module"
+        monkeypatch.setattr(zipfile.ZipFile, "extractall", raising)
+        payload = _zip({"a.py": b"x"})
+        shared = _verdict(
+            _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "tree")
         )
+
+        delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
+
+        expected = (Kind.UNREADABLE_MEMBER, f"zip entry 'a.py' cannot be read: {words}")
+        assert shared == expected
+        assert delivered == expected
 
 
 # ---------------------------------------------------------------------------
@@ -2387,24 +2547,6 @@ class TestWhatZipfileCannotReadIsARefusal:
 # ---------------------------------------------------------------------------
 
 _LINK_TARGET = b"/outside/the/tree"
-
-
-def _lzma_member() -> bytes:
-    """A zip of one LZMA member, ``a.py``; built when a row runs, because a Python built
-    without lzma cannot write one."""
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_LZMA) as archive:
-        archive.writestr("a.py", b"print(1)\n")
-    return buffer.getvalue()
-
-
-def _damaged_zstandard_member() -> bytes:
-    """A zip of one Zstandard member, ``a.py``, whose first data byte is changed."""
-    content = b"print('a source line')\n" * 50
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("a.py", content, compress_type=zipfile.ZIP_ZSTANDARD)
-    return _with_first_data_byte_flipped(buffer.getvalue())
 
 
 def _without_lzma(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2459,27 +2601,6 @@ UNREADABLE = [
         False,
         None,
         id="a-member-whose-data-fails-its-checksum",
-    ),
-    pytest.param(
-        _lzma_member,
-        Kind.UNREADABLE_MEMBER,
-        "zip entry 'a.py' cannot be read: "
-        "Compression requires the (missing) lzma module",
-        False,
-        _without_lzma,
-        id="a-method-whose-module-this-python-lacks",
-    ),
-    pytest.param(
-        _damaged_zstandard_member,
-        Kind.UNREADABLE_MEMBER,
-        "zip entry 'a.py' cannot be read: ",
-        False,
-        None,
-        marks=pytest.mark.skipif(
-            getattr(zipfile, "zstd", None) is None,
-            reason="this zipfile has no Zstandard support (Python 3.14 adds it)",
-        ),
-        id="a-damaged-zstandard-member",
     ),
 ]
 
@@ -2849,5 +2970,6 @@ class TestTheRefusal:
             "not-a-file",
             "unreadable-archive",
             "encrypted-member",
+            "unsupported-compression",
             "unreadable-member",
         }

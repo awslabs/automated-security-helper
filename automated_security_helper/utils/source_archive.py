@@ -14,7 +14,8 @@ same words. The rules are the ones the MCP delivery enforced, moved here, with
 additions that hold for both: a NUL, a ``.`` or an empty component in a member name,
 a Unicode path field that renames a member, two members on one path (names that differ
 only in case or Unicode normalization count as one on Windows and macOS), an
-encrypted member, and a file that holds anything besides one zip (below).
+encrypted member, a compression method other than stored and deflate, and a file that
+holds anything besides one zip (below).
 
 What is refused
 ---------------
@@ -94,6 +95,17 @@ destination as it was.
    checked for it right after they are counted, before any other rule reads the file,
    so an archive that holds one is refused in the same words by both entry points,
    whatever else it holds.
+8. Compression. A member is stored or deflated; one in any other method (bzip2, LZMA,
+   Zstandard, and the few others some tools write) is refused whatever size it
+   declares, a link included. zipfile gives the decompressor of the first three all the
+   data it has read, with no limit on the output, and cuts what it returns to the
+   declared size only after the call, so a few kilobytes of data can ask for gigabytes
+   of memory under a member that declares ten bytes, and rule 1's limit on the total
+   does not bound the process. Stored and deflated are what Info-ZIP, ``git archive``
+   and zipfile write, and zipfile bounds each call it makes to a deflate decompressor.
+   The method is read from the central directory right after the encryption flag, so
+   both entry points refuse such a member in the same words, on every Python, whether
+   or not it was built with the method's module.
 
 A malformed member is refused, never repaired: an archive that has to be rewritten to
 be safe is not the tree its sender meant to send.
@@ -112,11 +124,10 @@ Entry points
 * ``extract_source_archive(archive, destination)`` reads the zip at a path, for
   ``ash scan fs --archive``. Besides the rules above it refuses a path that is not a
   regular file or cannot be read, and a member zipfile cannot read back whole:
-  damaged data, a compression method or zip version it does not implement, a method
-  whose module this Python was built without. It reads the file once, into memory,
-  and zipfile reads that copy, so nothing zipfile raises is about the disk. Every
-  problem with the archive is a ``SourceArchiveRefused``; an ``OSError`` is a problem
-  with the destination or the disk.
+  damaged data, or a zip version it does not implement. It reads the file once, into
+  memory, and zipfile reads that copy, so nothing zipfile raises is about the disk.
+  Every problem with the archive is a ``SourceArchiveRefused``; an ``OSError`` is a
+  problem with the destination or the disk.
 * ``open_zip(handle)`` opens an archive its caller holds open, and
   ``extract_zip_members(archive, destination, rules)`` extracts it. The MCP finalize
   hashes an upload before extracting it, and has to extract the bytes it hashed, so it
@@ -152,8 +163,6 @@ Limits
   extraction with the ``OSError`` the filesystem raises.
 * A member whose data is damaged is found when extraction reaches it, after the
   members before it were written. The caller removes the destination on any failure.
-* A damaged bzip2 stream reaches the caller as the ``OSError`` Python raises for it,
-  which nothing tells apart from a disk error.
 * A Unicode path field that restates its name from a legacy code page rather than
   from UTF-8 bytes (Info-ZIP under a locale that is not UTF-8, for a name outside
   ASCII) is refused as naming another file.
@@ -213,6 +222,21 @@ _DATA_DESCRIPTOR_FLAG = 0x8
 #: Bit 11 of a member's general purpose flags: its name is UTF-8, not the legacy code
 #: page, which is how a reader decodes the bytes it finds where the name is.
 _UTF8_NAME_FLAG = 0x800
+#: The compression methods a member may use (rule 8): stored, and deflated, the two
+#: that Info-ZIP, git archive and zipfile write by default.
+_ADMITTED_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+#: The methods a refusal names, by their numbers in PKWARE's APPNOTE (section 4.4.5): the
+#: ones other tools write. Any other number is named as the number.
+_METHOD_NAMES = {
+    1: "Shrink",
+    6: "Implode",
+    9: "Deflate64",
+    12: "bzip2",
+    14: "LZMA",
+    93: "Zstandard",
+    95: "XZ",
+    98: "PPMd",
+}
 
 # The records a zip is made of, as PKWARE's APPNOTE (section 4.3) lays them out and
 # zipfile reads them (rule 6).
@@ -302,8 +326,9 @@ class SourceArchiveRefusal(str, Enum):
     # Only extract_source_archive refuses for these two: it opens the file itself.
     NOT_A_FILE = "not-a-file"
     UNREADABLE_ARCHIVE = "unreadable-archive"
-    # Both entry points refuse for these two.
+    # Both entry points refuse for these three.
     ENCRYPTED_MEMBER = "encrypted-member"
+    UNSUPPORTED_COMPRESSION = "unsupported-compression"
     UNREADABLE_MEMBER = "unreadable-member"
 
 
@@ -452,7 +477,9 @@ def admit_zip_members(
     Writes nothing. Reads the file ``archive`` was opened on where its records are (the
     end records, the central directory, each member's local header and any data
     descriptor) and, for a link, the first bytes of its target; no other member data.
-    The member count is checked first; then that no member is encrypted; then that the
+    The member count is checked first; then that no member is encrypted; then that none
+    is compressed with a method other than stored or deflated, so that no link's target
+    or other data is ever handed to a decompressor that cannot be bounded; then that the
     file is one zip and nothing else; then, for each member in archive order, its name,
     its Unicode path fields and the name an admitted one gives, the uncompressed total
     so far, and whether it is a link; then that no two members are extracted to one
@@ -475,6 +502,7 @@ def admit_zip_members(
             f"too many files in zip: {len(members)} > {rules.max_members}",
         )
     _refuse_encrypted_members(members)
+    _refuse_unsupported_methods(members)
     spelled_names, local_extras = _refuse_anything_but_one_zip(archive, members)
     total = 0
     for info, spelled, local_extra in zip(members, spelled_names, local_extras):
@@ -1104,9 +1132,8 @@ def extract_source_archive(archive: Path, destination: Path) -> Path:
 
     The file is read once, into memory, and zipfile reads that copy, so whatever
     zipfile raises while it reads is the archive's: a member it cannot read (damaged
-    data, a compression method or zip version it does not implement, a method whose
-    module this Python lacks) is a ``SourceArchiveRefused`` whatever exception zipfile
-    raised for it, as it is for the MCP finalize.
+    data, or a zip version it does not implement) is a ``SourceArchiveRefused``
+    whatever exception zipfile raised for it, as it is for the MCP finalize.
 
     Every rule but the last is decided before anything is written, so a refused
     archive leaves ``destination`` as it was, not made if it did not exist. A member
@@ -1244,6 +1271,27 @@ def _refuse_encrypted_members(members: List[zipfile.ZipInfo]) -> None:
                 SourceArchiveRefusal.ENCRYPTED_MEMBER,
                 f"zip entry {info.filename!r} is encrypted: an encrypted member "
                 "cannot be read",
+            )
+
+
+def _refuse_unsupported_methods(members: List[zipfile.ZipInfo]) -> None:
+    """Refuse a member compressed with any method but stored or deflated (rule 8).
+
+    Decided from the method the central directory gives each member, so it reads no
+    data, and a link is refused for it as any other member is. Whatever size the
+    member declares: zipfile hands a bzip2, LZMA or Zstandard member's data to a
+    decompressor with no limit on its output, and cuts what it returns to the declared
+    size only afterwards, so a few kilobytes can ask for gigabytes of memory.
+    """
+    for info in members:
+        method = info.compress_type
+        if method not in _ADMITTED_METHODS:
+            named = _METHOD_NAMES.get(method)
+            how = f"{named} (method {method})" if named else f"method {method}"
+            raise SourceArchiveRefused(
+                SourceArchiveRefusal.UNSUPPORTED_COMPRESSION,
+                f"zip entry {info.orig_filename!r} is compressed with {how}: only "
+                "stored and deflated members are read",
             )
 
 
