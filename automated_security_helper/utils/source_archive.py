@@ -675,21 +675,26 @@ def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
     """The zip64 end record, when a locator sits just before the end record.
 
     The record has to be the 56 bytes just before the locator, and the locator has to
-    place it there. Readers differ in where they look: zipfile before the releases that
+    place it there. Readers differ in where they look. zipfile before the releases that
     validate the locator reads the record just before it and takes no notice of the
-    offset it holds, and later ones read at that offset first. Where the two are one
-    place every reader finds the same record, which is where every writer puts it
-    (bytes before the archive and zip64 extensible data are refused by rule 6 in any
-    case), so a locator that places the record anywhere else is refused as not a zip,
-    whatever else the archive says. The record is read where it has to be, never at
-    the offset the locator gives, which the archive chooses.
+    offset it holds. Later ones read at that offset first, look just before the locator
+    when the record is not there, for bytes written before the archive, and refuse the
+    archive as they open it when the record's own directory offset and size do not end
+    at the offset the locator gives. Where the two are one place every reader finds the
+    same record, which is where every writer puts it (bytes before the archive and zip64
+    extensible data are refused by rule 6 in any case), so a locator that places the
+    record anywhere else is refused as not a zip, whatever else the archive says. The
+    record is read where it has to be, never at the offset the locator gives, which the
+    archive chooses.
 
-    A locator with no whole record before it is refused in the words zipfile uses for
-    it; one that places the record past where it lies, in the words of the releases
-    that validate it; one that places it before, as bytes that come before the archive.
-    These are the words of the refusal whichever zipfile reads the archive: ``open_zip``
-    asks before zipfile opens it (:func:`_refuse_a_misplaced_zip64_record`), and rule 6
-    asks again, for the record's fields.
+    The words of the refusal: "Zip64 end of central directory record not found" for a
+    locator with no whole record before it, and "Corrupt zip64 end of central directory
+    locator" for one that places the record past where it lies, as the releases that
+    validate the locator say; "N bytes come before the archive" for one that places it
+    before, where those releases say "Corrupt zip64 end of central directory record".
+    ``open_zip`` asks before zipfile opens the archive
+    (:func:`_refuse_a_misplaced_zip64_record`), so these are the words whichever
+    zipfile reads it, and rule 6 asks again, for the record's fields.
     """
     locator_at = end - _ZIP64_LOCATOR.size
     if locator_at < 0:
@@ -725,7 +730,7 @@ def _refuse_a_misplaced_zip64_record(handle: IO[bytes]) -> None:
     check the zip64 end record as they open an archive refuse a locator that misplaces
     it themselves, in words of their own: for a locator that places the record before
     where it lies they say "Corrupt zip64 end of central directory record", and
-    :func:`_zip64_end_record` says "4 bytes come before the archive". The releases
+    :func:`_zip64_end_record` says "N bytes come before the archive". The releases
     before them admit such an archive, and rule 6 refuses it with the same call.
 
     A file with no end record is not judged: zipfile refuses it, in its own words, and

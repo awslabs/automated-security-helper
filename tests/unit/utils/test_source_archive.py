@@ -1165,10 +1165,12 @@ REFUSED = [
     ),
     # The zip64 end record is the 56 bytes before its locator, and the locator says so.
     # zipfile before the releases that validate the locator reads the record there and
-    # takes no notice of the offset the locator holds; later ones read at that offset
-    # first, and refuse one past where the record lies. Red at the base: each was
-    # admitted, the record found just before the locator as zipfile before those
-    # releases finds it.
+    # takes no notice of the offset the locator holds, so it admits each of these.
+    # Later releases read at that offset first and refuse the archive as they open it:
+    # one that places the record past where it lies in the words of the first three
+    # rows, and one that places it before in "Corrupt zip64 end of central directory
+    # record", which is not the last row's words. open_zip judges the locator before
+    # zipfile opens the archive, so every Python gives the words of the rows.
     pytest.param(
         _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT + 1),
         Kind.NOT_A_ZIP,
