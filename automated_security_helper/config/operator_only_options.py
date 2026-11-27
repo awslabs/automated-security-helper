@@ -116,6 +116,7 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -133,8 +134,9 @@ OPERATOR_ONLY_OPTIONS: Dict[str, Tuple[str, ...]] = {
 }
 
 #: Scanner section name -> the options in it only the operator may set. Each
-#: section is a declared scanner's (``ScannerConfigSegment``), whose spellings
-#: are folded into it at load, so the scanner reads that one section.
+#: section is a declared scanner's (``ScannerConfigSegment``), whose spellings,
+#: and the sections of the retired names that resolve to it, are folded into it
+#: at load, so the scanner reads that one section (``_scanner_sections_in``).
 OPERATOR_ONLY_SCANNER_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "detect-secrets": ("max_worker_output_mib",),
 }
@@ -209,6 +211,22 @@ def _set_by_override(
     as an override of the ``aws-security-hub`` section next to it, which the
     scan reads. The key is not stripped either: the override is applied to the
     key exactly as written.
+
+    Under ``scanners``, the overrides whose section segment is a retired
+    scanner's name the alias table resolves to *section_key*
+    (``_is_retired_name_of``) count only where, applied in their order, they
+    leave the option where the scan reads it (``_retired_overrides_write``).
+    The resolver does not read the table, so the apply writes such a section
+    under the name as typed, in a configuration that holds no section under
+    it (the loader folds each file's sections as it reads them), and the
+    model's alias fold lays it over the serving scanner's key by key,
+    keeping only the options the scanner declares
+    (``ash_config.fold_scanner_name_aliases``). An override of the retired
+    section or of its options is therefore not an override of the serving
+    section, and the overrides under the name build that section together.
+    Counting every one of them skipped the confinement for overrides that
+    wrote nothing the scan reads, such as the option spelled with dashes,
+    which the fold drops.
     """
     section = reporters.get(section_key)
     options = section.get("options") if isinstance(section, dict) else None
@@ -220,16 +238,84 @@ def _set_by_override(
     ]
     parents = [None, kind, section_key, "options"]
     target = [kind, section_key, "options", option]
+
+    def lands_on(index: int, part: str) -> bool:
+        return (
+            resolve_override_segment(
+                containers[index], parents[index], part, environment_values
+            )
+            == target[index]
+        )
+
+    retired: List[str] = []
     for override in config_overrides or []:
-        key_path = override.partition("=")[0].removesuffix("+")
-        parts = key_path.split(".")
+        parts = override.partition("=")[0].removesuffix("+").split(".")
+        if (
+            kind == "scanners"
+            and len(parts) >= 2
+            and lands_on(0, parts[0])
+            and _is_retired_name_of(
+                resolve_override_segment(
+                    containers[1], parents[1], parts[1], environment_values
+                ),
+                section_key,
+            )
+        ):
+            retired.append(override)
+            continue
         if not parts or len(parts) > len(target):
             continue
-        if all(
-            resolve_override_segment(container, parent, part, environment_values)
-            == want
-            for container, parent, part, want in zip(containers, parents, parts, target)
-        ):
+        if all(lands_on(index, part) for index, part in enumerate(parts)):
+            return True
+    return _retired_overrides_write(retired, section_key, option, environment_values)
+
+
+def _retired_overrides_write(
+    overrides: Sequence[str],
+    section_key: str,
+    option: str,
+    environment_values: Sequence[str],
+) -> bool:
+    """Whether *overrides*, the overrides whose section segment is a retired
+    scanner name the alias table resolves to *section_key*, leave *option*
+    where the scan reads it once applied in their order (_set_by_override).
+
+    The configuration they apply to holds no section under a retired name
+    (the loader folds each file's sections as it reads them), so they write
+    onto mappings only they make, each over what the ones before it made. A
+    later override lands on a key an earlier one made (a ``-``/``_`` twin),
+    an append onto a mapping an earlier one made sets it instead of starting
+    a list, and an override of the section or of its options replaces what
+    was there. The model's alias fold then lays each such section over the
+    serving scanner's key by key and keeps only the options the scanner
+    declares (``ash_config.fold_scanner_name_aliases``). So the overrides
+    are applied here as the apply applies them
+    (``resolve_config._apply_config_override``) to a ``scanners`` mapping
+    that holds nothing else, the result is folded as the model folds it, and
+    *option* counts as written where the section the fold lays over the
+    serving scanner's holds it. Judged one at a time, an override that a
+    later one replaced or respelled was counted, and an append that an
+    earlier one turned into a set was not.
+    """
+    if not overrides:
+        return False
+    from automated_security_helper.config.ash_config import (
+        fold_scanner_name_aliases,
+    )
+    from automated_security_helper.config.resolve_config import (
+        _apply_config_override,
+    )
+
+    scratch: Dict[str, Any] = {"scanners": {}}
+    for override in overrides:
+        written, _, value = override.partition("=")
+        _apply_config_override(scratch, written, value, environment_values)
+    folded = fold_scanner_name_aliases(scratch["scanners"], log=False)
+    for key, section in folded.items():
+        if not (isinstance(key, str) and _spells_scanner_section(key, section_key)):
+            continue
+        options = section.get("options") if isinstance(section, dict) else None
+        if isinstance(options, dict) and option in options:
             return True
     return False
 
@@ -348,21 +434,72 @@ def _differs(value: Any, operator: Any, default: Any = _MISSING) -> bool:
     return value != operator
 
 
+def _spells_scanner_section(key: str, scanner: str) -> bool:
+    """Whether *key*, a ``scanners`` section key, is the declared scanner
+    section *scanner* or a spelling that folds to it
+    (``plugin_section_names``): a section the model reads as *scanner*'s by its
+    name alone."""
+    return (
+        key == scanner
+        or declared_section_names("scanners").get(folded_section_name(key)) == scanner
+    )
+
+
+def _is_retired_name_of(key: Any, scanner: str) -> bool:
+    """Whether *key*, a ``scanners`` section key, is a retired scanner's name
+    that the alias table resolves to the declared scanner section *scanner*:
+    ``canonical_scanner_name`` answers another name for it, and that name is
+    *scanner* or a spelling that folds to it (``_spells_scanner_section``).
+
+    The test is the alias fold's own, a name the table resolves to another
+    (``ash_config.fold_scanner_name_aliases``), which lays the section over
+    the serving plugin's. The loader folds each file's own sections as it
+    reads the file, and a section a ``patch`` adds once the patch has
+    applied, so a section keeps a retired name only where no load folded
+    it: an override's key path, and a document read some other way. What
+    reads such a section by its name reads it there. False for every key
+    while ``SCANNER_NAME_ALIASES`` has no row."""
+    if not isinstance(key, str):
+        return False
+    canonical = canonical_scanner_name(key)
+    return canonical not in (None, "", key) and _spells_scanner_section(
+        canonical, scanner
+    )
+
+
 def _scanner_sections_in(
     scanners: Dict[str, Any], scanner: str
 ) -> List[Tuple[str, Dict[str, Any]]]:
     """The sections of *scanners*, a document's ``scanners`` mapping, the model
-    reads as the declared scanner section *scanner*: that key, or a spelling
-    that folds to it (``plugin_section_names``). A spelling that does not fold
-    is a section of its own, which the scanner never reads."""
-    declared = declared_section_names("scanners")
-    return [
-        (key, section)
-        for key, section in scanners.items()
-        if isinstance(key, str)
-        and isinstance(section, dict)
-        and (key == scanner or declared.get(folded_section_name(key)) == scanner)
-    ]
+    reads as the declared scanner section *scanner*: that key, a spelling that
+    folds to it (``plugin_section_names``), or a retired scanner's name that
+    the alias table resolves to that key or such a spelling
+    (``utils/scanner_names.canonical_scanner_name``), whose section the alias
+    fold lays onto the serving plugin's
+    (``ash_config.fold_scanner_name_aliases``). Any other spelling is a
+    section of its own, which the scanner never reads.
+
+    A retired name's sections come after the others, in document order: the
+    fold lays each over the serving plugin's own section, the later one over
+    the earlier, so where two set an option the last of them is what the
+    scanner reads. A caller that keeps the last value it meets (the found
+    record's ``written``, ``RepositorySettings.elsewhere_value``) keeps that
+    one."""
+    spelled: List[Tuple[str, Dict[str, Any]]] = []
+    retired: List[Tuple[str, Dict[str, Any]]] = []
+    for key, section in scanners.items():
+        if not isinstance(key, str) or not isinstance(section, dict):
+            continue
+        if _spells_scanner_section(key, scanner):
+            spelled.append((key, section))
+            continue
+        # A retired name is no spelling of the section, and a section can
+        # still be under one here (_is_retired_name_of): unmatched, the option
+        # a repository file writes under it would not be left out, and the
+        # alias fold would then move it onto the section the scan reads.
+        if _is_retired_name_of(key, scanner):
+            retired.append((key, section))
+    return spelled + retired
 
 
 #: Each kind of plugin section with options only the operator may set: the
@@ -1247,10 +1384,14 @@ def _marker_value(
     A value is read from the environment when a reference of *references*
     (the chain's ``environment_references``, every read included, the ones at
     places the load left out too) sits at that place, under any spelling of
-    the section, and resolved to it. The loader records a reference at every
-    place a read value lands: a YAML alias's place included, and a ``patch``
-    value at the place the operation puts it (``copy`` and ``move`` are not
-    allowed ops), so no read value reaches one of these places without one.
+    the section, and resolved to it. A section written under a retired
+    scanner name, or added under one by a ``patch``, is folded onto the
+    serving plugin's section before the loader records its references, so
+    they sit at that section's place (config_sources._resolve). The loader
+    records a reference at every place a read value lands: a YAML alias's
+    place included, and a ``patch`` value at the place the operation puts it
+    (``copy`` and ``move`` are not allowed ops), so no read value reaches one
+    of these places without one.
     A literal a later file wrote over a read value is shown as the literal. A
     mapping key the file read from the environment (a key reference, recorded
     at the mapping's place) is shown as its reference too.

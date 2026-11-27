@@ -472,6 +472,18 @@ def test_ash_report_honors_the_recorded_setting_and_the_override(tmp_path):
             id="object-value-at-the-section",
         ),
         pytest.param(
+            'global_settings={"deduplication": {"fold": false}}',
+            id="object-value-at-the-parent",
+        ),
+        pytest.param(
+            "global-settings.deduplication.fold=false",
+            id="hyphen-for-the-underscore",
+        ),
+        pytest.param(
+            "global_settings.deduplication.fold+=false",
+            id="trailing-plus-on-a-scalar",
+        ),
+        pytest.param(
             "global_settings.deduplication.fold=false", id="control-the-leaf-key"
         ),
     ],
@@ -484,6 +496,33 @@ def test_an_override_that_writes_fold_false_turns_the_recorded_fold_off(
     # the override's doing.
     assert NOTE in _cli_markdown(tmp_path)
     assert NOTE not in _cli_markdown(tmp_path, "--config-overrides", override)
+
+
+def test_an_override_that_does_not_name_fold_leaves_the_recorded_fold(tmp_path):
+    # The control for the spellings above: an override of another key
+    # round-trips the configuration too, and the recorded fold stands.
+    _write(tmp_path, _model(fold=True))
+    folded = _cli_markdown(
+        tmp_path, "--config-overrides", "global_settings.severity_threshold=HIGH"
+    )
+    assert NOTE in folded
+
+
+def test_an_object_value_at_the_section_that_names_only_annotate_leaves_the_recorded_fold(
+    tmp_path,
+):
+    # An object value counts only for the keys inside it. This one lands on
+    # the deduplication section, as the object-value-at-the-section spelling
+    # above does, but names annotate and not fold: the operator's
+    # configuration holds fold's default False, which must not be taken for an
+    # explicit false, so the recorded fold stands.
+    _write(tmp_path, _model(fold=True))
+    folded = _cli_markdown(
+        tmp_path,
+        "--config-overrides",
+        'global_settings.deduplication={"annotate": false}',
+    )
+    assert NOTE in folded
 
 
 def test_scan_and_report_declare_the_flag_off_by_default():

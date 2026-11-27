@@ -36,7 +36,7 @@ from automated_security_helper.config.operator_only_options import reporter_sect
 from automated_security_helper.config.plugin_section_names import ascii_lower
 from automated_security_helper.config.recorded_config import (
     HOW_TO_SUPPLY,
-    _sets,
+    operator_named,
     take_own_values,
 )
 from automated_security_helper.config.reporter_trust import (
@@ -1200,15 +1200,8 @@ def report_command(
     # column shape back can get it (only a field the configuration names
     # counts: a defaulted False never turns a recorded setting off).
     #
-    # The fields the configuration names are read from the configuration this
-    # command resolved, through recorded_config._sets. With no override that
-    # is what the document wrote. With an override it is the record
-    # apply_config_overrides stamps from the keys each override landed on, so
-    # the rebuild's round trip through a dump and a validate, which marks every
-    # default as set, does not make every default count, and every spelling
-    # the override parser accepts counts as written: an object value at the
-    # section or at its parent, a hyphen for an underscore, a trailing "+".
-    # No second resolution is made.
+    # The fields the configuration names, under an override too:
+    # recorded_config.operator_named. No second resolution is made.
     recorded_dedup = getattr(
         getattr(getattr(model, "ash_config", None), "global_settings", None),
         "deduplication",
@@ -1220,7 +1213,7 @@ def report_command(
     own_set = {
         name
         for name in ("annotate", "fold")
-        if _sets(ash_config, ("global_settings", "deduplication", name))
+        if operator_named(ash_config, ("global_settings", "deduplication", name))
     }
     requested = {
         "annotate": annotate_duplicates,

@@ -10,6 +10,7 @@ rule (``config_sources.deep_merge``) with the overlay as the child: mappings
 merge key by key, and a list or scalar the overlay sets replaces the project's.
 """
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,6 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
-from automated_security_helper.utils import scanner_names
 
 pytestmark = pytest.mark.unit
 
@@ -460,9 +460,9 @@ def test_a_single_directory_scan_reads_only_the_config_it_was_given(tmp_path):
 
 
 @pytest.fixture
-def retired_oldname(monkeypatch):
+def retired_oldname(plant_scanner_alias):
     """One synthetic retirement: ``oldname`` is served by the bandit plugin."""
-    monkeypatch.setitem(scanner_names.SCANNER_NAME_ALIASES, "oldname", "bandit")
+    return plant_scanner_alias("oldname", "bandit")
 
 
 def test_a_projects_retired_section_does_not_beat_the_operators_canonical_one(
@@ -475,6 +475,57 @@ def test_a_projects_retired_section_does_not_beat_the_operators_canonical_one(
     config = _resolve(tmp_path, project, operator)
 
     assert config.scanners.bandit.enabled is True
+
+
+def test_a_projects_retired_section_is_folded_once_under_the_operators(
+    tmp_path, retired_oldname, caplog
+):
+    """The operator's canonical section wins over the project's retired one,
+    and the project's fold is logged once for the one resolution."""
+    project = _project(tmp_path, {"scanners": {"oldname": {"enabled": True}}})
+    operator = _operator(tmp_path, {"scanners": {"bandit": {"enabled": False}}})
+
+    with caplog.at_level(logging.INFO, logger="ash"):
+        config = _resolve(tmp_path, project, operator)
+
+    assert config.scanners.bandit.enabled is False
+    fold_line = (
+        "A scanners section under a retired name of the bandit plugin is applied "
+        "to scanners.bandit"
+    )
+    folds = [
+        record.getMessage()
+        for record in caplog.records
+        if fold_line in record.getMessage()
+    ]
+    assert len(folds) == 1, folds
+
+
+def test_an_operators_patch_names_the_retired_section_its_own_base_wrote(
+    tmp_path, retired_oldname
+):
+    """The operator's file, outside the scanned tree, is the config the scan
+    reads, so its patch runs with the ownership fold. Its base's retired
+    section is folded onto bandit before the patch applies, and the pointer
+    in the retired spelling still lands there."""
+    (tmp_path / "repo").mkdir()
+    _write(
+        tmp_path / "operator" / "base.yaml",
+        {"scanners": {"oldname": {"enabled": True}}},
+    )
+    operator = _operator(
+        tmp_path,
+        {
+            "extends": "base.yaml",
+            "patch": [
+                {"op": "replace", "path": "/scanners/oldname/enabled", "value": False}
+            ],
+        },
+    )
+
+    config = resolve_config(config_path=operator, source_dir=tmp_path / "repo")
+
+    assert config.scanners.bandit.enabled is False
 
 
 def test_an_operators_retired_section_beats_the_projects_canonical_one(

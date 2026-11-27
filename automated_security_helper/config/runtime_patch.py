@@ -72,8 +72,8 @@ from automated_security_helper.config.ash_config import (
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
     EnvironmentReference,
-    _bare,
     with_environment_values_shown,
+    written_without_tag,
 )
 from automated_security_helper.config.patch_ops import (
     DOCUMENT_CHANGING_OPS,
@@ -934,6 +934,32 @@ def _model_reads_leaf_as(
         return False
 
 
+def _model_reads_leaf_as_once(
+    memo: Dict[Tuple[str, str], bool],
+    config: AshConfig,
+    dump: Dict[str, Any],
+    pointer: str,
+    value: Any,
+    trusted_value: Any,
+    plugin_keys: PluginKeys,
+) -> bool:
+    """``_model_reads_leaf_as``, made once for each pointer and value within
+    one call of config_document_denials (``memo``): ``config`` and ``dump``
+    are that call's, so the answer depends on the two alone. A value that has
+    no JSON text is tried each time."""
+    try:
+        key = (pointer, json.dumps(value, sort_keys=True))
+    except (TypeError, ValueError):
+        return _model_reads_leaf_as(
+            config, dump, pointer, value, trusted_value, plugin_keys
+        )
+    if key not in memo:
+        memo[key] = _model_reads_leaf_as(
+            config, dump, pointer, value, trusted_value, plugin_keys
+        )
+    return memo[key]
+
+
 def _covered(patterns: Sequence[str], pointer: str, plugin_keys: PluginKeys) -> bool:
     """Whether ``pointer`` is at or under one of ``patterns``, under every spelling."""
     return bool(pointer) and any(
@@ -1081,6 +1107,9 @@ def config_document_denials(
     environment_pointers = list(environment_texts)
     own_texts = _own_reference_texts(own_references, document_path)
 
+    # One trial for each place and value within this call
+    # (_model_reads_leaf_as validates a whole copy of the dump each time).
+    model_reads: Dict[Tuple[str, str], bool] = {}
     denials: List[DocumentDenial] = []
     for key, op, kind in _document_writes(document):
         path = op["path"]
@@ -1141,8 +1170,14 @@ def config_document_denials(
                 else:
                     unchanged = _same_json_value(value, _as_json(op["value"])) or (
                         repeats_trusted
-                        and _model_reads_leaf_as(
-                            config, dump, path, op["value"], value, plugin_keys
+                        and _model_reads_leaf_as_once(
+                            model_reads,
+                            config,
+                            dump,
+                            path,
+                            op["value"],
+                            value,
+                            plugin_keys,
                         )
                     )
                 if unchanged:
@@ -1152,12 +1187,23 @@ def config_document_denials(
 
 
 def _text_written(record: Any) -> str:
-    """The text ``record`` (a rewrite or a reference) says its file wrote, as
-    ``environment_record._bare`` gives it: the reference alone (``${VAR}`` or
-    ``${VAR:default}``) with no ``!ENV`` tag, or the text without the tag where
-    it starts with no reference."""
+    """The whole text ``record`` (a rewrite or a reference) says its file wrote,
+    without an ``!ENV`` tag (``environment_record.written_without_tag``): the
+    reference and any text the file wrote after it. ``${VAR}-base`` and
+    ``${VAR}-root`` are two texts, as the loader reads them as two values
+    (``resolve_env_references`` keeps what follows the reference). Cut to the
+    reference alone (``environment_record._bare``), both read as ``${VAR}``, and
+    a place two files wrote that way counted one text.
+
+    Every record compared holds its field's text as the file wrote it in
+    ``written``: a value rewrite (``config_validator._rewrite_for``), a reference
+    a load kept (``environment_record.environment_references``) and one a fill
+    read (``environment_record.fill_environment_references``, which reads a
+    reference only where the document holds exactly this text). So a place one
+    file wrote once has one text in all three.
+    """
     written = getattr(record, "written", "")
-    return _bare(written) if isinstance(written, str) else ""
+    return written_without_tag(written) if isinstance(written, str) else ""
 
 
 def _environment_read_texts(
@@ -1241,10 +1287,14 @@ def _holds_the_operators_reference(
     ``pointer`` names (``environment_texts``, matched as pointers are equal under
     every spelling a denial reads: not a pointer above it, nor one below it), and
     the document's own references at exactly ``pointer`` (``own_texts``) wrote
-    that text and no other. The leaf then holds the value the fill read for that
-    reference, which is the operator's. A place with two texts (a base and the
-    file that extends it each read the field) or none, and a place the document's
-    references name under another spelling, never qualify.
+    that text and no other. A text is the whole text a file wrote there without
+    its ``!ENV`` tag (``_text_written``), what follows the reference included:
+    ``${VAR}-base`` and ``${VAR}-root`` are two texts though both read ``VAR``,
+    and the same text two files both wrote counts once. The leaf then holds the value
+    the fill read for that reference, which is the operator's. A place with two
+    texts (a base and the file that extends it each read the field, each with its
+    own text) or none, and a place the document's references name under another
+    spelling, never qualify.
     """
     own = own_texts.get(pointer)
     if not own:

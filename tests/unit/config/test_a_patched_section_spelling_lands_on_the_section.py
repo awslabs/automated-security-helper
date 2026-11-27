@@ -1192,6 +1192,55 @@ def test_the_default_tree_read_takes_the_variant_patch_beside_no_owned_twin(
     assert resolved.get("enabled") is True, resolved
 
 
+def test_a_retired_name_patch_lands_on_the_section_a_later_repository_variant_joins(
+    tmp_path, monkeypatch, plant_scanner_alias
+):
+    """The operator's own base writes the section under a retired name, the
+    repository's file, extended after it, writes the serving plugin's
+    section in a case variant, and the operator's root patches the retired
+    name.
+
+    The patch lands on the one ``bandit`` section. A declared plugin's
+    section is respelled to its declared key in each file as the file is
+    read (``fold_known_plugin_sections``), so the repository's ``Bandit`` is
+    ``bandit`` before the merge, and the base's retired section is folded
+    onto ``bandit`` as the base is read. A file of the chain wrote that
+    section under a retired name, so the pointer's retired spelling is
+    redirected to the serving plugin's name, and the operator's file that
+    wrote it is owned under ``bandit`` once folded, so the serving name lands
+    on that key. Both files write ``false``, so only the patch can make it
+    true."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    plant_scanner_alias("oldname", "bandit")
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    repository = checkout / ".ash.yaml"
+    repository.write_text(
+        "project_name: repository\nscanners:\n  Bandit:\n    enabled: false\n",
+        encoding="utf-8",
+    )
+    own = tmp_path / "own.yaml"
+    own.write_text("scanners:\n  oldname:\n    enabled: false\n", encoding="utf-8")
+    root = tmp_path / "operator.yaml"
+    root.write_text(
+        f"extends:\n  - {own.as_posix()}\n  - {repository.as_posix()}\n"
+        "patch:\n"
+        "  - op: replace\n"
+        "    path: /scanners/oldname/enabled\n"
+        "    value: true\n",
+        encoding="utf-8",
+    )
+
+    config = resolve_config(config_path=root, source_dir=checkout)
+
+    resolved = (
+        config.get_plugin_config(plugin_type="scanner", plugin_name="bandit") or {}
+    )
+    assert resolved.get("enabled") is True, resolved
+    extra = getattr(config.scanners, "__pydantic_extra__", None) or {}
+    assert "Bandit" not in extra and "oldname" not in extra, extra
+
+
 def test_a_failed_test_ops_refusal_names_no_key_read_from_the_environment(
     tmp_path, monkeypatch
 ):

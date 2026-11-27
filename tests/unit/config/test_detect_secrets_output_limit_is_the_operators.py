@@ -114,6 +114,279 @@ def test_a_file_in_the_tree_does_not_set_the_limit(tmp_path, key):
     assert "--config-overrides" in warning, warning
 
 
+#: A retired scanner name the test below plants in the alias table, served by
+#: detect-secrets. It is no spelling of any declared scanner section, so only
+#: the alias fold (ash_config.fold_scanner_name_aliases, which the loader runs
+#: on each file it reads) reads its section as detect-secrets'.
+_RETIRED_NAME = "legacy-secrets"
+
+
+@pytest.mark.parametrize(
+    "key", [_RETIRED_NAME, "detect-secrets"], ids=["retired-name", "canonical-control"]
+)
+@pytest.mark.parametrize(
+    "operator_extends_it", [False, True], ids=["alone", "under-an-operator-file"]
+)
+def test_a_retired_scanner_name_in_the_tree_does_not_set_the_limit(
+    tmp_path, monkeypatch, plant_scanner_alias, key, operator_extends_it
+):
+    """The repository's own .ash.yaml writes the limit under a retired scanner
+    name that the alias table resolves to detect-secrets. The loader folds that
+    name's section onto detect-secrets' as it reads the file, so the limit
+    written there is the scanner's, like any spelling of it, and the
+    confinement reads it there: the scan keeps the operator's, 256 by default,
+    and one warning names the option, the file and where the operator sets it.
+    Alone, the repository's file is the configuration. Under an operator file
+    outside the tree that extends it and writes no limit, the repository's
+    file is folded and confined as the base it is before the operator's file
+    is layered over it, so the limit the scan reads is never one a file outside
+    the tree set. The canonical-control rows write the section's own name with
+    the same row planted, and hold with or without the retired-name match
+    (test_a_file_in_the_tree_does_not_set_the_limit is the alone control
+    without the row)."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    checkout = _checkout(tmp_path, _setting(1024, key))
+    call: dict = {"source_dir": checkout}
+    if operator_extends_it:
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(
+            f"extends: {(checkout / '.ash.yaml').as_posix()}\n", encoding="utf-8"
+        )
+        call["config_path"] = operator
+
+    with _warnings() as messages:
+        config = resolve_config(**call)
+
+    assert _limit(config) == 256
+    [warning] = _about_the_limit(messages)
+    assert f"Ignoring {OPTION}" in warning, warning
+    assert ".ash.yaml" in warning, warning
+    assert "--config-overrides" in warning, warning
+
+
+def _plant_the_retired_name(plant_scanner_alias) -> None:
+    """Plant _RETIRED_NAME in the alias table, served by detect-secrets (the
+    plant_scanner_alias fixture checks that the row resolves the name), and
+    check the other premise: the name is no spelling of a declared section,
+    so only the alias fold moves it (declared_target is the rule
+    fold_known_plugin_sections folds by)."""
+    from automated_security_helper.config.plugin_section_names import (
+        declared_section_names,
+        declared_target,
+    )
+
+    plant_scanner_alias(_RETIRED_NAME, "detect-secrets")
+    assert declared_target(declared_section_names("scanners"), _RETIRED_NAME) is None
+
+
+@pytest.mark.parametrize(
+    "key", [_RETIRED_NAME, "detect-secrets"], ids=["retired-name", "canonical-control"]
+)
+def test_an_override_under_a_retired_scanner_name_sets_the_limit(
+    tmp_path, monkeypatch, plant_scanner_alias, key
+):
+    """The operator's --config-overrides writes the limit under a retired
+    scanner name the alias table resolves to detect-secrets, over a checkout
+    whose .ash.yaml writes no scanner section. An override's key path never
+    passes the loader's fold: the apply writes the override under the name as
+    written, and the model folds that section onto detect-secrets'. The gate
+    reads the section's segment as detect-secrets' through the alias table,
+    and the key path ends at the limit's declared name, which the fold keeps
+    (operator_only_options._set_by_override), so it counts the override as one
+    that wrote the limit, the scan reads the operator's 1024, and nothing the
+    repository wrote is ignored. The canonical-control row writes the
+    section's own name with the same row planted, and holds with or without
+    the retired-name match
+    (test_an_override_of_the_limit_wins_whatever_the_trusted_base_says is the
+    no-row control, with 64)."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    checkout = _checkout(tmp_path, "project_name: p\n")
+
+    with _warnings() as messages:
+        config = resolve_config(
+            source_dir=checkout,
+            config_overrides=[f"scanners.{key}.options.max_worker_output_mib=1024"],
+        )
+
+    assert _limit(config) == 1024
+    assert not _about_the_limit(messages), messages
+
+
+#: --config-overrides entries under the retired name that write nothing the scan
+#: reads at the limit: the option spelled with dashes, which the alias fold drops
+#: because detect-secrets declares only max_worker_output_mib, and a section or
+#: options value that does not hold the option. 512 is no other limit in the
+#: cells below, so a cell can tell which value the scan read.
+_RETIRED_OVERRIDES_WRITING_NO_LIMIT = [
+    f"scanners.{_RETIRED_NAME}.options.max-worker-output-mib=512",
+    f'scanners.{_RETIRED_NAME}={{"enabled": true}}',
+    f'scanners.{_RETIRED_NAME}.options={{"skip_generated_lockfiles": false}}',
+]
+
+
+@pytest.mark.parametrize(
+    "override",
+    _RETIRED_OVERRIDES_WRITING_NO_LIMIT,
+    ids=["dashed-option", "section-value", "options-value"],
+)
+@pytest.mark.parametrize("scene", ["repository-sets-it", "trusted-file-sets-it"])
+def test_an_override_under_a_retired_name_that_writes_no_limit_leaves_it_confined(
+    tmp_path, monkeypatch, plant_scanner_alias, override, scene
+):
+    """An override under a retired scanner name the alias table resolves to
+    detect-secrets writes nothing the scan reads at the limit: the apply
+    writes the section under the name as typed, and the model's alias fold
+    lays over detect-secrets' only the options it declares, under their
+    declared names. So the override does not set the limit, and the limit
+    stays confined (operator_only_options._set_by_override). Where the
+    repository's .ash.yaml writes 2048, that value is ignored with the one
+    warning and the scan keeps the default, 256. Where only the trusted file
+    writes 64, its bound holds and nothing is ignored. Counting every such
+    override as one that set the limit left the repository's 2048 out
+    without the warning, so the scan read the default, 256, unwarned (the
+    warning is what the repository's cells pin), and dropped the trusted
+    file's 64 for the default."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    call: dict = {"config_overrides": [override]}
+    if scene == "repository-sets-it":
+        call["source_dir"] = _checkout(tmp_path, _setting(2048))
+    else:
+        call["source_dir"] = _checkout(tmp_path, "project_name: p\n")
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(_setting(64), encoding="utf-8")
+        call["trusted_config_path"] = operator
+
+    with _warnings() as messages:
+        config = resolve_config(**call)
+
+    about = _about_the_limit(messages)
+    if scene == "repository-sets-it":
+        assert _limit(config) == 256
+        assert any(
+            f"Ignoring {OPTION}" in message and ".ash.yaml" in message
+            for message in about
+        ), messages
+    else:
+        assert _limit(config) == 64
+        assert not about, messages
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        f'scanners.{_RETIRED_NAME}={{"options": {{"max_worker_output_mib": 512}}}}',
+        f'scanners.{_RETIRED_NAME}.options={{"max_worker_output_mib": 512}}',
+    ],
+    ids=["section-value", "options-value"],
+)
+def test_an_override_under_a_retired_name_whose_value_holds_the_limit_sets_it(
+    tmp_path, monkeypatch, plant_scanner_alias, override
+):
+    """The control: the override's value holds the limit under its declared
+    name, so the alias fold keeps it over detect-secrets' and the override is
+    the operator's last word. The scan reads 512 over the repository's 2048,
+    and nothing is ignored."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    checkout = _checkout(tmp_path, _setting(2048))
+
+    with _warnings() as messages:
+        config = resolve_config(source_dir=checkout, config_overrides=[override])
+
+    assert _limit(config) == 512
+    assert not _about_the_limit(messages), messages
+
+
+#: Overrides under the retired name, each list as the operator passes it, with
+#: the limit the scan reads beside the trusted file's 64. In the first three,
+#: the apply runs the entries in order on one dictionary: a later entry lands
+#: on the dashed twin an earlier one made, which the fold drops; a later
+#: section value replaces the section an earlier entry's limit was in; and an
+#: append onto the mapping an earlier entry made sets it instead of starting a
+#: list. The last two write nothing the scan reads: an append onto nothing
+#: starts a list, which the fold does not lay, and a value that is not JSON is
+#: written as text, which the fold does not lay either.
+_RETIRED_OVERRIDE_SEQUENCES = [
+    pytest.param(
+        [
+            f"scanners.{_RETIRED_NAME}.options.max-worker-output-mib=1",
+            f"scanners.{_RETIRED_NAME}.options.max_worker_output_mib=1024",
+        ],
+        64,
+        id="respelled-onto-the-dashed-twin",
+    ),
+    pytest.param(
+        [
+            f"scanners.{_RETIRED_NAME}.options.max_worker_output_mib=1024",
+            f'scanners.{_RETIRED_NAME}={{"enabled": true}}',
+        ],
+        64,
+        id="replaced-by-a-later-section",
+    ),
+    pytest.param(
+        [
+            f"scanners.{_RETIRED_NAME}.enabled=true",
+            f'scanners.{_RETIRED_NAME}+={{"options": {{"max_worker_output_mib": 512}}}}',
+        ],
+        512,
+        id="appended-onto-a-mapping",
+    ),
+    pytest.param(
+        [f'scanners.{_RETIRED_NAME}+={{"options": {{"max_worker_output_mib": 512}}}}'],
+        64,
+        id="appended-onto-nothing",
+    ),
+    pytest.param(
+        [f"scanners.{_RETIRED_NAME}={{options: {{max_worker_output_mib: 512}}}}"],
+        64,
+        id="not-json",
+    ),
+]
+
+
+@pytest.mark.parametrize("overrides, expected", _RETIRED_OVERRIDE_SEQUENCES)
+def test_overrides_under_a_retired_name_are_judged_as_the_apply_builds_them(
+    tmp_path, monkeypatch, plant_scanner_alias, overrides, expected
+):
+    """--config-overrides entries under a retired scanner name the alias
+    table resolves to detect-secrets, over a silent repository and a trusted
+    file that writes 64. The apply runs the entries in order on one
+    dictionary, so a later entry lands on the keys an earlier one made or
+    replaces them, and the gate judges them the same way
+    (operator_only_options._retired_overrides_write): the limit is the
+    operator's only where the entries leave it under its declared name, and
+    otherwise the trusted file's 64 binds. Judged one entry at a time, the
+    first two lists counted an entry whose limit the scan never reads and
+    dropped the 64 for the default, 256, and the append onto a mapping was
+    not counted, so the 64 replaced the operator's 512."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    checkout = _checkout(tmp_path, "project_name: p\n")
+    operator = tmp_path / "operator.yaml"
+    operator.write_text(_setting(64), encoding="utf-8")
+
+    config = resolve_config(
+        source_dir=checkout,
+        trusted_config_path=operator,
+        config_overrides=overrides,
+    )
+
+    assert _limit(config) == expected
+
+
 def test_the_same_setting_in_a_file_outside_the_tree_is_kept(tmp_path):
     """The control: the operator's own config file, outside the scanned tree,
     sets the limit, and nothing is ignored."""
@@ -424,6 +697,51 @@ def test_a_repository_patch_tests_its_own_keys_beside_a_left_out_limit(tmp_path)
     assert config.scanners.detect_secrets.options.skip_generated_lockfiles is False
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    ["max-worker-output-mib", "max_worker_output_mib"],
+    ids=["the-dashed-twin", "the-declared-spelling"],
+)
+def test_a_retired_name_patch_adds_a_left_out_limit_where_the_files_wrote_it(
+    tmp_path, monkeypatch, plant_scanner_alias, spelling
+):
+    """base.yaml in the tree writes the limit, 64, under the retired name, and
+    the checkout's .ash.yaml extends it with a patch that adds the limit
+    under the retired name and then tests it. The base's limit is left out
+    before the patch applies, so the document holds no limit for the add to
+    land on; the files as written do. Spelled with dashes, the add is a -/_
+    twin of the declared option, which lands on the limit as the files wrote
+    them: the test of the declared spelling passes and the file loads, as it
+    does without the trust rules. The limit is then the extending file's own
+    write, which its confine hook leaves out, so the scan keeps the
+    operator's, 256. Judged where the document lands it, the dashed add was
+    dropped as an option detect-secrets does not declare, with a warning
+    that said so, and the test refused the file. No warning says it was
+    dropped now. The declared spelling is the control."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    options = f"/scanners/{_RETIRED_NAME}/options"
+    checkout = _checkout(
+        tmp_path,
+        "extends: base.yaml\n"
+        "patch:\n"
+        f"  - op: add\n    path: {options}/{spelling}\n    value: 4096\n"
+        f"  - op: test\n    path: {options}/max_worker_output_mib\n    value: 4096\n",
+    )
+    (checkout / "base.yaml").write_text(_setting(64, _RETIRED_NAME), encoding="utf-8")
+
+    with _warnings() as messages:
+        config = resolve_config(source_dir=checkout)
+
+    assert _limit(config) == 256
+    assert any(
+        f"Ignoring {OPTION}" in message for message in _about_the_limit(messages)
+    ), messages
+    assert not [m for m in messages if "does not declare" in m], messages
+
+
 @pytest.mark.parametrize("op", ["replace", "add"])
 def test_an_operator_patch_sets_the_limit_over_a_repository_base(tmp_path, op):
     """The operator's file outside the tree extends the repository's file,
@@ -729,6 +1047,155 @@ def test_a_repository_reference_at_a_kept_limit_leaves_no_reference_behind(
         for reference in config._displayed_environment_references
         if _at_the_limit(reference)
     ]
+    assert not [
+        rewrite
+        for rewrite in config._written_references or []
+        if rewrite.kind == "value" and rewrite.resolved == "3071"
+    ]
+
+
+def test_a_retired_name_s_reference_at_the_limit_leaves_no_reference_behind(
+    tmp_path, monkeypatch, plant_scanner_alias
+):
+    """The retired-name twin of
+    test_a_repository_reference_at_the_limit_leaves_no_reference_behind: the
+    repository's file writes the limit as ${VAR} under a retired scanner name
+    the alias table resolves to detect-secrets. The limit settles to the
+    operator's 256 as under the section's own name, so no reference to the
+    variable survives in the configuration's record of what its files read
+    from the environment, and no rewrite. The loader folds the section onto
+    detect-secrets' before it records the reference, so the reference is at
+    the settled limit's place, and the settle's swap of references
+    (resolve_config._take_confined_references) drops it there. The fixture
+    reads exactly one variable, so an empty record proves the reference did
+    not survive under either name."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    monkeypatch.setenv("ASH_TEST_DS_OUTPUT_LIMIT", "3071")
+    checkout = _checkout(
+        tmp_path,
+        "project_name: checkout\n"
+        + _setting("${ASH_TEST_DS_OUTPUT_LIMIT}", key=_RETIRED_NAME),
+    )
+
+    with _warnings() as messages:
+        config = resolve_config(source_dir=checkout)
+
+    # The controls: the retired name reaches the scanner (so it settles and
+    # warns), and the warning prints no value.
+    assert _limit(config) == 256
+    [warning] = _about_the_limit(messages)
+    assert "3071" not in warning, warning
+    assert not list(config._environment_references)
+    assert not list(config._displayed_environment_references)
+    assert not [
+        rewrite
+        for rewrite in config._written_references or []
+        if rewrite.kind == "value" and rewrite.resolved == "3071"
+    ]
+
+
+@pytest.mark.parametrize("kept_by", ["override", "operator-file"])
+def test_a_retired_name_s_reference_at_a_kept_limit_leaves_no_reference_behind(
+    tmp_path, monkeypatch, plant_scanner_alias, kept_by
+):
+    """The retired-name twin of
+    test_a_repository_reference_at_a_kept_limit_leaves_no_reference_behind:
+    the repository's file writes the limit as ${VAR} under a retired scanner
+    name the alias table resolves to detect-secrets, and the operator's own
+    512 is kept, an override's or that of the operator's --config outside the
+    tree, which extends the repository's file. Both write the section's own
+    name. No reference to the variable is left in the configuration's record,
+    in what `ash config get` shows, or among its rewrites: the loader folds the
+    repository's section onto detect-secrets' before it records the
+    reference, and the settle's swap of references drops a repository file's
+    reference at the kept limit there. The fixture reads exactly one variable,
+    so an empty record proves the reference did not survive under either
+    name."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    monkeypatch.setenv("ASH_TEST_DS_OUTPUT_LIMIT", "3071")
+    checkout = _checkout(
+        tmp_path,
+        "project_name: checkout\n"
+        + _setting("${ASH_TEST_DS_OUTPUT_LIMIT}", key=_RETIRED_NAME),
+    )
+    if kept_by == "override":
+        config = resolve_config(
+            source_dir=checkout,
+            config_overrides=[f"{OPTION}=512"],
+        )
+    else:
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(
+            f"extends: {(checkout / '.ash.yaml').as_posix()}\n" + _setting(512),
+            encoding="utf-8",
+        )
+        config = resolve_config(config_path=operator, source_dir=checkout)
+
+    assert _limit(config) == 512
+    assert not list(config._environment_references)
+    assert not list(config._displayed_environment_references)
+    assert not [
+        rewrite
+        for rewrite in config._written_references or []
+        if rewrite.kind == "value" and rewrite.resolved == "3071"
+    ]
+
+
+def _patch_adding(key: str, limit: str) -> str:
+    """A document whose ``patch`` adds the section ``scanners.<key>`` with the
+    limit set to *limit*, beside a ``scanners`` mapping that holds no section
+    of detect-secrets: the pointer lands on no key and no file wrote the
+    section under a retired name, so the operation writes the section under
+    *key* (config_sources._normalize_pointer), and the loader folds it onto
+    detect-secrets' once the patch has applied."""
+    return (
+        "project_name: checkout\n"
+        "scanners: {}\n"
+        "patch:\n"
+        "  - op: add\n"
+        f"    path: /scanners/{key}\n"
+        "    value:\n"
+        "      options:\n"
+        f"        max_worker_output_mib: {limit}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "key", [_RETIRED_NAME, "detect-secrets"], ids=["retired-name", "canonical-control"]
+)
+def test_a_limit_a_patch_adds_under_a_retired_name_leaves_no_reference_behind(
+    tmp_path, monkeypatch, plant_scanner_alias, key
+):
+    """The repository's file adds the limit's section with a ``patch``, under a
+    retired scanner name the alias table resolves to detect-secrets, as
+    ${VAR}. The loader folds the section the patch wrote onto detect-secrets'
+    once the patch has applied, and moves the reference the operation's value
+    read with it, so the limit settles to the operator's 256 at
+    detect-secrets' place and the settle's swap of references drops the
+    reference there: no reference or rewrite of the variable survives. The
+    canonical-control row adds the section under its own name with the same
+    row planted. The fixture reads exactly one variable."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    monkeypatch.setenv("ASH_TEST_DS_OUTPUT_LIMIT", "3071")
+    checkout = _checkout(tmp_path, _patch_adding(key, "${ASH_TEST_DS_OUTPUT_LIMIT}"))
+
+    with _warnings() as messages:
+        config = resolve_config(source_dir=checkout)
+
+    assert _limit(config) == 256
+    [warning] = _about_the_limit(messages)
+    assert "3071" not in warning, warning
+    assert not list(config._environment_references)
+    assert not list(config._displayed_environment_references)
     assert not [
         rewrite
         for rewrite in config._written_references or []
@@ -1173,6 +1640,76 @@ def test_get_config_shows_an_environment_read_option_by_its_reference(
             assert name not in result[kind][key][options], result
         return
     marker = _marker_at(result, place)
+    assert marker == (
+        "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
+    ), marker
+
+
+@pytest.mark.parametrize(
+    "key", [_RETIRED_NAME, "detect-secrets"], ids=["retired-name", "canonical-control"]
+)
+def test_get_config_shows_a_retired_name_s_environment_read_limit_by_its_reference(
+    tmp_path, monkeypatch, plant_scanner_alias, key
+):
+    """The no-file route of
+    test_get_config_shows_an_environment_read_option_by_its_reference, with the
+    limit written as ${VAR} under a retired scanner name the alias table
+    resolves to detect-secrets. The confinement leaves the value out and
+    records it, whatever text it is, and get_config marks the limit on
+    detect-secrets' section. The loader folds the section onto
+    detect-secrets' before it records the file's reference, so the marker
+    finds the reference at that section's place and shows it, `<from
+    ${VAR}>`, as under the section's own name, never the value the server's
+    environment gave the variable. The canonical-control row writes the
+    section's own name with the same row planted, and holds with or without
+    the retired-name match."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    _plant_the_retired_name(plant_scanner_alias)
+    monkeypatch.setenv("ASH_TEST_MARKER_VAR", _SERVER_VALUE)
+    checkout = _tree_with_ash_config_limit(
+        tmp_path, monkeypatch, _setting("${ASH_TEST_MARKER_VAR}", key=key)
+    )
+
+    result = mcp_get_config(search_dir=str(checkout))
+
+    assert _SERVER_VALUE not in json.dumps(result), result
+    marker = _marker_at(result, _ENV_OPTIONS["limit"][1])
+    assert marker == (
+        "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
+    ), marker
+
+
+@pytest.mark.parametrize(
+    "key", [_RETIRED_NAME, "detect-secrets"], ids=["retired-name", "canonical-control"]
+)
+def test_get_config_shows_a_limit_a_patch_adds_under_a_retired_name_by_its_reference(
+    tmp_path, monkeypatch, plant_scanner_alias, key
+):
+    """The no-file route of get_config, with the in-tree file ASH_CONFIG names
+    adding the limit's section with a ``patch`` under a retired scanner name,
+    as ${VAR}. The loader folds the added section onto detect-secrets' once
+    the patch has applied and moves the reference with it, so the marker on
+    detect-secrets' section finds it there and shows `<from ${VAR}>`, never
+    the value the server's environment gave the variable. The
+    canonical-control row adds the section under its own name with the same
+    row planted."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    _plant_the_retired_name(plant_scanner_alias)
+    monkeypatch.setenv("ASH_TEST_MARKER_VAR", _SERVER_VALUE)
+    checkout = _tree_with_ash_config_limit(
+        tmp_path, monkeypatch, _patch_adding(key, "${ASH_TEST_MARKER_VAR}")
+    )
+
+    result = mcp_get_config(search_dir=str(checkout))
+
+    assert _SERVER_VALUE not in json.dumps(result), result
+    marker = _marker_at(result, _ENV_OPTIONS["limit"][1])
     assert marker == (
         "<operator only; ignored from this file: <from ${ASH_TEST_MARKER_VAR}>>"
     ), marker

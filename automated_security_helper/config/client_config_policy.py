@@ -842,14 +842,16 @@ def client_file_denials(
 
     A session's client-patched profile copy holds each value its profile read
     from the environment as the reference text, and a scan's load fills the
-    operator's value in for it before the model is built. ``filled`` is what that
-    load recorded for each document (``ResolvedConfigDocument.filled_references``,
-    from ``resolve_config``): the documents are the filled ones, and a leaf that
-    holds such a value is the operator's own, not one the client chose. A copy
-    with nothing recorded (the documents a check reads before the scan, the
-    validator and the workspace resolver) is filled here the same way, from the
-    references ``rules.base`` read, and judged as filled, so every judge of a
-    copy applies one rule (``_filled_copy``).
+    operator's value in for it before the model is built. ``filled`` is what
+    that load recorded for each document
+    (``ResolvedConfigDocument.filled_references``, from ``resolve_config``):
+    the documents are the ones the scan built its configuration from, a leaf
+    that holds a value the load filled in is the operator's own, not one the
+    client chose, and a copy the load filled nothing in is judged as it is.
+    With no record (``filled`` None: the documents a check reads before the
+    scan, the validator and the workspace resolver), each copy is filled here
+    the same way, from the references ``rules.base`` read, and judged as
+    filled, so every judge of a copy applies one rule (``_filled_copy``).
 
     Raises:
         ASHConfigPolicyUnreadableError: A file is delivered and ``rules`` are
@@ -927,22 +929,28 @@ def _filled_copy(
     """(the references that are ``document``'s own, ``document`` as it is judged),
     for ``document``, the copy of a profile a client patched, read from ``path``.
 
-    A load that filled the copy from the operator's profile recorded what it read
-    (``filled``, by the document's path), and the documents it hands on are the
-    filled ones, so those references are the copy's own. A copy with no record is
-    filled here from the references ``base`` (the trusted profile's config) read,
-    as the load fills it (``environment_record.fill_environment_references``):
-    where the copy holds exactly the reference text the profile wrote, at the
-    place it wrote it, it gets the operator's value, and nothing else is read.
-    Each reference that was read is stamped as ``path``'s own.
+    A load that read the copy recorded what it filled in each file
+    (``filled``, by the document's path; an empty entry where it filled
+    nothing, resolve_config.load_config_file), and the documents it hands on
+    are the ones it built the configuration from: those references are the
+    copy's own, and the copy is judged as that load left it. Only a caller
+    that holds no record (``filled`` None: the check made before the scan,
+    the validator and the workspace resolver, which read the copy as it was
+    written) has the copy filled here from the references ``base`` (the
+    trusted profile's config) read, as the load fills it
+    (``environment_record.fill_environment_references``): where the copy
+    holds exactly the reference text the profile wrote, at the place it
+    wrote it, it gets the operator's value, and nothing else is read. Each
+    reference that was read is stamped as ``path``'s own.
     """
     from automated_security_helper.config.environment_record import (
         fill_environment_references,
     )
 
-    recorded = None if filled is None else filled.get(path)
-    if recorded is not None:
-        return tuple(recorded), document
+    if filled is not None:
+        # A load ran: a copy it filled nothing in is judged as the
+        # configuration the scan built from it, never filled again here.
+        return tuple(filled.get(path) or ()), document
     references = tuple(getattr(base, "_environment_references", None) or ())
     if not references:
         return (), document

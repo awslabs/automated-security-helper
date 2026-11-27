@@ -83,6 +83,7 @@ from automated_security_helper.config.config_sources import (
     read_config_text,
     resolve_config_document,
     resolve_override_segment,
+    served_scanner_place,
     unparsed_config_reason,
 )
 from automated_security_helper.config.archive_limits import confine_archive_limits
@@ -1340,7 +1341,19 @@ def _written_key_mappings(
         except (ASHConfigSourceError, yaml.YAMLError, OSError, ValueError):
             found.append((None, frozenset()))
             continue
-        found += mappings_with_written_reference_keys(written, (EXTENDS_KEY, PATCH_KEY))
+        # A mapping in a section written under a retired scanner name is named
+        # at the serving plugin's section, where the load's fold puts it
+        # (served_scanner_place). The written view is not folded itself: the
+        # fold keeps only the options the serving plugin declares, and a key
+        # written as a reference names none, so its mapping would be lost.
+        # Each is kept, one the fold leaves out of the configuration included,
+        # which the rules then find no place for.
+        found += [
+            (None if place is None else served_scanner_place(place), keys)
+            for place, keys in mappings_with_written_reference_keys(
+                written, (EXTENDS_KEY, PATCH_KEY)
+            )
+        ]
     return tuple(found)
 
 
@@ -1393,23 +1406,20 @@ def _record_overlay_reads(
     )
 
 
-def _layered_over(
-    document: Any, overlay: ResolvedConfigDocument, *, log: bool = True
-) -> Any:
+def _layered_over(document: Any, overlay: ResolvedConfigDocument) -> Any:
     """``document`` with the operator's overlay layered over it.
 
-    The one merge the load validates and the record of the configuration
-    repeats, so the two cannot differ. The project's document is folded first
-    (``fold_document_scanner_aliases``): a retired scanner name it wrote is
-    read as the serving plugin's own section before the operator's file is
-    layered over it, so the operator's file wins whichever spelling either one
-    uses. The overlay is the topmost document and is left for the model to
-    fold. ``log=False`` for the repeat, which mirrors a load that logged the
-    fold already.
+    The merge the load validates (load_config_file), which the record of the
+    configuration repeats. The record layers the overlay over the document
+    the project's chain resolved to; the load layers it over that document
+    once a fill has read the operator's values into it (load_config_file's
+    ``fill``), so where a fill read a value the two differ: the load holds
+    the value and the record the reference text. Every document the loader
+    returns has its retired scanner names folded already, the project's and
+    the overlay's alike (config_sources._resolve), so the layering is the
+    ordinary later-over-earlier one whichever name either file uses.
     """
-    return deep_merge(
-        fold_document_scanner_aliases(document, log=log), overlay.data, AshConfig
-    )
+    return deep_merge(document, overlay.data, AshConfig)
 
 
 def load_config_file(
@@ -1480,7 +1490,8 @@ def load_config_file(
     is filled on its own, and what the fill read in it is recorded on the
     returned document (``ResolvedConfigDocument.filled_references``), by the
     path ``documents`` names the file by: the client rules take a leaf holding
-    such a value as the operator's own.
+    such a value as the operator's own. A load with no ``fill`` records an
+    empty entry for each file.
 
     Raises:
         ASHConfigSourceError: The chain does not resolve. The message reads
@@ -1543,6 +1554,11 @@ def load_config_file(
             )
         document.documents = filled_documents
         document.filled_references = filled_references
+    else:
+        # A load that filled nothing records that it ran, an empty entry for
+        # each file, so the client rules judge each copy as this load left it
+        # instead of filling it themselves (client_config_policy._filled_copy).
+        document.filled_references = dict.fromkeys(document.documents, ())
     if overlay is not None and isinstance(data, dict):
         # A document that is not a mapping is left as it is, so its validation
         # error is still raised rather than replaced by the overlay's content.
@@ -5435,10 +5451,10 @@ def _resolve_config(
             if merged is not None:
                 data_for_record = document.data
                 if overlay is not None and isinstance(data_for_record, dict):
-                    # The same merge the load validated (deep_merge is pure),
-                    # so the record holds the overlaid document. The fold of
-                    # the project's document was logged by that load.
-                    data_for_record = _layered_over(data_for_record, overlay, log=False)
+                    # The merge the load validated (deep_merge is pure), so
+                    # the record holds the overlaid document; _layered_over
+                    # says where the two can differ.
+                    data_for_record = _layered_over(data_for_record, overlay)
                 merged.append(data_for_record)
             if documents_out is not None:
                 documents_out.update(document.documents)
@@ -6476,7 +6492,12 @@ def _operator_paths(
             except Exception:  # noqa: BLE001 - the chain was read already; nothing to add
                 own = None
         if isinstance(own, dict):
-            own = fold_known_plugin_sections(own)
+            # Folded as the load folded the file, known spellings and retired
+            # scanner names alike, so its keys are the merged document's. The
+            # load logged the fold.
+            own = fold_document_scanner_aliases(
+                fold_known_plugin_sections(own), log=False
+            )
             record.documents = [
                 _own_writes(document, own) if isinstance(document, dict) else own
             ]

@@ -3062,10 +3062,14 @@ def validated_with(
     the model it validates to and that model dumped as JSON, or None where the
     model refuses it (a validation error, or a value its dump cannot hold).
 
-    ``strict`` validates as a config file is loaded (``build_config``); left
-    off, the model's own settings apply. A copy of ``dumped`` is validated, and
-    a copy of ``value`` is what is placed, so a validator that edits its input
-    changes neither argument.
+    ``strict`` validates as a config file is loaded (``build_config``):
+    strict types, under the validation context the load runs under
+    (``resolve_config._entry_warn_context``), so an entry the load keeps
+    inert in warn mode (an unknown key in a suppression) is kept here too
+    instead of refused. Left off, the model's own settings apply, with no
+    context. A copy of ``dumped`` is validated, and a copy of ``value`` is
+    what is placed, so a validator that edits its input changes neither
+    argument.
     """
     from pydantic import ValidationError
 
@@ -3074,10 +3078,19 @@ def validated_with(
     for key in keys[:-1]:
         node = node[key]
     node[keys[-1]] = copy.deepcopy(value)
+    context: Optional[Dict[str, Any]] = None
+    if strict:
+        from automated_security_helper.config.resolve_config import (
+            _entry_warn_context,
+        )
+
+        context, _warned = _entry_warn_context(trial)
     try:
         # ``None`` is the parameter's own default: with ``strict`` off the call
         # reads as it always did, and a model that sets strictness itself keeps it.
-        model = type(config).model_validate(trial, strict=True if strict else None)
+        model = type(config).model_validate(
+            trial, strict=True if strict else None, context=context
+        )
         return model, model.model_dump(mode="json", by_alias=True)
     except (ValidationError, ValueError, TypeError):
         return None

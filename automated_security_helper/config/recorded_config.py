@@ -186,15 +186,28 @@ def _value_at(model: Any, segments: Sequence[str]) -> Tuple[bool, Any]:
     return True, node
 
 
-def _sets(model: Any, segments: Sequence[str]) -> bool:
-    """Whether ``model``'s operator set the field.
+def operator_named(model: Any, segments: Sequence[str]) -> bool:
+    """Whether ``model``'s operator set the field ``segments`` names.
 
     A freshly parsed model answers from ``model_fields_set``: every model on
     the way has the field there, as a configuration file that writes it does.
     A model ``apply_config_overrides`` rebuilt answers from the record it
-    stamped: the rebuild re-validates a full dump, which puts every field in
-    ``model_fields_set``, so the rebuilt model's own sets would say the
-    operator wrote every field whatever the file held."""
+    stamped (``override_field_paths``): the rebuild re-validates a full dump,
+    which puts every field in ``model_fields_set``, so the rebuilt model's own
+    sets would say the operator wrote every field whatever the file held.
+
+    The record holds what the configuration file wrote, less what a replacing
+    override overwrote (the whole subtree under the key it landed on), plus
+    each key each override wrote, spelled as the key it landed on
+    (``global-settings`` counts as ``global_settings``). An object value
+    counts only for the keys inside it:
+    ``global_settings.deduplication={"annotate": false}`` writes ``annotate``
+    and not ``fold``, and ``global_settings={"severity_threshold": "HIGH"}``
+    writes neither and takes a file's deduplication settings out of the
+    record with the rest of what the file wrote under ``global_settings``.
+    The append form on a scalar (``annotate+=false``) is applied as a plain
+    set, so it counts as one; an append to a list leaves the record as it
+    was."""
     from pydantic import BaseModel
 
     record = getattr(model, "_written_before_overrides", None)
@@ -221,6 +234,10 @@ def _sets(model: Any, segments: Sequence[str]) -> bool:
         else:
             return False
     return True
+
+
+#: The name the trust checks import; operator_named is the same function.
+_sets = operator_named
 
 
 def _canonical_segments(model: Any, segments: Sequence[str]) -> List[str]:
