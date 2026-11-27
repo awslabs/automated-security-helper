@@ -151,7 +151,7 @@ class _Chained(_Scripted):
     ``explicit`` (``raise ... from`` the first error) or ``suppressed``
     (``raise ... from None``)."""
 
-    mode = "implicit"
+    mode: str = "implicit"
 
     def scan(
         self,
