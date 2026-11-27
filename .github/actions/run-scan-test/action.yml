@@ -197,9 +197,21 @@ runs:
     # The python-local legs run `ash dependencies install`, which downloads the pinned
     # scanner release assets. Restored here, re-verified by ASH on every use, saved
     # after the scan from a push to main only. See the action for what it holds.
+    #
+    # The python-container legs download no release asset on the host, where ASH only
+    # builds and runs the image, but they run ASH, and every step that runs ASH maps
+    # ASH_TOOL_DOWNLOAD_CACHE from this step's output
+    # (tests/unit/test_build_handoffs_reach_every_consumer.py holds it to that). A
+    # skipped step's outputs are empty, so with this restore python-local only, those
+    # mappings were always an empty string: a line that read as a wired cache and was
+    # none. The restore runs for them too, as the action says it is meant to ("Restored
+    # everywhere"); the save below stays python-local only, since only a leg that
+    # downloads can add to the cache.
+    # tests/unit/test_run_scan_test_tool_cache_output_is_read_where_it_ran.py holds
+    # every step that reads this output to run in some context where this step ran.
     - name: Restore the tool download cache
       id: tool-cache
-      if: inputs.method == 'python-local'
+      if: inputs.method == 'python-local' || inputs.method == 'python-container'
       uses: ./.github/actions/tool-download-cache
       with:
         mode: restore
