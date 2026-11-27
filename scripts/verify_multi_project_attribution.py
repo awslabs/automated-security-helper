@@ -2298,7 +2298,7 @@ def build_scan_command(definition: Path, output_dir: Path) -> List[str]:
         "-m",
         "automated_security_helper.cli.main",
         "scan",
-        "--workspace",
+        "workspace",
         str(definition),
         "--output-dir",
         str(output_dir),

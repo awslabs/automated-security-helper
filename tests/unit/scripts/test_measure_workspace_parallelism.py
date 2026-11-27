@@ -40,7 +40,14 @@ def test_the_workspace_arm_names_the_same_scanners(measure, tmp_path: Path):
         tmp_path / "ws.code-workspace", tmp_path / "out"
     )
     assert _selected_scanners(command) == list(measure.GATE_SCANNERS)
-    assert "--workspace" in command
+    # ASH 3.9's spelling, `ash scan workspace FILE`: the tool times this tree's ASH.
+    start = command.index("scan")
+    assert command[start : start + 3] == [
+        "scan",
+        "workspace",
+        str(tmp_path / "ws.code-workspace"),
+    ]
+    assert "--workspace" not in command
 
 
 def test_the_set_is_the_two_scanners_the_fixture_exercises(measure):
