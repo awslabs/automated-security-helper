@@ -76,7 +76,7 @@ schema: 1
 template: docs/content/getting-started/x.md.template
 page: docs/content/getting-started/x.md
 twin:
-  scan: ash --scanners bandit --offline
+  scan: ash scan fs . --only-scanners bandit --offline
   timeout: 60
 body:
   - prose: |
@@ -107,7 +107,7 @@ body:
       lang: bash
       marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}
       body: |
-        ash --scanners bandit
+        ash scan fs . --only-scanners bandit
   - sample: |
       awslabs/automated-security-helper v{{RELEASE}}
   - prose: |

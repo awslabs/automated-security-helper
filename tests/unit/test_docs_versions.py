@@ -191,7 +191,7 @@ repos:
 
 ```bash
 export ASH_NIX_FLAKE_REF=github:awslabs/{REPO_URL.rsplit("/", 1)[1]}/v{{{{VERSION}}}}
-ash build-image --ash-revision-to-install v{{{{VERSION}}}}
+ash container build --ash-revision-to-install v{{{{VERSION}}}}
 ```
 
 ```yaml

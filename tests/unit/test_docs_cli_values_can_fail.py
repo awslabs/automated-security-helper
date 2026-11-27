@@ -115,27 +115,27 @@ CONVERTER = "jupyter"
 CLEAN_VALUES = f"""# Values
 
 {FENCE}bash
-ash --mode local --log-level QUIET --strategy sequential --build-target ci
-ash --sandbox AUTO --phases convert --phases scan
-ash --log-level=DEBUG --mode=precommit
-ash scan --scanners {SCANNER} --exclude-scanners {SCANNER},{SCANNER}
-ash --scanners {SCANNER.upper()} --output-formats sarif,junitxml -f html --format text
+ash scan fs . --mode local --log-level QUIET --strategy sequential --build-target ci
+ash scan fs . --sandbox AUTO --phases convert --phases scan
+ash scan fs . --log-level=DEBUG --mode=precommit
+ash scan fs . --scanners {SCANNER} --exclude-scanners {SCANNER},{SCANNER}
+ash scan fs . --scanners {SCANNER.upper()} --output-formats sarif,junitxml -f html --format text
 ash merge --results a --results b --output-formats sarif
 ash report --format {REPORTER}
 ash report --format {REPORTER.upper()}
 ash dependencies install --tool {SCANNER} --tool {REPORTER} -T {CONVERTER}
-ash --mode "$MODE" --scanners "${{SCANNERS}}"
-ash scan --ash-plugin-modules acme_plugins --scanners acme-scanner
+ash scan fs . --mode "$MODE" --scanners "${{SCANNERS}}"
+ash scan fs . --ash-plugin-modules acme_plugins --scanners acme-scanner
 ash report --format acme-format --config-overrides 'ash_plugin_modules+=[acme_plugins]'
-ash scan --ash-plugin-modules automated_security_helper.plugin_modules.x --scanners {SCANNER}
+ash scan fs . --ash-plugin-modules automated_security_helper.plugin_modules.x --scanners {SCANNER}
 {FENCE}
 
 <!-- doctest: illustrative reason="shows the synopsis with placeholders" -->
 {FENCE}bash
-ash --log-level <level> --mode <mode>
+ash scan fs . --log-level <level> --mode <mode>
 {FENCE}
 
-Run `ash --mode container` or `ash --mode <mode>`, and `ash report --format {REPORTER}`.
+Run `ash scan fs . --mode container` or `ash scan fs . --mode <mode>`, and `ash report --format {REPORTER}`.
 """
 
 VALUE_DEFECTS = [
@@ -225,7 +225,7 @@ VALUE_DEFECTS = [
     ),
     (
         "inline span",
-        "Run `ash --mode containr` to scan.\n",
+        "Run `ash scan fs . --mode containr` to scan.\n",
         "not 'containr'",
         1,
     ),
@@ -349,7 +349,7 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     # ... and on a command whose exit 2 is the findings code, it is still reported.
     scan_text = (
         f"<!-- doctest: run expect-exit=2 -->\n{FENCE}bash\n"
-        f"ash --source-dir . --scanners banditt --offline\n{FENCE}\n"
+        f"ash scan fs . --scanners banditt --offline\n{FENCE}\n"
     )
     _assert_reports(_check(cli_root, scan_text), "named 'banditt'", 3)
 
@@ -360,12 +360,12 @@ def test_a_run_block_that_expects_the_usage_error_may_show_a_refused_value(
     [
         (
             "ash dependencies install --tool gryp",
-            "ash --mode containr --version",
+            "ash scan fs . --mode containr --version",
             "not 'containr'",
             4,
         ),
         (
-            "ash --log-level LOUD --version",
+            "ash scan fs . --log-level LOUD --version",
             "ash dependencies install --tool gryp",
             "named 'gryp'",
             4,
@@ -404,13 +404,13 @@ def test_a_subshell_paren_ends_the_word_before_it():
 # Commands outside shell blocks
 # ---------------------------------------------------------------------------
 
-BAD = "ash scan --no-such-option"
-NOT_AN_OPTION = "--no-such-option is not an option of 'ash scan'"
+BAD = "ash scan fs . --no-such-option"
+NOT_AN_OPTION = "--no-such-option is not an option of 'ash scan fs'"
 
 CLEAN_FORMS = f"""# Commands in other forms
 
 {FENCE}text
-ash scan --offline
+ash scan fs . --offline
   ash --version
 ASH is a scanner; ash-like words such as ashtray are not commands.
 ash [OPTIONS] COMMAND [ARGS]...
@@ -424,7 +424,7 @@ pipeline {{
       steps {{
         sh '''
           (cd "$WORKSPACE_TMP" && ash dependencies install --tool {SCANNER})
-          ash scan --mode local \\\\
+          ash scan fs . --mode local \\\\
             --fail-on-findings
         '''
         sh "ash --version"
@@ -436,8 +436,8 @@ pipeline {{
 {FENCE}
 
 {FENCE}diff
-- ash scan --a-removed-option
-+ ash scan --offline
+- ash scan fs . --a-removed-option
++ ash scan fs . --offline
   ash --version
 {FENCE}
 
@@ -447,12 +447,12 @@ ash --this-is-output
 {FENCE}
 
 {FENCE}bash-session
-$ ash scan --offline
+$ ash scan fs . --offline
 {FENCE}
 
 ````markdown
 {FENCE}bash
-ash --mode container --source-dir .
+ash scan fs . --mode container
 {FENCE}
 ````
 
@@ -462,12 +462,12 @@ echo the output sample below is this block's
 
 <!-- doctest: output -->
 {FENCE}text
-ash scan default                        -> exit 0
+ash scan fs default                     -> exit 0
 {FENCE}
 
 Run this:
 
-    ash scan --offline \\
+    ash scan fs . --offline \\
       --fail-on-findings
 
 > {FENCE}bash
@@ -477,7 +477,7 @@ Run this:
 > ash is quoted prose here, not a command.
 
 {FENCE}json5
-{{command: "ash scan --no-such-option inside a string is not a line"}}
+{{command: "ash scan fs . --no-such-option inside a string is not a line"}}
 {FENCE}
 
 {FENCE}ini
@@ -490,13 +490,13 @@ FORM_DEFECTS = [
     ("text", f"{FENCE}text\n{BAD}\n{FENCE}\n", 2),
     (
         "synopsis with a bad option",
-        f"{FENCE}text\nash scan [OPTIONS] --no-such-option\n{FENCE}\n",
+        f"{FENCE}text\nash scan fs [OPTIONS] --no-such-option\n{FENCE}\n",
         2,
     ),
     ("text with a prompt", f"{FENCE}text\n$ {BAD}\n{FENCE}\n", 2),
     (
         "text continued",
-        f"{FENCE}text\nash scan --offline \\\n  --no-such-option\n{FENCE}\n",
+        f"{FENCE}text\nash scan fs . --offline \\\n  --no-such-option\n{FENCE}\n",
         2,
     ),
     (
@@ -516,7 +516,7 @@ FORM_DEFECTS = [
         3,
     ),
     ("markdown", f"````markdown\n{FENCE}bash\n{BAD}\n{FENCE}\n````\n", 3),
-    ("diff", f"{FENCE}diff\n- ash scan --old\n+ {BAD}\n{FENCE}\n", 3),
+    ("diff", f"{FENCE}diff\n- ash scan fs . --old\n+ {BAD}\n{FENCE}\n", 3),
     ("diff context", f"{FENCE}diff\n  {BAD}\n{FENCE}\n", 2),
     ("shell-session", f"{FENCE}shell-session\n$ {BAD}\noutput\n{FENCE}\n", 2),
     ("bash-session", f"{FENCE}bash-session\n$ {BAD}\n{FENCE}\n", 2),
