@@ -32,6 +32,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
 
+from automated_security_helper.core.report_identity import (
+    GITLAB_ANALYZER_NAME,
+    GITLAB_SCANNER_NAME,
+)
 from automated_security_helper.models.flat_vulnerability import (
     recorded_artifact_path,
 )
@@ -996,14 +1000,14 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
         scan: Dict[str, Any] = {
             "analyzer": {
                 "id": "ash",
-                "name": "Automated Security Helper (ASH)",
+                "name": GITLAB_ANALYZER_NAME,
                 "version": get_ash_version(),
                 "vendor": {"name": "ASH"},
                 "url": "https://github.com/aws-samples/automated-security-helper",
             },
             "scanner": {
                 "id": "automated-security-helper",
-                "name": "Automated Security Helper",
+                "name": GITLAB_SCANNER_NAME,
                 "version": get_ash_version(),
                 "vendor": {"name": "ASH"},
                 "url": "https://github.com/awslabs/automated-security-helper",

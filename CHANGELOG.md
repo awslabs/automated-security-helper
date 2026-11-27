@@ -114,6 +114,11 @@
 
 ### Maintenance
 
+- Internal change, no output change: the strings ASH writes to identify itself in
+  its reports (the SARIF driver name, the GitHub code-scanning, GitLab SAST, OCSF
+  and ASFF product names, and the aggregated report's names) are now defined once in
+  `automated_security_helper/core/report_identity.py`, and every writer and every
+  comparison imports them. A unit test fails if a literal copy returns.
 - Removed the four stale `.ash.yaml` suppressions for GHSA-g3hv-75wg-m249 /
   CVE-2026-118764 (minimatch globparts amplification): they pinned the minimatch
   10.2.5 copy bundled inside aws-cdk-lib 2.273.0, and the aws-cdk-lib 2.278.0 bump

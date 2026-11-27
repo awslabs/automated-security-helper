@@ -59,6 +59,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
+from automated_security_helper.core.report_identity import ASFF_PRODUCT_NAME
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.finding_identity import (
     CORRELATION_ID_PROPERTY,
@@ -125,7 +126,7 @@ _CVE_PATTERN = re.compile(r"\bCVE-\d{4}-\d{4,}\b", re.IGNORECASE)
 # for CompanyName and ProductName: "You cannot update this attribute with
 # BatchImportFindings or BatchUpdateFindings. The exception to this is a custom
 # integration."
-PRODUCT_NAME = "Automated Security Helper"
+PRODUCT_NAME = ASFF_PRODUCT_NAME
 COMPANY_NAME = "AWS Labs"
 
 # An ISO 8601 timestamp, split so it can be rewritten into the forms

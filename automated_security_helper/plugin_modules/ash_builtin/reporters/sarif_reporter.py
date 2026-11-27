@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, TYPE_CHE
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.base.options import ReporterOptionsBase
+from automated_security_helper.core.report_identity import SARIF_DRIVER_NAME
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
@@ -188,7 +189,7 @@ def _run_carrying(invocations: List[Any]) -> Run:
     return Run(
         tool=Tool(
             driver=ToolComponent(
-                name="AWS Labs - Automated Security Helper",
+                name=SARIF_DRIVER_NAME,
                 version=get_ash_version(),
                 organization="Amazon Web Services",
             )

@@ -15,6 +15,7 @@ import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple, TYPE_CHECKING
 
+from automated_security_helper.core.report_identity import SARIF_DRIVER_NAME
 from automated_security_helper.utils.secret_masking import (
     mask_secret_in_text,
     _mask_secret_value,
@@ -24,7 +25,7 @@ from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
 if TYPE_CHECKING:
     from automated_security_helper.schemas.sarif_schema_model import Region, Result, Run
 
-_GENERIC_ASH_TOOL_NAME = "AWS Labs - Automated Security Helper"
+_GENERIC_ASH_TOOL_NAME = SARIF_DRIVER_NAME
 CONTEXT_PROPERTY = "ash_occurrence_context"
 MERGE_MARKER = "ash_occurrence_context_version"
 CONTEXT_VERSION = 1
