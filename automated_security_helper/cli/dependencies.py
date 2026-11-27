@@ -2841,17 +2841,43 @@ def _routed_commands(
 
 
 def _on_search_path(directory: Path) -> bool:
-    """Whether ``directory`` is one of PATH's anchored entries, compared by real path.
+    """Whether ``directory`` is one of PATH's anchored entries.
 
     A scan searches the directories PATH names and never the working directory, so
     a relative entry (``.``, ``bin``, an empty one) names nothing a scan looks in.
+
+    An entry is the directory when the two real paths agree, once case is folded where
+    the platform folds it. A real path replaces symbolic links and keeps every other
+    component as written, so two spellings of one directory can still differ: another
+    letter case on a case-insensitive volume (the macOS default), or a bind mount at
+    another path. A scan reads such an entry as it is spelled and finds the tool
+    there. So when the real paths differ, the entry is the directory when its device
+    and inode are, as ``os.stat`` reads them through a link too. A filesystem that
+    reports no inode numbers (inode 0) is compared by real path alone, so it does not
+    match every directory.
     """
     wanted = os.path.normcase(os.path.realpath(directory))
-    return any(
-        os.path.normcase(os.path.realpath(entry)) == wanted
-        for entry in os.environ.get("PATH", "").split(os.pathsep)
-        if entry and is_anchored(entry)
+    try:
+        target: Optional[os.stat_result] = os.stat(directory)
+    except OSError:
+        target = None
+    identity = (
+        (target.st_dev, target.st_ino) if target is not None and target.st_ino else None
     )
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not is_anchored(entry):
+            continue
+        if os.path.normcase(os.path.realpath(entry)) == wanted:
+            return True
+        if identity is None:
+            continue
+        try:
+            found = os.stat(entry)
+        except OSError:
+            continue
+        if (found.st_dev, found.st_ino) == identity:
+            return True
+    return False
 
 
 def _names_the_same_file(first: str, second: Optional[str]) -> bool:
@@ -2899,7 +2925,11 @@ def _managed_executable(
     next directory. Each directory is read as a scan reads it:
 
     * The virtualenv's scripts directory is searched only when PATH names it, which is
-      the one way a scan reaches it, and as a PATH entry (``_which_in_path_entry``,
+      the one way a scan reaches it. An anchored entry names it when its real path is
+      the directory's or, when the real paths differ, its device and inode are
+      (``_on_search_path``), so an entry that spells the directory in another letter
+      case on a case-insensitive volume, or reaches it through a bind mount, names it,
+      as it does for a scan. It is searched as a PATH entry (``_which_in_path_entry``,
       which the scan's own PATH search calls): each file name a scan tries for the
       command, read through ``shutil.which``. On Windows with Python 3.12 or later that
       reads a name with each suffix of PATHEXT, and the bare name only when it already
