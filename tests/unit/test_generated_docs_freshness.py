@@ -1282,7 +1282,10 @@ def test_output_formats_say_which_values_write_a_report(tmp_path: Path) -> None:
     """``--output-formats`` is checked against ExportFormat, and only reporter names write.
 
     A value that names no reporter is accepted and writes nothing; a reporter whose
-    name is not an ExportFormat value is refused (cli/scan.py's parse loop).
+    name is not an ExportFormat value is refused (cli/scan.py's parse loop, and
+    ``_parse_output_formats`` of cli/merge.py). Every row of the page that is the
+    option of a command says so, found by its anchor, so a command that takes the
+    option is read whether or not this test names it.
     """
     formats = set(
         _in_code_tree(
@@ -1296,9 +1299,15 @@ def test_output_formats_say_which_values_write_a_report(tmp_path: Path) -> None:
     )
     reporters = _builtin_reporter_names()
     assert reporters, "no built-in reporters read from reporters.md"
-    _assert_output_formats_row(
-        _row(_page("cli.md"), "scan--output-formats"), formats, reporters
-    )
+    page = _page("cli.md")
+    anchors = re.findall(r'<a id="([a-z-]*--output-formats)"></a>', page)
+    # The commands that run a scan are the ones whose row lost its note when `ash scan`
+    # became a group, so a page that has no row for them is read as a failure.
+    assert {"scan-fs--output-formats", "scan-workspace--output-formats"} <= set(
+        anchors
+    ), anchors
+    for anchor in anchors:
+        _assert_output_formats_row(_row(page, anchor), formats, reporters)
 
 
 def _assert_output_formats_row(row: str, formats: set, reporters: set) -> None:
