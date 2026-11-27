@@ -62,7 +62,7 @@ from automated_security_helper.utils.numeric_text import purely_numeric
 from automated_security_helper.utils.redacted_model import value_tuple
 from automated_security_helper.utils.sarif_utils import (
     _resolve_result_severity,
-    is_not_a_finding,
+    result_states_no_finding,
 )
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_COUNT_KEYS,
@@ -1700,7 +1700,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # a reader can tell a suppressed or below-threshold finding from an
             # analyzed one; None for a finding the analysis took.
             indexed["left_out"] = self._left_out_reason(
-                finding_dict, is_actionable, excluded_types, is_secret
+                finding_dict, is_actionable, excluded_types, is_secret, result
             )
 
             if is_secret:
@@ -1723,13 +1723,20 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         is_actionable: bool,
         excluded_types: set,
         is_secret: bool,
+        result: Any = None,
     ) -> Optional[str]:
-        """Why the analysis left ``finding_dict`` out, or None when it took it."""
+        """Why the analysis left ``finding_dict`` out, or None when it took it.
+
+        A result that states no finding is left out as not a finding, suppressed
+        or not: the finding rule is read before the suppression. *result* is the
+        full SARIF result when the caller has it, since *finding_dict* drops
+        defaulted fields.
+        """
         if not is_actionable:
+            if result_states_no_finding(result if result is not None else finding_dict):
+                return "not a finding"
             if finding_dict.get("suppressions"):
                 return "suppressed"
-            if is_not_a_finding(finding_dict):
-                return "not a finding"
             return "below threshold"
         if excluded_types and not is_secret:
             return "excluded"
@@ -1822,9 +1829,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         (which a workspace ceiling can tighten) and can leave out policy-added
         scanners; this uses each scanner's threshold, so the two can differ there.
 
-        Not suppressed, not a result whose kind states no finding (``pass``,
-        ``notApplicable`` or ``informational``: the gate counts none of them, at
-        any level), and its severity (``result_severity``, which reads
+        Not suppressed, not a result that states no finding (a kind of ``pass``,
+        ``notApplicable`` or ``informational`` with a level of none and nothing
+        declared above INFO: the gate counts none of them), and its severity (``result_severity``, which reads
         ``issue_severity`` first) fails *threshold*, the threshold of the scanner
         that reported it. A ``properties.below_threshold`` flag alone would not
         do: nothing in ASH sets it, so every unsuppressed finding would be sent,
@@ -1838,7 +1845,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             return True
         if finding_dict.get("suppressions"):
             return False
-        if is_not_a_finding(result if result is not None else finding_dict):
+        if result_states_no_finding(result if result is not None else finding_dict):
             return False
         if (finding_dict.get("properties") or {}).get(BELOW_THRESHOLD_PROPERTY):
             return False

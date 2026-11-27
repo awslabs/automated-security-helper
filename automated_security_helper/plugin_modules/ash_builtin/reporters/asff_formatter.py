@@ -71,7 +71,8 @@ from automated_security_helper.utils.finding_identity import (
 from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.sarif_utils import (
     _resolve_result_severity,
-    is_not_a_finding,
+    is_result_suppressed,
+    result_states_no_finding,
     shared_correlation_ids,
 )
 
@@ -245,8 +246,12 @@ class AsffFormatter:
         # keys depend on the run's other results, and the correlation ids are read
         # by position from the flattened findings of the whole run. Only the list
         # returned leaves out a result whose kind states no finding (``pass``,
-        # ``notApplicable``, ``informational``), which its level ``none`` would
-        # otherwise export to Security Hub as an INFORMATIONAL finding.
+        # ``notApplicable``, ``informational``, with a level of none and nothing
+        # declared above INFO), which would otherwise be exported to Security Hub
+        # as an INFORMATIONAL finding. A result of such a kind that reports a
+        # problem is a finding and is exported. A suppressed result that states no
+        # finding is still sent, as ARCHIVED, so that an earlier import of it is
+        # archived.
         return [
             self._to_asff(
                 entry,
@@ -258,7 +263,8 @@ class AsffFormatter:
                 timestamp=timestamp,
             )
             for entry, key in zip(prepared, keys)
-            if not is_not_a_finding(entry["result"])
+            if not result_states_no_finding(entry["result"])
+            or is_result_suppressed(entry["result"])
         ]
 
     def _prepare(

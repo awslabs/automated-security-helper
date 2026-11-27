@@ -37,9 +37,9 @@ from automated_security_helper.models.flat_vulnerability import (
 )
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,
-    is_not_a_finding,
     result_message_text,
     result_rule_id,
+    result_states_no_finding,
     shared_correlation_ids,
     shared_finding_ids,
     suppressions_in_effect,
@@ -294,7 +294,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             descriptors = rule_descriptors_by_result(recorded_sarif)
             ASH_LOGGER.trace("Creating rule dict")
             for index, result in enumerate(all_results):
-                if is_not_a_finding(result):
+                if result_states_no_finding(result):
                     continue
                 # Scoped to one result so that a result this reporter cannot
                 # transform costs that result rather than the entire report. The

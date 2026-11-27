@@ -97,10 +97,10 @@ from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.finding_identity import CORRELATION_ID_PROPERTY
 from automated_security_helper.utils.sarif_utils import (
-    is_not_a_finding,
     result_message_text,
     result_rule_id,
     result_scanner_name,
+    result_states_no_finding,
     shared_correlation_ids,
     shared_finding_ids,
     suppressions_in_effect,
@@ -437,14 +437,14 @@ def _fallback_identities(
     in every other report (the flattened id's occurrence counter), instead of one
     finding a SIEM sees twice and merges.
 
-    A result that states no finding (:func:`is_not_a_finding`) is left out of the
+    A result that states no finding (:func:`result_states_no_finding`) is left out of the
     array, so it has no identity and takes no number: counted, it shifted the
     occurrence number of every identical finding after it when a rule stopped
     evaluating, and the uids of those findings changed with it.
     """
     keys: List[Optional[str]] = [
         None
-        if shared_id or is_not_a_finding(result)
+        if shared_id or result_states_no_finding(result)
         else _identity_key(result, result_rule_id(result) or "Unknown Rule")
         for result, shared_id in zip(results, shared_ids)
     ]
@@ -1566,7 +1566,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                 f"Processing SARIF result {i + 1}/{total_results_count}: {rule_id}"
             )
 
-            if is_not_a_finding(result):
+            if result_states_no_finding(result):
                 # Evaluated and passed, not applicable, or informational: not
                 # a vulnerability finding, and neither a success nor a failure
                 # of the conversion. Counted here and taken off the total after
@@ -1638,7 +1638,8 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         if non_finding_count:
             ASH_LOGGER.info(
                 f"{non_finding_count} SARIF result(s) state no problem (kind pass, "
-                "notApplicable or informational) and are not OCSF findings"
+                "notApplicable or informational, with no level or severity that "
+                "reports one) and are not OCSF findings"
             )
 
         # Log comprehensive processing statistics. A degraded record is a

@@ -640,9 +640,12 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
 
     The rule is found among the driver's and the extensions' rules
     (:func:`_rule_for_result`); a merged report keeps every scanner's rules in
-    ``tool.extensions``. A result whose ``kind`` states no finding (``pass``,
-    ``notApplicable``, ``informational``; :func:`is_not_a_finding`) is left as it
-    is: a rule's severity written onto it turned a non-verdict into a graded one.
+    ``tool.extensions``. A result that states no finding (a ``kind`` of ``pass``,
+    ``notApplicable`` or ``informational`` with a level of none and nothing declared
+    above INFO; :func:`result_states_no_finding`) is left as it is: a rule's
+    severity written onto it turned a non-verdict into a graded one. A result of
+    such a kind that reports a problem by its level is a finding and is graded as a
+    ``fail`` is.
     ``open`` and ``review`` assert a finding that a reader still has to judge, so
     their results are graded as a ``fail`` is: skipped, a ``review`` result with a
     critical rule score fell to its SARIF level and a scan that failed a ``high``
@@ -669,7 +672,7 @@ def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
                 rules_by_id.setdefault(rule.id, rule)
 
         for result in run.results or []:
-            if is_not_a_finding(result):
+            if result_states_no_finding(result):
                 continue
             if result.properties:
                 current = getattr(result.properties, "issue_severity", None)
