@@ -714,7 +714,13 @@ def test_the_document_fold_logs_only_when_asked_to(retired_oldname, caplog):
     }
 
     def about_the_retired_name():
-        return [r for r in caplog.records if "oldname" in r.getMessage()]
+        # The fold's lines name the plugin a retired name serves, never the
+        # name a file wrote.
+        return [
+            r
+            for r in caplog.records
+            if "a retired name of the bandit plugin" in r.getMessage()
+        ]
 
     with caplog.at_level(logging.INFO, logger="ash"):
         fold_document_scanner_aliases(document)
