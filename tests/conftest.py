@@ -54,7 +54,7 @@ from tests.utils.env_assertions import (
     redacted_environment_values,
     redacted_shown,
 )
-from tests.utils.helpers import get_ash_temp_path
+from tests.utils.helpers import get_ash_temp_path, record_run_basetemp
 
 # The hooks that run one shard of the suite under ASH_TEST_SHARD (no-ops without it).
 # Imported by name so pytest registers them as this conftest's own hooks;
@@ -544,6 +544,9 @@ def pytest_configure(config):
     # Reads ASH_TEST_SHARD once and removes it from os.environ, so no child pytest a
     # test starts inherits it; see tests/utils/sharding.py.
     sharding.configure(config)
+    # Keeps the run's base temp directory where the repository walkers can read it, so
+    # iter_repo_files leaves it out of a walk that reaches it (tests/utils/helpers.py).
+    record_run_basetemp(config)
     # Register custom markers
     config.addinivalue_line(
         "markers", "unit: Unit tests that test individual components in isolation"

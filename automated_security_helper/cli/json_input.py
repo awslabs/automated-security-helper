@@ -55,6 +55,10 @@ from urllib.request import url2pathname
 import typer
 from typer.core import TyperCommand, TyperOption
 
+# The spelling of --cli-json-input lives in core.constants, where the wrapper contract
+# (interactions/wrapper_contract.py, a layer below this one) can read it; it is
+# re-exported from here, see __all__.
+from automated_security_helper.core.constants import CLI_JSON_INPUT_FLAG
 from automated_security_helper.utils.console import echo_raw
 from automated_security_helper.utils.error_text import (
     error_text,
@@ -83,7 +87,6 @@ from typer._click.types import (
 from typer._types import TyperChoice
 from typer.models import TyperPath
 
-CLI_JSON_INPUT_FLAG = "--cli-json-input"
 GENERATE_CLI_SKELETON_FLAG = "--generate-cli-skeleton"
 _FILE_URI_PREFIX = "file://"
 

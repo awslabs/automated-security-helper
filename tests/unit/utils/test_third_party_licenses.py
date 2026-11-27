@@ -26,6 +26,7 @@ image build checks both on every build (install-pinned-tool refuses a missing
 member or a digest mismatch), and the container legs re-check the finished image.
 """
 
+import dataclasses
 import importlib.util
 import re
 import subprocess  # nosec B404 - runs this interpreter for the license table's own version probe
@@ -405,6 +406,69 @@ class TestTheDockerfileInstallsEveryEntry:
         for tool, entry in THIRD_PARTY_LICENSES.items():
             if entry.version_probe:
                 assert not entry.executables, tool
+
+    def test_probed_entries_keep_the_default_version_args(self):
+        """A probe replaces the PATH check, so version_args there would be ignored."""
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            if entry.version_probe:
+                assert entry.version_args == ("--version",), tool
+
+    def test_every_executable_is_asked_its_version_with_some_argument(self):
+        """Run with no arguments a tool does whatever it does by default, which is
+        not printing a version: crane prints its usage, other programs start work."""
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            # A tuple and not a bare str: the license check unpacks it into the
+            # command, so `version_args="version"` would run `crane v e r s i o n`.
+            assert isinstance(entry.version_args, tuple), tool
+            assert entry.version_args, tool
+            assert all(isinstance(a, str) and a for a in entry.version_args), tool
+
+    def test_how_a_tool_is_asked_its_version_reaches_neither_the_index_nor_the_source(
+        self,
+    ):
+        """The image's index.json and every SOURCE file are written from the entry's
+        license fields. Changing the arguments a tool is asked its version with
+        changes neither, so adding the field left the shipped license files as they
+        were."""
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            asked_differently = dataclasses.replace(
+                entry, version_args=("--no-such-flag",)
+            )
+            assert asked_differently.index_record() == entry.index_record(), tool
+            assert asked_differently.source_notice() == entry.source_notice(), tool
+            assert asked_differently.source_notice(
+                "https://example/x.tgz"
+            ) == entry.source_notice("https://example/x.tgz"), tool
+
+    def test_the_comparison_above_can_tell_two_entries_apart(self):
+        """Control: a changed license field does reach the index and the notice."""
+        entry = THIRD_PARTY_LICENSES["crane"]
+        other = dataclasses.replace(entry, commit="1" * 40)
+        assert other.index_record() != entry.index_record()
+        assert other.source_notice() != entry.source_notice()
+
+    def test_the_smoke_step_and_the_license_check_ask_the_same_question(self):
+        """The core stage runs each tool's version right after installing it, and the
+        license check asks the same tool again. crane's step was `RUN crane version`
+        from the start while the check ran `crane --version`, which crane refuses, so
+        every image build stopped at the check. The step knew the spelling the entry
+        did not."""
+        core = _core_stage(DOCKERFILE.read_text())
+        compared = []
+        for tool, entry in THIRD_PARTY_LICENSES.items():
+            if entry.version_probe:
+                continue
+            program = entry.executable_names[0]
+            pattern = rf"^RUN {re.escape(program)} (--version|version|-V|-v)$"
+            for argument in re.findall(pattern, core, flags=re.MULTILINE):
+                compared.append(tool)
+                assert (argument,) == entry.version_args, (
+                    f"the core stage runs `{program} {argument}` but the license "
+                    f"check runs `{program} {' '.join(entry.version_args)}`"
+                )
+        # Control for the pattern: it finds crane's step, whose spelling differs, and
+        # grype's, which takes --version, so a pattern that matched nothing fails here.
+        assert {"crane", "grype"} <= set(compared), compared
 
     def test_verification_runs_after_ash_dependencies_install(self):
         """opengrep only exists once `ash dependencies install` has run."""

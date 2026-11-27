@@ -171,9 +171,14 @@ def test_control_one_name_in_two_cases_under_two_env_mappings_is_accepted():
         "          http_proxy: http://127.0.0.1:9\n"
     )
     document = _load_unique(sibling)
-    assert document["env"] == {"HTTP_PROXY": "http://127.0.0.1:9"}
+    # Each env mapping is read by its names, then by the value of the one name it
+    # holds. A comparison with a whole mapping prints the mapping when it fails,
+    # which tests/unit/test_no_assertion_names_an_environment_mapping.py refuses.
+    assert sorted(document["env"]) == ["HTTP_PROXY"]
+    assert document["env"]["HTTP_PROXY"] == "http://127.0.0.1:9"
     step = document["jobs"]["scan"]["steps"][0]
-    assert step["env"] == {"http_proxy": "http://127.0.0.1:9"}
+    assert sorted(step["env"]) == ["http_proxy"]
+    assert step["env"]["http_proxy"] == "http://127.0.0.1:9"
 
 
 def test_the_scan_workflow_declares_its_artifact_id_output_once():
