@@ -3,5 +3,17 @@
     "version": "main",
     "title": "main (unreleased)",
     "aliases": []
+  },
+  {
+    "version": "3.8.0",
+    "title": "3.8.0",
+    "aliases": [
+      "latest"
+    ]
+  },
+  {
+    "version": "3.7.1",
+    "title": "3.7.1",
+    "aliases": []
   }
 ]
