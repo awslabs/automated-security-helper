@@ -222,7 +222,7 @@ as written. Three attribution columns say which image it came from:
 |---|---|
 | `image_ref` | The image as submitted: the reference, or the archive or layout path. |
 | `image_digest` | The image's sha256 **manifest digest**, when one is named, read from these sources in order: the tool's own run output (trivy records `repoDigests`), the digest the lookup ladder resolved for a tag-only reference (the local engine, then `crane digest`; see above) or the digest a pinned reference (`repo@sha256:...`) states, else trivy's config-blob `imageID` -- last because it is a *different* value for the same image, used only when nothing names the manifest, as for a locally built, never-pushed image. Empty only when every source failed, as for a tag-only reference with no engine record whose registry read also failed (`crane` missing, or the registry unreachable). |
-| `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
+| `layer_digest` | The digest of the layer the finding comes from, for trivy findings. trivy's SARIF carries no layer data, so ASH runs trivy once more with JSON output, joins each result to the SARIF by finding (vulnerability: CVE and package; secret: rule, target and start line; misconfiguration: check ID and target), and writes the layer's `Digest`, else its `DiffID`. A finding two layers both report, or one the JSON pass cannot match, stays empty. The second run happens only when it reads the same bytes as the first: for a saved archive or layout, or a reference that carries its digest (`repo@sha256:...`, or a tag whose digest the registry lookup named, which trivy is then handed pinned). A tag without a digest, such as one the local engine resolved, gets no second run and an empty column, and the scan logs a warning that says to pin the reference by digest. If the second pass fails the scan still succeeds with the column empty. syft reports no findings and grype's output has no layer data, so their findings carry none. Attribution only. |
 
 **The id-stability contract.** A finding's id keys on the in-image path and the scan's
 one subject key: the digest the scan start resolved (the ladder above, a pinned
@@ -321,7 +321,9 @@ registry rung).
 
 - Only grype, syft and trivy read images. Every other scanner is filesystem-only and is
   reported SKIPPED for an image scan.
-- `layer_digest` is filled for trivy findings only.
+- `layer_digest` is filled for trivy findings only, and only for a saved archive or
+  layout or a reference that carries its digest; a tag the local engine resolved gets
+  none until it is pinned by digest.
 - `--baseline`, shards, `--staged`, `--changed-files-only`, `--use-existing`,
   `--sandbox` and convert-only are refused with an image, as above.
 - Ignore paths reach the tools as absolute in-image globs only; relative patterns and

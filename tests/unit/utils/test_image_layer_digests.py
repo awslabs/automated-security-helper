@@ -264,12 +264,9 @@ class TestTheScannerRunsTheLayerPass:
         return seen
 
     def _args(self, scanner, tmp_path):
-        scanner._image_layers_json = tmp_path / "layers.json"
-        # An engine's own store serves the tag: one store, read twice within
-        # one scan, so the join is sound and the pass runs. The bare-tag rows
-        # below clear this to pin the guard.
-        scanner._image_engine_socket = "/run/docker.sock"
-        return ["trivy", "image", "--format", "sarif", "--output", "/o.sarif", "ref"]
+        # A digest names one manifest wherever it is read, so both runs read the
+        # same bytes and the pass runs. The bare-tag rows below pin the guard.
+        return self._argv_naming(scanner, tmp_path, PINNED_REF)
 
     def test_the_second_pass_asks_for_json_and_fills_the_column(
         self, tmp_path, monkeypatch
@@ -312,19 +309,16 @@ class TestTheScannerRunsTheLayerPass:
     ):
         # A tag no local store serves can resolve to a DIFFERENT manifest on
         # the second pull, and layers joined across two images attribute the
-        # wrong build: the pass is skipped, running nothing.
+        # wrong build: the pass is skipped, running nothing. The tool's start is
+        # recorded, not made to raise: the pass catches a raise as its own
+        # failure, so a raise could not tell a skipped pass from one that ran.
         scanner = self._scanner(tmp_path)
-
-        def never(argv, **kwargs):  # pragma: no cover - the assertion
-            raise AssertionError("the skipped pass must not run the tool")
-
-        monkeypatch.setattr(
-            "automated_security_helper.utils.subprocess_utils.spawn_run", never
-        )
-        args = self._args(scanner, tmp_path)
+        seen = self._fake_spawn(monkeypatch, None)
+        args = self._argv_naming(scanner, tmp_path, "ref")
         scanner._image_engine_socket = None
         report = _captured_sarif()
         assert scanner._attach_image_layers(report, args) == 0
+        assert "argv" not in seen
         assert _layer_of(report) == [None]
 
     def test_a_digest_pinned_reference_runs_without_an_engine(
@@ -339,11 +333,10 @@ class TestTheScannerRunsTheLayerPass:
         seen = self._fake_spawn(monkeypatch, document)
         args = self._args(scanner, tmp_path)
         scanner._image_engine_socket = None
-        args[-1] = "registry.example.com/team/app@sha256:" + "a" * 64
         report = _captured_sarif()
         assert scanner._attach_image_layers(report, args) == 1
         assert _layer_of(report) == [LAYER]
-        assert seen["argv"][-1] == args[-1]
+        assert seen["argv"][-1] == PINNED_REF
 
     def _argv_naming(self, scanner, tmp_path, subject):
         """The pass's invocation with *subject* as the reference, last."""
@@ -451,24 +444,20 @@ class TestTheScannerRunsTheLayerPass:
     def test_the_scans_own_argv_still_skips_a_bare_tag_with_no_engine(
         self, tmp_path, monkeypatch
     ):
-        # The control, through the same resolution: a tag no local store
-        # serves is still not read a second time.
+        # The control, through the same resolution: a tag with no digest is
+        # still not read a second time. The tool's start is recorded, not made
+        # to raise, since the pass catches a raise as its own failure.
         from automated_security_helper.core.asset import ImageLocator
         from automated_security_helper.core.container_engine import ContainerEngine
 
         scanner = self._scanner(tmp_path)
         scanner._image_engine = ContainerEngine.NONE
         scanner._image_engine_socket = None
-
-        def never(argv, **kwargs):  # pragma: no cover - the assertion
-            raise AssertionError("the skipped pass must not run the tool")
-
-        monkeypatch.setattr(
-            "automated_security_helper.utils.subprocess_utils.spawn_run", never
-        )
+        seen = self._fake_spawn(monkeypatch, None)
         argv, _results, _env = scanner._execute_image_scan(
             ImageLocator(ref="registry.example.com/team/app:1.2.3")
         )
         report = _captured_sarif()
         assert scanner._attach_image_layers(report, argv) == 0
+        assert "argv" not in seen
         assert _layer_of(report) == [None]

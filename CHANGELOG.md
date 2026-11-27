@@ -260,6 +260,12 @@
   does in `--output-dir report` and `config` in `--source-dir config`, was kept off the
   daemon for that reason; the word is now read as the option's value and the scan can
   use the daemon.
+- **trivy's image findings keep their package, and its layer pass needs a digest.** An
+  image scan now writes `package_name`, `package_version` and `fix_available` on each
+  trivy vulnerability, as grype's does, without reading a lockfile of the scanned
+  directory. The second run that fills `layer_digest` needs a saved archive or layout,
+  or a reference that carries its digest, even when an engine is detected, and a time
+  budget it cannot work out no longer fails the scan.
 
 ### Features
 
