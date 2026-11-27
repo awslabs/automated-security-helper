@@ -1,7 +1,7 @@
 class Ash < Formula
   include Language::Python::Virtualenv
 
-  desc "Automated Security Helper - security scanning tool for code repositories"
+  desc "Automated Security Helper, the agentic security harness for code repositories"
   homepage "https://github.com/awslabs/automated-security-helper"
   # Kept current by `cz bump` via [tool.commitizen] version_files in
   # pyproject.toml. tests/unit/test_homebrew_formula_version.py fails if this
@@ -81,13 +81,26 @@ class Ash < Formula
     # PATH, the same thing `uvx` does. Node.js goes last, so a node the user put
     # on PATH still wins and this one is there when none is.
     path = "#{libexec}/bin:$PATH:#{Formula["node"].opt_bin}"
+    # A wrapper is written only for a script the built release installed. Homebrew's
+    # write_env_script does not check that its target exists, so a wrapper for a
+    # script an older tag lacks (agentic-security-harness is not in v3.8.0) would
+    # install without error and then fail with exit 127. A release that adds a
+    # script gets its wrapper with no edit here.
     %w[ash ashv3 automated-security-helper agentic-security-harness].each do |script|
+      next unless (libexec/"bin"/script).exist?
+
       (bin/script).write_env_script libexec/"bin"/script, PATH: path
     end
   end
 
   test do
-    assert_match "automated-security-helper", shell_output("#{bin}/ash --version")
+    # Every wrapper the install wrote has to start, not only `ash`: a wrapper
+    # whose target is missing fails here with exit 127.
+    %w[ash ashv3 automated-security-helper agentic-security-harness].each do |script|
+      next unless (bin/script).exist?
+
+      assert_match "automated-security-helper", shell_output("#{bin/script} --version")
+    end
 
     (testpath/"src/sample.py").write "print('hello')\n"
     # detect-secrets is a Python dependency of ASH, so this scan needs nothing
