@@ -284,6 +284,43 @@ class TestTheCommandLine:
         (root,) = roots
         assert not root.exists(), f"the command left {root} behind"
 
+    def test_a_clone_that_cannot_be_removed_is_named_and_the_exit_code_stays(
+        self, tmp_path, monkeypatch
+    ):
+        """What stays on disk is named on stderr, and the scan keeps its exit code.
+
+        ``_remove_tree`` answers False for a tree it could not finish deleting (a
+        file another account owns). The scan is over by then, so the answer is a
+        line that names the directory, not a failure of the command.
+        """
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+        roots = []
+
+        def fake_clone(url, ref, *, depth, destination):
+            roots.append(Path(destination))
+            source = Path(destination) / "source"
+            source.mkdir()
+            return source
+
+        with (
+            patch(
+                "automated_security_helper.cli.mcp.source_delivery.clone_remote_source",
+                side_effect=fake_clone,
+            ),
+            patch(
+                "automated_security_helper.cli.mcp.source_delivery._remove_tree",
+                return_value=False,
+            ),
+            patch("automated_security_helper.cli.scan.run_ash_scan"),
+        ):
+            result = _scan("--source-git", URL)
+
+        assert result.exit_code == 0, result.output
+        (root,) = roots
+        output = result.output
+        assert "--source-git: could not remove all of the temporary clone" in output
+        assert f"delete this directory by hand: {root}" in output
+
     def test_a_clone_git_refused_exits_one_and_leaves_nothing(self):
         from automated_security_helper.cli.mcp.source_delivery import (
             GitCommandError,

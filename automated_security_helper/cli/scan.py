@@ -422,10 +422,13 @@ def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int)
     ``set_source_git`` tool runs); this makes the clone, with the same git
     environment (``clone_remote_source``). The temporary directory is removed
     when the click context closes, which every ending of the command reaches,
-    an exit and an error included. A clone git refuses or cannot make exits 1,
-    the answer for a run that produced no scan, naming what git said.
+    an exit and an error included. It is removed the way the MCP delivery
+    removes a clone (``_remove_tree``): git makes its pack files read-only, and
+    Windows does not delete a read-only file. What cannot be removed is named on
+    stderr, and the exit code stays the command's own, because the scan is over
+    by then. A clone git refuses or cannot make exits 1, the answer for a run
+    that produced no scan, naming what git said.
     """
-    import shutil
     import tempfile
 
     from automated_security_helper.cli.mcp.source_delivery import (
@@ -433,11 +436,23 @@ def _clone_git_source(ctx: typer.Context, url: str, ref: str | None, depth: int)
         GitCommandError,
         GitTimeoutError,
         SessionWorkspaceError,
+        _remove_tree,
         clone_remote_source,
     )
 
     root = Path(tempfile.mkdtemp(prefix="ash-source-git-"))
-    ctx.call_on_close(lambda: shutil.rmtree(root, ignore_errors=True))
+
+    def remove_the_clone() -> None:
+        if not _remove_tree(root):
+            echo(
+                shown_on_one_line(
+                    "--source-git: could not remove all of the temporary clone, "
+                    f"so delete this directory by hand: {root}"
+                ),
+                err=True,
+            )
+
+    ctx.call_on_close(remove_the_clone)
     try:
         return clone_remote_source(url, ref, depth=depth, destination=root).as_posix()
     except CloneRequestRefused as refusal:
