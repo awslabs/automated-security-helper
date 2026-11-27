@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """The reusable scan workflow runs ASH 3.9's spellings when its ASH has them.
 
 Why this file exists

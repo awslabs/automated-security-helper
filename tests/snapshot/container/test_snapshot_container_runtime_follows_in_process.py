@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """The container and Nix runtime snapshots record what the code under test prints.
 
 tests/conftest.py deselects the modules in runtime/ except on the CI legs that have a

@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """The Terraform pipeline's shards and merge spell ASH's commands the way its ASH does.
 
 Why this exists

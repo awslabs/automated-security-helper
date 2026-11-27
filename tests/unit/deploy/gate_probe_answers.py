@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """How a stand-in for a CodeCommit gate's subprocess runner answers its help probes.
 
 Before it scans, each gate asks the image's ASH how it scans a directory and whether

@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """A source zip is read under one set of rules by ``ash scan fs --archive`` and by MCP.
 
 Why this exists

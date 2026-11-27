@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """scripts/generate_config_reference.py: what the discovery section reads from the CLI.
 
 The configuration page's "Where ASH finds its configuration" section opens with the

@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """The 3.9 contract for every command spelling that moved, and the hints that name one.
 
 ASH 3.9 moves the directory scan under ``ash scan fs``, the scan of a workspace file

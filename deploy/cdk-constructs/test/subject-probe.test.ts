@@ -1,6 +1,3 @@
-// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-// SPDX-License-Identifier: Apache-2.0
-
 /**
  * The emitted ASH commands name the scan's subject when the ASH they run has one.
  *

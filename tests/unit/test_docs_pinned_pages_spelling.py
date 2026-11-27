@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """A hand-written page that pins a release before 3.9 names no command that release refuses.
 
 Why this file exists

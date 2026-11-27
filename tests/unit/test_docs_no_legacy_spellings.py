@@ -1,6 +1,3 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
-
 """A hand-written page or template gives no command in a spelling ASH 3.9 deprecates.
 
 Why this file exists
