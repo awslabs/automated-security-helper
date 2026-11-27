@@ -1413,6 +1413,10 @@ _WSL_TARGET = Match(
 #: Where the compatibility runtime can be installed: an environment the user owns.
 _USER_ENVIRONMENTS = ("uv-tool", "uvx", "pipx", "pip", "source")
 
+#: Every host operating system but Linux. The container image runs there in the Linux of
+#: the container engine's virtual machine, which is a kernel of its own.
+_NON_LINUX_HOSTS = tuple(token for token in VOCABULARY["host_os"] if token != "linux")
+
 _PATHS: tuple[UpgradePath, ...] = (
     UpgradePath(
         id="polars-compat-runtime",
@@ -1574,7 +1578,20 @@ _PATHS: tuple[UpgradePath, ...] = (
             "kernel parameter), which GuardDog's own sandbox needs."
         ),
         target=Match(tool_sandbox=("own",)),
-        available_when=Match(os=("linux",)),
+        # A kernel parameter of this machine, so it is offered where this machine is the
+        # Linux that runs the scanner. In container mode on a Mac or a Windows host
+        # ``os`` is the image's Linux while this machine is not, so ``host_os`` decides.
+        available_when=Match(host_os=("linux",)),
+    ),
+    UpgradePath(
+        id="engine-landlock",
+        kind=PathKind.SAME_OS,
+        summary=(
+            "Use a container engine whose Linux virtual machine runs a kernel with "
+            "Landlock enabled, which GuardDog's own sandbox needs."
+        ),
+        target=Match(tool_sandbox=("own",)),
+        available_when=Match(run_mode=("container",), host_os=_NON_LINUX_HOSTS),
     ),
     UpgradePath(
         id="pwsh7",
@@ -1636,12 +1653,15 @@ _LINUX_POSSIBLE: dict[str, tuple[str, ...]] = {
     "sandbox_backend": ("bwrap", "firejail", "landlock", "none"),
     "sandbox_loss": ("none", "landlock-below-6", "caches-read-only"),
     "express_available": ("yes",),
-    # GuardDog's own kernel sandbox is unavailable only where Landlock is.
+    # GuardDog's own kernel sandbox is unavailable only where the kernel that runs it
+    # lacks Landlock.
     "tool_sandbox": ("own", "unavailable", "n/a"),
 }
 
 #: A Mac can run the container image, so ``os`` can be Linux there; it has the
-#: sandbox-exec backend or none, and no libc of its own.
+#: sandbox-exec backend or none, and no libc of its own. In container mode the scanner
+#: runs in the Linux of the container engine's virtual machine, whose kernel may lack
+#: Landlock, so GuardDog's own sandbox can be unavailable there.
 _MACOS_POSSIBLE: dict[str, tuple[str, ...]] = {
     **_RUN_CHOICES,
     "os": ("darwin", "linux"),
@@ -1657,11 +1677,13 @@ _MACOS_POSSIBLE: dict[str, tuple[str, ...]] = {
     "sandbox_backend": ("sandbox-exec", "none"),
     "sandbox_loss": ("none",),
     "express_available": ("yes",),
-    "tool_sandbox": ("own", "replaced", "n/a"),
+    "tool_sandbox": ("own", "replaced", "unavailable", "n/a"),
 }
 
 #: A Windows host has no sandbox backend and no express mode, and none of the
-#: scanners that need a tool sandbox run there.
+#: scanners that need a tool sandbox run on Windows itself. In container mode they run
+#: in the Linux of the container engine's virtual machine, whose kernel may lack
+#: Landlock, so GuardDog's own sandbox can be unavailable there.
 _WINDOWS_POSSIBLE: dict[str, tuple[str, ...]] = {
     **_RUN_CHOICES,
     "os": ("windows", "linux"),
@@ -1677,7 +1699,7 @@ _WINDOWS_POSSIBLE: dict[str, tuple[str, ...]] = {
     "sandbox_backend": ("none",),
     "sandbox_loss": ("none",),
     "express_available": ("no",),
-    "tool_sandbox": ("n/a",),
+    "tool_sandbox": ("unavailable", "n/a"),
 }
 
 #: An operating system and processor ASH is not built for. It can run in the local
@@ -2290,7 +2312,7 @@ _SCANNER_ROWS: tuple[SupportRow, ...] = (
             "none here."
         ),
         cell="GuardDog has no kernel sandbox",
-        paths=("enable-landlock",),
+        paths=("enable-landlock", "engine-landlock"),
         cli=True,
     ),
     _polyfilled(
