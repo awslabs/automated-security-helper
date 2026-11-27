@@ -28,11 +28,29 @@ name: ASH - Image scan against a live engine and registry
 # 5. Requires, for both scans, that the report's `metadata.scan_source` is
 #    `image:<digest the registry holds>`, read independently from the registry.
 #
+# WHICH SCANNERS
+#
+# Both scans select syft and grype. grype is the one the ladder needs: the scan
+# phase resolves a tag-only reference to its digest only when a selected scanner
+# declares the registry read (Fetched.IMAGE_DIGEST in its operational facets),
+# because the digest keys finding ids and only a scanner that reports findings has
+# any. grype and trivy declare it; syft reports no findings and does not. A run that
+# selects syft alone logs "No selected scanner declares the image-digest registry
+# read" and resolves nothing, so neither rung runs and the scope stays on the
+# reference text (core/phases/scan_phase.py, utils/scanner_tool_types.py). syft stays
+# in the selection so the job still exercises its engine-delegated image argv.
+# tests/unit/test_live_engine_workflow_selects_a_digest_consumer.py holds the
+# selection to the same function the scan phase asks.
+#
 # DETERMINISM
 #
-# The only network use is the two pinned pulls from public.ecr.aws and the
-# installer's pinned tool downloads. The scanner is syft, which needs no
-# vulnerability database; nothing here depends on a feed that changes between runs.
+# The network use is the two pinned pulls from public.ecr.aws, the installer's
+# pinned tool downloads and the vulnerability database ASH refreshes for grype
+# before an online scan. Nothing asserted below depends on what that database
+# holds: the scans pass --no-fail-on-findings, so a finding cannot fail a step, and
+# the checks read only the digest ladder's log lines and `metadata.scan_source`. A
+# scanner that cannot complete still fails its step, because ASH exits 1 for an
+# incomplete scan.
 #
 # PINNED IMAGE DIGESTS (public.ecr.aws, read 2026-11-25; the multi-platform index
 # digests, which the engine resolves to the runner's platform):
@@ -71,11 +89,11 @@ jobs:
         with:
           python-version: "3.12"
           install-ash: "false"
-      - name: Install ASH and syft
+      - name: Install ASH, syft and grype
         run: |
           set -euo pipefail
           pip install .
-          ash dependencies install --tool syft
+          ash dependencies install --tool syft --tool grype
       # crane is not a scanner or reporter plugin, so `ash dependencies install` does
       # not know it. The image build installs it with this script from the same pins
       # (utils/tool_downloads.py), which verifies the archive and the executable digests.
@@ -127,7 +145,7 @@ jobs:
           EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
           set -euo pipefail
-          ash scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+          ash scan --image "$IMAGE_TAG" --only-scanners syft,grype --no-fail-on-findings --log-level INFO \
             --output-dir "$RUNNER_TEMP/scan-engine" 2>&1 | tee "$RUNNER_TEMP/scan-engine.log"
           grep -F "through the local docker engine" "$RUNNER_TEMP/scan-engine.log"
           python3 .github/scripts/assert-image-scan-scope.py \
@@ -146,7 +164,7 @@ jobs:
           EXPECTED_DIGEST: ${{ steps.digest.outputs.digest }}
         run: |
           set -euo pipefail
-          ash scan --image "$IMAGE_TAG" --only-scanners syft --log-level INFO \
+          ash scan --image "$IMAGE_TAG" --only-scanners syft,grype --no-fail-on-findings --log-level INFO \
             --output-dir "$RUNNER_TEMP/scan-registry" 2>&1 | tee "$RUNNER_TEMP/scan-registry.log"
           grep -F "through the registry (crane digest)" "$RUNNER_TEMP/scan-registry.log"
           python3 .github/scripts/assert-image-scan-scope.py \
