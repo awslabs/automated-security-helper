@@ -395,6 +395,9 @@ global_settings:
       path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
+      path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
       path: tests/unit/cli/inspect/test_each_value_is_shown_once.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
@@ -651,9 +654,9 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_judgments.py
       reason: >-
-        HEAD = "0123456789abcdef0123456789abcdef01234567" and TOKEN =
-        "0a1b2c3d4e5f60718293a4b5c6d7e8f9": a placeholder commit id and a
-        pattern-built fixture token the judgment tests redact, not credentials.
+        The HEAD constant (the sequential 40-hex placeholder commit id) and the
+        TOKEN constant (a pattern-built 32-hex fixture value the judgment tests
+        redact). Neither is a credential.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_launchers.py
       reason: >-
@@ -898,8 +901,9 @@ global_settings:
     - rule_id: B105
       path: tests/unit/plugin_modules/ash_builtin/test_bandit_scanner_behavior.py
       reason: >-
-        `secret = "abcdefghijklmnop"` is a fixture fed into a synthesized B105
-        message to prove ASH's own SARIF post-processor masks the password body to
+        A fixture that assigns the first sixteen letters of the alphabet to a
+        variable named for a secret is fed into a synthesized B105 message to
+        prove ASH's own SARIF post-processor masks the password body to
         asterisks — the test at line 722 asserts the literal never survives into the
         output. The heuristic flags the fixture that exists to verify the heuristic.
     # B108. In the first file, the hardcoded /tmp is a path INSIDE the build
@@ -3350,14 +3354,6 @@ global_settings:
         that must be redacted from runner output. The fixture exists to prove
         redaction. The reason does not repeat the assignment, so this file does not
         flag itself.
-    # === gitleaks: the made-up token in the fail-closed plugin tests ===
-    # The entry the sorted test-code section above would hold, with that section's
-    # reason; .ash/.ash_alpha_plugins.yaml holds the same entry in its own test-code
-    # section. It sits here, below the lines of this file that the alpha-plugins
-    # config pins ferret-scan entries to, because a line added above them moves them.
-    - rule_id: generic-api-key
-      path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
-      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     # === The #865 chain's test files: bandit ===
     # The unified bug-fixes chain added test files whose fixtures trip the same
     # bandit rules the sorted test-code section above already covers. Per-file
@@ -3738,12 +3734,6 @@ global_settings:
         Test code. One match is a copy of the scanner's RULE_ENV_SECRET
         severity-table entry under test; the other is a made-up env value,
         literal-1, that the case with env-secret flagging off must NOT report.
-    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
-      path: tests/unit/test_ci_ferret_self_scan_pins.py
-      reason: >-
-        Test code. A fabricated 40-hex commit sha in the parametrized masking
-        expectations; the test asserts how ferret pin lines are rendered, and
-        the value is the ascending-digits placeholder.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/mcp_config/test_json_spans.py
       reason: >-

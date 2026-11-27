@@ -509,8 +509,8 @@ global_settings:
         False positive. A module constant named for a fake MCP session, the same
         shape as the entries for the other MCP tests above.
     # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
-    # The supported window admits ferret-scan 2.6.0, whose detectors report these
-    # nine sites at 95-100% confidence. Each was read at the reported line and is
+    # The supported window admits ferret-scan 2.6.0, whose detectors report the
+    # sites below at 95-100% confidence. Each was read at the reported line and is
     # pinned to it by line or, where a named definition holds it, by that
     # definition (symbol); none is a stored credential. The ferret-scan 2.5.x scans of
     # the same files did not report them.
@@ -546,20 +546,6 @@ global_settings:
       reason: >-
         False positive. This is ferret-scan's own detector regular expression
         for the trade_secret keywords, pattern text and not a value.
-    - path: .ash.yaml
-      rule_id: API_KEY_OR_SECRET
-      line_start: 654
-      line_end: 654
-      reason: >-
-        False positive. A suppression reason that quotes a placeholder fixture
-        literal; the text explains why another finding is a false positive.
-    - path: .ash.yaml
-      rule_id: API_KEY_OR_SECRET
-      line_start: 901
-      line_end: 901
-      reason: >-
-        False positive. A suppression reason that quotes a placeholder fixture
-        literal; the text explains why another finding is a false positive.
     - path: .github/workflows/ash-repo-docs.yml
       rule_id: API_KEY_OR_SECRET
       line_start: 159

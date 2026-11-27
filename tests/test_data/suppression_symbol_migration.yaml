@@ -711,24 +711,6 @@ kept:
   kept_because: no symbol grammar for this file type
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
-  path: .ash.yaml
-  line_start: 654
-  line_end: 654
-  remeasured_at: c15148192f4
-  kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1050, then line 774, then line 715 of the root file), and
-    its lines moved again, so the pin was re-measured against main c15148192f4
-- config: .ash/.ash_alpha_plugins.yaml
-  rule_id: API_KEY_OR_SECRET
-  path: .ash.yaml
-  line_start: 901
-  line_end: 901
-  remeasured_at: c15148192f4
-  kept_because: no symbol grammar for this file type; the target file is now the root .ash.yaml (it was
-    .ash/.ash.yaml, where this pin sat at line 1297, then line 1021, then line 962 of the root file), and
-    its lines moved again, so the pin was re-measured against main c15148192f4
-- config: .ash/.ash_alpha_plugins.yaml
-  rule_id: API_KEY_OR_SECRET
   path: .github/workflows/ash-repo-docs.yml
   line_start: 159
   line_end: 159
