@@ -1289,8 +1289,11 @@ _TOOL_STAGE = "core"
 
 def stage_installs(text: str, stage: str, tool: str) -> bool:
     """Whether a line of *stage* in the Dockerfile *text* installs *tool* with the
-    pinned-tool installer."""
-    return f"install-pinned-tool {tool} -b " in text
+    pinned-tool installer. A comment installs nothing, a continued line is one line,
+    and a stage the file does not have installs nothing."""
+    body = dockerfile_stages(text).get(stage.lower(), "")
+    lines = [line for line in body.splitlines() if not line.lstrip().startswith("#")]
+    return f"install-pinned-tool {tool} -b " in "\n".join(lines).replace("\\\n", " ")
 
 
 def test_the_install_reader_has_controls_for_a_comment_and_for_another_stage() -> None:
