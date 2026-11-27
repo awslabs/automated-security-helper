@@ -134,11 +134,11 @@ TOKENS: Mapping[str, tuple[str, ...]] = {
 }
 
 #: The fields of a reading that a support row can match on, in the order a support
-#: row lists them.
+#: row lists them. ``os_release`` is recorded in the reading beside them and no row
+#: matches on it, so it is not one of them.
 FACT_FIELDS: tuple[str, ...] = (
     "os",
     "host_os",
-    "os_release",
     "arch",
     "translation",
     "cpu_level",
@@ -150,6 +150,11 @@ FACT_FIELDS: tuple[str, ...] = (
     "wsl",
     "express_available",
 )
+
+#: Every fact a reading holds, in the order it holds them: the fields a row matches on,
+#: and ``os_release`` after the two operating-system facts. ``HostReading.failed`` names
+#: the facts whose reader failed in this order.
+_READING_FACTS: tuple[str, ...] = (*FACT_FIELDS[:2], "os_release", *FACT_FIELDS[2:])
 
 # --------------------------------------------------------------------------------------
 # What polars needs
@@ -552,7 +557,8 @@ def fact_tokens(reading: HostReading) -> dict[str, str]:
     """The reading as the fields a support row matches on, in their order.
 
     The one place a reading is mapped onto those fields: the details beside the facts
-    (``failed``, ``cpu_missing_flags``, ``python_version``) are not part of it.
+    (``failed``, ``cpu_missing_flags``, ``python_version``) are not part of it, and
+    neither is ``os_release``, which a reading records and no row matches on.
     """
     return {name: getattr(reading, name) for name in FACT_FIELDS}
 
@@ -1487,7 +1493,7 @@ class HostFactsReader:
             python_version=python_text,
             requires_python=requires,
             failed=tuple(
-                (name, failed[name]) for name in FACT_FIELDS if name in failed
+                (name, failed[name]) for name in _READING_FACTS if name in failed
             ),
         )
 
