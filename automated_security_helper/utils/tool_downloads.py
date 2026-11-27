@@ -86,6 +86,7 @@ Known limitations
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
 
 from automated_security_helper.base.plugin_provisioning import (
@@ -96,6 +97,21 @@ from automated_security_helper.core.exceptions import ToolNotProvisionableError
 # Platform/architecture pair, in the vocabulary cli/dependencies.py already uses:
 # platform is one of linux/darwin/windows, arch is one of amd64/arm64.
 PlatformArch = tuple[str, str]
+
+
+class Linkage(str, Enum):
+    """What a Linux release asset links the C library as.
+
+    ``static`` needs no C library from the host and runs on glibc and musl hosts alike.
+    ``glibc`` and ``musl`` need that library. ``unread`` says nothing has measured the
+    asset, which is the honest value for every asset until someone reads it: a guess
+    would refuse a working install on one kind of host or allow a broken one on the other.
+    """
+
+    STATIC = "static"
+    GLIBC = "glibc"
+    MUSL = "musl"
+    UNREAD = "unread"
 
 
 @dataclass(frozen=True)
@@ -133,6 +149,41 @@ class ToolAsset:
     # its digest; the installer places the executable last, so an executable on disk
     # means its companions are too.
     companion_sha256: tuple[tuple[str, str], ...] = ()
+    # What the executable links the C library as, from _LINKAGE_READS, and the read it
+    # came from. ``unread`` for every asset no read covers; a value other than
+    # ``unread`` needs ``linkage_source`` (where it was read) and ``linkage_read_version``
+    # (the release it was read at, which must be the pinned one). A read is of one
+    # release: when a pin moves, the asset is ``unread`` again until someone reads the
+    # new one. See ``__post_init__``.
+    linkage: Linkage = Linkage.UNREAD
+    linkage_source: str = ""
+    linkage_read_version: str = ""
+
+    def __post_init__(self) -> None:
+        # A plain string that names a member is that member; any other spelling raises.
+        linkage = Linkage(self.linkage)
+        object.__setattr__(self, "linkage", linkage)
+        source = self.linkage_source.strip()
+        read_version = self.linkage_read_version.strip()
+        if linkage is Linkage.UNREAD:
+            if source or read_version:
+                raise ValueError(
+                    f"{self.tool} {self.version}: the linkage is 'unread' but the asset "
+                    "carries a read record; name the value that was read, or drop the "
+                    "record"
+                )
+            return
+        if not source or not read_version:
+            raise ValueError(
+                f"{self.tool} {self.version}: the linkage {linkage.value!r} needs a "
+                "recorded read (linkage_source and linkage_read_version); an asset "
+                "nothing has measured is 'unread'"
+            )
+        if read_version != self.version:
+            raise ValueError(
+                f"{self.tool}: its linkage was read at {read_version!r}, not at the "
+                f"pinned {self.version!r}; read the pinned asset, or leave it 'unread'"
+            )
 
     @property
     def executable_digest(self) -> Optional[str]:
@@ -599,6 +650,50 @@ _ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
     "uv": _UV_ASSETS,
+}
+
+
+@dataclass(frozen=True)
+class LinkageRead:
+    """What one asset is recorded to link the C library as, at which release, and from
+    where the reading came."""
+
+    linkage: Linkage
+    #: The release the asset was read at. A pin that has moved to another release does
+    #: not inherit the read (``get_tool_asset`` reads the asset as ``unread``).
+    version: str
+    source: str
+
+
+# The linkage of the assets this module already records a reading of, keyed by asset
+# filename. No other asset is here, and none is guessed: an asset not listed, or listed
+# for a release the pin has moved past, is ``unread``.
+#
+# * opengrep's Linux assets are the statically linked executables the module docstring
+#   describes for v2.0.0 (``opengrep_linux_*``). Its other platforms are not those
+#   builds, so they are not listed.
+# * uv's Linux assets are the builds whose names carry the ``unknown-linux-gnu`` target
+#   triple (``_UV_ASSETS``), which names a glibc build.
+# * cfn-guard is not here. Its Linux assets were read as statically linked at 3.2.1
+#   (the comment above ``_CFN_GUARD_ASSETS``) and the pin is 3.3.0.
+_OPENGREP_STATIC_READ = (
+    "the module docstring's account of opengrep v2.0.0: the Linux assets are "
+    "statically linked executables"
+)
+_UV_GNU_READ = (
+    "the pinned asset name: its unknown-linux-gnu target triple is uv's glibc build"
+)
+_LINKAGE_READS: dict[str, LinkageRead] = {
+    "opengrep_linux_x86": LinkageRead(Linkage.STATIC, "v2.0.0", _OPENGREP_STATIC_READ),
+    "opengrep_linux_aarch64": LinkageRead(
+        Linkage.STATIC, "v2.0.0", _OPENGREP_STATIC_READ
+    ),
+    "uv-x86_64-unknown-linux-gnu.tar.gz": LinkageRead(
+        Linkage.GLIBC, "0.13.9", _UV_GNU_READ
+    ),
+    "uv-aarch64-unknown-linux-gnu.tar.gz": LinkageRead(
+        Linkage.GLIBC, "0.13.9", _UV_GNU_READ
+    ),
 }
 
 
@@ -1644,6 +1739,11 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
             f"in tool_downloads.py disagree; a version bump is half-applied."
         )
 
+    read = _LINKAGE_READS.get(filename)
+    if read is not None and read.version != TOOL_VERSIONS[tool]:
+        # A reading is of one release, and the pin has moved past it.
+        read = None
+
     suffix = ".exe" if target_platform == "windows" else ""
     return ToolAsset(
         tool=tool,
@@ -1657,4 +1757,7 @@ def get_tool_asset(tool: str, target_platform: str, arch: str) -> ToolAsset:
         archive=tool not in _BARE_EXECUTABLE_TOOLS or filename.endswith(".zip"),
         executable_sha256=_EXECUTABLE_DIGESTS.get(filename),
         companion_sha256=tuple(sorted(_COMPANION_DIGESTS.get(filename, {}).items())),
+        linkage=read.linkage if read else Linkage.UNREAD,
+        linkage_source=read.source if read else "",
+        linkage_read_version=read.version if read else "",
     )

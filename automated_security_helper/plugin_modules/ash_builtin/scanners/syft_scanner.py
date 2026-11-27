@@ -348,6 +348,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="syft",
+                version_check=("syft", "--version"),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NOT_APPLICABLE,
                 note="an SBOM has no findings",

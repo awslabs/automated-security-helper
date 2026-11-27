@@ -1293,6 +1293,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 provisionable=(),
                 note="runs in ASH's own interpreter plus a jsii child that needs node on PATH; ASH installs neither",
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.ASH_WHEEL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="the violation's normalized rule level",
