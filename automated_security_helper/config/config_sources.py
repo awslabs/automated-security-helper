@@ -4325,9 +4325,11 @@ def _dropped_option_clause(
     replaces or tests it finds nothing at its path. ``folds`` is the chain's
     record of those folds and drops
     (_resolve); with none, or when the pointer names no option a fold dropped,
-    the message stays as it was. The sentence names the serving plugin, a name
-    from the alias table, and nothing a file wrote: the message already quotes
-    the pointer as shown."""
+    the message stays as it was. A pointer at an option the serving plugin
+    declares gets no sentence: no fold drops a declared option, so a dropped
+    ``-``/``_`` twin of it is not the cause. The sentence names the serving
+    plugin, a name from the alias table, and nothing a file wrote: the
+    message already quotes the pointer as shown."""
     if not folds or not isinstance(pointer, str) or not pointer.startswith("/"):
         return ""
     normalized = _normalize_pointer(document, pointer, owned, folds)
@@ -4338,11 +4340,21 @@ def _dropped_option_clause(
         or parts[2] != "options"
     ):
         return ""
+    from automated_security_helper.config.ash_config import (
+        ScannerConfigSegment,
+        _declared_option_names,
+    )
+
     section = parts[1].replace("-", "_").lower()
     option = parts[3].replace("-", "_")
     for serving, dropped in folds.items():
         if serving.replace("-", "_").lower() != section:
             continue
+        declared = _declared_option_names(ScannerConfigSegment, serving)
+        if declared is not None and parts[3] in declared:
+            # No fold drops a declared option, so a dropped -/_ twin of it is
+            # not why the operation found nothing.
+            return ""
         if any(
             isinstance(name, str) and name.replace("-", "_") == option
             for name in dropped

@@ -1106,6 +1106,42 @@ def test_an_op_on_an_option_bandit_does_not_declare_under_bandit_applies(
     assert "'patch' entry 0 in" not in text, text
 
 
+@pytest.mark.parametrize(
+    "named, clause",
+    [
+        pytest.param("confidence_level", False, id="the-declared-spelling"),
+        pytest.param("confidence-level", True, id="the-dropped-spelling"),
+    ],
+)
+def test_a_refusal_names_the_dropped_cause_only_for_the_dropped_spelling(
+    retired_oldname, tmp_path, monkeypatch, named, clause
+):
+    """The file writes confidence-level under oldname, a spelling of bandit's
+    confidence_level that bandit's options do not declare, so the fold drops
+    it as the file is read. The file's patch then removes *named*, which no
+    file wrote under that spelling, and the load is refused either way. The
+    refusal says the option was dropped only where the pointer names the
+    dropped spelling: bandit declares confidence_level, no fold drops it, and
+    the dropped twin is not why the remove found nothing. Read as one
+    spelling, the two gave the declared option a cause it does not have."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    path = _write(
+        tmp_path / "twin.yaml",
+        {
+            "scanners": {"oldname": {"options": {"confidence-level": "high"}}},
+            "patch": [{"op": "remove", "path": f"/scanners/oldname/options/{named}"}],
+        },
+    )
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        _load(monkeypatch, path)
+
+    text = " ".join(str(refused.value).split())
+    assert "'patch' entry 0 in" in text, text
+    assert (_DROPPED_CLAUSE in text) is clause, text
+
+
 # A patch's add or replace under the retired name, in a chain that wrote the
 # section under that name, lands on bandit's section, so its value is written
 # there without passing the fold the file's own section passed. The value is
