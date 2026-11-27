@@ -131,11 +131,7 @@ NAMED_ON_PURPOSE = {
 }
 
 #: Pages another change moves. Each entry is dropped when its page needs none.
-NOT_MOVED_HERE = {
-    "docs/content/how-to/scale-large-repos.md.template": (
-        "its examples pass --scanners; the change that owns the page moves them"
-    ),
-}
+NOT_MOVED_HERE: dict[str, str] = {}
 
 NO_SUBJECT = "ash scan with no subject"
 BARE_WITH_OPTIONS = "ash with options and no subcommand"
@@ -382,13 +378,16 @@ def test_a_command_named_on_purpose_is_still_on_its_page(rel, command):
     assert given, f"{rel} no longer gives {command!r}: drop it from NAMED_ON_PURPOSE"
 
 
-@pytest.mark.parametrize("rel", sorted(NOT_MOVED_HERE))
-def test_an_entry_in_not_moved_here_exists_and_is_still_needed(rel):
-    """An excuse a page no longer needs is dropped, so it cannot excuse a new one."""
-    assert rel in SOURCES, f"{rel} is gone; drop it from NOT_MOVED_HERE"
-    assert legacy_forms(SOURCES[rel]), (
-        f"{rel} no longer gives a deprecated spelling: drop it from NOT_MOVED_HERE"
-    )
+def test_an_entry_in_not_moved_here_exists_and_is_still_needed():
+    """An excuse a page no longer needs is dropped, so it cannot excuse a new one.
+
+    The table is empty when every page has moved, and then there is nothing to read.
+    """
+    for rel in sorted(NOT_MOVED_HERE):
+        assert rel in SOURCES, f"{rel} is gone; drop it from NOT_MOVED_HERE"
+        assert legacy_forms(SOURCES[rel]), (
+            f"{rel} no longer gives a deprecated spelling: drop it from NOT_MOVED_HERE"
+        )
 
 
 def _page(*lines: str) -> str:
