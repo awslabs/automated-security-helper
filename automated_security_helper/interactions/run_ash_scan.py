@@ -210,6 +210,7 @@ from automated_security_helper.utils.inner_run_outcome import (
 )
 from automated_security_helper.utils.sarif_utils import (
     _resolve_result_severity,
+    is_not_a_finding,
     is_result_suppressed,
 )
 from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
@@ -1430,7 +1431,16 @@ def _result_fails_its_scanner_threshold(result, threshold_for, run=None) -> bool
 
     *run* is the SARIF run that holds the result: it names the scanner of a
     result that carries no ``scanner_name`` of its own.
+
+    A result whose kind states no finding (``pass``, ``notApplicable``,
+    ``informational``: ``utils.sarif_utils.is_not_a_finding``) fails no gate. SARIF
+    asks for level ``none`` beside those kinds, the ladder grades that INFO, and a
+    threshold of ``ALL`` fails INFO, so graded by its level the note a scan records
+    for an image it did not scan, or a cdk-nag rule that was not evaluated, failed
+    a scan whose threshold was ``ALL`` and the scan exited 2. The kind is read first.
     """
+    if is_not_a_finding(result):
+        return False
     return severity_fails_threshold(
         _resolve_result_severity(result),
         threshold_for(_result_scanner_name(result, run)),
