@@ -24,7 +24,9 @@ import re
 SUBJECTS_RELEASE = (3, 9, 0)
 
 #: What ``ash scan`` can be told to scan once the subjects exist. ``workspace``, ``image``
-#: and ``git`` have no 3.8 form, so a page pinned to 3.8 must not name them at all.
+#: and ``git`` are no subjects in 3.8, so a page pinned to 3.8 must not name them as
+#: subjects. A workspace is ``ash scan --workspace FILE`` there, and a render for 3.8
+#: writes it that way (scripts/version_template_manager.py).
 SCAN_SUBJECTS = ("fs", "workspace", "image", "git")
 
 #: The commands 3.9 moved under ``ash results`` that 3.8.0 has as top-level commands

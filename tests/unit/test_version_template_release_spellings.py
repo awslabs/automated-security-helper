@@ -13,10 +13,11 @@ subcommand. The README on GitHub and the ``main`` docs showed that pairing.
 
 A template now holds the newest spellings, and rendering it for a release older than
 the one that introduced them writes the spellings that release reads in its code: ``ash
-scan`` (with ``--source-dir`` for a path argument), the top-level results commands
-(``report``, ``merge`` and ``inspect``; ``diff`` and ``trend`` have none, so a render
-leaves them and the checks refuse them), and ``ash build-image``. The prose around the
-code is rendered as the template writes it. A
+scan`` (with ``--source-dir`` for a path argument), ``ash scan --workspace FILE`` for a
+workspace scan, the top-level results commands (``report``, ``merge`` and ``inspect``;
+``diff`` and ``trend`` have none, so a render leaves them and the checks refuse them),
+and ``ash build-image``. The prose around the code is rendered as the template writes
+it. A
 sentence that names a spelling says what it says on every page, and a rewrite of it can
 make it say the opposite: a page that tells its reader an older ASH has no ``fs``
 subject, rendered for that older ASH, would tell its reader the subject is gone. A
@@ -288,6 +289,75 @@ ROWS = [
     ),
     ("ash diff a.json b.json", "ash diff a.json b.json"),
     ("ash container build --no-run", "ash build-image --no-run"),
+    # A workspace scan: 3.9's subject takes the file as its argument, and 3.8 reads the
+    # file as the value of `--workspace`. The subject word becomes the option and the
+    # file stays where it is.
+    (
+        "ash scan workspace services.code-workspace --dry-run",
+        "ash scan --workspace services.code-workspace --dry-run",
+    ),
+    ("ash scan workspace auto", "ash scan --workspace auto"),
+    ("`ash scan workspace FILE`", "`ash scan --workspace FILE`"),
+    (
+        "ash scan workspace <file> --allow-missing-projects",
+        "ash scan --workspace <file> --allow-missing-projects",
+    ),
+    (
+        'ash scan workspace "my services.code-workspace"',
+        'ash scan --workspace "my services.code-workspace"',
+    ),
+    (
+        "ash scan workspace services.code-workspace --scanners detect-secrets",
+        "ash scan --workspace services.code-workspace --scanners detect-secrets",
+    ),
+    (
+        "ash scan workspace services.code-workspace --only-scanners detect-secrets",
+        "ash scan --workspace services.code-workspace --scanners detect-secrets",
+    ),
+    (
+        "ASH_CONFIG=/etc/ash.yaml uv run ash scan workspace w.code-workspace",
+        "ASH_CONFIG=/etc/ash.yaml uv run ash scan --workspace w.code-workspace",
+    ),
+    (
+        "ashv3 scan workspace w.code-workspace",
+        "ashv3 scan --workspace w.code-workspace",
+    ),
+    # With no file, as when a sentence names the command, the option stands alone.
+    ("`ash scan workspace`", "`ash scan --workspace`"),
+    ("ash scan workspace 2>&1", "ash scan --workspace 2>&1"),
+    (
+        "ash \\\n  scan \\\n  workspace \\\n  services.code-workspace",
+        "ash \\\n  scan \\\n  --workspace \\\n  services.code-workspace",
+    ),
+    (
+        '["ash", "scan", "workspace", "services.code-workspace"]',
+        '["ash", "scan", "--workspace", "services.code-workspace"]',
+    ),
+    ('["ash", "scan", "workspace"]', '["ash", "scan", "--workspace"]'),
+    (
+        '[\n    "ash",\n    "scan",\n    "workspace",\n    "services.code-workspace",\n]',
+        '[\n    "ash",\n    "scan",\n    "--workspace",\n    "services.code-workspace",\n]',
+    ),
+    # Not a workspace scan of ASH, or `workspace` is a word of something else: left
+    # alone. After `fs`, `workspace` is the path of the scan.
+    ("ash scan workspaces", "ash scan workspaces"),
+    ("ash scan workspace-file", "ash scan workspace-file"),
+    ("ash scan workspace.py", "ash scan workspace.py"),
+    ("dash scan workspace w.code-workspace", "dash scan workspace w.code-workspace"),
+    ("ash scan fs workspace", "ash scan --source-dir workspace"),
+    # An option right after the subject: 3.9 lets the file follow the options, and 3.8's
+    # `--workspace` would take the next word as its value. There is no respelling that
+    # keeps the words where they are, so the render leaves the command and the checks
+    # refuse it.
+    (
+        "ash scan workspace --dry-run services.code-workspace",
+        "ash scan workspace --dry-run services.code-workspace",
+    ),
+    ("ash scan workspace [OPTIONS] FILE", "ash scan workspace [OPTIONS] FILE"),
+    (
+        '["ash", "scan", "workspace", "--dry-run", "w.code-workspace"]',
+        '["ash", "scan", "workspace", "--dry-run", "w.code-workspace"]',
+    ),
     # Not a command of ASH, or already a spelling 3.8 reads: left alone.
     ("ash scan --mode local", "ash scan --mode local"),
     ("ash scan --source-dir . --mode local", "ash scan --source-dir . --mode local"),
@@ -504,6 +574,24 @@ RENDER_ROWS = [
         "It runs ashv3 --mode=precommit on commit.",
     ),
     ("`ashv3 scan fs --mode=precommit`", "`ashv3 scan --mode=precommit`"),
+    # A workspace scan is spelled for the release in an inline span, which is code, and in
+    # a fenced block, and not in a sentence that names it in prose.
+    (
+        "Scan it with `ash scan workspace services.code-workspace` first.",
+        "Scan it with `ash scan --workspace services.code-workspace` first.",
+    ),
+    (
+        "an option that `ash scan workspace` does not take",
+        "an option that `ash scan --workspace` does not take",
+    ),
+    (
+        "```bash\nash scan workspace services.code-workspace --dry-run\n```\n",
+        "```bash\nash scan --workspace services.code-workspace --dry-run\n```\n",
+    ),
+    (
+        "Run ash scan workspace services.code-workspace to scan it.",
+        "Run ash scan workspace services.code-workspace to scan it.",
+    ),
 ]
 
 
@@ -615,6 +703,15 @@ DETECTOR_ROWS = [
     ("ash report", 0),
     ("ash merge --results a --results b", 0),
     ("ash inspect findings", 0),
+    # A workspace scan: 3.8.0 reads `--workspace`, and the subject is a newer spelling,
+    # prose included: the detectors read every word of a page, and the render only its code.
+    ("ash scan workspace services.code-workspace", 1),
+    ("`ash scan workspace`", 1),
+    ("Run ash scan workspace services.code-workspace to scan it.", 1),
+    ("ash scan workspace --dry-run services.code-workspace", 1),
+    ('["ash", "scan", "workspace", "services.code-workspace"]', 1),
+    ("ash scan --workspace services.code-workspace", 0),
+    ("ash scan workspaces", 0),
 ]
 
 
@@ -625,6 +722,24 @@ DETECTOR_ROWS = [
 )
 def test_the_detector_on_planted_text(text, count):
     assert len(_newer_spellings(text)) == count, text
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ash scan workspace --dry-run services.code-workspace",
+        "ash scan workspace [OPTIONS] FILE",
+        '["ash", "scan", "workspace", "--dry-run", "w.code-workspace"]',
+    ],
+)
+def test_a_workspace_scan_with_no_respelling_is_left_for_the_checks_to_refuse(command):
+    """The file of ``ash scan workspace --dry-run FILE`` follows an option, and 3.8's
+    ``--workspace`` takes the next word as its value, so no respelling keeps the words
+    where they are. The render leaves the command, and the check of a render for 3.8
+    names it, instead of the render writing one that 3.8 refuses."""
+    rendered = MANAGER.render(_fenced(command), "3.8.0")
+    assert rendered == _fenced(command)
+    assert len(_newer_spellings(rendered)) == 1, command
 
 
 def test_the_threshold_is_the_release_that_introduced_the_spellings():
