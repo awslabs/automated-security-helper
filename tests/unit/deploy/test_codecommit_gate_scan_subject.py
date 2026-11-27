@@ -386,7 +386,8 @@ def test_a_probe_that_crashed_is_asked_again_and_the_answer_then_stands(
                 stderr="Error: Got unexpected extra argument (fs)\n",
             ),
             "'ash scan --source-dir PATH'",
-            "refusing the word 'fs' (unexpected extra argument (fs))",
+            # The gate quotes the text its pattern matched, which ends at the word fs.
+            "refusing the word 'fs' (unexpected extra argument (fs",
         ),
     ],
     ids=["with-the-subject", "answers-without-it", "refuses-the-word"],
