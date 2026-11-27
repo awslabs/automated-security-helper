@@ -765,6 +765,17 @@ _MOVED_COMMAND = re.compile(
     r"(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|merge|inspect|build-image)\b"
 )
 _SCAN_FS = re.compile(r"\b(?:ash|ashv3) scan fs\b")
+#: A scan of any subject, or of none: ``--scanners`` is an option of the scan alone.
+_ASH_SCAN = re.compile(r"\b(?:ash|ashv3) scan\b")
+#: The option ``ash scan`` and each of its subjects deprecate for ``--only-scanners``
+#: and ``--add-scanners`` (cli/scan.py prints "DeprecationWarning: --scanners (and
+#: ASH_SCANNERS) is deprecated"), as ``--scanners X`` or ``--scanners=X``. Neither
+#: replacement matches it. No other ASH command takes the option, so it is a
+#: deprecated spelling only where its command is a scan: Trivy has an option of the
+#: same name.
+_SCANNERS_OPTION = re.compile(r"(?<![\w-])--scanners(?![\w-])")
+#: What ends one command on a shell line and starts the next.
+_COMMAND_SEPARATOR = re.compile(r"&&|\|\||[;|]")
 #: A help request never warns.
 _HELP = re.compile(r"(?<!\S)--help(?=\s|$)")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
@@ -778,12 +789,25 @@ _NOT_DOCUMENTATION = (
 )
 
 
+def _scans_with_the_deprecated_scanners_option(command: str) -> bool:
+    """Whether a command on the line *command* is an ``ash scan`` given ``--scanners``.
+
+    A line can run several commands, and an option belongs to the one it follows: the
+    ``--scanners`` of ``ash scan fs . && trivy fs --scanners vuln .`` is Trivy's.
+    """
+    return any(
+        _ASH_SCAN.search(part) and _SCANNERS_OPTION.search(part)
+        for part in _COMMAND_SEPARATOR.split(command)
+    )
+
+
 def _is_legacy(command: str, fenced: bool = False) -> bool:
     """Whether *command*, as a reader is shown it, runs a spelling that warns.
 
     A help request never warns, whatever it follows. A scan with ``--workspace`` and
-    no subject warns too, naming ``ash scan workspace``. The program alone is the bare
-    scan only as a line of a fenced block.
+    no subject warns too, naming ``ash scan workspace``, and so does ``--scanners`` on
+    any scan, which ``--only-scanners`` and ``--add-scanners`` replace. The program
+    alone is the bare scan only as a line of a fenced block.
     """
     if _HELP.search(command):
         return False
@@ -794,7 +818,9 @@ def _is_legacy(command: str, fenced: bool = False) -> bool:
         return True
     if _MOVED_COMMAND.search(command):
         return True
-    return bool(_SCAN_FS.search(command) and "--source-dir" in command)
+    if _SCAN_FS.search(command) and "--source-dir" in command:
+        return True
+    return _scans_with_the_deprecated_scanners_option(command)
 
 
 def _commands(markdown: str):
@@ -872,13 +898,26 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
         ("ash scan nosuchsubject src", True),
         # A deprecated option on a subject still warns.
         ("ash scan fs --mode container --source-dir src", True),
+        # --scanners is deprecated on every scan, as ``--scanners X`` and
+        # ``--scanners=X``: --only-scanners and --add-scanners replace it.
+        ("uv run ash scan fs /path/to/project --scanners trivy-repo", True),
+        ("ash scan fs . --scanners=trivy-repo", True),
+        ("ash scan workspace ws.code-workspace --scanners detect-secrets", True),
+        ("./ash scan fs . --mode container --scanners bandit,semgrep", True),
         # A workspace scan with no subject warns, and names the subject it moved to.
         ("ash scan --workspace ws.yaml", True),
         ("ash --workspace ws.yaml", True),
         ("ash --workspace=ws.yaml --mode container", True),
         ("uv run ash scan --workspace ws.code-workspace --dry-run", True),
         ("ash scan fs --ash-plugin-modules x", False),
-        ("uv run ash scan fs /path/to/project --scanners trivy-repo", False),
+        # The options that replace --scanners, a help request, and another program's
+        # option of the same name (Trivy's), alone or on a line that runs a scan first.
+        ("uv run ash scan fs /path/to/project --only-scanners trivy-repo", False),
+        ("ash scan fs . --add-scanners=trivy-repo", False),
+        ("ash scan fs . --exclude-scanners trivy-repo", False),
+        ("ash scan fs --scanners trivy-repo --help", False),
+        ("trivy fs --scanners vuln,secret .", False),
+        ("ash scan fs . && trivy fs --scanners vuln .", False),
         ("ash config get --source-dir src", False),
         ("ash --version", False),
         ("ash --install-completion", False),
@@ -898,7 +937,8 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
 )
 def test_the_markdown_check_tells_a_legacy_command_from_a_noun_one(command, legacy):
     """The check's own controls: it flags each kind of old spelling, and passes the
-    noun forms and the commands whose ``--source-dir`` is their own option."""
+    noun forms and the commands whose ``--source-dir`` or ``--scanners`` is their own
+    option."""
     assert _is_legacy(command) is legacy
 
 
@@ -924,9 +964,44 @@ def _fenced(*lines: str) -> str:
             id="a-deprecated-option-on-the-continuation-line",
         ),
         pytest.param(
-            _fenced("uv run ash scan fs . \\", "    --scanners bandit"),
+            _fenced("uv run ash scan fs . \\", "    --only-scanners bandit"),
             [],
             id="a-continued-scan-fs-with-its-own-options",
+        ),
+        pytest.param(
+            _fenced("uv run ash scan fs . \\", "    --scanners bandit"),
+            [(2, "uv run ash scan fs . --scanners bandit")],
+            id="the-scanners-option-on-the-continuation-line",
+        ),
+        pytest.param(
+            _fenced("uv run ash scan fs . --scanners bandit"),
+            [(2, "uv run ash scan fs . --scanners bandit")],
+            id="the-scanners-option-in-a-fenced-line",
+        ),
+        pytest.param(
+            _fenced("uv run ash scan fs . --scanners=bandit"),
+            [(2, "uv run ash scan fs . --scanners=bandit")],
+            id="the-scanners-option-with-an-equals-sign-in-a-fenced-line",
+        ),
+        pytest.param(
+            "Narrow it with `ash scan fs . --scanners bandit`.",
+            [(1, "ash scan fs . --scanners bandit")],
+            id="the-scanners-option-inline",
+        ),
+        pytest.param(
+            "Narrow it with `ash scan fs . --scanners=bandit`.",
+            [(1, "ash scan fs . --scanners=bandit")],
+            id="the-scanners-option-with-an-equals-sign-inline",
+        ),
+        pytest.param(
+            _fenced("trivy fs --scanners vuln,secret ."),
+            [],
+            id="another-programs-scanners-option",
+        ),
+        pytest.param(
+            "Use `--only-scanners` where you wrote `--scanners`.",
+            [],
+            id="the-option-named-in-prose",
         ),
         pytest.param(
             _fenced("ash scan \\", "    --workspace ws.yaml"),
