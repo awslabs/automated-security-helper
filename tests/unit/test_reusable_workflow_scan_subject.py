@@ -16,7 +16,8 @@ the new command's help, as the deploy targets do, and only an answer picks the o
 spelling: a help that does not name the command, or the usage error that refuses the
 word the command adds (``fs``, or ``results``). A probe that fails any other way (uvx
 cannot fetch the source, ASH crashes) says nothing about the ASH's commands, so the
-step fails with the end of what the probe printed and runs neither spelling.
+step fails with status 70, which ASH never gives, and the end of what the probe
+printed, and runs neither spelling.
 
 The scan step used to pass ``--source-dir .`` ahead of ``ash-args``, so a
 ``--source-dir`` in ``ash-args`` came later and named the directory scanned (click
@@ -36,17 +37,21 @@ would and records every other call:
   shows a command's help before it refuses the extra word, and has no ``results``;
 * ``refusing`` is an older ASH that refuses the word with click's usage error
   instead (exit 2), and has no ``results`` either;
+* ``refusing-otherwise`` refuses with the other two phrases the steps read as a
+  refusal: "No such command 'fs'" for the scan and "Got unexpected extra argument
+  (results)" for the report, which ``refusing`` has the other way round;
 * ``no-name`` exits 0 with a help that names neither command;
 * ``broken`` exits non-zero with only an error on stderr, as uvx does when it cannot
   install the source;
 * ``names-it-and-fails`` prints the usage line, which names the command, and exits 1;
+* ``numbered-failure`` prints 25 numbered lines and exits 1;
 * ``hostile`` exits non-zero and prints lines that would be workflow commands.
 
 1. The scan runs ``ash scan fs .`` on 3.9 and ``ash --source-dir .`` on the releases
    that answer without the subject, with the same options after the directory on
    both, for each value the step's env selects a flag from; its exit status is the
-   step's. On ``broken``, ``names-it-and-fails`` and ``hostile`` the step fails with
-   the probe's last lines and runs no scan.
+   step's. On ``broken``, ``names-it-and-fails``, ``numbered-failure`` and ``hostile``
+   the step fails with status 70 and the probe's last 20 lines, and runs no scan.
 2. A ``--source-dir`` in ``ash-args``, written either way, is the directory on both;
    one that is another option's value is left as that value; one with no word after
    it is passed on, for ASH to refuse; a directory whose name starts with a dash is
@@ -55,8 +60,8 @@ would and records every other call:
    scans that directory and prints no deprecation line.
 4. The report runs ``ash results report`` on 3.9 and ``ash --output-dir ... report``
    on the releases that answer without ``results``, and its exit status is the step's.
-   On ``broken``, ``names-it-and-fails`` and ``hostile`` the step fails and runs no
-   report.
+   On ``broken``, ``names-it-and-fails``, ``numbered-failure`` and ``hostile`` the
+   step fails with status 70 and runs no report.
 5. The probes run with colour off, name the config their step's command names, run
    without ``--reinstall``, do not print the help they read, and do not run at all
    for an ``ash-args`` the step refuses.
@@ -124,6 +129,18 @@ if [ "${last:-}" = "--help" ]; then
       exit 2 ;;
     "refusing:--from ash-source ash results report")
       echo "Error: No such command 'results'." >&2; exit 2 ;;
+    "refusing-otherwise:--from ash-source ash scan fs")
+      echo "Error: No such command 'fs'." >&2; exit 2 ;;
+    "refusing-otherwise:--from ash-source ash results report")
+      printf '%s\n' "Usage: ash [OPTIONS]" "Error: Got unexpected extra argument (results)" >&2
+      exit 2 ;;
+    "numbered-failure:--from ash-source ash scan fs"|"numbered-failure:--from ash-source ash results report")
+      i=1
+      while [ "$i" -le 25 ]; do
+        printf 'probe line %02d\n' "$i" >&2
+        i=$((i + 1))
+      done
+      exit 1 ;;
     "no-name:--from ash-source ash scan fs"|"no-name:--from ash-source ash results report")
       echo " Usage: ash [OPTIONS]"; pad; exit 0 ;;
     "names-it-and-fails:--from ash-source ash scan fs"|"names-it-and-fails:--from ash-source ash results report")
@@ -278,6 +295,8 @@ def test_this_trees_help_names_both_commands():
         ("3.9", ["scan", "fs", "."]),
         ("3.8", ["--source-dir", "."]),
         ("refusing", ["--source-dir", "."]),
+        # The scan's other refusal: an unknown command, not an extra argument.
+        ("refusing-otherwise", ["--source-dir", "."]),
         ("no-name", ["--source-dir", "."]),
     ],
 )
@@ -292,9 +311,10 @@ def test_the_scan_names_the_directory_the_way_its_ash_does(
     assert "Usage:" not in _output(ran)
 
 
-#: The failed probes: uvx that cannot fetch the source, and an ASH that prints the usage
-#: line, which names the command, and then dies. The exit status is not 0 in either, so
-#: neither help is an answer: the status is read before the words are.
+#: The failed probes: uvx that cannot fetch the source, an ASH that prints the usage
+#: line, which names the command, and then dies, and one that prints 25 lines and dies.
+#: The exit status is not 0 in any, so none of the help is an answer: the status is read
+#: before the words are.
 FAILED_PROBES = [
     pytest.param("broken", "error: Failed to fetch the source", id="cannot-fetch"),
     pytest.param(
@@ -302,6 +322,7 @@ FAILED_PROBES = [
         "it broke after printing its usage",
         id="names-it-and-fails",
     ),
+    pytest.param("numbered-failure", "probe line 25", id="twenty-five-lines"),
 ]
 
 
@@ -478,6 +499,8 @@ def test_a_source_dir_with_no_directory_is_still_refused(
         ("3.9", ["results", "report", "--output-dir", "out"]),
         ("3.8", ["--output-dir", "out", "report"]),
         ("refusing", ["--output-dir", "out", "report"]),
+        # The report's other refusal: an extra argument, not an unknown command.
+        ("refusing-otherwise", ["--output-dir", "out", "report"]),
         ("no-name", ["--output-dir", "out", "report"]),
     ],
 )
@@ -511,6 +534,37 @@ def test_the_report_does_not_read_a_failed_probe_as_an_older_ash(
     assert f"{could_not_tell} 'ash results report'" in output
     assert "'ash results report --help' exited 1" in output
     assert printed in output
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "step, env, asked",
+    [
+        (RUN_ASH, SCAN_ENV, "ash scan fs"),
+        (REPORT, {"ASH_CONFIG": ""}, "ash results report"),
+    ],
+    ids=["scan", "report"],
+)
+def test_a_failed_probe_shows_its_last_twenty_lines_and_no_others(
+    tmp_path, helps, step, env, asked
+):
+    """The probe printed 25 lines and failed: the step shows lines 6 to 25.
+
+    Fewer would cut the line that says why, and more would put a whole traceback in a
+    log the reader scrolls through for the one line that matters.
+    """
+    ran = _run(tmp_path, helps, step, "numbered-failure", env)
+
+    assert ran.result.returncode == 70, _output(ran)
+    assert ran.calls == [], ran.calls
+    output = _output(ran)
+    could_not_tell = "Could not tell whether the ASH this workflow installs has"
+    assert f"{could_not_tell} '{asked}'" in output
+    for number in range(6, 26):
+        assert f"probe line {number:02d}" in output, (number, output)
+    for number in range(1, 6):
+        assert f"probe line {number:02d}" not in output, (number, output)
 
 
 @pytest.mark.integration
@@ -630,6 +684,18 @@ def test_an_ash_args_the_step_refuses_starts_no_probe(tmp_path, helps):
             "3.8",
             "reporting with the older spelling: this ASH refused the word 'results'",
         ),
+        (
+            RUN_ASH,
+            SCAN_ENV,
+            "refusing-otherwise",
+            "scanning with the older spelling: this ASH refused the word 'fs'",
+        ),
+        (
+            REPORT,
+            {"ASH_CONFIG": ""},
+            "refusing-otherwise",
+            "reporting with the older spelling: this ASH refused the word 'results'",
+        ),
     ],
     ids=[
         "scan-3.9",
@@ -638,6 +704,8 @@ def test_an_ash_args_the_step_refuses_starts_no_probe(tmp_path, helps):
         "report-3.9",
         "report-no-name",
         "report-3.8",
+        "scan-refusing-otherwise",
+        "report-refusing-otherwise",
     ],
 )
 def test_the_steps_say_which_spelling_they_chose_and_why(

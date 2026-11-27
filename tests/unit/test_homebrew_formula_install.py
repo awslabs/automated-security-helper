@@ -680,9 +680,12 @@ class TestTheInstallLeavesNoBuildPathBehind:
 #: by $ASH_STUB_RELEASE: ``with-subject`` (ASH 3.9), ``without-subject`` (an older
 #: ASH, which shows the subject-less scan's help since click reads ``--help`` before
 #: it refuses the extra argument), ``refusing`` (an older ASH that refuses the word
-#: ``fs`` with a usage error instead), ``names-it-and-fails`` (an ASH that prints the
-#: usage line and then dies), and anything else, a crash. Any other command line is
-#: refused, so a probe that asks something else than ``scan fs --help`` gets no answer.
+#: ``fs`` with a usage error instead), ``no-such-command`` (one whose ``scan`` has no
+#: ``fs`` command, which click refuses as an unknown command), ``names-it-and-fails``
+#: (an ASH that prints the usage line and then dies), ``numbered-failure`` (one that
+#: prints 25 numbered lines and dies, so what the test shows of them can be counted),
+#: and anything else, a crash. Any other command line is refused, so a probe that asks
+#: something else than ``scan fs --help`` gets no answer.
 STAND_IN_ASH_FOR_THE_PROBE = """#!/bin/sh
 if [ "$*" != "scan fs --help" ]; then
   echo "the stand-in answers only 'scan fs --help', not '$*'" >&2
@@ -695,9 +698,20 @@ case "$ASH_STUB_RELEASE" in
     echo "Usage: ash scan [OPTIONS]" >&2
     echo "Error: Got unexpected extra argument (fs)" >&2
     exit 2 ;;
+  no-such-command)
+    echo "Usage: ash scan [OPTIONS] COMMAND [ARGS]..." >&2
+    echo "Error: No such command 'fs'." >&2
+    exit 2 ;;
   names-it-and-fails)
     echo "Usage: ash scan fs [OPTIONS] [PATH]"
     echo "Error: it broke after printing its usage" >&2
+    exit 1 ;;
+  numbered-failure)
+    i=1
+    while [ "$i" -le 25 ]; do
+      printf 'probe line %02d\\n' "$i" >&2
+      i=$((i + 1))
+    done
     exit 1 ;;
 esac
 printf '%s\\n' 'Traceback (most recent call last):' 'MemoryError' >&2
@@ -761,6 +775,8 @@ class TestTheFormulaTestChoosesTheDirectoryWordFromAnAnswer:
             ("with-subject", "fs"),
             ("without-subject", "--source-dir"),
             ("refusing", "--source-dir"),
+            # The scan's other refusal: an unknown command, not an extra argument.
+            ("no-such-command", "--source-dir"),
         ],
     )
     def test_an_answer_picks_the_word(self, tmp_path, release, word):
@@ -776,6 +792,7 @@ class TestTheFormulaTestChoosesTheDirectoryWordFromAnAnswer:
             # The usage line names the command, but the exit status is not 0, so the
             # help is not an answer: the status is read before the words are.
             ("names-it-and-fails", "it broke after printing its usage"),
+            ("numbered-failure", "probe line 25"),
         ],
     )
     def test_a_probe_that_fails_picks_no_word_and_fails_the_test(
@@ -787,6 +804,23 @@ class TestTheFormulaTestChoosesTheDirectoryWordFromAnAnswer:
         assert proc.stdout == "", "a word was chosen by guess"
         assert "could not tell whether this ASH has 'ash scan fs'" in proc.stderr
         assert printed in proc.stderr
+
+    def test_a_failed_probe_shows_its_last_twenty_lines_and_no_others(self, tmp_path):
+        """The probe printed 25 lines and failed: the test shows lines 6 to 25.
+
+        Fewer would cut the line that says why, and more would put a whole traceback
+        in the output of a test that Homebrew prints in full.
+        """
+        proc = self._run(tmp_path, "numbered-failure")
+
+        assert proc.returncode != 0, proc.stdout
+        for number in range(6, 26):
+            assert f"probe line {number:02d}" in proc.stderr, (number, proc.stderr)
+        for number in range(1, 6):
+            assert f"probe line {number:02d}" not in proc.stderr, (
+                number,
+                proc.stderr,
+            )
 
     @pytest.mark.parametrize(
         "release, said",
@@ -801,6 +835,10 @@ class TestTheFormulaTestChoosesTheDirectoryWordFromAnAnswer:
             ),
             (
                 "refusing",
+                "scanning with the older spelling: this ASH refused the word 'fs'",
+            ),
+            (
+                "no-such-command",
                 "scanning with the older spelling: this ASH refused the word 'fs'",
             ),
         ],
