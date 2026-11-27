@@ -643,6 +643,32 @@ def test_the_warning_is_bounded_whatever_the_baseline_lists(
         assert all(len(name) <= 83 for name in names[:-1]), names
 
 
+def test_the_warning_is_bounded_when_the_names_are_control_characters(
+    tmp_path, monkeypatch, caplog
+):
+    """A control character is shown as an escape of up to ten characters, so a
+    name is cut by what it shows and not by what it holds: names of newlines
+    and of right-to-left overrides give a record as short as names of letters."""
+    override = chr(0x202E)
+    document = _baseline_document()
+    document["plugins_used"] = [{"name": "\n" * 200 + str(i)} for i in range(5000)]
+    document["filters_used"] = [{"path": override * 200 + str(i)} for i in range(5000)]
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        _scanner(tmp_path, monkeypatch)
+
+    (warning,) = _not_applied_warnings(caplog)
+    assert len(warning) < 8000, len(warning)
+    assert "\n" not in warning
+    assert override not in warning
+    for label in (NOT_RUN, NOT_APPLIED_FILTERS):
+        names = _listed(warning, label)
+        assert len(names) == 21, names
+        assert names[-1] == "and 4980 more"
+        assert all(len(name) <= 83 for name in names[:-1]), names
+
+
 def test_the_same_baseline_is_reported_once_per_scanner(tmp_path, monkeypatch, caplog):
     """The options are processed again when a different configuration is swapped
     in before the scan, and by any caller that builds the scanner again; the
