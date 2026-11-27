@@ -39,9 +39,13 @@ A block is evidence when the runner ran it, it passed, and its marker expects ex
 (success) or 2 (actionable findings). It expects exit 1 for a scan that ended with scan
 errors, but ASH also exits 1 for many refusals (``--use-existing`` with no results to
 use, ``ash config init`` refusing a second config source), so an exit-1 block counts
-only when its processes also reached the part of
-``ASHScanOrchestrator._write_results_file`` that follows its early exits: a scan ran and
-wrote its results. Any other expectation shows ASH refusing something or being stopped.
+only through a process of its own that reached the part of
+``ASHScanOrchestrator._write_results_file`` that follows its early exits: that process
+ran a scan and wrote its results, and it shows what it ran. The processes of a block
+share its context and its exit, so a block that runs a scan and then a command that
+refuses shows the scan and nothing of the command; a process that did not write the
+results (a worker a scanner runs in included) shows nothing on an exit-1 block. Any
+other expectation shows ASH refusing something or being stopped.
 
 A feature measured in a function is reached by running its REGION: the statements that
 come after the function's leading guards (the early exits it opens with, before its
@@ -59,19 +63,39 @@ that the shared method calls on ``self``, and a plugin that shares its work meth
 no such method is an inventory error.
 
 A saved configuration counts for a block that reached ``load_config_file`` only where
-the block can have read that file: the latest save of its path in the session at or
-before the block, of kind ``ash`` or ``pyproject`` (a fragment never counts), saved
-under the name discovery picks among the saves of the directory it searches, or named by
-the block's own ``--config``, ``-c`` or literal ``ASH_CONFIG=<file>``. Nothing counts
-after a shell block of the session may have changed directory. Where the unprovable case
-is left uncovered, it is left so on purpose.
+the block can have read that file, and the file still held what the page saved: the
+latest save of its path in the session at or before the block, of kind ``ash`` or
+``pyproject`` (a fragment never counts), saved under the name discovery picks among the
+saves of the directory it searches, or named by the block's own ``--config``, ``-c`` or
+literal ``ASH_CONFIG=<file>``. Nothing counts after a shell block of the session may
+have changed directory, nor for a scan the block starts in another directory
+(``env -C DIR``, ``env --chdir=DIR``), and a marker whose ``env=`` sets ``ASH_CONFIG``
+or ``ASH_SOURCE_DIR`` withholds the discovery credit as an assignment in the text does.
+
+A save counts for nothing where a block of its session after it, up to and including the
+block that loaded it, may have changed what the scan reads in its place. The read is
+static and leans to "may have": a redirection, or an ``rm``, ``mv``, ``cp``, ``tee`` or
+other command that names the file, a directory that holds it, a glob that matches it or
+any name config discovery reads (a file written under a higher name outranks the save);
+an ``ash config`` command that writes (``init``, ``update``, ``wizard``, ``lint``); a
+program this module does not know to leave files alone (``sed -i``, ``git checkout``, a
+script); an expansion or a placeholder where a path stands; and every python block,
+which the check does not read. What such a block wrote never counts either. Reading
+a file (``cat``, ``ls``, ``grep``) and writing another (``> notes.txt``) leave the save
+in place, and so does the block that loads the save when its whole text is one
+``ash config update`` or ``ash config lint``: that command read the file before it wrote
+anything. Where the unprovable case is left uncovered, it is left so on purpose; the
+cost is a credit lost where a page only touches a word, which the page's author can
+restore by saving the file after the block, or by keeping the block out of the session.
 
 ``check`` fails (exit 1) on an uncovered feature missing from the shrink-only baseline
 (scripts/docs_feature_coverage_baseline.txt) and on a baseline line that names no
 feature; given the base branch's baseline it also fails on a line for a covered feature
 and on a line the pull request added. It exits 2 when the measurement cannot be
 trusted: nothing was measured, a coverage data file cannot be read, the data does not
-fit the docs tree, or the inventory cannot be built the same everywhere.
+fit the docs tree, the inventory cannot be built the same everywhere, or a function the
+measurement reads a block's reach from (config discovery, the results write) cannot be
+found or called.
 
 Not measured: processes outside this interpreter's environment (a scanner's own tool,
 ``uvx``, a container), a sandboxed scanner's Python (the sandbox passes on an allowlist
@@ -80,28 +104,37 @@ that is killed before it saves its data: the runner kills a block's processes wi
 SIGKILL at its timeout, and coverage.py saves on SIGTERM only with ``sigterm = true`` in
 its ``[run]`` settings, which the rc file does not set.
 
-Stated limit, refusal returns that remain inside regions. Under the region rule a
-function that returns or raises a refusal after its first statement has that refusal
-inside its region, so a docs example that ended in one would read as covering the
-function. No executed docs example ends in one today, which is why none is a named
-exception, and each is named here by function: the ``if refusal is not None: return
-refusal`` of the MCP tools in ``cli/mcp_server.py`` (``get_scan_progress``,
-``list_active_scans``, ``cancel_scan``, ``set_source_git``, ``set_source_zip_chunk``,
-``set_source_zip_finalize``, ``clear_source``, ``set_source_image``,
-``set_source_image_archive_chunk``, ``set_source_image_archive_finalize`` and
-``select_profile``, with the ``profile_refusal`` of ``resolve_ash_workspace`` and
-``run_ash_workspace_scan``); the asff reporter's ``ValueError`` guards and the
-aws-security-hub reporter's ``SecurityHubImportError`` guards; and the ``return None``
-of the s3 and cloudwatch-logs reporters when their settings are missing. A page that
-drives an MCP tool call with no session, or enables one of those reporters, makes the
-limit live: the change that adds such an example is the one that gives that guard a
-named exception.
+Refusals inside regions. Under the region rule an ``if`` after the function's first
+statement whose body ends in ``return`` or ``raise`` is inside its region, so a call
+that took it ran the region up to the refusal and no further, and a block that passes
+after it would read as covering the function. Such a call can pass: ``ash plugin
+verify`` refuses with exit 2, which is also the findings code; ``ash express stop``
+returns and exits 0 when no daemon answers; a block's own ``|| true`` drops an exit 1;
+an MCP tool returns its refusal as data, and a reporter's refusal is caught by the scan
+around it. So every feature measured in a function carries the bodies of its ways out
+(``Feature.refusals``), and a block shows the feature only if none of its processes ran
+a line of one: a block with one refusing call and one completing call shows nothing of
+the command, which is a credit lost, never one given.
+
+What the mechanism can see. It reads every ``if``, at any depth of the function and not
+inside a function, lambda or class nested in it, whose body ends in ``return`` or
+``raise``, and takes it for a refusal unless ``LATE_EXITS`` names it, by file and
+feature, as an exit after the work. The exits that follow the work are the ones that
+need naming, so a way out nobody has judged withholds credit instead of giving it. The
+test line is never part of the refusal: it runs on every call. What it cannot see: an
+exit written as a call (``sys.exit(1)``, ``ctx.exit()``), in an ``except`` handler or a
+``match`` arm, or on one line with its test (``if x: return``, which runs the same line
+whether or not the exit is taken); an exit a called function takes for its caller (a
+helper that raises ``typer.Exit``); and a refusal the function reports as a value that
+its caller turns into an exit. A way out among the function's leading guards needs no
+reading: it sits outside the region, and a call that took it ran nothing of the region.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import functools
 import importlib
 import importlib.util
@@ -117,7 +150,7 @@ import traceback
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPTS_DIR.parent
@@ -230,6 +263,12 @@ class Feature:
     #: feature is covered only when a block also reached one of these. Empty for every
     #: other feature, and left out of the report.
     requires: tuple[Region, ...] = ()
+    #: For a feature measured in a function: the bodies of the ways out of that function
+    #: that its region holds (``_refusals``), less the late exits ``LATE_EXITS`` names.
+    #: A process that ran any line of one took a way out before the function did its
+    #: work, so it shows nothing of the feature. Empty when the region holds no way out,
+    #: and left out of the report.
+    refusals: tuple[Region, ...] = ()
 
     @property
     def kind(self) -> str:
@@ -436,13 +475,152 @@ def function_region(fn: Any, *, past_the_last_exit: bool = False) -> Region:
     )
 
 
+#: Late exits: the ways out of a function that come after its work, by the file its code
+#: sits in, the feature id, and a needle of each exit's test as ``ast.unparse`` writes
+#: it. ``ash express status --json`` asks the server for its status, prints it and
+#: returns; a reporter reads the findings and returns early on an empty report; ``ash
+#: config validate`` returns when a scan accepts the file; the scan callback leaves with
+#: the worst code of its image batch; a reporter that writes more than one format leaves
+#: at the end of the one it was asked for. A block whose call ended in one of these ran
+#: the function's work, so it counts. Syntax cannot tell such an exit from a refusal, so
+#: every other way out of a region is read as a refusal (``_refusals``), and this table
+#: is the one place that says which exits are the work's own. An exit missing here
+#: withholds the credit of a feature that did the work, which a gap in the report shows;
+#: a refusal missing from a list of refusals would give credit nothing earned, and
+#: nothing shows it. The file is part of the key so that a feature of the same id in
+#: another tree (a test's own command tree has a ``scan`` too) takes none of these
+#: exits. A needle that matches no way out of its feature's region, or more than one,
+#: stops the check (``InventoryError``), and so does an entry no feature of the
+#: inventory holds, so an edit that moves or renames an exit has to name it again.
+LATE_EXITS: Mapping[str, Mapping[str, tuple[str, ...]]] = {
+    f"{PACKAGE}/cli/config.py": {
+        "command:ash config lint": ("lint_result.issues", "declined"),
+        "command:ash config validate": ("config_path is None", "check.scan_accepts"),
+    },
+    f"{PACKAGE}/cli/express.py": {
+        "command:ash express start": ("foreground",),
+        "command:ash express status": ("as_json",),
+    },
+    f"{PACKAGE}/cli/mcp_server.py": {
+        "mcp-tool:get_scan_results": (
+            "filter_level == 'full'",
+            "filter_level == 'summary'",
+            "filter_level == 'minimal'",
+        ),
+    },
+    f"{PACKAGE}/cli/merge.py": {
+        "command:ash results merge": ("exit_code != 0",),
+    },
+    f"{PACKAGE}/cli/scan.py": {
+        "command:ash scan": ("len(images) > 1",),
+    },
+    f"{PACKAGE}/plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py": {
+        "reporter:bedrock-summary-reporter": ("secret_findings",),
+    },
+    f"{PACKAGE}/plugin_modules/ash_builtin/reporters/asff_reporter.py": {
+        "reporter:asff": ("not results",),
+    },
+    f"{PACKAGE}/plugin_modules/ash_builtin/reporters/csv_reporter.py": {
+        "reporter:csv": ("not flat_vulns",),
+    },
+    f"{PACKAGE}/plugin_modules/ash_builtin/reporters/gitlab_cyclonedx_reporter.py": {
+        "reporter:gitlab-cyclonedx": ("not components",),
+    },
+    f"{PACKAGE}/plugin_modules/ash_builtin/reporters/ocsf_reporter.py": {
+        "reporter:ocsf": ("not vulnerability_findings",),
+    },
+    f"{PACKAGE}/plugin_modules/ash_builtin/reporters/unused_suppressions_reporter.py": {
+        "reporter:unused-suppressions": (
+            "output_format == 'both'",
+            "output_format == 'markdown'",
+        ),
+    },
+    f"{PACKAGE}/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py": {
+        "scanner:npm-audit": ("all_results",),
+    },
+}
+
+
+def _ways_out(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.If]:
+    """Every ``if`` of a function, at any depth, whose body ends in ``return`` or
+    ``raise``: each is a way out of the function, a refusal or not.
+
+    A nested ``def``, ``lambda`` or class is not part of the function's own flow, so
+    what it returns or raises is not looked at. An exit written as a call
+    (``sys.exit(1)``, ``ctx.exit()``), one in an ``except`` handler, in a ``match`` arm
+    or in a loop's ``else``, is not an ``if`` and is not seen, and neither is one a
+    called function takes for the caller (a helper that raises ``typer.Exit``).
+    """
+    found: list[ast.If] = []
+    pending: list[ast.AST] = list(reversed(node.body))
+    while pending:
+        current = pending.pop()
+        if isinstance(
+            current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+        ):
+            continue
+        if isinstance(current, ast.If) and isinstance(
+            current.body[-1], (ast.Return, ast.Raise)
+        ):
+            found.append(current)
+        pending.extend(reversed(list(ast.iter_child_nodes(current))))
+    return found
+
+
+def _refusals(
+    feature_id: str,
+    path: str,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    region: frozenset[int],
+) -> tuple[Region, ...]:
+    """The bodies of the ways out inside a feature's region, less its late exits.
+
+    A call that took a way out before the function's work ran the region up to that
+    point and no further, yet its block can pass and expect an exit that counts: a
+    command that refuses with exit 2, the findings code; ``ash express stop`` with no
+    daemon answering, which returns and exits 0; a refusal a block's ``|| true`` drops;
+    an MCP tool, which returns its refusal as data; a reporter's, which the scan around
+    it catches. Reaching the region says nothing then, so a process that ran a line of
+    one of these bodies shows nothing of the feature (``_shows``).
+
+    The test line of a way out runs on every call and is never part of it. A way out
+    written on one line (``if x: return``) shares its line with its test, so a call that
+    only evaluated the test cannot be told from one that took it: it is not seen.
+    """
+    ways = [
+        way
+        for way in _ways_out(node)
+        if way.lineno in region and way.body[0].lineno > way.lineno
+    ]
+    named: set[int] = set()
+    for needle in LATE_EXITS.get(path, {}).get(feature_id, ()):
+        matching = [way for way in ways if needle in ast.unparse(way.test)]
+        if len(matching) != 1:
+            raise InventoryError(
+                f"{feature_id} names its late exit {needle!r}, which matches "
+                f"{len(matching)} of the {len(ways)} ways out of its code in {path}: "
+                "an edit moved it, so scripts/docs_feature_coverage.py has to name it "
+                "again"
+            )
+        named.add(id(matching[0]))
+    lines = {
+        line
+        for way in ways
+        if id(way) not in named
+        for line in range(way.body[0].lineno, (way.body[-1].end_lineno or 0) + 1)
+    }
+    return (Region(path=path, lines=frozenset(lines)),) if lines else ()
+
+
 def code_feature(feature_id: str, fn: Any) -> Feature:
     """A feature shown by its function's region."""
-    region = function_region(fn)
+    path, node = _function_info(fn)
+    region = Region(path=path, lines=_region_of(node))
     return Feature(
         id=feature_id,
         regions=(region,),
         location=f"{region.path}:{_unwrapped(fn).__code__.co_firstlineno}",
+        refusals=_refusals(feature_id, path, node, region.lines),
     )
 
 
@@ -540,12 +718,18 @@ def cli_features(root: Any) -> list[Feature]:
         callback_path, callback_node = _function_info(callback)
         paths = tuple(sorted(path for path, _ in members))
         location = f"{region.path}:{callback.__code__.co_firstlineno}"
+        # The ways out of the callback are the command's, and its options' too: an
+        # option shows only a call that did the command's work.
+        refusals = _refusals(
+            f"command:{name}", callback_path, callback_node, region.lines
+        )
         features.append(
             Feature(
                 id=f"command:{name}",
                 regions=(region,),
                 location=location,
                 paths=paths,
+                refusals=refusals,
             )
         )
         options: dict[str, list[Region]] = {}
@@ -577,6 +761,7 @@ def cli_features(root: Any) -> list[Feature]:
                     location=location,
                     paths=paths,
                     canonical=canonical,
+                    refusals=refusals,
                 )
             )
     if not any(feature.kind == "option" for feature in features):
@@ -756,6 +941,7 @@ def plugin_features(package: Any = None) -> list[Feature]:
                 id=feature_id,
                 regions=(region,),
                 location=f"{path}:{_unwrapped(method).__code__.co_firstlineno}",
+                refusals=_refusals(feature_id, path, node, region.lines),
             ),
         )
 
@@ -784,6 +970,7 @@ def plugin_features(package: Any = None) -> list[Feature]:
                 location=feature.location,
                 note=note,
                 requires=requires,
+                refusals=feature.refusals,
             )
         )
     return features
@@ -853,11 +1040,13 @@ def mcp_tool_features() -> list[Feature]:
             raise InventoryError(
                 f"mcp tool {name} is not a function defined on line {lineno}"
             )
+        region = Region(path=path, lines=_region_of(node))
         features.append(
             Feature(
                 id=f"mcp-tool:{name}",
-                regions=(Region(path=path, lines=_region_of(node)),),
+                regions=(region,),
                 location=f"{path}:{lineno}",
+                refusals=_refusals(f"mcp-tool:{name}", path, node, region.lines),
             )
         )
     return features
@@ -882,6 +1071,21 @@ def inventory() -> list[Feature]:
     missing = sorted(set(KINDS) - {feature.kind for feature in features})
     if missing:
         raise InventoryError(f"the inventory holds no feature of kind {missing}")
+    held = {
+        (feature.id, region.path) for feature in features for region in feature.regions
+    }
+    gone = sorted(
+        (feature_id, path)
+        for path, named in LATE_EXITS.items()
+        for feature_id in named
+        if (feature_id, path) not in held
+    )
+    if gone:
+        raise InventoryError(
+            f"LATE_EXITS names code the inventory no longer holds: {gone}: a rename, "
+            "a move or a removal, so scripts/docs_feature_coverage.py has to name it "
+            "again"
+        )
     return sorted(features, key=lambda feature: feature.id)
 
 
@@ -1180,6 +1384,29 @@ def _read_records(
     return recorded
 
 
+def _package_suffixes(measured: Iterable[str]) -> dict[str, list[str]]:
+    """The files of a coverage data set by the repository path each ends in:
+    ``automated_security_helper/...`` from every component of the file's path that
+    names the package, so data recorded in another checkout still matches."""
+    by_suffix: dict[str, list[str]] = defaultdict(list)
+    for file in measured:
+        text = file.replace("\\", "/")
+        for match in re.finditer(rf"(?:^|(?<=/)){PACKAGE}/", text):
+            by_suffix[text[match.start() :]].append(file)
+    return by_suffix
+
+
+class _Reach:
+    """The lines of the package that some processes of one block ran, by repository
+    path: all of the block's processes together, or one of them (``_Coverage``)."""
+
+    def __init__(self, lines_of: Callable[[str], set[int]]):
+        self._lines_of = lines_of
+
+    def reached(self, region: Region) -> bool:
+        return bool(self._lines_of(region.path) & region.lines)
+
+
 class _Coverage:
     """The coverage data of a run, combined into a file of its own.
 
@@ -1194,6 +1421,11 @@ class _Coverage:
     dropping it unseen would read the features only that process reached as
     uncovered, so every message the callback gets is an error naming the file. A file
     the combine skips as the duplicate of another (the same content) is no error.
+
+    The combined data cannot tell the processes of a block apart, and one data file is
+    one process, so ``processes`` reads the files on their own, each opened in place
+    and read before it is used (a ``CoverageData`` that was not read erases its file on
+    first use), and only for the contexts that need it.
     """
 
     def __init__(self, data: Path):
@@ -1212,6 +1444,9 @@ class _Coverage:
                 f"no coverage data file under {directory}: nothing was measured"
             )
         self.files = len(files)
+        self._paths = files
+        self._by_context: dict[str, list[Path]] | None = None
+        self._opened: list[Any] = []
         self._scratch = tempfile.TemporaryDirectory(prefix="docs-feature-coverage-")
         unreadable: list[str] = []
         try:
@@ -1227,12 +1462,7 @@ class _Coverage:
                     "the coverage data cannot be read: " + "; ".join(unreadable)
                 )
             self.contexts = frozenset(c for c in self._data.measured_contexts() if c)
-            by_suffix: dict[str, list[str]] = defaultdict(list)
-            for measured in self._data.measured_files():
-                text = measured.replace("\\", "/")
-                for match in re.finditer(rf"(?:^|(?<=/)){PACKAGE}/", text):
-                    by_suffix[text[match.start() :]].append(measured)
-            self._by_suffix = by_suffix
+            self._by_suffix = _package_suffixes(self._data.measured_files())
         except CoverageException as exc:
             self.close()
             raise MeasurementError(f"the coverage data cannot be read: {exc}") from exc
@@ -1242,6 +1472,8 @@ class _Coverage:
         self._lines: dict[str, dict[str, set[int]]] = {}
 
     def close(self) -> None:
+        for data in getattr(self, "_opened", ()):
+            data.close()
         data = getattr(self, "_data", None)
         if data is not None:
             data.close()
@@ -1258,10 +1490,66 @@ class _Coverage:
             self._lines[path] = found
         return self._lines[path]
 
+    def reach(self, context: str) -> _Reach:
+        """What every process that ran under ``context`` ran, together."""
+        return _Reach(lambda path: self.lines_by_context(path).get(context, set()))
+
     def reached(self, context: str, region: Region) -> bool:
-        return bool(
-            self.lines_by_context(region.path).get(context, set()) & region.lines
-        )
+        return self.reach(context).reached(region)
+
+    def processes(self, context: str) -> list[_Reach]:
+        """What each process that ran under ``context`` ran, on its own: one ``_Reach``
+        for each data file that holds the context."""
+        from coverage.exceptions import CoverageException
+
+        if self._by_context is None:
+            found: dict[str, list[Path]] = defaultdict(list)
+            for path in self._paths:
+                data = self._read(path)
+                try:
+                    for name in data.measured_contexts():
+                        if name:
+                            found[name].append(path)
+                except CoverageException as exc:
+                    raise MeasurementError(
+                        f"the coverage data cannot be read: {exc}"
+                    ) from exc
+                finally:
+                    data.close()
+            self._by_context = found
+        return [self._process(path, context) for path in self._by_context[context]]
+
+    def _read(self, path: Path) -> Any:
+        """A data file, opened where it is and read at once: a ``CoverageData`` that
+        was not read erases its file on first use, and these are the run's own."""
+        from coverage import CoverageData
+        from coverage.exceptions import CoverageException
+
+        data = CoverageData(basename=str(path))
+        try:
+            data.read()
+        except CoverageException as exc:
+            data.close()
+            raise MeasurementError(f"the coverage data cannot be read: {exc}") from exc
+        return data
+
+    def _process(self, path: Path, context: str) -> _Reach:
+        data = self._read(path)
+        self._opened.append(data)
+        by_suffix = _package_suffixes(data.measured_files())
+        lines: dict[str, set[int]] = {}
+
+        def lines_of(region_path: str) -> set[int]:
+            if region_path not in lines:
+                found: set[int] = set()
+                for measured in by_suffix.get(region_path, ()):
+                    for line, contexts in data.contexts_by_lineno(measured).items():
+                        if context in contexts:
+                            found.add(line)
+                lines[region_path] = found
+            return lines[region_path]
+
+        return _Reach(lines_of)
 
 
 class _Uses:
@@ -1306,12 +1594,19 @@ def _option_keys(feature: Feature) -> tuple[tuple[tuple[str, ...], ...], str]:
     return (tuple(command.split()),), canonical
 
 
-def _shows(coverage: _Coverage, context: str, feature: Feature) -> bool:
-    """Whether the block with ``context`` ran any of a feature's regions and, when the
-    feature requires methods of its own (``Feature.requires``), any of those too."""
-    return any(coverage.reached(context, region) for region in feature.regions) and (
-        not feature.requires
-        or any(coverage.reached(context, region) for region in feature.requires)
+def _shows(reach: _Reach, feature: Feature) -> bool:
+    """Whether what a block's processes ran shows a feature: any of its regions and,
+    when the feature requires methods of its own (``Feature.requires``), any of those
+    too, and no line of a way out its code takes before its work (``Feature.refusals``).
+    A block that ran a refusal's lines took it with one of its calls, whatever else the
+    block ran."""
+    return (
+        any(reach.reached(region) for region in feature.regions)
+        and (
+            not feature.requires
+            or any(reach.reached(region) for region in feature.requires)
+        )
+        and not any(reach.reached(region) for region in feature.refusals)
     )
 
 
@@ -1352,6 +1647,8 @@ _DOT_OF_A_FILE = re.compile(_BEFORE_A_WORD + r"\.[ \t]+[^\s#;&|)<>-]")
 #: home directory) or a placeholder (``<path>``) names no file that can be read from the
 #: page.
 _EXPANDS = re.compile(r"[$`*?\[\]{}<>\n]|^~")
+#: The same without the glob marks, which ``_names_a_config`` reads as patterns.
+_EXPANDS_ANYTHING = re.compile(r"[$`{}<>\n]")
 _ASSIGNMENT_WORD = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
 
 #: The commands that read a configuration through discovery when they are given no
@@ -1398,6 +1695,19 @@ def _discovery() -> Any:
             f"config discovery (config_sources) cannot be imported: {exc}"
         ) from exc
     return _anchor(config_sources, "discover_config_source", owner="config_sources")
+
+
+def _discovery_refusal() -> type[Exception]:
+    """``ASHConfigSourceError``: what discovery raises for a config source it refuses,
+    a ``pyproject.toml`` that holds a ``[tool.ash]`` table and cannot be read, or a
+    directory it cannot search. Every other failure of the call stops the check."""
+    try:
+        from automated_security_helper.core import exceptions
+    except ImportError as exc:
+        raise MeasurementError(
+            f"the exceptions config discovery raises cannot be imported: {exc}"
+        ) from exc
+    return _anchor(exceptions, "ASHConfigSourceError", owner="core.exceptions")
 
 
 def _shell_text(block: Any) -> str:
@@ -1463,9 +1773,13 @@ def _discovered(saves: Mapping[str, _Recorded], directory: str) -> str | None:
     kind, because discovery reads files and not kinds, so a fragment saved under the
     name discovery picks hides a full configuration saved under a lower one. None when
     discovery finds nothing there or cannot tell (a ``pyproject.toml`` it cannot read,
-    a path that is a file and a directory): nothing then counts.
+    a path that is a file and a directory): nothing then counts. A call that fails any
+    other way (a changed signature, an exception it does not raise for a source it
+    refuses) stops the check, naming discovery: such a page is not one that selects
+    nothing, and reading it as one would withhold credit with no sign of why.
     """
     discover = _discovery()
+    refusal = _discovery_refusal()
     with tempfile.TemporaryDirectory(prefix="docs-feature-coverage-discovery-") as tmp:
         root = Path(tmp)
         for path, saved in saves.items():
@@ -1480,8 +1794,18 @@ def _discovered(saves: Mapping[str, _Recorded], directory: str) -> str | None:
             return None
         try:
             found = discover(search)
-        except Exception:
+        except refusal:
+            # A source discovery refuses, which a scan of the directory refuses too.
             return None
+        except Exception as exc:
+            # A call that fails any other way is a discovery this check can no longer
+            # make (its signature moved, it raises what it did not): the measurement
+            # stops, naming it, and never reads the page as one that selects nothing.
+            raise MeasurementError(
+                "config discovery (config_sources.discover_config_source) failed on "
+                f"the scratch copy of the page's saves ({type(exc).__name__}: {exc}): "
+                "scripts/docs_feature_coverage.py has to be brought in line with it"
+            ) from exc
         if found.selected is None:
             return None
         return found.selected.path.relative_to(root).as_posix()
@@ -1542,6 +1866,286 @@ def _rows_of_a_save(saved: _Recorded, path: str) -> set[str]:
     return _ash_config_rows(block, saved_only=True)
 
 
+# What a block after a save can have done to the file the scan reads. The runner writes
+# a save at its place in the session, and a later block can rewrite, extend, replace or
+# remove that file, or write a name discovery ranks above it, and the scan then reads
+# what the block left, which this check cannot see. So a save counts only where no block
+# after it, up to and including the one that loaded it, may have changed what the scan
+# reads in its place; what such a block wrote never counts. The read of a block is
+# static, and it leans to "may have": a program that is not named below, a python block
+# (the check does not read python), a redirection or an operand it cannot read.
+
+#: Words that open or close a compound command; the command proper follows them.
+_SHELL_KEYWORDS = frozenset(
+    {"if", "then", "else", "elif", "fi", "do", "done", "while", "until", "!", "{", "}"}
+    | {"time"}
+)
+#: Programs that change no file except through the redirections of the shell (read apart
+#: by ``_redirect_targets``), whatever words they are given: a command that runs one of
+#: these has changed no configuration. The heads of a ``for`` or ``case`` change none
+#: either; the commands of their bodies are commands of their own.
+_CHANGES_NO_FILE = frozenset(
+    {":", "[", "[[", "basename", "case", "cat", "cmp", "cut", "date", "declare"}
+    | {"diff", "dirname", "echo", "egrep", "esac", "exit", "export", "false", "fgrep"}
+    | {"file", "for", "function", "grep", "head", "hostname", "id", "in", "jq", "local"}
+    | {"ls", "printf", "pwd", "read", "readlink", "readonly", "realpath", "return"}
+    | {"select", "set", "sleep", "stat", "tail", "test", "tr", "true", "type"}
+    | {"typeset", "uname", "unset", "wc", "which", "whoami"}
+)
+#: Programs that change the files their own words name, and no other. A command that
+#: runs one changes a configuration only through a word that can name one
+#: (``_names_a_config``). ``touch`` and ``mkdir`` act on a name, not on what lies below
+#: it: they change a file only by making one the page's configuration is outranked by.
+_CHANGES_ITS_WORDS = frozenset(
+    {"chmod", "cp", "install", "ln", "mkdir", "mv", "rm", "rmdir", "tee", "touch"}
+    | {"truncate", "unlink"}
+)
+_MAKES_A_NAME = frozenset({"mkdir", "touch"})
+#: The commands under ``ash config`` that change no file: every other one, ``init``,
+#: ``update``, ``wizard`` and ``lint`` (which fixes with a flag) among them, writes a
+#: configuration whose name its command line need not spell.
+_READS_A_CONFIG_ONLY = frozenset(
+    {
+        ("ash", "config", "get"),
+        ("ash", "config", "validate"),
+        ("ash", "config", "validate-plugin-dependencies"),
+    }
+)
+#: A redirection of the shell that writes: ``>``, ``>>``, ``>|``, ``&>``, ``n>``, and
+#: ``>&word`` (a word that is not a file descriptor). Read from the text as it stands,
+#: quotes and here-documents included, so that it sees more than the shell does, never
+#: less. The target is the word that follows on the same line.
+_OUTPUT_REDIRECTION = re.compile(
+    r"(?P<operator>>[>|&]?)[ \t]*"
+    r"(?P<target>\([^)\n]*\)?|\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|()<>]*)"
+)
+_NOT_A_FILE = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"})
+
+
+def _config_file_names() -> frozenset[str]:
+    """Every name config discovery reads for a configuration, read from the product's
+    own lists: the canonical file, the dedicated names, the rc names and the
+    ``pyproject.toml`` it reads a table from."""
+    from automated_security_helper.core import constants
+
+    names: set[str] = set()
+    for name in ("ASH_CANONICAL_CONFIG_FILE_NAME", "ASH_PYPROJECT_FILE_NAME"):
+        names.add(_anchor(constants, name, owner="core.constants"))
+    for name in ("ASH_CONFIG_FILE_NAMES", "ASH_RC_FILE_NAMES"):
+        names.update(_anchor(constants, name, owner="core.constants"))
+    return frozenset(names)
+
+
+def _redirect_targets(script: str) -> list[str | None]:
+    """The target of every redirection in ``script`` that can write a file, as the word
+    it is given (quotes taken off); None where the target cannot be read (a process
+    substitution). A file descriptor (``2>&1``) and the null device write no file of the
+    project and are left out."""
+    found: list[str | None] = []
+    for match in _OUTPUT_REDIRECTION.finditer(script):
+        target = match.group("target")
+        if target.startswith("("):
+            found.append(None)
+            continue
+        if len(target) > 1 and target[0] == target[-1] and target[0] in "'\"":
+            target = target[1:-1]
+        if match.group("operator") == ">&" and (
+            not target or target.isdigit() or target == "-"
+        ):
+            continue
+        if not target or target in _NOT_A_FILE:
+            continue
+        found.append(target)
+    return found
+
+
+def _names_a_config(word: str, path: str, *, directories: bool = True) -> bool:
+    """Whether a word of a command can name the configuration the scan reads where the
+    page saved ``path``: that file, a directory that holds it (unless ``directories`` is
+    false), a glob that matches it, or a name config discovery reads, wherever it stands
+    (a file written under such a name outranks the save, or is the configuration where
+    there was none). A word the shell expands, a placeholder, and a path with a ``..``
+    part name nothing that can be told, so they count as naming it. An option names
+    nothing, but the value it is given with ``=``."""
+    if word.startswith("-"):
+        if "=" not in word:
+            return False
+        word = word.partition("=")[2]
+    if _EXPANDS_ANYTHING.search(word) or word.startswith("~"):
+        return True
+    text = word.replace("\\", "/")
+    parts = [part for part in text.split("/") if part not in ("", ".")]
+    if ".." in parts:
+        return True
+    normalized = "/".join(parts) or "."
+    if any(mark in text for mark in "*?["):
+        return fnmatch.fnmatchcase(path, normalized) or fnmatch.fnmatchcase(
+            posixpath.basename(path), parts[-1] if parts else "*"
+        )
+    if parts and parts[-1] in _config_file_names():
+        return True
+    if text.startswith("/"):
+        return False
+    return normalized == path or (
+        directories and (normalized == "." or path.startswith(normalized + "/"))
+    )
+
+
+def _ash_may_write_a_config(invocation: Any, cli: Any, loads_first: bool) -> bool:
+    """Whether an ``ash`` command line can write a configuration.
+
+    ``loads_first`` is set for the one command of the block that loaded the save, which
+    ran no command before it and none after it: a command that discovers its
+    configuration and then writes one (``update``, ``lint``) read the file before it
+    wrote anything, so what it wrote is not what it read.
+    """
+    command, _uses = _checks().invocation_usage(invocation.args, cli)
+    command = tuple(command)
+    if command in _READS_A_CONFIG_ONLY:
+        return False
+    if loads_first and command in _DISCOVERING_COMMANDS:
+        return False
+    return command[:2] == ("ash", "config")
+
+
+def _may_change_a_config(
+    script: str, path: str, cli: Any, depth: int = 0, loading: bool = False
+) -> bool:
+    """Whether running ``script``, the text of a shell block or a script it hands to
+    another shell, can have written, replaced or removed the configuration the scan
+    reads where the page saved ``path``, or put one in front of it.
+
+    ``loading`` is set for the block that loaded the save. When that block is one simple
+    command, the command that loaded the save is the only thing it ran, so a write of
+    its own came after its read (``_ash_may_write_a_config``). Any other command, a
+    redirection, or a command of a script it hands on is read as before.
+    """
+    checks = _checks()
+    if depth > 4:
+        return True
+    for target in _redirect_targets(script):
+        if target is None or _names_a_config(target, path):
+            return True
+    commands = checks.split_shell(script)
+    alone = loading and depth == 0 and len(commands) == 1
+    for command in commands:
+        words = list(command.words)
+        while words and (
+            _ASSIGNMENT_WORD.match(words[0]) or words[0] in _SHELL_KEYWORDS
+        ):
+            words.pop(0)
+        if words and _command_may_change_a_config(words, path, cli, depth, alone):
+            return True
+        if any(
+            _may_change_a_config(substitution, path, cli, depth + 1)
+            for substitution in command.substitutions
+        ):
+            return True
+    return False
+
+
+def _command_may_change_a_config(
+    words: list[str], path: str, cli: Any, depth: int, loads_first: bool = False
+) -> bool:
+    program = posixpath.basename(words[0])
+    if program in ("bash", "sh", "zsh") and "-c" in words[1:]:
+        index = words.index("-c") + 1
+        return _may_change_a_config(
+            words[index] if index < len(words) else "", path, cli, depth + 1
+        )
+    invocations = _checks().find_invocations(words)
+    if invocations:
+        return any(
+            _ash_may_write_a_config(found, cli, loads_first) for found in invocations
+        )
+    if program == "command" and words[1:2] in (["-v"], ["-V"]):
+        return False
+    if program in _CHANGES_NO_FILE:
+        return False
+    if program in _CHANGES_ITS_WORDS:
+        return any(
+            _names_a_config(word, path, directories=program not in _MAKES_A_NAME)
+            for word in words[1:]
+        )
+    return True
+
+
+def _changed_after_its_save(
+    saved: _Recorded,
+    path: str,
+    session: Sequence[_Recorded],
+    line: int,
+    cli: Any,
+) -> bool:
+    """Whether a block of the session after the save of ``path``, up to and including
+    the block fenced on ``line`` that loaded it, may have changed what the scan reads in
+    its place. The loading block counts as the others do, but for a lone command that
+    reads the file before it writes one (``_may_change_a_config``)."""
+    for later in session:
+        number = later.record["line"]
+        if not later.record["runs"] or not saved.record["line"] < number <= line:
+            continue
+        if later.block.family != "shell":
+            return True
+        if _may_change_a_config(
+            _shell_text(later.block), path, cli, loading=number == line
+        ):
+            return True
+    return False
+
+
+def _marker_env_names(block: Any) -> set[str]:
+    """The variables the marker of a block gives its own environment
+    (``env="A=1,B=2"``), as the runner reads them (``marker_env``)."""
+    pairs = "" if block.marker is None else str(block.marker.keys.get("env", ""))
+    names = set()
+    for pair in pairs.split(","):
+        name, separator, _value = pair.strip().partition("=")
+        if separator:
+            names.add(name)
+    return names
+
+
+def _env_starts_in_a_directory(script: str, depth: int = 0) -> bool:
+    """Whether a command of ``script`` runs through ``env`` given a directory to start
+    in: ``env -C DIR`` or ``env --chdir=DIR`` (any short cluster with ``C``, any
+    abbreviation of the long option). The command then reads another directory than
+    the one the page saved its files in. Read where ``env`` stands in a command, and in
+    the substitutions a command holds; a program given the option in another spelling
+    (``sudo -D``, ``make -C``) is not read."""
+    if depth > 4:
+        return True
+    for command in _checks().split_shell(script):
+        words = command.words
+        for index, word in enumerate(words):
+            if posixpath.basename(word) != "env":
+                continue
+            position = index + 1
+            while position < len(words):
+                option = words[position]
+                if option in ("-u", "--unset", "-S", "--split-string", "-a", "--argv0"):
+                    position += 2
+                    continue
+                if _ASSIGNMENT_WORD.match(option):
+                    position += 1
+                    continue
+                if not option.startswith("-") or option == "-":
+                    break
+                name = option.partition("=")[0]
+                if option.startswith("--"):
+                    if len(name) >= 3 and "--chdir".startswith(name):
+                        return True
+                elif "C" in option[1:]:
+                    return True
+                position += 1
+        if any(
+            _env_starts_in_a_directory(substitution, depth + 1)
+            for substitution in command.substitutions
+        ):
+            return True
+    return False
+
+
 def _saved_rows_read(
     entry: _Recorded,
     session: Sequence[_Recorded],
@@ -1572,6 +2176,14 @@ def _saved_rows_read(
       moved. The block shows the scan reached the loader, not which of its commands did,
       so any one of them is enough.
 
+    * No save counts where the block starts its scan in another directory through
+      ``env -C DIR`` or ``env --chdir=DIR``, and the discovery credit is off where a
+      block's marker sets ``ASH_CONFIG`` or ``ASH_SOURCE_DIR`` in its ``env=``. The file
+      a marker's ``ASH_CONFIG`` names is not credited either.
+    * A save counts only if no block of the session after it, up to and including this
+      one, may have changed what the scan reads in its place
+      (``_changed_after_its_save``).
+
     What cannot be shown is not counted, on purpose: a file a shell block wrote and a
     save never held, a value a variable fills in, a ``cd`` the text does not spell.
     """
@@ -1584,6 +2196,10 @@ def _saved_rows_read(
     texts = [_shell_text(shell.block) for shell in shells]
     if any(
         _MOVES_THE_SESSION.search(text) or _DOT_OF_A_FILE.search(text) for text in texts
+    ):
+        return set()
+    if entry.block.family == "shell" and _env_starts_in_a_directory(
+        _shell_text(entry.block)
     ):
         return set()
     saves = _latest_saves(session, line)
@@ -1612,6 +2228,9 @@ def _saved_rows_read(
     environment_names = any(
         _mentions("ASH_CONFIG", text) or _mentions("ASH_SOURCE_DIR", text)
         for text in texts
+    ) or any(
+        {"ASH_CONFIG", "ASH_SOURCE_DIR"} & _marker_env_names(block)
+        for block in (*(shell.block for shell in shells), entry.block)
     )
     if not gave_config and not environment_names:
         for directory in {directory for directory in directories if directory}:
@@ -1619,11 +2238,13 @@ def _saved_rows_read(
             if picked is not None:
                 paths.add(picked)
 
+    cli = _checks().load_cli()
     rows: set[str] = set()
     for path in paths:
         saved = saves.get(path)
-        if saved is not None:
-            rows |= _rows_of_a_save(saved, path)
+        if saved is None or _changed_after_its_save(saved, path, session, line, cli):
+            continue
+        rows |= _rows_of_a_save(saved, path)
     return rows
 
 
@@ -1684,18 +2305,27 @@ def _evaluate(
             "no passing block's context is in the coverage data: the collection is "
             "broken (the context never reached the measured processes)"
         )
-    evidence = [
-        entry
-        for entry in passed
-        if (
-            entry.record["expected"] in counting
-            or (
-                entry.record["expected"] == scan_errors
-                and coverage.reached(entry.record["context"], results_write)
-            )
-        )
-        and not uses.refuses_a_selection_of_dependencies(entry.block)
-    ]
+    # What each evidence block shows, as the lists of what its processes ran: a block
+    # that expects success or findings shows what all its processes ran together; a
+    # block that expects scan errors (exit 1, which ASH uses for refusals too) shows
+    # only what a process ran that itself wrote its scan's results, since a command of
+    # the block that refused with exit 1 shares the block's context and its exit.
+    evidence: list[tuple[_Recorded, list[_Reach]]] = []
+    for entry in passed:
+        context = entry.record["context"]
+        expected = entry.record["expected"]
+        if expected in counting:
+            reaches = [coverage.reach(context)]
+        elif expected == scan_errors and coverage.reached(context, results_write):
+            reaches = [
+                process
+                for process in coverage.processes(context)
+                if process.reached(results_write)
+            ]
+        else:
+            continue
+        if reaches and not uses.refuses_a_selection_of_dependencies(entry.block):
+            evidence.append((entry, reaches))
 
     by_kind: dict[str, list[Feature]] = defaultdict(list)
     for feature in features:
@@ -1730,10 +2360,9 @@ def _evaluate(
     for entry in recorded:
         sessions[(entry.page, entry.record["session"])].append(entry)
 
-    for entry in evidence:
-        context = entry.record["context"]
+    for entry, reaches in evidence:
         for feature in code_features:
-            if _shows(coverage, context, feature):
+            if any(_shows(reach, feature) for reach in reaches):
                 cover(feature.id, entry.page)
         if not (by_kind["option"] or config_ids):
             continue
@@ -1743,16 +2372,16 @@ def _evaluate(
                 for feature in option_index.get(
                     (tuple(use.command), _canonical(use.names)), ()
                 ):
-                    if _shows(coverage, context, feature):
+                    if any(_shows(reach, feature) for reach in reaches):
                         cover(feature.id, entry.page)
         if not config_ids:
             continue
-        if coverage.reached(context, load_anchor):
+        if any(reach.reached(load_anchor) for reach in reaches):
             session = sessions[(entry.page, entry.record["session"])]
             for feature_id in _saved_rows_read(entry, session, invoked, discovering):
                 if feature_id in config_ids:
                     cover(feature_id, entry.page)
-        if coverage.reached(context, override_anchor):
+        if any(reach.reached(override_anchor) for reach in reaches):
             for _invocation, _path, option_uses in invoked:
                 for use in option_uses:
                     if "--config-overrides" in use.names and use.value:

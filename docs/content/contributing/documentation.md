@@ -593,8 +593,10 @@ Only a block that passed counts, and only when its marker expects exit 0 or 2, o
 from a scan that wrote its results (see [Exit codes](../reference/exit-codes.md)). ASH
 exits 1 when a scan's scanners fail, and also when it refuses a command, as it does for
 `--use-existing` with no results to use. A block that shows ASH refusing something
-reaches code without showing that the feature works, so an exit 1 counts only when the
-block also ran the part of the scan that writes its results. A block marked
+reaches code without showing that the feature works, so an exit 1 counts only through a
+process of the block that itself ran the part of the scan that writes its results. A
+block's processes share its exit, so a block that runs a scan and then a command that
+refuses with exit 1 shows the scan and nothing of the command. A block marked
 `expect-exit=nonzero` or `expect-exit=any` never counts, and neither does one that shows
 `ash dependencies install` refusing a tool it cannot select.
 
@@ -603,12 +605,31 @@ code. The code that counts starts after the function's leading guards, the early
 it opens with (an `if` with no `else` that ends in `return` or `raise`). Those run on
 calls that do none of the function's work: the scan runs before every other
 subcommand and returns at once, so a block that ran any other command would otherwise
-reach it. An early exit after a statement that does work is part of the code that counts,
+reach it. An early exit after a statement that does work lies inside that code as well,
 because a reporter that builds its report and then returns early on an empty one has
-run. A scanner's or converter's work method is the exception: it counts past its last
+run; the paragraphs below say which exits count. A scanner's or converter's work
+method is the exception: it counts past its last
 early exit. It opens with resets and then the checks that end a scan that has nothing
 for it to do, and every scan runs every enabled scanner and every converter, so a scan
 that skipped one would otherwise count as running it.
+
+A call that left a function by a refusal shows nothing of it. In the code that counts, an
+`if` whose body ends in `return` or `raise` is a way out, and the check reads each one as
+a refusal. A block can pass after one: `ash plugin verify` exits 2 for a transcript
+directory that is missing, and 2 is also the exit for findings; `ash express stop`
+returns and exits 0 when no daemon answers; a `|| true` after a command hides its exit
+1; an MCP tool returns its refusal as data. So a feature counts only when no process of
+the block ran the body of one of its refusals, and a block that ran one refused call and
+one completed call of a command shows nothing of it.
+
+A way out that follows the work is not a refusal. `ash express status --json` asks the
+server for its status, prints it, and returns; a reporter that reads the findings returns
+early on an empty report; `ash config validate` returns when a scan accepts the file. The
+script lists these exits in `LATE_EXITS` and reads every other way out as a refusal, so
+a feature whose normal exit is missing from the list reads as not reached, and the change
+that finds one adds it. The check does not see an exit written as a call, such as
+`sys.exit(1)`, one in an `except` block or on the same line as its `if`, or one that a
+function it calls takes for it.
 
 Two plugins that share one work method, as `opengrep` and `semgrep` share the scan
 method of one base class, cannot be told apart by that method alone. Each also needs a
@@ -635,7 +656,8 @@ must also run the code that applies the config:
   `save-as`, and the saved config sets the key.
 
 A block that loads a config read one file, not every config its page saved. A saved
-config counts for it only where the page shows the block can have read that file:
+config counts for it only where the page shows the block can have read that file, and
+that the file still held what the page saved:
 
 - It is the latest save of its path in the session, at or before the block. A later save
   of the same path replaced it, and a save after the block changed nothing the block read.
@@ -660,10 +682,27 @@ config counts for it only where the page shows the block can have read that file
   session, while saved files stay in the page's project, so after a change of directory
   the file a scan read cannot be told. The check reads the word wherever it stands, in
   quotes and comments too, so an example that only mentions `cd` stops the credit.
+- The block does not start its scan in another directory with `env -C DIR` or
+  `env --chdir=DIR`, and its marker does not set `ASH_CONFIG` or `ASH_SOURCE_DIR` in its
+  `env` list. Neither shows in the text of the block, and each moves the scan to a file
+  the page did not save under that name.
+- The file still held what the page saved. A save counts for nothing when a block of the
+  session after it, up to and including the block that loads it, may have changed what
+  the scan reads in its place. The check reads those blocks as text and decides toward
+  "may have": a redirection, `rm`, `mv`, `cp`, or `tee` that names the file, a directory
+  that holds it, a glob that matches it, or any name config discovery reads (a file
+  written under a higher name outranks the save); an `ash config` command that writes,
+  such as `ash config init` or `ash config update`; a program the check does not know to
+  leave files alone, such as `sed -i` or a script; and every Python block, which the
+  check does not read. A block that only reads the file (`cat`) or writes another one
+  (`> notes.txt`) leaves the save in place. So does a loading block that is one
+  `ash config update` or one `ash config lint` and nothing else: the command reads the
+  file before it writes anything.
 
-To make a config count, save it with `save-as` under a name the command reads, and run the
-scan in the same session without changing directory. The check cannot see a file that a
-shell block writes, so it never counts one.
+To make a config count, save it with `save-as` under a name the command reads, after any
+block that writes files of the project, and run the scan in the same session without
+changing directory. The check cannot see a file that a shell block writes, so it never
+counts one.
 
 ### Read the report
 
@@ -711,11 +750,17 @@ warning that says to delete it.
 
 The check exits 1 when the gate fails, and 2 when the run cannot show anything: no block
 records, no readable coverage data, no passing block, records from another version of
-the docs, or an inventory that cannot be built the same way everywhere. To measure
-the examples in a checkout:
+the docs, an inventory that cannot be built the same way everywhere, or a function the
+check reads a block's reach from, such as config discovery, that it can no longer find or
+call. To measure the examples in a checkout, start from an empty data directory: a run
+adds to the data files already there under the same block names, so a block that no
+longer reaches a feature would still be credited with it by the earlier run.
 
 <!-- doctest: illustrative reason="runs in a checkout of this repository" -->
 ```bash
+# Start from an empty data directory, since a run adds to the one it finds
+rm -rf .docs-coverage
+
 # The examples, measured into a directory given as an absolute path
 ASH_DOCS_COVERAGE_DIR="$PWD/.docs-coverage" uv run pytest tests/integration/docs/test_docs_examples.py --run-integration
 
