@@ -16,7 +16,7 @@ every rule it holds is checked here on planted input:
   storyboard's whatever the machine speed, output is shortened and never stretched, and
   a scene that does not fit its duration is refused;
 * the scrub scan: a planted token is found, by its kind and never its value, including
-  one that SGR runs, a line wrap or an escape sequence split;
+  one that SGR runs, a line wrap, an escape sequence or an invisible character split;
 * the run record: canonical JSON, byte for byte what ``json.dumps(sort_keys=True,
   indent=2)`` plus a newline writes;
 * no ``pty``, ``termios`` or ``fcntl`` import, so the module runs, and is tested, on
@@ -939,9 +939,11 @@ def test_the_ls_refusal_names_the_argument_that_prints_owners(cast):
     ["ls --format=across", "ls --format", "ls --author", "ls --no-group", "ls --all"],
 )
 def test_a_long_option_that_prints_no_owners_does_not_claim_to(cast, command):
+    # The refusal says what some long options print, never that this one does.
     problem = cast.command_problem(command)
     assert problem is not None
-    assert LISTS_OWNERS not in problem
+    assert f"some long options print the {LISTS_OWNERS}" in problem
+    assert f"prints the {LISTS_OWNERS}" not in problem
 
 
 @pytest.mark.parametrize(
@@ -965,6 +967,9 @@ def test_every_ls_long_option_gets_the_one_generic_refusal(cast, option):
     assert generic is not None
     problem = cast.command_problem(f"ls {option}")
     assert problem == generic.replace("--no-such-option", option)
+    # The words give the owner reason: what the scan cannot read in a listing.
+    assert LISTS_OWNERS in problem
+    assert "scrub scan cannot recognize" in problem
 
 
 def test_the_generic_ls_refusal_names_the_short_flags_that_print_owners(cast):
@@ -975,6 +980,12 @@ def test_the_generic_ls_refusal_names_the_short_flags_that_print_owners(cast):
     assert "-l, -g, -o, -n" not in cast.command_problem("cat --all")
 
 
+def test_a_long_option_of_cat_gets_no_owner_reason(cast):
+    # The owner reason is about ls listings: cat prints no owner and group columns.
+    problem = cast.command_problem("cat --number")
+    assert problem == "argument '--number' is an option other than a short flag"
+
+
 @pytest.mark.parametrize(
     "value", ["long", "verbose", "l", "lo", "lon", "verb", "verbos", "across"]
 )
@@ -983,12 +994,13 @@ def test_ls_format_with_its_value_in_the_next_argument_gets_the_owner_reason(
 ):
     # GNU ls takes the value of --format from the next argument, so `ls --format long`
     # prints owners and groups as `ls --format=long` does. The option is refused before
-    # its value is read, with the reason every ls option gets: the owner flags.
+    # its value is read, with the reason every ls long option gets: some print owners
+    # and groups, which the scan cannot read.
     problem = cast.command_problem(f"ls --format {value}")
     assert problem is not None
     assert problem == cast.command_problem("ls --format")
     assert "-l, -g, -o, -n" in problem
-    assert "owners and groups" in problem
+    assert LISTS_OWNERS in problem
 
 
 # --- ids, kinds and the other keys
@@ -1842,10 +1854,63 @@ def test_a_token_wrapped_inside_a_table_drawn_with_ascii_bars_is_not_rejoined(ca
 
 ZERO_WIDTH_SPACE = "\N{ZERO WIDTH SPACE}"
 
+#: Characters of Unicode category Cf, which a terminal does not show. One inside a path
+#: splits it for a scan of the text and not for the reader of the recording.
+INVISIBLE_FORMAT_CHARACTERS = {
+    "a zero-width space": ZERO_WIDTH_SPACE,
+    "a zero-width non-joiner": "\N{ZERO WIDTH NON-JOINER}",
+    "a zero-width joiner": "\N{ZERO WIDTH JOINER}",
+    "a word joiner": "\N{WORD JOINER}",
+    "a soft hyphen": "\N{SOFT HYPHEN}",
+    "a byte-order mark": "\N{ZERO WIDTH NO-BREAK SPACE}",
+    "a left-to-right mark": "\N{LEFT-TO-RIGHT MARK}",
+    "a right-to-left override": "\N{RIGHT-TO-LEFT OVERRIDE}",
+    "a tag character": "\N{TAG LATIN SMALL LETTER A}",
+}
+#: Characters that look as empty and are not of that category, so the flat view keeps
+#: them: a space, a combining mark, a symbol and a letter.
+KEPT_BLANK_LOOKING_CHARACTERS = {
+    "a no-break space": "\N{NO-BREAK SPACE}",
+    "a combining grapheme joiner": "\N{COMBINING GRAPHEME JOINER}",
+    "a braille blank": "\N{BRAILLE PATTERN BLANK}",
+    "a hangul filler": "\N{HANGUL FILLER}",
+}
+
+
+@pytest.mark.parametrize("how", sorted(INVISIBLE_FORMAT_CHARACTERS))
+def test_a_token_split_by_an_invisible_format_character_is_found_in_the_flat_view(
+    cast, how
+):
+    char = INVISIBLE_FORMAT_CHARACTERS[how]
+    text = f"wrote /home/bui{char}lder/app.py"
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in cast.strip_sgr(text)
+    hits = cast.scan_text(text, tokens, "event 8")
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "event 8", "flat")
+    ]
+
+
+@pytest.mark.parametrize("how", sorted(KEPT_BLANK_LOOKING_CHARACTERS))
+def test_the_flat_view_keeps_a_blank_looking_character_that_is_not_a_format_one(
+    cast, how
+):
+    char = KEPT_BLANK_LOOKING_CHARACTERS[how]
+    assert cast.flatten_text(f"a{char}b") == f"a{char}b"
+    # Kept, it still parts the halves of a path.
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert cast.scan_text(f"/home/bui{char}lder", tokens, "event 8") == []
+
+
+def test_the_flat_view_keeps_the_spaces_beside_a_format_character(cast):
+    # Only a control or a box-drawing character takes the spaces beside it away.
+    assert cast.flatten_text(f"a {ZERO_WIDTH_SPACE} b") == "a  b"
+
+
 #: More wrapped paths that the flat view does not rejoin, each with a twin that it does.
 #: In the twin only characters the view removes lie between the halves. In the text,
 #: something it keeps does: the text of a column to the right of the wrapped cell, the
-#: right-hand column of a log line, the bar of an ASCII table, a zero-width space.
+#: right-hand column of a log line, the bar of an ASCII table.
 NOT_REJOINED = {
     "first column with a column to its right, bordered": (
         f"{BAR} /home/bu {BAR} FAILED {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}\r\n",
@@ -1863,21 +1928,18 @@ NOT_REJOINED = {
         "| /home/bu | FAILED |\r\n| ilder/x  |        |",
         f"{BAR} /home/bu {BAR}        {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}",
     ),
-    "a zero-width space inside the token": (
-        f"wrote /home/bu{ZERO_WIDTH_SPACE}ilder/x",
-        "wrote /home/bu\x07ilder/x",
-    ),
 }
 
 
 @pytest.mark.parametrize("shape", sorted(NOT_REJOINED))
 def test_a_token_with_something_kept_between_its_halves_is_not_rejoined(cast, shape):
     """Limits of the flat view, pinned as they are, not promises. The view removes
-    escape sequences, control characters, box-drawing characters and the spaces beside
-    the last two, and nothing else. A token with anything else between its halves is
-    not found, so a recording must not wrap a path beside other text: the scan is not
-    what keeps such a path out of one. If the view comes to rejoin one of these, its
-    case here turns red and becomes a must-flag case.
+    escape sequences, control characters, box-drawing characters, invisible format
+    characters and the spaces beside the controls and the box-drawing characters, and
+    nothing else. A token with anything else between its halves is not found, so a
+    recording must not wrap a path beside other text: the scan is not what keeps such a
+    path out of one. If the view comes to rejoin one of these, its case here turns red
+    and becomes a must-flag case.
     """
     text, twin = NOT_REJOINED[shape]
     tokens = [cast.ForbiddenToken("home", "/home/builder")]
@@ -1886,6 +1948,43 @@ def test_a_token_with_something_kept_between_its_halves_is_not_rejoined(cast, sh
     # The twin has only removed characters between the halves, and is found.
     assert "/home/builder" in cast.flatten_text(twin)
     assert [hit.view for hit in cast.scan_text(twin, tokens, "event 6")] == ["flat"]
+
+
+#: Every wrapped path above that the view keeps apart, as the scan reads it: the first
+#: half holds the start of /home/builder, and the second half is not one the view can
+#: join to it.
+KEPT_APART = {
+    f"a middle column, {name}": cells["middle"]
+    for name, cells in WRAPPED_IN_A_TABLE.items()
+}
+KEPT_APART.update({name: pair[0] for name, pair in NOT_REJOINED.items()})
+
+
+@pytest.mark.parametrize("shape", sorted(KEPT_APART))
+def test_a_home_root_token_finds_the_first_half_of_a_path_the_view_keeps_apart(
+    cast, shape
+):
+    """The net under the flat view's limits: the first half of a wrapped home path
+    holds the root of the home directory, so a token for the root finds the path where
+    the token for the whole path cannot.
+    """
+    text = KEPT_APART[shape]
+    whole = [cast.ForbiddenToken("home", "/home/builder")]
+    root = [cast.ForbiddenToken("home-root", "/home/")]
+    assert cast.scan_text(text, whole, "event 6") == []
+    hits = cast.scan_text(text, root, "event 6")
+    assert [(hit.kind, hit.view) for hit in hits] == [("home-root", "raw")]
+
+
+def test_a_home_root_token_does_not_find_a_path_that_wraps_inside_the_root(cast):
+    # The net has a limit of its own: a wrap inside the root leaves neither half
+    # holding it, so the wrap has to fall after the root.
+    text = "| /ho | FAILED |\r\n| me/builder |"
+    tokens = [
+        cast.ForbiddenToken("home", "/home/builder"),
+        cast.ForbiddenToken("home-root", "/home/"),
+    ]
+    assert cast.scan_text(text, tokens, "event 6") == []
 
 
 def test_a_hit_names_its_kind_and_never_the_value(cast):
