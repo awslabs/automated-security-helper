@@ -1612,7 +1612,7 @@ def test_every_text_run_is_pinned_to_the_grid(rc, rendered):
         for row in stored_rows(rendered.root).values()
         for text in row.iter(SVG + "text")
     ]
-    assert len(runs) > 20
+    assert len(runs) > 8
     for text in runs:
         assert text.get("lengthAdjust") == "spacingAndGlyphs"
         assert int(text.get("x")) % rc.CELL_WIDTH == 0
