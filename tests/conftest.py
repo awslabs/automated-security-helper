@@ -2116,6 +2116,32 @@ def _no_ash_handler_outlives_its_module():
         yield
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _restore_ash_logger_switches_per_module():
+    """What ``_restore_ash_logger_switches`` does, for a module's own fixtures.
+
+    pytest sets a module's fixtures up before the function-scoped ones of its first
+    test, so the per-test fixture takes its snapshot after them and keeps whatever
+    they set. ``run_ash_scan`` calls ``get_logger``, which pins the ``ash`` logger at
+    TRACE and leaves it there, so a fixture that runs a scan once for a module, such
+    as ``ferret_scan_output`` in
+    tests/unit/plugin_modules/ash_ferret_plugins/test_ferret_matches_are_masked_in_reports.py,
+    left TRACE in place for every later test on the same xdist worker. A test that
+    builds a scanner before its own ``caplog.at_level("WARNING")`` block then found
+    the scanner's TRACE lines in ``caplog.text`` or not, depending on which modules
+    its worker had run before it
+    (tests/unit/plugin_modules/ash_builtin/test_trivy_scanner_target_position_and_skip_dirs.py).
+
+    This fixture is set up ahead of the module's own: autouse fixtures of a scope come
+    first, so its snapshot is the state the module was entered with, and it puts that
+    state back once the module's fixtures are torn down. Inside the module nothing
+    changes, since each test still returns to what the module's fixtures left.
+    Handlers stay with ``_no_ash_handler_outlives_its_module``.
+    """
+    with _AshLoggerSwitches():
+        yield
+
+
 def _open_run_log_scopes() -> "set[str]":
     """The run log scopes open in this process (``utils.log``). Empty until
     ``utils.log`` is imported; this imports nothing of ASH's. The set is read
