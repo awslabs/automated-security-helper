@@ -47,6 +47,12 @@ those sections, so it always leaves them out, and an in-tree file that sets
 ``enabled: true`` is named in a warning. Such a config may still turn one of
 them off.
 
+mcp-config's five checks resolve to the operator's value or the config's,
+whichever is on. Its two prefix lists keep only the entries under one of the
+operator's prefixes, compared with the scanner's own URL and command-path
+matching. An empty list, or one with nothing left, keeps the operator's list, and
+an operator who sets no list accepts any.
+
 What is not done here
 ---------------------
 A file an MCP client delivered keeps nothing here: its base is the defaults, so
@@ -78,17 +84,35 @@ Limits
 
 from __future__ import annotations
 
+import copy
+import posixpath
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from automated_security_helper.config.tool_config_trust import (
     TIGHTENING_VALUES,
+    _MISSING,
     Landing,
     _covered,
     _file_wrote,
     _get,
+    _options_mapping,
     _options_of,
+    _same_option_value,
     _set,
+    _spellings_in,
+    _trusted_option,
     _wrote,
     landings_of,
     replay_overrides_onto,
@@ -100,6 +124,11 @@ from automated_security_helper.config.untrusted_source import (
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.mcp_config.model import (
+    command_prefix_matches,
+    split_url,
+    url_prefix_matches,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -208,6 +237,7 @@ def keep_operator_floors(
 
     ignored: List[str] = []
     ignored.extend(_keep_switches_off(config, trusted_config, landings))
+    ignored.extend(_keep_option_floors(config, trusted_config, landings))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
         tail = (
@@ -266,3 +296,252 @@ def _keep_switches_off(
             if wrote:
                 ignored.append(f"scanners.{key}.enabled")
     return ignored
+
+
+# ---------------------------------------------------------------------------
+# Option floors
+# ---------------------------------------------------------------------------
+
+#: How a floor narrows. ``TRUE_NARROWS``: the check is on when either side has it
+#: on. ``URL_PREFIXES`` and ``COMMAND_PREFIXES``: a list keeps only the entries
+#: under one of the operator's prefixes, compared the way mcp-config compares them.
+TRUE_NARROWS = "true-narrows"
+URL_PREFIXES = "url-prefixes"
+COMMAND_PREFIXES = "command-prefixes"
+
+
+class Floor(NamedTuple):
+    """One option of a scanner that a config that is not the operator's may only narrow."""
+
+    #: How the option narrows: one of the rule constants above.
+    rule: str
+    #: The plugin's own default, which is the operator's value where the operator
+    #: sets none.
+    default: Any
+    #: The type a value read from a plugin's plain section is validated as.
+    kind: Any
+    #: The values a rule names, for the rules that name some.
+    members: FrozenSet[str] = frozenset()
+
+
+#: The floors, keyed by (scanner, option). A nested option is dotted. Each default
+#: is the plugin's own, which ``tests/unit/config`` pins against its options model.
+OPERATOR_FLOORS: Dict[Tuple[str, str], Floor] = {
+    ("mcp-config", "forbid_privilege_escalation"): Floor(TRUE_NARROWS, True, bool),
+    ("mcp-config", "forbid_unpinned_runners"): Floor(TRUE_NARROWS, True, bool),
+    ("mcp-config", "forbid_auto_approval"): Floor(TRUE_NARROWS, True, bool),
+    ("mcp-config", "flag_env_secrets"): Floor(TRUE_NARROWS, True, bool),
+    ("mcp-config", "require_local"): Floor(TRUE_NARROWS, False, bool),
+    ("mcp-config", "remote_url_prefixes"): Floor(URL_PREFIXES, [], List[str]),
+    ("mcp-config", "allowed_command_prefixes"): Floor(COMMAND_PREFIXES, [], List[str]),
+}
+
+#: What ``_floored`` answers when the config's value already meets the floor.
+_UNCHANGED = object()
+
+
+def _keep_option_floors(
+    config: "AshConfig", trusted_config: "AshConfig", landings: Sequence[Landing]
+) -> List[str]:
+    """Hold each floored option of the config to the operator's value; return what was named.
+
+    The operator's value is read from the trusted base's section under either
+    spelling of each key, and is the plugin's default where the operator sets none.
+    A section or option the config leaves out takes the value the floor gives the
+    default. A value the config wrote that a floor changes is named. A value either
+    side holds that the scanner would refuse is left for the scanner.
+    """
+    from automated_security_helper.config.client_scanner_exclusions import (
+        _scanner_sections,
+    )
+
+    ignored: List[str] = []
+    extra = getattr(config.scanners, "__pydantic_extra__", None)
+    for (scanner, option), floor in OPERATOR_FLOORS.items():
+        parts = option.split(".")
+        operator = _operator_value(trusted_config, scanner, parts, floor)
+        if operator is _MISSING:
+            continue
+        sections = _scanner_sections(config, scanner)
+        if not sections:
+            new = _floored(floor, operator, copy.deepcopy(floor.default))
+            if new is not _UNCHANGED and isinstance(extra, dict):
+                extra[scanner] = {"options": _nested(parts, copy.deepcopy(new))}
+            continue
+        for key, section in sections:
+            options = _options_of(section)
+            if options is None:
+                # A section with no options mapping reads as the plugin's defaults;
+                # anything else is no section of options at all.
+                if not (isinstance(section, dict) and section.get("options") is None):
+                    continue
+                holder, spelling, raw = None, None, _MISSING
+            else:
+                holder, spelling, raw = _locate(options, parts)
+            path = ("scanners", key, "options", *parts)
+            # A value an override the trusted base could not take set is the
+            # operator's own; there is nothing of the base's to put in its place.
+            if _covered(landings, path):
+                continue
+            current = _typed(floor, raw)
+            if current is _MISSING:
+                continue
+            new = _floored(floor, operator, current)
+            if new is _UNCHANGED:
+                continue
+            wrote = (
+                spelling is not None
+                if isinstance(holder, dict)
+                else _file_wrote(config, path, raw)
+            )
+            if options is None:
+                section["options"] = _nested(parts, copy.deepcopy(new))
+            else:
+                _put(options, parts, new)
+            if wrote:
+                ignored.append(f"scanners.{key}.options.{option}")
+    return ignored
+
+
+def _operator_value(
+    trusted_config: "AshConfig", scanner: str, parts: Sequence[str], floor: Floor
+) -> Any:
+    """The operator's value of the option at ``parts``; _MISSING when it is one the scanner refuses."""
+    value: Any = _options_mapping(
+        trusted_config.get_plugin_config(PluginKind.SCANNER, scanner)
+    )
+    for part in parts:
+        value = _trusted_option(value, part)
+        if value is _MISSING:
+            break
+    return _typed(floor, value)
+
+
+def _typed(floor: Floor, raw: Any) -> Any:
+    """``raw`` as the floor's kind: the plugin's default where it holds no value,
+    and _MISSING where the scanner would refuse the value it holds."""
+    from pydantic import TypeAdapter, ValidationError
+
+    if raw is _MISSING or raw is None:
+        return copy.deepcopy(floor.default)
+    try:
+        return TypeAdapter(floor.kind).validate_python(raw)
+    except ValidationError:
+        return _MISSING
+
+
+def _read(level: Any, spelling: str) -> Any:
+    return level[spelling] if isinstance(level, dict) else getattr(level, spelling)
+
+
+def _locate(options: Any, parts: Sequence[str]) -> Tuple[Any, Optional[str], Any]:
+    """Where the option at ``parts`` is held under ``options``.
+
+    Returns the mapping or model that holds the last part, the spelling it is held
+    under, and its value. A plugin's dict holds either spelling of a key and a
+    model holds the field by name. The holder is None when a level on the way is
+    missing, and the spelling is None when the holder lacks the last part; the value
+    is then _MISSING.
+    """
+    level = options
+    for part in parts[:-1]:
+        spellings = _spellings_in(level, part)
+        child = _read(level, spellings[0]) if spellings else None
+        if child is None:
+            return None, None, _MISSING
+        level = child
+    spellings = _spellings_in(level, parts[-1])
+    if not spellings:
+        return level, None, _MISSING
+    return level, spellings[0], _read(level, spellings[0])
+
+
+def _put(options: Any, parts: Sequence[str], value: Any) -> None:
+    """Set the option at ``parts`` under ``options`` to a copy of ``value``.
+
+    A mapping level the option's path lacks is made; a model level cannot be.
+    """
+    level = options
+    for part in parts[:-1]:
+        spellings = _spellings_in(level, part)
+        child = _read(level, spellings[0]) if spellings else None
+        if child is None:
+            if not isinstance(level, dict):
+                return
+            child = {}
+            level[spellings[0] if spellings else part] = child
+        level = child
+    spellings = _spellings_in(level, parts[-1])
+    _set(level, spellings[0] if spellings else parts[-1], copy.deepcopy(value), None)
+
+
+def _nested(parts: Sequence[str], value: Any) -> Dict[str, Any]:
+    for part in reversed(parts):
+        value = {part: value}
+    return value
+
+
+def _floored(floor: Floor, operator: Any, current: Any) -> Any:
+    """The value the config's ``current`` becomes under the operator's floor.
+
+    ``_UNCHANGED`` when ``current`` already meets it. Values are compared as a
+    config file spells them, so that 1 is not True.
+    """
+    if floor.rule == TRUE_NARROWS:
+        new: Any = bool(operator) or bool(current)
+    elif floor.rule == URL_PREFIXES:
+        new = _narrowed(list(current), list(operator), _url_under)
+    elif floor.rule == COMMAND_PREFIXES:
+        new = _narrowed(list(current), list(operator), _command_under)
+    else:
+        raise ValueError(f"unknown floor rule {floor.rule!r}")
+    return _UNCHANGED if _same_option_value(new, current) else new
+
+
+def _narrowed(
+    current: List[str],
+    operator: List[str],
+    under: Callable[[str, Sequence[str]], bool],
+) -> List[str]:
+    """A prefix list held to the operator's.
+
+    An operator list that is empty accepts any list. A list that is empty, or has
+    no entry under the operator's, takes the operator's: left empty it would turn
+    the scanner's check off.
+    """
+    if not operator:
+        return current
+    if not current:
+        return list(operator)
+    kept = [entry for entry in current if under(entry, operator)]
+    return kept or list(operator)
+
+
+def _url_under(entry: str, operator: Sequence[str]) -> bool:
+    """Whether the URL prefix ``entry`` is under one of the operator's.
+
+    The scanner's own comparison (``check_remote``): both are normalized the way it
+    does, with the scheme and host in lower case, and compared on a URL boundary.
+    Every URL ``entry`` admits then starts with an operator prefix on a boundary
+    too, so the operator's prefixes admit it.
+    """
+
+    def normalized(prefix: str) -> str:
+        return (split_url(prefix) or ("", None, prefix))[2]
+
+    return any(
+        url_prefix_matches(normalized(entry), normalized(prefix)) for prefix in operator
+    )
+
+
+def _command_under(entry: str, operator: Sequence[str]) -> bool:
+    """Whether the command prefix ``entry`` is under one of the operator's.
+
+    A ``.`` prefix admits no command, so keeping it only narrows. Every command path
+    the entry admits is the normalized entry or starts with it and a ``/``, which
+    the operator's prefix then admits too.
+    """
+    path = posixpath.normpath(entry.replace("\\", "/"))
+    return path == "." or any(
+        command_prefix_matches(path, prefix) for prefix in operator
+    )

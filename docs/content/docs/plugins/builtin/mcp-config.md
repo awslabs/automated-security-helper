@@ -60,6 +60,8 @@ scanners:
 
 The three `forbid_*` checks are on by default because each is a hazard the MCP specification and the clients' own documentation name, and each fires on an exact whole-word or exact-flag match, so a clean repository stays quiet. The prefix policies depend on the site, so they stay off until configured. An unknown option name is refused, and an error message never repeats a configured value.
 
+A config file inside the scanned tree or a git checkout, or one an MCP client delivered, may only tighten these options against the operator's config, or against the defaults when the operator sets none. It may turn a check on, and narrow a prefix list to entries under the operator's prefixes. A value that would loosen one is ignored with a warning, and an empty list, or one with no entry under the operator's, keeps the operator's list. The operator sets a looser value in a config file outside every checkout or with `--config-overrides`.
+
 Prefix matching is on path and URL boundaries. `/opt/mcp` allows `/opt/mcp/server` and not `/opt/mcp-evil/server`. `https://api.example.com` allows `https://api.example.com/v1` and not `https://api.example.com.evil.test`. A command path is normalized before it is compared, so `/opt/mcp/../../bin/sh` is read as `/bin/sh`.
 
 A finding's rule id is one of `MCP-PRIVILEGE-ESCALATION`, `MCP-AUTO-APPROVAL`, `MCP-UNPINNED-RUNNER`, `MCP-REMOTE-NOT-LOCAL`, `MCP-REMOTE-URL-PREFIX`, `MCP-REMOTE-URL-INSECURE`, `MCP-COMMAND-PREFIX` or `MCP-ENV-SECRET`. Its file, line and column are the position of the field in the original config file.

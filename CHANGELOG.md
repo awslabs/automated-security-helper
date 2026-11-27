@@ -119,6 +119,14 @@
   config leaves the scanner's section out or sets `enabled: true`, and a config that
   sets it is named in a warning. Such a config may still turn one of these scanners
   off.
+- **mcp-config's checks are floors for a config that is not the operator's.** A config
+  file inside the scanned tree or a git checkout, or one an MCP client delivered, may
+  turn on `forbid_privilege_escalation`, `forbid_unpinned_runners`,
+  `forbid_auto_approval`, `flag_env_secrets` and `require_local`, and may narrow
+  `remote_url_prefixes` and `allowed_command_prefixes` to entries under the operator's.
+  It no longer turns a check off or widens a list past the operator's config, or past
+  the defaults when the operator sets none. A value that would is ignored with a
+  warning.
 
 ### Maintenance
 
