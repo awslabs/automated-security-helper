@@ -113,7 +113,7 @@ scanners:
 The options, with their types, defaults, and descriptions, are listed under [`trivy-repo` in the scanners reference](../../../reference/scanners.md#trivy-repo). Two behaviors that the reference does not state:
 
 - `severity_threshold`: findings below it are still reported, and ASH does not pass it as `trivy --severity`.
-- `scan_timeout`: ASH does not pass `trivy --timeout`, so trivy's own 5-minute default still applies.
+- `scan_timeout`: besides killing trivy after that many seconds, ASH passes it as `trivy --timeout` (the default, 1800, as `trivy --timeout=1800s`), so trivy's own 5-minute default does not apply. `null` leaves both unbounded: ASH then passes `trivy --timeout=2562047h` (about 292 years), since trivy reads `0s` as a deadline already passed. The flag outranks `TRIVY_TIMEOUT` and a `timeout` in your trivy config file.
 
 trivy-repo always passes `trivy --config` and `trivy --module-dir`, so trivy does not load a `trivy.yaml` from the directory it runs in. `config_file` and `module_dir` are honored only when set through `--config-overrides` or a config file outside every git checkout and the scanned directory (one that is not [repository-written](../../../concepts/trust-model.md#how-the-tier-is-decided)), and only for paths outside the scanned tree, which a path written inside the tree and led out of it by a symbolic link there is not; otherwise they are ignored with a warning. A relative path is taken from the directory of the ASH config file that sets it, or from the working directory for `--config-overrides`, not from the source directory (see [Relative paths in the operator's settings](../../../how-to/configure.md#relative-paths)). A configured path that does not exist fails the scan. Unset or ignored, `--config` names `TRIVY_CONFIG` when that is a file outside the scanned tree (a relative path in it is taken from the working directory ASH runs in), and otherwise an empty config ASH ships; `trivy --module-dir` names an empty directory ASH creates outside the scanned tree for each scanner run and removes when the run ends.
 
@@ -1564,7 +1564,7 @@ Trivy supports extensive configuration through environment variables:
 # Database and caching
 export TRIVY_CACHE_DIR=/custom/cache/path
 export TRIVY_DB_REPOSITORY=custom-db-repo
-export TRIVY_TIMEOUT=10m
+# trivy-repo passes scan_timeout as trivy --timeout, which outranks TRIVY_TIMEOUT
 # Offline scans: set ASH_OFFLINE=YES (or options.offline: true). TRIVY_OFFLINE_SCAN
 # alone does not stop the database update ASH runs before an online scan.
 export ASH_OFFLINE=YES
