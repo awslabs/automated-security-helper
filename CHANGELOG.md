@@ -149,6 +149,34 @@
   `utils/content_databases.py` are `StalenessPolicy` members, and the three
   `*_CHECKPOINT` constants of `utils/inner_run_outcome.py` are `InnerRunRecordType`
   members. The wire spellings themselves do not change.
+- Added `scripts/_generated_blocks.py`, a library that finds, reads and rewrites the
+  marked generated blocks in docs pages and in the templates they are rendered from,
+  with `tests/unit/test_generated_blocks.py` to pin its rules. It refuses a block whose
+  markers are missing, repeated, out of order, nested or named for another generator,
+  any carriage return, and a body that holds a release placeholder, each with an error
+  that names the file and the block and before it writes anything, and it leaves every
+  byte outside the markers as it found it. No page uses it yet, so no generated page
+  changes.
+- The four tests that each expanded the GitHub Actions workflow matrices by hand
+  (`tests/unit/test_unified_ci_job_counts.py`, `tests/unit/test_ci_matrix_agreement.py`,
+  `tests/unit/test_oci_runner_ci_coverage.py` and `tests/unit/docs/test_page_claims.py`)
+  now read them through one shared reader, `scripts/_ci_matrix.py`. It gives the jobs a
+  workflow creates for each event, the runner each job runs on and the steps that run in
+  it, and it refuses a matrix, a `runs-on` or an `if:` condition in a shape it does not
+  read instead of counting it as a match. `tests/unit/test_ci_matrix_reader.py` covers it.
+- Added `tests/unit/test_dockerfile_daemonless_builders.py`, a unit test that fails when
+  the `Dockerfile` uses a form that daemonless image builders such as kaniko do not carry
+  out: `COPY --link` and `ADD --link`, `RUN --mount`, `RUN --chown`, here-documents, a
+  `# syntax=` line, an `ADD` of a local xz archive, `ADD --chown` of a local archive, a
+  platform argument in `FROM` or a global `ARG`, and a Windows container base. Each
+  failure names the form, the line and the documentation page that lists the form, so a
+  later edit learns of it from a failing test and not from an image that differs.
+- Added `scripts/_cast.py`, a standard-library core for the docs terminal recordings:
+  asciicast v2 files, the storyboard format, retiming of each scene's measured output
+  times into its time budget, a scan for tokens that must not appear in a recording (home
+  directories, user names and host names) that names each hit by its kind and never by
+  its value, and the record of a recording run. `tests/unit/docs/test_cast_core.py`
+  covers it. No recorder or renderer uses it yet.
 
 ### Deprecations
 
