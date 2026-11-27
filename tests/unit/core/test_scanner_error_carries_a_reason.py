@@ -6,6 +6,7 @@ parsing the first sentence of that message. The error now takes a ``reason=``
 keyword: a ``FailureReason`` that is built never to raise, and that holds no path.
 """
 
+import contextlib
 import copy
 import logging
 import pickle
@@ -46,6 +47,27 @@ def _roundtrips(error):
     }
 
 
+@contextlib.contextmanager
+def _debug_records():
+    """The records ASH's logger is handed while the block runs, DEBUG included."""
+    records: list[logging.LogRecord] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    logger = logging.getLogger("ash")
+    handler = Collect(level=logging.DEBUG)
+    before = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(before)
+
+
 class TestTheErrorKeepsItsMessage:
     def test_a_positional_error_is_unchanged(self):
         error = ScannerError("its tool failed")
@@ -76,6 +98,19 @@ class TestTheErrorKeepsItsMessage:
 
         assert error.args == ("a", REASON)
         assert error.reason is None
+
+    def test_a_subclass_that_never_chains_up_still_has_the_attribute(self):
+        """``reason`` is documented as the public field, so it is always there."""
+
+        class NeverChainsUp(ScannerError):
+            def __init__(self, message: str) -> None:
+                Exception.__init__(self, message)
+
+        error = NeverChainsUp("its tool failed")
+
+        assert error.reason is None
+        assert reason_of(error) is None
+        assert ScannerError.reason is None
 
     @pytest.mark.parametrize("not_a_reason", ["its tool failed", 7, {"code": "x"}])
     def test_a_reason_that_is_not_one_is_dropped_and_never_raises(self, not_a_reason):
@@ -255,6 +290,12 @@ class TestAFailureReasonNeverRaises:
             "could not read ~/x",
             "could not read C:\\x",
             "could not read \\\\h\\s",
+            "could not read (/home/me/.ash/x)",
+            "could not read `/home/me/x`",
+            "at [/etc/x]",
+            "<~/x>",
+            "files=a,/etc/x",
+            "could not read (C:\\Users\\me\\x)",
             "two\nlines",
             "y" * 201,
             "",
@@ -275,6 +316,22 @@ class TestAFailureReasonNeverRaises:
 
         assert reason.code == "some_new_code"
         assert reason.sentence == FALLBACK_SENTENCE == "its run failed"
+
+    def test_a_code_nobody_defines_leaves_a_debug_line_that_names_it(self):
+        """A misspelled code at a raise site would otherwise be silent."""
+        with _debug_records() as records:
+            FailureReason("timed_otu")
+
+        assert [record.getMessage() for record in records] == [
+            "a failure reason's code 'timed_otu' is not one ASH defines"
+        ]
+        assert {record.levelno for record in records} == {logging.DEBUG}
+
+    def test_a_code_ash_defines_leaves_no_line(self):
+        with _debug_records() as records:
+            FailureReason(ReasonCode.TIMED_OUT, "it timed out after 300 s")
+
+        assert records == []
 
     @pytest.mark.parametrize(
         "code", ["", "Timed Out", "timed-out", "9lives", "a", "x" * 49]

@@ -19,8 +19,10 @@ SHORT_REASON_LIMIT = 200
 
 #: Anything that looks like a path on the machine that ran the scan: a POSIX
 #: absolute path, a home-relative one, a drive path or a UNC path, at the start of
-#: the text or after a space, a quote or an equals sign.
-LOCAL_PATH = re.compile(r"(?:\A|[\s'\"=])(?:/|~/|[A-Za-z]:[\\/]|\\\\)")
+#: the text or after a space, a quote, an equals sign, an opening bracket or
+#: parenthesis, a backtick, a less-than sign or a comma. Not after a colon, which
+#: would refuse every URL ("https://...").
+LOCAL_PATH = re.compile(r"(?:\A|[\s'\"=(\[`<,])(?:/|~/|[A-Za-z]:[\\/]|\\\\)")
 
 
 def names_a_local_path(text: str) -> bool:

@@ -146,6 +146,11 @@ class FailureReason:
         if not is_reason_code(code):
             _LOGGER.debug("a failure reason's code is not a reason code; replaced")
             code = ReasonCode.RUN_FAILED
+        elif code not in DEFAULT_SENTENCES:
+            # A plugin may define a code of its own, so this is a note and not an
+            # error; it makes a misspelled code at a raise site visible. The code
+            # passed is_reason_code, so it holds no path and is safe to quote.
+            _LOGGER.debug("a failure reason's code %r is not one ASH defines", code)
         sentence = self.sentence
         if is_short_reason(sentence):
             sentence = sentence.strip()
@@ -169,7 +174,9 @@ class ScannerError(Exception):
     with no reason is shown by the first sentence of its text where it has one.
     """
 
-    reason: Optional[FailureReason]
+    #: None unless a raise site gave one. A class-level default, so a subclass
+    #: whose own ``__init__`` never chains up still has the attribute.
+    reason: Optional[FailureReason] = None
 
     def __init__(self, *args: object, reason: Optional[FailureReason] = None) -> None:
         super().__init__(*args)

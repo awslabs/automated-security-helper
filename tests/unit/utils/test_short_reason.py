@@ -28,6 +28,7 @@ class TestWhatIsAShortReason:
             "its config_file option names a file that does not exist",
             "the https://example.test/x address is not reachable",
             "a path-like and/or word is not a path",
+            "its shards (1/2), [and/or], `x/y` and a,b/c are not paths",
         ],
     )
     def test_a_plain_sentence_is_one(self, text):
@@ -54,6 +55,12 @@ class TestWhatIsAShortReason:
             ("could not read \\\\host\\share", "a UNC path"),
             ("config_file='/tmp/x'", "a path after a quote"),
             ("config_file=/tmp/x", "a path after an equals sign"),
+            ("could not read (/home/me/.ash/x)", "a path in parentheses"),
+            ("could not read `/home/me/x`", "a path in backticks"),
+            ("at [/etc/x]", "a path in brackets"),
+            ("<~/x>", "a home path in angle brackets"),
+            ("files=a,/etc/x", "a path after a comma"),
+            ("could not read (C:\\Users\\me\\x)", "a drive path in parentheses"),
         ],
     )
     def test_text_that_is_not_fit_to_show_is_refused(self, text, why):
@@ -82,6 +89,12 @@ class TestWhatLooksLikeALocalPath:
             "C:\\x",
             "d:/x",
             "\\\\h\\s",
+            "(/etc/x)",
+            "`/etc/x`",
+            "[/etc/x]",
+            "<~/x>",
+            "a,/etc/x",
+            "(C:\\x)",
         ],
     )
     def test_a_path_is_found(self, text):
@@ -95,8 +108,13 @@ class TestWhatLooksLikeALocalPath:
             "and/or",
             "a/b",
             "https://example.test",
+            "https://example.test/x",
             "tilde ~ alone",
             "C: is not a path",
+            "(1/2)",
+            "[and/or]",
+            "`x/y`",
+            "a,b/c",
         ],
     )
     def test_a_word_with_a_slash_inside_is_not_a_path(self, text):
