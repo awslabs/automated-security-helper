@@ -9,8 +9,8 @@ the copy's version still recorded and no probe owed, so the SARIF step named a
 binary that did not run.
 
 The other direction is the PATH fallbacks: a copy that answered no version kept the
-version an earlier uv probe wrote, and the checkov and cfn-lint resolver arms never
-touched the record at all.
+version an earlier uv probe wrote, and the checkov, cfn-lint and guarddog resolver
+arms never touched the record at all.
 
 Every test states the route the scan takes and asserts the record that route owes:
 the copy's own version (or nothing when it answered none) on a direct route, and the
@@ -49,12 +49,21 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanne
     ZizmorScannerConfig,
     ZizmorScannerConfigOptions,
 )
+from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+    guarddog_scanner,
+)
+from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner import (
+    GuardDogScanner,
+    GuardDogScannerConfig,
+    GuardDogScannerConfigOptions,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     Run,
     SarifReport,
     Tool,
     ToolComponent,
 )
+from automated_security_helper.utils import pre_installed_tool, uv_tool_runner
 
 pytestmark = pytest.mark.unit
 
@@ -89,6 +98,35 @@ def _satisfied(version: str | None) -> SimpleNamespace:
         summary="",
         from_nix=False,
         version=version,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _guarddog_reads_what_these_tests_replace(monkeypatch):
+    """GuardDog takes the verifier, the PATH lookup and the uv lookup by name when its
+    module is imported, while checkov, cfn-lint and bandit import them where they call
+    them. ``patch(VERIFY, ...)`` and the unit tests' tool guard reach those calls and
+    not GuardDog's names, so GuardDog's names are routed through the modules this file
+    and the guard replace. Its PATH lookup finds no GuardDog: a uv answer looks there,
+    since the uv-absent branch checks the copy a direct run would start. Its check runs
+    as on a host it supports: it refuses Windows before anything else.
+
+    The fixture changes only GuardDog's own names, and it keeps ``monkeypatch``'s
+    default of failing on a name that is not there, so a binding renamed in GuardDog
+    fails here instead of patching nothing."""
+    monkeypatch.setattr(
+        guarddog_scanner,
+        "verify_pre_installed_tool",
+        lambda *args, **kwargs: pre_installed_tool.verify_pre_installed_tool(
+            *args, **kwargs
+        ),
+    )
+    monkeypatch.setattr(
+        guarddog_scanner, "find_uv_or_none", lambda: uv_tool_runner.find_uv_or_none()
+    )
+    monkeypatch.setattr(guarddog_scanner, "find_executable", lambda name: None)
+    monkeypatch.setattr(
+        GuardDogScanner, "unsupported_platform_reason", lambda self: None
     )
 
 
@@ -278,7 +316,7 @@ def test_bandit_records_the_version_a_resolved_copy_answered(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# checkov and cfn-lint resolver arms
+# checkov, cfn-lint and guarddog resolver arms
 # ---------------------------------------------------------------------------
 
 
@@ -290,13 +328,33 @@ def _cfn_lint_for(tmp_path):
     return CfnLintScanner(context=_context(tmp_path), config=CfnLintScannerConfig())
 
 
+def _guarddog_for(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir(exist_ok=True)
+    output = tmp_path / "out"
+    output.mkdir(exist_ok=True)
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=AshConfig(),
+    )
+    return GuardDogScanner(
+        context=context,
+        config=GuardDogScannerConfig(
+            enabled=True, options=GuardDogScannerConfigOptions()
+        ),
+    )
+
+
 RESOLVER_SCANNERS = pytest.mark.parametrize(
     ("make", "module", "tool"),
     [
         (_checkov_for, checkov_scanner, "checkov"),
         (_cfn_lint_for, cfn_lint_scanner, "cfn-lint"),
+        (_guarddog_for, guarddog_scanner, "guarddog"),
     ],
-    ids=["checkov", "cfn-lint"],
+    ids=["checkov", "cfn-lint", "guarddog"],
 )
 
 #: uv named the ways the uv the resolver probes can be found: by its path, and as a

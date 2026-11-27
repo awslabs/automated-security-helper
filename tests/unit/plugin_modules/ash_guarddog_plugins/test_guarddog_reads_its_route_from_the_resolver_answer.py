@@ -21,7 +21,10 @@ installed and GuardDog not on PATH, and the scan started ``guarddog`` by name.
 
 Every test states the route the scan takes and the record that route owes: a copy
 on PATH is verified against the scan's requirement and its own version recorded,
-and the uv route keeps what the uv probe recorded.
+and the uv route keeps what the uv probe recorded. The record a route owes after a
+re-validation off uv, and after the resolver returns to uv, is pinned in
+test_the_recorded_version_follows_the_route_that_runs.py, beside checkov's and
+cfn-lint's.
 
 A probe that timed out opens a retry window in which the runner's availability
 check keeps answering "unavailable" without probing again, and the resolver, which
@@ -30,13 +33,26 @@ the scan passes that check, which refuses a uv run while it says no and starts
 nothing in its place, so a uv answer there is not a route the scan can run. The
 tests of that input put the window's answer where the unit tests' tool guard puts
 uv-absent's, and let the mixin's own check, version probe and gates read it.
+
+A copy that falls short while the check says no is the only copy the scan could
+run, so GuardDog is MISSING, and the reason says how to provide one: the verifier's
+one-line summary of the shortfall and a remedy that fits the host (a uv was found,
+so the check failed rather than uv being absent, or no uv is installed), never the
+copy's path or the verifier's detail. Every line the check writes goes through the
+uv-aware redaction the other scanners' checks of a copy on PATH use, with the
+plugin's values read once and guarded. That matters for a ``tool_version`` read from
+the environment: the verifier quotes the requirement in the spelling the options
+validator stored, which is not the spelling the environment held and which the
+plain match the scan phase applies to the reason does not see. A values hook that
+raises leaves the copy unrun, with a reason that names only the failure.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any, List, NamedTuple
 
 import pytest
 
@@ -50,6 +66,8 @@ from automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scan
     GuardDogScannerConfig,
     GuardDogScannerConfigOptions,
 )
+from automated_security_helper.utils.error_text import text_without_values
+from automated_security_helper.utils.pre_installed_tool import build_requirement
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
 pytestmark = pytest.mark.unit
@@ -73,6 +91,25 @@ PROBE_TIMED_OUT = "the probe timed out after 10 seconds"
 #: value the scan's own spec cannot equal, so the argument is shown to come from
 #: that method.
 SPEC = "guarddog==9.9.9"
+
+#: The uv the scanner's own lookup finds, in the tests whose remedy depends on one.
+UV = "/opt/uv/bin/uv"
+
+#: The verifier's one-line summaries of a shortfall. The first is its words for a copy
+#: whose version falls short of the constraint, which it reaches only through uv's dry
+#: run, so a uv exists there. The second is the only shortfall a host with no uv can
+#: show: a ``--version`` probe that exits non-zero.
+SHORT_OF_THE_CONSTRAINT = (
+    "the installed package does not satisfy the version constraint"
+)
+PROBE_EXITED = "its --version probe exited 1"
+
+#: ``tool_version`` as an environment variable can hold it, with a space between the
+#: operator and the version. The options validator stores it without one
+#: (``==3.7.4``), so what the plugin's values hook answers and what the verifier
+#: quotes are two spellings of one value. The version is none that a fixed text of
+#: the scanner carries.
+AS_READ = "== 3.7.4"
 
 #: uv as the resolver can name it: the bare word, its path, and a Windows
 #: executable in either letter case.
@@ -105,7 +142,7 @@ def _a_supported_host(monkeypatch):
     )
 
 
-def _scanner(tmp_path: Path) -> GuardDogScanner:
+def _scanner(tmp_path: Path, tool_version: str | None = None) -> GuardDogScanner:
     source = tmp_path / "src"
     source.mkdir(exist_ok=True)
     output = tmp_path / "out"
@@ -116,11 +153,14 @@ def _scanner(tmp_path: Path) -> GuardDogScanner:
         work_dir=output / "converted",
         config=AshConfig(),
     )
+    options = (
+        GuardDogScannerConfigOptions()
+        if tool_version is None
+        else GuardDogScannerConfigOptions(tool_version=tool_version)
+    )
     return GuardDogScanner(
         context=context,
-        config=GuardDogScannerConfig(
-            enabled=True, options=GuardDogScannerConfigOptions()
-        ),
+        config=GuardDogScannerConfig(enabled=True, options=options),
     )
 
 
@@ -206,12 +246,15 @@ def _inside_the_retry_window(monkeypatch) -> None:
     )
 
 
-def _without_uv(monkeypatch, scanner, answer, verifier=_never_verified) -> _Resolver:
-    """The check as it runs when the runner says uv is unavailable."""
+def _without_uv(
+    monkeypatch, scanner, answer, verifier=_never_verified, on_path: str | None = None
+) -> _Resolver:
+    """The check as it runs when the runner says uv is unavailable; ``on_path`` is
+    the copy a lookup of the tool's name finds, as for ``_answering``."""
     cls = type(scanner)
     monkeypatch.setattr(cls, "resolve_deferred_tool_version", lambda self: None)
     monkeypatch.setattr(cls, "_validate_uv_tool_availability", lambda self: False)
-    return _answering(monkeypatch, answer, verifier)
+    return _answering(monkeypatch, answer, verifier, on_path)
 
 
 def _at_the_last_fallback(
@@ -227,6 +270,66 @@ def _at_the_last_fallback(
     )
     monkeypatch.setattr(cls, "_install_uv_tool", lambda self, **kwargs: False)
     return _answering(monkeypatch, answer, verifier)
+
+
+class _EnvReadPin(NamedTuple):
+    """The spellings of one environment-read ``tool_version`` the check could show."""
+
+    as_read: str
+    stored: str
+    requirement: str
+    #: The verifier's detail for a copy that falls short of the constraint: it quotes
+    #: the requirement, then the bare constraint, both as stored.
+    detail: str
+
+
+def _with_an_env_read_constraint(
+    monkeypatch, tmp_path: Path
+) -> tuple[GuardDogScanner, _EnvReadPin]:
+    """A scanner whose ``tool_version`` was read from the environment, and the three
+    spellings of it that must not be shown: the constraint as the environment held it,
+    as the options validator stored it, and the requirement built from that.
+
+    The plugin's values hook answers what the environment held, as
+    ``config_environment_values`` does for a value read with ``!ENV``. The verifier
+    builds its requirement from the stored spelling, so its detail quotes that one.
+    Nothing here is a payload: the constraint is any pin the scanner's own text does
+    not carry."""
+    scanner = _scanner(tmp_path, tool_version=AS_READ)
+    monkeypatch.setattr(GuardDogScanner, "_values_to_redact", lambda self: (AS_READ,))
+    stored = scanner._get_tool_version_constraint()
+    requirement = build_requirement(TOOL, scanner._get_tool_package_extras(), stored)
+    # The two quotations of the verifier's detail for a version that falls short.
+    detail = (
+        f"its environment (/opt/venv/bin/python) does not satisfy {requirement!r}: "
+        f"installed {TOOL} does not satisfy {stored!r}"
+    )
+    # The controls. The validator changed the spelling, so the plain match the scan
+    # phase applies to the reason cannot hide the stored one, and the detail carries
+    # it: a text without it was hidden, not never given it.
+    assert stored != AS_READ
+    assert text_without_values(stored, [AS_READ]) == stored
+    assert stored in detail
+    return scanner, _EnvReadPin(AS_READ, stored, requirement, detail)
+
+
+def _spellings_shown(pin: _EnvReadPin, **texts: str) -> list[str]:
+    """Which of ``texts`` show which spelling of the constraint, as labels that name
+    the kind of spelling and never its characters. Empty when none does."""
+    return [
+        f"{where}: {kind}"
+        for where, text in texts.items()
+        for kind, spelling in (
+            ("as read", pin.as_read),
+            ("as stored", pin.stored),
+            ("in the requirement", pin.requirement),
+        )
+        if spelling in text
+    ]
+
+
+def _a_values_hook_that_raises(self: Any) -> tuple[str, ...]:
+    raise RuntimeError("the hook failed")
 
 
 # ---------------------------------------------------------------------------
@@ -272,32 +375,68 @@ def test_no_answer_with_uv_unavailable_is_not_satisfied(tmp_path, monkeypatch):
     assert any("UV is not available but required" in line for line in scanner.errors)
 
 
-def test_a_copy_that_falls_short_is_missing_with_the_reason(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("uv_found", "summary"),
+    [(True, SHORT_OF_THE_CONSTRAINT), (False, PROBE_EXITED)],
+    ids=["uv-found", "no-uv"],
+)
+def test_a_copy_that_falls_short_is_missing_with_the_reason(
+    tmp_path, monkeypatch, uv_found, summary
+):
     """With uv unavailable, the copy on PATH is the scan's GuardDog, so it is
     verified against the scan's requirement (its extras and version constraint).
     One that falls short is MISSING, with the reason recorded for the row and
     logged.
 
-    Fails at the base: the copy was never verified, and was declared satisfied."""
+    The reason names the shortfall in the verifier's own one-line summary, the
+    requirement, and a remedy that fits the host. With a uv found the check failed
+    rather than uv being absent, since a copy falls short of a constraint only
+    through uv's dry run: the remedy offers a copy that meets the requirement, a
+    constraint this copy meets, or a run once the check passes. With none, it offers
+    installing uv. The reason names no path and quotes no detail: the verifier's
+    detail holds the copy's own output and the constraint as stored, and the log line
+    keeps both.
+
+    Without the fix: the reason named the copy's path and the detail, gave no
+    remedy, and said uv was unavailable where only its check had failed."""
     scanner = _scanner(tmp_path)
     detail = "guarddog 2.9.0 does not satisfy ==3.2.0"
-    verifier = _Verifier(_verdict("unsatisfied", version="2.9.0", detail=detail))
+    verifier = _Verifier(
+        _verdict("unsatisfied", version="2.9.0", detail=detail, summary=summary)
+    )
     _without_uv(monkeypatch, scanner, [COPY], verifier)
+    monkeypatch.setattr(
+        guarddog_module, "find_uv_or_none", lambda: UV if uv_found else None
+    )
+    extras = scanner._get_tool_package_extras()
+    constraint = scanner._get_tool_version_constraint()
+    requirement = build_requirement(TOOL, extras, constraint)
 
     assert scanner.validate_plugin_dependencies() is False
 
     assert scanner.dependencies_satisfied is False
     reason = scanner.dependency_unavailable_reason
-    assert reason is not None and COPY in reason and detail in reason
-    assert any(reason in line for line in scanner.errors)
-    assert verifier.asked == [
-        (
-            COPY,
-            TOOL,
-            scanner._get_tool_package_extras(),
-            scanner._get_tool_version_constraint(),
-        )
-    ]
+    assert reason is not None
+    assert COPY not in reason
+    assert detail not in reason
+    assert "uv is not available" not in reason
+    assert summary in reason
+    assert requirement in reason
+    if uv_found:
+        remedy = "once uv's availability check passes"
+        assert "scanners.guarddog.options.tool_version" in reason
+        assert "uv tool install" in reason
+        assert "install uv" not in reason
+    else:
+        remedy = "install uv"
+        assert "options.tool_version" not in reason
+        assert "once uv's availability check passes" not in reason
+    assert remedy in reason
+    # The log line keeps what the reason leaves out.
+    assert any(
+        COPY in line and detail in line and remedy in line for line in scanner.errors
+    )
+    assert verifier.asked == [(COPY, TOOL, extras, constraint)]
 
 
 @pytest.mark.parametrize("answered", ["3.2.0", None], ids=["a-version", "none"])
@@ -413,11 +552,13 @@ def test_a_uv_answer_inside_the_window_runs_a_copy_that_cannot_be_verified_with_
     tmp_path, monkeypatch, capture
 ):
     """A copy the check could not verify runs, since nothing else can run inside the
-    window, and the log says it was not verified. It names no version, so none is
-    recorded for it and the probe the uv route owed is dropped.
+    window, and the log says it was not verified. The line says uv's availability
+    check did not pass, which is what the window's answer is, and does not say uv is
+    not available. The copy names no version, so none is recorded for it and the
+    probe the uv route owed is dropped.
 
     Without the fix the scan kept the uv route, and inside the window every run of
-    it was refused."""
+    it was refused; and the line said uv was unavailable."""
     scanner = _scanner(tmp_path)
     _inside_the_retry_window(monkeypatch)
     verifier = _Verifier(_verdict("unverifiable", detail="the version probe timed out"))
@@ -432,6 +573,14 @@ def test_a_uv_answer_inside_the_window_runs_a_copy_that_cannot_be_verified_with_
     assert scanner._deferred_tool_version_probe is None
     assert "could not be verified" in capture.text
     assert COPY in capture.text
+    # The record about the copy, picked by the copy's path since the mixin's own
+    # lines inside the window are not this test's subject.
+    about_the_copy = [
+        record.getMessage() for record in capture.records if COPY in record.getMessage()
+    ]
+    assert len(about_the_copy) == 1
+    assert "uv's availability check did not pass" in about_the_copy[0]
+    assert "uv is not available" not in about_the_copy[0]
 
 
 def test_a_uv_answer_inside_the_window_keeps_uv_over_a_copy_that_falls_short(
@@ -473,6 +622,159 @@ def test_a_uv_answer_inside_the_window_keeps_uv_over_a_copy_that_falls_short(
     assert COPY in capture.text
     assert summary in capture.text
     assert detail not in capture.text
+
+
+# ---------------------------------------------------------------------------
+# What the check shows of a constraint read from the environment, and what it does
+# when the plugin's values cannot be read
+# ---------------------------------------------------------------------------
+
+
+def test_a_copy_that_falls_short_shows_no_spelling_of_an_env_read_constraint(
+    tmp_path, monkeypatch, capture
+):
+    """A ``tool_version`` read from the environment reaches the verifier in the
+    spelling the options validator stored, which is not the spelling the plugin's
+    values hook answers, so the plain match that redacts the reason in the scan
+    phase does not see it. The verdict's detail for a copy that falls short quotes
+    the requirement and the bare constraint in that spelling. Neither the reason, nor
+    any line the check logs (the ERROR line and the scanner's errors that carry the
+    detail), nor the log shows the constraint in any of its three spellings: as the
+    environment held it, as stored, and inside the requirement.
+
+    The reason is not empty for it: it still names the shortfall and the remedy.
+
+    Without the fix: the reason quoted the detail, and the ERROR line the detail
+    unredacted."""
+    scanner, pin = _with_an_env_read_constraint(monkeypatch, tmp_path)
+    verifier = _Verifier(
+        _verdict(
+            "unsatisfied",
+            version="2.9.0",
+            detail=pin.detail,
+            summary=SHORT_OF_THE_CONSTRAINT,
+        )
+    )
+    _without_uv(monkeypatch, scanner, [COPY], verifier)
+    monkeypatch.setattr(guarddog_module, "find_uv_or_none", lambda: UV)
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    reason = scanner.dependency_unavailable_reason
+    assert reason is not None
+    assert (
+        _spellings_shown(
+            pin,
+            reason=reason,
+            errors="\n".join(scanner.errors),
+            log=capture.text,
+        )
+        == []
+    )
+    assert SHORT_OF_THE_CONSTRAINT in reason
+    assert "uv tool install" in reason
+
+
+@pytest.mark.parametrize("case", ["unverifiable-binary", "falls-short-uv-answer"])
+def test_a_warning_about_the_copy_shows_no_spelling_of_an_env_read_constraint(
+    tmp_path, monkeypatch, capture, case
+):
+    """The two WARNING lines the check can write about a copy on PATH go through the
+    same redaction as the reason: the line about a copy that cannot be verified, which
+    quotes the verdict's detail, and the line about a copy that falls short while the
+    resolver answers uv, which quotes the verdict's summary. Neither shows the
+    constraint in any of its spellings.
+
+    This pins a contract rather than a live leak. No verdict the verifier returns
+    carries a value into either line today (an unverifiable detail is a path, fixed
+    text or uv's own output the verifier has redacted, and a summary names no
+    constraint), so the verdicts here are stand-ins that do. What it guards is that
+    every line of the check is written through the uv layer, whatever a later
+    verdict holds.
+
+    Without the fix: both lines quoted the verdict's text as it came."""
+    scanner, pin = _with_an_env_read_constraint(monkeypatch, tmp_path)
+    if case == "unverifiable-binary":
+        answer, on_path = [COPY], None
+        verdict = _verdict("unverifiable", detail=pin.detail)
+    else:
+        answer = ["uv", "tool", "run", "--from", pin.requirement, TOOL]
+        on_path = COPY
+        verdict = _verdict(
+            "unsatisfied",
+            version="2.9.0",
+            detail=pin.detail,
+            summary=f"it is below {pin.stored}",
+        )
+    _without_uv(monkeypatch, scanner, answer, _Verifier(verdict), on_path=on_path)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert _spellings_shown(pin, log=capture.text) == []
+    # The line about the copy was written: the log is not empty for it.
+    assert COPY in capture.text
+
+
+@pytest.mark.parametrize("case", ["binary", "uv-answer-with-copy"])
+def test_a_values_hook_that_raises_leaves_the_copy_unrun_without_naming_it(
+    tmp_path, monkeypatch, capture, case
+):
+    """The plugin's values hook is read once, guarded, before a copy on PATH is
+    checked. One that raises leaves nothing to redact the check's lines with, so the
+    copy does not run: the check is False, the reason names the hook's failure and
+    nothing of the copy, and a WARNING says so. The route stays where the resolver's
+    answer left it.
+
+    Without the fix: the hook was read bare, and its error escaped the check."""
+    scanner = _scanner(tmp_path)
+    monkeypatch.setattr(
+        GuardDogScanner, "_values_to_redact", _a_values_hook_that_raises
+    )
+    if case == "binary":
+        _without_uv(monkeypatch, scanner, [COPY])
+    else:
+        _without_uv(monkeypatch, scanner, UV_ANSWER, on_path=COPY)
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    assert scanner.dependencies_satisfied is False
+    reason = scanner.dependency_unavailable_reason
+    assert reason is not None
+    assert "values hook raised RuntimeError" in reason
+    assert "Fix the plugin's values hook" in reason
+    assert COPY not in reason
+    warnings = [
+        record.getMessage()
+        for record in capture.records
+        if record.levelno == logging.WARNING
+    ]
+    assert any(
+        "was not verified" in line and "raised RuntimeError" in line
+        for line in warnings
+    )
+    assert scanner.use_uv_tool is True
+
+
+def test_a_uv_answer_with_nothing_on_path_does_not_read_the_values_hook(
+    tmp_path, monkeypatch
+):
+    """The control of the test above. With a uv answer and no copy on PATH the check
+    keeps the uv route and reads nothing: the hook is read only once a copy is to be
+    checked, and the uv route's own run path reads it where it needs to.
+
+    It passes with and without the fix. A failure at either means something else on
+    the way reads the hook bare."""
+    scanner = _scanner(tmp_path)
+    monkeypatch.setattr(
+        GuardDogScanner, "_values_to_redact", _a_values_hook_that_raises
+    )
+    _without_uv(monkeypatch, scanner, UV_ANSWER)
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    assert scanner.use_uv_tool is True
+    assert scanner.dependencies_satisfied is True
+    assert scanner.dependency_unavailable_reason is None
 
 
 # ---------------------------------------------------------------------------
@@ -544,42 +846,36 @@ def test_the_last_fallback_asks_the_resolver_under_the_scans_spec_and_mode(
     assert resolver.calls == [((TOOL,), {"from_spec": SPEC, "offline": offline})]
 
 
-def test_a_revalidation_already_off_uv_keeps_the_version_of_the_copy_that_runs(
-    tmp_path, monkeypatch
+@OFFLINE_MODES
+def test_the_missing_reason_shows_no_spelling_of_an_env_read_constraint(
+    tmp_path, monkeypatch, capture, offline
 ):
-    """A re-validation of a scanner already on a direct route sees the same binary
-    again. It must not erase the version of the copy that keeps running."""
-    scanner = _scanner(tmp_path)
-    scanner.use_uv_tool = False
-    scanner.tool_version = "3.2.0"  # the copy that runs, recorded when it was chosen
-    scanner._deferred_tool_version_probe = None
-    _at_the_last_fallback(monkeypatch, scanner, [COPY])
+    """The reason for a GuardDog that could not be installed or found on PATH names
+    the ``uv tool install`` command, which holds the scan's requirement, so it holds
+    the constraint in the spelling the options validator stored. It goes through the
+    same redaction as the other reasons, whether the scan is offline or not, and the
+    ERROR line and the scanner's errors that carry it show no spelling either.
 
-    assert scanner.validate_plugin_dependencies() is True
+    Without the fix: the reason and the line quoted the requirement as stored."""
+    scanner, pin = _with_an_env_read_constraint(monkeypatch, tmp_path)
+    monkeypatch.setattr(GuardDogScanner, "_is_offline_mode", lambda self: offline)
+    _at_the_last_fallback(monkeypatch, scanner, None)
 
-    assert scanner.use_uv_tool is False
-    assert scanner.tool_version == "3.2.0"
+    assert scanner.validate_plugin_dependencies() is False
 
-
-def test_the_resolver_returning_to_uv_takes_the_old_version_with_the_route(
-    tmp_path, monkeypatch
-):
-    """A scanner on a direct route whose resolver now answers uv goes back to the
-    uv route. The version recorded for the copy goes with the route, and the uv
-    probe is owed again.
-
-    Fails at the base: the fallback left the route where it was."""
-    scanner = _scanner(tmp_path)
-    scanner.use_uv_tool = False
-    scanner.tool_version = "1.2.3"
-    scanner._deferred_tool_version_probe = None
-    _at_the_last_fallback(monkeypatch, scanner, ["uv", "tool", "run", TOOL])
-
-    assert scanner.validate_plugin_dependencies() is True
-
-    assert scanner.use_uv_tool is True
-    assert scanner.tool_version is None
-    assert scanner._deferred_tool_version_probe == (TOOL, None)
+    reason = scanner.dependency_unavailable_reason
+    assert reason is not None
+    assert (
+        _spellings_shown(
+            pin,
+            reason=reason,
+            errors="\n".join(scanner.errors),
+            log=capture.text,
+        )
+        == []
+    )
+    # Not an empty reason: both texts name the install command.
+    assert "uv tool install" in reason
 
 
 def test_a_verified_copy_still_on_path_is_honored_without_asking_the_resolver(
