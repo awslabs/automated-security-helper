@@ -154,7 +154,7 @@ def is_removed(row: SpellingRow, version: Optional[str] = None) -> bool:
     return running.release >= removal.release
 
 
-def _release_label(release: str) -> str:
+def release_label(release: str) -> str:
     """``v4`` for ``4.0``, ``v4.2`` for ``4.2``: how the changelog names it."""
     parts = release.split(".")
     while len(parts) > 1 and parts[-1] == "0":
@@ -176,7 +176,7 @@ def deprecation_message(row: SpellingRow, old: str) -> str:
         )
     return (
         f"The '{old}' key is a deprecated spelling of '{row.canonical}' and will "
-        f"be removed in ASH {_release_label(row.removed_in)}; write "
+        f"be removed in ASH {release_label(row.removed_in)}; write "
         f"'{row.canonical}'."
     )
 
