@@ -81,7 +81,7 @@ SET_ON_EMPTY = _block(
     "printf 'fail_on_findings: true\\n' > \"$OPERATOR_CONFIG\"",
     "run fixture=empty",
 )
-SCAN = 'ash scan --config "$OPERATOR_CONFIG" --scanners detect-secrets'
+SCAN = 'ash scan fs . --config "$OPERATOR_CONFIG" --add-scanners detect-secrets'
 CHECK_LOG = (
     "head -n 1 .ash/ash_output/ash.log | "
     'grep -F "Using config file specified at: $OPERATOR_CONFIG"'

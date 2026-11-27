@@ -177,7 +177,8 @@ def _build_argv(recording_runner, tmp_path, override: str | None) -> str:
         [
             "bash",
             str(ASH_SCRIPT),
-            "--source-dir",
+            "scan",
+            "fs",
             str(source_dir),
             "--output-dir",
             str(tmp_path / "out"),

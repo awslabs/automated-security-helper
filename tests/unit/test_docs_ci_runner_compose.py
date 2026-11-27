@@ -643,9 +643,9 @@ def test_steps_matching_a_numbered_job_and_a_named_one_are_ambiguous():
 # the page quotes it.
 
 GITLAB_TEXT = (
-    "ash-scan:\n  image: python:3.12\n  script:\n    - ash scan --mode local\n"
+    "ash-scan:\n  image: python:3.12\n  script:\n    - ash scan fs . --mode local\n"
 )
-GITLAB_SCRIPT = "ash-scan:\n  script:\n    - ash scan --mode local --no-progress\n"
+GITLAB_SCRIPT = "ash-scan:\n  script:\n    - ash scan fs . --mode local --no-progress\n"
 
 #: (case id, a plain value YAML 1.1 reads as something other than a string, and YAML
 #: 1.2 reads differently)
@@ -728,7 +728,7 @@ def test_the_workflow_s_own_on_key_is_exempt_and_any_other_on_is_not():
     )
     assert "'on'" in message and "line 3" in message, message
     message = _compose_error(
-        "gitlab-ci", GITLAB_TEXT, "on:\n  script:\n    - ash scan --mode local\n"
+        "gitlab-ci", GITLAB_TEXT, "on:\n  script:\n    - ash scan fs . --mode local\n"
     )
     assert "'on'" in message and "line 1" in message, message
 

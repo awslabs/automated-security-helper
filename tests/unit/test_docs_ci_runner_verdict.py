@@ -119,7 +119,7 @@ ACT_MATRIX_LOG = "\n".join(
 
 GITLAB_LOG = f"""\
 Using docker image sha256:abc for public.ecr.aws/docker/library/python@sha256:{"e" * 64}
-$ ash scan --mode local --no-progress --fail-on-findings
+$ ash scan fs . --mode local --no-progress --fail-on-findings
 {SCAN_VERDICT}
 $ echo "$ash_exit" > ash-exit-code.txt
 ash-scan finished in 4.2 min
@@ -138,9 +138,9 @@ CODEBUILD_FAILED = (
     _codebuild(
         [
             "[Container] 2026/10/12 21:04:05.123456 Entering phase BUILD",
-            "[Container] 2026/10/12 21:04:05.123457 Running command ash scan --mode local --no-progress",
+            "[Container] 2026/10/12 21:04:05.123457 Running command ash scan fs . --mode local --no-progress",
             f"{ESC}[1;31m{SCAN_VERDICT}{ESC}[0m",
-            "[Container] 2026/10/12 21:04:05.234567 Command did not exit successfully ash scan exit status 2",
+            "[Container] 2026/10/12 21:04:05.234567 Command did not exit successfully ash scan fs exit status 2",
             "[Container] 2026/10/12 21:04:05.345678 Phase complete: BUILD State: FAILED",
             "[Container] 2026/10/12 21:04:05.345679 Phase context status code: COMMAND_EXECUTION_ERROR",
             "[Container] 2026/10/12 21:04:05.456789 Entering phase POST_BUILD",

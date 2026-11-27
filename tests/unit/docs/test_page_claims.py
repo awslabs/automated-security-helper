@@ -3992,9 +3992,9 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
         return _ash(
             [
                 "scan",
-                *mode,
-                "--workspace",
+                "workspace",
                 str(workspace),
+                *mode,
                 "--config",
                 str(config),
                 "--output-dir",
@@ -4043,9 +4043,7 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
     config_mounts = sorted(
         m.split("destination=", 1)[1] for m in mounts if "destination=/ash-config" in m
     )
-    assert inner[inner.index("--workspace") + 1] == "/src/services.code-workspace", (
-        inner
-    )
+    assert inner[inner.index("workspace") + 1] == "/src/services.code-workspace", inner
     assert inner[inner.index("--config") + 1] == "/ash-config/ash.yaml", inner
     assert ("--config-from-scanned-repository" in inner) is marked, inner
     assert config_mounts == [

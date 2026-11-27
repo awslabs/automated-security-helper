@@ -229,7 +229,7 @@ def test_a_complete_mapping_is_accepted() -> None:
         {"name": "pull", "id": "p", "uses": "./.github/actions/prepull-base-image"},
         {
             "name": "build",
-            "run": "./ash --build-target ci",
+            "run": "./ash scan fs . --build-target ci",
             "env": {
                 "ASH_BASE_OCI_LAYOUT": "${{ steps.p.outputs.oci-layout }}",
                 "ASH_BASE_IMAGE_OVERRIDE": "${{ steps.p.outputs.base-image-override }}",

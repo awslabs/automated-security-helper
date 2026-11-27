@@ -338,14 +338,14 @@ def test_the_runner_option_in_every_spelling_names_the_wrappers_runner(
     words = [word.format(runner=program) for word in spelling]
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), "--output-dir", str(out), *words],
+        ["--no-build", "scan", "fs", str(source), "--output-dir", str(out), *words],
         env={"OCI_RUNNER": str(guard)},
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
     assert "GUARD-RUNNER-RAN" not in shown, shown
     run = _only_run(calls, shown)
-    assert _inner(run) == ["ash", *SANDBOX_OFF], run
+    assert _inner(run) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF], run
 
 
 @pytest.mark.parametrize(
@@ -363,7 +363,7 @@ def test_an_equals_spelling_with_no_value_is_refused(runner, tmp_path, word, opt
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), "--output-dir", str(out), word],
+        ["--no-build", "scan", "fs", str(source), "--output-dir", str(out), word],
     )
     # The usage error the CLI exits 5 for: an option that requires an argument.
     assert result.returncode == 5, result.stdout + result.stderr
@@ -380,7 +380,8 @@ def test_the_short_uid_and_gid_options_take_an_attached_value(runner, tmp_path):
         runner,
         [
             "--no-run",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source),
             "--output-dir",
             str(out),
@@ -403,18 +404,18 @@ def test_dash_v_is_the_scans_verbose_not_the_wrappers_version(runner, tmp_path):
         runner,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source),
             "--output-dir",
             str(out),
-            "scan",
             "-v",
         ],
     )
     shown = result.stdout + result.stderr
     assert result.returncode == 0, shown
     run = _only_run(calls, shown)
-    assert _inner(run) == ["ash", "scan", *SANDBOX_OFF, "-v"], run
+    assert _inner(run) == ["ash", "scan", "fs", "/src", *SANDBOX_OFF, "-v"], run
 
 
 def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(
@@ -426,7 +427,7 @@ def test_dash_v_before_any_subcommand_is_still_the_wrappers_version(
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
-        ["--no-build", "--source-dir", str(source), "--output-dir", str(out), "-v"],
+        ["--no-build", "-v", "scan", "fs", str(source), "--output-dir", str(out)],
         path_prefix=suite_python,
     )
     shown = result.stdout + result.stderr
@@ -443,7 +444,8 @@ def test_the_long_version_option_is_still_the_wrappers_own(
         runner,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source),
             "--output-dir",
             str(out),
@@ -501,7 +503,7 @@ def test_the_scripts_directory_is_read_with_cdpath_unset(runner, tmp_path):
     source, out = _dirs(tmp_path)
     result, calls = _run(
         runner,
-        ["--source-dir", str(source), "--output-dir", str(out)],
+        ["scan", "fs", str(source), "--output-dir", str(out)],
         cwd=REPO_ROOT.parent,
         script=f"{REPO_ROOT.name}/ash",
         env={"CDPATH": str(REPO_ROOT.parent), "BUILD_FAILS": "1"},

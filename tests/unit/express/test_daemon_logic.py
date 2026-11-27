@@ -131,7 +131,7 @@ def _request(daemon_instance, **overrides):
         "protocol": runtime.PROTOCOL_VERSION,
         "version": daemon_instance.version,
         "fingerprint": daemon_instance.fingerprint,
-        "argv": ["scan", "--source-dir", "."],
+        "argv": ["scan", "fs", "."],
         "cwd": "/somewhere",
         "env": {"ASH_MODE": "local"},
         "config_hash": None,

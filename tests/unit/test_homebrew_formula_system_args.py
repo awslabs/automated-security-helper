@@ -211,7 +211,7 @@ class TestTheChecker:
                 '    system "uv", "sync",\n           "--python", venv.root/"bin/python"\n',
                 ['venv.root/"bin/python"'],
             ),
-            ('    system "ash", "--source-dir", testpath\n', ["testpath"]),
+            ('    system "ash", "scan", "fs", testpath\n', ["testpath"]),
             ('    system("ash", testpath/"out")\n', ['testpath/"out"']),
             (
                 '    system "ash", \\\n           buildpath/"x"\n',

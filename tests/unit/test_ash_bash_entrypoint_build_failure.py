@@ -81,7 +81,8 @@ def run_ash(failing_runner, tmp_path):
         [
             "bash",
             str(ASH_SCRIPT),
-            "--source-dir",
+            "scan",
+            "fs",
             str(source_dir),
             "--output-dir",
             str(tmp_path / "out"),

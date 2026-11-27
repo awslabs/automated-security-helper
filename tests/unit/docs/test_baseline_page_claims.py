@@ -209,9 +209,17 @@ def _probe_the_matching_tradeoff() -> None:
 def _scan(tmp_path: Path, *arguments: str, env: Dict[str, str] | None = None):
     source = tmp_path / "source"
     source.mkdir(parents=True, exist_ok=True)
-    return CliRunner().invoke(
-        app, ["scan", "--source-dir", str(source), *arguments], env=env
-    )
+    return CliRunner().invoke(app, ["scan", "fs", str(source), *arguments], env=env)
+
+
+def _scan_without_a_subject(tmp_path: Path, *arguments: str):
+    """``_scan`` without a subject, the deprecated form that still takes
+    ``--workspace``. ``ash scan fs`` has no workspace option and
+    ``ash scan workspace`` no ``--baseline``, so the scan's own refusal of
+    ``--baseline`` with a workspace is reached only without a subject."""
+    source = tmp_path / "source"
+    source.mkdir(parents=True, exist_ok=True)
+    return CliRunner().invoke(app, ["scan", "--source-dir", str(source), *arguments])
 
 
 #: Each way ``--baseline`` is refused on the command line, before any scan starts.
@@ -230,7 +238,8 @@ REFUSED_COMBINATIONS = [
 def _probe_the_refused_combinations(tmp_path: Path) -> None:
     missing = str(tmp_path / "baseline.json")
     for index, arguments in enumerate(REFUSED_COMBINATIONS):
-        response = _scan(
+        scan = _scan_without_a_subject if "--workspace" in arguments else _scan
+        response = scan(
             tmp_path / f"refused-{index}", "--baseline", missing, *arguments
         )
         assert response.exit_code == 5, (arguments, response.output)
@@ -564,11 +573,11 @@ def test_the_exit_codes_page_lists_a_baseline_of_another_project_or_directory(
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "precommit",
             "--staged",
-            "--source-dir",
-            str(source),
             "--baseline",
             str(baseline),
         ],

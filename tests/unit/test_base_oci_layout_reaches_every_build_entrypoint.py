@@ -314,7 +314,8 @@ def _ash_build(tmp_path: Path, runner_name: str, value: str | None):
         [
             "bash",
             str(ASH_SCRIPT),
-            "--source-dir",
+            "scan",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
