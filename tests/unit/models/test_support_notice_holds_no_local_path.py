@@ -40,7 +40,19 @@ LOCAL_PATHS = {
     "a drive path": "C:\\Users\\alice\\AppData\\Local\\uv",
     "a drive path with slashes": "c:/work/repo",
     "a network share": "\\\\fileserver\\share\\ash",
+    # The shapes a Windows run reads that the three above do not cover: a path from
+    # the root of the current drive, and the two prefixes that put \\?\ or \\.\ in
+    # front of a drive or a share. The drive in \\?\C:\ follows a backslash, so it is
+    # not the start of a token and the drive rule alone never sees it.
+    "a path from the root of the drive": "\\Users\\alice\\AppData\\Local\\uv",
+    "an extended-length path": "\\\\?\\C:\\Users\\alice\\AppData\\Local\\uv",
+    "an extended-length path with slashes": "\\\\?\\c:/work/alice/repo",
+    "an extended-length network share": "\\\\?\\UNC\\fileserver\\share\\ash",
+    "a device path": "\\\\.\\C:\\Users\\alice\\AppData",
     "a file URI": "file:///home/alice/ash",
+    "a file URI in capitals": "FILE:///home/alice/ash",
+    "a file URI in mixed case": "File:///home/alice/ash",
+    "a file URI with a drive": "file:///c:/users/alice",
 }
 
 #: Ordinary text a notice holds, each in a spelling a path guard could get wrong.
@@ -53,6 +65,10 @@ PLAIN_TEXT = {
     "slashes inside words": "Linux/macOS, TCP/IP, and/or and n/a are words.",
     "spaced punctuation": "a / b, 3 ~ 4, about ~5 minutes, and Section C: the processor.",
     "a relative path": "Run ./scripts/check or ../tool/check from the project.",
+    "backslashes that start no path": "a\\b, a lone \\ and 5 \\ 3 are not paths.",
+    "words that are not a file URI": (
+        "Set it aside: the file: prefix, a FILE: label and profile: are words."
+    ),
 }
 
 
