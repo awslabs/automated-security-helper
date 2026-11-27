@@ -73,6 +73,21 @@ CONTRACT_JSON = HERE / "gate-contract.json"
 
 _HANDLER_MARKER = "export const CODECOMMIT_GATE_HANDLER = `"
 
+# The methods that change a list in place. A call of one on `directory` is a write to
+# it, as an assignment is.
+LIST_MUTATORS = frozenset(
+    {
+        "append",
+        "clear",
+        "extend",
+        "insert",
+        "pop",
+        "remove",
+        "reverse",
+        "sort",
+    }
+)
+
 # The TS template-literal escapes the handler actually uses, plus the ones it
 # could grow. Anything else is left alone rather than guessed at.
 _TS_ESCAPES = {
@@ -292,8 +307,10 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
     with the `fs` subject (3.9 and later) and ``directory_without_subject`` the one
     for an older ASH. Both are the arms of the handler's `directory = [...] if ...
     else [...]` assignment, which `argv` carries as `*directory`, so a handler
-    that stops carrying it, stops assigning it as two lists, or assigns it a
-    second time is refused rather than derived as if it still named a directory.
+    that stops carrying it, stops assigning it as two lists, or writes it any other
+    way (a second assignment, a tuple or loop target, a walrus, a store through a
+    subscript, a mutator call) is refused rather than derived as if it still named a
+    directory.
     The changed-files pair is added when ASH_CHANGED_FILES_ONLY is on, and the
     severity pair when ASH_MIN_SEVERITY is set. Only literal strings are
     collected; the values beside them are runtime data (a temp directory, a
@@ -345,24 +362,62 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
     def names_directory(target: ast.AST) -> bool:
         return isinstance(target, ast.Name) and target.id == "directory"
 
+    def writes_directory(node: ast.AST) -> bool:
+        """Whether *node* changes what the name `directory` holds, in any way Python
+        has of doing it.
+
+        A later write overrides the first, so the gate would name its path one way
+        whatever its ASH has, while the contract still read the two arms of the
+        assignment it overrides. Listing the statement forms (`=`, `+=`, `: T =`)
+        left the others open, so this reads the name itself:
+
+        * a `Name` in a store or delete position: a plain, augmented or annotated
+          assignment, a tuple, list or starred target, a `for` or `with` target, a
+          walrus, `del directory`;
+        * a store or delete through the name: `directory[:] = ...`, `directory[0] +=
+          ...`, `directory.x = ...`, `del directory[0]`;
+        * a call of one of the list's own mutators: `directory.append(...)`;
+        * a name bound another way: an `except ... as directory`, an import, a
+          `def` or `class` of that name, a parameter of that name.
+
+        A `directory` that only appears where it is read, as `*directory` in the
+        argv, is none of these.
+        """
+        if isinstance(node, ast.Name):
+            return node.id == "directory" and isinstance(node.ctx, (ast.Store, ast.Del))
+        if isinstance(node, (ast.Subscript, ast.Attribute)):
+            return (
+                isinstance(node.ctx, (ast.Store, ast.Del))
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "directory"
+            )
+        if isinstance(node, ast.Call):
+            return (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "directory"
+                and node.func.attr in LIST_MUTATORS
+            )
+        if isinstance(node, ast.ExceptHandler):
+            return node.name == "directory"
+        if isinstance(node, ast.alias):
+            return (node.asname or node.name.split(".")[0]) == "directory"
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return node.name == "directory"
+        if isinstance(node, ast.arg):
+            return node.arg == "directory"
+        return False
+
     base: list[str] = []
     changed_files_only: list[str] = []
     min_severity: list[str] = []
     directory_arms: list[list[str]] = []
-    directory_assignments = 0
+    directory_writes = 0
     argv_carries_directory = False
 
     for node in ast.walk(handler):
-        # Every assignment to `directory`, of whatever value: a later one overrides
-        # the first, so the gate would name its path one way whatever its ASH has.
-        if (
-            isinstance(node, ast.Assign)
-            and any(names_directory(t) for t in node.targets)
-        ) or (
-            isinstance(node, (ast.AugAssign, ast.AnnAssign))
-            and names_directory(node.target)
-        ):
-            directory_assignments += 1
+        if writes_directory(node):
+            directory_writes += 1
         # `directory = [...] if has_subject else [...]`: how the scan names its path
         if (
             isinstance(node, ast.Assign)
@@ -396,17 +451,14 @@ def derive_scan_flags(source: str | None = None) -> dict[str, list[str]]:
             "flag set cannot be derived and must not be reported as empty"
         )
 
-    if (
-        directory_assignments != 1
-        or len(directory_arms) != 2
-        or not all(directory_arms)
-    ):
+    if directory_writes != 1 or len(directory_arms) != 2 or not all(directory_arms):
         raise AssertionError(
             "handler() no longer assigns `directory` exactly once, as one list with a "
             "literal word for an ASH with the `fs` subject and one for an ASH without "
-            "it, so the words that name the directory the gate scans cannot be derived "
-            "and must not be reported as absent. Update this derivation with the "
-            "handler."
+            "it, and writes it no other way (a tuple or loop target, a walrus, a store "
+            "through a subscript, a mutator call), so the words that name the directory "
+            "the gate scans cannot be derived and must not be reported as absent. "
+            "Update this derivation with the handler."
         )
     if not argv_carries_directory:
         raise AssertionError(

@@ -326,6 +326,57 @@ def test_a_handler_that_assigns_directory_again_is_refused():
         gate_contract.derive_scan_flags(planted)
 
 
+@pytest.mark.parametrize(
+    "plant",
+    [
+        pytest.param('directory[:] = ["--source-dir", source_dir]', id="slice-store"),
+        pytest.param('directory[0] = "--source-dir"', id="item-store"),
+        pytest.param(
+            'directory, unused = ["--source-dir", source_dir], None', id="tuple-target"
+        ),
+        pytest.param(
+            '[directory, unused] = (["--source-dir", source_dir], None)',
+            id="list-target",
+        ),
+        pytest.param('(directory := ["--source-dir", source_dir])', id="walrus"),
+        pytest.param(
+            'for directory in (["--source-dir", source_dir],):\n        pass',
+            id="loop-target",
+        ),
+        pytest.param('with open("x") as directory:\n        pass', id="with-target"),
+        pytest.param('directory.append("--source-dir")', id="mutator-call"),
+        pytest.param("del directory", id="del"),
+    ],
+)
+def test_a_handler_that_writes_directory_another_way_is_refused(plant):
+    """Planted control, one per way Python has of changing what a name holds.
+
+    Each is planted ahead of the argv, after the assignment the contract reads, so each
+    one changes what the gate scans while the assignment still reads as the two
+    spellings. A reader that counted only `=`, `+=` and annotated assignments let all of
+    these through.
+    """
+    import gate_contract
+
+    planted = _handler_with(
+        'argv = ["ash", "scan", *directory,',
+        plant + '\n    argv = ["ash", "scan", *directory,',
+    )
+
+    with pytest.raises(AssertionError, match="assigns `directory`"):
+        gate_contract.derive_scan_flags(planted)
+
+
+def test_a_handler_that_only_reads_directory_still_derives():
+    """Control for the planted writes above: the handler as it is has one write."""
+    import gate_contract
+
+    flags = gate_contract.derive_scan_flags()
+
+    assert flags["directory_with_subject"] == ["fs"]
+    assert flags["directory_without_subject"] == ["--source-dir"]
+
+
 def test_the_directory_words_are_read_from_the_handler_not_carried():
     """Planted control. A word the handler changes is the word the derivation reports."""
     import gate_contract
