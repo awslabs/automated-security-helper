@@ -15,7 +15,9 @@ What it pins on how-to/supported-configurations.md:
 - the sentence each undeclared token carries;
 - the name of each stand-in and each adaptation;
 - the sentences that say what the page lists, what the four levels mean and how a
-  configuration is described.
+  configuration is described;
+- the ways out that the section on a missing scanner build links, for every platform
+  that can lack a build.
 
 The page describes what the register declares. It does not say that ASH shows a notice,
 because a page may claim only what ASH does: the change that makes ASH show one rewrites
@@ -27,6 +29,8 @@ starts a scanner or reads the host.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 
@@ -114,6 +118,36 @@ def test_the_page_names_each_stand_in_and_adaptation(polyfill: sr.Polyfill) -> N
 @pytest.mark.parametrize("sentence", FRAMING, ids=lambda sentence: sentence[:32])
 def test_the_page_carries_its_framing_sentences(sentence: str) -> None:
     assert_on_page(PAGE, sentence)
+
+
+def _section(anchor: str) -> str:
+    """The raw text of the section of the page whose heading carries ``anchor``."""
+    text = (CONTENT / PAGE).read_text(encoding="utf-8")
+    start = text.index("{#" + anchor + "}")
+    following = re.search(r"^#{1,3} ", text[start:], re.MULTILINE)
+    end = start + following.start() if following else len(text)
+    return text[start:end]
+
+
+def test_the_no_build_section_links_every_way_out_a_missing_build_offers() -> None:
+    """The register chooses the ways out of a missing build for the platform that has
+    none: another machine for a Linux gap, and WSL 2, the image or another operating
+    system elsewhere. The section the derived rows share links each one a gap offers."""
+    binaries = (
+        sr.PinnedBinary("demo-a", "tool-a", "1.0", ("linux/amd64",)),
+        sr.PinnedBinary("demo-b", "tool-b", "1.0", ("linux/arm64",)),
+    )
+    ways = {path for row in sr.no_build_rows(binaries) for path in row.paths}
+    assert ways >= {
+        "wsl2",
+        "container-image",
+        "linux-or-macos-host",
+        "x86-host-with-features",
+        "ci-runner",
+        "arm64-host",
+    }
+    section = _section(sr.NO_BUILD_ANCHOR)
+    assert [path for path in sorted(ways) if f"](#{path})" not in section] == []
 
 
 def test_the_page_does_not_say_that_ash_shows_a_notice() -> None:

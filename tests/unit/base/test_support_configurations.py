@@ -48,6 +48,8 @@ def _offered(facts: sr.HostFacts, row_id: str, scope: str = "ash") -> list[str] 
 
 WINDOWS = {"os": "windows", "host_os": "windows", "express_available": "no"}
 MACOS = {"os": "darwin", "host_os": "darwin"}
+#: A Windows host that runs the container image: the scanners run in the image's Linux.
+WINDOWS_IMAGE = {"os": "linux", "host_os": "windows", "express_available": "no"}
 
 CPU = ("host.cpu.below-polars-runtime", "unsupported", "continues")
 CPU_COMPAT = ("host.cpu.below-polars-compat", "unsupported", "continues")
@@ -160,6 +162,37 @@ CASES: list[tuple[str, dict[str, str], list[tuple[str, str, str]]]] = [
         [NO_BACKEND_AUTO],
     ),
     (
+        "container mode on windows with a sandbox asked for and no host backend",
+        {
+            **WINDOWS_IMAGE,
+            "run_mode": "container",
+            "sandbox_mode": "auto",
+            "sandbox_backend": "none",
+        },
+        [IN_CONTAINER],
+    ),
+    (
+        "container mode on windows with a named sandbox and no host backend",
+        {
+            **WINDOWS_IMAGE,
+            "run_mode": "container",
+            "sandbox_mode": "named",
+            "sandbox_backend": "none",
+        },
+        [IN_CONTAINER],
+    ),
+    (
+        "container mode on macos with a sandbox asked for and no host backend",
+        {
+            "os": "linux",
+            "host_os": "darwin",
+            "run_mode": "container",
+            "sandbox_mode": "auto",
+            "sandbox_backend": "none",
+        },
+        [IN_CONTAINER],
+    ),
+    (
         "landlock abi 5",
         {
             "sandbox_mode": "auto",
@@ -207,14 +240,79 @@ def test_a_configuration_raises_exactly_its_rows(
     assert _raised(_facts(**overlay)) == expected
 
 
-def test_the_cases_cover_every_row_a_run_can_raise_in_the_ash_scope() -> None:
-    """A row no case raises is a row nothing here holds."""
+SEMGREP_WINDOWS = ("scanner.semgrep.windows", "unsupported", "skips-scanner")
+GUARDDOG_WINDOWS = ("scanner.guarddog.windows", "unsupported", "skips-scanner")
+GUARDDOG_REPLACED = ("scanner.guarddog.sandbox-replaced", "polyfilled", "continues")
+GUARDDOG_NO_SANDBOX = ("scanner.guarddog.sandbox-unavailable", "degraded", "continues")
+BETTERLEAKS_HOME = ("scanner.betterleaks.private-home", "polyfilled", "continues")
+IGNORE_PATHS_TOOLS = ("trivy", "trivy-repo", "checkov", "ferret-scan")
+
+#: macOS on Apple silicon with a sandbox asked for and sandbox-exec as its backend.
+MACOS_SANDBOXED = {
+    **MACOS,
+    "arch": "arm64",
+    "sandbox_mode": "auto",
+    "sandbox_backend": "sandbox-exec",
+}
+
+
+def _ignore_paths(tool: str) -> tuple[str, str, str]:
+    return (f"scanner.{tool}.windows-ignore-paths", "degraded", "continues")
+
+
+# (configuration, the scanner, the facts it plants, the rows a run raises there)
+SCANNER_CASES: list[tuple[str, str, dict[str, str], list[tuple[str, str, str]]]] = [
+    ("semgrep on windows", "semgrep", {**WINDOWS}, [SEMGREP_WINDOWS]),
+    ("guarddog on windows", "guarddog", {**WINDOWS}, [GUARDDOG_WINDOWS]),
+    (
+        "guarddog under sandbox-exec on macos",
+        "guarddog",
+        {**MACOS_SANDBOXED, "tool_sandbox": "replaced"},
+        [GUARDDOG_REPLACED],
+    ),
+    (
+        "guarddog without its kernel sandbox on linux",
+        "guarddog",
+        {"tool_sandbox": "unavailable"},
+        [GUARDDOG_NO_SANDBOX],
+    ),
+    (
+        "betterleaks under sandbox-exec on macos",
+        "betterleaks",
+        {**MACOS_SANDBOXED},
+        [BETTERLEAKS_HOME],
+    ),
+    *(
+        (
+            f"{tool} with ignore paths on windows",
+            tool,
+            {**WINDOWS, "ignore_paths": "set"},
+            [_ignore_paths(tool)],
+        )
+        for tool in IGNORE_PATHS_TOOLS
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("scanner", "overlay", "expected"),
+    [pytest.param(s, o, e, id=name) for name, s, o, e in SCANNER_CASES],
+)
+def test_a_scanner_configuration_raises_exactly_its_rows(
+    scanner: str, overlay: dict[str, str], expected: list[tuple[str, str, str]]
+) -> None:
+    assert _raised(_facts(**overlay), scanner) == expected
+
+
+def test_the_cases_cover_every_row_a_run_can_raise() -> None:
+    """A row no case raises is a row nothing here holds, in whichever scope it is
+    declared: a new row of a scanner, as of ASH, needs a configuration that raises it."""
     seen = {row[0] for _, _, rows in CASES for row in rows}
+    seen |= {row[0] for _, _, _, rows in SCANNER_CASES for row in rows}
     declared = {
-        row.id
-        for row in sr.REGISTER.rows
-        if row.scope == "ash" and row.notify is not sr.Notify.MATRIX
+        row.id for row in sr.REGISTER.rows if row.notify is not sr.Notify.MATRIX
     }
+    assert declared, "the register declares no row that a run raises"
     assert declared - seen == set()
 
 
@@ -304,6 +402,17 @@ PATHS: list[tuple[str, dict[str, str], tuple[str, ...], list[str]]] = [
     (
         "container mode with a sandbox, on windows",
         {**WINDOWS, "run_mode": "container", "sandbox_mode": "auto"},
+        IN_CONTAINER[:1],
+        ["wsl2-sandboxed"],
+    ),
+    (
+        "container mode with a sandbox, on windows, the image's linux and no backend",
+        {
+            **WINDOWS_IMAGE,
+            "run_mode": "container",
+            "sandbox_mode": "auto",
+            "sandbox_backend": "none",
+        },
         IN_CONTAINER[:1],
         ["wsl2-sandboxed"],
     ),
@@ -456,7 +565,7 @@ def test_windows_container_mode_meets_the_container_limit_and_not_the_windows_on
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("scanner", ["trivy", "trivy-repo", "checkov", "ferret-scan"])
+@pytest.mark.parametrize("scanner", IGNORE_PATHS_TOOLS)
 def test_ignore_paths_are_not_passed_to_four_tools_on_windows(scanner: str) -> None:
     facts = _facts(**WINDOWS, ignore_paths="set")
     (found,) = sr.evaluate(facts, scanner)
@@ -470,6 +579,21 @@ def test_ignore_paths_are_not_passed_to_four_tools_on_windows(scanner: str) -> N
     assert _raised(_facts(ignore_paths="set"), scanner) == []
 
 
+@pytest.mark.parametrize("scanner", IGNORE_PATHS_TOOLS)
+def test_ignore_paths_limit_applies_in_local_and_pre_commit_modes_only(
+    scanner: str,
+) -> None:
+    """On Windows in container mode the scanners run in Linux and get the ignore
+    paths, so the row is not raised there, nor in Nix mode, which Windows refuses."""
+    row = _ignore_paths(scanner)
+    for mode in ("local", "precommit"):
+        facts = _facts(**WINDOWS, ignore_paths="set", run_mode=mode)
+        assert _raised(facts, scanner) == [row], mode
+    for mode in ("container", "nix"):
+        facts = _facts(**WINDOWS, ignore_paths="set", run_mode=mode)
+        assert _raised(facts, scanner) == [], mode
+
+
 def test_guarddog_without_its_kernel_sandbox_is_degraded_and_always_shown() -> None:
     facts = _facts(tool_sandbox="unavailable")
     (found,) = sr.evaluate(facts, "guarddog")
@@ -477,9 +601,23 @@ def test_guarddog_without_its_kernel_sandbox_is_degraded_and_always_shown() -> N
     assert found.row.level is sr.SupportLevel.DEGRADED
     assert found.row.cli_on_stderr
     assert [p.id for p in found.paths] == ["enable-landlock"]
-    assert _raised(_facts(**MACOS, tool_sandbox="unavailable"), "guarddog") == [
-        ("scanner.guarddog.sandbox-unavailable", "degraded", "continues")
-    ]
+
+
+def test_guarddog_without_its_kernel_sandbox_is_never_raised_without_a_way_out() -> (
+    None
+):
+    """GuardDog's own sandbox is unavailable only where Landlock is, and the one way
+    out is a Linux kernel setting, so a Mac run raises nothing here: a row that a
+    run raises always has a way out on the machine that raises it."""
+    others = {"os": "other", "host_os": "other"}
+    for host in ({}, MACOS, WINDOWS, others):
+        facts = _facts(**host, tool_sandbox="unavailable")
+        raised = sr.evaluate(
+            facts, "guarddog", notify=(sr.Notify.START, sr.Notify.DECISION)
+        )
+        for found in raised:
+            assert found.paths, (host, found.row.id)
+    assert _raised(_facts(**MACOS, tool_sandbox="unavailable"), "guarddog") == []
 
 
 def test_guarddog_under_sandbox_exec_and_betterleaks_are_polyfilled() -> None:
@@ -500,6 +638,24 @@ def test_guarddog_under_sandbox_exec_and_betterleaks_are_polyfilled() -> None:
         _raised(_facts(sandbox_mode="auto", sandbox_backend="bwrap"), "betterleaks")
         == []
     )
+
+
+def test_guarddog_under_ashs_sandbox_is_polyfilled_only_where_ash_sandboxes_it() -> (
+    None
+):
+    """The stand-in is ASH's sandbox-exec confinement, so the row needs macOS, a
+    sandbox asked for and sandbox-exec as the backend, as the Betterleaks row does.
+    Without them no run has the stand-in, and a matrix cell must not show it."""
+    on_mac = {**MACOS_SANDBOXED, "tool_sandbox": "replaced"}
+    assert _raised(_facts(**on_mac), "guarddog") == [GUARDDOG_REPLACED]
+    elsewhere = {
+        "the sandbox off": {"sandbox_mode": "off"},
+        "linux": {"os": "linux", "host_os": "linux"},
+        "another backend": {"sandbox_backend": "bwrap"},
+    }
+    for name, change in elsewhere.items():
+        assert _raised(_facts(**{**on_mac, **change}), "guarddog") == [], name
+    assert sr.cells("guarddog", {"tool_sandbox": "replaced"}) == "yes"
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +688,25 @@ def _pinned_binaries() -> list[sr.PinnedBinary]:
     return found
 
 
+def _missing_builds(
+    register: sr.Register, binaries: list[sr.PinnedBinary], facts: sr.HostFacts
+) -> dict[str, sr.Evaluation]:
+    """The missing-build row each pinned scanner raises on ``facts``. A scanner's
+    other rows are other limits of the same configuration, so they are not read as a
+    missing build, and one scanner has at most one missing-build row there."""
+    missing = {}
+    for binary in binaries:
+        derived = [
+            found
+            for found in register.evaluate(facts, binary.scanner)
+            if found.row.anchor == sr.NO_BUILD_ANCHOR
+        ]
+        if derived:
+            (only,) = derived
+            missing[binary.scanner] = only
+    return missing
+
+
 def test_windows_arm64_raises_a_missing_build_for_each_tool_without_one() -> None:
     planted = sr.PinnedBinary(
         scanner="planted",
@@ -542,12 +717,7 @@ def test_windows_arm64_raises_a_missing_build_for_each_tool_without_one() -> Non
     binaries = [*_pinned_binaries(), planted]
     register = sr.REGISTER.extended(rows=sr.no_build_rows(binaries))
     facts = _facts(**WINDOWS, arch="arm64")
-    missing = {}
-    for binary in binaries:
-        found = register.evaluate(facts, binary.scanner)
-        if found:
-            (only,) = found
-            missing[binary.scanner] = only
+    missing = _missing_builds(register, binaries, facts)
     lacking = sorted(
         binary.scanner
         for binary in binaries
@@ -568,6 +738,39 @@ def test_windows_arm64_raises_a_missing_build_for_each_tool_without_one() -> Non
             "container-image",
             "linux-or-macos-host",
         ]
+
+
+def test_a_row_that_is_not_a_missing_build_is_not_read_as_one() -> None:
+    """The must-fail control for the reading above: a pinned scanner that gains
+    another Windows row still has exactly one missing-build row."""
+    binaries = _pinned_binaries()
+    scanner = next(
+        b.scanner
+        for b in binaries
+        if b.provisionable and "windows/arm64" not in b.provisionable
+    )
+    other = sr.SupportRow(
+        id=f"scanner.{scanner}.windows-other-limit",
+        scope=scanner,
+        dimension="os",
+        match=sr.Match(os=("windows",)),
+        level=sr.SupportLevel.DEGRADED,
+        behavior=sr.Behavior.CONTINUES,
+        notify=sr.Notify.MATRIX,
+        reason="Another limit of this scanner on Windows.",
+        cell="another limit on Windows",
+        lost="A function of this scanner is lost on Windows.",
+        paths=("wsl2", "container-image"),
+    )
+    register = sr.REGISTER.extended(rows=(*sr.no_build_rows(binaries), other))
+    facts = _facts(**WINDOWS, arch="arm64")
+    assert len(register.evaluate(facts, scanner)) == 2, "the other row matches too"
+    missing = _missing_builds(register, binaries, facts)
+    assert missing[scanner].row.anchor == sr.NO_BUILD_ANCHOR
+    assert missing[scanner].row.id.startswith(f"scanner.{scanner}.no-build.")
+    assert missing == _missing_builds(
+        sr.REGISTER.extended(rows=sr.no_build_rows(binaries)), binaries, facts
+    )
 
 
 def test_no_other_platform_and_no_other_tool_has_a_missing_build_row() -> None:
@@ -608,6 +811,14 @@ _CPU_PATHS = (
     "arm64-host",
     "ci-runner",
 )
+#: The processor row for a processor below the compatibility runtime's own set leaves
+#: out the compatibility runtime, which is already in use there and cannot help.
+_BELOW_COMPAT_PATHS = (
+    "native-arm64",
+    "x86-host-with-features",
+    "arm64-host",
+    "ci-runner",
+)
 _SANDBOX_PATHS = ("install-bubblewrap", "wsl2-sandboxed", "sandbox-capable-host")
 
 # (id, level, behavior, notify, dimension, shown on stderr, paths)
@@ -628,7 +839,7 @@ DECLARED: list[tuple[str, str, str, str, str, bool, tuple[str, ...]]] = [
         "start",
         "cpu",
         True,
-        _CPU_PATHS,
+        _BELOW_COMPAT_PATHS,
     ),
     (
         "host.cpu.polars-compat-runtime",
