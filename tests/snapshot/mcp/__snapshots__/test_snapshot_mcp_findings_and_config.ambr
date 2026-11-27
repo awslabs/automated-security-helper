@@ -214,6 +214,7 @@
           'references': None,
           'resource_id': None,
           'resource_type': None,
+          'result_kind': 'fail',
           'rule_id': 'B105',
           'scanner': 'bandit',
           'scanner_type': 'UNKNOWN',
@@ -250,6 +251,7 @@
           'references': None,
           'resource_id': None,
           'resource_type': None,
+          'result_kind': 'fail',
           'rule_id': 'B101',
           'scanner': 'bandit',
           'scanner_type': 'UNKNOWN',
@@ -284,6 +286,7 @@
           'references': None,
           'resource_id': None,
           'resource_type': None,
+          'result_kind': 'fail',
           'rule_id': 'SECRET-AWS-ACCESS-KEY',
           'scanner': 'detect-secrets',
           'scanner_type': 'UNKNOWN',
@@ -329,6 +332,7 @@
           'description': 'Use of assert detected.',
           'references': list([
           ]),
+          'result_kind': 'fail',
           'scanner': 'bandit',
           'scanner_metadata': dict({
             'attachments': list([
@@ -413,6 +417,7 @@
           'description': 'subprocess call with shell=True identified, security issue.',
           'references': list([
           ]),
+          'result_kind': 'fail',
           'scanner': 'bandit',
           'scanner_metadata': dict({
             'attachments': list([
@@ -491,6 +496,7 @@
           'description': 'AWS Access Key detected in configuration file.',
           'references': list([
           ]),
+          'result_kind': 'fail',
           'scanner': 'detect-secrets',
           'scanner_metadata': dict({
             'attachments': list([
