@@ -1,10 +1,21 @@
-/* Homepage example. Local Anime.js (MIT); no project files or scans leave the browser. */
-import {
+/* Homepage example. Anime.js 4.5.0 (MIT) loads from cdnjs through the script element
+   in docs/overrides/home.html, pinned by version and Subresource Integrity; no project
+   files or scans leave the browser. Without the library the example keeps its
+   finished, static state and says so in its caption. */
+const {
   createTimeline, createDrawable, createMotionPath, cubicBezier, stagger
-} from "./vendor/anime.js";
+} = globalThis.anime ?? {};
+const motionLoaded = [createTimeline, createDrawable, createMotionPath, cubicBezier, stagger]
+  .every((member) => typeof member === "function");
 
 const host = document.querySelector("[data-ash-scan]");
-if (host) initialize(host);
+if (host && motionLoaded) initialize(host);
+else if (host) showFinishedExample(host);
+
+function showFinishedExample(example) {
+  const caption = example.querySelector("[data-scan-caption]");
+  if (caption) caption.textContent = "Example data · The animation did not load, so the finished scan is shown.";
+}
 
 function initialize(example) {
   const root = document.documentElement;

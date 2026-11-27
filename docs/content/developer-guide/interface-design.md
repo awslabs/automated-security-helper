@@ -27,9 +27,9 @@ navigation architecture, and motion vocabulary.
 Open Sans is hosted locally under the SIL Open Font License. Reports embed the
 font and its license. Terminals use the operator's font; GitHub uses native typography.
 
-Light Phosphor icons and Anime.js 4.5.0 use MIT licenses. The homepage loads a
-reduced local animation module; other pages and reports do not load it.
-Run `npm run vendor:motion` in `docs/ui-tests` to rebuild the module and its notice.
+Light Phosphor icons and Anime.js 4.5.0 use MIT licenses. The homepage loads Anime.js
+from cdnjs, pinned by version and Subresource Integrity; other pages and reports do
+not load it. Without it, the homepage's scan example shows its finished state.
 
 Use one page title, sentence-case headings, 16px reading text, and labels of at
 least 12px. Containers use 16px corner radii; inputs use 8px. Reserve shadows for

@@ -69,8 +69,10 @@ content has its own canonical source in
 `ash-agent-plugins/agentic-coding/transpiler/_base/`.
 
 Refresh the README's report and terminal images with `npm run capture -- --readme`
-in `docs/ui-tests`. Rebuild the local MIT animation module with `npm run vendor:motion`
-after changing its pinned dependency.
+in `docs/ui-tests`. The homepage loads Anime.js from cdnjs: to change its version,
+update the script element's URL and integrity value in `docs/overrides/home.html`, the
+privacy plugin's `assets_exclude` in `mkdocs.yml`, and `LOADED_FROM_CDNJS` in
+`tests/unit/test_cdn_references_are_pinned.py`.
 
 ## Devfile environments
 

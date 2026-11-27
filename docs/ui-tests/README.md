@@ -53,16 +53,11 @@ DOCS_UI_CHROME=/usr/bin/google-chrome npm run capture
 
 `npm run report` opens the Playwright test report. Failures retain screenshots and traces. `npm run test:headed` is useful for inspecting keyboard flows.
 
-Playwright and Axe are development tools. The homepage loads a local, reduced
-Anime.js 4.5.0 module (MIT). Reports and documentation pages use native browser
-controls without the animation module.
-
-Rebuild the vendored animation module and its license notice with:
-
-<!-- doctest: illustrative reason="runs in a checkout of this repository and needs Node.js" -->
-```sh
-npm run vendor:motion
-```
+Playwright and Axe are development tools. The homepage loads Anime.js 4.5.0 (MIT)
+from cdnjs, pinned by version and Subresource Integrity, so the homepage checks need
+network access to cdnjs.cloudflare.com; one of them blocks it on purpose and expects
+the scan example's finished, static state. Reports and documentation pages use native
+browser controls without the animation library.
 
 ## Review loop
 

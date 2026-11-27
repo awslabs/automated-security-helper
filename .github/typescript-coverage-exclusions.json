@@ -85,11 +85,6 @@
     },
     {
       "kind": "no-harness",
-      "path": "docs/content/assets/javascripts/vendor/anime.js",
-      "reason": "The vendored MIT animejs 4.5.0 build, written whole by docs/ui-tests/vendor-motion.cjs (which checks the upstream license and version before copying). Third-party vendored output, not code this repository authors; no ancestor directory holds a JS harness config, so no harness exists to measure it."
-    },
-    {
-      "kind": "no-harness",
       "path": ".github/scripts/assert-coverage-completeness.mjs",
       "reason": "This census script itself. Invoked as `node .github/scripts/...` from a workflow step, and neither .github/scripts/, .github/ nor the repository root carries a package.json, tsconfig, jest or vitest config -- verified against `git ls-files` -- so no JS harness exists anywhere in its tree to measure it. Named here rather than left unlisted because the gate is deliberately self-inclusive: it censuses every tracked JS/TS file, including its own, and an unexplained absence is what it exists to reject."
     },
