@@ -1406,15 +1406,21 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # container runtime, uv, uvx, pip, git or aws, after a ``%`` or ``PS>`` prompt,
 # environment assignments and a wrapper such as ``sudo``) is a finding, unless it is the
 # output of the run block above it
-# (output_samples), or the page is a record of a past release (is_historical_doc) or one
-# a generator writes (is_generated_page: the repository's list of those names the page,
-# and the banner that opens it names the generator the list gives it), or
-# UNEXECUTED_SEED_FILE lists it. That seed holds a line for each such block of a page a
-# person writes, as measured at main: the page's path, a tab, and the block's first
-# command. It is read like the illustrative seed, and may only shrink. The journey
-# pages (getting-started/local.md and ci.md, and their templates) open with a banner
-# too, but their blocks are written by hand in a journey file, so the list does not
-# name them and they are read like any page.
+# (output_samples), or the page is a record of a past release (is_historical_doc), or
+# the block is the usage line of a command on a page a generator writes
+# (is_generated_page: the repository's list of those names the page, and the banner
+# that opens it names the generator the list gives it; is_usage_line: the program, the
+# command's path, ``[OPTIONS]`` and a placeholder for each argument), or
+# UNEXECUTED_SEED_FILE lists it. A generator prints a usage line from its command tree,
+# and the freshness test holds the page to that output, so no person has a seed to keep
+# for one. It fences the examples that a person wrote in a command's help text as
+# ``text`` too, which keeps them out of the runs with no marker, so those are counted
+# like the blocks of any page. The seed holds a line for each such block, as measured at
+# main: the page's path, a tab, and the block's first command. It is read like the
+# illustrative seed, and may only shrink. The journey pages (getting-started/local.md
+# and ci.md, and their templates) open with a banner too, but their blocks are written
+# by hand in a journey file, so the list does not name them and they are read like any
+# page.
 
 #: The illustrative seed: one file per page, in this directory.
 ILLUSTRATIVE_SEED_DIR = "docs/illustrative-seed"
@@ -1572,6 +1578,46 @@ def _first_command(block: Block) -> str | None:
     return " ".join(first_ash[0][1].split()) if first_ash else None
 
 
+#: What a command's name is in the usage line a CLI reference generator prints: a word of
+#: lower-case letters, digits and hyphens.
+_USAGE_COMMAND_WORD = re.compile(r"[a-z][a-z0-9-]*")
+#: What click prints for an argument after ``[OPTIONS]``: a placeholder in brackets for
+#: one that is optional, in braces as the CLI spells a required one, or in capitals as
+#: click spells it when the CLI names no metavar, with ``...`` after it for one that
+#: takes more than a value. ``COMMAND [ARGS]...`` is this too.
+_USAGE_PLACEHOLDER = re.compile(
+    r"(?:\[[^\s\[\]{}]+\]|\{[^\s\[\]{}]+\}|[A-Z][A-Z0-9_]*)(?:\.\.\.)?"
+)
+_USAGE_OPTIONS = "[OPTIONS]"
+
+
+def is_usage_line(command: str) -> bool:
+    """Whether ``command`` has the shape of the usage line that a generator of the CLI
+    reference prints for a command (scripts/generate_cli_docs.py, from click's own
+    usage): the program, the command's path, ``[OPTIONS]``, and a placeholder for each
+    argument and nothing else, as in ``ash config get [OPTIONS] [config_path]``.
+
+    Click prints ``[OPTIONS]`` for every command, since ``--help`` is an option, and
+    prints only placeholders after it. So an example, which is a command with values
+    (``ash config lint --fix``), a flag before or after ``[OPTIONS]``, or a bare word
+    where a placeholder belongs, is not a usage line, and neither is a command that
+    starts with another program. The shape names no page: whether a block of a page may
+    be left out for having it is is_generated_page's to say.
+    """
+    words = command.split()
+    if not words or words[0] not in ASH_PROGRAMS:
+        return False
+    path = 1
+    while path < len(words) and _USAGE_COMMAND_WORD.fullmatch(words[path]):
+        path += 1
+    pieces = words[path:]
+    return (
+        bool(pieces)
+        and pieces[0] == _USAGE_OPTIONS
+        and all(_USAGE_PLACEHOLDER.fullmatch(piece) for piece in pieces)
+    )
+
+
 def unexecuted_command_blocks(
     page: Page, generated: Mapping[str, str]
 ) -> list[tuple[Block, str]]:
@@ -1581,24 +1627,34 @@ def unexecuted_command_blocks(
     A block of the family "other" (text, markdown, diff, ...) holding an ash command
     line or a ``$`` prompt line. Not the output of a run block (output_samples), which
     the runner compares with what that block prints; not groovy, whose ``sh`` steps the
-    CLI check parses; and nothing in a record of a past release, or in a page a
-    generator writes (is_generated_page, with ``generated`` as read_generated_pages
-    gives it). The freshness test holds that page to the generator's output, and a
-    usage line printed from the CLI's own command tree is no command the page tells a
-    reader to run, so a person has no seed to keep for it. A page that only opens with
-    a banner is read: a journey page does.
+    CLI check parses; and nothing in a record of a past release.
+
+    A page that a generator writes (is_generated_page, with ``generated`` as
+    read_generated_pages gives it) is read for what the generator does not print. The
+    freshness test holds the page to the generator's output, and a usage line printed
+    from the CLI's own command tree (is_usage_line) is no command the page tells a
+    reader to run, so a person has no seed to keep for it: a block whose first command
+    is one is left out. Every other block of the page is counted, the examples that a
+    person wrote in a command's help text among them. The generator fences them as
+    ``text``, so they never reach the runs, and nothing but this count would track them.
+    A page that only opens with a banner is read in full: a journey page does.
     """
-    # A generated block in a hand-written page gets the same rule, not a seed line.
-    if is_historical_doc(page.rel) or is_generated_page(page, generated):
+    if is_historical_doc(page.rel):
         return []
     samples = output_samples(page)
+    generated_page = is_generated_page(page, generated)
     found: list[tuple[Block, str]] = []
     for block in page.blocks:
         if block.family != "other" or block.lang == "groovy" or id(block) in samples:
             continue
         command = _first_command(block)
-        if command is not None:
-            found.append((block, command))
+        if command is None:
+            continue
+        # A usage line is left out only where a generator prints it; the same block on a
+        # page a person writes is read like any other block.
+        if generated_page and is_usage_line(command):
+            continue
+        found.append((block, command))
     return found
 
 
@@ -1680,8 +1736,8 @@ def write_seeds(files: Iterable[Path], root: Path = REPO_ROOT) -> list[str]:
     The seed is written once, from main. Where a seed already exists this refuses, so
     the markers added since are never written into it: a seed only shrinks, by deleting
     lines. It refuses too (ValueError) when the list of generated pages under ``root``
-    cannot be read, because a seed written without it would list the blocks of every
-    generated page. ``python scripts/docs_checks.py write-seeds`` runs it on this
+    cannot be read, because a seed written without it would list the usage lines of
+    every generated page. ``python scripts/docs_checks.py write-seeds`` runs it on this
     checkout.
     """
     refuse_a_second_seed(root)
@@ -1899,9 +1955,9 @@ def unexecuted_command_problems(pages: Sequence[Page], root: Path) -> list[Findi
     """The blocks of ``pages`` that show a command nothing runs are the lines of the
     unexecuted-command seed under ``root``. Nothing when ``root`` has no such seed.
 
-    The pages a generator writes, which are not read, are the ones the list under
-    ``root`` names (read_generated_pages). A list it cannot read is a finding, and
-    names no page.
+    The pages a generator writes, whose usage lines are not read (is_usage_line), are the
+    ones the list under ``root`` names (read_generated_pages). A list it cannot read is
+    a finding, and names no page.
     """
     read = read_unexecuted_seed(root)
     if read is None:

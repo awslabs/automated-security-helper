@@ -177,12 +177,19 @@ shrinks too. Fence the block as `bash` so the runner executes it, or as `console
 shows `$` prompts with their output, or mark it `output`, or write the command in prose,
 and delete its line.
 
-The check does not read a page that a generator writes. A page is one when
-`REFERENCE_PAGES` in the freshness test lists it and the banner that opens it names the
-generator listed for it, as
+On a page that a generator writes, the check leaves out the usage lines and reads every
+other block. A page is one when `REFERENCE_PAGES` in the freshness test lists it and the
+banner that opens it names the generator listed for it, as
 [Add a generated reference page](#add-a-generated-reference-page) describes. The
-freshness test holds the page's text to that generator's output, so the usage line of a
-new command in the CLI reference needs no line in the seed. A banner alone is not
+freshness test holds the page's text to that generator's output, and a usage line is
+the program, the command's path, `[OPTIONS]` and a placeholder for each argument, as
+in `ash config get [OPTIONS] [config_path]`. It is no command the page tells a reader to
+run, so the usage line of a new command in the CLI reference needs no line in the seed.
+A block with values or flags is read like any block, because a person wrote it: the
+examples in a command's help text come out as `text` blocks of the CLI reference, so
+the seed lists each of them. A new example in a help text would be a new line the seed
+refuses, so show it where it runs: in a `bash` block of a how-to page, or have the
+generator fence the `Examples:` block of a help text as `bash`. A banner alone is not
 enough: the getting-started pages open with one, but a person writes their blocks in a
 journey file, so they are read like any other page, and so is a page that copies a
 banner.
@@ -1084,8 +1091,9 @@ tools) is generated, never written by hand. To add one:
    when the code changes and the page does not, and checks the banner in the page's
    first 600 characters. The docs checks read the same entry: the check for commands
    shown in blocks that nothing runs
-   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page out only when
-   this entry names it and the banner from step 2 names the script the entry gives it.
+   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page's usage lines
+   out only when this entry names the page and the banner from step 2 names the script
+   the entry gives it.
 4. Add the page to `GOLDEN` in
    [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py),
    so a commit that changes it needs a `Snapshot-Update:` trailer.
