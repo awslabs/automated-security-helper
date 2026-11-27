@@ -569,6 +569,28 @@ def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     assert ("github-pat", "app/settings.py", 4) in _findings(report)
 
 
+def test_an_operator_config_saved_with_a_byte_order_mark_is_read_by_gitleaks(
+    tmp_path, path_with_gitleaks
+):
+    """ASH skips a leading UTF-8 byte order mark for its own read of the config and
+    passes the file as written, so whether the config applies is gitleaks' answer.
+    The table right after the mark turns on the default rules: a mark gitleaks
+    could not read past would leave no github-pat finding. The allowlist hides
+    docs/."""
+    source = _copy_fixture(tmp_path)
+    operator_config = tmp_path / "operator.toml"
+    operator_config.write_bytes(
+        (
+            chr(0xFEFF)
+            + "[extend]\nuseDefault = true\n\n"
+            + "[[allowlists]]\npaths = ['''^docs/''']\n"
+        ).encode("utf-8")
+    )
+    _, report = _scan_direct(source, tmp_path / "out", config_file=str(operator_config))
+    assert ("github-pat", "app/settings.py", 4) in _findings(report)
+    assert ("github-pat", "docs/example.md", 5) not in _findings(report)
+
+
 def test_an_inline_allow_comment_hides_nothing_by_default(tmp_path, path_with_gitleaks):
     """ASH passes --ignore-gitleaks-allow: the comment is the tree's to write."""
     source = _copy_fixture(tmp_path)
