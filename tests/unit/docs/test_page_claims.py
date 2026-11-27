@@ -13856,6 +13856,130 @@ def test_trivy_repo_counts_only_an_executable_trivy(
     assert satisfied is (found is not None), (satisfied, found)
 
 
+TRIVY_BUILTIN = "docs/plugins/builtin/trivy.md"
+
+#: How the two pages described trivy-repo's deadline before they matched the code.
+_TRIVY_REPO_NO_TIMEOUT_CLAIMS = (
+    "ASH does not pass `trivy --timeout`",
+    "it gets no `trivy --timeout`",
+)
+
+
+@pytest.mark.parametrize(
+    "scan_timeout,deadline",
+    [
+        pytest.param(60, "60s", id="a-bound"),
+        pytest.param(None, "2562047h", id="unbounded"),
+    ],
+)
+@pytest.mark.unit
+def test_trivy_repo_passes_scan_timeout_as_trivys_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scan_timeout: Optional[int],
+    deadline: str,
+) -> None:
+    """trivy-plugin.md (Configuration Options) and builtin/trivy.md (trivy-repo).
+
+    Both pages say trivy-repo passes ``scan_timeout`` as ``trivy --timeout``, and
+    neither may say the opposite or offer ``TRIVY_TIMEOUT``. The probe runs
+    trivy-repo's ``scan()`` with the trivy process replaced by a double that records
+    its argv, and ``TRIVY_TIMEOUT`` set: the bound must be on the command line once
+    whatever the environment says, since trivy reads a flag over ``TRIVY_<FLAG>``.
+    ``scan_timeout: null`` is trivy's longest duration, because trivy reads ``0s`` as
+    a deadline already passed.
+    """
+    assert_on_page(
+        TRIVY_PLUGIN,
+        "besides killing trivy after that many seconds, ASH passes it as "
+        "`trivy --timeout`",
+    )
+    assert_on_page(TRIVY_PLUGIN, "The flag outranks `TRIVY_TIMEOUT`")
+    assert_on_page(
+        TRIVY_BUILTIN,
+        "ASH's `scan_timeout` as `trivy --timeout` (so trivy's own 5-minute default "
+        "does not apply)",
+    )
+    for page in (TRIVY_PLUGIN, TRIVY_BUILTIN):
+        text = _normalize(_page_text(page))
+        stale = [
+            claim
+            for claim in _TRIVY_REPO_NO_TIMEOUT_CLAIMS
+            if _normalize(claim) in text
+        ]
+        assert not stale, (page, stale)
+    assert "export TRIVY_TIMEOUT" not in _page_text(TRIVY_PLUGIN)
+
+    from unittest.mock import patch
+
+    from automated_security_helper.base import scanner_plugin
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.plugin_modules.ash_trivy_plugins import (
+        trivy_repo_scanner,
+    )
+    from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+        TrivyRepoScanner,
+        TrivyRepoScannerConfig,
+        TrivyRepoScannerConfigOptions,
+    )
+
+    source = tmp_path / "src"
+    output = source / ".ash" / "ash_output"
+    for directory in (source, output, output / "converted"):
+        directory.mkdir(parents=True, exist_ok=True)
+    (source / "requirements.txt").write_text("requests==2.0.0\n", encoding="utf-8")
+    context = PluginContext(
+        source_dir=source,
+        output_dir=output,
+        work_dir=output / "converted",
+        config=get_default_config(),
+    )
+    # trivy counts as installed without a process: the lookup answers a path, and
+    # the run itself is the double below.
+    for module in (scanner_plugin, trivy_repo_scanner):
+        if hasattr(module, "find_executable"):
+            monkeypatch.setattr(
+                module, "find_executable", lambda name: "/opt/trivy/bin/trivy"
+            )
+    for name in ("TRIVY_CONFIG", "TRIVY_IGNOREFILE", "TRIVY_SECRET_CONFIG"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("TRIVY_TIMEOUT", "10m")
+    scanner = TrivyRepoScanner(
+        context=context,
+        config=TrivyRepoScannerConfig(
+            options=TrivyRepoScannerConfigOptions(scan_timeout=scan_timeout)
+        ),
+    )
+    scanner.dependencies_satisfied = True
+    document = {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "Trivy"}}, "results": []}],
+    }
+    argv: List[str] = []
+
+    def _run(self: Any, command: List[Any], **kwargs: Any) -> Dict[str, Any]:
+        argv[:] = [str(arg) for arg in command]
+        report = Path(command[command.index("--output") + 1])
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps(document), encoding="utf-8")
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    # The double is spec'd on the real _run_subprocess (autospec), so a change to its
+    # signature fails here instead of passing silently.
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(TrivyRepoScanner, "_run_subprocess", autospec=True) as double,
+        patch.object(scanner, "_plugin_log"),
+    ):
+        double.side_effect = _run
+        scanner.scan(target=source, target_type="source")
+
+    timeouts = [arg for arg in argv if arg.startswith("--timeout=")]
+    assert timeouts == [f"--timeout={deadline}"], argv
+
+
 # --------------------------------------------------------------------------- #
 # Suppression paths that name a directory
 # --------------------------------------------------------------------------- #

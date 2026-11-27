@@ -19,6 +19,5 @@ docs/plugins/alpha/guarddog-plugin.md
 docs/plugins/alpha/hadolint-plugin.md
 docs/plugins/builtin/actionlint.md
 docs/plugins/builtin/cfn-lint-and-cfn-guard.md
-docs/plugins/builtin/trivy.md
 how-to/agent-plugins.md
 support.md
