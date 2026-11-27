@@ -1436,7 +1436,14 @@ class RuntimeOverridesConfig(RedactedSection):
         # And mcp-config's checks: each of these, set false, drops a whole kind of
         # finding (privilege escalation, unpinned package runners, auto-approved
         # tool calls, literal secrets in env). Its require_local and its two
-        # prefix lists only add findings, so they are not listed.
+        # prefix lists are not listed. Against the default (require_local off,
+        # both lists empty) each of them only adds findings. Against what an
+        # operator set it does not hold: a client's file replaces the operator's
+        # config for a scan instead of merging with it (config_sources.py: sources
+        # are never merged; client_config_policy.py: a client's file replaces the
+        # profile rather than overlaying it), so a delivered list replaces the
+        # operator's list. A workspace scan layers the other way, and there the
+        # operator's list replaces the project's (workspace/resolver.py).
         "/scanners/mcp-config/options/forbid_privilege_escalation",
         "/scanners/mcp-config/options/forbid_unpinned_runners",
         "/scanners/mcp-config/options/forbid_auto_approval",

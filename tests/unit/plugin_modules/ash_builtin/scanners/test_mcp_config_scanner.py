@@ -521,11 +521,13 @@ def test_an_entry_with_a_command_and_a_url_is_checked_on_both_sides() -> None:
 # The two prefix lists feed their own checks and no other. A check beyond its own
 # that took a listed command or URL as trusted would let a config hide a finding by
 # listing what the finding is about, with no denied option touched. The delivered
-# config policy relies on that: it lets a client set both lists because a list only
-# reports more (_REVIEWED_OPTIONS in
-# tests/unit/cli/mcp/test_delivered_scanner_exclusions.py). The rows above start
-# from everything off, so none of them could see one check lean on another's
-# option; every row here runs with each check that is on by default.
+# config policy relies on that: it lets a client set both lists because, against
+# the default (an empty list), a list only reports more (_REVIEWED_OPTIONS in
+# tests/unit/cli/mcp/test_delivered_scanner_exclusions.py). That is a claim about
+# the default, not about a list the operator set: a delivered config replaces the
+# operator's config instead of merging with it. The rows above start from
+# everything off, so none of them could see one check lean on another's option;
+# every row here runs with each check that is on by default.
 # ---------------------------------------------------------------------------
 
 #: The rules a prefix list exists to raise. A list may add these and nothing else.
@@ -654,6 +656,62 @@ def test_a_list_that_matches_nothing_adds_findings_of_its_own_rules_only(row) ->
     assert [found for found in listed if found[0] in PREFIX_RULES], listed
     # And everything they leave is what the defaults found, unmoved.
     assert [found for found in listed if found[0] not in PREFIX_RULES] == baseline
+
+
+# ---------------------------------------------------------------------------
+# A bare name in allowed_command_prefixes. ``npx`` in the list names the program a
+# client finds on PATH, so it allows that bare command and no command that carries
+# a path. ``./npx``, ``x/../npx`` and ``.\npx`` are files the scanned repository can
+# ship, and ``npx/server`` is one under a directory of that name. None of them is
+# the program on PATH, and normalizing the command first would fold the first three
+# into ``npx`` and pass them as the trusted one. An entry that is a path keeps the
+# normalized, path-boundary rule the ALLOWED rows above pin; the last two rows here
+# hold it beside a bare name and for a relative path.
+# ---------------------------------------------------------------------------
+
+BARE_NAME = ["npx"]
+
+
+class ListedCommand(NamedTuple):
+    """One command, the list it runs under, and whether the list lets it through."""
+
+    name: str
+    server: dict
+    listed: List[str]
+    allowed: bool
+
+
+LISTED_COMMANDS = [
+    ListedCommand("the-bare-command", stdio("npx"), BARE_NAME, True),
+    ListedCommand(
+        "the-bare-command-with-a-pinned-package",
+        stdio("npx", "-y", "pkg@1.2.3"),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand("a-dot-slash-spelling", stdio("./npx"), BARE_NAME, False),
+    ListedCommand("a-dot-dot-spelling", stdio("x/../npx"), BARE_NAME, False),
+    ListedCommand("a-backslash-spelling", stdio(r".\npx"), BARE_NAME, False),
+    ListedCommand("a-directory-named-npx", stdio("npx/server"), BARE_NAME, False),
+    ListedCommand(
+        "a-path-entry-beside-a-bare-name",
+        stdio("/opt/mcp/server"),
+        ["npx", "/opt/mcp"],
+        True,
+    ),
+    ListedCommand(
+        "a-relative-path-entry-reads-the-command-normalized",
+        stdio("./tools/bin/x"),
+        ["tools/bin"],
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize("row", LISTED_COMMANDS, ids=lambda row: row.name)
+def test_a_bare_name_matches_as_written_and_a_path_matches_normalized(row) -> None:
+    found = rules(row.server, allowed_command_prefixes=row.listed)
+    assert found == ([] if row.allowed else [RULE_COMMAND_PREFIX])
 
 
 # ---------------------------------------------------------------------------
