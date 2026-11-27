@@ -517,6 +517,12 @@ CLEAN_DEFAULTS = """# Defaults
 |---|---|
 | [`bandit`](#bandit) | yes on Linux and macOS; yes on Windows |
 | `ferret-scan` | yes |
+
+<!-- doctest: options of=scanners -->
+| Scanner | Tier | Loads by default | On once loaded |
+|---|---|---|---|
+| [`bandit`](#bandit) | supported | yes | yes |
+| `ferret-scan` | alpha | no | yes |
 """
 
 DEFAULT_DEFECTS = [
@@ -593,6 +599,32 @@ DEFAULT_DEFECTS = [
         _table("of=scanners", "| Scanner | Enabled by default |", "| `bandit` | no |"),
         "'bandit' enabled by default says no, but its enabled default is `true`",
         4,
+    ),
+    (
+        "a scanner said to be off once loaded that is on",
+        _table("of=scanners", "| Scanner | On once loaded |", "| `bandit` | no |"),
+        "'bandit' on once loaded says no, but its enabled default is `true`",
+        4,
+    ),
+    (
+        "a scanner said to load by default that does not",
+        _table(
+            "of=scanners", "| Scanner | Loads by default |", "| `ferret-scan` | yes |"
+        ),
+        "'ferret-scan' loads by default says yes, but its manifest's default_enabled is `false`",
+        4,
+    ),
+    (
+        "a scanner said not to load by default that does",
+        _table("of=scanners", "| Scanner | Loads by default |", "| `bandit` | no |"),
+        "'bandit' loads by default says no, but its manifest's default_enabled is `true`",
+        4,
+    ),
+    (
+        "a loads column for keys that are not scanners",
+        _table("of=reporters", "| Key | Loads by default |", "| `spdx` | yes |"),
+        "states whether each scanner's module loads by default, but of=reporters names no scanners section",
+        1,
     ),
     (
         "an enabled column for keys that are not plugins",
