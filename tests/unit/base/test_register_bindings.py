@@ -187,6 +187,10 @@ def python_upper_bound(text: str) -> Optional[str]:
         ("<=3.13", None),
         ("python_version >= '3.10'", None),
         ("", None),
+        # Two upper bounds in one request are one bound, the smaller, compared as numbers.
+        (">=3.10,<3.15,<3.14", "3.14"),
+        ("<3.14,>=3.10,<3.15", "3.14"),
+        ("<3.10,<3.9", "3.9"),
     ],
 )
 def test_the_python_bound_reader_has_controls_in_both_directions(
@@ -195,22 +199,65 @@ def test_the_python_bound_reader_has_controls_in_both_directions(
     assert python_upper_bound(text) == bound
 
 
-@pytest.mark.parametrize("name", _ALPHA_PYTHON)
-def test_a_pins_python_bound_is_the_bound_of_the_scanners_compat_row(
-    name: str,
-) -> None:
-    (pin,) = prov.provisioning_for(name).pypi_pins
-    rows = [
-        row
-        for row in _facets_by_name()[name].runtime_compat.rows
+def derived_python_bound(
+    facet: opsf.RuntimeCompatFacet, constraint: Optional[str]
+) -> Optional[str]:
+    """The upper bound of the interpreter request a scanner with the compatibility
+    rows *facet* and the tool constraint *constraint* hands to ``uv``."""
+    bounds = {
+        python_upper_bound(row.runtime_request)
+        for row in facet.rows
         if row.runtime is opsf.RuntimeName.PYTHON
         and row.resolution is opsf.CompatResolution.PIN
-    ]
+    } - {None}
+    assert len(bounds) <= 1, bounds
+    return next(iter(bounds), None)
 
-    if rows:
-        bounds = {python_upper_bound(row.runtime_request) for row in rows}
-        assert bounds == {python_upper_bound(pin.python_marker)}, name
-    else:
+
+def _pin_row(request: str, tool_versions: str = "") -> opsf.RuntimeCompatRow:
+    """A PIN row asking for the interpreter *request* on the tool versions it names."""
+    return opsf.RuntimeCompatRow(
+        runtime=opsf.RuntimeName.PYTHON,
+        tool_versions=tool_versions,
+        runtime_request=request,
+        resolution=opsf.CompatResolution.PIN,
+        reason="a planted row",
+    )
+
+
+def test_the_derived_bound_is_the_one_the_installer_asks_uv_for() -> None:
+    """The installer keeps the PIN rows that apply to the scanner's tool constraint and
+    combines their requests. Two applicable rows are one bound, the smaller, and a row
+    that no longer applies asks for nothing."""
+    two_apply = opsf.RuntimeCompatFacet(
+        rows=(_pin_row(">=3.10,<3.15"), _pin_row(">=3.10,<3.14", ">=2"))
+    )
+    one_stale = opsf.RuntimeCompatFacet(
+        rows=(_pin_row(">=3.10,<3.14"), _pin_row(">=3.10,<3.11", "<2.5"))
+    )
+    only_stale = opsf.RuntimeCompatFacet(rows=(_pin_row(">=3.10,<3.11", "<2.5"),))
+
+    assert derived_python_bound(two_apply, "==2.6.1") == "3.14"
+    assert derived_python_bound(one_stale, "==2.6.1") == "3.14"
+    assert derived_python_bound(only_stale, "==2.6.1") is None
+    assert derived_python_bound(opsf.RuntimeCompatFacet(rows=()), "==2.6.1") is None
+    # The control: a constraint that names a range keeps every row, the safe side, so
+    # the row above binds again.
+    assert derived_python_bound(only_stale, ">=2.0,<3") == "3.11"
+
+
+@pytest.mark.parametrize("name", _ALPHA_PYTHON)
+def test_a_pins_python_bound_is_the_bound_the_installer_derives(
+    name: str, _context
+) -> None:
+    (pin,) = prov.provisioning_for(name).pypi_pins
+    facet = _facets_by_name()[name].runtime_compat
+    constraint = _class_named(name)(context=_context)._get_tool_version_constraint()
+
+    derived = derived_python_bound(facet, constraint)
+
+    assert derived == python_upper_bound(pin.python_marker), name
+    if facet.pin_request(opsf.RuntimeName.PYTHON, constraint) is None:
         assert pin.python_marker == "", name
 
 
