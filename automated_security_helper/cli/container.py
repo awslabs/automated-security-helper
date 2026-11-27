@@ -8,9 +8,9 @@
 
 import typer
 
+from automated_security_helper.cli.help_text import BUILD_HELP
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.cli.json_input import CliJsonInputCommand
-from automated_security_helper.cli.main import BUILD_HELP
 
 container_app = typer.Typer(
     name="container",

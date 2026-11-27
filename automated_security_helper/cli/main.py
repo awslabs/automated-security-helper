@@ -20,6 +20,7 @@ from automated_security_helper.cli.json_input import (
     usage_error_text,
 )
 from automated_security_helper.cli.deprecation import deprecated_command_message
+from automated_security_helper.cli.help_text import BUILD_HELP
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.scan_group import ScanTyperGroup, build_scan_app
 from automated_security_helper.core.enums import (
@@ -256,13 +257,6 @@ DEPRECATED_SPELLINGS: dict[str, str] = {
 MERGE_COMMAND_HELP = """Merges the results of a sharded scan into one unified report.
 
 Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
-"""
-
-#: The container build's help, shared by ``ash container build`` and its deprecated
-#: spelling ``ash build-image``, which puts its deprecation sentence in front of it.
-BUILD_HELP = """Builds the ASH container image, then scans the current directory with it unless --no-run is given.
-
-It takes only the options below. To scan with scan options, run `ash scan fs --mode container`, which builds the image the same way and accepts every scan option.
 """
 
 #: The keyword arguments the eager ``app.command(...)`` registration passed for
