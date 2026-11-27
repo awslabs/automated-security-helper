@@ -1490,7 +1490,8 @@ def load_config_file(
     is filled on its own, and what the fill read in it is recorded on the
     returned document (``ResolvedConfigDocument.filled_references``), by the
     path ``documents`` names the file by: the client rules take a leaf holding
-    such a value as the operator's own.
+    such a value as the operator's own. A load with no ``fill`` records an
+    empty entry for each file.
 
     Raises:
         ASHConfigSourceError: The chain does not resolve. The message reads
@@ -1553,6 +1554,11 @@ def load_config_file(
             )
         document.documents = filled_documents
         document.filled_references = filled_references
+    else:
+        # A load that filled nothing records that it ran, an empty entry for
+        # each file, so the client rules judge each copy as this load left it
+        # instead of filling it themselves (client_config_policy._filled_copy).
+        document.filled_references = dict.fromkeys(document.documents, ())
     if overlay is not None and isinstance(data, dict):
         # A document that is not a mapping is left as it is, so its validation
         # error is still raised rather than replaced by the overlay's content.

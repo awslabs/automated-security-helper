@@ -353,12 +353,21 @@ def test_the_patched_copy_scans_with_a_fixed_choice_field_written_out(server) ->
 _REGION_KEY = "reporters.aws-security-hub.options.aws_region"
 
 
-def _denials_before_the_scan(target: Path, *, references: bool = True) -> List[Any]:
+def _denials_before_the_scan(
+    target: Path,
+    *,
+    references: bool = True,
+    filled: Any = None,
+    empty_entries: bool = False,
+) -> List[Any]:
     """What ``client_file_denials`` finds in the session's bound copy, with the
     document and the rules the check made before a scan starts reads
     (``mcp_tools._client_config_denial``): the chain read as a scan reads it, and
     the rules of the profile the session bound. ``references=False`` gives the
-    rules a base that holds none of the profile's environment reads."""
+    rules a base that holds none of the profile's environment reads. ``filled``
+    is passed on as the record a scan's load passes (``client_file_denials``'s
+    ``filled``); ``empty_entries`` passes the record a load that filled nothing
+    makes, an empty entry for each file of the chain."""
     from automated_security_helper.cli import mcp_tools
     from automated_security_helper.config.client_config_policy import (
         client_file_denials,
@@ -386,13 +395,33 @@ def _denials_before_the_scan(target: Path, *, references: bool = True) -> List[A
         permit_base=config_base_gate(SESSION),
         refuse_env=env_refused_for(caller_is_remote(SESSION), SESSION),
     )
+    if empty_entries:
+        filled = dict.fromkeys(document.documents, ())
     return client_file_denials(
         document.documents,
         rules,
         all_delivered=client_named_config_is_untrusted(path, session_id=SESSION),
         names=document.names,
         moved_exclusions=True,
+        filled=filled,
     )
+
+
+def _bare_session_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Have ``mcp_tools._session_client_rules`` answer the session's rules with a
+    base that holds none of the profile's environment reads, for every check
+    that reads the rules through it."""
+    from automated_security_helper.cli import mcp_tools
+
+    real = mcp_tools._session_client_rules
+
+    def without_references(*args: Any, **kwargs: Any) -> Any:
+        rules = real(*args, **kwargs)
+        bare = rules.base.model_copy(deep=True)
+        bare._environment_references = ()
+        return rules.model_copy(update={"base": bare})
+
+    monkeypatch.setattr(mcp_tools, "_session_client_rules", without_references)
 
 
 def test_the_check_before_the_scan_accepts_a_denied_reporter_option_from_the_environment(
@@ -423,40 +452,37 @@ def test_the_check_before_the_scan_refuses_the_copy_where_it_holds_no_reference_
 ) -> None:
     """The control: with rules whose base holds none of the profile's environment
     reads there is nothing to fill from, so the copy is judged as it stands and
-    the denied option is refused. The check does judge this copy, and the fill is
-    what accepts it."""
+    the denied option is refused. The check a scan's start makes
+    (``mcp_tools._client_config_denial``) refuses it and names the option, so
+    that check does judge this copy, and the fill is what accepts it."""
+    from automated_security_helper.cli import mcp_tools
+
     monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
     _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
-    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+    bound = _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+    _bare_session_rules(monkeypatch)
 
+    refused = mcp_tools._client_config_denial(
+        bound, server["target"], SESSION, "scan_directory"
+    )
+
+    assert refused is not None
+    assert refused["success"] is False, refused
+    assert _REGION_KEY in refused["error"], refused
     found = _denials_before_the_scan(server["target"], references=False)
-
     keys = [denial.key for _file, denials in found for denial in denials]
     assert _REGION_KEY in keys, keys
 
 
-def _policy_errors_of_validate_config(bound: str, monkeypatch, *, references: bool):
-    """The ``denied_by_runtime_policy`` errors ``validate_config`` reports for the
-    bound copy. ``references=False`` gives the check rules whose base holds none
-    of the profile's environment reads."""
+def _validate_config(bound: str, monkeypatch, *, references: bool) -> Dict[str, Any]:
+    """What ``validate_config`` answers for the bound copy, whole.
+    ``references=False`` gives the check rules whose base holds none of the
+    profile's environment reads."""
     from automated_security_helper.cli import mcp_tools
 
     if not references:
-        real = mcp_tools._session_client_rules
-
-        def without_references(*args: Any, **kwargs: Any) -> Any:
-            rules = real(*args, **kwargs)
-            bare = rules.base.model_copy(deep=True)
-            bare._environment_references = ()
-            return rules.model_copy(update={"base": bare})
-
-        monkeypatch.setattr(mcp_tools, "_session_client_rules", without_references)
-    result = mcp_tools.mcp_validate_config(config_path=bound, session_id=SESSION)
-    return [
-        error
-        for error in result["errors"]
-        if error["type"] == "denied_by_runtime_policy"
-    ]
+        _bare_session_rules(monkeypatch)
+    return mcp_tools.mcp_validate_config(config_path=bound, session_id=SESSION)
 
 
 def test_validate_config_accepts_a_denied_reporter_option_from_the_environment(
@@ -464,12 +490,16 @@ def test_validate_config_accepts_a_denied_reporter_option_from_the_environment(
 ) -> None:
     """``validate_config`` judges the bound copy as the scan does, from its own read
     of the chain, so the operator's own value at a place the policy denies draws no
-    refusal there either."""
+    refusal there either. The whole answer is checked: no error of any type, so a
+    fill that fails or a reference left unread there would show."""
     monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
     _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
     bound = _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
 
-    assert _policy_errors_of_validate_config(bound, monkeypatch, references=True) == []
+    result = _validate_config(bound, monkeypatch, references=True)
+
+    assert result["errors"] == [], result
+    assert result["valid"] is True, result
 
 
 def test_validate_config_refuses_the_copy_where_it_holds_no_reference_of_the_profile(
@@ -482,6 +512,62 @@ def test_validate_config_refuses_the_copy_where_it_holds_no_reference_of_the_pro
     _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
     bound = _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
 
-    errors = _policy_errors_of_validate_config(bound, monkeypatch, references=False)
+    result = _validate_config(bound, monkeypatch, references=False)
 
-    assert [error["field"] for error in errors] == [_REGION_KEY], errors
+    assert result["valid"] is False, result
+    denied = [
+        error["field"]
+        for error in result["errors"]
+        if error["type"] == "denied_by_runtime_policy"
+    ]
+    assert denied == [_REGION_KEY], result
+
+
+@pytest.mark.parametrize(
+    "empty_entries",
+    [
+        pytest.param(False, id="no-entry-for-the-copy"),
+        pytest.param(True, id="an-empty-entry-for-each-file"),
+    ],
+)
+def test_a_copy_the_scans_load_filled_nothing_in_is_judged_as_that_load_left_it(
+    server, monkeypatch: pytest.MonkeyPatch, empty_entries: bool
+) -> None:
+    """A load that read the copy and filled nothing in it passes a record that
+    holds nothing for it (no entry, or the empty entry each file gets from a
+    load with no fill), and its documents are the ones the scan built its
+    configuration from, still holding the reference text. The rules judge the
+    copy as that load left it, so the denied option is refused, although the
+    rules' base holds the profile's environment reads. Without a record (the
+    check made before the scan) the copy is filled from those reads and
+    accepted."""
+    monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
+    _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    found = _denials_before_the_scan(
+        server["target"], filled={}, empty_entries=empty_entries
+    )
+
+    keys = [denial.key for _file, denials in found for denial in denials]
+    assert _REGION_KEY in keys, keys
+    assert _denials_before_the_scan(server["target"]) == []
+
+
+def test_a_load_without_a_fill_records_an_empty_entry_for_each_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``load_config_file`` records what it filled into each file of the chain
+    even when it filled nothing: an empty entry for each, so the client rules
+    can tell a load that ran from none and judge each copy as it left it."""
+    from automated_security_helper.config.resolve_config import load_config_file
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    (tmp_path / "base.yaml").write_text("project_name: base\n", encoding="utf-8")
+    root = tmp_path / "ash.yaml"
+    root.write_text("extends: base.yaml\n", encoding="utf-8")
+
+    document, _config = load_config_file(root, confine_to=tmp_path)
+
+    assert len(document.documents) == 2, document.documents
+    assert document.filled_references == dict.fromkeys(document.documents, ())

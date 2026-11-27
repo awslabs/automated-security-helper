@@ -931,6 +931,32 @@ def _model_reads_leaf_as(
         return False
 
 
+def _model_reads_leaf_as_once(
+    memo: Dict[Tuple[str, str], bool],
+    config: AshConfig,
+    dump: Dict[str, Any],
+    pointer: str,
+    value: Any,
+    trusted_value: Any,
+    plugin_keys: PluginKeys,
+) -> bool:
+    """``_model_reads_leaf_as``, made once for each pointer and value within
+    one call of config_document_denials (``memo``): ``config`` and ``dump``
+    are that call's, so the answer depends on the two alone. A value that has
+    no JSON text is tried each time."""
+    try:
+        key = (pointer, json.dumps(value, sort_keys=True))
+    except (TypeError, ValueError):
+        return _model_reads_leaf_as(
+            config, dump, pointer, value, trusted_value, plugin_keys
+        )
+    if key not in memo:
+        memo[key] = _model_reads_leaf_as(
+            config, dump, pointer, value, trusted_value, plugin_keys
+        )
+    return memo[key]
+
+
 def _covered(patterns: Sequence[str], pointer: str, plugin_keys: PluginKeys) -> bool:
     """Whether ``pointer`` is at or under one of ``patterns``, under every spelling."""
     return bool(pointer) and any(
@@ -1078,6 +1104,9 @@ def config_document_denials(
     environment_pointers = list(environment_texts)
     own_texts = _own_reference_texts(own_references, document_path)
 
+    # One trial for each place and value within this call
+    # (_model_reads_leaf_as validates a whole copy of the dump each time).
+    model_reads: Dict[Tuple[str, str], bool] = {}
     denials: List[DocumentDenial] = []
     for key, op, kind in _document_writes(document):
         path = op["path"]
@@ -1138,8 +1167,14 @@ def config_document_denials(
                 else:
                     unchanged = _same_json_value(value, _as_json(op["value"])) or (
                         repeats_trusted
-                        and _model_reads_leaf_as(
-                            config, dump, path, op["value"], value, plugin_keys
+                        and _model_reads_leaf_as_once(
+                            model_reads,
+                            config,
+                            dump,
+                            path,
+                            op["value"],
+                            value,
+                            plugin_keys,
                         )
                     )
                 if unchanged:

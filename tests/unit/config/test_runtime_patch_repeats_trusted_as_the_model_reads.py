@@ -579,6 +579,24 @@ def _judged_copy_of_the_root(
     }, "the control: filled at the project name and nowhere else"
     assert [r.written for r in own] == ["${ASH_C3_PROJECT}-root"], own
 
+    # The threat the fill is held against: a client copies the profile's
+    # reference text to a place the profile never read, here an allowed
+    # entry's path. The fill reads a reference only at the place the profile
+    # wrote it, so that text stays text, and the operator's value never lands
+    # at a place the client chose.
+    elsewhere = {
+        **copy,
+        "global_settings": {
+            "severity_threshold": "LOW",
+            "ignore_paths": [{"path": "${ASH_C3_PROJECT}-root", "reason": "client"}],
+        },
+    }
+    filled_elsewhere, own_elsewhere = _filled(references, elsewhere)
+    assert filled_elsewhere["global_settings"]["ignore_paths"] == [
+        {"path": "${ASH_C3_PROJECT}-root", "reason": "client"}
+    ], "the operator's value reached a place the profile never read"
+    assert [r.path for r in own_elsewhere] == [("project_name",)], own_elsewhere
+
     keys = _environment_denied_keys(document, config, denied=["/project_name"], own=own)
     return references, keys
 
@@ -681,18 +699,51 @@ def test_a_plugin_section_spelled_another_way_than_the_reference_names_it_is_ref
 def test_references_at_the_spelling_the_copy_uses_admit_the_same_leaf(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The control for the case above: the same copy, with the references read at
-    the spelling the copy uses (where the fill puts them), is not refused. So
-    the spelling alone decided that case."""
+    """The control for the case above: the copy spells the plugin section another
+    way and holds the profile's reference text there. The fill finds a reference
+    by its keys with '-' and '_' alike and in any case, so it reads the
+    operator's value into the copy and places the reference at the spelling the
+    copy uses, and the leaf is not refused. So the spelling of the references
+    alone decided that case."""
     config, references = _load(tmp_path, monkeypatch, {".ash.yaml": _REPORTER_PROFILE})
     spelled = ("reporters", "AWS-Security-Hub", "options", "aws_region")
-    own = [replace(reference, path=spelled).read_in(_COPY) for reference in references]
+    document, own = _filled(
+        references,
+        {
+            "reporters": {
+                "AWS-Security-Hub": {
+                    "enabled": False,
+                    "options": {"aws_region": "${ASH_C3_REGION}"},
+                }
+            }
+        },
+    )
+    assert document == _reporter_copy("AWS-Security-Hub"), "the control: filled"
+    assert [reference.path for reference in own] == [spelled], own
 
     keys = _environment_denied_keys(
-        _reporter_copy("AWS-Security-Hub"),
+        document,
         config,
         denied=_REPORTER_DENIED,
         own=own,
     )
 
     assert keys == []
+
+
+def test_a_trial_value_is_validated_under_the_loads_context() -> None:
+    """``validated_with(strict=True)`` validates as a config file is loaded,
+    under the load's context too: an entry with a key the schema does not know
+    is kept inert in warn mode, as the load keeps it, instead of refused, so a
+    leaf the scan reads is not refused by its trial."""
+    from automated_security_helper.config.config_validator import validated_with
+
+    config = AshConfig()
+    dump = config.model_dump(mode="json", by_alias=True)
+    entry = {"path": "src/app.py", "reason": "legacy entry", "bogus_key": 1}
+
+    trial = validated_with(
+        config, dump, ("global_settings", "suppressions"), [entry], strict=True
+    )
+
+    assert trial is not None

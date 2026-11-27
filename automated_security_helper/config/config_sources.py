@@ -3040,8 +3040,10 @@ class ResolvedConfigDocument:
     #: file by. Each reference is at the place the document holds it, and stamped
     #: with that file (``EnvironmentReference.read_in``), so the document is the
     #: one that holds the operator's value there. A file the fill read nothing
-    #: in has an empty entry; a load that filled nothing records none. The
-    #: client rules take a leaf holding such a value as the operator's own
+    #: in has an empty entry, and so has each file of a load with no fill
+    #: (load_config_file records an entry for every file whenever it runs); a
+    #: document no such load returned holds none. The client rules take a leaf
+    #: holding such a value as the operator's own
     #: (``runtime_patch.config_document_denials``).
     filled_references: Dict[Path, Tuple[EnvironmentReference, ...]] = field(
         default_factory=dict
