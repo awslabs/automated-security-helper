@@ -71,6 +71,7 @@ from automated_security_helper.utils.sandbox.scope import (
     SandboxBackendUnavailable,
     SandboxUnavailable,
 )
+from automated_security_helper.utils.error_text import text_without_values
 from automated_security_helper.utils.short_reason import is_short_reason
 from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_ENDING
 
@@ -463,6 +464,33 @@ class TestAFailureTheHandlerCatches:
 
         assert row.error_reason_code == ReasonCode.RESULTS_UNREADABLE, _why(row)
         assert row.error_reason and CANARY not in row.error_reason, row.error_reason
+        # The sentence the row gets is the recorded one REDACTED, not the code's
+        # default sentence that a sentence unfit to show falls back to: the redacted
+        # text is itself fit, so the executor keeps it.
+        redacted = text_without_values(f"its option {CANARY} was refused", (CANARY,))
+        assert redacted != f"its option {CANARY} was refused"
+        assert is_short_reason(redacted), redacted
+        assert row.error_reason == redacted, row.error_reason
+        assert row.error_reason != DEFAULT_SENTENCES[ReasonCode.RESULTS_UNREADABLE]
+
+    def test_control_without_the_runs_values_the_quoted_value_stays_in_the_sentence(
+        self, tmp_path, monkeypatch
+    ):
+        """The control the module docstring promises: take the run's values away and
+        the canary survives into ``error_reason``, so the case above rests on the
+        redaction and on nothing else."""
+        _plugin_values(monkeypatch)
+        context = _context(tmp_path)
+        recorded = ScannerError(
+            "refused",
+            reason=FailureReason(
+                ReasonCode.RESULTS_UNREADABLE, f"its option {CANARY} was refused"
+            ),
+        )
+
+        row = _one_row(context, _scanner(context, recorded))
+
+        assert row.error_reason == f"its option {CANARY} was refused", row.error_reason
 
     def test_a_sentence_that_names_a_path_is_never_the_reason_shown(self, tmp_path):
         context = _context(tmp_path)
@@ -714,6 +742,33 @@ class TestAGradingStepThatRecordedItsOwnReason:
 
         assert row.error_reason_code == ReasonCode.PATTERN_TIME_LIMIT, _why(row)
         assert row.error_reason and CANARY not in row.error_reason, row.error_reason
+        redacted = text_without_values(
+            f"its option {CANARY} ran out of time", (CANARY,)
+        )
+        assert redacted != f"its option {CANARY} ran out of time"
+        assert is_short_reason(redacted), redacted
+        assert row.error_reason == redacted, row.error_reason
+
+    def test_control_without_the_runs_values_the_grading_sentence_keeps_the_value(
+        self, tmp_path, monkeypatch
+    ):
+        _plugin_values(monkeypatch)
+        context = _context(tmp_path)
+        recorded = ScannerError(
+            "refused",
+            reason=FailureReason(
+                ReasonCode.PATTERN_TIME_LIMIT, f"its option {CANARY} ran out of time"
+            ),
+        )
+
+        def failing(**kwargs):
+            raise recorded
+
+        monkeypatch.setattr(scanner_executor, "apply_suppressions_to_sarif", failing)
+
+        row = _one_row(context, _scanner(context, _sarif()))
+
+        assert row.error_reason == f"its option {CANARY} ran out of time"
 
     def test_control_a_step_that_recorded_no_reason_is_ungradable(
         self, tmp_path, monkeypatch
