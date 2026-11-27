@@ -1234,10 +1234,12 @@ def drop_recorded_operator_only_options(config: "AshConfig") -> "AshConfig":
     return confined
 
 
-#: What the ignored marker shows where it would show a value the configuration
-#: read from the environment and no reference sits at that place
-#: (``_marker_value``). Nothing of the value is in it.
-ENVIRONMENT_PLACEHOLDER = "<from the environment>"
+#: What the ignored marker shows where a leaf only equals or contains a value
+#: the configuration read, and neither a reference nor the loader's mark shows
+#: it (``_marker_value``). It says nothing of where the value came from, and
+#: nothing of the value: the leaf may be a literal the file wrote, which cannot
+#: be told from the read.
+ENVIRONMENT_PLACEHOLDER = "<withheld: may hold a value read from the environment>"
 
 
 def operator_only_marker(shown: str) -> str:
@@ -1260,25 +1262,29 @@ def _marker_value(
     environment: each leaf of *value*, and each mapping key, is shown the first
     way that applies.
 
-    1. A reference of *references* (the chain's ``environment_references``)
-       sits at that place, under any spelling of the section, and resolved to
-       the leaf: it is shown as the reference the file wrote,
-       ``<from ${VAR}>``. A literal a later file wrote over a read value is not
-       that read, and is shown as the literal. A mapping key the file read from
-       the environment (a key reference, recorded at the mapping's place) is
-       shown as its reference too.
-    2. Otherwise, if the leaf reads the environment, the whole of *value* is
-       ``ENVIRONMENT_PLACEHOLDER`` and none of it is shown, the entries beside
-       the read one included. A leaf reads the environment when the loader
-       marked it so (``EnvResolvedScalar.from_environment``), or when its text
-       equals or contains one of *needles*, the values and keys the chain
-       read; for a scalar that is not a string that text is its ``str`` and its
-       JSON. The loader drops the references at the places it settles,
-       which for a file in a checkout other than the scanned one is every
-       place of the options marked here, so there this is the only way a read
-       value is kept out of the marker. A literal that happens to equal or
-       contain such a value gets the placeholder too: it cannot be told from
-       the read, and showing less is the safe side.
+    1. The leaf is shown as the reference the file wrote, ``<from ${VAR}>``,
+       when a reference of *references* (the chain's
+       ``environment_references``) sits at that place, under any spelling of
+       the section, and resolved to the leaf, or else when the loader's own
+       mark on it (``EnvResolvedScalar.from_environment``) carries the text
+       the file wrote (``shown``). The mark makes both routes of get_config
+       show one text: the loader drops the references at the places it
+       settles, which for a file in a checkout other than the scanned one is
+       every place of the options marked here, and the mark still names the
+       reference. A literal a later file wrote over a read value is not that
+       read, and is shown as the literal. A mapping key the file read from the
+       environment (a key reference, recorded at the mapping's place, or the
+       mark on the key) is shown as its reference too.
+    2. Otherwise, if the leaf only equals or contains a value the chain read,
+       the whole of *value* is ``ENVIRONMENT_PLACEHOLDER`` and none of it is
+       shown, the entries beside it included. A leaf holds a read when its text
+       contains one of *needles*, the values and keys the chain read; a
+       scalar that is not a string holds one only when its ``str`` or its JSON
+       equals a needle, because a value interpolated from the environment is a
+       string and carries the loader's mark. A mark with no ``shown`` text
+       falls back to the placeholder as well. The placeholder says nothing of
+       where the value came from: the leaf may be a literal the file wrote that
+       cannot be told from the read, and showing less is the safe side.
     3. Any other leaf is shown as JSON, on one line. A date, time or bytes a
        YAML or TOML file writes is not JSON and is shown as text
        (``default=str``) instead of raising out of the marking.
@@ -1326,23 +1332,36 @@ def _marker_value(
                 and at_place(reference, within=within)
             ):
                 return environment_marker(reference.written)
+        # No reference of the load sits here, as for a file in a checkout the
+        # session does not scan: the loader's own mark on a scalar it read from
+        # the environment carries the text the file wrote (``shown``), which is
+        # the reference alone.
+        shown = getattr(text, "shown", None)
+        if (
+            getattr(text, "from_environment", False)
+            and isinstance(shown, str)
+            and shown
+        ):
+            return environment_marker(shown)
         return None
 
     def holds_a_read(leaf: Any) -> bool:
-        # The loader's own mark on a scalar it read from the environment, or
-        # text that equals or contains a value the chain read. The mark needs
-        # no record of values, so it covers a read the configuration's record
-        # does not hold (a set member).
+        # The loader's own mark on a scalar it read from the environment (a
+        # fallback here: a mark with a ``shown`` text is shown by ``read_as``),
+        # or text that equals or contains a value the chain read. A string
+        # holds one when it contains a needle; any other scalar, only when its
+        # text or its JSON equals one, since a value interpolated from the
+        # environment is a string and carries the mark.
         if getattr(leaf, "from_environment", False):
             return True
         if not needles:
             return False
-        texts = (
-            (leaf,)
-            if isinstance(leaf, str)
-            else (str(leaf), json.dumps(leaf, default=str))
+        if isinstance(leaf, str):
+            return any(needle in leaf for needle in needles)
+        return any(
+            needle == str(leaf) or needle == json.dumps(leaf, default=str)
+            for needle in needles
         )
-        return any(needle in text for needle in needles for text in texts)
 
     def note_a_read(leaf: Any) -> None:
         nonlocal reads_the_environment
@@ -1430,17 +1449,19 @@ def mark_operator_only_options(
 
     VALUE is shown as ``_marker_value`` shows it, never as a value the chain
     read from the environment: as the reference the file wrote,
-    ``<from ${VAR}>``, where one of *references* (the chain's
-    ``environment_references``) sits at that place, and as
-    ``<from the environment>`` where none does. *environment_values* are the
-    values and keys the configuration read from the environment
-    (``config_environment_values(config)``). That record walks mappings, lists
-    and strings, so a set member is not in it; the loader's own mark on the
-    scalar covers that. A value that is, or holds, one of them, or that the
-    loader marked as read, is shown as the placeholder. A literal that happens
-    to equal or contain one of them gets the placeholder too: the two cannot be
-    told apart, and the marker shows less rather than more. A literal no read
-    touches is shown as JSON on one line, the repository's own text.
+    ``<from ${VAR}>``, from one of *references* (the chain's
+    ``environment_references``) at that place or else from the loader's own
+    mark on the scalar, which carries the reference the file wrote.
+    *environment_values* are the values and keys the configuration read from
+    the environment (``config_environment_values(config)``). That record walks
+    mappings, lists and strings, so a set member is not in it; the loader's own
+    mark on the scalar covers that. Only a leaf that matches one of them
+    (a string that is or contains one, a number or boolean whose text equals
+    one) and that neither a reference nor the mark shows is shown as the
+    placeholder, which says nothing of where the value came from. Such a leaf
+    may be a literal the file wrote: the two cannot be told apart, and the
+    marker shows less rather than more. A literal no read touches is shown as
+    JSON on one line, the repository's own text.
 
     The rest of an off-host reporter's section (``aws_region`` and the other
     destination options) is not marked: it is not an operator-only option. The

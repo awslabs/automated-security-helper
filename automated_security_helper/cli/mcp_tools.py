@@ -5173,9 +5173,11 @@ def mcp_get_config(
         shown as a scan of that checkout applies them, ignored:
         ``<operator only; ignored from this file: VALUE>``. A value the file
         read from the environment is the server's, so VALUE is never that
-        value: it is the reference the file wrote, ``<from ${VAR}>``, where one
-        sits at its place, and ``<from the environment>`` where none does. A
-        refused path returns ``success`` False with ``error_type``
+        value: it is the reference the file wrote, ``<from ${VAR}>``, from a
+        reference of the load at its place or else from the loader's own mark
+        on the scalar it read. Only a literal that equals or contains a value
+        the configuration read is withheld, as a placeholder that says
+        nothing of where the value came from. A refused path returns ``success`` False with ``error_type``
         ``config_input_not_permitted``, and a file a client delivered that
         reads from the environment the same with ``config_env_not_resolved``.
         A resolved config whose ``ash_plugin_modules`` a scan of the answered
@@ -5479,9 +5481,11 @@ def _answer_get_config(
         # answered document's own.
         marking_references = tuple(getattr(base, "_environment_references", ()) or ())
         # The values this read recorded go with its references: where no
-        # reference shows a value the chain read, the marker shows
-        # ``<from the environment>``, and these are what tell such a value
-        # from a literal. The answered configuration's own join them below.
+        # reference shows a leaf, the loader's mark on the record's value
+        # names the reference the file wrote, and these are what catch a
+        # literal that only equals or contains a value the chain read (it is
+        # withheld with a neutral placeholder). The answered configuration's
+        # own join them below.
         marking_values = config_environment_values(base)
         if not raw:
             # The answer IS the scan's own resolution: resolve_config's
@@ -5936,13 +5940,17 @@ def _answer_get_config(
         # the references the chain's files wrote at the places it settled, a
         # chain file in another checkout included, so none of the file's own
         # sits at the place of such an option (the trusted base's references
-        # do, which is why the walk above ran first). The marker then shows
-        # ``<from the environment>``, and the option stays marked: the client
-        # reads that the file set an option a scan ignores. What tells a value
-        # read from the environment from a literal, in whatever shape the file
-        # wrote it, is the configuration's own record of what its chain read
-        # (config_environment_values, every read included, the ones at dropped
-        # places too) and the loader's mark on each scalar it read.
+        # do, which is why the walk above ran first). The marker still shows
+        # the reference the file wrote: the loader's mark on the record's value
+        # (``EnvResolvedScalar.shown``) names it where no reference of the
+        # load sits at the place, so both routes show the same text, and the
+        # option stays marked: the client reads that the file set an option a
+        # scan ignores. A literal that only equals or contains a value the
+        # configuration read, in whatever shape the file wrote it, is withheld
+        # with a placeholder that says nothing of where the value came from;
+        # what tells it from a literal no read touches is the configuration's
+        # own record of what its chain read (config_environment_values, every
+        # read included, the ones at dropped places too).
         shown = mark_operator_only_options(
             shown,
             written,
