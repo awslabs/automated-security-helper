@@ -3893,11 +3893,10 @@ global_settings:
     #     source directory is stripped from a reported path (_normalize_sarif_uri in
     #     automated_security_helper/utils/sarif_utils.py).
     # That test file also fails when a manifest has an entry for one spelling and not
-    # the other. `ash config validate` and `ash config lint` warn that each /out path
-    # is absolute and matches nothing. It does match: it is the path the container
-    # scan reports, so the warning is expected (validate exits 0 with it) and the
-    # entries stay. An output directory other than these two is not covered: the
-    # manual pre-commit hook writes to .ash/ash_output_precommit_local.
+    # the other. `ash config validate` and `ash config lint` draw no warning for these
+    # /out paths: a path outside the source directory is compared as written with the
+    # path the container scan reports. An output directory other than these two is not
+    # covered: the manual pre-commit hook writes to .ash/ash_output_precommit_local.
     #
     # Taking a new version of a package named here, or a newly harvested package:
     # the required self-scan reads this file from the pull request's base commit,
