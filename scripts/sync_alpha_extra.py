@@ -332,11 +332,7 @@ def locate_extra(lines: list[str]) -> Placement:
     body = range(start, stop)
 
     openers = [i for i in body if lines[i].strip() == OPENER]
-    stray = [
-        i
-        for i in body
-        if i not in openers and _ALPHA_KEY.match(lines[i].strip())
-    ]
+    stray = [i for i in body if i not in openers and _ALPHA_KEY.match(lines[i].strip())]
     if stray:
         raise Refusal(
             f"{PYPROJECT} line {stray[0] + 1} writes the {EXTRA} extra, but not as "
@@ -513,9 +509,7 @@ def _changes(fix: bool) -> tuple[list[Change], str]:
         )
     else:
         wrote = f"removed the {EXTRA} extra from {PYPROJECT.name} (no pin is a member)"
-        group = (
-            f"emptied the {GROUP} block in {DEPENDABOT.name} (no pin is a member)"
-        )
+        group = f"emptied the {GROUP} block in {DEPENDABOT.name} (no pin is a member)"
         ok = (
             f"ok: no pin is a member of the {EXTRA} extra; {PYPROJECT.name} has no "
             f"{EXTRA} key and the Dependabot block between the markers is empty"

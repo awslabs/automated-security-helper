@@ -606,7 +606,9 @@ class TestTheGateCannotPassVacuously:
 
     def test_an_empty_alpha_array_is_removed_when_no_member_is_in(self, sandbox):
         sandbox.edit(
-            sandbox.pyproject, "]\n\n[[project.authors]]", "]\nalpha = [\n]\n\n[[project.authors]]"
+            sandbox.pyproject,
+            "]\n\n[[project.authors]]",
+            "]\nalpha = [\n]\n\n[[project.authors]]",
         )
         assert _extras(sandbox.pyproject)[EXTRA] == []
 
@@ -661,11 +663,17 @@ def _repeat_table(box: Sandbox) -> None:
 
 
 def _repeat_opener(box: Sandbox) -> None:
-    box.edit(box.pyproject, "\n[[project.authors]]", "alpha = [\n]\n\n[[project.authors]]")
+    box.edit(
+        box.pyproject, "\n[[project.authors]]", "alpha = [\n]\n\n[[project.authors]]"
+    )
 
 
 def _leave_the_array_open(box: Sandbox) -> None:
-    box.edit(box.pyproject, _array_line(REQUIREMENTS[3]) + "]\n", _array_line(REQUIREMENTS[3]))
+    box.edit(
+        box.pyproject,
+        _array_line(REQUIREMENTS[3]) + "]\n",
+        _array_line(REQUIREMENTS[3]),
+    )
 
 
 def _write_the_array_on_one_line(box: Sandbox) -> None:
@@ -723,8 +731,16 @@ _BOTH = ("--check", "--fix")
 #: case -> (what to break, a fragment of the refusal, the modes that refuse). The array
 #: shape is only refused by --fix, which is the one that would drop what it holds.
 _REFUSALS = {
-    "the table is gone": (_repoint_table, "no [project.optional-dependencies] table", _BOTH),
-    "the table is repeated": (_repeat_table, "2 [project.optional-dependencies] lines", _BOTH),
+    "the table is gone": (
+        _repoint_table,
+        "no [project.optional-dependencies] table",
+        _BOTH,
+    ),
+    "the table is repeated": (
+        _repeat_table,
+        "2 [project.optional-dependencies] lines",
+        _BOTH,
+    ),
     "the opener is repeated": (_repeat_opener, "2 `alpha = [` lines", _BOTH),
     "the array never closes": (_leave_the_array_open, "never closes", _BOTH),
     "the array is written on one line": (

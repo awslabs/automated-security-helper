@@ -594,7 +594,9 @@ def test_a_member_in_the_register_would_change_what_the_extra_must_hold() -> Non
     script = _load_script()
     planted = prov.PypiPin("planted-tool", "==1.0.0", "uv-tool", extra=EXTRA)
 
-    rendered = script.requirement_lines(script.member_pins(prov.PROVISIONING) + [planted])
+    rendered = script.requirement_lines(
+        script.member_pins(prov.PROVISIONING) + [planted]
+    )
 
     assert "planted-tool==1.0.0" in rendered
     assert "planted-tool==1.0.0" not in (_committed_alpha_extra() or [])
