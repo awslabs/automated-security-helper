@@ -33,8 +33,10 @@ What is asserted
 ----------------
 For CodeBuild: the install pin names the packaged release and `cz bump` rewrites it
 and the README's copy; every `ash` command line passes only options this tree's CLI
-declares; and the artifact and the report group are read from the output directory
-the scan command names.
+declares; the artifact and the report group are read from the output directory
+the scan command names; and the build and post-build commands, run against a stand-in
+`ash`, spell the scan and the report the way that ASH does, picking the older spelling
+only from an answer and failing, with what the probe printed, when a probe crashes.
 
 For GitHub Actions: every input it passes is one the workflow declares; its branch
 filters are ones GitHub accepts; the scan job is granted only permissions the called
@@ -45,7 +47,11 @@ workflow at.
 
 from __future__ import annotations
 
+import json
+import os
 import shlex
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -183,7 +189,9 @@ def _output_dir(invocation: Invocation) -> str:
 
 def test_the_codebuild_example_collects_what_the_scan_writes():
     document = _load(CODEBUILD)
-    # The `--help` probes ask which spelling the installed ASH has; they write nothing.
+    # A `--help` command line asks which spelling the installed ASH has and writes
+    # nothing. The buildspec's probes are command substitutions the reader does not
+    # open, so this keeps one written as a command of its own from being read as a scan.
     output_dirs = {
         _output_dir(invocation)
         for invocation in _codebuild_invocations()
@@ -302,19 +310,221 @@ def test_the_github_example_sets_no_unused_env():
 
 
 def test_the_shell_reader_sees_the_codebuild_scan_line():
-    """Positive control for the reader on the exact shape the buildspec uses."""
+    """Positive control for the reader on the exact shape the buildspec uses.
+
+    The probe captures ``ash scan fs --help`` into a variable inside a quoted command
+    substitution, which the reader takes for one word of an assignment. So the only
+    ASH command lines it reads are the two spellings of the scan, each with its options.
+    """
     scan = "ash scan fs --mode container --no-progress --output-dir .ash/ash_output"
     legacy = "ash --mode container --no-progress --output-dir .ash/ash_output"
-    block = (
-        'if ash scan fs --help 2>/dev/null | grep "scan fs" >/dev/null; then\n'
-        f"  {scan}\n"
-        "else\n"
-        f"  {legacy}\n"
-        "fi\n"
-    )
+    block = f"""\
+ASH_PROBE_STATUS=0
+ASH_PROBE_HELP="$(ash scan fs --help 2>&1)" || ASH_PROBE_STATUS=$?
+case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in
+  0:*"scan fs"*)
+    ASH_SCAN_FS=yes
+    echo "ash: scanning with 'ash scan fs'" >&2 ;;
+  *)
+    echo "ash: could not tell whether this ASH has 'ash scan fs'" >&2
+    printf '%s\\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
+    exit 1 ;;
+esac
+if [ "$ASH_SCAN_FS" = yes ]; then
+  {scan}
+else
+  {legacy}
+fi
+"""
     invocations = shell_invocations(block, "control")
     assert [invocation.words for invocation in invocations] == [
-        ("scan", "fs", "--help", "2"),
         tuple(shlex.split(scan))[1:],
         tuple(shlex.split(legacy))[1:],
     ]
+
+
+# ---------------------------------------------------------------------------
+# The example's commands, run against a stand-in ash
+# ---------------------------------------------------------------------------
+
+posix_only = pytest.mark.skipif(
+    os.name == "nt", reason="runs a POSIX buildspec command destined for Linux"
+)
+
+#: A stand-in ``ash`` that answers the two help probes the example asks, as each kind of
+#: release does, and records every other call as one JSON argv per line. Releases:
+#: ``with-subject`` (ASH 3.9), ``without-subject`` (an older ASH, which shows the
+#: subject-less scan's help for ``scan fs --help`` since click reads ``--help`` before it
+#: refuses the extra argument, and has no ``results`` command), ``refusing`` (an older
+#: ASH that refuses the word ``fs`` with the usage error instead) and ``crashing``.
+_STAND_IN_ASH = """\
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+release = os.environ["ASH_STUB_RELEASE"]
+if argv in (["scan", "fs", "--help"], ["results", "report", "--help"]):
+    scan = argv[0] == "scan"
+    if release == "crashing":
+        sys.stderr.write("Traceback (most recent call last):\\nMemoryError\\n")
+        sys.exit(1)
+    if release == "with-subject":
+        sys.stdout.write(
+            "Usage: ash scan fs [OPTIONS]\\n" if scan else "Usage: ash results report\\n"
+        )
+        sys.exit(0)
+    if scan and release == "without-subject":
+        sys.stdout.write("Usage: ash scan [OPTIONS]\\n")
+        sys.exit(0)
+    if scan:
+        sys.stderr.write("Usage: ash scan [OPTIONS]\\n")
+        sys.stderr.write("Error: Got unexpected extra argument (fs)\\n")
+        sys.exit(5)
+    sys.stderr.write("Error: No such command 'results'.\\n")
+    sys.exit(5)
+with open(os.environ["ASH_STUB_LOG"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(argv) + "\\n")
+"""
+
+
+def _phase_command(phase: str) -> str:
+    (command,) = _load(CODEBUILD)["phases"][phase]["commands"]
+    return command
+
+
+def _run_codebuild_command(
+    tmp_path: Path, command: str, release: str
+) -> tuple[list[list[str]], subprocess.CompletedProcess]:
+    """Run *command* in a POSIX shell with the stand-in first on PATH.
+
+    Returns the calls the stand-in recorded and the finished shell.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ash = bin_dir / "ash"
+    ash.write_text(f"#!{sys.executable} -I\n{_STAND_IN_ASH}", encoding="utf-8")
+    ash.chmod(0o755)
+    log = tmp_path / "ash.jsonl"
+    shell = shutil.which("sh")
+    assert shell, "no sh on PATH"
+    work = tmp_path / "work"
+    work.mkdir()
+    finished = subprocess.run(
+        [shell, "-c", command],
+        cwd=work,
+        env={
+            "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "ASH_STUB_RELEASE": release,
+            "ASH_STUB_LOG": str(log),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if not log.exists():
+        return [], finished
+    return [
+        json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()
+    ], finished
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, prefix",
+    [
+        ("with-subject", ["scan", "fs", "--mode", "container"]),
+        ("without-subject", ["--mode", "container"]),
+        ("refusing", ["--mode", "container"]),
+    ],
+)
+def test_the_codebuild_example_scans_the_way_its_ash_does(tmp_path, release, prefix):
+    calls, finished = _run_codebuild_command(tmp_path, _phase_command("build"), release)
+
+    assert finished.returncode == 0, finished.stderr
+    # One call: the probe is answered, not recorded.
+    assert len(calls) == 1, calls
+    assert calls[0][: len(prefix)] == prefix, calls[0]
+    assert calls[0][calls[0].index("--output-dir") + 1] == ".ash/ash_output"
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, command",
+    [
+        ("with-subject", ["results", "report"]),
+        ("without-subject", ["report"]),
+        ("refusing", ["report"]),
+    ],
+)
+def test_the_codebuild_example_reports_the_way_its_ash_does(tmp_path, release, command):
+    calls, finished = _run_codebuild_command(
+        tmp_path, _phase_command("post_build"), release
+    )
+
+    assert finished.returncode == 0, finished.stderr
+    assert calls == [[*command, "--output-dir", ".ash/ash_output"]], calls
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "phase, asked",
+    [("build", "ash scan fs"), ("post_build", "ash results report")],
+)
+def test_the_codebuild_example_does_not_read_a_crashed_probe_as_an_older_ash(
+    tmp_path, phase, asked
+):
+    """A crash says nothing about the ASH's commands. Read as an older ASH, it would run
+    the older spelling on an ASH that has the new one, with no word of why."""
+    calls, finished = _run_codebuild_command(
+        tmp_path, _phase_command(phase), "crashing"
+    )
+
+    assert calls == [], calls
+    assert finished.returncode != 0, finished.stderr
+    assert f"could not tell whether this ASH has '{asked}'" in finished.stderr
+    assert f"'{asked} --help' exited 1" in finished.stderr
+    assert "MemoryError" in finished.stderr
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "phase, release, said",
+    [
+        (
+            "build",
+            "with-subject",
+            "scanning with 'ash scan fs': its help names 'scan fs'",
+        ),
+        (
+            "build",
+            "without-subject",
+            (
+                "scanning with the older spelling: the help of 'ash scan fs --help' "
+                "does not name 'scan fs'"
+            ),
+        ),
+        (
+            "build",
+            "refusing",
+            "scanning with the older spelling: this ASH refused the word 'fs'",
+        ),
+        (
+            "post_build",
+            "with-subject",
+            "reporting with 'ash results report': its help names 'results report'",
+        ),
+        (
+            "post_build",
+            "without-subject",
+            "reporting with the older spelling: this ASH refused the word 'results'",
+        ),
+    ],
+)
+def test_the_codebuild_example_says_which_spelling_it_chose_and_why(
+    tmp_path, phase, release, said
+):
+    _, finished = _run_codebuild_command(tmp_path, _phase_command(phase), release)
+
+    assert f"ash: {said}" in finished.stderr, finished.stderr
