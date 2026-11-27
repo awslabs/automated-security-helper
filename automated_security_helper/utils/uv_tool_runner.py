@@ -129,8 +129,16 @@ UV_NO_ENV_FILE = "--no-env-file"
 # only when uv downloads or authenticates, which an offline read cannot show, so their
 # splits are not measured: each is taken as one entry. Each name maps to how its value
 # is split (one entry, or a list split at whitespace, at commas or at the path
-# separator) and to whether an entry may start with an index name, as in
-# ``corp=https://host/simple``.
+# separator), to whether an entry may start with an index name, as in
+# ``corp=https://host/simple``, and to whether its value may be a URL.
+#
+# The variables that take only a path are ``UV_CONFIG_FILE``, ``UV_ENV_FILE``,
+# ``UV_PROJECT``, ``UV_WORKING_DIR``, ``UV_PYTHON_CACHE_DIR``, ``UV_CREDENTIALS_DIR``
+# and ``UV_PYTHON_SEARCH_PATH``. They read a value spelled as a URL as a path, which
+# is a relative path, read against the directory uv starts in. Measured with uv
+# 0.13.5: ``UV_CONFIG_FILE=https://host/uv.toml`` fails with "failed to open file",
+# and ``uv tool run --show-settings`` keeps ``UV_ENV_FILE=file:///x.env`` as that
+# path. Every other name may be a URL.
 #
 # Four directory variables are left out: ``UV_CACHE_DIR``, ``UV_TOOL_DIR``,
 # ``UV_TOOL_BIN_DIR`` and ``UV_PYTHON_INSTALL_DIR``. ASH resolves them itself, in the
@@ -138,7 +146,9 @@ UV_NO_ENV_FILE = "--no-env-file"
 # split ASH from uv. ``UV_PYTHON_BIN_DIR``, where ``uv python install`` writes the
 # executables it links, is another of the directories uv keeps its own state in, and is
 # left out with the four. ``UV_PYTHON`` is left out too: it names an interpreter or a
-# version request, and ``plugin_base`` judges it on the scan route.
+# version request. Only the plugin subprocess runner judges it (``plugin_base``); the
+# version probes, ``uv tool install``, ``uv tool list`` and the notebook converter pass
+# it on as given.
 # ``UV_PROJECT_ENVIRONMENT`` names a project's environment, and the uv tool commands run
 # no project. The endpoints of remote services (``UV_S3_ENDPOINT_URL``,
 # ``UV_GCS_ENDPOINT_URL``, ``UV_AZURE_ENDPOINT_URL``, ``UV_MALWARE_CHECK_URL`` and
@@ -149,29 +159,44 @@ _AT_WHITESPACE = "at whitespace"
 _AT_COMMAS = "at commas"
 _AT_PATH_SEPARATOR = "at the path separator"
 
-_UV_PATH_VARIABLES: Dict[str, Tuple[str, bool]] = {
-    "UV_CONFIG_FILE": (_ONE_ENTRY, False),
-    "UV_PROJECT": (_ONE_ENTRY, False),
-    "UV_WORKING_DIR": (_ONE_ENTRY, False),
-    "UV_ENV_FILE": (_AT_WHITESPACE, False),
-    "UV_CONSTRAINT": (_AT_WHITESPACE, False),
-    "UV_BUILD_CONSTRAINT": (_AT_WHITESPACE, False),
-    "UV_OVERRIDE": (_AT_WHITESPACE, False),
-    "UV_EXCLUDE": (_AT_WHITESPACE, False),
-    "UV_INDEX": (_AT_WHITESPACE, True),
-    "UV_EXTRA_INDEX_URL": (_AT_WHITESPACE, False),
-    "UV_DEFAULT_INDEX": (_ONE_ENTRY, True),
-    "UV_INDEX_URL": (_ONE_ENTRY, False),
-    "UV_FIND_LINKS": (_AT_COMMAS, False),
-    "UV_PYTHON_INSTALL_MIRROR": (_ONE_ENTRY, False),
-    "UV_PYPY_INSTALL_MIRROR": (_ONE_ENTRY, False),
-    "UV_GRAALPY_INSTALL_MIRROR": (_ONE_ENTRY, False),
-    "UV_PYODIDE_INSTALL_MIRROR": (_ONE_ENTRY, False),
-    "UV_ASTRAL_MIRROR_URL": (_ONE_ENTRY, False),
-    "UV_PYTHON_DOWNLOADS_JSON_URL": (_ONE_ENTRY, False),
-    "UV_PYTHON_CACHE_DIR": (_ONE_ENTRY, False),
-    "UV_CREDENTIALS_DIR": (_ONE_ENTRY, False),
-    "UV_PYTHON_SEARCH_PATH": (_AT_PATH_SEPARATOR, False),
+
+class _UvPathVariable(NamedTuple):
+    """How uv reads the value of one variable of ``_UV_PATH_VARIABLES``.
+
+    ``splitting`` is how the value is split into entries (one of the four constants
+    above), ``carries_name`` whether an entry may start with an index name, and
+    ``takes_url`` whether the value may be a URL. A variable that takes only a path
+    reads a value spelled as a URL as a relative path.
+    """
+
+    splitting: str
+    carries_name: bool
+    takes_url: bool
+
+
+_UV_PATH_VARIABLES: Dict[str, _UvPathVariable] = {
+    "UV_CONFIG_FILE": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_PROJECT": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_WORKING_DIR": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_ENV_FILE": _UvPathVariable(_AT_WHITESPACE, False, False),
+    "UV_CONSTRAINT": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_BUILD_CONSTRAINT": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_OVERRIDE": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_EXCLUDE": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_INDEX": _UvPathVariable(_AT_WHITESPACE, True, True),
+    "UV_EXTRA_INDEX_URL": _UvPathVariable(_AT_WHITESPACE, False, True),
+    "UV_DEFAULT_INDEX": _UvPathVariable(_ONE_ENTRY, True, True),
+    "UV_INDEX_URL": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_FIND_LINKS": _UvPathVariable(_AT_COMMAS, False, True),
+    "UV_PYTHON_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYPY_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_GRAALPY_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYODIDE_INSTALL_MIRROR": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_ASTRAL_MIRROR_URL": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYTHON_DOWNLOADS_JSON_URL": _UvPathVariable(_ONE_ENTRY, False, True),
+    "UV_PYTHON_CACHE_DIR": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_CREDENTIALS_DIR": _UvPathVariable(_ONE_ENTRY, False, False),
+    "UV_PYTHON_SEARCH_PATH": _UvPathVariable(_AT_PATH_SEPARATOR, False, False),
 }
 
 # An entry that starts with a URL scheme of two characters or more followed by ``://``
@@ -227,27 +252,29 @@ def _uv_value_paths(name: str, value: str) -> List[str]:
     The value is split as ``_UV_PATH_VARIABLES`` says: it is one entry, or a list split
     at whitespace, at commas or at the path separator (``os.pathsep``). An entry is not
     stripped, as uv does not strip it: a leading space is part of the path. An empty
-    entry names nothing. An entry of an index variable loses a leading ``name=``. An
-    entry that starts with a URL scheme is a URL (``_file_url_path``); every other
-    entry is a path, as written.
+    entry names nothing. An entry of an index variable loses a leading ``name=``. In a
+    variable that takes a URL, an entry that starts with a URL scheme is a URL
+    (``_file_url_path``); every other entry is a path, as written. In a variable that
+    takes only a path, every entry is a path as written, a URL spelling included: uv
+    reads it as a relative path, so ``_names_a_tree_path`` judges it the tree's.
     """
-    splitting, carries_name = _UV_PATH_VARIABLES[name]
-    if splitting == _AT_WHITESPACE:
+    variable = _UV_PATH_VARIABLES[name]
+    if variable.splitting == _AT_WHITESPACE:
         entries = value.split()
-    elif splitting == _AT_COMMAS:
+    elif variable.splitting == _AT_COMMAS:
         entries = value.split(",")
-    elif splitting == _AT_PATH_SEPARATOR:
+    elif variable.splitting == _AT_PATH_SEPARATOR:
         entries = value.split(os.pathsep)
     else:
         entries = [value]
     paths: List[str] = []
     for entry in entries:
         location = entry
-        if carries_name:
+        if variable.carries_name:
             index_name = _INDEX_NAME.match(entry)
             if index_name is not None:
                 location = entry[index_name.end() :]
-        if _URL_SCHEME.match(location):
+        if variable.takes_url and _URL_SCHEME.match(location):
             location = _file_url_path(location) or ""
         if location:
             paths.append(location)
@@ -306,7 +333,9 @@ def without_tree_uv_files(
     are all absolute and outside every one of them is the operator's and stays whole,
     and so does one that holds only URLs that name no local path. ``environment`` is
     what the child gets (this process's when None); the same object comes back when
-    nothing is dropped, so a run that passed no environment still passes none.
+    nothing is dropped, so a run that passed no environment still passes none. A
+    variable that takes only a path is the exception to the URL rules above: uv reads a
+    URL spelling of its value as a relative path, so it is dropped.
     """
     from automated_security_helper.utils.subprocess_utils import scanned_trees
 

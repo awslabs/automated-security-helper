@@ -893,11 +893,15 @@ def run_command(args: List[str], shell: bool = False):
     ``-P`` where Python has it, so it imports no ``pip/`` or
     ``automated_security_helper/`` from where it starts; see
     ``utils/python_child.py``. A uv command also gets the environment
-    :func:`uv_child_overrides` gives it.
+    :func:`uv_child_overrides` gives it. Every command gets none of the uv path
+    variables that name a path in the source tree (a shell line or a script can start
+    uv in turn), judged as on every route that starts uv
+    (:func:`uv_tool_runner.without_tree_uv_files`).
     """
     from automated_security_helper.utils.subprocess_utils import run_command as run_cmd
     from automated_security_helper.utils.subprocess_utils import run_succeeded
     from automated_security_helper.utils.uv_tool_runner import find_uv_or_none
+    from automated_security_helper.utils.uv_tool_runner import without_tree_uv_files
 
     values = _INSTALL_VALUES.get()
     if shell and isinstance(args, (list, tuple)) and len(args) != 1:
@@ -948,6 +952,19 @@ def run_command(args: List[str], shell: bool = False):
         # The declared command's UV_NO_CONFIG environment, when one was built
         # above, extended with the uv child's own overrides.
         env = {**(env if env is not None else snapshot_environ()), **overrides}
+    # The working directory is the source tree this command installs for. A uv path
+    # variable whose value names a path of that tree (relative, starting with ``~``, or
+    # inside it) could send uv to a file or directory the repository supplies, so it
+    # is left out, judged as the uv tool runner judges the uv commands it starts. This
+    # is done for every command: one declared as a shell line can name uv, and a script
+    # or another program can start uv in turn. Only uv reads these variables, so a
+    # command that starts no uv loses nothing. When nothing is dropped, ``env`` comes
+    # back as it was, so a command that inherits the environment (None) still does.
+    try:
+        tree_roots: Tuple[Path, ...] = (Path.cwd(),)
+    except OSError:
+        tree_roots = ()
+    env = without_tree_uv_files(env, tree_roots)
     try:
         if not shell and runs_module_or_code(args):
             with python_child(*args[1:]) as child:
