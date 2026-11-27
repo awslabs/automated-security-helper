@@ -24,6 +24,7 @@ from automated_security_helper.core.exceptions import (
     FailureReason,
     ReasonCode,
     ScannerSelectionError,
+    reason_of,
 )
 from automated_security_helper.core.scanner_selection import (
     SelectionOrigin,
@@ -278,6 +279,26 @@ def _staged_nothing_to_scan_reason(
     if not (isinstance(reason, str) and reason):
         return None
     return text_without_values(reason, values)
+
+
+def _construction_reason(error: BaseException, values: Iterable[str]) -> FailureReason:
+    """Why a scanner could not be constructed, as a reason the reports show.
+
+    The reason the constructor's own error carries (a ``ScannerError`` raised with
+    ``reason=``, or raised from one), redacted with ``values``, the config's
+    environment values, as every recorded sentence is. Without one, the kind of
+    exception: a class name and never its text, which is redacted for the log but
+    can still hold a path.
+    """
+    recorded = reason_of(error)
+    if recorded is not None:
+        return FailureReason(
+            recorded.code, text_without_values(recorded.sentence, tuple(values))
+        )
+    return FailureReason(
+        ReasonCode.CONSTRUCTION_FAILED,
+        f"it could not be constructed ({type(error).__name__})",
+    )
 
 
 def _scanner_display_name(plugin_instance) -> str:
@@ -1430,15 +1451,13 @@ class ScanPhase(EnginePhase):
                         # error can name an option the config read from the
                         # environment, and this text goes to the report, ash.log,
                         # the results files and scanner_reasons.
+                        environment_values = config_environment_values(
+                            getattr(self.plugin_context, "config", None)
+                        )
                         construction_error = (
                             f"Scanner {failed_name} could not be constructed, so it "
                             f"did not run{image_note}: {type(e).__name__}: "
-                            + error_text(
-                                e,
-                                config_environment_values(
-                                    getattr(self.plugin_context, "config", None)
-                                ),
-                            )
+                            + error_text(e, environment_values)
                         )
                         ASH_LOGGER.error(construction_error)
                         # `errors` passed to the constructor so the field is set
@@ -1451,12 +1470,12 @@ class ScanPhase(EnginePhase):
                             duration=None,
                             errors=[construction_error],
                         )
-                        # The reason is the kind of exception, a class name and
-                        # never its text: the text above is redacted but can
-                        # still hold a path, and the reports show this one.
-                        construction_reason = FailureReason(
-                            ReasonCode.CONSTRUCTION_FAILED,
-                            f"it could not be constructed ({type(e).__name__})",
+                        # The reason the constructor's own error carries, else the
+                        # kind of exception, a class name and never its text: the
+                        # text above is redacted but can still hold a path, and
+                        # the reports show this one.
+                        construction_reason = _construction_reason(
+                            e, environment_values
                         )
                         container.record_error_reason(
                             construction_reason.code, construction_reason.sentence

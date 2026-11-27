@@ -21,7 +21,8 @@ scanner, and the scan phase through its own recorders:
   image;
 - a scanner's whole run failing, in the sequential and the parallel loop;
 - the scan phase: a name the tracker refuses or another scanner holds, a check
-  that raised, a scanner that could not be built, a module that did not import.
+  that raised, a scanner that could not be built (with the reason its constructor's
+  own error carries, when it carries one), a module that did not import.
 
 Every reason recorded is a sentence ``is_short_reason`` accepts, with a code the
 vocabulary defines. The controls at the end take away the one thing a case rests on
@@ -1073,6 +1074,52 @@ class TestTheScanPhasesOwnFailures:
             "bandit",
             ReasonCode.CONSTRUCTION_FAILED,
             "it could not be constructed (RuntimeError)",
+        )
+
+    def test_a_constructor_that_raised_with_a_reason_keeps_that_reason(
+        self, scan_phase, monkeypatch
+    ):
+        """The scanner's own words say more than the kind of exception."""
+        written = _capture_writes(scan_phase, monkeypatch)
+        plugin_class, _ = _phase_scanner("opengrep")
+        plugin_class.side_effect = ScannerError(
+            "scanners.opengrep.options.patterns names 2 patterns; see /home/me/x",
+            reason=FailureReason(
+                ReasonCode.OPTION_REFUSED, "its patterns option is refused"
+            ),
+        )
+        scan_phase.plugins = [plugin_class]
+
+        results = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        self._assert_filed(
+            results,
+            written,
+            "opengrep",
+            ReasonCode.OPTION_REFUSED,
+            "its patterns option is refused",
+        )
+
+    def test_a_constructor_that_raised_a_scanner_error_with_no_reason_is_the_kind_only(
+        self, scan_phase, monkeypatch
+    ):
+        written = _capture_writes(scan_phase, monkeypatch)
+        plugin_class, _ = _phase_scanner("opengrep")
+        plugin_class.side_effect = ScannerError("it broke at /home/me/x")
+        scan_phase.plugins = [plugin_class]
+
+        results = scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(), parallel=False
+        )
+
+        self._assert_filed(
+            results,
+            written,
+            "opengrep",
+            ReasonCode.CONSTRUCTION_FAILED,
+            "it could not be constructed (ScannerError)",
         )
 
     def test_a_module_that_did_not_import(self, scan_phase, monkeypatch):
