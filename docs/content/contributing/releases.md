@@ -203,10 +203,13 @@ tag, publishes a version named after the release: `v3.8.0` publishes `3.8.0`.
 The newest release also moves the `latest` alias, which is where the site root and
 search engines send readers, so a release changes what most readers see. A patch
 release for an older line, built outside the workflow as described under
-[Tags](#tags), publishes its version when the docs workflow is run on its tag and
-leaves `latest` where it is. The frozen `v3` major tag publishes nothing. How the
-versions are built and checked is in
-[Testing the documentation](documentation.md#versioned-docs).
+[Tags](#tags), publishes its version when the docs workflow is run on its tag, if the
+tagged commit carries the current workflow, and leaves `latest` where it is. A tag
+runs the workflow file of the commit it points at, so what a tag push does depends on
+that commit: on one that carries the current workflow it publishes nothing, the
+frozen `v3` major tag included, and on one that carries the old workflow it replaces
+the whole site, as the end of this section describes. How the versions are built and
+checked is in [Testing the documentation](documentation.md#versioned-docs).
 
 A tag that the tag workflow creates is created with `GITHUB_TOKEN`, and a push made with
 that token starts no workflow, so the docs workflow never runs on it, and the tag
@@ -219,11 +222,35 @@ A tag pushed by hand runs the docs workflow as it is at the tagged commit. For a
 a commit from before the site was versioned, that is the old workflow, whose
 `mkdocs gh-deploy --force` force-pushes a single unversioned build as a commit with no
 parent, so every published version disappears from `gh-pages` along with its history.
-That applies to any tag pushed by hand while it points at such a commit,
-and to a patch release built on a release from before versioning. A ruleset on `gh-pages` that blocks force
-pushes stops it; the versioned deploy only ever fast-forwards the branch. Without one,
-recover by running the docs workflow again on `main` and on each release tag whose
-version should exist, in any order: whichever release is newest takes `latest`.
+That applies to any tag pushed by hand, or moved, while it points at such a commit, and
+to a patch release built on a release from before versioning. A tag push on 2026-11-12
+did this.
+
+Never push or move a tag onto a commit whose `ash-repo-docs.yml` still runs
+`gh-deploy`. Those commits are v3.6.0 (`beae9ff7`), v3.7.0 (`3a86cc99`) and v3.7.1
+(`af1206a`), and every commit of `main` from before the docs moved to mike. A change
+to the workflow on `main` cannot reach them. A ruleset on `gh-pages` that refuses
+non-fast-forward updates and deletion is the repository setting that catches such a
+push, since the versioned deploy only ever fast-forwards the branch. The maintainers
+configure that ruleset in the repository settings; nothing here sets it up, and this
+page does not assume it is in place.
+
+To bring back versions that such a push removed, run the docs workflow again on `main`
+and on each release tag whose commit carries the current workflow, in any order:
+whichever release is newest takes `latest`. That run cannot publish a tag that carries
+the old workflow, such as v3.7.1, because the old file starts no job on a manual run.
+Publish that version with the deploy script instead, from a checkout of a commit that
+has `scripts/docs_versions.py`:
+
+<!-- doctest: illustrative reason="runs in a checkout of this repository and pushes the published site" -->
+```bash
+uv run python scripts/docs_versions.py deploy --ref refs/tags/v3.7.1 --push
+```
+
+The ref only names the version, so the pages are those of the checkout: the version
+shows the docs of the commit checked out, which for an old release is not the tagged
+commit. The script publishes with mike, pushes `gh-pages` without force, and publishes
+nothing for a ref that is neither `main` nor a release tag.
 
 ## Version-pinned pages
 
