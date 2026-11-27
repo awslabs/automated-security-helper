@@ -289,34 +289,174 @@ def test_a_library_loaded_from_cdnjs_has_no_license_entry_or_provenance_block():
         )
 
 
-def test_the_scan_module_waits_on_the_element_that_loads_the_library():
-    """The module reads the outcome the async library records on its element.
+SCAN_MODULE = REPO_ROOT / "docs" / "content" / "assets" / "javascripts" / "ash-scan.js"
+#: An inline handler that records the load outcome: this.dataset.state = '<token>'.
+STATE_RECORD = re.compile(
+    r"""^\s*this\.dataset\.state\s*=\s*(['"])(?P<token>[A-Za-z][\w-]*)\1\s*;?\s*$"""
+)
+OUTCOME_HANDLERS = ("onload", "onerror")
+#: The module's lookup of the element by its id, bound to a name.
+LOOKUP = (
+    r"(?:const|let|var)\s+(?P<name>[A-Za-z_$][\w$]*)\s*=\s*"
+    r"document\s*\.\s*getElementById\(\s*(['\"]){identifier}\2\s*\)"
+)
 
-    An async script can finish before or after the module that uses it runs. Its
-    onload and onerror handlers write the outcome to the element's data-state,
-    which the module reads, and the module listens on the same element when
-    neither has happened yet. A renamed id on either side would leave the
-    animation off for good while every other check here still passed.
-    """
+
+def recorded_tokens(attributes: dict[str, str]) -> dict[str, str]:
+    """The token each outcome handler writes to data-state, for the handlers that write one."""
+    tokens = {}
+    for handler in OUTCOME_HANDLERS:
+        match = STATE_RECORD.match(attributes.get(handler, ""))
+        if match:
+            tokens[handler] = match["token"]
+    return tokens
+
+
+def token_problems(attributes: dict[str, str], module: str) -> list[str]:
+    """Why the module would leave an outcome the library element records unread."""
+    tokens = recorded_tokens(attributes)
+    problems = [
+        f"{handler} does not write this.dataset.state = '<token>'"
+        for handler in OUTCOME_HANDLERS
+        if handler not in tokens
+    ]
+    if len(set(tokens.values())) < len(tokens):
+        problems.append(f"onload and onerror write the same token: {tokens}")
+    for handler, token in tokens.items():
+        if not re.search(rf"===\s*(['\"]){re.escape(token)}\1", module):
+            problems.append(
+                f"ash-scan.js never compares data-state with {token!r}, "
+                f"the token {handler} writes"
+            )
+    return problems
+
+
+def listener_problems(attributes: dict[str, str], module: str) -> list[str]:
+    """Why the module would not hear a load or an error that comes after it runs."""
+    identifier = attributes.get("id", "")
+    if not identifier:
+        return ["the cdnjs script has no id for the scan module to find"]
+    lookup = re.search(LOOKUP.format(identifier=re.escape(identifier)), module)
+    if lookup is None:
+        return [f"ash-scan.js does not look up the element with id {identifier!r}"]
+    name = re.escape(lookup["name"])
+    return [
+        f"ash-scan.js does not listen for {event!r} on {lookup['name']}, "
+        "the element it looks up"
+        for event in ("load", "error")
+        if not re.search(
+            rf"(?<![\w$]){name}\s*\.\s*addEventListener\(\s*(['\"]){event}\1",
+            module,
+        )
+    ]
+
+
+def _homepage_library() -> dict[str, str]:
     libraries = [
         attributes
         for rel, _line, tag, attributes in cdn_elements()
         if rel == "docs/overrides/home.html" and tag == "script"
     ]
     assert len(libraries) == 1, libraries
-    library = libraries[0]
-    identifier = library.get("id", "")
-    assert identifier, "the cdnjs script has no id for the scan module to find"
-    for handler in ("onload", "onerror"):
-        assert "dataset.state" in library.get(handler, ""), (
-            f"the cdnjs script's {handler} does not record the outcome in data-state"
-        )
-    module = (
-        REPO_ROOT / "docs" / "content" / "assets" / "javascripts" / "ash-scan.js"
-    ).read_text(encoding="utf-8")
-    assert f'getElementById("{identifier}")' in module, (
-        f"ash-scan.js does not look up the element with id {identifier!r}"
+    return libraries[0]
+
+
+def test_the_scan_module_compares_the_tokens_the_library_handlers_write():
+    """The module checks data-state against exactly the tokens the handlers write.
+
+    The library loads async, so it can finish before the module runs. Its onload
+    and onerror handlers write a token to the element's data-state, and the
+    module compares that attribute with each token. A handler that writes a token
+    the module never compares leaves that outcome unread: an error token the
+    module does not know keeps the "did not load" caption from ever appearing.
+    """
+    problems = token_problems(
+        _homepage_library(), SCAN_MODULE.read_text(encoding="utf-8")
     )
+    assert problems == []
+
+
+def test_the_scan_module_listens_on_the_library_element_it_looks_up():
+    """The module waits on the element when neither outcome has happened yet.
+
+    On a cold cache the module usually runs first. It must look the element up by
+    its id and listen there for load and for error; a module that reads
+    data-state only once never starts the animation when the library arrives
+    later.
+    """
+    problems = listener_problems(
+        _homepage_library(), SCAN_MODULE.read_text(encoding="utf-8")
+    )
+    assert problems == []
+
+
+GOOD_LIBRARY = {
+    "id": "ash-motion-library",
+    "onload": "this.dataset.state = 'loaded'",
+    "onerror": "this.dataset.state = 'failed'",
+}
+GOOD_MODULE = """\
+const library = document.getElementById("ash-motion-library");
+const state = library?.dataset.state;
+if (state === "loaded" || globalThis.anime) settle(true);
+else if (!library || state === "failed") settle(false);
+else {
+  library.addEventListener("load", () => settle(true), { once: true });
+  library.addEventListener("error", () => settle(false), { once: true });
+}
+"""
+#: A module that reads data-state once and never listens.
+ONE_SHOT_MODULE = """\
+const library = document.getElementById("ash-motion-library");
+if (library?.dataset.state === "loaded" || globalThis.anime) start();
+else showFinishedExample();
+"""
+
+
+@pytest.mark.parametrize(
+    ("change", "module", "token_fragment", "listener_fragment"),
+    [
+        ({}, GOOD_MODULE, None, None),
+        (
+            {},
+            ONE_SHOT_MODULE,
+            "never compares data-state with 'failed'",
+            "does not listen for 'load'",
+        ),
+        (
+            {"onerror": "this.dataset.state = 'error'"},
+            GOOD_MODULE,
+            "never compares data-state with 'error'",
+            None,
+        ),
+        ({"onerror": "markFailed(this)"}, GOOD_MODULE, "onerror does not write", None),
+        (
+            {"onerror": "this.dataset.state = 'loaded'"},
+            GOOD_MODULE,
+            "write the same token",
+            None,
+        ),
+        ({"id": "another-id"}, GOOD_MODULE, None, "does not look up the element"),
+        (
+            {},
+            GOOD_MODULE.replace("library.addEventListener", "window.addEventListener"),
+            None,
+            "does not listen for 'load'",
+        ),
+    ],
+)
+def test_the_contract_checks_flag_each_planted_break(
+    change, module, token_fragment, listener_fragment
+):
+    attributes = {**GOOD_LIBRARY, **change}
+    for problems, fragment in (
+        (token_problems(attributes, module), token_fragment),
+        (listener_problems(attributes, module), listener_fragment),
+    ):
+        if fragment is None:
+            assert problems == []
+        else:
+            assert any(fragment in problem for problem in problems), problems
 
 
 #: A well-formed element. The digest is 64 zero bytes: the check reads the
