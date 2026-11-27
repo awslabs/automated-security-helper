@@ -733,7 +733,6 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
         self.targets_attempted = 0
         self.targets_failed = 0
         self.clear_unevaluated_targets()
-        self._start_ingest_record()
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(

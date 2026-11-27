@@ -431,6 +431,41 @@ T = TypeVar("T", bound=ScannerPluginConfigBase)
 _FORCED_RECORD_PREFIX_MARK = "_ash_reads_forced_binary_record"
 
 
+#: The methods that scan one target. Each gets a record of what reading the target's
+#: report repaired, started when it is called and forgotten when it raises.
+_SCAN_ENTRY_POINTS = ("scan", "scan_image")
+
+#: Marks a scan method that already starts the target's record, so it is never
+#: wrapped twice.
+_TARGET_RECORD_MARK = "_ash_starts_the_target_record"
+
+
+def _with_a_record_for_the_target(method: Any) -> Any:
+    """*method*, which scans one target, started with a fresh ingest record.
+
+    One plugin instance scans source and then converted, so a record that carried
+    over would report the previous target's repairs on a target that returned early
+    (an empty tree, missing dependencies). A scan that raises leaves no record
+    either: its report was refused or never built, so nothing it repaired changed a
+    report that anyone holds. Done here once, for every override, in place of a
+    reset copied into each scanner's own ``scan``.
+    """
+    if getattr(method, _TARGET_RECORD_MARK, False):
+        return method
+
+    @functools.wraps(method)
+    def with_a_record_for_the_target(self, *args, **kwargs):
+        self._start_ingest_record()
+        try:
+            return method(self, *args, **kwargs)
+        except BaseException:
+            self._start_ingest_record()
+            raise
+
+    setattr(with_a_record_for_the_target, _TARGET_RECORD_MARK, True)
+    return with_a_record_for_the_target
+
+
 class ScannerPluginBase(PluginBase, Generic[T]):
     """Base class for all scanner plugins.
 
@@ -845,6 +880,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ``_forced_binary_precluded_reason`` hook, never by skipping the wrap.
         """
         super().__pydantic_init_subclass__(**kwargs)
+        # Every override of the two scan entry points gets its own ingest record
+        # for the target, the same way (see _with_a_record_for_the_target).
+        for entry_point in _SCAN_ENTRY_POINTS:
+            scanning = cls.__dict__.get(entry_point)
+            if scanning is not None and callable(scanning):
+                setattr(cls, entry_point, _with_a_record_for_the_target(scanning))
         override = cls.__dict__.get("validate_plugin_dependencies")
         if override is None or not callable(override):
             return
@@ -2504,6 +2545,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             return None
         return timeout if timeout > 0 else None
 
+    @_with_a_record_for_the_target
     def scan(
         self,
         target: "Path",
@@ -2543,9 +2585,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.output = []
         # The record of which of the error lines are ASH's own goes with them.
         self._reset_errors()
-        # And what reading this target's report repairs: an empty tree or a
-        # skipped scan must not report the previous target's repairs.
-        self._start_ingest_record()
 
         if self._target_is_empty(target):
             self._plugin_log(
@@ -2868,6 +2907,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             )
         return excludes.globs
 
+    @_with_a_record_for_the_target
     def scan_image(
         self,
         image: "ImageLocator",
@@ -2897,7 +2937,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.end_time = None
         self.output = []
         self._reset_errors()
-        self._start_ingest_record()
         self._staged_scan_files = None
         self._staged_all_filtered = False
         self._nothing_scanned_reason = None

@@ -2116,9 +2116,6 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
         # which the early returns never reach, so a converted run that returned
         # early re-reported the source target's refused workflows.
         self.inputs_not_scanned = []
-        # And this target's own record of what converting actionlint's output
-        # repaired: the record never carries the previous target's.
-        self._start_ingest_record()
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(

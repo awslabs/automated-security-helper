@@ -39,7 +39,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.schemas.scanner_output_ingest import (
-    IngestRecord,
     ingest_sarif,
     read_json_tolerant,
 )
@@ -274,39 +273,27 @@ def _sweep_abandoned_copies(
             os.close(fd)
 
 
-def _sarif_result_count(document: Any, record: Optional[IngestRecord] = None) -> int:
+def _sarif_result_count(document: Any) -> int:
     """How many results a parsed SARIF document holds, counting suppressed ones.
 
     A result counts only when it is an object inside a ``results`` list inside a
     run that is an object inside the ``runs`` list. A container of any other kind
     holds no result ASH can read: it counts for none (a string was counted by its
     length and a dict by its keys, and ``runs`` that was not a list raised a
-    ``TypeError``), and it is noted on *record*, by where it sits and never by
-    what it holds, when one is given.
+    ``TypeError``). It only counts: what the reader repairs or refuses is noted
+    by the reader, so a shape the reader cannot repair is not recorded as dropped.
     """
     if not isinstance(document, dict):
         return 0
     runs = document.get("runs")
-    if runs is None:
-        return 0
     if not isinstance(runs, list):
-        if record is not None:
-            record.note("dropped", "runs_not_a_list", ("runs",))
         return 0
     count = 0
-    for run_index, run in enumerate(runs):
+    for run in runs:
         if not isinstance(run, dict):
-            if record is not None:
-                record.note("dropped", "run_not_an_object", ("runs", run_index))
             continue
         results = run.get("results")
-        if results is None:
-            continue
         if not isinstance(results, list):
-            if record is not None:
-                record.note(
-                    "dropped", "results_not_a_list", ("runs", run_index, "results")
-                )
             continue
         count += sum(1 for result in results if isinstance(result, dict))
     return count
@@ -942,9 +929,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
-        # What reading this target's report repairs, started again for each target
-        # for the same reason.
-        self._start_ingest_record()
         self._staged_refused = 0
         # Check if the target directory is empty or doesn't exist
         if self._target_is_empty(target):
@@ -1161,14 +1145,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 # read as the tool meant them and noted on the scanner's record.
                 with open(results_file, mode="rb") as f:
                     scanner_results = read_json_tolerant(f.read(), self._ingest_record)
-                # Snyk exits 1 only when it found issues, so a run that exits 1 and
-                # reports none has not shown what it scanned: not a clean scan.
-                if self.exit_code == 1 and not _sarif_result_count(
-                    scanner_results, self._ingest_record
-                ):
+                if scanner_results is None:
+                    # An empty file (or a byte-order mark and nothing else) is said
+                    # to be empty, not read as a report that holds no results.
                     raise ScannerError(
-                        "snyk exited with exit code 1, which it uses for issues "
-                        f"found, but its SARIF file holds no results: {results_file}"
+                        "snyk-code's results file is empty, so there is nothing "
+                        "to grade"
                     )
                 # Only the reading of the document sits in this try: an error raised
                 # after the SARIF validated (attaching the scanner details,
@@ -1188,6 +1170,15 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     raise ScannerError(
                         "snyk-code's results file is not SARIF ASH can read, so its "
                         f"findings could not be graded: {error_text(e)}"
+                    )
+                # Snyk exits 1 only when it found issues, so a run that exits 1 and
+                # reports none has not shown what it scanned: not a clean scan. A
+                # document the reader refuses is refused as that, at either exit
+                # code: the count is of a document that can be read.
+                if self.exit_code == 1 and not _sarif_result_count(scanner_results):
+                    raise ScannerError(
+                        "snyk exited with exit code 1, which it uses for issues "
+                        f"found, but its SARIF file holds no results: {results_file}"
                     )
                 self._say_what_the_ingest_repaired(target_type)
                 self._refuse_a_repaired_report_with_no_run(sarif_report)

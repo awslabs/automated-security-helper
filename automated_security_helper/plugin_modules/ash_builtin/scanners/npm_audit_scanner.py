@@ -3571,8 +3571,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         self.targets_failed = 0
         self.inputs_not_scanned = []
         self.exit_code = None
-        # This target's own record of what converting the audits repaired.
-        self._start_ingest_record()
         tool_component = ToolComponent(
             name="npm-audit",
             version=self.tool_version,

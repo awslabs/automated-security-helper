@@ -648,9 +648,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
-        # And this target's own record of what reading the SBOM repaired, so it
-        # never carries the previous target's.
-        self._start_ingest_record()
         # Check if the target directory is empty or doesn't exist
         if self._target_is_empty(target):
             message = (
@@ -910,8 +907,6 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self.end_time = None
         self.output = []
         self._reset_errors()
-        # The image's own record of what reading its SBOM repaired.
-        self._start_ingest_record()
         self._nothing_scanned_reason = None
         self._image_ignore_paths = list(global_ignore_paths or [])
 

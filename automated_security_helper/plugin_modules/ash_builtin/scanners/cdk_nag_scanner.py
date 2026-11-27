@@ -1749,8 +1749,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # were evaluated", which would contradict the findings kept beside it.
         self.targets_unevaluated_with_own_findings = 0
         self._reset_errors()
-        # This target's own record of what reading the templates' reports repaired.
-        self._start_ingest_record()
         self.exit_code = 0
         # The timing too, as ScannerPluginBase.scan() resets it. ``_post_scan`` sets
         # ``start_time`` only when it is unset, so without this an early return on the

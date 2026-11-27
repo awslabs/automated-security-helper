@@ -2079,9 +2079,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
-        # What reading this target's report repairs, started again for each target
-        # for the same reason.
-        self._start_ingest_record()
         self.targets_attempted = None
         self.targets_failed = 0
         # Check if the target directory is empty or doesn't exist
@@ -2412,6 +2409,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 raise ScannerError(
                     "ferret-scan's results file is not SARIF ASH can read "
                     "(it is not valid JSON), so its findings could not be graded"
+                )
+
+            if scanner_results is None:
+                raise ScannerError(
+                    "ferret-scan's results file is empty, so there is nothing to grade"
                 )
 
             _resolve_sarif_uri_base_ids(scanner_results)

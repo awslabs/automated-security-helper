@@ -1062,9 +1062,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         self.exit_code = None
         self._nothing_scanned_reason = None
         self.clear_unevaluated_targets()
-        # What reading this target's SARIF repairs, started again for each target
-        # for the same reason.
-        self._start_ingest_record()
 
         tool_component = ToolComponent(
             name="cfn_nag",

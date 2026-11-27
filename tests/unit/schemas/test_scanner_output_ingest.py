@@ -2189,3 +2189,80 @@ def test_absorbing_keeps_to_the_most_elements_a_record_names():
     assert len(summary["elements"]) == 50
     assert summary["elements_not_listed"] == 11
     assert summary["repaired"] == 61
+
+
+# --------------------------------------------------------------------------- #
+# What a refused or empty read leaves on the record
+# --------------------------------------------------------------------------- #
+
+
+#: The byte-order mark as text.
+_MARK = chr(0xFEFF)
+
+
+def _a_document_with_a_repair_and_one_part_that_cannot_be_repaired() -> dict:
+    result = {
+        "ruleId": "r-one",
+        "message": {"text": "found"},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": "a.py"},
+                    "region": {"startLine": 0},
+                }
+            }
+        ],
+    }
+    unreadable = {"ruleId": "r-two"}
+    return {
+        "version": "2.1.0",
+        "runs": [{"tool": {"driver": {"name": "t"}}, "results": [result, unreadable]}],
+    }
+
+
+def test_a_refused_document_leaves_the_record_as_it_found_it():
+    """The line-0 region is repaired on the way, then the second result is refused
+    for its missing message. The report is not kept, so the repair is not counted;
+    what the record held before the document (a mark noted by the reader) stays."""
+    record = IngestRecord()
+    record.note("rewritten", "bom")
+    before = record.summary()
+
+    with pytest.raises(ValidationError):
+        ingest_sarif(
+            _a_document_with_a_repair_and_one_part_that_cannot_be_repaired(), record
+        )
+
+    assert record.summary() == before
+    assert record.repaired == 1 and record.left_out == 0
+
+
+@pytest.mark.parametrize(
+    "read",
+    [
+        pytest.param(
+            lambda: read_json_tolerant(b"\xef\xbb\xbf", IngestRecord()), id="bytes"
+        ),
+        pytest.param(lambda: read_json_text_tolerant(_MARK, IngestRecord()), id="text"),
+    ],
+)
+def test_a_mark_with_nothing_after_it_reads_as_an_empty_file(read):
+    assert read() is None
+
+
+@pytest.mark.parametrize("blank", ["", " \n\t", _MARK, _MARK + " \n"])
+def test_an_empty_or_blank_file_notes_nothing(blank):
+    record = IngestRecord()
+
+    assert read_json_text_tolerant(blank, record) is None
+    assert read_json_tolerant(blank.encode("utf-8"), record) is None
+
+    assert record.summary() is None
+
+
+def test_a_mark_before_a_document_is_still_noted():
+    record = IngestRecord()
+
+    assert read_json_tolerant(b"\xef\xbb\xbf{}", record) == {}
+
+    assert record.repaired == 1

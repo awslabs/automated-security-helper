@@ -569,6 +569,10 @@ def read_json_tolerant(data: bytes, record: IngestRecord) -> Any:
     """
     if data.startswith(_BOM_BYTES):
         data = data[len(_BOM_BYTES) :]
+        if not data.strip():
+            # A mark and nothing after it is an empty file: nothing was read, so
+            # nothing was repaired.
+            return None
         record.note("rewritten", "bom")
     try:
         text = data.decode("utf-8")
@@ -586,7 +590,8 @@ def read_json_text_tolerant(text: str, record: IngestRecord) -> Any:
     """:func:`read_json_tolerant` for text a tool already gave as ``str``."""
     if text.startswith(_BOM_TEXT):
         text = text[len(_BOM_TEXT) :]
-        record.note("rewritten", "bom")
+        if text.strip():
+            record.note("rewritten", "bom")
     if not text.strip():
         return None
     try:
@@ -1200,6 +1205,37 @@ def _apply(
 
 
 def _ingest(
+    raw: Any,
+    record: IngestRecord,
+    *,
+    model: type[BaseModel],
+    classify: Classifier,
+    format_name: str,
+    count_results: Callable[[Any], int],
+    names_the_format: Callable[[Any], bool],
+) -> Any:
+    """:func:`_read_and_repair`, which leaves *record* as it found it on a refusal.
+
+    The repairs a refused document went through changed nothing the report keeps,
+    so they are not counted.
+    """
+    checkpoint = record.checkpoint()
+    try:
+        return _read_and_repair(
+            raw,
+            record,
+            model=model,
+            classify=classify,
+            format_name=format_name,
+            count_results=count_results,
+            names_the_format=names_the_format,
+        )
+    except Exception:
+        record.rollback(checkpoint)
+        raise
+
+
+def _read_and_repair(
     raw: Any,
     record: IngestRecord,
     *,

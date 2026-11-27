@@ -1694,9 +1694,6 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # the executor (which clears them before each scan).
         self._reset_errors()
         self.clear_unevaluated_targets()
-        # What reading this target's SARIF repairs, started again for each target
-        # for the same reason.
-        self._start_ingest_record()
 
         report = self._empty_report(target)
         try:

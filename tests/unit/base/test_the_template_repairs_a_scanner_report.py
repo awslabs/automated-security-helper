@@ -247,7 +247,110 @@ def test_a_report_that_cannot_be_repaired_is_refused_with_the_same_words(
         _scan(scanner, tmp_path)
 
     assert "its results file is not SARIF ASH can read" in str(refused.value)
+    # The region repaired on the way to the refusal changed nothing a report holds.
+    assert scanner.output_ingest_record is None
+
+
+@pytest.mark.parametrize("image", [False, True], ids=["scan", "scan_image"])
+def test_a_refused_file_leaves_no_note_of_how_it_was_read(
+    plugin_context, tmp_path, image
+):
+    """The byte-order mark is noted while the file is read, before the document is
+    refused. The target gets no report, so nothing was repaired."""
+    broken = _result("r-one", 3)
+    del broken["message"]
+    written = b"\xef\xbb\xbf" + json.dumps(_report(broken)).encode()
+    scanner = _make_scanner(plugin_context, written)
+
+    with pytest.raises(ScannerError, match="not SARIF ASH can read"):
+        _scan(scanner, tmp_path, image=image)
+
+    assert scanner.output_ingest_record is None
+
+
+def test_a_scan_that_raises_does_not_leave_the_last_targets_record_behind(
+    plugin_context, tmp_path
+):
+    scanner = _make_scanner(plugin_context, _repaired_report())
+    _scan(scanner, tmp_path)
     assert scanner.output_ingest_record["repaired"] == 1
+
+    type(scanner).written[0] = b"{not json"
+    with pytest.raises(ScannerError):
+        _scan(scanner, tmp_path)
+
+    assert scanner.output_ingest_record is None
+
+
+def _an_overriding_scanner(plugin_context, *, raises: bool):
+    class Overriding(ScannerPluginBase):
+        offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+        found_empty: ClassVar[list] = []
+
+        def model_post_init(self, context):
+            self.command = "stub-tool"
+            self.tool_type = ScannerToolType.SAST
+            super().model_post_init(context)
+
+        def scan(self, target, target_type, global_ignore_paths=None, **kwargs):
+            type(self).found_empty.append(self.output_ingest_record is None)
+            self._ingest_record.note("dropped", "unknown_key", ("x",))
+            if raises:
+                raise ScannerError("refused")
+
+    return Overriding(config=_Config(), context=plugin_context)
+
+
+def test_an_override_of_scan_starts_each_target_with_a_fresh_record(
+    plugin_context, tmp_path
+):
+    """The override does not reset the record itself: the base class does it for
+    every override, once."""
+    scanner = _an_overriding_scanner(plugin_context, raises=False)
+    scanner._ingest_record.note("rewritten", "bom")
+
+    scanner.scan(target=tmp_path, target_type="source")
+    scanner.scan(target=tmp_path, target_type="source")
+
+    assert type(scanner).found_empty == [True, True]
+    assert scanner.output_ingest_record["repaired"] == 1
+
+
+def test_an_override_of_scan_that_raises_leaves_no_record(plugin_context, tmp_path):
+    scanner = _an_overriding_scanner(plugin_context, raises=True)
+
+    with pytest.raises(ScannerError, match="refused"):
+        scanner.scan(target=tmp_path, target_type="source")
+
+    assert scanner.output_ingest_record is None
+
+
+def test_no_scanner_module_resets_the_record_itself():
+    """One reset, in the base class. A copy in each scanner's own ``scan`` was nine
+    copies and then sixteen, and a scanner that forgot it reported the previous
+    target's repairs."""
+    import automated_security_helper
+
+    package = Path(automated_security_helper.__file__).parent
+    base = package / "base" / "scanner_plugin.py"
+    calls = [
+        path.relative_to(package).as_posix()
+        for path in sorted(package.rglob("*.py"))
+        if path != base and "_start_ingest_record(" in path.read_text(encoding="utf-8")
+    ]
+
+    assert calls == []
+
+
+def test_a_bom_and_nothing_else_is_an_empty_file_and_notes_nothing(
+    plugin_context, tmp_path
+):
+    scanner = _make_scanner(plugin_context, b"\xef\xbb\xbf")
+
+    with pytest.raises(ScannerError, match="empty"):
+        _scan(scanner, tmp_path)
+
+    assert scanner.output_ingest_record is None
 
 
 def test_a_scanners_record_starts_again_with_each_target(plugin_context, tmp_path):

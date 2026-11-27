@@ -1957,8 +1957,6 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         self.targets_attempted = 0
         self.targets_failed = 0
         self._sandbox_unavailable = False
-        # This target's own record of what converting GuardDog's output repaired.
-        self._start_ingest_record()
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(

@@ -2915,8 +2915,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # of files given to detect-secrets, set below; None until then (no claim).
         self.exit_code = 0
         self.targets_attempted: Optional[int] = None
-        # This target's own record of what reading its findings repaired.
-        self._start_ingest_record()
         # Where this target's errors start. ``self.errors`` is the instance's,
         # appended across targets (and read whole by the executor), so the
         # converted target's invocation record carried the source target's

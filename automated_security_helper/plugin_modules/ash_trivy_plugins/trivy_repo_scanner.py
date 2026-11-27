@@ -485,9 +485,6 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
         self.exit_code = 0
         self.output = []
         self._reset_errors()
-        # What reading this target's report repairs, started again for each target
-        # for the same reason.
-        self._start_ingest_record()
         global_ignore_paths = list(global_ignore_paths or [])
         # Check if the target directory is empty or doesn't exist
         if self._target_is_empty(target):
@@ -669,6 +666,12 @@ class TrivyRepoScanner(TrivyScannerBase[TrivyRepoScannerConfig]):
                 # read as the tool meant them and noted on the scanner's record.
                 with open(results_file, mode="rb") as f:
                     scanner_results = read_json_tolerant(f.read(), self._ingest_record)
+                if scanner_results is None:
+                    # An empty file (or a byte-order mark and nothing else) is said
+                    # to be empty, not refused as a document that is not SARIF.
+                    raise ScannerError(
+                        "trivy's results file is empty, so there is nothing to grade"
+                    )
                 # Only the validation sits in this try: an error raised after the
                 # SARIF validated (attaching the package identity, building the
                 # invocation) is ASH's own and is reported as what it is by the
