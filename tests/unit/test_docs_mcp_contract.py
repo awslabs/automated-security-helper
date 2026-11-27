@@ -141,11 +141,14 @@ def _check(package: Path, files=None, root: Path = REPO_ROOT):
 # Planted defects in the real server, against the real pages
 # ---------------------------------------------------------------------------
 
-#: run_ash_scan's refusal of a symlinked .ash/ash_output, under a new error_type.
+#: run_ash_scan's refusal of a symlinked .ash/ash_output, under a new error_type. The
+#: spelling lives in McpErrorType (#1064 moved every error_type literal of the server
+#: there; run_ash_scan returns ``McpErrorType.OUTPUT_DIR_NOT_PERMITTED.value``), so the
+#: rename is made to the member, which every site that returns it reads.
 RENAMED_REFUSAL_ERROR_TYPE = {
-    "cli/mcp_server.py": (
-        '"error_type": "output_dir_not_permitted",',
-        '"error_type": "output_dir_refused",',
+    "cli/mcp/error_types.py": (
+        'OUTPUT_DIR_NOT_PERMITTED = "output_dir_not_permitted"',
+        'OUTPUT_DIR_NOT_PERMITTED = "output_dir_refused"',
     )
 }
 #: A key of run_ash_scan's success response, under a new name.

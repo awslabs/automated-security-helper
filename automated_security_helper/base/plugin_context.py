@@ -17,7 +17,7 @@ from pydantic.json_schema import SkipJsonSchema
 from typing import Annotated, Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
-from automated_security_helper.core.asset import Asset
+from automated_security_helper.core.asset import Asset, AssetKind
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.plugin_manager import AshPluginManager
 
@@ -113,6 +113,19 @@ def _raise_link_refusal(error: ValidationError) -> None:
     refused = (errors[0].get("ctx") or {}).get("error")
     if isinstance(refused, OutputDirLinkRefused):
         raise refused from error
+
+
+def scans_container_image(context: Any) -> bool:
+    """Whether *context*'s scan subject is a container image, by its asset's kind.
+
+    Here, beside the ``asset`` field, so the helpers in ``utils`` can ask: the
+    layer order keeps them from importing ``core``, where ``AssetKind`` lives
+    (tests/unit/test_layer_dag_boundaries.py). Any object with an ``asset``
+    attribute is read; one with no asset is a filesystem scan, as the field
+    documents.
+    """
+    asset = getattr(context, "asset", None)
+    return getattr(asset, "kind", None) == AssetKind.CONTAINER_IMAGE
 
 
 # One PluginContext is built per run and handed to every converter, scanner and
@@ -289,6 +302,19 @@ class PluginContext(BaseModel):
 
     # Private, like _scan_id: per-run state no dump or schema carries.
     _warned_unmatched_engines: Set[str] = PrivateAttr(default_factory=set)
+    _warned_rule_less_suppressions: Set[int] = PrivateAttr(default_factory=set)
+
+    @property
+    def warned_rule_less_suppressions(self) -> Set[int]:
+        """This run's warn-once receipts for a rule-less suppression covering
+        npm-audit findings (``sarif_utils._apply_config_suppression``), keyed by
+        the entry's ``id()``; the entries live on this context's config, so the
+        ids are stable for the run. On the context for the same reason as
+        ``warned_unmatched_engines`` below: the context is the one object built
+        per run and shared with every phase, so one entry warns once per scan
+        (the docs' "once per entry per run"), not once per report pass.
+        """
+        return self._warned_rule_less_suppressions
 
     @property
     def warned_unmatched_engines(self) -> Set[str]:
@@ -302,26 +328,6 @@ class PluginContext(BaseModel):
         state missed worker threads started without a copied context.
         """
         return self._warned_unmatched_engines
-
-    # Private, like _scan_id: per-run state no dump or schema carries.
-    _warned_rule_less_suppressions: Set[int] = PrivateAttr(default_factory=set)
-
-    @property
-    def warned_rule_less_suppressions(self) -> Set[int]:
-        """This run's warn-once receipts for a suppression that names no rule and
-        covers npm-audit findings (``sarif_utils._apply_config_suppression``), as
-        the ``id()`` of the entry in the config this context holds.
-
-        On the context for the reason ``warned_unmatched_engines`` is: the
-        suppression pass runs once per scanner and again over the merged report,
-        so a set built inside the pass warned about one entry once per pass, not
-        once per run. The context is the one object built per run and shared with
-        every pass. The ids name entries of the one config a run holds (the engine
-        builds its context with it and nothing replaces it afterwards), so within a
-        run an id is never another entry's. A context given a different config
-        starts with the receipts of the old one; build a new context instead.
-        """
-        return self._warned_rule_less_suppressions
 
     @field_validator("config")
     def validate_config(cls, value):

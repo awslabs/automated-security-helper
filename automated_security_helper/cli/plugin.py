@@ -769,13 +769,17 @@ def verify_plugins(
                 )
             )
         except PluginLoadError as error:
-            load_errors.append((manifest.name, str(error)))
+            # error_text, not str(error): the text is redacted with the values the
+            # error carries, as this module's other error sites redact theirs. The
+            # print below shows it on one line; --json writes it as a JSON string.
+            load_errors.append((manifest.name, error_text(error)))
     if as_json:
         echo_raw(
             json.dumps(
                 [r.as_dict() for r in reports]
                 + [
-                    {"scanner": name, "error": message} for name, message in load_errors
+                    {PluginKind.SCANNER.value: name, "error": message}
+                    for name, message in load_errors
                 ],
                 indent=2,
             )
@@ -786,9 +790,14 @@ def verify_plugins(
             for row in report.rows:
                 echo(f"  {row.number}. [{row.status.value}] {row.name}")
                 for detail in row.details:
-                    echo(f"       - {detail}")
+                    # A detail quotes repository text (paths, transcript notes,
+                    # exception text); on one line, like every other site here, a
+                    # newline or control in it cannot forge a row of this output.
+                    echo(shown_on_one_line(f"       - {detail}"))
     for _name, message in load_errors:
-        secho(f"Error: {message}", err=True)
+        # The load error quotes the manifest's entry point and the import
+        # error's own text; shown on one line for the same reason.
+        secho(shown_on_one_line(f"Error: {message}"), err=True)
     codes = {r.exit_code for r in reports}
     # A red row outranks a load error (the help's exit-status contract): a run that
     # judged something red says so with 1, whoever else could not be imported.

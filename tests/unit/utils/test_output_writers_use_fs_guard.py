@@ -819,6 +819,13 @@ NOT_WRITES: Dict[Site, Tuple[int, str]] = {
         1,
         "nothing: it reads the member names of the saved image",
     ),
+    # `tarfile.open(image.oci_archive, "r:")` reads a saved image's record member
+    # (manifest.json/index.json, bounded) to key the payload on its own digest;
+    # the detector cannot read the mode of a tarfile.open(). Never a write.
+    (f"{_ASH}/utils/image_digest_resolver.py", "payload_digest", "Path.open"): (
+        1,
+        "nothing: it reads the saved image's record member, bounded",
+    ),
     (f"{_ASH}/cli/mcp_server.py", "_keep_stdout_off_the_wire", "os.open"): (
         1,
         _STDOUT_DIVERSION,
