@@ -167,7 +167,7 @@ import os
 import stat
 import struct
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import IO, Callable, Iterator, List, Optional, Tuple, Type
@@ -405,29 +405,32 @@ def _reserved_on_windows(component: str) -> bool:
 class ZipRules:
     """The limits one extraction applies, and the check each member name passes.
 
-    The defaults are the source-archive limits. The MCP finalize builds its own each
-    time it runs, from its module's names, so a limit set there is the one applied.
+    The defaults are the source-archive limits, read from this module's names when the
+    rules are made, as ``MAX_ARCHIVE_BYTES`` is read when an archive is: a limit set
+    on this module is the one applied. The MCP finalize builds its own each time it
+    runs, from its module's names, for the same reason.
     """
 
-    max_members: int = MAX_MEMBERS
-    max_extracted_bytes: int = MAX_EXTRACTED_BYTES
+    max_members: int = field(default_factory=lambda: MAX_MEMBERS)
+    max_extracted_bytes: int = field(default_factory=lambda: MAX_EXTRACTED_BYTES)
     #: Given each member's name as the archive spells it, and then, for a member whose
     #: Unicode path field restates that name in other characters, the name the field
     #: gives, which zipfile from 3.12 extracts it under; raises to refuse.
     validate_name: Callable[[str], None] = validate_member_name
-    symlink_excerpt_bytes: int = SYMLINK_TARGET_EXCERPT_BYTES
+    symlink_excerpt_bytes: int = field(
+        default_factory=lambda: SYMLINK_TARGET_EXCERPT_BYTES
+    )
     #: The archives the link refusal names: "symlinks are not allowed in <archives>".
     archives: str = SOURCE_ARCHIVES
 
 
-#: The rules ``extract_source_archive`` applies.
-SOURCE_ARCHIVE_RULES = ZipRules()
-
-
 def admit_zip_members(
-    archive: zipfile.ZipFile, rules: ZipRules = SOURCE_ARCHIVE_RULES
+    archive: zipfile.ZipFile, rules: Optional[ZipRules] = None
 ) -> List[zipfile.ZipInfo]:
     """Return every member of ``archive`` when ``rules`` admit them all.
+
+    ``rules`` are, when none are given, ``ZipRules()``: the source-archive limits as
+    this module's names hold them now.
 
     Writes nothing. Reads the file ``archive`` was opened on where its records are (the
     end records, the central directory, each member's local header and any data
@@ -446,6 +449,8 @@ def admit_zip_members(
             exception of this module's own, is raised as it is.
         ValueError: ``archive`` is closed.
     """
+    if rules is None:
+        rules = ZipRules()
     members = archive.infolist()
     if len(members) > rules.max_members:
         raise SourceArchiveRefused(
@@ -839,14 +844,14 @@ def _refuse_a_second_name(
         for named in _unicode_path_names(info, extra, where):
             given = True
             if named != restated:
-                field = (
+                source = (
                     "its Unicode path field"
                     if where == _CENTRAL_DIRECTORY_ENTRY
                     else "the Unicode path field of its local header"
                 )
                 raise SourceArchiveRefused(
                     SourceArchiveRefusal.UNICODE_PATH_MISMATCH,
-                    f"zip entry {info.orig_filename!r} is named {named!r} by {field}: "
+                    f"zip entry {info.orig_filename!r} is named {named!r} by {source}: "
                     "the field names another file",
                 )
     return restated if given else None
@@ -963,7 +968,7 @@ def open_zip(handle: IO[bytes]) -> zipfile.ZipFile:
 def extract_zip_members(
     archive: zipfile.ZipFile,
     destination: Path,
-    rules: ZipRules = SOURCE_ARCHIVE_RULES,
+    rules: Optional[ZipRules] = None,
 ) -> None:
     """Extract every member of an open ``archive`` into ``destination``, once admitted.
 

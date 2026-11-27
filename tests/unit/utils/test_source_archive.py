@@ -1942,6 +1942,68 @@ class TestTheFileItselfIsChecked:
         assert isinstance(failed.value, PermissionError)
 
 
+class TestTheLimitsAreReadWhenAnArchiveIsRead:
+    """One policy for the four limits: each is read from this module's name when the
+    archive is read, as ``MAX_ARCHIVE_BYTES`` always was, so a limit set there is the
+    one applied. Red at the base for the three ``ZipRules`` took when the module loaded:
+    patching them changed nothing."""
+
+    def test_the_member_count(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sa, "MAX_MEMBERS", 2)
+        payload = _zip({"a": b"", "b": b"", "c": b""})
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.TOO_MANY_MEMBERS
+        assert str(refused) == "too many files in zip: 3 > 2"
+
+    def test_the_extracted_size(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sa, "MAX_EXTRACTED_BYTES", 10)
+        payload = _zip({"a.py": b"x" * 11})
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.EXTRACTED_TOO_LARGE
+        assert str(refused) == "extracted size exceeds 10 bytes (at entry 'a.py')"
+
+    def test_how_much_of_a_links_target_a_refusal_quotes(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sa, "SYMLINK_TARGET_EXCERPT_BYTES", 4)
+        payload = _zip_with_modes({"evil": (b"/outside/the/tree", 0o120777)})
+
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, payload), tmp_path / "tree"
+        )
+
+        assert refused.kind is Kind.SYMLINK_MEMBER
+        assert str(refused) == (
+            "symlink 'evil' -> '/out...': symlinks are not allowed in source archives"
+        )
+
+    def test_rules_made_after_a_limit_is_set_hold_it(self, monkeypatch):
+        monkeypatch.setattr(sa, "MAX_MEMBERS", 7)
+        monkeypatch.setattr(sa, "MAX_EXTRACTED_BYTES", 8)
+        monkeypatch.setattr(sa, "SYMLINK_TARGET_EXCERPT_BYTES", 9)
+
+        rules = sa.ZipRules()
+
+        assert (
+            rules.max_members,
+            rules.max_extracted_bytes,
+            rules.symlink_excerpt_bytes,
+        ) == (7, 8, 9)
+
+    def test_rules_given_by_the_caller_are_not_changed_by_the_module(self, monkeypatch):
+        monkeypatch.setattr(sa, "MAX_MEMBERS", 7)
+
+        rules = sa.ZipRules(max_members=3)
+
+        assert rules.max_members == 3
+
+
 class TestWhatZipfileCannotReadIsARefusal:
     """Every way zipfile fails on a crafted archive reaches the caller as a refusal.
 
