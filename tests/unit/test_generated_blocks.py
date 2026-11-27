@@ -926,24 +926,52 @@ def test_on_windows_a_swap_that_is_always_refused_gives_up_and_names_the_page(
     original = page(begin(), "stale", end()).encode("utf-8")
     path = put(tmp_path, "page.md", original)
     listing = sorted(os.listdir(tmp_path))
+    raised = []
+
+    def refusal():
+        raised.append(make_error())
+        return raised[-1]
 
     with monkeypatch.context() as patch:
-        calls, pauses = stub_the_swap(patch, "win32", None, make_error)
+        calls, pauses = stub_the_swap(patch, "win32", None, refusal)
         with pytest.raises(PermissionError, match="planted") as caught:
             gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
 
-    # A few tries, a short pause between each two of them and none after the last.
-    assert 3 <= len(calls) <= 10, len(calls)
-    assert len(pauses) == len(calls) - 1
+    # The bounded number of tries, a short pause between each two of them and none
+    # after the last.
+    assert len(calls) == gb._REPLACE_ATTEMPTS, len(calls)
+    assert len(pauses) == gb._REPLACE_ATTEMPTS - 1, pauses
     assert all(0 < pause <= 1 for pause in pauses), pauses
-    # The error names the page and keeps the last refusal as its cause.
+    assert sum(pauses) < 1, pauses
+    # The error names the page and keeps the last refusal, not the first, as its cause.
     error = caught.value
     assert error.filename == os.path.realpath(path)
     assert "page.md" in str(error)
-    assert isinstance(error.__cause__, PermissionError)
+    assert error.__cause__ is raised[-1]
+    assert error.__cause__ is not raised[0]
     # Nothing was written, and no temporary file is left beside the page.
     assert path.read_bytes() == original
     assert sorted(os.listdir(tmp_path)) == listing
+
+
+def test_the_swap_retry_is_a_few_short_tries_and_not_a_long_wait():
+    """A generator run holds a page another program has open for as long as it
+    retries, so the tries stay few and the first pause short."""
+    assert 3 <= gb._REPLACE_ATTEMPTS <= 10
+    assert 0 < gb._REPLACE_PAUSE <= 0.5
+
+
+def test_on_windows_a_swap_that_is_not_refused_waits_for_nothing(tmp_path, monkeypatch):
+    path = put(tmp_path, "page.md", page(begin(), "stale", end()))
+
+    with monkeypatch.context() as patch:
+        calls, pauses = stub_the_swap(patch, "win32", 0, held_open)
+        gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    assert len(calls) == 1
+    assert pauses == []
+    assert text_of(path) == page(begin(), *ROWS, end())
+    assert os.listdir(tmp_path) == ["page.md"]
 
 
 def test_on_windows_a_failure_that_is_not_a_permission_error_is_not_tried_again(
