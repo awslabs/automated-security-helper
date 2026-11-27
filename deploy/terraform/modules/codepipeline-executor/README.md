@@ -12,7 +12,8 @@ Source  ->  CodeCommit (existing repository, read only)
 Scan    ->  N CodeBuild actions, all at run_order 1 (parallel)
             each: ash scan --shard-index <i> --shard-count <n>
 Merge   ->  one CodeBuild action
-            ash merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
+            ash results merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
+            (ash merge before ASH 3.9; the action asks the image's ASH which it has)
 ```
 
 ## The shard contract
@@ -38,7 +39,8 @@ A shard *does* fail on a real crash: with that flag in effect a non-zero exit me
 a genuine failure rather than findings, so it is safe to propagate, and failing
 there stops the pipeline before anything forms a verdict from incomplete data.
 
-The verdict is `ash merge`'s exit code, propagated unchanged:
+The verdict is the exit code of `ash results merge` (`ash merge` before ASH 3.9),
+propagated unchanged:
 
 | Exit | Meaning |
 |---|---|
@@ -60,8 +62,8 @@ would be a third copy of a table that has already drifted once in this codebase 
 drift — and the next time it drifted, this pipeline would silently report a
 different verdict than `ash scan` for identical findings.
 
-`min_severity` maps directly onto `ash merge --min-severity` for the same reason:
-one implementation of "does this breach".
+`min_severity` maps directly onto `--min-severity` of `ash results merge` (`ash merge`
+before ASH 3.9) for the same reason: one implementation of "does this breach".
 
 ### `min_severity` is a floor, so lower is stricter
 
@@ -195,7 +197,7 @@ tree (bandit's `.bandit`, grype's `.grype.yaml`).
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-scan"` | |
 | `source_branch` | — | `string` | `"main"` | |
-| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`, lower-cased. One of `critical`, `high`, `medium` or `low`, in any case; any other value fails at plan time. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
+| `min_severity` | — | `string` | `"low"` | Passed to `--min-severity` of `ash results merge` (`ash merge` before ASH 3.9), lower-cased. One of `critical`, `high`, `medium` or `low`, in any case; any other value fails at plan time. A floor, so lower is stricter, applied after `global_settings.severity_threshold`; see above. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `enable_eventbridge_trigger` | — | `bool` | `true` | Preferred over polling. |
 | `build_compute_type` | — | `string` | `BUILD_GENERAL1_LARGE` | Scanners are CPU-bound. |
@@ -262,13 +264,12 @@ makes sense if the shards agreed on what to scan. Both projects therefore receiv
 the same `base_config_ssm_parameter_name`. Overriding the configuration per shard
 would make the merged verdict meaningless.
 
-**`ash merge` and the shard CLI flags are a dependency on work landing elsewhere.** At the commit
-this module was written against, `automated_security_helper/core/sharding.py` and
-the scan-phase shard selection exist, but `--shard-index` / `--shard-count` are
-not yet wired onto `ash scan`, and there is no `ash merge` command or `--results`
-flag. This module is written against the stated contract for both. It will plan
-and apply against an image that lacks them; the shard and merge actions will fail
-at run time until the image is built from a revision that has them.
+**The shard options and the merge command need ASH 3.8.0 or later.** Each shard action
+passes `--shard-index` and `--shard-count` to `ash scan`, and the merge action runs
+`ash results merge` (`ash merge` before ASH 3.9). ASH 3.7.0 and 3.7.1 have neither:
+they ignore the shard options, so no shard scans only its part, and they have no
+merge command, so the merge action fails. The module plans and applies against an
+image built from one of them; the problem shows at run time.
 
 ## What is first-party and what is not
 

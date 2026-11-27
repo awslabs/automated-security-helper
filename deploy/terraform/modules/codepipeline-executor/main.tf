@@ -6,7 +6,8 @@
 #   Source  -> CodeCommit
 #   Scan    -> N CodeBuild actions, all at run_order 1 so they run in parallel,
 #              each `ash scan --shard-index <i> --shard-count <n>`
-#   Merge   -> one CodeBuild action, `ash merge --results ... --output-dir ...`
+#   Merge   -> one CodeBuild action, `ash results merge --results ... --output-dir ...`
+#              (`ash merge` before ASH 3.9; the action asks the image's ASH which it has)
 #
 # The merge action owns the verdict. This is the single most important property of
 # the design: a shard that happens to own no findings exits 0, so gating on shard
@@ -526,11 +527,11 @@ resource "aws_codebuild_project" "merge" {
       }
     }
 
-    # Passed straight through to `ash merge --min-severity`. The threshold is
-    # evaluated by ASH, not compared here, so there is exactly one
-    # implementation of "does this breach". Lowered, because the validation
-    # accepts any case and ASH should get the spelling it ranks whatever the
-    # release.
+    # Passed straight through to `--min-severity` of `ash results merge` (`ash merge`
+    # before ASH 3.9). The threshold is evaluated by ASH, not compared here, so
+    # there is exactly one implementation of "does this breach". Lowered, because
+    # the validation accepts any case and ASH should get the spelling it ranks
+    # whatever the release.
     environment_variable {
       name  = "MIN_SEVERITY"
       value = lower(var.min_severity)
