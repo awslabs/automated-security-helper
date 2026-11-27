@@ -29,7 +29,6 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.uv_tool_mixin import _tool_name
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
-from automated_security_helper.core.exceptions import ReasonCode
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
     DEFAULT_EXCLUDES,
@@ -488,11 +487,10 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 "only copy ASH can run here, and it does not run unverified.",
                 level=logging.WARNING,
             )
-            self._record_unavailable(
+            self._record_tool_unusable(
                 f"{self.command} cannot be used: the plugin's values hook {failure}, "
                 "so the copy on PATH could not be verified and its records could "
-                "not be redacted. Fix the plugin's values hook.",
-                ReasonCode.TOOL_NOT_USABLE,
+                "not be redacted. Fix the plugin's values hook."
             )
             return False
         values: Tuple[str, ...] = read.values
@@ -548,9 +546,8 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 level=logging.ERROR,
             )
             summary = getattr(answer, "summary", "") or answer.detail
-            self._record_unavailable(
-                _shown(f"{self.command} cannot be used: {summary}. {remedy}"),
-                ReasonCode.TOOL_NOT_USABLE,
+            self._record_tool_unusable(
+                _shown(f"{self.command} cannot be used: {summary}. {remedy}")
             )
             return False
         self._plugin_log(

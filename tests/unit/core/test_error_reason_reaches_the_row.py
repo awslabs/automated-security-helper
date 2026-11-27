@@ -409,12 +409,14 @@ class TestASentenceThatSaysWhyOutranksTheCounts:
         assert metrics.error_reason == DEFAULT_SENTENCES[ReasonCode.RUN_FAILED]
         assert unified_metrics.recorded_error_sentence(results, "example-tool") is None
 
-    @pytest.mark.parametrize("home", ["raw_results", "errors"])
-    def test_a_failure_report_with_unreadable_counters_is_a_failed_run_too(self, home):
+    def test_a_failure_report_with_unreadable_counters_is_a_failed_run_too(self):
+        """Unreadable counters are another reason made from counts, so a crash gets
+        ``run_failed`` for them too. (A report whose error sits in its own ``errors``
+        carries no failure mark and keeps ``counters_unusable``.)"""
         results = _model(
             {
                 "source": _raised_report(
-                    home,
+                    "raw_results",
                     error="templates/x.yaml: could not be read",
                     targets_attempted="3",
                     targets_failed=0,

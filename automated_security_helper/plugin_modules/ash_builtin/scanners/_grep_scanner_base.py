@@ -329,6 +329,13 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         self.dependency_unavailable_reason = reason
         self._unavailable_with = (reason, code)
 
+    def _record_tool_unusable(self, reason: str) -> None:
+        """Record that the scanner declines because the copy of its tool ASH found
+        cannot be run (one inside the scanned tree, or one it could not verify), as
+        ``tool_not_usable``. The subclasses call this, so only the base imports the
+        reason codes."""
+        self._record_unavailable(reason, ReasonCode.TOOL_NOT_USABLE)
+
     def _unavailable_code(self) -> str:
         """The code recorded with the current reason, or ``run_failed`` for a reason
         that was set without one."""

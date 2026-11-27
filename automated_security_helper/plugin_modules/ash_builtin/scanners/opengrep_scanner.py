@@ -666,7 +666,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         if found is None:
             refusal = in_tree_refusal(_tool_name(self))
             if refusal is not None:
-                self._record_unavailable(refusal, ReasonCode.TOOL_NOT_USABLE)
+                self._record_tool_unusable(refusal)
                 self._plugin_log(refusal, level=logging.WARNING)
         return found is not None
 

@@ -1006,10 +1006,14 @@ def test_control_a_site_with_its_reason_removed_fails_its_case(
     )
     dropped_site = _site_of(error, dropped=True)
     assert dropped_site is not None
-    assert str(dropped_site) == str(kept_site), (
+    # The two runs sit in directories of their own, and some sites name one in their
+    # text: compared with the directory each run used written the same way.
+    dropped_text = str(dropped_site).replace(str(dropped_dir), "<dir>")
+    kept_text = str(kept_site).replace(str(kept_dir), "<dir>")
+    assert dropped_text == kept_text, (
         "the control failed at another site than the case it controls",
-        str(dropped_site),
-        str(kept_site),
+        dropped_text,
+        kept_text,
     )
     assert isinstance(dropped_site, type(kept_site)) or isinstance(
         kept_site, type(dropped_site)
