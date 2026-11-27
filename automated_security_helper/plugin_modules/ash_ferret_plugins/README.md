@@ -439,17 +439,17 @@ Results are written to:
 uv run ash scan fs /path/to/code
 
 # Run only Ferret Scan
-uv run ash scan fs /path/to/code --scanners ferret-scan
+uv run ash scan fs /path/to/code --only-scanners ferret-scan
 
 # Run with ferret-scan's own debug output
-uv run ash scan fs /path/to/code --scanners ferret-scan -o ferret_debug=true
+uv run ash scan fs /path/to/code --only-scanners ferret-scan -o ferret_debug=true
 
 # Run with ferret-scan's own verbose output
-uv run ash scan fs /path/to/code --scanners ferret-scan -o ferret_verbose=true
+uv run ash scan fs /path/to/code --only-scanners ferret-scan -o ferret_verbose=true
 
 # Run with a custom config file
 uv run ash scan fs /path/to/code \
-    --scanners ferret-scan \
+    --only-scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.config_file=/path/to/custom.yaml"
 ```
 
