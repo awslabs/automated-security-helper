@@ -21,6 +21,7 @@ for the bind.
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 import socket
@@ -193,6 +194,24 @@ class TestEngineDetection:
             assert detect_container_engine() == ContainerEngine.PODMAN
         finally:
             server.close()
+
+
+class TestTheNoEngineHelper:
+    def test_it_leaves_offline_mode_off(self, monkeypatch, tmp_path):
+        # An image built for an offline run carries ASH_OFFLINE in its
+        # environment, and the offline skip returns a reference before the
+        # tool is started. Every row that points the engine detection at this
+        # suite's own paths also expects the scan to go on to the spawn, so the
+        # helper that does the pointing turns offline mode off as well.
+        from automated_security_helper.core.constants import is_offline_mode
+
+        monkeypatch.setenv("ASH_OFFLINE", "true")
+        assert is_offline_mode() is True
+
+        _no_engine(monkeypatch, tmp_path)
+
+        assert "ASH_OFFLINE" not in os.environ
+        assert is_offline_mode() is False
 
 
 class TestArchiveScheme:
@@ -753,3 +772,32 @@ class TestSyftImageDispatch:
         assert scanner._nothing_scanned_reason is not None
         assert "offline" in scanner._nothing_scanned_reason
         assert "archive" in scanner._nothing_scanned_reason
+
+    @pytest.mark.parametrize("engine_present", [False, True])
+    def test_an_offline_ref_skip_is_logged_as_one_warning(
+        self, monkeypatch, tmp_path, caplog, engine_present
+    ):
+        # The skip is the only record that the image was never looked at, so
+        # the log line is a warning, with a daemon present or not (the skip
+        # ignores the engine), and it keeps its reason and its closing words.
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
+            SyftScanner,
+            SyftScannerConfig,
+        )
+
+        _no_engine(monkeypatch, tmp_path)
+        if engine_present:
+            monkeypatch.setenv("DOCKER_HOST", "tcp://docker:2375")
+        monkeypatch.setenv("ASH_OFFLINE", "true")
+        scanner = SyftScanner(context=_context(tmp_path), config=SyftScannerConfig())
+
+        with caplog.at_level(logging.INFO, logger="ash"):
+            assert scanner.scan_image(ImageLocator(ref=IMAGE_REF)) is True
+
+        records = [
+            record
+            for record in caplog.records
+            if "Not running the tool" in record.getMessage()
+        ]
+        assert [record.levelno for record in records] == [logging.WARNING]
+        assert "was not scanned: offline mode" in records[0].getMessage()
