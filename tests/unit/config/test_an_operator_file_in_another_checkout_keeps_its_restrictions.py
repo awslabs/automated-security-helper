@@ -621,9 +621,35 @@ def test_control_a_value_the_scanner_would_refuse_is_left_for_it(option: str) ->
 _MCP_CONFIG_MODULE = (
     "automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner"
 )
+_PLUGINS = "automated_security_helper.plugin_modules"
 FLOOR_MODELS = [
     ("mcp-config", option, _MCP_CONFIG_MODULE, "McpConfigScannerConfigOptions")
     for option in (*BOOLEANS, *LISTS)
+] + [
+    (
+        "trivy-repo",
+        "module_dir",
+        f"{_PLUGINS}.ash_trivy_plugins.trivy_repo_scanner",
+        "TrivyRepoScannerConfigOptions",
+    ),
+    (
+        "actionlint",
+        "shellcheck",
+        f"{_PLUGINS}.ash_builtin.scanners.actionlint_scanner",
+        "ActionlintScannerConfigOptions",
+    ),
+    (
+        "actionlint",
+        "pyflakes",
+        f"{_PLUGINS}.ash_builtin.scanners.actionlint_scanner",
+        "ActionlintScannerConfigOptions",
+    ),
+    (
+        "cfn-guard",
+        "rules_paths",
+        f"{_PLUGINS}.ash_builtin.scanners.cfn_guard_scanner",
+        "CfnGuardScannerConfigOptions",
+    ),
 ]
 
 
@@ -713,3 +739,172 @@ def test_an_in_tree_config_that_leaves_mcp_config_out_keeps_the_operator_s(
     assert options.allowed_command_prefixes == [R]
     # An omission is not the config's choice, so no warning names it.
     assert not [w for w in _warnings(ash_log) if "scanners.mcp-config.options" in w]
+
+
+# ---------------------------------------------------------------------------
+# An option the operator sets keeps the operator's value under a config that is
+# not the operator's: trivy-repo's module_dir, actionlint's shellcheck and pyflakes,
+# cfn-guard's rules_paths
+# ---------------------------------------------------------------------------
+#
+# Each leaves a scanner running without the operator's modules, rules or program
+# when the config leaves it out or empties it, and a config that writes another
+# value either has it refused by the scanner (so the scanner runs without the
+# operator's) or, for the program of actionlint's own name, has it looked up on PATH
+# in place of the operator's.
+
+#: (scanner, option, the operator's value, another value a config writes, the empty
+#: value of the option). The other value for the two programs is the flag's own
+#: name, the one the scanner accepts from any config.
+OPERATOR_SET = [
+    pytest.param(
+        "trivy-repo",
+        "module_dir",
+        "/opt/ops/modules",
+        "/opt/repo/modules",
+        None,
+        id="trivy-repo.module_dir",
+    ),
+    pytest.param(
+        "actionlint",
+        "shellcheck",
+        "/opt/ops/bin/shellcheck",
+        "shellcheck",
+        "",
+        id="actionlint.shellcheck",
+    ),
+    pytest.param(
+        "actionlint",
+        "pyflakes",
+        "/opt/ops/bin/pyflakes",
+        "pyflakes",
+        "",
+        id="actionlint.pyflakes",
+    ),
+    pytest.param(
+        "cfn-guard",
+        "rules_paths",
+        ["/opt/ops/rules"],
+        ["/opt/repo/rules"],
+        [],
+        id="cfn-guard.rules_paths",
+    ),
+]
+
+
+def _option(config: AshConfig, scanner: str, option: str) -> Any:
+    """An option as the config holds it; None where it has no section or option."""
+    section = config.get_plugin_config("scanner", scanner) or {}
+    return (section.get("options") or {}).get(option)
+
+
+def _config_with(scanner: str, option: str, value: Any) -> AshConfig:
+    return _loaded({"scanners": {scanner: {"options": {option: value}}}})
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_an_operator_set_option_the_config_leaves_out_keeps_the_operator_s(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_an_operator_set_option_the_config_empties_keeps_the_operator_s(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _config_with(scanner, option, empty)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_a_value_the_config_writes_over_an_operator_set_option_gives_way_to_the_operator_s(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _config_with(scanner, option, other)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_control_an_operator_set_option_the_config_repeats_is_unchanged(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _config_with(scanner, option, operator)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_control_an_option_the_operator_leaves_unset_is_not_touched(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert not _option(config, scanner, option)
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_control_a_value_the_config_writes_stands_when_the_operator_sets_none(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _loaded({})
+    config = _config_with(scanner, option, other)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == other
+
+
+ACTIONLINT_OPERATOR = """\
+project_name: operator
+scanners:
+  actionlint:
+    options:
+      shellcheck: /opt/ops/bin/shellcheck
+"""
+
+ACTIONLINT_OWN_NAME = """\
+project_name: repository
+scanners:
+  actionlint:
+    options:
+      shellcheck: shellcheck
+"""
+
+
+def test_an_in_tree_config_cannot_swap_the_operator_s_shellcheck_for_its_own_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=ACTIONLINT_OPERATOR,
+        repository_text=ACTIONLINT_OWN_NAME,
+    )
+
+    assert _option(config, "actionlint", "shellcheck") == "/opt/ops/bin/shellcheck"
+    named = [
+        w for w in _warnings(ash_log) if "scanners.actionlint.options.shellcheck" in w
+    ]
+    assert len(named) == 1, _warnings(ash_log)

@@ -579,3 +579,24 @@ def test_control_an_upload_still_tightens_a_profile_with_no_mcp_config_values(
     assert options["require_local"] is True
     assert options["remote_url_prefixes"] == [MCP_PREFIX]
     assert options["allowed_command_prefixes"] == [MCP_COMMANDS]
+
+
+# actionlint's shellcheck names the program run on every script of the scanned
+# tree. An upload that leaves it out must not turn the profile's choice into the
+# default, which runs nothing.
+
+
+def test_an_upload_that_leaves_out_the_profile_s_shellcheck_keeps_it(_server) -> None:
+    from automated_security_helper.utils.config_trust import set_by_operator
+
+    _bind_profile(
+        _server["tmp"],
+        "scanners:\n  actionlint:\n    options:\n      shellcheck: shellcheck\n",
+    )
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    shown = config.get_plugin_config("scanner", "actionlint")["options"]["shellcheck"]
+    assert shown == "shellcheck"
+    assert set_by_operator(config, "scanners.actionlint.options.shellcheck", shown)

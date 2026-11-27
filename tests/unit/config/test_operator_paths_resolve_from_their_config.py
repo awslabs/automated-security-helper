@@ -41,6 +41,7 @@ from automated_security_helper.utils.config_trust import (
     OperatorPath,
     operator_path,
     operator_paths,
+    set_by_operator,
 )
 from automated_security_helper.utils.uv_tool_runner import UVToolRunner
 
@@ -529,8 +530,27 @@ _SET_BY_THE_TREE = [
 ]
 
 
-@pytest.mark.parametrize("operator_sets_it", [True, False])
-@pytest.mark.parametrize("path", _SET_BY_THE_TREE, ids=lambda p: p.option.id)
+#: The two of those options whose operator-set value replaces whatever a config in
+#: the tree writes for them (``restrictions_kept.OPERATOR_FLOORS``). The test below
+#: keeps the tree's value for the others, and for these two where the operator
+#: sets none.
+_FLOORED_PATHS = [
+    path
+    for path in _SET_BY_THE_TREE
+    if (path.scanner, path.name)
+    in {("trivy-repo", "module_dir"), ("cfn-guard", "rules_paths")}
+]
+
+
+@pytest.mark.parametrize(
+    "path, operator_sets_it",
+    [
+        pytest.param(path, operator_sets_it, id=f"{path.option.id}-{operator_sets_it}")
+        for path in _SET_BY_THE_TREE
+        for operator_sets_it in [True, False]
+        if not (operator_sets_it and path in _FLOORED_PATHS)
+    ],
+)
 def test_a_config_in_the_tree_is_left_as_written_and_is_not_the_operators(
     tmp_path: Path, path: ScannerPath, operator_sets_it: bool
 ) -> None:
@@ -538,7 +558,9 @@ def test_a_config_in_the_tree_is_left_as_written_and_is_not_the_operators(
 
     With ``operator_sets_it`` the operator's file sets the same relative value,
     which is anchored at that file's directory, so the two no longer compare
-    equal and the tree's value is not taken for the operator's.
+    equal and the tree's value is not taken for the operator's. The options the
+    operator's value replaces are not among these rows when the operator sets one
+    (``_FLOORED_PATHS``); the tests below hold them.
     """
     repo = _repo(tmp_path)
     _touch(repo / "tools" / "named.cfg")
@@ -558,6 +580,221 @@ def test_a_config_in_the_tree_is_left_as_written_and_is_not_the_operators(
     chosen = _chosen(config, path, repo)
     assert chosen.path is None
     assert chosen.refusal == NOT_THE_OPERATORS
+
+
+# --------------------------------------------------------------------------- #
+# An option the operator sets stays the operator's under a config in the tree
+# --------------------------------------------------------------------------- #
+#
+# A config in the tree replaces the operator's config instead of adding to it, so
+# an option it leaves out or empties read as the plugin's default, and one it writes
+# is the tree's own value. The scanner refuses the tree's path and runs without the
+# operator's modules or rules; for the programs actionlint runs on a script, the
+# tree's value can be the flag's own name, which the scanner accepts and looks up on
+# PATH in place of the operator's. For these four options the operator's value
+# stays in force (``restrictions_kept.OPERATOR_FLOORS``).
+
+
+def _resolved_value(config: AshConfig, scanner: str, option: str) -> Any:
+    """The option as the resolved config holds it; None without such a section or option."""
+    return _options(config, scanner).get(option)
+
+
+def _resolve_under_the_operator(
+    tmp_path: Path,
+    repo: Path,
+    operator_document: Dict[str, Any],
+    tree_document: Dict[str, Any],
+) -> AshConfig:
+    """The tree's config in *repo*, resolved with the operator's file as the trusted base."""
+    project = _write(repo / ".ash.yaml", tree_document)
+    operator = _write(tmp_path / "operator" / "ash.yaml", operator_document)
+    return resolve_config(
+        config_path=project, source_dir=repo, trusted_config_path=operator
+    )
+
+
+#: What a config in the tree writes to empty each path option the operator sets.
+_EMPTY_PATH_OPTION: Dict[str, Any] = {"module_dir": None, "rules_paths": []}
+
+
+def test_the_floored_path_options_are_the_two() -> None:
+    assert [path.option.id for path in _FLOORED_PATHS] == [
+        "cfn-guard.rules_paths",
+        "trivy-repo.module_dir",
+    ]
+
+
+@pytest.mark.parametrize("path", _FLOORED_PATHS, ids=lambda p: p.option.id)
+def test_a_config_in_the_tree_that_leaves_out_an_operator_s_path_option_keeps_the_operator_s(
+    tmp_path: Path, path: ScannerPath
+) -> None:
+    repo = _repo(tmp_path)
+    wanted = _touch(tmp_path / "operator" / "tools" / "named.cfg")
+
+    config = _resolve_under_the_operator(
+        tmp_path,
+        repo,
+        path.option.document("tools/named.cfg"),
+        {"project_name": "scanned"},
+    )
+
+    assert _resolved_value(config, path.scanner, path.name)
+    assert _chosen(config, path, repo).path == wanted.resolve()
+
+
+@pytest.mark.parametrize("path", _FLOORED_PATHS, ids=lambda p: p.option.id)
+def test_a_config_in_the_tree_that_empties_an_operator_s_path_option_keeps_the_operator_s(
+    tmp_path: Path, path: ScannerPath
+) -> None:
+    repo = _repo(tmp_path)
+    wanted = _touch(tmp_path / "operator" / "tools" / "named.cfg")
+    emptied = {path.name: _EMPTY_PATH_OPTION[path.name]}
+
+    config = _resolve_under_the_operator(
+        tmp_path,
+        repo,
+        path.option.document("tools/named.cfg"),
+        {
+            "project_name": "scanned",
+            "scanners": {path.scanner: {"options": emptied}},
+        },
+    )
+
+    assert _resolved_value(config, path.scanner, path.name)
+    assert _chosen(config, path, repo).path == wanted.resolve()
+
+
+@pytest.mark.parametrize("path", _FLOORED_PATHS, ids=lambda p: p.option.id)
+def test_a_config_in_the_tree_that_writes_another_value_gives_way_to_the_operator_s(
+    tmp_path: Path, path: ScannerPath
+) -> None:
+    """The tree's relative value names the tree's file; the operator's is anchored
+    at the operator's own file, so the two differ and the operator's stays."""
+    repo = _repo(tmp_path)
+    _touch(repo / "tools" / "named.cfg")
+    wanted = _touch(tmp_path / "operator" / "tools" / "named.cfg")
+
+    config = _resolve_under_the_operator(
+        tmp_path,
+        repo,
+        path.option.document("tools/named.cfg"),
+        path.option.document("tools/named.cfg") | {"project_name": "scanned"},
+    )
+
+    assert _chosen(config, path, repo).path == wanted.resolve()
+
+
+@pytest.mark.parametrize("path", _FLOORED_PATHS, ids=lambda p: p.option.id)
+def test_control_a_path_option_no_config_sets_stays_unset(
+    tmp_path: Path, path: ScannerPath
+) -> None:
+    config = _resolve_under_the_operator(
+        tmp_path,
+        _repo(tmp_path),
+        {"project_name": "operator"},
+        {"project_name": "scanned"},
+    )
+
+    assert not _resolved_value(config, path.scanner, path.name)
+
+
+@pytest.mark.parametrize("option", ["shellcheck", "pyflakes"])
+def test_a_config_in_the_tree_that_leaves_out_the_operator_s_actionlint_program_keeps_it(
+    tmp_path: Path, option: str
+) -> None:
+    config = _resolve_under_the_operator(
+        tmp_path,
+        _repo(tmp_path),
+        {"scanners": {"actionlint": {"options": {option: option}}}},
+        {"project_name": "scanned"},
+    )
+
+    assert _resolved_value(config, "actionlint", option) == option
+    key = f"scanners.actionlint.options.{option}"
+    assert set_by_operator(config, key, option) is True
+
+
+@pytest.mark.parametrize("option", ["shellcheck", "pyflakes"])
+def test_a_config_in_the_tree_that_empties_the_operator_s_actionlint_program_keeps_it(
+    tmp_path: Path, option: str
+) -> None:
+    config = _resolve_under_the_operator(
+        tmp_path,
+        _repo(tmp_path),
+        {"scanners": {"actionlint": {"options": {option: option}}}},
+        {
+            "project_name": "scanned",
+            "scanners": {"actionlint": {"options": {option: ""}}},
+        },
+    )
+
+    assert _resolved_value(config, "actionlint", option) == option
+    key = f"scanners.actionlint.options.{option}"
+    assert set_by_operator(config, key, option) is True
+
+
+@pytest.mark.parametrize("option", ["shellcheck", "pyflakes"])
+def test_a_config_in_the_tree_that_sets_the_actionlint_program_to_its_own_name_gives_way_to_the_operator_s(
+    tmp_path: Path, option: str
+) -> None:
+    """The flag's own name is the one value the scanner accepts from a config in the
+    tree, and looks up on PATH, so it would replace the program the operator chose."""
+    chosen = (tmp_path / "operator" / "bin" / option).as_posix()
+
+    config = _resolve_under_the_operator(
+        tmp_path,
+        _repo(tmp_path),
+        {"scanners": {"actionlint": {"options": {option: chosen}}}},
+        {
+            "project_name": "scanned",
+            "scanners": {"actionlint": {"options": {option: option}}},
+        },
+    )
+
+    assert _resolved_value(config, "actionlint", option) == chosen
+    key = f"scanners.actionlint.options.{option}"
+    assert set_by_operator(config, key, chosen) is True
+
+
+@pytest.mark.parametrize("option", ["shellcheck", "pyflakes"])
+def test_control_an_actionlint_program_only_the_tree_sets_stays_the_tree_s(
+    tmp_path: Path, option: str
+) -> None:
+    config = _resolve_under_the_operator(
+        tmp_path,
+        _repo(tmp_path),
+        {"project_name": "operator"},
+        {
+            "project_name": "scanned",
+            "scanners": {"actionlint": {"options": {option: option}}},
+        },
+    )
+
+    assert _resolved_value(config, "actionlint", option) == option
+
+
+def test_control_trivy_repo_secret_config_file_already_comes_from_the_operator(
+    tmp_path: Path,
+) -> None:
+    """The one option of the four item-2 kinds a config in the tree already cannot
+    replace: ``confine_scanner_config_files`` gives it the trusted base's value."""
+    wanted = _touch(tmp_path / "operator" / "secret.yaml")
+
+    config = _resolve_under_the_operator(
+        tmp_path,
+        _repo(tmp_path),
+        {
+            "scanners": {
+                "trivy-repo": {"options": {"secret_config_file": "secret.yaml"}}
+            }
+        },
+        {"project_name": "scanned"},
+    )
+
+    assert _same_file(
+        _resolved_value(config, "trivy-repo", "secret_config_file"), wanted
+    )
 
 
 def test_a_relative_rules_path_appended_by_an_override_is_taken_from_the_working_directory(
