@@ -207,37 +207,49 @@ def test_every_by_block_page_is_pinned_and_reads_by_block():
     )
 
 
-INSTALL = "pip install git+https://github.com/awslabs/automated-security-helper.git@v{}"
+#: The install command that pins a release. Its pin is written ``<pin>``, one of the
+#: placeholders tests/unit/test_agent_plugin_ash_version.py exempts: that guard reads
+#: every pin after the repository name in the tree, this file included, as a release or
+#: a placeholder, and a ``{}`` or a literal release written here would be a malformed or
+#: a stale pin of its own. ``_install`` puts a release in its place.
+INSTALL = (
+    "pip install git+https://github.com/awslabs/automated-security-helper.git@v<pin>"
+)
+
+
+def _install(pin: str) -> str:
+    """The install command pinned to the release ``pin``."""
+    return INSTALL.replace("<pin>", pin)
 
 
 def _page(pin: str | None, command: str) -> str:
     """A fenced block of ``command``, after an install of ``pin`` when one is given."""
-    install = f"{INSTALL.format(pin)}\n" if pin else ""
+    install = f"{_install(pin)}\n" if pin else ""
     return f"```bash\n{install}{command}\n```\n"
 
 
 ROWS = [
     # (text, by_block, how many problems)
-    (f"```bash\n{INSTALL.format('3.8.0')}\nash scan fs --mode local\n```\n", False, 1),
-    (f"```bash\n{INSTALL.format('3.8.0')}\nash scan fs --mode local\n```\n", True, 1),
+    (f"```bash\n{_install('3.8.0')}\nash scan fs --mode local\n```\n", False, 1),
+    (f"```bash\n{_install('3.8.0')}\nash scan fs --mode local\n```\n", True, 1),
     (
-        f"```bash\n{INSTALL.format('3.8.0')}\n```\n\n```bash\nash results report\n```\n",
+        f"```bash\n{_install('3.8.0')}\n```\n\n```bash\nash results report\n```\n",
         False,
         1,
     ),
     (
-        f"```bash\n{INSTALL.format('3.8.0')}\n```\n\n```bash\nash results report\n```\n",
+        f"```bash\n{_install('3.8.0')}\n```\n\n```bash\nash results report\n```\n",
         True,
         0,
     ),
-    (f"{INSTALL.format('3.7.1')}\nthen `ash container build`\n", False, 1),
+    (f"{_install('3.7.1')}\nthen `ash container build`\n", False, 1),
     ("```bash\nash scan fs --mode local\n```\n", False, 0),
-    (f"```bash\n{INSTALL.format('3.9.0')}\nash scan fs --mode local\n```\n", False, 0),
-    (f"```bash\n{INSTALL.format('3.8.0')}\nash scan --mode local\n```\n", False, 0),
-    (f"```bash\n{INSTALL.format('3.8.0')}\nash report\n```\n", False, 0),
-    (f"```bash\n{INSTALL.format('3.8.0')}\ndash scan fs\n```\n", False, 0),
+    (f"```bash\n{_install('3.9.0')}\nash scan fs --mode local\n```\n", False, 0),
+    (f"```bash\n{_install('3.8.0')}\nash scan --mode local\n```\n", False, 0),
+    (f"```bash\n{_install('3.8.0')}\nash report\n```\n", False, 0),
+    (f"```bash\n{_install('3.8.0')}\ndash scan fs\n```\n", False, 0),
     (
-        f"````bash\n{INSTALL.format('3.8.0')}\n```\nash scan fs\n````\n",
+        f"````bash\n{_install('3.8.0')}\n```\nash scan fs\n````\n",
         True,
         1,
     ),
