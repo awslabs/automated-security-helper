@@ -20,6 +20,7 @@ import yaml
 import typer
 from pydantic import ValidationError
 
+from automated_security_helper.core import command_names
 from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.utils.console import (
     ash_console,
@@ -3070,9 +3071,9 @@ def validate(
             for i, warning in enumerate(check.warnings, 1):
                 secho(shown_on_one_line(f"  {i}. {warning}"), fg=typer.colors.YELLOW)
         if _lint_fix_removes_something(config_path, check):
+            lint_fix = command_names.render_command(command_names.CONFIG_LINT, "--fix")
             secho(
-                "\n💡 'ash config lint --fix' removes internal-only fields and "
-                "sections.",
+                f"\n💡 '{lint_fix}' removes internal-only fields and sections.",
                 fg=typer.colors.YELLOW,
             )
 

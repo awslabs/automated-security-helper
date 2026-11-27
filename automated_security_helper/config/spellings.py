@@ -60,6 +60,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, ValidationInfo
 from pydantic_core import PydanticUndefined
 
+from automated_security_helper.core import command_names
 from automated_security_helper.utils.unknown_keys import tolerated_notes, warned_notes
 
 #: The key a config file holds its ``patch`` operations under
@@ -211,7 +212,10 @@ class SpellingRefused(ValueError):
     file writes both spellings with different values.
 
     The text names the file, the place in it and the keys, and no value, in the
-    form every refusal of a config file uses (``Config <file>: ...``).
+    form every refusal of a config file uses (``Config <file>: ...``). The file's
+    name is a name the repository chose, so the text writes out any character a
+    terminal would act on (``command_names.terminal_text``); ``source`` keeps the
+    name as it was given.
     """
 
     def __init__(self, source: str, place: str, detail: str) -> None:
@@ -219,7 +223,8 @@ class SpellingRefused(ValueError):
         self.place = place
         self.detail = detail
         where = f"{place}: " if place else ""
-        super().__init__(f"Config {source}: {where}{detail}")
+        shown = command_names.terminal_text(source)
+        super().__init__(f"Config {shown}: {where}{detail}")
 
 
 # ---------------------------------------------------------------------------
@@ -617,8 +622,9 @@ class _Fold:
             raise SpellingRefused(self.source, place, removal_message(row, old))
         message = deprecation_message(row, old)
         warnings.warn(message, DeprecationWarning)
+        shown = command_names.terminal_text(self.source)
         self.lines.setdefault(
-            (row.model, row.canonical, old), f"Config {self.source}: {message}"
+            (row.model, row.canonical, old), f"Config {shown}: {message}"
         )
 
     def _respell(

@@ -182,6 +182,7 @@ from automated_security_helper.config.config_validator import (
     placed_at_appends,
     redact_values,
 )
+from automated_security_helper.core import command_names
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
     ASH_PYPROJECT_FILE_NAME,
@@ -1017,13 +1018,18 @@ def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> 
         cwd is None or Path(source_dir).resolve() != cwd.resolve()
     ):
         paths.append(source_dir)
+    shown: List[str | command_names.Placeholder]
     if all(pasteable_path(path) for path in paths):
         shown = [Path(path).as_posix() for path in paths]
     else:
-        shown = ["<the file named above>", "<the directory the scan scanned>"]
-    command = f"ash config lint --config {shown[0]}"
+        shown = [
+            command_names.Placeholder("the file named above"),
+            command_names.Placeholder("the directory the scan scanned"),
+        ]
+    arguments: List[str | command_names.Placeholder] = ["--config", shown[0]]
     if len(paths) > 1:
-        command += f" --source-dir {shown[1]}"
+        arguments += ["--source-dir", shown[1]]
+    command = command_names.render_command(command_names.CONFIG_LINT, *arguments)
     return f"Run: {command}"
 
 
@@ -5766,11 +5772,12 @@ def validate_config_document(
             # (describe_validation_error). Not chained: the cause would carry
             # the text to the console, ash.log and an MCP reply.
             described = describe_validation_error(e, document.environment_values)
+            lint = command_names.render_command(command_names.CONFIG_LINT)
             raise ASHConfigValidationError(
                 f"Configuration validation failed for "
                 f"'{describe_config_path(Path(config_path))}': "
                 f"{described.rstrip('.')}. "
-                "Run 'ash config lint' to identify and fix issues."
+                f"Run '{lint}' to identify and fix issues."
             ) from None
         refused = _client_validation_error(config_path, e, why=unquoted)
     else:
@@ -6020,10 +6027,11 @@ def _client_validation_error(
         if layered_over is not None
         else ""
     )
+    lint = command_names.render_command(command_names.CONFIG_LINT)
     return ASHConfigValidationError(
         f"Configuration validation failed for '{describe_config_path(Path(config_path))}'"
         f"{layered}: {len(problems)} problem(s): {'; '.join(problems)}. The values are not "
-        f"shown because {why}. Run 'ash config lint' to identify and fix issues."
+        f"shown because {why}. Run '{lint}' to identify and fix issues."
     )
 
 

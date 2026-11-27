@@ -58,6 +58,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.config.plugin_sections import build_segment
 from automated_security_helper.config.spellings import check_spellings
+from automated_security_helper.core import command_names
 from automated_security_helper.config.wire_enum import (
     wire_enum_validator,
     wire_value,
@@ -2321,7 +2322,8 @@ class DefaultScannersConfig(RedactedSection):
     unknown_keys_note: ClassVar[str] = (
         "In a config file inside a git checkout or the scanned tree, or one an "
         "MCP client delivered, the whole section is ignored instead, an unknown "
-        "key included, and `ash config lint` warns about it."
+        "key included, and "
+        f"`{command_names.render_command(command_names.CONFIG_LINT)}` warns about it."
     )
 
     only: Annotated[

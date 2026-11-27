@@ -35,6 +35,7 @@ from typing import (
     cast,
 )
 
+from automated_security_helper.core import command_names
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.vocab import Severity
 from automated_security_helper.core.resource_management.scan_registry import (
@@ -1502,13 +1503,14 @@ def _load_error_response(
             McpErrorType.CONFIG_POLICY_UNREADABLE.value,
         ):
             return denial
+    lint_command = command_names.render_command(command_names.CONFIG_LINT)
     return with_exit_code(
         create_error_response(
             error=checked.load_error,
             operation="scan_directory",
             suggestions=[
                 "Fix the error the message names; a syntax error names its line",
-                "Run 'ash config lint' on the file to check it",
+                f"Run '{lint_command}' on the file to check it",
             ],
         ),
         REFUSED_CONFIG_EXIT_CODE,
@@ -2054,6 +2056,7 @@ async def mcp_scan_directory(
         if not_discovered is not None:
             # A config the scan cannot use, as a named file that does not parse
             # is: the same code (3) whichever way the file reached the scan.
+            lint_command = command_names.render_command(command_names.CONFIG_LINT)
             return with_exit_code(
                 create_error_response(
                     error=not_discovered,
@@ -2063,7 +2066,7 @@ async def mcp_scan_directory(
                             "Fix the error the message names; a syntax error names "
                             "its line"
                         ),
-                        "Run 'ash config lint' on the file to check it",
+                        f"Run '{lint_command}' on the file to check it",
                     ],
                 ),
                 REFUSED_CONFIG_EXIT_CODE,

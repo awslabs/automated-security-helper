@@ -63,6 +63,7 @@ from automated_security_helper.config.environment_record import (
     with_environment_values_shown,
     written_without_tag,
 )
+from automated_security_helper.core import command_names
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigUnparsedError,
@@ -2116,13 +2117,14 @@ class ConfigLinter:
         with LEGACY_NAME_CONFLICT. The message names the key only, never the
         entry's values, which can be read from the environment.
         """
+        fix = command_names.render_command(command_names.CONFIG_LINT, "--fix")
         return LintIssue(
             severity=LintSeverity.INFO,
             category=LintCategory.DEPRECATED_SPELLING,
             message=(
                 f"{subject} is written with the deprecated 'expiration' "
                 "spelling; write 'expires'. The alias is removed in ASH v4; "
-                "`ash config lint --fix` does not rename it"
+                f"`{fix}` does not rename it"
             ),
             path=path,
             entry_id=entry_id,
@@ -2947,6 +2949,9 @@ class ConfigLinter:
                 # `enabled: false`, still applies. This is a warning; --fix
                 # does not rename the key, since that would drop one of the two.
                 if swapped in segment_data:
+                    fix = command_names.render_command(
+                        command_names.CONFIG_LINT, "--fix"
+                    )
                     result.issues.append(
                         LintIssue(
                             severity=LintSeverity.WARNING,
@@ -2960,8 +2965,8 @@ class ConfigLinter:
                                 f"scan merges them key by key, and where both "
                                 f"set a key '{swapped}' wins, so a key only "
                                 f"'{shown_key}' sets still applies. Remove or "
-                                f"merge one of them by hand: `ash config lint "
-                                f"--fix` does not rename it"
+                                f"merge one of them by hand: `{fix}` does not "
+                                f"rename it"
                             ),
                             fixable=False,
                         )
