@@ -36,9 +36,14 @@ import pytest
 
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base import support_register as sr
-from automated_security_helper.utils import tool_downloads
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.scanner_enumeration import load_scanner_universe
+from tests.utils.support_gaps import (
+    UNALLOWED_GAP,
+    all_platforms_but,
+    pinned_binaries,
+    unallowed_gap_rows,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -60,22 +65,7 @@ def _facets(cls: type) -> opsf.ScannerOperationalFacets:
 def _pinned_binaries() -> list[sr.PinnedBinary]:
     """One record per scanner whose tool ASH downloads, from the register and the
     download table the consistency test already binds together."""
-    found = []
-    for cls in _universe():
-        facets = _facets(cls)
-        if facets.runtime.kind is not opsf.RuntimeKind.PINNED_BINARY:
-            continue
-        key = facets.runtime.tool_versions_key
-        assert key is not None, facets.scanner_name
-        found.append(
-            sr.PinnedBinary(
-                scanner=facets.scanner_name,
-                tool=key,
-                version=tool_downloads.TOOL_VERSIONS[key],
-                provisionable=facets.platforms.provisionable,
-            )
-        )
-    return sorted(found, key=lambda binary: binary.scanner)
+    return pinned_binaries(_universe())
 
 
 def _facts(**overlay: str) -> sr.HostFacts:
@@ -290,6 +280,22 @@ def test_a_supported_row_names_an_adaptation_and_nothing_else() -> None:
 def test_a_second_declaration_of_an_id_is_refused(parts: dict[str, Any]) -> None:
     with pytest.raises(sr.SupportRegisterError, match="twice|duplicate"):
         _with(**parts)
+
+
+def test_a_not_declared_token_that_is_supported_or_named_by_a_row_is_refused() -> None:
+    """Not declared means that no row and no supported set names the token. A key for
+    a token the register declares anywhere else contradicts itself, and a matrix
+    would add "not declared" to every cell that holds the token, so the register
+    refuses the key when it is built."""
+    declared = dict(sr.REGISTER.not_declared)
+    assert replace(sr.REGISTER, not_declared=declared).not_declared == declared
+    reason = "ASH declares nothing about it."
+    with pytest.raises(sr.SupportRegisterError, match="shell=pwsh"):
+        replace(sr.REGISTER, not_declared={**declared, ("shell", "pwsh"): reason})
+    with pytest.raises(sr.SupportRegisterError, match="host.arch.other"):
+        replace(sr.REGISTER, not_declared={**declared, ("arch", "other"): reason})
+    with pytest.raises(sr.SupportRegisterError, match="host.os.other"):
+        replace(sr.REGISTER, not_declared={**declared, ("os", "other"): reason})
 
 
 # ---------------------------------------------------------------------------
@@ -521,14 +527,22 @@ def _admits(profile: sr.Profile, row: sr.SupportRow) -> bool:
     )
 
 
+#: The facts a run chooses that a row may leave unnamed. The validity rule tries each
+#: one a profile can have on every witness, so a way out that only leads to another
+#: row in one mode, or with one sandbox request, is still found.
+_CHOSEN = ("run_mode", "sandbox_mode")
+
+
 def _witnesses(
     register: sr.Register, row: sr.SupportRow
 ) -> list[tuple[sr.Profile, sr.HostFacts]]:
-    """The profile's facts overlaid with each combination of the row's match
-    tokens the profile can have, settled, and still matching the row."""
-    found = []
+    """The profile's facts overlaid with each combination of the row's match tokens
+    the profile can have and with each run mode and sandbox request the profile can
+    have that the row does not name, settled, and still matching the row."""
+    found: list[tuple[sr.Profile, sr.HostFacts]] = []
     constraints = row.match.constraints()
     names = [field for field, _ in constraints]
+    chosen = [field for field in _CHOSEN if field not in names]
     for profile in register.profiles:
         if not _admits(profile, row):
             continue
@@ -536,10 +550,15 @@ def _witnesses(
             [t for t in tokens if t in profile.possible[field]]
             for field, tokens in constraints
         ]
+        picks = [profile.possible[field] for field in chosen]
+        seen: set[sr.HostFacts] = set()
         for combo in itertools.product(*choices):
-            facts = sr.settle(replace(profile.facts, **dict(zip(names, combo))))
-            if row.match.matches(facts):
-                found.append((profile, facts))
+            for pick in itertools.product(*picks):
+                overlay = {**dict(zip(names, combo)), **dict(zip(chosen, pick))}
+                facts = sr.settle(replace(profile.facts, **overlay))
+                if row.match.matches(facts) and facts not in seen:
+                    seen.add(facts)
+                    found.append((profile, facts))
     return found
 
 
@@ -566,7 +585,10 @@ def _validity_failures(
             failures.append(f"{row.id}: no witness, no profile admits its match")
             continue
         for profile, facts in witnesses:
-            where = f"{row.id} on {profile.name} ({_describe(row, facts)})"
+            where = (
+                f"{row.id} on {profile.name} ({_describe(row, facts)}, "
+                f"run_mode={facts.run_mode}, sandbox_mode={facts.sandbox_mode})"
+            )
             offered = register.offered_paths(row, facts)
             if not offered:
                 failures.append(f"{where}: no path is offered")
@@ -649,8 +671,9 @@ def test_a_row_no_profile_can_have_fails_the_rule() -> None:
 
 
 def test_a_backend_row_needs_the_sandbox_it_belongs_to() -> None:
-    """``settle`` makes the backend n/a while the sandbox is off, so a row that
-    names a backend without a sandbox mode could never match a run."""
+    """``settle`` makes the backend n/a while the sandbox is off, and in container
+    mode, so a row that names a backend without a sandbox mode matches only the runs
+    that ask for a sandbox outside a container."""
     row = sr.REGISTER.row("host.sandbox.landlock-below-6")
     assert row.match.sandbox_mode
     plant = replace(
@@ -660,7 +683,31 @@ def test_a_backend_row_needs_the_sandbox_it_belongs_to() -> None:
             sandbox_backend=("landlock",), sandbox_loss=("landlock-below-6",)
         ),
     )
-    assert _witnesses(_with(rows=(plant,)), plant) == []
+    witnesses = _witnesses(_with(rows=(plant,)), plant)
+    assert witnesses
+    assert {facts.sandbox_mode for _, facts in witnesses} <= {"auto", "named"}
+    assert "container" not in {facts.run_mode for _, facts in witnesses}
+
+
+def test_a_trade_that_exists_only_in_container_mode_fails_the_rule() -> None:
+    """The witnesses try every run mode and sandbox request the row does not name. A
+    row about a sandbox that names neither offers a way out that leads, in container
+    mode, to the row that says the sandbox is not applied there."""
+    row = sr.REGISTER.row("host.sandbox.unavailable-auto")
+    plant = replace(
+        row,
+        id="plant.container-trade",
+        match=sr.Match(sandbox_mode=("auto",)),
+        paths=("sandbox-capable-host", "install-bubblewrap"),
+    )
+    failures = _validity_failures(_with(rows=(plant,)), rows=(plant,))
+    trades = [f for f in failures if "trades it for" in f]
+    assert trades, failures
+    assert all(
+        "trades it for host.sandbox.not-applied-in-container" in f
+        and "run_mode=container" in f
+        for f in trades
+    ), trades
 
 
 def test_a_row_whose_paths_are_never_offered_fails_the_rule() -> None:
@@ -696,7 +743,7 @@ def test_a_path_to_another_machine_keeps_only_the_runs_own_choices() -> None:
         host_os="windows",
         arch="arm64",
         translation="native",
-        run_mode="container",
+        run_mode="precommit",
         sandbox_mode="auto",
         express_requested="yes",
         shell="pwsh",
@@ -707,12 +754,21 @@ def test_a_path_to_another_machine_keeps_only_the_runs_own_choices() -> None:
     assert after.libc == "glibc" and after.translation == "native"
     assert after.express_available == "yes"
     assert after.sandbox_backend == "bwrap" and after.sandbox_loss == "none"
-    assert (after.run_mode, after.sandbox_mode) == ("container", "auto")
+    assert (after.run_mode, after.sandbox_mode) == ("precommit", "auto")
     assert (after.express_requested, after.shell, after.ignore_paths) == (
         "yes",
         "pwsh",
         "set",
     )
+
+
+def test_a_path_to_another_machine_in_container_mode_leaves_no_sandbox_backend() -> (
+    None
+):
+    facts = _facts(run_mode="container", sandbox_mode="auto")
+    (after,) = sr.REGISTER.apply_path(sr.REGISTER.path("ci-runner"), facts)
+    assert (after.run_mode, after.sandbox_mode) == ("container", "auto")
+    assert (after.sandbox_backend, after.sandbox_loss) == ("n/a", "none")
 
 
 def test_a_path_to_two_profiles_is_checked_against_each() -> None:
@@ -777,13 +833,30 @@ def test_settle_keeps_the_facts_a_run_did_ask_for() -> None:
         sandbox_mode="auto",
         sandbox_backend="bwrap",
         sandbox_loss="caches-read-only",
-        run_mode="container",
-        image_arch_matches="no",
+        run_mode="precommit",
         os="linux",
         libc="musl",
         wsl="wsl2",
     )
     assert sr.settle(asked) == asked
+
+
+def test_settle_leaves_no_sandbox_backend_in_container_mode() -> None:
+    """Container mode applies no per-scanner sandbox, so the backend the host has and
+    the loss it comes with say nothing about the run. The request is still the
+    run's own choice, and so is the image's architecture."""
+    asked = replace(
+        sr.REFERENCE_FACTS,
+        run_mode="container",
+        sandbox_mode="named",
+        sandbox_backend="none",
+        sandbox_loss="caches-read-only",
+        image_arch_matches="no",
+    )
+    settled = sr.settle(asked)
+    assert (settled.sandbox_backend, settled.sandbox_loss) == ("n/a", "none")
+    assert (settled.sandbox_mode, settled.image_arch_matches) == ("named", "no")
+    assert sr.settle(replace(asked, run_mode="local")).sandbox_backend == "none"
 
 
 def test_settle_changes_nothing_for_the_reference_and_is_idempotent() -> None:
@@ -970,6 +1043,17 @@ def test_wsl_is_offered_from_windows_and_never_from_linux_or_macos() -> None:
     assert "install-bubblewrap" not in _offered(row, windows)
 
 
+def test_bubblewrap_is_offered_by_the_host_and_not_by_the_image_it_runs() -> None:
+    """In container mode ``os`` is the image's Linux, so a Windows or macOS host that
+    runs the image is not a machine where bubblewrap can be installed."""
+    row = sr.REGISTER.row("host.sandbox.unavailable-auto")
+    unavailable = {"sandbox_mode": "auto", "sandbox_backend": "none"}
+    assert "install-bubblewrap" in _offered(row.id, _facts(**unavailable))
+    for host in ("windows", "darwin"):
+        image = _facts(os="linux", host_os=host, **unavailable)
+        assert "install-bubblewrap" not in _offered(row.id, image), host
+
+
 def test_the_container_is_no_way_out_of_a_missing_sandbox() -> None:
     """Container mode applies no per-scanner sandbox, so it trades the problem
     for the row that says so."""
@@ -1041,9 +1125,20 @@ def test_matrix_only_rows_show_in_a_cell_though_they_raise_nothing() -> None:
     )
 
 
-def test_a_skipped_scanner_cell_keeps_todays_refusal_text() -> None:
+def test_a_skipped_scanner_cell_is_the_rows_cell_phrase() -> None:
+    """A skipped scanner's cell carries the row's cell phrase, which is the refusal
+    text for semgrep and a shorter phrase for GuardDog, so only GuardDog tells the
+    two apart."""
     windows = {"os": "windows", "host_os": "windows"}
     assert sr.cells("semgrep", windows) == "refused: semgrep publishes no Windows build"
+    assert sr.cells("guarddog", windows) == (
+        "refused: GuardDog cannot be installed on Windows"
+    )
+    for scanner in ("semgrep", "guarddog"):
+        row = sr.REGISTER.row(f"scanner.{scanner}.windows")
+        assert sr.cells(scanner, windows) == f"refused: {row.cell}", scanner
+    guarddog = sr.REGISTER.row("scanner.guarddog.windows")
+    assert guarddog.cell != guarddog.reason
     assert sr.cells("semgrep", {"os": "linux"}) == "yes"
 
 
@@ -1062,19 +1157,37 @@ def test_a_cell_overlay_with_a_bad_token_is_refused() -> None:
         sr.cells("ash", {"no_such_fact": "yes"})
 
 
-def test_a_cell_never_reads_the_machine_that_renders_it() -> None:
+def test_a_cell_never_reads_the_machine_that_renders_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A matrix calls ``cells`` on declared facts, so the same call answers the
-    same everywhere: it takes no host reading, and a raising one is never called."""
+    same everywhere: it takes no host reading, and every reader of the machine
+    raises here, so a cell that read one would fail."""
     import inspect
+    import os
+    import platform
 
     assert list(inspect.signature(sr.cells).parameters) == [
         "scope",
         "overlay",
         "register",
     ]
-    assert sr.cells("ash", {"cpu_level": "compat-only"}) == sr.cells(
-        "ash", {"cpu_level": "compat-only"}
-    )
+
+    def refuse(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("a cell read the machine that renders it")
+
+    for reader in ("system", "machine", "release", "mac_ver", "uname", "processor"):
+        monkeypatch.setattr(platform, reader, refuse)
+    monkeypatch.setattr(os, "cpu_count", refuse)
+    with pytest.raises(AssertionError, match="read the machine"):
+        platform.machine()
+    with pytest.raises(AssertionError, match="read the machine"):
+        os.cpu_count()
+    row = sr.REGISTER.row("host.cpu.below-polars-runtime")
+    assert sr.cells("ash", {"cpu_level": "compat-only"}) == f"unsupported: {row.cell}"
+    refused = sr.REGISTER.row("scanner.guarddog.windows")
+    windows = {"os": "windows", "host_os": "windows"}
+    assert sr.cells("guarddog", windows) == f"refused: {refused.cell}"
 
 
 def test_the_refusal_accessor_reads_the_declared_skip_rows() -> None:
@@ -1173,6 +1286,19 @@ def test_a_derived_row_is_read_by_the_evaluator_and_valid() -> None:
     assert _validity_failures(register, rows=derived) == []
 
 
+@pytest.mark.parametrize("gap", sr.ALL_PLATFORMS)
+def test_a_derived_row_leads_out_of_each_single_platform_gap(gap: str) -> None:
+    """Whichever one platform a tool lacks, every way out its row offers leaves the
+    gap. WSL 2, the container image and another operating system keep the
+    processor or land on Linux with it, so for a Linux gap the way out is another
+    machine."""
+    provisionable = tuple(pair for pair in sr.ALL_PLATFORMS if pair != gap)
+    register = _with(rows=sr.no_build_rows((_pinned(provisionable=provisionable),)))
+    (row,) = [r for r in register.rows if r.scope == "demo"]
+    assert row.id == f"scanner.demo.no-build.{gap.replace('/', '-')}"
+    assert _validity_failures(register, rows=(row,)) == []
+
+
 # ---------------------------------------------------------------------------
 # Nothing declared is dead, and every name resolves
 # ---------------------------------------------------------------------------
@@ -1183,6 +1309,43 @@ def test_every_path_is_offered_by_some_row_and_every_polyfill_is_named() -> None
     assert {p.id for p in sr.REGISTER.paths} == offered
     named = {row.polyfill for row in sr.REGISTER.rows if row.polyfill}
     assert {p.id for p in sr.REGISTER.polyfills} == named
+
+
+def _never_offered(register: sr.Register, rows: Iterable[sr.SupportRow]) -> list[str]:
+    """The ``row: path`` pairs of ``rows`` that no witness of the row is offered, so
+    the register and the page would list a way out for a row that nobody sees."""
+    dead = []
+    for row in rows:
+        witnesses = _witnesses(register, row)
+        for path_id in row.paths:
+            offered_somewhere = any(
+                path_id in [path.id for path in register.offered_paths(row, facts)]
+                for _, facts in witnesses
+            )
+            if not offered_somewhere:
+                dead.append(f"{row.id}: {path_id}")
+    return dead
+
+
+def test_every_path_a_row_lists_is_offered_at_some_witness_of_the_row() -> None:
+    """The check above names each path once. This one holds each pair: a path a row
+    lists is offered where the row matches, or the row lists a way out that is never
+    shown."""
+    assert _never_offered(sr.REGISTER, sr.REGISTER.rows) == []
+
+
+def test_a_listed_path_no_witness_is_offered_fails_the_check() -> None:
+    """The must-fail control: the compatibility runtime needs a processor that has its
+    instruction set, so it is never offered for the row of a processor below it."""
+    row = sr.REGISTER.row("host.cpu.below-polars-compat")
+    plant = replace(
+        row,
+        id="plant.dead-pair",
+        paths=("x86-host-with-features", "polars-compat-runtime"),
+    )
+    assert _never_offered(_with(rows=(plant,)), (plant,)) == [
+        "plant.dead-pair: polars-compat-runtime"
+    ]
 
 
 def _unshipped_scopes(register: sr.Register, shipped: set[str]) -> list[str]:
@@ -1226,11 +1389,16 @@ def _derivation_failures(
 
 def test_the_rows_derived_from_the_shipped_scanners_are_valid() -> None:
     """Every pinned binary gets a row for each platform it has no build for and for
-    no other, and each row's paths lead out."""
+    no other, only the allowed platforms are among them, and each row's paths lead out.
+
+    The derivation check compares the rows with the declaration they come from, so it
+    cannot tell a gap declared by mistake from one upstream leaves. The allowed
+    platforms are what the declaration is held to."""
     binaries = _pinned_binaries()
     assert binaries, "the scanner universe holds no pinned binary"
     derived = sr.no_build_rows(binaries)
     assert _derivation_failures(binaries, derived) == []
+    assert unallowed_gap_rows(derived) == [], UNALLOWED_GAP
     register = _with(rows=derived)
     assert _validity_failures(register, rows=derived) == []
 
@@ -1254,6 +1422,23 @@ def test_a_missing_or_an_extra_derived_row_is_caught() -> None:
     assert len(_derivation_failures((not_downloaded,), every_gap)) == 5
     grown = (*_pinned_binaries(), gap)
     assert _derivation_failures(grown, sr.no_build_rows(grown)) == []
+
+
+def test_a_scanner_that_loses_windows_amd64_fails_the_derived_rows_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The must-fail control for the test above, run on the test itself. A scanner that
+    loses its windows/amd64 build to a typo gets a missing-build row for the Windows
+    most machines run. The rows still match the declaration they come from and every
+    way out still leads out, so only the allowed platforms report it. The same scanner
+    lacking only windows/arm64, the gap the shipped scanners have, passes."""
+    loses_amd64 = _pinned(provisionable=all_platforms_but("windows/amd64"))
+    monkeypatch.setitem(globals(), "_pinned_binaries", lambda: [loses_amd64])
+    with pytest.raises(AssertionError, match="outside ALLOWED_GAP_PLATFORMS"):
+        test_the_rows_derived_from_the_shipped_scanners_are_valid()
+    loses_arm64 = _pinned(provisionable=all_platforms_but("windows/arm64"))
+    monkeypatch.setitem(globals(), "_pinned_binaries", lambda: [loses_arm64])
+    test_the_rows_derived_from_the_shipped_scanners_are_valid()
 
 
 def test_a_row_and_a_path_each_link_to_one_section_of_the_page() -> None:

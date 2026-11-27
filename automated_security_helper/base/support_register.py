@@ -346,13 +346,15 @@ def settle(facts: HostFacts) -> HostFacts:
     on a combination no run has.
 
     The processor level is n/a unless the architecture is amd64; the sandbox backend
-    and its loss are n/a and none while the sandbox is off; the image architecture is
-    n/a outside container mode; libc and WSL are n/a unless the scanners run on Linux.
+    and its loss are n/a and none while the sandbox is off and in container mode, where
+    ASH applies no per-scanner sandbox and the backend the host has says nothing about
+    the run; the image architecture is n/a outside container mode; libc and WSL are n/a
+    unless the scanners run on Linux.
     """
     changes: dict[str, str] = {}
     if facts.arch != "amd64" and facts.cpu_level != "n/a":
         changes["cpu_level"] = "n/a"
-    if facts.sandbox_mode == "off":
+    if facts.sandbox_mode == "off" or facts.run_mode == "container":
         if facts.sandbox_backend != "n/a":
             changes["sandbox_backend"] = "n/a"
         if facts.sandbox_loss != "none":
@@ -863,6 +865,14 @@ def _is_no_build(row: SupportRow) -> bool:
     return f".{_NO_BUILD}." in row.id
 
 
+def _group(name: str) -> tuple[str, ...]:
+    """The facts whose tokens share one coverage with ``name`` (``FIELD_GROUPS``)."""
+    for group in FIELD_GROUPS:
+        if name in group:
+            return group
+    return (name,)
+
+
 @dataclass(frozen=True)
 class Register:
     """The declared polyfills, upgrade paths, host profiles and rows, with the
@@ -871,8 +881,9 @@ class Register:
     Construction refuses what can be refused from the declarations alone: an id
     declared twice, a row that names a path or a polyfill nobody declared, a path that
     names a profile nobody declared, an unsupported row whose paths are all on this
-    operating system, a supported row that names a stand-in. What the register says
-    about itself beyond that (every token covered, every path valid) is held by tests.
+    operating system, a supported row that names a stand-in, a not-declared token that
+    the supported set or a row names. What the register says about itself beyond that
+    (every token covered, every path valid) is held by tests.
     """
 
     polyfills: tuple[Polyfill, ...]
@@ -941,6 +952,22 @@ class Register:
             if name not in VOCABULARY or token not in VOCABULARY[name]:
                 raise SupportRegisterError(
                     f"not declared: {name}={token} is not in the vocabulary"
+                )
+            members = _group(name)
+            if any(token in SUPPORTED_TOKENS[member] for member in members):
+                raise SupportRegisterError(
+                    f"not declared: {name}={token} is in the supported set, so the "
+                    "register does declare it"
+                )
+            naming = [
+                row.id
+                for row in self.rows
+                if any(token in getattr(row.match, member) for member in members)
+            ]
+            if naming:
+                raise SupportRegisterError(
+                    f"not declared: {name}={token} is named by row "
+                    f"{', '.join(naming)}, so the register does declare it"
                 )
             _public(f"{name}={token}", "reason", reason)
         object.__setattr__(self, "_polyfills", polyfills)
@@ -1518,7 +1545,7 @@ _PATHS: tuple[UpgradePath, ...] = (
             "firejail or landlock backend."
         ),
         target=Match(sandbox_backend=("bwrap",), sandbox_loss=("none",)),
-        available_when=Match(os=("linux",)),
+        available_when=Match(host_os=("linux",)),
     ),
     UpgradePath(
         id="newer-kernel-landlock",
@@ -1910,6 +1937,11 @@ _CPU_PATHS = (
     "arm64-host",
     "ci-runner",
 )
+#: The ways out of a processor below the compatibility runtime's own set. The
+#: compatibility runtime is the one already in use there, so it is no way out.
+_BELOW_COMPAT_PATHS = tuple(
+    path_id for path_id in _CPU_PATHS if path_id != "polars-compat-runtime"
+)
 _HERE_PATHS = ("wsl2", "container-image", "linux-or-macos-host")
 _SANDBOX_PATHS = ("install-bubblewrap", "wsl2-sandboxed", "sandbox-capable-host")
 _WINDOWS_LOCAL = Match(os=("windows",), run_mode=("local", "precommit"))
@@ -1948,7 +1980,7 @@ _ASH_ROWS: tuple[SupportRow, ...] = (
             "crash."
         ),
         cell="processor below polars' compat runtime",
-        paths=_CPU_PATHS,
+        paths=_BELOW_COMPAT_PATHS,
     ),
     _polyfilled(
         "host.cpu.polars-compat-runtime",
@@ -2230,7 +2262,12 @@ _SCANNER_ROWS: tuple[SupportRow, ...] = (
         "scanner.guarddog.sandbox-replaced",
         scope="guarddog",
         dimension="tool sandbox",
-        match=Match(tool_sandbox=("replaced",)),
+        match=Match(
+            os=("darwin",),
+            sandbox_mode=("auto", "named"),
+            sandbox_backend=("sandbox-exec",),
+            tool_sandbox=("replaced",),
+        ),
         notify=Notify.DECISION,
         reason=(
             "GuardDog runs inside ASH's sandbox-exec confinement instead of its own "
@@ -2243,7 +2280,7 @@ _SCANNER_ROWS: tuple[SupportRow, ...] = (
         "scanner.guarddog.sandbox-unavailable",
         scope="guarddog",
         dimension="tool sandbox",
-        match=Match(tool_sandbox=("unavailable",)),
+        match=Match(os=("linux",), tool_sandbox=("unavailable",)),
         notify=Notify.DECISION,
         text=(
             "GuardDog runs without its own kernel sandbox, because the kernel offers "
@@ -2359,13 +2396,30 @@ class PinnedBinary:
     provisionable: tuple[str, ...]
 
 
+def _gap_paths(os_token: str, arch: str) -> tuple[str, ...]:
+    """The ways out of a missing build for ``os_token`` on ``arch``.
+
+    WSL 2, the container image and another operating system keep the processor or land
+    on Linux with it, so they lead out of a Windows or macOS gap. A Linux gap has no
+    such way out: the image runs the same Linux on the same processor. Its way out is
+    another machine: an arm64 one for a missing x86-64 build, an x86-64 one or a CI
+    runner for a missing arm64 build.
+    """
+    if os_token != "linux":
+        return _HERE_PATHS
+    if arch == "amd64":
+        return ("arm64-host",)
+    return ("x86-host-with-features", "ci-runner")
+
+
 def no_build_rows(binaries: Iterable[PinnedBinary]) -> tuple[SupportRow, ...]:
     """One row for each platform a pinned tool has no build for.
 
     A tool ASH does not download, and a tool with every build, give no rows. The rows
     are unsupported and raised at the decision, where a missing tool is graded, so a
     copy the user put on the path raises nothing. They are derived from the scanner's
-    declaration so the same fact is never typed twice.
+    declaration so the same fact is never typed twice. Each row lists the ways out of
+    its own gap (``_gap_paths``).
     """
     rows: list[SupportRow] = []
     for binary in binaries:
@@ -2387,7 +2441,7 @@ def no_build_rows(binaries: Iterable[PinnedBinary]) -> tuple[SupportRow, ...]:
                     notify=Notify.DECISION,
                     reason=f"ASH has no {binary.tool} {binary.version} build for {pair}.",
                     cell=cell if len(cell) <= CELL_LIMIT else f"no build for {pair}",
-                    paths=_HERE_PATHS,
+                    paths=_gap_paths(os_token, arch),
                     docs_anchor=NO_BUILD_ANCHOR,
                 )
             )
