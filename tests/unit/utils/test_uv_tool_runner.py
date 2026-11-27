@@ -2842,6 +2842,9 @@ class TestGetUvToolCommand:
             monkeypatch.setenv("ASH_OFFLINE", "YES")
         else:
             monkeypatch.delenv("ASH_OFFLINE", raising=False)
+        # A relative uv path variable is the scanned tree's, and the probe goes
+        # without it (uv_tool_runner.without_tree_uv_files).
+        monkeypatch.setenv("UV_ENV_FILE", ".env")
         with (
             patch(
                 "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
@@ -2877,9 +2880,15 @@ class TestGetUvToolCommand:
                 "--version",
             ]
             # An explicit copy of the environment, never None: see
-            # utils/process_env.py. Compared by names, so a failure prints no value.
+            # utils/process_env.py. Compared by names, so a failure prints no value,
+            # and outside the variables that filter judges, which the machine
+            # running the tests may set to a value it leaves out.
             assert probe.kwargs["env"] is not None
-            assert differing_names(probe.kwargs["env"], os.environ) == []
+            judged = {*uv_tool_runner._UV_PATH_VARIABLES, "UV_PYTHON"}
+            changed = set(differing_names(probe.kwargs["env"], os.environ)) - judged
+            assert changed == set(), sorted(changed)
+        names = set(probe.kwargs["env"])
+        assert "UV_ENV_FILE" not in names
 
     def test_falls_back_to_direct_binary_when_uv_probe_fails(self, reset_module_caches):
         with (

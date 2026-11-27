@@ -176,9 +176,12 @@ def test_with_a_notebook_nbconvert_is_resolved(tmp_path):
     result, calls, _ = _run(tmp_path, with_notebook=True)
 
     assert any("nbconvert" in c for c in calls), calls
-    # The probe resolves under the converter's requirement, the run's own spec.
+    # The probe resolves under the converter's requirement, the run's own spec,
+    # and, as every uv tool run ASH starts, loads no env file.
     assert any(
-        c.startswith("tool run --from nbconvert>=7.16.0,<8.0.0 jupyter-nbconvert")
+        c.startswith(
+            "tool run --no-env-file --from nbconvert>=7.16.0,<8.0.0 jupyter-nbconvert"
+        )
         and c.endswith(" --version")
         for c in calls
     ), calls

@@ -33,9 +33,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
+import ntpath
 import os
+import re
 import subprocess
 import sys
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import List
@@ -1038,13 +1042,16 @@ def test_run_command_sets_uv_no_config_unless_the_command_is_uv_tool(
 
 
 # ---------------------------------------------------------------------------
-# Files uv is sent to by name: UV_ENV_FILE, UV_CONFIG_FILE and .python-version
+# Files uv is sent to by name, UV_ENV_FILE and UV_CONFIG_FILE, and .python-version
 # ---------------------------------------------------------------------------
 #
 # ``uv tool run`` reads an env file (``--env-file``, ``UV_ENV_FILE``) and uv reads
 # ``UV_CONFIG_FILE`` even ahead of ``--no-config``; both are resolved against uv's
 # working directory when relative, and a scanner starts uv in the scanned tree.
 # ``uv tool run`` takes ``--no-env-file`` (uv-cli ``ToolRunArgs.no_env_file``).
+# uv's tool commands do not read a ``.python-version`` in the directory they start
+# in (test_the_real_uv_reads_no_python_version_file_on_a_runners_run measures it
+# with the uv installed with ASH), and ASH passes no version from one.
 
 NO_ENV_FILE = "--no-env-file"
 
@@ -1096,7 +1103,8 @@ def spawns(monkeypatch):
 
 @pytest.fixture
 def tree(tmp_path, monkeypatch):
-    """A scanned tree that names an env file, a uv config and an interpreter."""
+    """A scanned tree that names an env file and a uv config, and holds a
+    ``.python-version`` naming 3.8, which uv's tool commands do not read."""
     src = tmp_path / "src"
     src.mkdir()
     (src / ".env").write_text("PYTHONPATH=planted\n")
@@ -1117,7 +1125,9 @@ def _assert_guarded(runs: List[dict], src: Path, tool: str):
         if value is not None:
             where = os.path.abspath(os.path.join(os.fspath(run["cwd"] or src), value))
             assert not where.startswith(os.fspath(src) + os.sep), (value, where)
-        # The planted .python-version names 3.8; ASH's own request is what runs.
+        # The tree's .python-version names 3.8. uv's tool commands do not read it
+        # (test_the_real_uv_reads_no_python_version_file_on_a_runners_run), and ASH
+        # passes no version from it.
         assert "3.8" not in argv, argv
         if "--python" in argv:
             assert argv[argv.index("--python") + 1] != "3.8", argv
@@ -1201,7 +1211,8 @@ def test_a_uv_config_file_inside_the_tree_by_its_absolute_path_is_dropped(
     runs = [r for r in spawns.tool_runs() if tool in r["command"]]
     assert runs
     for run in runs:
-        assert "UV_CONFIG_FILE" not in _effective(run["env"]), run["env"]
+        names = set(_effective(run["env"]))
+        assert "UV_CONFIG_FILE" not in names, run["command"]
 
 
 @pytest.mark.unit
@@ -1220,7 +1231,19 @@ def test_an_absolute_uv_config_file_outside_the_tree_is_kept(
     runs = [r for r in spawns.tool_runs() if tool in r["command"]]
     assert runs
     for run in runs:
-        assert _effective(run["env"]).get("UV_CONFIG_FILE") == str(outside)
+        kept = _effective(run["env"]).get("UV_CONFIG_FILE")
+        assert kept == str(outside), run["command"]
+
+
+def _env_file_path(path: Path) -> str:
+    """``path`` as a value in an env file uv reads.
+
+    uv's env-file reader takes a backslash in a bare or double-quoted value as an
+    escape, and a Windows path such as ``C:\\a\\_temp`` stops it: it warns that it
+    failed to parse the file and loads nothing from it (measured with uv 0.13.5).
+    Forward slashes are read as written, and Windows opens the path all the same.
+    """
+    return path.as_posix()
 
 
 @needs_uv
@@ -1235,7 +1258,7 @@ def test_the_real_uv_loads_no_env_file_the_tree_names(isolated_uv, monkeypatch):
     """
     sub = _plant(isolated_uv, "user")
     marker = isolated_uv / "from-the-tree-env"
-    (sub / ".env").write_text(f"PLANTED_MARKER={marker}\n")
+    (sub / ".env").write_text(f"PLANTED_MARKER={_env_file_path(marker)}\n")
     monkeypatch.delenv("PLANTED_MARKER", raising=False)
     monkeypatch.setenv("UV_ENV_FILE", ".env")
     monkeypatch.chdir(sub)
@@ -1277,7 +1300,7 @@ def test_the_real_uv_reads_no_env_file_on_a_runners_run(isolated_uv, monkeypatch
     marker = isolated_uv / "from-an-env-file"
     env_file = isolated_uv / "operator" / "tool.env"
     env_file.parent.mkdir()
-    env_file.write_text(f"PLANTED_MARKER={marker}\n")
+    env_file.write_text(f"PLANTED_MARKER={_env_file_path(marker)}\n")
     monkeypatch.delenv("PLANTED_MARKER", raising=False)
     monkeypatch.setenv("UV_ENV_FILE", str(env_file))
     monkeypatch.chdir(sub)
@@ -1316,7 +1339,8 @@ def test_the_probes_carry_the_guard_too(tree, spawns):
     for run in runs:
         argv = run["command"]
         assert NO_ENV_FILE in argv[: argv.index("bandit")], argv
-        assert "UV_CONFIG_FILE" not in _effective(run["env"]), argv
+        names = set(_effective(run["env"]))
+        assert "UV_CONFIG_FILE" not in names, argv
 
 
 @pytest.mark.unit
@@ -1340,8 +1364,8 @@ def test_the_guarddog_bootstrap_is_guarded_and_drops_the_working_directory(
     assert failure is None, failure
     assert prefix[1:3] == ["tool", "run"], prefix
     assert NO_ENV_FILE in prefix[: prefix.index("python")], prefix
-    # G5: nothing of the working directory is importable ahead of the bootstrap's
-    # own imports.
+    # Nothing of the working directory is importable ahead of the bootstrap's own
+    # imports.
     assert guarddog_module._HIT_LIMIT_BOOTSTRAP.startswith(
         python_child.DROP_WORKING_DIRECTORY
     )
@@ -1367,7 +1391,8 @@ def test_the_nbconvert_uv_route_is_guarded(tree, tmp_path, spawns, monkeypatch):
         argv = run["command"]
         assert NO_ENV_FILE in argv, argv
         assert argv.index(NO_ENV_FILE) < argv.index("--to"), argv
-        assert "UV_CONFIG_FILE" not in _effective(run["env"]), run["env"]
+        names = set(_effective(run["env"]))
+        assert "UV_CONFIG_FILE" not in names, argv
 
 
 # ---------------------------------------------------------------------------
@@ -1575,7 +1600,8 @@ def test_a_probe_drops_a_uv_config_file_spelled_through_a_link_into_the_tree(
         uv_tool_runner.get_uv_tool_command("bandit")
     runs = spawns.tool_runs()
     assert len(runs) == 1, spawns.runs
-    assert "UV_CONFIG_FILE" not in _effective(runs[0]["env"]), runs[0]["command"]
+    names = set(_effective(runs[0]["env"]))
+    assert "UV_CONFIG_FILE" not in names, runs[0]["command"]
 
 
 @pytest.mark.unit
@@ -1589,7 +1615,8 @@ def test_a_probe_drops_a_uv_config_file_inside_a_tree_scanned_through_a_link(
         uv_tool_runner.get_uv_tool_command("bandit")
     runs = spawns.tool_runs()
     assert len(runs) == 1, spawns.runs
-    assert "UV_CONFIG_FILE" not in _effective(runs[0]["env"]), runs[0]["command"]
+    names = set(_effective(runs[0]["env"]))
+    assert "UV_CONFIG_FILE" not in names, runs[0]["command"]
 
 
 def _guarddog(src: Path, tmp_path: Path, **options):
@@ -1808,7 +1835,10 @@ def test_the_scanned_tree_is_a_root_for_a_caller_that_names_none(tmp_path):
 #: "failed to open file `https://...`", ``UV_PROJECT=https://...`` with "Project
 #: directory `https://...` does not exist", and ``UV_ENV_FILE=file:///x`` is kept
 #: as the path ``file:///x``), so the spelling is a relative path, read against
-#: the directory uv starts in.
+#: the directory uv starts in. ``UV_PYTHON_SEARCH_PATH`` is split at the path
+#: separator first: where that is ``:``, the URL's own colon splits it and a
+#: relative piece is what drops it, so its case pins the path-only reading only
+#: where the separator is ``;`` (Windows).
 _PATH_ONLY_VARIABLES = [
     "UV_CONFIG_FILE",
     "UV_ENV_FILE",
@@ -1816,6 +1846,7 @@ _PATH_ONLY_VARIABLES = [
     "UV_WORKING_DIR",
     "UV_PYTHON_CACHE_DIR",
     "UV_CREDENTIALS_DIR",
+    "UV_PYTHON_SEARCH_PATH",
 ]
 
 
@@ -1920,3 +1951,643 @@ def test_every_command_ash_dependencies_install_runs_drops_a_uv_path_in_the_tree
     # Controls: the operator's own values are passed on.
     assert child.get("UV_CONSTRAINT") == operator
     assert child.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
+
+
+# ---------------------------------------------------------------------------
+# UV_PYTHON, the warning a left-out variable is named in, and path spellings
+# ---------------------------------------------------------------------------
+#
+# uv reads UV_PYTHON as a path when the value is absolute or holds a path
+# separator, and reads a relative one against the directory it starts in. It reads
+# a bare name as a path too when a file or a directory of that name is there: with
+# a ``.venv`` directory there, ``UV_PYTHON=.venv`` runs ``.venv/bin/python``. Any
+# other bare name is a version request (``3.12``, ``cpython@3.12``, ``python3.12``)
+# or a program uv looks up on PATH, and runs nothing of the tree (measured with uv
+# 0.13.5 and stub interpreters that record a run). So UV_PYTHON is judged as the
+# other uv path variables are, and a bare name of an entry of ASH's working
+# directory or of a judged directory is the tree's, a directory named like a
+# version included.
+
+#: Each UV_PYTHON that names a path of the tree, made from the judged root ``src``,
+#: which holds a ``.venv`` directory, an ``interp`` file and a directory ``3.12``.
+_UV_PYTHON_OF_THE_TREE = [
+    pytest.param(lambda src: ".venv/bin/python", id="a-relative-path"),
+    pytest.param(lambda src: "~/py/bin/python", id="a-leading-tilde"),
+    pytest.param(
+        lambda src: str(src / ".venv" / "bin" / "python"), id="an-absolute-path-inside"
+    ),
+    pytest.param(lambda src: str(src), id="the-root-itself"),
+    pytest.param(lambda src: ".venv", id="a-bare-name-of-a-directory-in-a-root"),
+    pytest.param(lambda src: "interp", id="a-bare-name-of-a-file-in-a-root"),
+    # The safe side: a name that is also an entry there is the tree's, though uv
+    # reads this one as a version request first.
+    pytest.param(lambda src: "3.12", id="a-version-that-also-names-an-entry"),
+]
+
+
+@pytest.mark.parametrize("make", _UV_PYTHON_OF_THE_TREE)
+@pytest.mark.unit
+def test_a_uv_python_that_names_a_path_of_the_tree_is_not_passed_to_uv(
+    make, tmp_path, monkeypatch
+):
+    src = tmp_path / "src"
+    (src / ".venv" / "bin").mkdir(parents=True)
+    (src / "interp").write_text("")
+    (src / "3.12").mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    value = make(src)
+    left = _judged(
+        {"UV_PYTHON": value, "UV_INDEX_URL": "https://mirror.invalid/simple"}, (src,)
+    )
+    assert "UV_PYTHON" not in left, value
+    # Controls on the same call: the other variable stays, and so does a request
+    # that names no entry there.
+    assert left.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
+    asked = {"UV_PYTHON": "cpython@3.12"}
+    assert _judged(asked, (src,)) == asked
+
+
+@pytest.mark.unit
+def test_a_bare_uv_python_naming_an_entry_of_ashs_working_directory_is_the_trees(
+    tmp_path, monkeypatch
+):
+    # uv reads the name in the directory it starts in, and a probe or an install
+    # starts uv in ASH's own working directory.
+    src = tmp_path / "src"
+    src.mkdir()
+    checkout = tmp_path / "checkout"
+    (checkout / ".venv" / "bin").mkdir(parents=True)
+    monkeypatch.chdir(checkout)
+    assert "UV_PYTHON" not in _judged({"UV_PYTHON": ".venv"}, (src,))
+    # Control: where nothing is named so, the same name is a program uv looks up
+    # on PATH, and it stays.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    supplied = {"UV_PYTHON": ".venv"}
+    assert _judged(supplied, (src,)) == supplied
+
+
+#: Each UV_PYTHON that names nothing of the tree, made from a directory outside
+#: every root: a request, a program uv looks up on PATH, an empty value, or the
+#: operator's interpreter.
+_UV_PYTHON_NOT_OF_THE_TREE = [
+    pytest.param(lambda out: "3.12", id="a-version"),
+    pytest.param(lambda out: "cpython@3.12", id="an-implementation-and-version"),
+    pytest.param(lambda out: "python3.12", id="an-executable-name"),
+    pytest.param(lambda out: "no-such-name", id="a-bare-name-that-names-nothing"),
+    pytest.param(lambda out: "", id="empty"),
+    pytest.param(
+        lambda out: str(out / "bin" / "python"), id="an-absolute-path-outside"
+    ),
+]
+
+
+@pytest.mark.parametrize("make", _UV_PYTHON_NOT_OF_THE_TREE)
+@pytest.mark.unit
+def test_a_uv_python_that_names_nothing_of_the_tree_is_passed_to_uv(
+    make, tmp_path, monkeypatch
+):
+    src = tmp_path / "src"
+    src.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    supplied = {"UV_PYTHON": make(tmp_path / "operator")}
+    assert _judged(supplied, (src,)) == supplied
+
+
+# UV_PYTHON on each route that starts uv, with the process boundary recorded.
+
+
+def _uv_python_seen(spawns: _Spawns, monkeypatch, value: str, start, read) -> set:
+    """With UV_PYTHON set to ``value``, the UV_PYTHON given to each uv command that
+    ``start`` starts and ``read`` picks. The memos are cleared first, so each call
+    starts uv again."""
+    monkeypatch.setenv("UV_PYTHON", value)
+    _reset_uv_tool_runner_caches()
+    before = len(spawns.runs)
+    start()
+    runs = [run for run in spawns.runs[before:] if read(run["command"])]
+    assert runs, [run["command"] for run in spawns.runs[before:]]
+    return {_effective(run["env"]).get("UV_PYTHON") for run in runs}
+
+
+def _a_tool_run(command) -> bool:
+    return command[1:3] == ["tool", "run"]
+
+
+def _a_tool_install(command) -> bool:
+    return command[1:3] == ["tool", "install"]
+
+
+def _a_tool_listing(command) -> bool:
+    return command[1:3] == ["tool", "list"]
+
+
+def _version_probe(tree, tmp_path, spawns, monkeypatch):
+    return lambda: UVToolRunner(uv_executable="/opt/uv").get_tool_version("bandit")
+
+
+def _command_probe(tree, tmp_path, spawns, monkeypatch):
+    return lambda: uv_tool_runner.get_uv_tool_command("bandit")
+
+
+def _tool_install(tree, tmp_path, spawns, monkeypatch):
+    return lambda: UVToolRunner(uv_executable="/opt/uv").install_tool_with_version(
+        "bandit"
+    )
+
+
+def _tool_listing(tree, tmp_path, spawns, monkeypatch):
+    return lambda: UVToolRunner(uv_executable="/opt/uv").list_available_tools()
+
+
+def _nbconvert(tree, tmp_path, spawns, monkeypatch):
+    from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
+        JupyterConverter,
+        JupyterConverterConfig,
+    )
+
+    converter = JupyterConverter(
+        context=_plugin_context(tree, tmp_path), config=JupyterConverterConfig()
+    )
+    monkeypatch.setattr(JupyterConverter, "_uv_from_spec", lambda self: "nbconvert>=7")
+    return lambda: converter._execute_nbconvert_via_uv(
+        ["jupyter", "nbconvert", "--to", "script", "x.ipynb"], timeout=30
+    )
+
+
+def _dependencies_install(tree, tmp_path, spawns, monkeypatch):
+    # ``ash dependencies install`` starts a plugin's declared ``uv tool install``
+    # through run_command, which starts it through subprocess_utils.run_command.
+    from automated_security_helper.cli import dependencies
+
+    def run_cmd(args, **kwargs):
+        spawns.record(args, kwargs.get("cwd"), kwargs.get("env"))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(subprocess_utils, "run_command", run_cmd)
+    return lambda: dependencies.run_command(["uv", "tool", "install", "bandit"])
+
+
+#: Each route that starts uv for a tool outside a scanner's run: its set-up, which
+#: gives what starts the route once, and which of the uv commands it starts are
+#: read. ``uv tool install`` is given no python request, so UV_PYTHON is what
+#: chooses its interpreter.
+_UV_PYTHON_ROUTES = {
+    "version-probe": (_version_probe, _a_tool_run),
+    "command-probe": (_command_probe, _a_tool_run),
+    "tool-install": (_tool_install, _a_tool_install),
+    "tool-list": (_tool_listing, _a_tool_listing),
+    "nbconvert": (_nbconvert, _a_tool_run),
+    "dependencies-install": (_dependencies_install, _a_tool_install),
+}
+
+
+@pytest.mark.parametrize("route", sorted(_UV_PYTHON_ROUTES))
+@pytest.mark.unit
+def test_every_route_that_starts_uv_gives_it_no_relative_uv_python(
+    route, tree, tmp_path, spawns, monkeypatch
+):
+    set_up, read = _UV_PYTHON_ROUTES[route]
+    # ASH started inside the repository it scans, the CI default.
+    monkeypatch.chdir(tree)
+    start = set_up(tree, tmp_path, spawns, monkeypatch)
+    # A relative path, which uv reads against the directory it starts in. Nothing
+    # on these routes names an interpreter after the filter, so the child gets none.
+    seen = _uv_python_seen(spawns, monkeypatch, ".venv/bin/python", start, read)
+    assert seen == {None}, seen
+    # Control: a version request reaches uv on the same route.
+    assert _uv_python_seen(spawns, monkeypatch, "3.12", start, read) == {"3.12"}
+
+
+@pytest.mark.unit
+def test_a_scanners_run_gives_uv_no_bare_uv_python_naming_a_directory_of_the_tree(
+    tree, tmp_path, spawns, monkeypatch
+):
+    # The plugin's own check (plugin_base._uv_interpreter_inside) leaves out a
+    # UV_PYTHON that is a path inside the tree, but a bare name is no path to it.
+    # After the filter, the run's environment passes through
+    # python_child.uv_child_overrides, which names ASH's own interpreter for a uv
+    # command other than ``uv tool`` that names none, so what is pinned is that the
+    # planted value does not reach uv, not that the variable is absent.
+    (tree / ".venv" / "bin").mkdir(parents=True)
+    monkeypatch.chdir(tree)
+    scanner = _bandit(tree, tmp_path)
+    seen = {}
+    for value in (".venv", "3.12"):
+        monkeypatch.setenv("UV_PYTHON", value)
+        runs = _tool_runs_of_one_run(scanner, spawns, tmp_path)
+        assert runs, [run["command"] for run in spawns.runs]
+        seen[value] = {_effective(run["env"]).get("UV_PYTHON") for run in runs}
+    assert ".venv" not in seen[".venv"], seen
+    # Control: a version request reaches uv on the same run.
+    assert seen["3.12"] == {"3.12"}, seen
+
+
+# The warning a left-out uv variable is named in: once per process for each
+# variable and reason, at WARNING, without the value.
+
+#: How each warning ends, after the variable's name.
+_RELATIVE_REASON = (
+    "is not passed to uv: its value holds a relative path, which uv reads in the "
+    "directory it starts in."
+)
+_INSIDE_REASON = (
+    "is not passed to uv: its value names a path inside the scanned tree or a "
+    "directory ASH treats as one."
+)
+
+
+@pytest.fixture
+def uv_warnings():
+    """Each line ASH's logger says about a uv variable it does not pass to uv, as
+    (level, text). What was already said is forgotten before and after."""
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    said: List[tuple] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            text = record.getMessage()
+            if " is not passed to uv: " in text:
+                said.append((record.levelno, text))
+
+    handler = _Collect(level=logging.DEBUG)
+    level = ASH_LOGGER.level
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    ASH_LOGGER.addHandler(handler)
+    _reset_uv_tool_runner_caches()
+    try:
+        yield said
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(level)
+        _reset_uv_tool_runner_caches()
+
+
+@pytest.mark.unit
+def test_a_uv_variable_left_out_is_named_in_one_warning_that_holds_no_value(
+    tmp_path, uv_warnings
+):
+    src = tmp_path / "src"
+    src.mkdir()
+    value = "planted-configs/planted-uv.toml"
+    supplied = {"UV_CONFIG_FILE": value}
+    assert "UV_CONFIG_FILE" not in _judged(supplied, (src,))
+    assert uv_warnings == [(logging.WARNING, f"UV_CONFIG_FILE {_RELATIVE_REASON}")]
+    assert value not in uv_warnings[0][1]
+    # The same environment judged again is not warned about again.
+    assert "UV_CONFIG_FILE" not in _judged(supplied, (src,))
+    assert len(uv_warnings) == 1, uv_warnings
+    # Control: variables that are passed on are not warned about.
+    kept = {
+        "UV_CONFIG_FILE": str(tmp_path / "operator" / "uv.toml"),
+        "UV_INDEX_URL": "https://mirror.invalid/simple",
+    }
+    assert _judged(kept, (src,)) == kept
+    assert len(uv_warnings) == 1, uv_warnings
+
+
+@pytest.mark.unit
+def test_a_uv_variable_left_out_for_a_path_inside_a_root_names_that_reason(
+    tmp_path, uv_warnings
+):
+    src = tmp_path / "src"
+    src.mkdir()
+    value = str(src / "planted-uv.toml")
+    assert "UV_CONFIG_FILE" not in _judged({"UV_CONFIG_FILE": value}, (src,))
+    assert uv_warnings == [(logging.WARNING, f"UV_CONFIG_FILE {_INSIDE_REASON}")]
+    assert "planted-uv.toml" not in uv_warnings[0][1]
+    # Control: the operator's file outside every root is passed on unremarked.
+    kept = {"UV_CONFIG_FILE": str(tmp_path / "operator" / "uv.toml")}
+    assert _judged(kept, (src,)) == kept
+    assert len(uv_warnings) == 1, uv_warnings
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        pytest.param("UV_CONFIG_FILE", "~/uv.toml", id="a-leading-tilde"),
+        pytest.param(
+            "UV_CONFIG_FILE",
+            "https://config.invalid/uv.toml",
+            id="a-url-spelling-of-a-path-only-variable",
+        ),
+        pytest.param("UV_PYTHON", ".venv", id="a-bare-uv-python-naming-an-entry"),
+    ],
+)
+@pytest.mark.unit
+def test_spellings_uv_reads_against_its_starting_directory_give_the_relative_reason(
+    name, value, tmp_path, monkeypatch, uv_warnings
+):
+    src = tmp_path / "src"
+    (src / ".venv" / "bin").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert name not in _judged({name: value}, (src,))
+    assert uv_warnings == [(logging.WARNING, f"{name} {_RELATIVE_REASON}")]
+    # Control: a version request is passed on unremarked.
+    asked = {"UV_PYTHON": "3.12"}
+    assert _judged(asked, (src,)) == asked
+    assert len(uv_warnings) == 1, uv_warnings
+
+
+@pytest.mark.unit
+def test_each_uv_variable_is_warned_of_once_for_each_reason_until_a_reset(
+    tmp_path, uv_warnings
+):
+    src = tmp_path / "src"
+    src.mkdir()
+    relative = {"UV_CONFIG_FILE": "uv.toml"}
+    inside = {"UV_CONFIG_FILE": str(src / "uv.toml")}
+    another = {"UV_ENV_FILE": ".env"}
+    for environment in (relative, inside, another, relative, inside, another):
+        _judged(environment, (src,))
+    assert uv_warnings == [
+        (logging.WARNING, f"UV_CONFIG_FILE {_RELATIVE_REASON}"),
+        (logging.WARNING, f"UV_CONFIG_FILE {_INSIDE_REASON}"),
+        (logging.WARNING, f"UV_ENV_FILE {_RELATIVE_REASON}"),
+    ]
+    # What was said is forgotten with the runner's caches.
+    _reset_uv_tool_runner_caches()
+    _judged(relative, (src,))
+    assert uv_warnings[3:] == [(logging.WARNING, f"UV_CONFIG_FILE {_RELATIVE_REASON}")]
+
+
+# A directory every uv command a run starts is judged against.
+
+
+@pytest.mark.unit
+def test_inside_judging_uv_paths_in_a_tool_listing_gets_no_uv_path_of_that_directory(
+    tmp_path, spawns, monkeypatch
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    inside = str(checkout / "uv.toml")
+    operator = str(tmp_path / "operator" / "constraints.txt")
+    monkeypatch.setenv("UV_CONFIG_FILE", inside)
+    monkeypatch.setenv("UV_CONSTRAINT", operator)
+    with uv_tool_runner.judging_uv_paths_in(checkout):
+        UVToolRunner(uv_executable="/opt/uv").list_available_tools()
+    # Control: outside it, the same listing has no such directory to judge against.
+    UVToolRunner(uv_executable="/opt/uv").list_available_tools()
+    listings = [run for run in spawns.runs if _a_tool_listing(run["command"])]
+    assert len(listings) == 2, [run["command"] for run in spawns.runs]
+    judged = _effective(listings[0]["env"])
+    unjudged = _effective(listings[1]["env"])
+    assert "UV_CONFIG_FILE" not in judged
+    # Control: the operator's file outside that directory is passed on.
+    assert judged.get("UV_CONSTRAINT") == operator
+    assert unjudged.get("UV_CONFIG_FILE") == inside
+
+
+@pytest.mark.unit
+def test_ash_dependencies_install_judges_its_tool_listing_against_its_directory(
+    tmp_path, spawns, monkeypatch
+):
+    # Driven as tests/unit/cli/test_dependencies_absent_tool_fails.py drives the
+    # post-install sweep: one stand-in plugin whose tool runs through
+    # ``uv tool run``, so the sweep asks uv's tool listing whether it is there.
+    import io
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from rich.console import Console
+    from typer.testing import CliRunner
+
+    from automated_security_helper.cli import dependencies
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    inside = str(checkout / "uv.toml")
+    operator = str(tmp_path / "operator" / "constraints.txt")
+    monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv("UV_CONFIG_FILE", inside)
+    monkeypatch.setenv("UV_CONSTRAINT", operator)
+    monkeypatch.chdir(checkout)
+    plugin = MagicMock()
+    plugin.config = SimpleNamespace(name="stand-in")
+    plugin.command = "banditish"
+    plugin.use_uv_tool = True
+    plugin.external_executables = ()
+    plugin.get_installation_commands.return_value = [["installer", "banditish"]]
+    monkeypatch.setattr(dependencies, "load_plugins", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        dependencies,
+        "ash_plugin_manager",
+        SimpleNamespace(
+            plugin_modules=lambda kind: (
+                [lambda **_kw: plugin] if kind == "scanner" else []
+            )
+        ),
+    )
+    monkeypatch.setattr(dependencies, "run_command", lambda cmd, shell=False: 0)
+    monkeypatch.setattr(
+        dependencies, "find_executable_for_scan", lambda name, root: None
+    )
+    monkeypatch.setattr(
+        dependencies,
+        "console",
+        Console(file=io.StringIO(), width=300, no_color=True),
+    )
+    result = CliRunner().invoke(
+        dependencies.dependencies_app,
+        ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin")],
+    )
+    listings = [run for run in spawns.runs if _a_tool_listing(run["command"])]
+    assert listings, (result.exit_code, result.output)
+    for run in listings:
+        env = _effective(run["env"])
+        assert "UV_CONFIG_FILE" not in env, run["command"]
+        # Control: the operator's file outside the directory is passed on.
+        assert env.get("UV_CONSTRAINT") == operator, run["command"]
+
+
+# Spellings of a path that name the tree without lying under a root as written.
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="the /proc links a process reads its own directory through are Linux's",
+)
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("/proc/self/cwd/uv.toml", id="proc-self"),
+        pytest.param("/proc/thread-self/cwd/uv.toml", id="proc-thread-self"),
+        pytest.param("/proc/./self/cwd/uv.toml", id="proc-self-not-normalized"),
+        # Python's normpath keeps exactly two leading slashes, which Linux reads
+        # as one.
+        pytest.param("//proc/self/cwd/uv.toml", id="proc-self-two-leading-slashes"),
+        pytest.param("/dev/fd/0/uv.toml", id="dev-fd"),
+    ],
+)
+@pytest.mark.unit
+def test_a_uv_path_through_a_link_to_the_reading_process_is_the_trees(
+    value, tmp_path, monkeypatch
+):
+    # What such a path names depends on the process that opens it: uv started in
+    # the tree reads /proc/self/cwd as the tree, while ASH, working elsewhere,
+    # resolves it to its own working directory.
+    src = tmp_path / "src"
+    src.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert "UV_CONFIG_FILE" not in _judged({"UV_CONFIG_FILE": value}, (src,))
+    # Control: the operator's file by its absolute path outside the tree stays.
+    operators = {"UV_CONFIG_FILE": str(tmp_path / "operator" / "uv.toml")}
+    assert _judged(operators, (src,)) == operators
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param(
+            "letter-case",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="Windows' own normcase folds letter case already",
+            ),
+        ),
+        "normalization-form",
+    ],
+)
+@pytest.mark.unit
+def test_where_the_volume_folds_case_a_path_spelled_another_way_is_the_trees(
+    spelling, tmp_path, monkeypatch
+):
+    accented = unicodedata.lookup("LATIN SMALL LETTER E WITH ACUTE")
+    src = tmp_path / f"Src-Caf{accented}"
+    src.mkdir()
+    if spelling == "letter-case":
+        other = tmp_path / f"sRC-cAF{accented.upper()}"
+    else:
+        # The same name decomposed: an e followed by a combining accent.
+        other = tmp_path / ("Src-Cafe" + unicodedata.lookup("COMBINING ACUTE ACCENT"))
+    supplied = {"UV_CONFIG_FILE": str(other / "uv.toml")}
+    monkeypatch.setattr(uv_tool_runner, "_folds_case", lambda: True, raising=False)
+    assert "UV_CONFIG_FILE" not in _judged(supplied, (src,))
+    # Control: where the volume keeps case and form, the spelling names another
+    # directory, and the file stays.
+    monkeypatch.setattr(uv_tool_runner, "_folds_case", lambda: False, raising=False)
+    assert _judged(supplied, (src,)) == supplied
+
+
+#: On Windows, resolving a share's path reaches for the server.
+_NO_SHARE_LOOKUP = pytest.mark.skipif(
+    sys.platform == "win32", reason="resolving a share's path reaches for the server"
+)
+
+#: Windows spellings of a path of the tree, each with the root it lies in. An
+#: extended-length (``\\?\``) prefix is no part of the path, on the value or on the
+#: root, and a path with no drive is relative: the child resolves it on the drive of
+#: its own working directory.
+_WINDOWS_SPELLINGS_OF_THE_TREE = [
+    pytest.param(r"\\?\C:\tree\uv.toml", r"C:\tree", id="a-prefixed-drive-path"),
+    pytest.param(
+        r"\\?\UNC\srv\share\tree\x",
+        r"\\srv\share\tree",
+        id="a-prefixed-share-path",
+        marks=_NO_SHARE_LOOKUP,
+    ),
+    pytest.param(r"C:\tree\uv.toml", r"\\?\C:\tree", id="a-root-spelled-prefixed"),
+    pytest.param(r"\tree\uv.toml", r"C:\tree", id="no-drive-with-a-backslash"),
+    pytest.param("/tree/uv.toml", r"C:\tree", id="no-drive-with-a-slash"),
+    pytest.param(r"c:\TREE\uv.toml", r"C:\tree", id="another-letter-case"),
+    pytest.param("C:/tree/uv.toml", r"C:\tree", id="forward-slashes"),
+]
+
+#: Windows paths outside the tree, each with a root they do not lie in.
+_WINDOWS_PATHS_OUTSIDE_THE_TREE = [
+    pytest.param(r"D:\other\uv.toml", r"C:\tree", id="another-drive"),
+    pytest.param(r"\\?\D:\other\uv.toml", r"C:\tree", id="another-drive-prefixed"),
+    pytest.param(
+        r"\\srv\share\other\x",
+        r"\\srv\share\tree",
+        id="another-directory-of-the-share",
+        marks=_NO_SHARE_LOOKUP,
+    ),
+]
+
+
+@pytest.mark.parametrize("value, root", _WINDOWS_SPELLINGS_OF_THE_TREE)
+@pytest.mark.unit
+def test_a_windows_spelling_of_a_path_in_the_tree_is_the_trees(value, root):
+    # Windows' path rules on any host: every path call goes through ``pathmod``.
+    judged = uv_tool_runner._names_a_tree_path
+    assert judged(value, (root,), pathmod=ntpath) is True
+    # Control on the same root: a path on another drive is not.
+    assert judged(r"D:\other\uv.toml", (root,), pathmod=ntpath) is False
+
+
+@pytest.mark.parametrize("value, root", _WINDOWS_PATHS_OUTSIDE_THE_TREE)
+@pytest.mark.unit
+def test_a_windows_path_outside_the_tree_is_not_the_trees(value, root):
+    judged = uv_tool_runner._names_a_tree_path
+    assert judged(value, (root,), pathmod=ntpath) is False
+
+
+@pytest.mark.parametrize("host", ["C:", "C|"])
+@pytest.mark.unit
+def test_a_file_url_whose_host_is_a_drive_letter_names_a_path_on_that_drive(host):
+    # Read as uv's URL parser reads it: ``file://C:/x`` and ``file://C|/x`` are
+    # ``file:///C:/x``.
+    read = uv_tool_runner._file_url_path
+    assert read(f"file://{host}/tree/x") == read("file:///C:/tree/x")
+    # Control: a host that is not a drive letter stays a host.
+    assert read("file://server/share/x") != read("file:///server/share/x")
+
+
+@needs_uv
+@pytest.mark.integration
+def test_the_real_uv_reads_no_python_version_file_on_a_runners_run(
+    isolated_uv, monkeypatch
+):
+    """uv's tool commands do not read a ``.python-version``, and ASH passes no
+    version from one.
+
+    The directory the planted tool runs from holds a ``.python-version`` naming
+    3.2, which no interpreter here satisfies. The control asks ``uv python find``
+    there, which reads the file and fails naming 3.2. The runner's run must start
+    the tool, which prints its version. UV_PYTHON is unset for both, since it would
+    choose the interpreter whatever the file says, and the directory of the
+    interpreter the tests run on is put first on PATH, so uv has one to find.
+    """
+    sub = _plant(isolated_uv, "user")
+    (sub / ".python-version").write_text("3.2\n")
+    monkeypatch.delenv("UV_PYTHON", raising=False)
+    monkeypatch.delenv("UV_PYTHON_SEARCH_PATH", raising=False)
+    interpreter = getattr(sys, "_base_executable", None) or sys.executable
+    monkeypatch.setenv(
+        "PATH",
+        os.pathsep.join([os.path.dirname(interpreter), os.environ.get("PATH", "")]),
+    )
+    monkeypatch.chdir(sub)
+
+    control = subprocess.run(  # nosec B603
+        [UV, "python", "find", "--no-project"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=sub,
+    )
+    assert control.returncode != 0, control.stdout
+    assert re.search(r"(?<![\d.])3\.2(?![\d.])", control.stderr), control.stderr
+
+    result = UVToolRunner(uv_executable=UV).run_tool(
+        PLANTED,
+        cwd=sub,
+        results_dir=isolated_uv / "results",
+        stdout_preference="return",
+        stderr_preference="return",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "planted 9.9.9" in result.stdout, result.stdout
+    assert "--python" not in result.args, result.args

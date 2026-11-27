@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from automated_security_helper.utils.uv_tool_runner import (
+    _UV_PATH_VARIABLES,
     UVToolRunner,
     UVToolRunnerError,
     _reset_uv_tool_runner_caches,
@@ -462,15 +463,22 @@ class TestGetToolVersionOffline:
 
     def test_online_probe_is_unchanged(self, runner, monkeypatch):
         monkeypatch.delenv("ASH_OFFLINE", raising=False)
+        # A relative uv path variable is the scanned tree's, and the probe goes
+        # without it (uv_tool_runner.without_tree_uv_files).
+        monkeypatch.setenv("UV_ENV_FILE", ".env")
         _, call = self._probe(runner)
         assert "--offline" not in call.args[0]
         # An explicit copy of the environment, never None: see utils/process_env.py.
-        # Compared by names, so a failure prints no value. Its output is read, so
-        # it runs without the caller's display variables and with NO_COLOR set
-        # (environ_for_parsed_output).
+        # Compared by names, so a failure prints no value, and outside the variables
+        # that filter judges, which the machine running the tests may set to a value
+        # it leaves out. Its output is read, so it runs without the caller's display
+        # variables and with NO_COLOR set (environ_for_parsed_output).
         env = call.kwargs["env"]
         assert env is not None
-        changed = set(differing_names(env, os.environ))
+        names = set(env)
+        assert "UV_ENV_FILE" not in names
+        judged = {*_UV_PATH_VARIABLES, "UV_PYTHON"}
+        changed = set(differing_names(env, os.environ)) - judged
         assert changed <= {*DISPLAY_VARIABLES, "NO_COLOR"}, sorted(changed)
         no_color = env.get("NO_COLOR")
         assert no_color == "1"
