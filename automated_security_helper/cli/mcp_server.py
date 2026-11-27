@@ -1883,9 +1883,11 @@ async def get_scan_results(
                         scan reports but does not fail on, are left out, as are findings
                         marked as false positives or accepted risks. Adds `findings`, a
                         flat list of the actionable findings (rule_id, severity, message,
-                        scanner, file_path, line_start, line_end), with `findings_count`.
-                        The list honors `scanners` and `severities`; use filter_level
-                        "full" to receive it. Default is False.
+                        scanner, file_path, line_start, line_end, result_kind), with
+                        `findings_count`. `result_kind` is the result's SARIF kind, which
+                        is `fail` when the scanner states none. The list honors `scanners`
+                        and `severities`; use filter_level "full" to receive it. Default
+                        is False.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
