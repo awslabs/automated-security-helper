@@ -13,8 +13,12 @@ from __future__ import annotations
 
 import pytest
 
+from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.utils.download_utils import (
     create_pinned_tool_install_command,
+)
+from automated_security_helper.utils.rules_bundles import (
+    create_rules_bundle_install_command,
 )
 from tests.unit.cli.dependencies_install_support import (
     CHECKOV_COMMAND,
@@ -142,3 +146,89 @@ def test_a_declared_stub_provider_refuses_as_not_implemented(tmp_path, monkeypat
     assert scene.calls == [], scene.calls
     assert scene.result.exit_code == 1, scene.text
     assert "cargo is not implemented" in " ".join(scene.text.split())
+
+
+#: The rules bundle cfn-guard declares beside its binary.
+_RULES_BUNDLE = "aws-guard-rules-registry"
+
+
+def _cfn_guard_scene(tmp_path, monkeypatch, *, on_run=None):
+    """A scene with cfn-guard's two declared commands, in their declared order.
+
+    The pinned binary download, then the pinned rules-bundle install, as
+    ``CfnGuardScanner.setup_custom_install_commands`` declares them. The
+    already-present check answers "not present", so each command reaches the
+    recorder whatever this host has installed; the recorder runs nothing, and
+    nothing is downloaded.
+    """
+    pinned = create_pinned_tool_install_command(
+        "cfn-guard", "linux", "amd64", str(tmp_path / "bin")
+    )
+    rules = create_rules_bundle_install_command(_RULES_BUNDLE)
+    scene = build_scene(
+        monkeypatch,
+        tmp_path,
+        name="cfn-guard",
+        command="cfn-guard",
+        uv_managed=False,
+        declared=[pinned, rules],
+        find_on_path=lambda c: f"/x/{c}",
+        on_run=on_run,
+    )
+    monkeypatch.setattr(
+        dependencies_module, "pinned_install_already_satisfied", lambda *_a, **_k: None
+    )
+    return scene, list(pinned.args), list(rules.args)
+
+
+@pytest.mark.parametrize(
+    "providers",
+    ["release-download", "release-download,custom"],
+    ids=["release-download", "release-download-then-custom"],
+)
+def test_release_download_runs_cfn_guards_rules_bundle_install_as_declared(
+    tmp_path, monkeypatch, providers
+):
+    """The rules-bundle install is a pinned release download of its own.
+
+    It runs as declared. It is not rebuilt from its tool's name as a second download
+    of the cfn-guard binary, which left the bundle uninstalled while the run reported
+    success. With custom listed after release-download the result is the same:
+    release-download is tried first and serves both commands.
+    """
+    scene, pinned, rules = _cfn_guard_scene(tmp_path, monkeypatch)
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", providers)
+
+    assert scene.argvs == [pinned, rules], scene.calls
+    assert scene.result.exit_code == 0, scene.text
+
+
+def test_release_download_fails_the_run_when_the_rules_bundle_install_fails(
+    tmp_path, monkeypatch
+):
+    """A failed rules-bundle install fails the run: no "Installation Complete" and
+    exit 0 while the bundle a scan of a template needs is absent."""
+    rules_argv = list(create_rules_bundle_install_command(_RULES_BUNDLE).args)
+    scene, _pinned, rules = _cfn_guard_scene(
+        tmp_path, monkeypatch, on_run=lambda argv: 1 if argv == rules_argv else 0
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "release-download")
+
+    assert rules in scene.argvs, scene.calls
+    assert scene.result.exit_code == 1, scene.text
+    assert "Installation Complete" not in scene.text, scene.text
+
+
+def test_without_providers_cfn_guards_two_commands_run_as_declared(
+    tmp_path, monkeypatch
+):
+    """The default run is unchanged: each command is built by its own provider."""
+    scene, pinned, rules = _cfn_guard_scene(tmp_path, monkeypatch)
+
+    run_install(scene, monkeypatch, tmp_path)
+
+    assert scene.argvs == [pinned, rules], scene.calls
+    assert scene.result.exit_code == 0, scene.text
+    assert "Skipped provider" not in scene.text, scene.text
