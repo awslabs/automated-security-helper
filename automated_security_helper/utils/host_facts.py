@@ -51,11 +51,16 @@ A distribution's version and ASH's ``Requires-Python`` are the header lines of i
 the first reading. A text that is not made of plain headers goes to the parser, and the
 runtimes polars would try only after the one that loads are never looked up.
 
-This module is the only reader of ``/proc/cpuinfo``, the macOS translation sysctl and
-the two Windows calls named in ``tests/unit/utils/test_host_facts_single_reader.py``,
-which holds the rest of the package to that. It imports nothing else from ASH and
-nothing from polars, and everything beyond a few cheap standard-library modules is
-imported inside the function that needs it.
+On Linux the translation is read from the same processor file as the level: an x86-64
+machine whose file shows no x86-64 processor runs under an emulator that presents the
+host's own processor, so its translation is ``unknown``, not ``native``.
+
+This module is the only reader of the kernel release, ``/proc/cpuinfo``, the macOS
+translation and feature sysctls and the two Windows calls named in
+``tests/unit/utils/test_host_facts_single_reader.py``, which holds the rest of the
+package to that. It imports nothing else from ASH and nothing from polars, and
+everything beyond a few cheap standard-library modules is imported inside the function
+that needs it.
 """
 
 from __future__ import annotations
@@ -1234,7 +1239,16 @@ class HostFactsReader:
     def _translation(self) -> str:
         platform = self._platform()
         if platform == "linux":
-            return "native"
+            arch = self._arch()
+            if arch == UNKNOWN:
+                return UNKNOWN
+            if arch != "amd64":
+                return "native"
+            # An x86-64 machine runs x86-64 code natively where the processor file shows
+            # an x86-64 processor. QEMU and Rosetta for Linux present the host's own
+            # processor (an arm64 one) to what they translate, so a file with no x86
+            # flags line says the process is translated, and which way cannot be told.
+            return "native" if self._x86_processor_flags() is not None else UNKNOWN
         if platform == "darwin":
             import errno
 
@@ -1281,7 +1295,12 @@ class HostFactsReader:
             return UNKNOWN
         if "microsoft" not in release:
             return "no"
-        return "wsl2" if "wsl2" in release else "wsl1"
+        # The first WSL2 kernels (4.19.x) have no WSL2 suffix, but every WSL2 kernel is
+        # a ``microsoft-standard`` one, and a WSL1 release (``4.4.0-19041-Microsoft``)
+        # is not.
+        if "wsl2" in release or "microsoft-standard" in release:
+            return "wsl2"
+        return "wsl1"
 
     def _loader(self, path: str) -> Optional[str]:
         """The program loader the executable at ``path`` names, read from the file."""
@@ -1388,9 +1407,18 @@ class HostFactsReader:
             reports = self._windows_reports()
         return cpu_level_from_reports(reports)
 
-    def _linux_reports(self) -> dict[str, Optional[bool]]:
+    def _x86_processor_flags(self) -> Optional[frozenset[str]]:
+        """The flags the processor file lists for an x86-64 processor, or None.
+
+        None is a file with no such list: another kind of processor, or a read that may
+        have stopped inside the list. The file is read once per reader, a failed read
+        included, whichever fact asks first.
+        """
         text = self._src("read_text", "/proc/cpuinfo", _CPUINFO_LIMIT)
-        flags = _x86_flags(text, _CPUINFO_LIMIT)
+        return _x86_flags(text, _CPUINFO_LIMIT)
+
+    def _linux_reports(self) -> dict[str, Optional[bool]]:
+        flags = self._x86_processor_flags()
         if flags is None:
             return {}
         return {
@@ -1516,7 +1544,11 @@ class HostFactsReader:
     @staticmethod
     def _is_channel_path(channel: str, parts: tuple[str, ...]) -> bool:
         if channel == "uvx":
-            return len(parts) >= 2 and parts[0].startswith("environments-v")
+            # uvx runs from an environment of the cache: one kept in ``archive-v<N>/<id>``
+            # (where uv puts the environments it builds) or one in ``environments-v<N>``.
+            return len(parts) >= 2 and parts[0].startswith(
+                ("environments-v", "archive-v")
+            )
         return bool(parts)
 
     def _below(
@@ -1591,13 +1623,20 @@ class HostFactsReader:
             local = self._sources.getenv("LOCALAPPDATA")
             if local:
                 yield flavor.join(local, "pipx", "pipx", "venvs")
-        elif home:
-            yield posixpath.join(home, ".local", "pipx", "venvs")
-            yield posixpath.join(home, ".local", "share", "pipx", "venvs")
-            if platform == "darwin":
-                yield posixpath.join(
-                    home, "Library", "Application Support", "pipx", "venvs"
-                )
+        else:
+            # pipx takes its home from platformdirs, which puts it under XDG_DATA_HOME
+            # where that is set, and ignores the variable on macOS (and Windows, above).
+            if platform != "darwin":
+                data = self._sources.getenv("XDG_DATA_HOME")
+                if data:
+                    yield posixpath.join(data, "pipx", "venvs")
+            if home:
+                yield posixpath.join(home, ".local", "pipx", "venvs")
+                yield posixpath.join(home, ".local", "share", "pipx", "venvs")
+                if platform == "darwin":
+                    yield posixpath.join(
+                        home, "Library", "Application Support", "pipx", "venvs"
+                    )
 
     def _read_ash_record(self) -> tuple[bool, str]:
         """``(editable, installer token)`` from ASH's installed metadata."""
