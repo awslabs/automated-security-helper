@@ -25,6 +25,7 @@ environment install what the hook's own scanner preset needs.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -275,16 +276,44 @@ _EXPRESSION = re.compile(
 )
 
 
+def _load_ci_matrix() -> Any:
+    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
+    name = "_ash_ci_matrix"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
+        )
+        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+ci_matrix = _load_ci_matrix()
+
+#: The event whose matrix is the static axes less the static excludes: the pull-request
+#: cover is void on a manual run. This test asks whether the cells the hooks are named
+#: on exist in the matrix, as an OS dropped from an axis or a renamed Python version
+#: would remove them. The cover takes the ubuntu-latest and macos-latest cells off a pull
+#: request on purpose, and the hooks run for real on the windows-latest cell there (the
+#: cover notes in both workflows), so a pull request is not the event this reads.
+_STATIC_EVENT = "workflow_dispatch"
+
+
 def _effective_cells(job: dict[str, Any], method: str) -> set[tuple[str, str]]:
-    matrix = job["strategy"]["matrix"]
-    excludes = matrix.get("exclude") or []
-    cells = set()
-    for os_name in matrix["os"]:
-        for python in matrix["python-version"]:
-            cell = {"os": os_name, "python-version": python, "method": method}
-            if not any(all(cell.get(k) == v for k, v in ex.items()) for ex in excludes):
-                cells.add((os_name, python))
-    return cells
+    """The (os, python-version) cells the job's matrix has for ``method``.
+
+    The shared reader's product of the axes less the excludes, read for _STATIC_EVENT.
+    An ``include`` entry adds no cell here.
+    """
+    legs = ci_matrix.axis_cells(job["strategy"]["matrix"], _STATIC_EVENT)
+    return {
+        (leg["os"], leg["python-version"])
+        for leg in legs
+        if leg.get("method") == method
+    }
 
 
 def _run_hooks_values(job: dict[str, Any]) -> list[str]:

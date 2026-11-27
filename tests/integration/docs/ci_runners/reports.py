@@ -25,12 +25,14 @@
 from __future__ import annotations
 
 import calendar
+import importlib.util
 import json
 import math
 import os
 import re
 import shutil
 import struct
+import sys
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
@@ -373,42 +375,50 @@ def _input_on(inputs: Any, name: str) -> bool:
     return value not in (False, "false")
 
 
+#: scripts/_ci_matrix.py, the one reader of a workflow's matrices. scripts/ is not a
+#: package, so it is loaded by path, under the name the tests share.
+_CI_MATRIX_PATH = Path(__file__).resolve().parents[4] / "scripts" / "_ci_matrix.py"
+#: The event the matrices are read for. The caller names no event, so a matrix is read as
+#: on a manual run, where the pull-request overlay of an exclude entry matches nothing.
+#: The blocks the page tests run carry no overlay.
+_STATIC_EVENT = "workflow_dispatch"
+
+
+def _ci_matrix() -> Any:
+    """The shared matrix reader, loaded on first use."""
+    name = "_ash_ci_matrix"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, _CI_MATRIX_PATH)
+        assert spec and spec.loader, f"cannot load {_CI_MATRIX_PATH}"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return module
+
+
 def matrix_entries(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The runs of a ``strategy.matrix``, expanded as GitHub expands it.
 
-    The product of the list-valued keys, less each ``exclude`` entry it matches; an
-    ``include`` entry is added to every run whose original values it keeps, or else
-    becomes a run of its own. A matrix built by an expression cannot be counted before
-    the run, and is an error.
+    The shared reader's expansion: the product of the list-valued keys, less each
+    ``exclude`` entry it matches; an ``include`` entry is added to every original run
+    whose values it keeps, never to a run an earlier ``include`` created, or else
+    becomes a run of its own. A matrix of ``include`` entries alone is one run per entry.
+    GitHub's workflow syntax reference says so under
+    ``jobs.<job_id>.strategy.matrix.include``: "If you don't specify any matrix
+    variables, all configurations under ``include`` will run." and, for an entry that
+    fits no combination, "If the object cannot be added to any of the matrix
+    combinations, a new matrix combination will be created instead."
+    https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions
+
+    A matrix built by an expression, or holding a ``${{ }}`` form the reader does not
+    evaluate, cannot be counted before the run, and is an error (a ValueError).
     """
-    keys = [key for key in matrix if key not in ("include", "exclude")]
-    for key in keys:
-        if not isinstance(matrix[key], list):
-            raise ValueError(
-                f"matrix key {key} is {matrix[key]!r}, not a list; its runs cannot be "
-                "counted before the run"
-            )
-    runs: list[dict[str, Any]] = [{}] if keys else []
-    for key in keys:
-        runs = [{**run, key: value} for run in runs for value in matrix[key]]
-    for name in ("exclude", "include"):
-        if not isinstance(matrix.get(name) or [], list):
-            raise ValueError(f"matrix {name} is {matrix[name]!r}, not a list")
-    for exclude in matrix.get("exclude") or []:
-        runs = [
-            run
-            for run in runs
-            if not all(run.get(key) == value for key, value in exclude.items())
-        ]
-    for include in matrix.get("include") or []:
-        matched = False
-        for run in runs:
-            if all(run[key] == value for key, value in include.items() if key in keys):
-                run.update({k: v for k, v in include.items() if k not in keys})
-                matched = True
-        if not matched:
-            runs.append(dict(include))
-    return runs
+    return _ci_matrix().cells({"strategy": {"matrix": matrix}}, _STATIC_EVENT)
 
 
 def matrix_runs(job: Mapping[str, Any]) -> int:

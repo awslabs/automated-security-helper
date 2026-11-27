@@ -120,11 +120,23 @@ COVERAGE_RUNNERS = [
 ]
 COVERAGE_PYTHON = "3.12"
 
-#: The one event-conditioned matrix entry the workflow uses: on a pull_request event it
-#: is the quoted value and drops the combinations it matches; on every other event it is
-#: the empty string and matches no combination (the note on ensure-cache in the workflow).
-PULL_REQUEST_COVER_PREFIX = "${{ github.event_name == 'pull_request' && '"
-PULL_REQUEST_COVER_SUFFIX = "' || '' }}"
+
+def _load_ci_matrix() -> Any:
+    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
+    name = "_ash_ci_matrix"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
+        )
+        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+ci_matrix = _load_ci_matrix()
 
 
 def _static_axes(matrix: dict[str, Any]) -> list[str]:
@@ -135,17 +147,19 @@ def _static_axes(matrix: dict[str, Any]) -> list[str]:
 def _assert_only_the_pull_request_cover(job_id: str, matrix: dict[str, Any]) -> None:
     """Every exclude entry on a tier job is the pull-request cover and nothing else.
 
+    The cover is the one event-conditioned matrix entry the workflow uses, which the
+    shared reader reads as PULL_REQUEST_OVERLAY: on a pull_request event it is the
+    quoted value and drops the combinations it matches; on every other event it is the
+    empty string and matches no combination (the note on ensure-cache in the workflow).
+
     A static exclude would change the leg count on every event, and the job counts in
     the workflow comments are checked against the static axes; the cover changes it on a
     pull request only, where tests/unit/test_unified_ci_job_counts.py resolves it.
     """
+    cover = ci_matrix.PULL_REQUEST_OVERLAY
     for entry in matrix.get("exclude") or []:
         for key, value in entry.items():
-            assert (
-                isinstance(value, str)
-                and value.startswith(PULL_REQUEST_COVER_PREFIX)
-                and value.endswith(PULL_REQUEST_COVER_SUFFIX)
-            ), (
+            assert isinstance(value, str) and cover.match(value), (
                 f"{job_id} carries a static exclude ({key}: {value!r}); only the "
                 "pull-request cover is admitted on a tier job"
             )
