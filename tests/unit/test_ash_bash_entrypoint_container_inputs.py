@@ -1439,11 +1439,11 @@ class TestAnExplicitRunnerPathRunsThatPath:
 
 
 class TestAWorkspaceScanIsRefused:
-    """``./ash`` scans one directory: it hands the scan inside ``--source-dir /src``,
-    which that scan refuses next to ``--workspace``, after the container has started.
-    So it cannot run a workspace scan, and cannot mark a workspace's ``--config``
-    either. A ``--workspace`` passed through is refused with exit 3 before anything
-    is built or mounted, naming ``ash --mode container --workspace``, whatever the
+    """``./ash`` scans one directory: it mounts that directory, and the scan inside
+    could not be told which workspace config the repository wrote. So it cannot run
+    a workspace scan, and cannot mark a workspace's ``--config`` either. A
+    ``--workspace`` passed through is refused with exit 3 before anything is built or
+    mounted, naming ``ash scan workspace <file> --mode container``, whatever the
     config; the case that matters is a config in the checkout but outside the
     workspace, which the scan inside would read as the operator's."""
 
@@ -1469,7 +1469,7 @@ class TestAWorkspaceScanIsRefused:
 
         assert rc == 3, text
         assert calls == []
-        assert "ash --mode container --workspace" in text
+        assert "ash scan workspace <file> --mode container" in text
 
     def test_a_one_directory_scan_runs(self, fake_runner, project):
         """Control: without --workspace, as before."""
