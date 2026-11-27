@@ -16,12 +16,14 @@ plugin declares, because on main the two agree.
 from __future__ import annotations
 
 import ast
+import contextlib
 import dataclasses
 import importlib.util
 import re
 import sys
 import types
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -699,6 +701,64 @@ def test_an_install_declaration_that_raises_is_an_error_naming_the_scanner(ir, r
         ir.route_for("planted-cli", planted)
 
 
+def test_a_scanner_module_that_raises_when_imported_is_an_error_naming_the_scanner(
+    ir, monkeypatch
+):
+    ref = next(
+        m.entry_points.scanner for m in scanner_manifests() if m.name == "hadolint"
+    )
+    real = ir.resolve_ref
+
+    def resolve(candidate):
+        if candidate == ref:
+            raise RuntimeError("raised while importing")
+        return real(candidate)
+
+    monkeypatch.setattr(ir, "resolve_ref", resolve)
+
+    with pytest.raises(ir.RouteError, match="hadolint.*RuntimeError"):
+        ir.Registers.read()
+
+
+def test_a_pin_module_that_raises_when_imported_is_an_error_naming_the_scanner(
+    ir, regs, monkeypatch, tmp_path
+):
+    (tmp_path / "ash_planted_raising_pin.py").write_text(
+        'raise RuntimeError("raised while importing")\n', encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    planted = _uv_scanner(regs, specifier=">=1")
+
+    with pytest.raises(
+        ir.RouteError, match="planted-uv.*RuntimeError.*raised while importing"
+    ):
+        ir.route_for(
+            "planted-uv",
+            planted,
+            interim={"planted-uv": "ash_planted_raising_pin:VERSION"},
+        )
+
+
+def test_the_declarations_are_read_while_the_plugin_describes_its_install_story(
+    ir, regs
+):
+    from automated_security_helper.base.plugin_base import install_story_is_declared
+
+    manifest = next(m for m in regs.manifests if m.name == "snyk-code")
+    scanner_class = ir.resolve_ref(manifest.entry_points.scanner)
+    seen = []
+
+    def gated(self, target_platform, arch):
+        seen.append(install_story_is_declared())
+        return [["true"]] if install_story_is_declared() else []
+
+    with mock.patch.object(scanner_class, "get_installation_commands", gated):
+        pairs = regs.declared_on(manifest)
+
+    assert pairs == opsf.PLATFORMS_ALL
+    assert seen and all(seen)
+
+
 def test_the_declaration_reader_asks_each_platform_the_register_names(ir):
     asked = []
 
@@ -880,7 +940,7 @@ def test_nix_runs_what_the_flake_carries_and_cdk_nag_needs_the_host_extra(ir, re
         "cdk-nag": "needs the cdk extra",
         "ferret-scan": "needs ferret-scan",
         "guarddog": "needs guarddog",
-        "snyk-code": "needs snyk-code",
+        "snyk-code": "needs snyk",
     }
 
 
@@ -962,7 +1022,7 @@ def test_a_host_runs_the_tools_its_recipe_installs(ir, regs):
         "trivy-repo": "needs trivy",
         "ferret-scan": "needs ferret-scan",
         "guarddog": "needs guarddog",
-        "snyk-code": "needs snyk-code",
+        "snyk-code": "needs snyk",
     }
     assert _statuses(got)["betterleaks"] == "opt_in"
 
@@ -1010,6 +1070,8 @@ def test_an_architecture_the_release_table_lacks_misses_that_tool(ir, regs):
     assert _reasons(got)["grype"] == "no windows/arm64 release asset"
     assert _statuses(got)["gitleaks"] == "available"
     assert _statuses(got)["betterleaks"] == "opt_in"
+    assert _statuses(got)["semgrep"] == "missing"
+    assert _reasons(got)["semgrep"] == "semgrep publishes no Windows build"
 
 
 def test_an_alpha_scanner_never_changes_a_count_cell(ir, regs):
@@ -1037,6 +1099,149 @@ def test_an_alpha_scanner_never_changes_a_count_cell(ir, regs):
         assert _statuses(after)["planted-alpha"] == "opt_in"
         assert ir.builtin_count(after) == ir.builtin_count(before)
         assert ir.scanner_set_cell(after) == ir.scanner_set_cell(before)
+
+
+def _alpha_like(regs, name, copy_of):
+    """*regs* with one more alpha scanner whose register row is a copy of *copy_of*'s."""
+    return _plant(
+        regs,
+        _manifest(name),
+        regs.facets[copy_of].model_copy(update={"scanner_name": name}),
+    )
+
+
+@pytest.mark.parametrize(
+    "name,copy_of",
+    [("planted-inproc", "detect-secrets"), ("planted-npm", "npm-audit")],
+)
+def test_a_tool_less_alpha_scanner_changes_no_count_cell_in_any_environment(
+    ir, regs, name, copy_of
+):
+    planted = _alpha_like(regs, name, copy_of)
+    bare = ir.Env("linux", "amd64", RunMode.local, ir.Provision("host"))
+
+    for env in (_host(ir), bare, _nix(ir), _image(ir), _precommit(ir)):
+        before = ir.scanners_for(env, regs)
+        after = ir.scanners_for(env, planted)
+
+        assert ir.builtin_count(after) == ir.builtin_count(before), env
+        assert ir.scanner_set_cell(after) == ir.scanner_set_cell(before), env
+
+
+def test_a_user_installed_cli_is_missing_by_the_program_its_runtime_names(ir, regs):
+    planted = _plant(
+        regs,
+        _manifest("planted-cli"),
+        _facets(
+            "planted-cli",
+            opsf.RuntimeKind.USER_INSTALLED_CLI,
+            programs=("planted-tool",),
+        ),
+    )
+
+    bare = ir.scanners_for(_host(ir), planted)
+    provided = ir.scanners_for(_host(ir, tools=_HOST_TOOLS | {"planted-tool"}), planted)
+
+    assert _reasons(bare)["planted-cli"] == "needs planted-tool"
+    assert _statuses(provided)["planted-cli"] == "opt_in"
+
+
+# ---------------------------------------------------------------------------
+# A platform a plugin says it cannot run on is a platform the host does not run it on
+# ---------------------------------------------------------------------------
+
+
+def _windows(ir, arch="amd64"):
+    """A Windows host that provides every tool and runtime, so what it misses is
+    missing for its platform and for nothing else."""
+    return _host(
+        ir,
+        os_="windows",
+        arch=arch,
+        tools=ir.ALL_TOOLS,
+        runtimes=frozenset({"node", "npm", "ruby"}),
+    )
+
+
+def test_a_windows_host_misses_semgrep_which_publishes_no_windows_build(ir, regs):
+    got = ir.scanners_for(_windows(ir), regs)
+
+    assert _statuses(got)["semgrep"] == "missing"
+    assert _reasons(got)["semgrep"] == "semgrep publishes no Windows build"
+    assert ir.builtin_count(got) == (16, 17)
+    assert ir.scanner_set_cell(got) == "16 of 17 built-in"
+
+
+def test_a_windows_host_misses_guarddog_which_cannot_be_installed_there(ir, regs):
+    got = ir.scanners_for(_windows(ir), regs)
+
+    assert _statuses(got)["guarddog"] == "missing"
+    assert "cannot be installed on Windows" in _reasons(got)["guarddog"]
+    assert "`guarddog`" not in ir.scanner_names(got).alpha
+
+
+@pytest.mark.parametrize(
+    "os_,arch",
+    [("linux", "amd64"), ("linux", "arm64"), ("darwin", "amd64"), ("darwin", "arm64")],
+)
+def test_semgrep_and_guarddog_run_on_every_platform_they_are_built_for(
+    ir, regs, os_, arch
+):
+    got = ir.scanners_for(_host(ir, os_=os_, arch=arch, tools=ir.ALL_TOOLS), regs)
+
+    assert _statuses(got)["semgrep"] == "available"
+    assert _statuses(got)["guarddog"] == "opt_in"
+
+
+def test_a_platform_the_plugin_could_not_be_asked_about_is_unread_never_available(
+    ir, regs
+):
+    def unreadable(manifest, os_name):
+        if manifest.name == "semgrep":
+            raise RuntimeError("could not be built")
+        return regs.platform_reason(manifest, os_name)
+
+    planted = dataclasses.replace(regs, platform_reason=unreadable)
+
+    got = ir.scanners_for(_host(ir), planted)
+
+    assert _statuses(got)["semgrep"] == "missing"
+    assert _reasons(got)["semgrep"].startswith("platform not read")
+    assert "could not be built" in _reasons(got)["semgrep"]
+    assert _statuses(got)["bandit"] == "available"
+    assert (
+        "`semgrep` (deprecated; missing: platform not read RuntimeError: "
+        "could not be built)"
+    ) in ir.scanner_names(got).builtin
+
+
+def test_only_a_plugin_that_overrides_the_platform_question_is_built_to_ask_it(
+    ir, regs, monkeypatch
+):
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+    base = ScannerPluginBase.unsupported_platform_reason
+    overriders = {
+        m.name
+        for m in regs.manifests
+        if ir.resolve_ref(m.entry_points.scanner).unsupported_platform_reason
+        is not base
+    }
+    built = []
+    real = ir.described_scanner
+
+    @contextlib.contextmanager
+    def counting(manifest):
+        built.append(manifest.name)
+        with real(manifest) as instance:
+            yield instance
+
+    monkeypatch.setattr(ir, "described_scanner", counting)
+
+    ir.scanners_for(_windows(ir), regs)
+
+    assert {"semgrep", "guarddog"} <= overriders
+    assert set(built) == overriders
 
 
 # ---------------------------------------------------------------------------
@@ -1119,9 +1324,10 @@ def test_alpha_reads_opt_in_with_no_count(ir):
     three = _planted_availability(ir, alpha=("alpha-a", "alpha-b", "alpha-c"))
     none = _planted_availability(ir, alpha=())
 
-    assert ir.scanner_set_cell(one) == "all built-in, alpha opt-in"
-    assert ir.scanner_set_cell(three) == ir.scanner_set_cell(one)
+    assert {row.status for row in three.rows if not row.builtin} == {ir.Status.OPT_IN}
     assert ir.scanner_set_cell(none) == "all built-in"
+    assert ir.scanner_set_cell(one) == "all built-in"
+    assert ir.scanner_set_cell(three) == ir.scanner_set_cell(none)
     assert not re.search(r"\d", ir.scanner_set_cell(three))
 
 
@@ -1164,7 +1370,7 @@ def test_a_deprecated_scanner_that_is_also_missing_carries_both_notes(ir, regs):
 def test_the_image_cell_and_names_on_the_real_registers(ir, regs):
     got = ir.scanners_for(_image(ir), regs)
 
-    assert ir.scanner_set_cell(got) == "all built-in, alpha opt-in"
+    assert ir.scanner_set_cell(got) == "all built-in"
     assert len(ir.scanner_names(got).builtin) == 17
     assert ir.scanner_names(got).alpha == (
         "`betterleaks`",

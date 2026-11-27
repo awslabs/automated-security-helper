@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import json
+import os
 import re
 import shlex
 import shutil
@@ -717,9 +718,70 @@ def test_json_belongs_to_plan_only(script, capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_a_pin_module_that_raises_when_imported_exits_2_with_the_scripts_message(
+    script, monkeypatch, capsys, tmp_path
+):
+    (tmp_path / "ash_planted_raising_pin.py").write_text(
+        'raise RuntimeError("raised while importing")\n', encoding="utf-8"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(
+        script, "INTERIM_PINS", {"ferret-scan": "ash_planted_raising_pin:VERSION"}
+    )
+
+    code = script.main(["plan"])
+
+    captured = capsys.readouterr()
+    assert code == 2 and captured.out == ""
+    assert captured.err.startswith("alpha-doctest-installs: ")
+    assert "ferret-scan" in captured.err and "raised while importing" in captured.err
+
+
 # ---------------------------------------------------------------------------
 # verify, against planted directories and planted probes
 # ---------------------------------------------------------------------------
+
+
+_WINDOWS_EXTENSIONS = (".com", ".exe", ".bat", ".cmd")
+
+
+def _windows_which(program, path=None):
+    """``shutil.which`` as Windows answers it, run on any machine.
+
+    A name matches only with one of the PATHEXT extensions on it, or when one is added:
+    a file with no extension is never a program there (CPython 3.11 to 3.14 under the
+    default X_OK mode).
+    """
+    names = (
+        [program]
+        if program.lower().endswith(_WINDOWS_EXTENSIONS)
+        else [program + extension for extension in _WINDOWS_EXTENSIONS]
+    )
+    for directory in (path or "").split(os.pathsep):
+        for name in names:
+            candidate = Path(directory) / name
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+@pytest.fixture(params=[False, True], ids=["this-machines-lookup", "windows-lookup"])
+def windows(request):
+    """Whether a program is found the way Windows finds it, by a PATHEXT extension."""
+    return request.param
+
+
+def test_the_windows_lookup_finds_a_name_with_an_extension_and_not_a_bare_one(tmp_path):
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    (directory / "bare").write_text("", encoding="utf-8")
+    (directory / "extended.exe").write_text("", encoding="utf-8")
+    extended = str(directory / "extended.exe")
+
+    assert _windows_which("bare", path=str(directory)) is None
+    assert _windows_which("extended", path=str(directory)) == extended
+    assert _windows_which("extended.exe", path=str(directory)) == extended
+    assert _windows_which("missing", path=str(directory)) is None
 
 
 def _bin(tmp_path, *names):
@@ -738,6 +800,7 @@ def _probes(
     versions=None,
     uv="guarddog v3.2.0\n- guarddog\n",
     distributions=None,
+    windows=False,
 ):
     versions = {
         "betterleaks": "betterleaks version 1.10.1",
@@ -747,7 +810,7 @@ def _probes(
     }
     distributions = {"ferret-scan": "2.5.3", **(distributions or {})}
     return script.Probes(
-        which=shutil.which,
+        which=_windows_which if windows else shutil.which,
         version_text=lambda executable: versions.get(Path(executable).name, ""),
         uv_tool_list=lambda: uv,
         distribution_version=distributions.get,
@@ -757,30 +820,36 @@ def _probes(
 _ALL_TOOLS = ("betterleaks", "ferret-scan", "guarddog", "hadolint", "trivy")
 
 
-def test_verify_accepts_what_the_plan_says_is_installed(script, tmp_path):
+def test_verify_accepts_what_the_plan_says_is_installed(script, tmp_path, windows):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
-    problems = script.verify(script.plan(), path=str(directory), probes=_probes(script))
+    problems = script.verify(
+        script.plan(), path=str(directory), probes=_probes(script, windows=windows)
+    )
 
     assert problems == []
 
 
-def test_verify_names_a_tool_that_is_not_on_the_path(script, tmp_path):
+def test_verify_names_a_tool_that_is_not_on_the_path(script, tmp_path, windows):
     directory = _bin(tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"))
 
-    problems = script.verify(script.plan(), path=str(directory), probes=_probes(script))
+    problems = script.verify(
+        script.plan(), path=str(directory), probes=_probes(script, windows=windows)
+    )
 
     assert len(problems) == 1
     assert "hadolint" in problems[0] and "not on the session PATH" in problems[0]
 
 
-def test_verify_names_a_binary_that_reports_another_version(script, tmp_path):
+def test_verify_names_a_binary_that_reports_another_version(script, tmp_path, windows):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
     problems = script.verify(
         script.plan(),
         path=str(directory),
-        probes=_probes(script, versions={"betterleaks": "betterleaks 1.10.0"}),
+        probes=_probes(
+            script, versions={"betterleaks": "betterleaks 1.10.0"}, windows=windows
+        ),
     )
 
     assert len(problems) == 1
@@ -791,20 +860,22 @@ def test_verify_names_a_binary_that_reports_another_version(script, tmp_path):
     "reported",
     ["trivy 0.76.20", "trivy 10.76.2", "trivy 0.76.2.1", "trivy 0.76.2-rc1"],
 )
-def test_a_version_found_inside_another_is_not_the_pin(script, tmp_path, reported):
+def test_a_version_found_inside_another_is_not_the_pin(
+    script, tmp_path, windows, reported
+):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
     problems = script.verify(
         script.plan(),
         path=str(directory),
-        probes=_probes(script, versions={"trivy": reported}),
+        probes=_probes(script, versions={"trivy": reported}, windows=windows),
     )
 
-    assert [p for p in problems if "trivy" in p], reported
+    assert [p for p in problems if "trivy" in p and reported in p], reported
 
 
 def test_verify_names_a_uv_tool_the_tool_list_does_not_show_at_the_pin(
-    script, tmp_path
+    script, tmp_path, windows
 ):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
@@ -812,14 +883,14 @@ def test_verify_names_a_uv_tool_the_tool_list_does_not_show_at_the_pin(
         problems = script.verify(
             script.plan(),
             path=str(directory),
-            probes=_probes(script, uv=listing),
+            probes=_probes(script, uv=listing, windows=windows),
         )
 
-        assert [p for p in problems if "guarddog" in p], listing
+        assert [p for p in problems if "guarddog" in p and "uv tool list" in p], listing
 
 
 def test_verify_names_a_python_package_at_another_version_or_not_installed(
-    script, tmp_path
+    script, tmp_path, windows
 ):
     directory = _bin(tmp_path, *_ALL_TOOLS)
 
@@ -827,17 +898,21 @@ def test_verify_names_a_python_package_at_another_version_or_not_installed(
         problems = script.verify(
             script.plan(),
             path=str(directory),
-            probes=_probes(script, distributions=distributions),
+            probes=_probes(script, distributions=distributions, windows=windows),
         )
 
-        assert [p for p in problems if "ferret-scan" in p], distributions
+        assert [p for p in problems if "ferret-scan" in p and "the installed" in p], (
+            distributions
+        )
 
 
-def test_verify_checks_only_what_the_plan_installs(script, tmp_path):
+def test_verify_checks_only_what_the_plan_installs(script, tmp_path, windows):
     directory = _bin(tmp_path, *(t for t in _ALL_TOOLS if t != "hadolint"))
     rows = script.plan(held={"hadolint": "held"})
 
-    problems = script.verify(rows, path=str(directory), probes=_probes(script))
+    problems = script.verify(
+        rows, path=str(directory), probes=_probes(script, windows=windows)
+    )
 
     assert problems == []
 
@@ -879,11 +954,13 @@ def test_verify_exits_1_on_a_problem_and_prints_it_on_stderr_only(
 
 
 def test_verify_prints_what_it_found_and_exits_0_when_everything_resolves(
-    script, tmp_path, monkeypatch, capsys
+    script, tmp_path, monkeypatch, capsys, windows
 ):
     directory = _bin(tmp_path, *_ALL_TOOLS)
     monkeypatch.setattr(script, "session_path", lambda: str(directory))
-    monkeypatch.setattr(script, "default_probes", lambda: _probes(script))
+    monkeypatch.setattr(
+        script, "default_probes", lambda: _probes(script, windows=windows)
+    )
 
     code = script.main(["verify"])
 
