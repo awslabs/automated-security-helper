@@ -167,17 +167,27 @@ def _facets(
 
 
 def _plant(regs, manifest, facets, declared=(), **replace):
-    """*regs* with one more scanner; *declared* are the pairs it declares installs for."""
+    """*regs* with one more scanner; *declared* are the pairs it declares installs for.
+
+    The planted scanner has no class to ask, so it names no unsupported platform.
+    """
     old = regs.declared_on
+    old_reason = regs.platform_reason
 
     def declared_on(candidate):
         return tuple(declared) if candidate.name == manifest.name else old(candidate)
+
+    def platform_reason(candidate, os_name):
+        if candidate.name == manifest.name:
+            return None
+        return old_reason(candidate, os_name)
 
     return dataclasses.replace(
         regs,
         manifests=tuple(sorted((*regs.manifests, manifest), key=lambda m: m.name)),
         facets={**regs.facets, manifest.name: facets},
         declared_on=declared_on,
+        platform_reason=platform_reason,
         **replace,
     )
 
@@ -553,12 +563,25 @@ def test_a_reference_that_cannot_be_read_as_one_version_is_an_error(
         ir.route_for("planted-uv", planted, interim={"planted-uv": ref})
 
 
-def test_cfn_nag_is_pinned_by_the_constant_its_installer_uses(ir, regs):
+def _gem_install_version(ir, regs):
+    """The version the declared ``gem install cfn-nag`` command passes after ``-v``."""
+    manifest = next(m for m in regs.manifests if m.name == "cfn-nag")
+    with ir.described_scanner(manifest) as instance:
+        commands = [
+            list(command)
+            for command in instance.get_installation_commands("linux", "amd64")
+        ]
+    gem = [c for c in commands if c[:3] == ["gem", "install", "cfn-nag"]]
+    assert len(gem) == 1, commands
+    return gem[0][gem[0].index("-v") + 1]
+
+
+def test_cfn_nag_is_pinned_by_the_version_its_gem_install_command_passes(ir, regs):
     row = ir.route_for("cfn-nag", regs)
 
     assert row.route is ir.Route.DECLARED_COMMANDS
     assert [(p.version, p.source.value) for p in row.pins] == [
-        (tool_downloads.CFN_NAG_GEM_VERSION, "module_constant")
+        (_gem_install_version(ir, regs), "module_constant")
     ]
     assert row.installable is True
     assert "linux/amd64" in row.declared_on

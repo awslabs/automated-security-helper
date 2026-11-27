@@ -30,16 +30,18 @@ that answers is listed, so a caller can see two places that disagree:
 
 A binary's pin is the release pin of its tool, from ``tool_versions()``.
 
-Nothing here installs anything, and nothing here runs a scanner. A plugin is built
-once, in a scratch context, to read what install commands it declares.
+Nothing here installs anything, and nothing here runs a scanner. A plugin is built in
+a scratch context to read what install commands it declares and, for a host, whether
+it says it cannot run on the host's operating system.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import re
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -191,13 +193,15 @@ def declared_pairs(plugin: Any) -> tuple[str, ...]:
     return tuple(pairs)
 
 
-def _declared_on(manifest: ScannerManifest) -> tuple[str, ...]:
-    """What an instance of the manifest's scanner declares, built to be described.
+@contextlib.contextmanager
+def described_scanner(manifest: ScannerManifest) -> Iterator[Any]:
+    """An instance of the manifest's scanner, built to be described, for the block.
 
     The instance is built the way the reference generators build one: in a scratch
     context, as on Linux, with the plugin told it is describing its install story,
     so a plugin whose commands depend on a probe of this machine declares them as it
-    would where the probe passes.
+    would where the probe passes. Both settings hold for the whole block, so what the
+    caller asks the instance is answered in the context it was built in.
     """
     from automated_security_helper.base.plugin_base import declaring_install_story
     from automated_security_helper.base.plugin_context import PluginContext
@@ -214,8 +218,32 @@ def _declared_on(manifest: ScannerManifest) -> tuple[str, ...]:
         )
         with mock.patch("platform.system", return_value="Linux"):
             with declaring_install_story():
-                instance = scanner_class(context=context)
+                yield scanner_class(context=context)
+
+
+def _declared_on(manifest: ScannerManifest) -> tuple[str, ...]:
+    """The ``os/arch`` pairs the manifest's plugin declares install commands for."""
+    with described_scanner(manifest) as instance:
         return declared_pairs(instance)
+
+
+def _platform_reason(manifest: ScannerManifest, os_name: str) -> str | None:
+    """Why the manifest's plugin says it cannot run on *os_name*, or None.
+
+    ScanPhase asks each plugin ``unsupported_platform_reason()`` and skips one that
+    answers with a reason, so this asks the same question, with ``platform.system``
+    reading as *os_name*, in the context the declarations are read in. A plugin that
+    does not override the question names no reason and is not built.
+    """
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+    scanner_class = resolve_ref(manifest.entry_points.scanner)
+    hook = getattr(scanner_class, "unsupported_platform_reason", None)
+    if hook is None or hook is ScannerPluginBase.unsupported_platform_reason:
+        return None
+    with described_scanner(manifest) as instance:
+        with mock.patch("platform.system", return_value=os_name.capitalize()):
+            return instance.unsupported_platform_reason()
 
 
 @dataclass(frozen=True)
@@ -238,6 +266,10 @@ class Registers:
     nix_tools: frozenset[str]
     #: The ``os/arch`` pairs a manifest's plugin declares install commands for.
     declared_on: Callable[[ScannerManifest], tuple[str, ...]]
+    #: Why a manifest's plugin says it cannot run on an operating system (``linux``,
+    #: ``darwin`` or ``windows``), or None when it names no reason. A scanner planted
+    #: with no class has no plugin to ask, so a test that plants one plants its answer.
+    platform_reason: Callable[[ScannerManifest, str], str | None]
 
     @classmethod
     def read(cls) -> Registers:
@@ -248,7 +280,7 @@ class Registers:
             ref = manifest.entry_points.scanner
             try:
                 scanner_class = resolve_ref(ref)
-            except (ImportError, AttributeError, ValueError) as err:
+            except Exception as err:
                 raise RouteError(
                     f"{manifest.name}: its scanner {ref} cannot be loaded "
                     f"({type(err).__name__}: {err})"
@@ -276,6 +308,7 @@ class Registers:
                 if facet.row_for("nix") is not None
             ),
             declared_on=_declared_on,
+            platform_reason=_platform_reason,
         )
 
 
@@ -315,10 +348,10 @@ def _constant(scanner: str, ref: str, table: str) -> str:
         )
     try:
         module = importlib.import_module(module_name)
-    except ImportError as err:
+    except Exception as err:
         raise RouteError(
             f"{scanner}: the {table} reference {ref!r} names a module that cannot "
-            f"be imported ({err})"
+            f"be imported ({type(err).__name__}: {err})"
         ) from err
     if not hasattr(module, attribute):
         raise RouteError(f"{scanner}: {module_name} has no {attribute} ({table})")
@@ -593,18 +626,35 @@ def _tool_of(
     """The tool an environment must provide for the scanner, or None for none.
 
     A scanner that runs inside ASH, or through a runtime the environment provides
-    (npm), has no tool of its own.
+    (npm), has no tool of its own. A user-installed CLI is the program its runtime
+    facet names, not the scanner's name.
     """
     kind = facet.runtime.kind
     if kind in (opsf.RuntimeKind.IN_PROCESS, opsf.RuntimeKind.NODE_SUBCOMMAND):
         return None
     if kind is opsf.RuntimeKind.PINNED_BINARY:
         return facet.runtime.tool_versions_key
+    if kind is opsf.RuntimeKind.USER_INSTALLED_CLI:
+        own = [p for p in facet.runtime.external_programs if p not in HOST_RUNTIMES]
+        return own[0] if own else manifest.name
     return manifest.name
 
 
 def _needs(parts: list[str]) -> str:
     return "needs " + ", ".join(parts) if parts else ""
+
+
+def _platform_refusal(manifest: ScannerManifest, os_name: str, regs: Registers) -> str:
+    """Why the plugin says it cannot run on *os_name*; empty when it names no reason.
+
+    A plugin that cannot be asked has had nothing read from it. Its platform is
+    reported as unread, and an unread platform is never available.
+    """
+    try:
+        reason = regs.platform_reason(manifest, os_name)
+    except Exception as err:
+        return f"platform not read ({type(err).__name__}: {err})"
+    return reason or ""
 
 
 def _availability(
@@ -670,6 +720,9 @@ def _availability(
         provisionable = facet.platforms.provisionable
         if provisionable and pair not in provisionable:
             return row(Status.MISSING, f"no {pair} release asset")
+        refusal = _platform_refusal(manifest, env.os, regs)
+        if refusal:
+            return row(Status.MISSING, refusal)
         if not tool_present:
             parts.append(str(tool))
         if extra and extra not in provision.extras:
@@ -685,7 +738,9 @@ def scanners_for(env: Env, regs: Registers | None = None) -> Availability:
     """Which scanners *env* runs, each available, opt-in or missing with a reason.
 
     The pre-commit set is read from ``constants`` when the question is asked, so a
-    change to it changes the answer.
+    change to it changes the answer. On a host, a plugin that says it cannot run on
+    the host's operating system is missing with the reason it gives, and one that
+    could not be asked is missing as unread.
     """
     registers = Registers.read() if regs is None else regs
     precommit_set = frozenset(constants.PRECOMMIT_MODE_SCANNERS)
@@ -755,17 +810,15 @@ def scanner_set_cell(availability: Availability) -> str:
 
     "all built-in" when every built-in scanner is available, "N of M built-in"
     otherwise, and "<n> (the precommit set)" for the pre-commit hook. Alpha scanners
-    read "alpha opt-in" with no count, so admitting one changes no count.
+    are not in the cell: their rows read opt-in or missing, and the names view lists
+    the ones an environment can run, so admitting one changes no count.
     """
     available, total = builtin_count(availability)
     if availability.env.provision.kind == "precommit":
         return f"{available} (the precommit set)"
     if total == 0:
         raise RouteError("the availability has no built-in scanner row to count")
-    cell = "all built-in" if available == total else f"{available} of {total} built-in"
-    if any(not r.builtin and r.status is not Status.MISSING for r in availability.rows):
-        cell += ", alpha opt-in"
-    return cell
+    return "all built-in" if available == total else f"{available} of {total} built-in"
 
 
 @dataclass(frozen=True)
