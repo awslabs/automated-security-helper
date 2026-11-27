@@ -111,13 +111,13 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
-from automated_security_helper.core.constants import is_anchored
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ASHRespelledOverrideError,
     ScannerError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.path_stat import is_anchored
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -1318,11 +1318,12 @@ def refuse_relative_extend_path(
     config through viper, and betterleaks' decoder matches names in any case), so
     ``[Extend] Path``, ``[extend] PATH`` and ``"extend.path"`` are all
     ``extend.path``. A path is absolute when it is anchored
-    (``core.constants.is_anchored``): on Windows one with a root and no drive names
+    (``utils.path_stat.is_anchored``): on Windows one with a root and no drive names
     a file on the drive of the scanned tree, where ASH would read it on its own.
     An empty path is skipped, as both tools skip it. Each file is read as a
     regular file of at most ``TOOL_CONFIG_MAX_BYTES``, and each absolute extended
-    file is followed to the tool's own depth limit.
+    file is followed to the tool's own depth limit. A UTF-8 byte order mark at the
+    start of the text, which some editors save, is skipped before the parse.
 
     A file or text ASH cannot read or parse (missing, not a regular file, too
     large, not UTF-8, not TOML) is refused, not left to the tool, because ASH could
@@ -1351,6 +1352,9 @@ def refuse_relative_extend_path(
         where = repr(str(path))
     else:
         where = f"the config text in {source}"
+    # chr(0xFEFF) is the byte order mark, which tomllib reads as text before the
+    # first key. Only this parse skips it; the tool is given the text as it is.
+    text = text.removeprefix(chr(0xFEFF))
     try:
         data = tomllib.loads(text)
     except (ValueError, RecursionError):

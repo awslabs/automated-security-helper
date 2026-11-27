@@ -179,7 +179,6 @@ from automated_security_helper.config.tool_config_trust import (
     empty_tool_directory,
     refuse_relative_extend_path,
 )
-from automated_security_helper.core.constants import is_anchored
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -204,6 +203,7 @@ from automated_security_helper.utils.config_trust import (
     refusal_warning,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_stat import is_anchored
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import OutputPreference
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -943,7 +943,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # written to a file outside the tree) are passed as --config too.
             # With none, gitleaks sets its config path to
             # ``<source>/.gitleaks.toml`` and skips that one file. "Absolute"
-            # means anchored (``core.constants.is_anchored``): on Windows a path
+            # means anchored (``utils.path_stat.is_anchored``): on Windows a path
             # with a root and no drive (``\rules.toml``) is on whichever drive is
             # current, so it is anchored where ASH runs and gitleaks is given the
             # file ASH checked.

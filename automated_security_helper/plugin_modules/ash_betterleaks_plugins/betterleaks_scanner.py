@@ -164,7 +164,6 @@ from automated_security_helper.config.tool_config_trust import (
     empty_tool_directory,
     refuse_relative_extend_path,
 )
-from automated_security_helper.core.constants import is_anchored
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -185,6 +184,7 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_stat import is_anchored
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements

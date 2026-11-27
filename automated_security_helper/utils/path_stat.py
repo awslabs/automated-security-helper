@@ -23,6 +23,9 @@ Every site that classifies a named path reads the one stat this module makes
 and formats its own refusal from the result: the scan's ``--config`` pre-check,
 ``resolve_config``, the ASH_CONFIG lookup (``default_config._ash_config_file``)
 and the ASH_CONFIG chain helpers.
+
+``is_anchored`` answers the question before any stat: whether a named path
+depends on the working directory at all.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ import errno
 import os
 import stat
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 #: ENOENT, ENOTDIR, or a path the OS cannot take: the documented "not found".
 MISSING = "missing"
@@ -153,3 +156,17 @@ def is_regular_file(result: Union[os.stat_result, StatProblem]) -> bool:
     """Whether ``result``, a stat_named_path answer, is a regular file (what
     ``Path.is_file()`` answers when it does not raise)."""
     return isinstance(result, os.stat_result) and stat.S_ISREG(result.st_mode)
+
+
+def is_anchored(path: str, pathmod: Any = os.path) -> bool:
+    """Whether ``path`` names a location without reference to the cwd.
+
+    ``isabs`` alone is not enough on Windows: before Python 3.13 ``\\tools`` counts
+    as absolute there, but it is rooted on whichever drive is current. A drive
+    letter or UNC share is required as well.
+    """
+    if not pathmod.isabs(path):
+        return False
+    if pathmod.__name__ == "ntpath":
+        return bool(pathmod.splitdrive(path)[0])
+    return True

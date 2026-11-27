@@ -177,10 +177,11 @@
   as the tools read them (any case, a dotted key split into its parts). A config is
   also refused when its extend path is not a string or is set twice, or has a root
   but no drive on Windows, and when ASH cannot read the file (missing, not a regular
-  file, larger than 4 MiB, not UTF-8 or not valid TOML). A config from the
-  environment is now passed to gitleaks as `--config`, so gitleaks no longer looks
-  for `.gitleaks.toml` in the tree. ferret-scan's `--version` check now runs outside
-  the tree with an empty config.
+  file, larger than 4 MiB, not UTF-8 or not valid TOML); a byte order mark at the
+  start of a config is skipped, not refused. A config from the environment is now
+  passed to gitleaks as `--config`, so gitleaks no longer looks for `.gitleaks.toml`
+  in the tree. ferret-scan's `--version` check now runs outside the tree with an
+  empty config.
 
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
