@@ -252,7 +252,7 @@ def test_a_parent_whose_git_entry_belongs_to_another_user_is_not_named(
     test_plugin_context, monkeypatch, only_staged_checkouts
 ):
     repo, sub = _checkout(only_staged_checkouts)
-    _owned_by_someone_else(monkeypatch, repo / ".git")
+    _owned_by_someone_else(monkeypatch, os.path.realpath(repo / ".git"))
     scanner = _scanner(test_plugin_context)
 
     envs = _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
@@ -855,7 +855,7 @@ def test_the_walk_logs_the_git_entry_it_refuses_to_trust(
     ASH_LOGGER.setLevel(logging.DEBUG)
     try:
         repo, sub = _checkout(only_staged_checkouts)
-        _owned_by_someone_else(monkeypatch, repo / ".git")
+        _owned_by_someone_else(monkeypatch, os.path.realpath(repo / ".git"))
         scanner = _scanner(test_plugin_context)
         _both_spawn_paths(scanner, _policy(only_staged_checkouts, sub), sub)
     finally:
