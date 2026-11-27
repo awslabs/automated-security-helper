@@ -365,7 +365,9 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     assert scanner._baseline_in_use()
     assert scanner._baseline_file_path() == in_source.resolve()
     assert str(scanner.config.options.baseline_file) == "custom.baseline"
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The file is in the scanned tree, so its settings are not applied; the
+    # document the scan read is the marker of which file that was.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "SourceMarker"
     ]
 
@@ -415,7 +417,7 @@ def test_a_found_configured_baseline_leaves_the_option_as_written(
     assert scanner.config.options.baseline_file == written
     assert str(scanner.config.options.baseline_file) == "custom.baseline"
     assert scanner._baseline_in_use() is True
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
     ]
 
@@ -445,10 +447,13 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     """SecretsCollection.load_from_baseline only loads results, not settings.
 
     So the scanner has to propagate plugins_used and filters_used itself, or the
-    baseline's configuration silently fails to apply during scanning.
+    baseline's configuration silently fails to apply during scanning. Only a
+    baseline the operator names from outside the scanned tree is propagated.
     """
     monkeypatch.chdir(tmp_path)
-    (plugin_context.source_dir / ".secrets.baseline").write_text(
+    named = tmp_path / "operator" / "shared.baseline"
+    named.parent.mkdir()
+    named.write_text(
         json.dumps(
             baseline_document(
                 plugins=[{"name": "AWSKeyDetector"}, {"name": "JwtTokenDetector"}],
@@ -459,7 +464,10 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     )
 
     scanner = DetectSecretsScanner(
-        context=plugin_context, config=DetectSecretsScannerConfig()
+        context=plugin_context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(named))
+        ),
     )
 
     plugin_names = [p.name for p in scanner.config.options.scan_settings.plugins_used]
@@ -659,7 +667,10 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     assert getattr(scanner, other_flag) is False
     assert scanner._baseline_in_use() is True
     assert asked, "the valid baseline was never consulted"
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The repository wrote a config of its own, so the baseline is not the
+    # operator's and its settings are not applied; the document read is the
+    # marker that this baseline, and not the first pass's, was the one used.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
     ]
 

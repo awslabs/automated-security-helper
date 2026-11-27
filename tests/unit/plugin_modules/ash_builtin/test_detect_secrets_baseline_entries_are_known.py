@@ -673,11 +673,10 @@ def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directo
     # The listed candidate is known: kept, suppressed, under the scan's URI.
     assert _findings(report) == [("settings.py", 1)]
     assert len(_suppressed(report)["settings.py"]) == 1
-    # The checkout-relative exclude pattern took the tests directory out.
+    # The baseline is the repository's, so its exclude pattern is not applied:
+    # the tests directory is scanned.
     assert seen["paths"], seen
-    assert not any(Path(path).name == "fixture.py" for path in seen["paths"]), seen[
-        "paths"
-    ]
+    assert any(Path(path).name == "fixture.py" for path in seen["paths"]), seen["paths"]
     assert any(Path(path).name == "settings.py" for path in seen["paths"]), seen[
         "paths"
     ]
@@ -825,11 +824,9 @@ def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchor
         for item in scanner.config.options.scan_settings.filters_used
         if item.path == SHOULD_EXCLUDE_FILE_FILTER
     ] == [["^tests/"]], "the operator's exclude entry should be the only one in play"
-    # The precedence is per path: the baseline's filter under another path is
-    # loaded beside the operator's entry. The pinned-settings test below drops
-    # it, which tells "the baseline's filters were not loaded" from "the
-    # baseline had none".
-    assert any(
+    # The baseline is the repository's, so none of its filters is loaded, the
+    # one under another path included.
+    assert not any(
         item.path == HEURISTIC_FILTER
         for item in scanner.config.options.scan_settings.filters_used
     )

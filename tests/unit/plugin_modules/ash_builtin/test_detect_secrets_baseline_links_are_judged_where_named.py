@@ -257,9 +257,12 @@ def test_a_regular_in_tree_baseline_is_named_where_it_sits(tmp_path, monkeypatch
 
     assert scanner._baseline_in_use()
     assert scanner._baseline_named == context.source_dir / ".secrets.baseline"
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The file was read (its plugin list is the marker); a baseline in the tree
+    # sets no plugins, so the scan keeps the default set.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "AWSKeyDetector"
     ]
+    assert len(scanner.config.options.scan_settings.plugins_used) > 10
     reason = scanner._untrusted_baseline_reason(None)
     assert reason is not None and "inside the scanned directory" in reason, reason
 

@@ -1429,9 +1429,11 @@ def test_an_operator_option_naming_the_work_product_baseline_is_loaded(tmp_path)
     )
     options = scanner.config.options
     # The option keeps the value as written, and the scan loaded that
-    # baseline (its marker plugin is in the scan settings).
+    # baseline (its marker plugin is in the document the scan read).
     assert str(options.baseline_file) == derived.as_posix(), options.baseline_file
-    assert _plugin_names(options) == ["StandIn"], _plugin_names(options)
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
+        "StandIn"
+    ]
 
 
 def _named_baseline_json(plugin_name: str) -> str:
@@ -1475,7 +1477,9 @@ def test_a_relative_baseline_option_names_the_scanned_trees_file(tmp_path, monke
     # The scan loaded the scanned tree's file (MarkerA), not the same-named
     # one in the working directory (MarkerB), and the option keeps the
     # relative value as written.
-    assert _plugin_names(options) == ["MarkerA"], _plugin_names(options)
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
+        "MarkerA"
+    ]
     assert str(options.baseline_file) == "team.baseline", options.baseline_file
 
 
@@ -1497,7 +1501,9 @@ def test_a_discovered_baseline_is_found_in_the_scanned_tree_not_the_cwd(
     # The scan loaded the scanned tree's discovered file (MarkerA), not the
     # working directory's (MarkerB), and with nothing configured the option
     # stays unset.
-    assert _plugin_names(options) == ["MarkerA"], _plugin_names(options)
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
+        "MarkerA"
+    ]
     assert options.baseline_file is None, options.baseline_file
 
 

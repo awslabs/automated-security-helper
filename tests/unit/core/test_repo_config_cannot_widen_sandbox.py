@@ -809,9 +809,9 @@ def test_detect_secrets_verification_from_the_repository_gets_no_network(
         ),
     )
     assert scanner._baseline_in_use()
-    # The baseline's settings were read (its plugin is the scanner's), and its
-    # verification filter was the one entry refused.
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The baseline was read, and as the repository's it applies no settings: its
+    # verification filter is not loaded, nor any other entry of its filters.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "AWSKeyDetector"
     ]
     assert not any(

@@ -38,6 +38,10 @@ HEURISTIC = "detect_secrets.filters.heuristic.is_likely_id_string"
 SEQUENTIAL = "detect_secrets.filters.heuristic.is_sequential_string"
 
 
+def _baseline_path(context: PluginContext) -> Path:
+    return Path(context.source_dir).parent / "operator" / "shared.baseline"
+
+
 def _context_with_baseline(tmp_path: Path, filters: list) -> PluginContext:
     context = PluginContext(
         source_dir=tmp_path / "src",
@@ -47,7 +51,11 @@ def _context_with_baseline(tmp_path: Path, filters: list) -> PluginContext:
     )
     context.source_dir.mkdir(parents=True)
     context.output_dir.mkdir(parents=True)
-    (context.source_dir / ".secrets.baseline").write_text(
+    # Named by the operator from outside the scanned tree: a baseline the scan
+    # found in the tree sets no plugins or filters.
+    baseline = _baseline_path(context)
+    baseline.parent.mkdir()
+    baseline.write_text(
         json.dumps(
             {
                 "version": "1.5.0",
@@ -67,7 +75,8 @@ def _scanner(context: PluginContext, filters: list) -> DetectSecretsScanner:
         context=context,
         config=DetectSecretsScannerConfig(
             options=DetectSecretsScannerConfigOptions(
-                scan_settings=DetectSecretsScanSettings(filters_used=filters)
+                baseline_file=str(_baseline_path(context)),
+                scan_settings=DetectSecretsScanSettings(filters_used=filters),
             )
         ),
     )
