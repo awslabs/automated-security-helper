@@ -141,8 +141,8 @@ def test_a_sigterm_stops_the_modes_child_and_exits_terminated(tmp_path, mode):
     command = [
         _ash_executable(),
         "scan",
+        "fs",
         *mode_args,
-        "--source-dir",
         str(source),
         "--output-dir",
         str(tmp_path / "out"),

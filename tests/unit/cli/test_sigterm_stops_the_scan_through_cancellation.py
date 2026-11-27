@@ -749,10 +749,10 @@ def test_importing_the_library_installs_no_handler(tmp_path):
 
 
 def _scan_command_app() -> typer.Typer:
-    from automated_security_helper.cli.scan import run_ash_scan_cli_command
+    from automated_security_helper.cli.scan_group import run_ash_scan_fs_cli_command
 
     app = typer.Typer()
-    app.command(name="scan")(run_ash_scan_cli_command)
+    app.command(name="scan")(run_ash_scan_fs_cli_command)
     return app
 
 
@@ -796,7 +796,7 @@ def test_the_scan_command_exits_terminated_when_a_sigterm_stops_the_scan(
     )
     result = CliRunner().invoke(
         _scan_command_app(),
-        ["--source-dir", str(tmp_path), "--output-dir", str(tmp_path / "out")],
+        [str(tmp_path), "--output-dir", str(tmp_path / "out")],
     )
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert "stopped by SIGTERM" in result.output
@@ -826,7 +826,7 @@ def test_a_keyboard_interrupt_cancels_the_scans_scope_before_exit(
     )
     result = CliRunner().invoke(
         _scan_command_app(),
-        ["--source-dir", str(tmp_path), "--output-dir", str(tmp_path / "out")],
+        [str(tmp_path), "--output-dir", str(tmp_path / "out")],
     )
     assert result.exit_code == ASH_EXIT_INTERRUPTED, result.output
     event = seen["event"]
@@ -887,7 +887,7 @@ def test_an_unstopped_tools_shutdown_line_says_the_tool_may_still_run(
     )
     result = CliRunner().invoke(
         _scan_command_app(),
-        ["--source-dir", str(tmp_path), "--output-dir", str(tmp_path / "out")],
+        [str(tmp_path), "--output-dir", str(tmp_path / "out")],
     )
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert "stopped by SIGTERM" in result.output
@@ -919,7 +919,7 @@ def test_a_clean_shutdown_line_does_not_warn_about_a_surviving_tool(
     )
     result = CliRunner().invoke(
         _scan_command_app(),
-        ["--source-dir", str(tmp_path), "--output-dir", str(tmp_path / "out")],
+        [str(tmp_path), "--output-dir", str(tmp_path / "out")],
     )
     assert result.exit_code == ASH_EXIT_TERMINATED, result.output
     assert "may still be running" not in result.output
@@ -941,7 +941,7 @@ def test_an_unexplained_cancel_is_not_dressed_up_as_a_shutdown(
     with pytest.raises(ScanCancelled):
         CliRunner().invoke(
             _scan_command_app(),
-            ["--source-dir", str(tmp_path), "--output-dir", str(tmp_path / "out")],
+            [str(tmp_path), "--output-dir", str(tmp_path / "out")],
             catch_exceptions=False,
         )
 
@@ -964,7 +964,7 @@ def test_the_commands_scope_is_registered_with_the_shutdown_handler(
     )
     result = CliRunner().invoke(
         _scan_command_app(),
-        ["--source-dir", str(tmp_path), "--output-dir", str(tmp_path / "out")],
+        [str(tmp_path), "--output-dir", str(tmp_path / "out")],
     )
     assert result.exit_code == 0, result.output
     assert len(seen) == 1 and isinstance(seen[0], CancelEvent)
