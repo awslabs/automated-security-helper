@@ -84,7 +84,6 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners._trivy_scanner_base import (
     OUTPUT_RESTRICTING_TRIVY_ENV,
-    _existing_file,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScanner,
@@ -462,24 +461,20 @@ def _trivy(
 
 
 def _trivy_config_key_missing(tmp_path, monkeypatch):
-    return _raised(
-        lambda: _existing_file(
-            "scanners.trivy.options.config_file",
-            "private-value/trivy.yaml",
-            tmp_path / "absent.yaml",
-        )
+    # The operator's config option, through the scan's own config step.
+    scanner = _trivy(
+        tmp_path,
+        monkeypatch,
+        operator=True,
+        config_file=str(tmp_path / "private-value" / "trivy.yaml"),
     )
+    return _raised(scanner._trivy_config_file)
 
 
 def _trivy_config_variable_missing(tmp_path, monkeypatch):
-    return _raised(
-        lambda: _existing_file(
-            "TRIVY_CONFIG",
-            "private-value/trivy.yaml",
-            tmp_path / "absent.yaml",
-            show_value=True,
-        )
-    )
+    scanner = _trivy(tmp_path, monkeypatch, operator=True)
+    monkeypatch.setenv("TRIVY_CONFIG", str(tmp_path / "private-value" / "trivy.yaml"))
+    return _raised(scanner._trivy_config_file)
 
 
 def _trivy_secret_config_missing(tmp_path, monkeypatch):
@@ -844,7 +839,7 @@ CASES = [
         _drop_in(trivy_base),
         ReasonCode.CONFIG_FILE_MISSING,
         holds=("scanners.trivy.options.config_file",),
-        never=("private-value", "absent.yaml"),
+        never=("private-value", "trivy.yaml"),
     ),
     Case(
         "trivy config variable names no file",
@@ -852,7 +847,7 @@ CASES = [
         _drop_in(trivy_base),
         ReasonCode.CONFIG_FILE_MISSING,
         holds=("TRIVY_CONFIG",),
-        never=("private-value", "absent.yaml"),
+        never=("private-value", "trivy.yaml"),
     ),
     Case(
         "trivy secret config names no file",
