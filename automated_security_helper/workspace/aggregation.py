@@ -151,7 +151,7 @@ from urllib.parse import quote, unquote
 from automated_security_helper.core.committed_output import WORKSPACE_SPOOL_DIR_NAME
 from automated_security_helper.core.enums import MinSeverity, ScannerStatus
 from automated_security_helper.base.report_identity import (
-    WORKSPACE_REPORT_DESCRIPTION_LEAD,
+    WORKSPACE_REPORT_DESCRIPTION,
     WORKSPACE_REPORT_METADATA_DESCRIPTION,
 )
 from automated_security_helper.core.exceptions import WorkspacePatternError
@@ -1815,11 +1815,7 @@ class WorkspaceAggregator:
 
         header: Dict[str, Any] = {
             "name": f"ASH Workspace Scan: {project_name or Path(self.plan.workspace_root).name}",
-            "description": (
-                WORKSPACE_REPORT_DESCRIPTION_LEAD
-                + "SARIF run per project; see the 'workspace' block for "
-                "attribution and per-project verdicts."
-            ),
+            "description": WORKSPACE_REPORT_DESCRIPTION,
             "metadata": metadata,
             "workspace": payload.model_dump(mode="json"),
             "scanner_results": self._scanner_results_payload(),

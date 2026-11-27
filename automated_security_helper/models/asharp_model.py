@@ -23,6 +23,7 @@ from pydantic import (
 from automated_security_helper.base.forward_refs import OnceOnlyResolver
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.base.report_identity import (
+    AGGREGATED_REPORT_DESCRIPTION,
     AGGREGATED_REPORT_NAME,
     AGGREGATED_REPORT_POST_PROCESSOR_DESCRIPTION,
     SARIF_DRIVER_NAME,
@@ -1152,9 +1153,9 @@ class AshAggregatedResults(RecordModel):
         hide_input_in_errors=True,
     )
 
-    name: str = Field(default="ASH Scan Report", description="Name of the report")
+    name: str = Field(default=AGGREGATED_REPORT_NAME, description="Name of the report")
     description: str = Field(
-        default=AGGREGATED_REPORT_NAME,
+        default=AGGREGATED_REPORT_DESCRIPTION,
         description="The description of the generated report.",
     )
 
