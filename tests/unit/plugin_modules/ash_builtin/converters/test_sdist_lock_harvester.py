@@ -261,6 +261,29 @@ def test_disabled_option_harvests_nothing(harvest_env) -> None:
     assert converter.refused_inputs == []
 
 
+def test_syft_disabled_skips_every_flagged_package_visibly(harvest_env) -> None:
+    """With syft off nothing is fetched, and the skip is one visible record.
+
+    Grype and trivy read the harvested lockfiles, so the converter says which
+    packages it did not harvest instead of returning silently. The record is a
+    skip, not a failure, so it carries no limit and does not fail the gate.
+    """
+    _source, _output, opener, build = harvest_env
+    config = get_default_config()
+    config.scanners.syft.enabled = False
+    converter = build(config=config)
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (record,) = converter.refused_inputs
+    assert HARVEST_SKIPPED_RULE in record.reason
+    assert "scanners.syft.enabled" in record.reason
+    assert "fixturepkg 0.1.0" in record.reason
+    assert "purepkg" not in record.reason
+    assert record.limit is None
+    assert converter.failed_inputs == []
+
+
 def test_sdist_with_no_recognized_lockfile_is_a_visible_skip(harvest_env) -> None:
     from tests.utils.sdist_fixture import PKG_INFO
 

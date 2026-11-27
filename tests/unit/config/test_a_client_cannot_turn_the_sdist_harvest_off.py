@@ -7,7 +7,8 @@ The harvest completes syft's SBOM with the packages that the source
 distributions a lockfile pins embed, and the findings are read from that SBOM.
 Two settings turn it off: ``scanners.syft.options.sdist_harvest.enabled``, and
 the ``sdist-lock-harvester`` converter's own ``enabled``, which decides whether
-the converter runs at all.
+the converter runs at all. Disabling the syft scanner itself is a client's
+choice: the converter then records a visible skip and fetches nothing.
 
 A client has two routes to a setting: a runtime patch op, which
 ``check_runtime_ops`` judges, and a config file an MCP client delivers, which
@@ -148,3 +149,54 @@ def test_control_a_delivered_file_that_keeps_the_harvest_on_is_accepted(
     pointers = [SWITCHES[switch][0] for switch in sorted(SWITCHES)]
     refused = _refused_pointers({"project_name": "renamed"}, tmp_path)
     assert [p for p in pointers if p in refused] == [], f"refused at {refused}"
+
+
+def test_a_delivered_file_that_repeats_the_converter_default_is_accepted(
+    tmp_path,
+) -> None:
+    """A delivered ``converters.sdist-lock-harvester.enabled: true`` is the default.
+
+    Repeating a default is no change, as it is for a scanner option.
+    """
+    pointer = SWITCHES["converter"][0]
+    document = {"converters": {"sdist-lock-harvester": {"enabled": True}}}
+    refused = _refused_pointers(document, tmp_path)
+    assert pointer not in refused, f"refused at {refused}"
+
+
+def test_control_a_trusted_off_converter_still_refuses_a_delivered_on(
+    tmp_path,
+) -> None:
+    """Where the trusted config holds ``enabled: false``, a delivered ``true`` is
+    a change and is refused.
+    """
+    pointer = SWITCHES["converter"][0]
+    base = AshConfig.model_validate(
+        {"converters": {"sdist-lock-harvester": {"enabled": False}}}
+    )
+    delivered = {"converters": {"sdist-lock-harvester": {"enabled": True}}}
+    found = ccp.client_file_denials(
+        {tmp_path / "delivered.yaml": delivered},
+        ccp.rules_from(base),
+        scanned_root=tmp_path,
+        all_delivered=True,
+    )
+    refused = [denial.pointer for _path, denials in found for denial in denials]
+    assert pointer in refused, f"{pointer} was not refused; refused at {refused}"
+
+
+def test_disabling_the_syft_scanner_is_not_refused(tmp_path) -> None:
+    """Turning the syft scanner off is a client's choice and draws no denial."""
+    refused = _refused_pointers({"scanners": {"syft": {"enabled": False}}}, tmp_path)
+    assert "/scanners/syft/enabled" not in refused, f"refused at {refused}"
+
+
+def test_the_converter_default_is_the_converters_own() -> None:
+    """The table's value is the converter config's own ``enabled`` default."""
+    from automated_security_helper.plugin_modules.ash_builtin.converters.sdist_lock_harvester import (
+        SdistLockHarvesterConverterConfig,
+    )
+
+    assert ccp.CONVERTER_SECTION_DEFAULTS[("sdist-lock-harvester", "enabled")] == (
+        SdistLockHarvesterConverterConfig().enabled
+    )
