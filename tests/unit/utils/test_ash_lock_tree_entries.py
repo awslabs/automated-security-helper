@@ -271,7 +271,7 @@ class TestAlgorithmAndGrammar:
         root = _tree(tmp_path)
         _bound(root, _scope("B602", "risky", "file"))
         _edit(root, LAYOUT_RISKY)
-        assert _states(root) == {("B602", "risky"): "ok"}, "the control, ash-ast-1"
+        assert _states(root) == {("B602", "risky"): "ok"}, "the control, the current id"
 
         def other_algorithm(entry):
             entry["digests"]["algorithm"] = "ash-ast-9"

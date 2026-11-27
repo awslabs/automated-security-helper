@@ -25,7 +25,7 @@ One JSON document with a fixed key order and two-space indentation::
         "src/app.py": {
           "created": "2026-11-26T19:00:00Z",
           "digests": {
-            "algorithm": "ash-ast-1",
+            "algorithm": "ash-ast-2",
             "file": "<64 hex>",
             "symbols": {"Handler.run": "<64 hex>"}
           },

@@ -40,8 +40,8 @@ token on the lines its spans cover (the line window), every definition that
 bears the name, the headers of its enclosing definitions (decorators, name,
 parameters, bases, modifiers) and the prelude. A comment between a decorator
 and its definition does not end the decorators. In JavaScript and TypeScript
-the headers of an enclosing function also include the leading run of
-directives at the top of its body (``"use strict"``), comments skipped. The
+it also covers the leading run of directives (``"use strict"``, comments
+skipped) at the top of every function it sits in, named or not. The
 digest does not cover imports other than ``from __future__``, module
 constants, class attributes, other definitions, callers, or the control flow
 around the definition.
@@ -64,7 +64,7 @@ from typing import Any, Collection, Iterable, List, Optional, Sequence, Tuple
 #: The id of the canonical form: the record format, ``LAYOUT``, the prelude and
 #: the policy tables together. Recorded in every tree entry and part of every
 #: preimage, so digests are never compared across two forms.
-ALGORITHM = "ash-ast-1"
+ALGORITHM = "ash-ast-2"
 
 #: The bytes that are layout between tokens: space, tab and line feed.
 LAYOUT = b" \t\n"
@@ -73,7 +73,7 @@ LAYOUT = b" \t\n"
 #: ``check_policy_pin`` compares the running tables with it, so an edit to a
 #: table that changes what a digest means fails until it comes with a new
 #: ``ALGORITHM`` and this value.
-POLICY_SHA256 = "1d386e9d12f2cae41ad65936787932953efadbfd6d41e2ac161f20fcf4e81539"
+POLICY_SHA256 = "cf60c1feee2703acd7da306826e60795f1b4af29bf862f3a817b6e401db6a4d7"
 
 _BOM = b"\xef\xbb\xbf"
 _LENGTH = struct.Struct(">I").pack
@@ -571,6 +571,53 @@ def header(enclosing: Any, target: Any, policy: Any) -> List[Tuple[Any, str]]:
     return nodes
 
 
+def _function_directive_runs(
+    occurrence: Occurrence, policy: Any
+) -> List[List[Tuple[Any, str]]]:
+    """The directive runs of the other functions an occurrence sits in, outer to
+    inner, each one non-empty.
+
+    ``header`` takes the run of each enclosing definition and of an enclosing
+    assigned definition's function value. A function that is neither (an
+    immediately invoked function, a callback, the value of
+    ``module.exports = function () {}``, a method of an object literal) governs
+    the code inside it all the same, so its run is part of the digest too. A node
+    of any type the tables name as a definition, a member or a function value is
+    asked; ``_body_directives`` gives a run only when its body holds the
+    occurrence, and only for an ``ecmascript`` prologue.
+    """
+    if policy.prologue != "ecmascript":
+        return []
+    kinds = (
+        set(policy.definitions)
+        | set(policy.member_definitions)
+        | set(policy.function_values)
+    )
+    covered = list(occurrence.enclosing)
+    for definition in occurrence.enclosing:
+        assigned = policy.assigned_definitions.get(definition.type)
+        if assigned is not None:
+            value = definition.child_by_field_name(assigned[1])
+            if value is not None:
+                covered.append(value)
+    runs: List[List[Tuple[Any, str]]] = []
+    # Walked up from the occurrence, carrying the child on the path, so a deeply
+    # nested definition costs one pass and not one per ancestor.
+    child = occurrence.node
+    ancestor = child.parent
+    while ancestor is not None:
+        if ancestor.type in kinds and not any(
+            ancestor.start_byte == node.start_byte and ancestor == node
+            for node in covered
+        ):
+            run = _body_directives(ancestor, child, policy)
+            if run:
+                runs.append(run)
+        child, ancestor = ancestor, ancestor.parent
+    runs.reverse()
+    return runs
+
+
 def symbol_digest(
     raw: bytes,
     source: bytes,
@@ -584,7 +631,8 @@ def symbol_digest(
     """The digest of one qualified name, or None when no definition bears it.
 
     Covers, for every occurrence by start byte, the headers of its enclosing
-    definitions and every token on its span's lines, plus the prelude.
+    definitions, the directive runs of the other functions it sits in and every
+    token on its span's lines, plus the prelude.
     """
     found = sorted(occurrences, key=lambda o: (o.start.start_byte, o.node.start_byte))
     # chr(0) is symbol_spans._UNSPELLABLE ("\x00"): a segment no symbol can spell
@@ -602,6 +650,12 @@ def symbol_digest(
         for enclosing in occurrence.enclosing:
             walker.raw(b"H")
             for node, field_name in header(enclosing, occurrence.node, policy):
+                walker.raw(b"[")
+                walker.stream([(node, field_name)])
+                walker.raw(b"]")
+        for run in _function_directive_runs(occurrence, policy):
+            walker.raw(b"D")
+            for node, field_name in run:
                 walker.raw(b"[")
                 walker.stream([(node, field_name)])
                 walker.raw(b"]")

@@ -233,7 +233,7 @@ A digest depends on how the grammar of the file's language parses the file, so e
 - a file whose bytes have not changed since it was recorded stays current;
 - a changed file cannot be compared across two grammars, so `verify` and the scan report its suppressions as stale, naming both grammar versions, until a refresh records the review under the new grammar.
 
-A grammar release with the same tables is the same grammar to the lock. Each entry also names the canonical form its digests were computed in (`ash-ast-1`); an ASH that does not compute that form reports a changed file of the entry as one it cannot check, never as current.
+A grammar release with the same tables is the same grammar to the lock. Each entry also names the canonical form its digests were computed in (`ash-ast-2`); an ASH that does not compute that form reports a changed file of the entry as one it cannot check, never as current.
 
 #### Upgrading a version 1 lock {#upgrade-lock}
 
