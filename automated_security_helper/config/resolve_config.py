@@ -50,6 +50,7 @@ from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
 )
+from automated_security_helper.config.spellings import fold_written_spellings
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
     PATCH_KEY,
@@ -1085,15 +1086,28 @@ def _entry_warn_context(
     return context, warned
 
 
-def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> AshConfig:
+def build_config(
+    data: Any,
+    config_overrides: Optional[List[str]] = None,
+    spelling_warnings: Sequence[str] = (),
+) -> AshConfig:
     """The AshConfig a scan builds from a resolved document.
 
     Strict validation, then ``--config-overrides``. Raises pydantic's
     ValidationError for the document and ASHConfigValidationError for an
     override; see ``load_config_file``, which every config file goes through.
+
+    ``spelling_warnings`` are the lines the document's fold said
+    (``ResolvedConfigDocument.spelling_warnings``): the deprecation of each old
+    key spelling its files wrote, naming the file. They join the config's
+    resolution warnings whether or not unknown entry keys are fatal, because the
+    entries the model validates carry the canonical spelling by then.
     """
     context, warned = _entry_warn_context(data, config_overrides)
     config = AshConfig.model_validate(data, strict=True, context=context)
+    if spelling_warnings:
+        # Before the overrides are applied, like the entry warnings below.
+        config._resolution_warnings.extend(spelling_warnings)
     if warned:
         # Logged where every other resolution warning is (the orchestrator
         # reads _resolution_warnings). Extended before the overrides are
@@ -1339,10 +1353,12 @@ def _written_key_mappings(
                 )
             else:
                 written = read_config_file_as_written(path)
-            # Folded as the load folded the document (plugin_section_names),
-            # so a mapping under a respelled known-plugin section is named at
-            # the place the configuration uses.
+            # Folded as the load folded the document (plugin_section_names,
+            # and the renamed-key spellings: renames only, spellings), so a
+            # mapping under a respelled known-plugin section or an old key is
+            # named at the place the configuration uses.
             written = fold_known_plugin_sections(written)
+            written = fold_written_spellings(written)
         except (ASHConfigSourceError, yaml.YAMLError, OSError, ValueError):
             found.append((None, frozenset()))
             continue
@@ -1397,6 +1413,9 @@ def _record_overlay_reads(
         *tuple(config._displayed_environment_references or ()),
         *tuple(overlay.displayed_environment_references),
     )
+    # The overlay's own deprecation lines, naming its files. Here and not in the
+    # load, so the overlay used alone (``overlaid_fallback``) carries them too, once.
+    config._resolution_warnings.extend(overlay.spelling_warnings)
 
 
 def _layered_over(
@@ -1554,7 +1573,9 @@ def load_config_file(
         # error is still raised rather than replaced by the overlay's content.
         data = _layered_over(data, overlay)
     try:
-        return document, build_config(data, config_overrides)
+        return document, build_config(
+            data, config_overrides, spelling_warnings=document.spelling_warnings
+        )
     except ValidationError as e:
         if _has_a_client_file(document):
             # A chain that holds a file an MCP client supplied, by any name on
@@ -5781,6 +5802,9 @@ def validate_config_document(
             ) from None
         refused = _client_validation_error(config_path, e, why=unquoted)
     else:
+        # The fold's lines first, as build_config adds them: the entries the
+        # model validated carry the canonical spelling by now.
+        config._resolution_warnings.extend(document.spelling_warnings)
         if warned:
             config._resolution_warnings.extend(warned)
         return config
@@ -6485,6 +6509,9 @@ def _operator_paths(
                 own = None
         if isinstance(own, dict):
             own = fold_known_plugin_sections(own)
+            # And the renamed-key spellings, as the load folded the merged
+            # document, so the file's keys pair with it.
+            own = fold_written_spellings(own)
             record.documents = [
                 _own_writes(document, own) if isinstance(document, dict) else own
             ]

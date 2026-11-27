@@ -277,6 +277,7 @@ from automated_security_helper.config.patch_ops import (
     CONFIG_SOURCE_OPS,
     VALUE_WRITING_OPS,
 )
+from automated_security_helper.config import spellings
 from automated_security_helper.config.plugin_section_names import (
     PLUGIN_SEGMENT_KEYS,
     AmbiguousPluginSpellings,
@@ -533,7 +534,11 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
     Comparing the two spellings is equivalent to consulting the alias map here
     because every alias declared anywhere under `AshConfig` is its field name
     with '_' replaced by '-'; that held for 9 of 9 aliases across 75 models when
-    this was written, walking `model_fields` from `AshConfig` down.
+    this was written, walking `model_fields` from `AshConfig` down. An old
+    spelling of a renamed key (the table in ``config/spellings.py``) is not a
+    twin of its field's name, and the table is the only place it is named: a
+    reader that pairs a field with the keys it is written under reads
+    ``spellings.field_spellings``, which holds both (``_declared_top_level_fields``).
 
     `extends` merging and `patch` pointers use the same rule, for the same
     reason: a base and a child are as likely to spell a section differently as a
@@ -554,25 +559,32 @@ def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
 
 _TOP_LEVEL_FIELDS_BY_FOLD: "Dict[str, Tuple[str, FrozenSet[str]]] | None" = None
 
+#: The spelling table (``spellings.ROWS``) the map above was built from: a table
+#: that is replaced is read again.
+_TOP_LEVEL_FIELDS_ROWS: "Tuple[spellings.SpellingRow, ...] | None" = None
+
 
 def _declared_top_level_fields() -> Dict[str, Tuple[str, FrozenSet[str]]]:
     """The configuration's own top-level fields by their folded name: the
-    field's name and the spellings an override may use for it (the name and
-    its declared alias; their ``-``/``_`` twins resolve as twins). Built once;
-    read from the model's fields, so a field added later is covered without
-    being listed."""
-    global _TOP_LEVEL_FIELDS_BY_FOLD
-    if _TOP_LEVEL_FIELDS_BY_FOLD is None:
+    field's name and the spellings an override may use for it
+    (``spellings.field_spellings``: the name, its declared alias, and the old
+    spellings the table of renamed keys gives it; their ``-``/``_`` twins resolve
+    as twins). Built once for one table; read from the model's fields, so a
+    field added later is covered without being listed."""
+    global _TOP_LEVEL_FIELDS_BY_FOLD, _TOP_LEVEL_FIELDS_ROWS
+    rows = spellings.ROWS
+    if _TOP_LEVEL_FIELDS_BY_FOLD is None or _TOP_LEVEL_FIELDS_ROWS is not rows:
         # Imported here: this module is imported while ash_config loads.
         from automated_security_helper.config.ash_config import AshConfig
 
         by_fold: Dict[str, Tuple[str, FrozenSet[str]]] = {}
-        for name, info in AshConfig.model_fields.items():
-            accepted = frozenset(
-                spelling for spelling in (name, info.alias) if spelling
+        for name in AshConfig.model_fields:
+            by_fold[folded_section_name(name)] = (
+                name,
+                frozenset(spellings.field_spellings(AshConfig, name)),
             )
-            by_fold[folded_section_name(name)] = (name, accepted)
         _TOP_LEVEL_FIELDS_BY_FOLD = by_fold
+        _TOP_LEVEL_FIELDS_ROWS = rows
     return _TOP_LEVEL_FIELDS_BY_FOLD
 
 
@@ -3029,6 +3041,14 @@ class ResolvedConfigDocument:
     filled_references: Dict[Path, Tuple[EnvironmentReference, ...]] = field(
         default_factory=dict
     )
+    #: One line for each file of ``chain`` and each old spelling of a renamed key
+    #: (the table in ``config/spellings.py``) it writes, naming the file: the
+    #: deprecation, said once wherever in the file the spelling is written, a
+    #: ``patch`` pointer or an operation's value included. A caller that builds a
+    #: configuration from the document adds them to its resolution warnings
+    #: (``resolve_config.build_config``), whether or not unknown entry keys are
+    #: fatal; the model's own validators meet only the canonical spelling.
+    spelling_warnings: Tuple[str, ...] = ()
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: as
@@ -3103,6 +3123,9 @@ class _ChainState:
     read: List[EnvironmentReference] = field(default_factory=list)
     #: ``ResolvedConfigDocument.environment_paths``.
     environment_paths: Set[Path] = field(default_factory=set)
+    #: ``ResolvedConfigDocument.spelling_warnings``, in the order the files were
+    #: folded, a line once however many times its file is reached.
+    spelling_warnings: List[str] = field(default_factory=list)
     #: ``resolve_config_document``'s ``confine``: given each file's resolved
     #: path, the name that reached it, and the document the file resolved to
     #: (its own data merged over its bases', its ``patch`` applied), it returns
@@ -4165,8 +4188,11 @@ def _file_references(
             parsed_as if parsed_as is not None else path, text, keep_env_tags=True
         )
         # Folded as ``data`` was folded, so the two views pair up at a
-        # respelled known-plugin section (plugin_section_names).
+        # respelled known-plugin section (plugin_section_names) and at an old
+        # spelling of a renamed key (spellings: the renames alone, with no gate
+        # and no line, since ``_resolve`` has said both already).
         written = fold_known_plugin_sections(written)
+        written = spellings.fold_written_spellings(written)
     except (ASHConfigSourceError, yaml.YAMLError, OSError, ValueError):
         return []
     return [
@@ -5028,6 +5054,24 @@ def _resolve(
     except ValueError as exc:
         raise ASHConfigSourceError(f"Config {state.shown(real)}: {exc}") from None
 
+    # Each old spelling of a renamed key (the table in config/spellings.py) the
+    # file writes, as a key, in a `patch` pointer or in an operation's value, is
+    # the canonical one from here on: before the document is recorded, before the
+    # references are paired and before it is merged or patched, so a base and the
+    # file that extends it agree on one spelling whichever each was written in.
+    # The deprecation is said once for the file and the spelling, naming the file.
+    # A file past the release that removes the old spelling, or writing both
+    # spellings with different values, is refused naming the file, the place in
+    # it and the keys, and no value.
+    try:
+        folded = spellings.fold_spellings(data, state.shown(real))
+    except spellings.SpellingRefused as exc:
+        raise ASHConfigSourceError(str(exc)) from None
+    data = folded.document
+    for line in folded.warnings:
+        if line not in state.spelling_warnings:
+            state.spelling_warnings.append(line)
+
     state.documents.setdefault(real, copy.deepcopy(data))
     # In read order, so a file's own come before those of the bases it extends,
     # which are read below. The order decides only which of two references at
@@ -5437,6 +5481,7 @@ def resolve_config_document(
         environment_paths=frozenset(state.environment_paths),
         environment_values=_values_of(state.read),
         reference_places=places,
+        spelling_warnings=tuple(state.spelling_warnings),
     )
 
 
@@ -5591,6 +5636,7 @@ def load_config_with_references(
         document.data, strict=True, context={"strict_file_load": True}
     )
     config._environment_references = tuple(document.environment_references)
+    config._resolution_warnings.extend(document.spelling_warnings)
     return config
 
 

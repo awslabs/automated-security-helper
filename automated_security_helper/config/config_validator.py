@@ -56,6 +56,7 @@ from automated_security_helper.config.plugin_section_names import (
     fold_known_plugin_sections,
     folded_section_name,
 )
+from automated_security_helper.config.spellings import fold_written_spellings
 from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
@@ -3473,12 +3474,15 @@ def environment_record_read(
                 )
             else:
                 written = read_config_file_as_written(path)
-            # Folded as the load folded the document (plugin_section_names),
-            # so a rewrite under a respelled known-plugin section carries the
-            # place the record and the dump use. Copies: the caller's
-            # ``reads`` cache keeps the file as parsed.
+            # Folded as the load folded the document (plugin_section_names,
+            # and the renamed-key spellings: the renames alone), so a rewrite
+            # under a respelled known-plugin section or an old key spelling
+            # carries the place the record and the dump use. Copies: the
+            # caller's ``reads`` cache keeps the file as parsed.
             resolved = fold_known_plugin_sections(resolved)
             written = fold_known_plugin_sections(written)
+            resolved = fold_written_spellings(resolved)
+            written = fold_written_spellings(written)
         except (ASHConfigSourceError, yaml.YAMLError, OSError, ValueError):
             # Read once already for the load; one that cannot be read again
             # holds nothing to redact or rewrite.
