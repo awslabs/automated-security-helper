@@ -906,19 +906,13 @@ def parse_storyboard(
 _MERGE_TAG = "tag:yaml.org,2002:merge"
 
 
-def _is_merge_key(event: Any) -> bool:
-    """Whether a scalar event is one PyYAML reads as a merge key: a plain ``<<``, or a
-    scalar given the ``!!merge`` tag."""
-    if event.tag == _MERGE_TAG:
-        return True
-    return event.tag is None and event.style is None and event.value == "<<"
-
-
 def _refuse_yaml_features(yaml: Any, text: str, source: str) -> None:
-    """Refuse anchors, aliases and merge keys, as a journey file's loader does.
+    """Refuse anchors and aliases, as a journey file's loader does.
 
     This reads the parser's events and builds no data, so each refusal names the line
-    and the anchor, alias or key at fault. ``yaml`` is the PyYAML module.
+    and the anchor or alias at fault. A merge key is not found here, because its text
+    does not say what PyYAML will do with it: ``_refuse_merge_keys`` reads the tag the
+    composer resolved instead. ``yaml`` is the PyYAML module.
     """
     for event in yaml.parse(text, Loader=yaml.SafeLoader):
         where = f"{source}: line {event.start_mark.line + 1}"
@@ -935,12 +929,35 @@ def _refuse_yaml_features(yaml: Any, text: str, source: str) -> None:
                 f"the YAML anchor &{anchor} is not part of storyboard schema "
                 f"{STORYBOARD_SCHEMA}; write the value out",
             )
-        if isinstance(event, yaml.ScalarEvent) and _is_merge_key(event):
+
+
+def _refuse_merge_keys(yaml: Any, root: Any, source: str) -> None:
+    """Refuse every node PyYAML resolves as a merge key, found by its resolved tag.
+
+    The composer has already resolved each spelling, so the tag says what PyYAML will
+    do and the text does not. A plain ``<<``, ``! <<``, ``! "<<"``, ``!<!> <<`` and
+    ``!!merge`` with any word all carry the merge tag. PyYAML tests only the tag of a
+    key, whatever node it sits on, so a flow sequence or mapping written after
+    ``!!merge`` carries it too. PyYAML merges the mapping after such a key into the
+    mapping that holds it, so a merged value can be supplied or dropped without a
+    word. A quoted ``"<<"`` with no tag resolves to a string and is an ordinary key.
+    The nodes are read in document order, so the refusal names the first one. ``yaml``
+    is the PyYAML module.
+    """
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        if node.tag == _MERGE_TAG:
             _fail(
-                where,
+                f"{source}: line {node.start_mark.line + 1}",
                 "the YAML merge key '<<' is not part of storyboard schema "
                 f"{STORYBOARD_SCHEMA}; write each key out",
             )
+        if isinstance(node, yaml.SequenceNode):
+            pending.extend(reversed(node.value))
+        elif isinstance(node, yaml.MappingNode):
+            for key_node, value_node in reversed(node.value):
+                pending.extend((value_node, key_node))
 
 
 def _refuse_repeated_keys(yaml: Any, node: Any, source: str, path: str = "") -> None:
@@ -991,6 +1008,7 @@ def _load_yaml(text: str, source: str) -> object:
             node = loader.get_single_node()
             if node is None:
                 return None
+            _refuse_merge_keys(yaml, node, source)
             _refuse_repeated_keys(yaml, node, source)
             return loader.construct_document(node)
         finally:
