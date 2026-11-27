@@ -974,18 +974,10 @@ def resolve_config_source(
     )
 
 
-# The characters a path printed in a pasteable command may hold: ASCII letters
-# and digits, `_ . / : -`. No shell (POSIX shells, cmd.exe, PowerShell) reads
-# any of them specially. The set is deliberately narrow: a character outside it
-# is not necessarily special, but a space, `&`, `;`, a quote, `~`, `+`, `@`, a
-# comma or non-ASCII text either is in some shell or is not worth the doubt.
-# Paths are printed with "/" (as_posix), so a backslash is never needed.
-_PASTEABLE_PATH = re.compile(r"[A-Za-z0-9_./:-]+")
-
-
 def pasteable_path(path: Path | str) -> bool:
     """Whether lint_hint prints ``path`` itself, rather than pointing at it."""
-    return bool(_PASTEABLE_PATH.fullmatch(Path(path).as_posix()))
+    # Paths are printed with "/" (as_posix), so a backslash is never needed.
+    return command_names.pasteable(Path(path).as_posix())
 
 
 def lint_hint(config_path: Path | str, source_dir: Path | str | None = None) -> str:
