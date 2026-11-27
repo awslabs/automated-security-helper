@@ -620,23 +620,23 @@ kept:
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 145
-  line_end: 145
-  remeasured_at: e19cc22a5d6
+  line_start: 146
+  line_end: 146
+  remeasured_at: c4feb6ddaa2
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 148
-  line_end: 148
-  remeasured_at: e19cc22a5d6
+  line_start: 149
+  line_end: 149
+  remeasured_at: c4feb6ddaa2
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 175
-  line_end: 175
-  remeasured_at: e19cc22a5d6
+  line_start: 176
+  line_end: 176
+  remeasured_at: c4feb6ddaa2
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml
   rule_id: threat-filesystem-read
@@ -791,23 +791,23 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 145
-  line_end: 145
-  remeasured_at: e19cc22a5d6
+  line_start: 146
+  line_end: 146
+  remeasured_at: c4feb6ddaa2
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 148
-  line_end: 148
-  remeasured_at: e19cc22a5d6
+  line_start: 149
+  line_end: 149
+  remeasured_at: c4feb6ddaa2
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
   path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
-  line_start: 175
-  line_end: 175
-  remeasured_at: e19cc22a5d6
+  line_start: 176
+  line_end: 176
+  remeasured_at: c4feb6ddaa2
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: threat-filesystem-read
