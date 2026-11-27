@@ -486,6 +486,23 @@ def test_an_override_that_writes_fold_false_turns_the_recorded_fold_off(
     assert NOTE not in _cli_markdown(tmp_path, "--config-overrides", override)
 
 
+def test_an_object_value_at_the_section_that_names_only_annotate_leaves_the_recorded_fold(
+    tmp_path,
+):
+    # An object value counts only for the keys inside it. This one lands on
+    # the deduplication section, as the object-value-at-the-section spelling
+    # above does, but names annotate and not fold: the operator's
+    # configuration holds fold's default False, which must not be taken for an
+    # explicit false, so the recorded fold stands.
+    _write(tmp_path, _model(fold=True))
+    folded = _cli_markdown(
+        tmp_path,
+        "--config-overrides",
+        'global_settings.deduplication={"annotate": false}',
+    )
+    assert NOTE in folded
+
+
 def test_scan_and_report_declare_the_flag_off_by_default():
     from automated_security_helper.cli.report import report_command
     from automated_security_helper.cli.scan import run_ash_scan_cli_command

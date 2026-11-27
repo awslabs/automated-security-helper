@@ -275,6 +275,29 @@ def test_a_config_file_naming_false_still_turns_the_recorded_setting_off_with_an
     assert not set(ANNOTATION_COLUMNS) & set(header)
 
 
+def test_a_config_file_not_naming_deduplication_leaves_the_recorded_setting_with_an_unrelated_override(
+    tmp_path,
+):
+    # The other side of the test above: a real file that writes another global
+    # setting and never deduplication, under an override that names neither.
+    # The record starts from what the file wrote, so annotate is not a field
+    # the operator named, and the recorded True stands.
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        "project_name: p\nglobal_settings:\n  severity_threshold: MEDIUM\n",
+        encoding="utf-8",
+    )
+    header = _cli_csv(
+        tmp_path,
+        "--config",
+        str(config),
+        "--config-overrides",
+        "global_settings.severity_threshold=HIGH",
+    )
+    assert tuple(header[-3:]) == ANNOTATION_COLUMNS
+
+
 @pytest.mark.parametrize(
     ("override", "keeps_columns"),
     [
@@ -323,6 +346,24 @@ def test_every_spelling_that_writes_annotate_false_turns_the_recorded_setting_of
         assert tuple(header[-3:]) == ANNOTATION_COLUMNS
     else:
         assert not set(ANNOTATION_COLUMNS) & set(header)
+
+
+def test_an_object_value_at_the_parent_without_deduplication_leaves_the_recorded_setting(
+    tmp_path,
+):
+    # An object value counts only for the keys inside it. This one lands on
+    # global_settings, the parent of the deduplication section, as the
+    # object-value-at-the-parent spelling above does, but leaves the section
+    # out: it names neither annotate nor fold. The override replaces
+    # global_settings, so the operator's configuration holds annotate's
+    # default False, which must not be taken for an explicit false.
+    _write(tmp_path, _model(annotate=True))
+    header = _cli_csv(
+        tmp_path,
+        "--config-overrides",
+        'global_settings={"severity_threshold": "HIGH"}',
+    )
+    assert tuple(header[-3:]) == ANNOTATION_COLUMNS
 
 
 def test_a_config_file_naming_false_turns_the_recorded_setting_off(tmp_path):
