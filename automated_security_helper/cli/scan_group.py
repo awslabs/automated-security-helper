@@ -43,6 +43,9 @@ from automated_security_helper.cli.scan_deprecation import (
     SCAN_NOUN_META,
     SOURCE_DIR_KEY_LINE,
     SOURCE_DIR_LINE,
+    SOURCE_DIR_VARIABLE_LINE,
+    WORKSPACE_CONFIG_VARIABLE_LINE,
+    WORKSPACE_VARIABLE_LINE,
     warn_deprecated,
 )
 from automated_security_helper.utils.terminal_text import shown_on_one_line
@@ -100,13 +103,15 @@ OTHER_SUBJECT_OPTIONS = (
 _LEGACY_KEY = "legacy"
 
 _PATH_HELP = (
-    "The directory to scan. Defaults to the current directory. "
-    "--source-dir and ASH_SOURCE_DIR also name it."
+    "The directory to scan. Defaults to the current directory. --source-dir and "
+    "ASH_SOURCE_DIR also name it, and both are deprecated and will be removed in "
+    "ASH v4.0."
 )
 _FILE_HELP = (
     "The '.code-workspace' file whose folders are scanned as separate, "
     "independently-scoped projects. Pass 'auto' to use the single "
-    "'*.code-workspace' file in the current directory."
+    "'*.code-workspace' file in the current directory. ASH_WORKSPACE also names it; "
+    "that variable is deprecated and will be removed in ASH v4.0."
 )
 
 _ARCHIVE_HELP = (
@@ -498,6 +503,18 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
     # default_map (cli/json_input.py), so a document that names the directory with
     # the deprecated option's key reads as DEFAULT_MAP.
     from_document = source_dir_source == "DEFAULT_MAP"
+    # The variable names the directory alone when nothing else in the command does: no
+    # PATH, no archive and no clone replace it, and an image option refuses it with
+    # the engine's own words.
+    from_variable_alone = (
+        source_dir_source == "ENVIRONMENT"
+        and path is None
+        and archive is None
+        and not any(
+            kwargs.get(name)
+            for name in ("source_git", "image", "image_archive", "image_layout")
+        )
+    )
     if archive is not None:
         _refuse_what_an_archive_replaces(
             ctx, kwargs, path, directory_named=from_command_line or from_document
@@ -541,6 +558,8 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
             warn_deprecated(SOURCE_DIR_LINE)
         elif from_document:
             warn_deprecated(SOURCE_DIR_KEY_LINE)
+        elif from_variable_alone:
+            warn_deprecated(SOURCE_DIR_VARIABLE_LINE)
     return run_ash_scan_cli_command(*args, **kwargs)
 
 
@@ -560,6 +579,13 @@ def run_ash_scan_workspace_cli_command(*args: Any, **kwargs: Any) -> Any:
     # The engine names the workspace file `workspace`; the argument is `file`.
     kwargs["workspace"] = kwargs.pop("file")
     ctx.meta[SCAN_NOUN_META] = WORKSPACE_SUBJECT
+    # A variable that names what no argument does is told once, each by its own line.
+    for parameter, line in (
+        ("file", WORKSPACE_VARIABLE_LINE),
+        ("workspace_config", WORKSPACE_CONFIG_VARIABLE_LINE),
+    ):
+        if getattr(ctx.get_parameter_source(parameter), "name", None) == "ENVIRONMENT":
+            warn_deprecated(line)
     return run_ash_scan_cli_command(*args, **kwargs)
 
 

@@ -275,6 +275,9 @@ def test_a_directory_variable_in_the_environment_is_replaced(
     assert result.exit_code == 0, result.output
     assert Path(engine.calls[0]["source_dir"]).parent == scratch
     assert engine.trees == [{"app.py": "x = 1\n"}]
+    assert not [
+        line for line in result.stderr.splitlines() if line.startswith("Deprecated:")
+    ], "the archive is what is scanned, so the variable is not told"
 
 
 # --------------------------------------------------------------------------- #

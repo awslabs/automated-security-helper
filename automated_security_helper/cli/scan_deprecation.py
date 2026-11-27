@@ -13,6 +13,13 @@ prints one line to stderr, as ``ash dependencies install --tool <old name>`` doe
 a script that parses stdout is not handed a line it has never seen, and the exit
 code is unchanged.
 
+The variables that name what a subject scans when no argument does (``ASH_SOURCE_DIR``
+for ``fs``, ``ASH_WORKSPACE`` and ``ASH_WORKSPACE_CONFIG`` for ``workspace``) are told
+the same way, once for each variable the scan reads. A scan that was given the
+argument prints none, and neither does a form with no subject, whose own line already
+names the subject. ``ash config`` reads ``ASH_SOURCE_DIR`` for its own option and is
+not touched.
+
 Kept apart from ``cli.scan`` and ``cli.scan_group`` because both need it and
 neither may import the other's heavy parts; this module imports nothing at module
 scope beyond the standard library.
@@ -54,6 +61,23 @@ SOURCE_DIR_KEY_LINE = (
 WORKSPACE_WITHOUT_SUBJECT_LINE = (
     "A workspace scan without the `workspace` subject is deprecated and will be "
     f"removed in {REMOVAL}. Use `ash scan workspace <file>`."
+)
+#: ``ASH_SOURCE_DIR`` naming the directory of an ``ash scan fs`` that was given no PATH
+#: argument. Scoped to the scan: ``ash config`` keeps reading the variable.
+SOURCE_DIR_VARIABLE_LINE = (
+    "`ASH_SOURCE_DIR` as the directory of a scan is deprecated and will be removed in "
+    f"{REMOVAL}. Give the directory as the argument: `ash scan fs <path>`."
+)
+#: ``ASH_WORKSPACE`` naming the file of an ``ash scan workspace`` given no FILE.
+WORKSPACE_VARIABLE_LINE = (
+    "`ASH_WORKSPACE` as the workspace file of a scan is deprecated and will be removed "
+    f"in {REMOVAL}. Give the file as the argument: `ash scan workspace <file>`."
+)
+#: ``ASH_WORKSPACE_CONFIG`` naming the policy file of an ``ash scan workspace`` that was
+#: given no ``--workspace-config``.
+WORKSPACE_CONFIG_VARIABLE_LINE = (
+    "`ASH_WORKSPACE_CONFIG` is deprecated and will be removed in "
+    f"{REMOVAL}. Give the policy file with `--workspace-config <path>`."
 )
 
 

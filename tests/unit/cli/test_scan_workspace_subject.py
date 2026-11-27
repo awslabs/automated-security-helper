@@ -497,7 +497,7 @@ def test_a_missing_workspace_file_is_the_workspace_error(tmp_path, no_scan):
     assert no_scan == []
 
 
-def test_the_file_may_come_from_the_environment_without_a_deprecation_line(
+def test_the_file_may_come_from_the_environment_and_is_told_once(
     tmp_path, no_scan, monkeypatch
 ):
     monkeypatch.setenv("ASH_WORKSPACE", str(_workspace(tmp_path)))
@@ -505,7 +505,10 @@ def test_the_file_may_come_from_the_environment_without_a_deprecation_line(
     result = _invoke(["scan", "workspace", "--dry-run"])
 
     assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
-    assert _deprecation_lines(result.stderr) == [], result.stderr
+    # The scan runs on the variable, and one line says the variable is deprecated
+    # (tests/unit/cli/test_scan_variables_warn_once.py has every case).
+    (line,) = _deprecation_lines(result.stderr)
+    assert "ASH_WORKSPACE" in line and "ash scan workspace <file>" in line, line
 
 
 def test_the_subject_takes_no_directory_so_the_directory_variable_names_none(

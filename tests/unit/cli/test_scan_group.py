@@ -358,9 +358,10 @@ def test_with_no_path_the_environment_variable_still_names_the_directory(
 
     assert result.exit_code == 0, result.output
     assert [call["source_dir"] for call in engine.calls] == ["/from/env"]
-    assert _deprecation_lines(result.output) == [], (
-        "ASH_SOURCE_DIR is how the container hands the mount to the scan inside"
-    )
+    # The scan still runs on the variable, and it is told once that the variable is
+    # deprecated (tests/unit/cli/test_scan_variables_warn_once.py has every case).
+    (line,) = _deprecation_lines(result.output)
+    assert "ASH_SOURCE_DIR" in line and "ash scan fs <path>" in line, line
 
 
 def test_the_path_beats_the_environment_variable(engine, monkeypatch):
