@@ -9,6 +9,12 @@ A plugin after the first is told "Already realized" only where the realization r
 and exited 0. Where it failed, the next plugin that routes to nix runs it again, and
 each plugin reports its own result instead of the later ones being reported as
 verified because an earlier attempt was made.
+
+A plugin's own second command on the realization is served by its first, so it is
+neither announced nor counted: nothing has run when the commands are routed. A plugin
+an earlier realization served is told so once, reads INSTALLED, and is named on a
+summary line of its own, never as verified against a pinned digest, which nothing
+checked.
 """
 
 from __future__ import annotations
@@ -50,11 +56,21 @@ def _factory(fake):
     return lambda **_kwargs: fake
 
 
-def _scene(monkeypatch, tmp_path, scanners, nix_exits):
+def _two_shapes(name):
+    """A plain ``uv tool install`` of ``name`` and the same with one ``--with``
+    dependency: two commands of one plugin that both route to nix."""
+    return [
+        ["uv", "tool", "install", name],
+        ["uv", "tool", "install", "--with", "pbr", name],
+    ]
+
+
+def _scene(monkeypatch, tmp_path, scanners, nix_exits, find_on_path=None):
     """The run with ``scanners`` installed in order, as ``build_scene`` installs one.
 
     The n-th run of the nix command exits ``nix_exits[n]``, and the last code
-    repeats after that.
+    repeats after that. The lookup a scan makes answers ``/x/<name>`` unless
+    ``find_on_path`` says otherwise.
     """
     ran = []
 
@@ -65,7 +81,10 @@ def _scene(monkeypatch, tmp_path, scanners, nix_exits):
         return nix_exits[min(len(ran), len(nix_exits)) - 1]
 
     scene = build_scene(
-        monkeypatch, tmp_path, find_on_path=lambda c: f"/x/{c}", on_run=on_run
+        monkeypatch,
+        tmp_path,
+        find_on_path=find_on_path or (lambda c: f"/x/{c}"),
+        on_run=on_run,
     )
     monkeypatch.setattr(
         dependencies_module,
@@ -136,7 +155,9 @@ def test_the_next_plugin_realizes_what_the_first_attempt_could_not(
 
 def test_a_realization_that_succeeded_is_not_run_again(tmp_path, monkeypatch):
     """The control: after a success the second plugin is served by the first
-    plugin's run, and is said to be."""
+    plugin's run, and is said to be. It was installed by that run, so it reads
+    INSTALLED and is named on the line for plugins a realization served, not on the
+    pinned-digest line: no digest was checked for it."""
     scene = _scene(
         monkeypatch, tmp_path, [_scanner("bandit"), _scanner("checkov")], nix_exits=[0]
     )
@@ -147,12 +168,65 @@ def test_a_realization_that_succeeded_is_not_run_again(tmp_path, monkeypatch):
     assert len(_nix_runs(scene)) == 1, scene.argvs
     assert "Already realized by nix earlier in this run: checkov" in scene.text
     assert _status_of(scene, "bandit") == "INSTALLED", scene.text
-    assert _status_of(scene, "checkov") == "VERIFIED PRESENT", scene.text
+    assert _status_of(scene, "checkov") == "INSTALLED", scene.text
+    assert "verified against the pinned digest" not in scene.text, scene.text
+    assert "Served by a realization earlier in this run: 1 -- checkov" in scene.text, (
+        scene.text
+    )
+    assert "No install path on this platform" not in scene.text, scene.text
+
+
+def test_a_plugin_an_earlier_realization_served_is_told_so_once(tmp_path, monkeypatch):
+    """Two install commands of a plugin that an earlier plugin's realization already
+    served make one plugin served once: it is told so one time, and named on the line
+    for plugins a realization served."""
+    scene = _scene(
+        monkeypatch,
+        tmp_path,
+        [_scanner("bandit"), _scanner("checkov", declared=_two_shapes("checkov"))],
+        nix_exits=[0],
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert len(_nix_runs(scene)) == 1, scene.argvs
+    assert (
+        scene.text.count("Already realized by nix earlier in this run: checkov") == 1
+    ), scene.text
+    assert "Served by a realization earlier in this run: 1 -- checkov" in scene.text, (
+        scene.text
+    )
+
+
+def test_a_plugin_an_earlier_realization_served_reads_installed_not_on_path_when_not_found(
+    tmp_path, monkeypatch
+):
+    """A plugin the realization served was installed by it, so a tool the lookup then
+    does not find reads INSTALLED (not on PATH) and fails the run as a tool that did
+    not land, not as a pinned binary verified by digest."""
+    scene = _scene(
+        monkeypatch,
+        tmp_path,
+        [_scanner("bandit"), _scanner("checkov")],
+        nix_exits=[0],
+        find_on_path=lambda c: "/x/bandit" if c == "bandit" else None,
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 1, scene.text
+    assert len(_nix_runs(scene)) == 1, scene.argvs
+    assert _status_of(scene, "checkov") == "INSTALLED (not on PATH)", scene.text
+    assert "Install ran but tool not found on PATH: checkov" in scene.text, scene.text
+    assert "verified against the pinned digest" not in scene.text, scene.text
 
 
 def test_one_plugins_commands_realize_it_once(tmp_path, monkeypatch):
     """Two install commands of one plugin that both route to nix are served by one
-    run of it."""
+    run of it. Nothing is said to be realized, or verified, before that run: the
+    second command is served by the first, and the plugin reports that command's
+    result."""
     scanner = _scanner(
         "bandit",
         declared=[
@@ -166,4 +240,30 @@ def test_one_plugins_commands_realize_it_once(tmp_path, monkeypatch):
 
     assert scene.result.exit_code == 0, scene.text
     assert len(_nix_runs(scene)) == 1, scene.argvs
+    assert "Already realized" not in scene.text, scene.text
+    assert "verified against the pinned digest" not in scene.text, scene.text
+    assert "Served by a realization earlier in this run" not in scene.text, scene.text
     assert _status_of(scene, "bandit") == "INSTALLED", scene.text
+
+
+def test_one_plugins_second_command_is_not_reported_realized_when_the_realization_fails(
+    tmp_path, monkeypatch
+):
+    """When the one run of nix fails, the plugin's second command, which that run
+    serves, was not realized earlier and is not said to be, and the plugin is not
+    counted among the pinned binaries a digest check found: it reports the failure."""
+    scene = _scene(
+        monkeypatch,
+        tmp_path,
+        [_scanner("bandit", declared=_two_shapes("bandit"))],
+        nix_exits=[1],
+    )
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "nix")
+
+    assert scene.result.exit_code == 1, scene.text
+    assert len(_nix_runs(scene)) == 1, scene.argvs
+    assert "Already realized" not in scene.text, scene.text
+    assert "verified against the pinned digest" not in scene.text, scene.text
+    assert _status_of(scene, "bandit") == "FAILED", scene.text
+    assert "Served by a realization earlier in this run" not in scene.text, scene.text
