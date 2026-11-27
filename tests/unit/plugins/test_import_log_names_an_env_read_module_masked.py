@@ -254,7 +254,7 @@ def test_report_import_log_names_the_entry_masked(
     )
 
     result = CliRunner().invoke(
-        app, ["report", "--config", str(env_read_importable_config)]
+        app, ["results", "report", "--config", str(env_read_importable_config)]
     )
 
     assert result.exception is None or isinstance(result.exception, SystemExit), repr(
