@@ -672,10 +672,14 @@ def _timeout_reason(
         if timed_out_after is not None
         else ""
     )
+    # Every ending but the was-killed one says a tool may still be running: the
+    # timeout's own could not be stopped, or a later run's could not. Both are
+    # could_not_stop, whose default sentence does not say "killed" either; the
+    # default is what a report falls back to when the sentence below is not fit.
     code = (
-        ReasonCode.COULD_NOT_STOP
-        if ending == COULD_NOT_STOP_ENDING
-        else ReasonCode.TIMED_OUT
+        ReasonCode.TIMED_OUT
+        if ending == WAS_KILLED_ENDING
+        else ReasonCode.COULD_NOT_STOP
     )
     return FailureReason(
         code, text_without_values(f"it timed out{limit}{ending}", values)
