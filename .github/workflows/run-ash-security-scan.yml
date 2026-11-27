@@ -1133,7 +1133,16 @@ jobs:
               echo "::error::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
               exit 1
             fi
-            printf '{}\n' > "${DEST}"
+            # An empty config, in the format ASH reads the file as. ASH takes that from
+            # the name's suffix in any letter case. `{}` is an empty mapping in YAML and
+            # JSON but not a TOML document, so a TOML name gets an empty file. A
+            # pyproject.toml is read through its [tool.ash] table, and ASH refuses one
+            # without it, so that name gets the empty table.
+            case "$(printf '%s' "${RELATIVE##*/}" | tr '[:upper:]' '[:lower:]')" in
+              pyproject.toml) printf '[tool.ash]\n' > "${DEST}" ;;
+              *.toml) : > "${DEST}" ;;
+              *) printf '{}\n' > "${DEST}" ;;
+            esac
             echo "::warning::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
           else
             ENTRY="${ENTRIES[0]}"
