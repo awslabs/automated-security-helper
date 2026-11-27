@@ -189,11 +189,12 @@
 - **A session's patched profile that reads a value from the environment is no longer
   refused for that value.** When the registered profile sets an option a client may
   not set from an environment reference and `select_profile`'s patch changes only keys
-  the profile permits, the patched copy is accepted when it is bound and when it is
-  scanned: the filled-in value counts as the profile's own where the copy holds, at
-  exactly that place, the one reference text the profile wrote there. A value the copy
-  wrote itself, the reference at another place, and a place the profile's files read
-  twice (a base and the file that extends it) are still refused. Each value the copy
+  the profile permits, the patched copy is accepted by `validate_config`, by the check
+  made before a scan, and by the scan: the filled-in value counts as the profile's own
+  where the copy holds, at exactly that place, the one reference text the profile wrote
+  there. A value the copy wrote itself, the reference at another place, and a place the
+  profile's files wrote with two different texts (a base and the file that extends it,
+  even when both texts read the same variable) are still refused. Each value the copy
   repeats from the profile is also judged on its own now, validated as a config file is
   with only that value placed, so another spelling of a field, a key the model drops,
   or reference text in a typed field elsewhere in the copy no longer decides whether it
