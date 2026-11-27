@@ -931,10 +931,18 @@ UpgradePathGroupText = Literal["this-machine", "elsewhere"]
 _THIS_MACHINE_PATH_KINDS = frozenset({"same-os", "container", "wsl"})
 
 #: A path on the machine that wrote a notice: an absolute path (``/home/alice/.venv``),
-#: a home path (``~/.cache``, ``~alice``), a drive path (``C:\Users\alice``), a network
-#: share (``\\server\share``) or a file URI. It has to start a token, so a slash inside
-#: a word (``windows/arm64``, ``n/a``), the path of a URL and a relative path
-#: (``./check``) are not one.
+#: a home path (``~/.cache``, ``~alice``), a drive path (``C:\Users\alice``), a path
+#: from the root of the current drive (``\Users\alice``), a network share
+#: (``\\server\share``), an extended-length or device path (``\\?\C:\Users\alice``,
+#: ``\\.\C:\Users\alice``) or a file URI in any case (``file:///home/alice``,
+#: ``FILE:///home/alice``). It has to start a token, so a slash inside a word
+#: (``windows/arm64``, ``n/a``), the path of a URL and a relative path (``./check``)
+#: are not one.
+#:
+#: The drive in an extended-length path follows a backslash, which is never the start
+#: of a token, so the drive rule does not see it. The backslash after the ``?`` does
+#: start one (a ``?`` is no word character), and the rule for a backslash and a word
+#: character refuses the path there.
 _LOCAL_PATH = re.compile(
     r"""
     (?<![\w/.\\~])               # the start of a token
@@ -942,8 +950,9 @@ _LOCAL_PATH = re.compile(
         /[\w.~+@%-]              # /home/alice
       | ~(?:[/\\]|[A-Za-z_])     # ~/.cache or ~alice
       | [A-Za-z]:[\\/]           # C:\Users or c:/work
-      | \\\\[\w.$-]              # \\server\share
-      | file:/                   # file:///home/alice
+      | \\\\[\w.$-]              # \\server\share and \\.\C:\Users
+      | \\\w                     # \Users\alice, and the \C: of \\?\C:\Users
+      | (?i:file:/)              # file:///home/alice, in any case
     )
     """,
     re.VERBOSE,
