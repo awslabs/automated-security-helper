@@ -46,6 +46,10 @@ FORBIDDEN_AT_VERSION_TIME = (
     # workspace resolution (pulls the config model)
     "automated_security_helper.workspace",
     "automated_security_helper.models.workspace",
+    # the support register and the host reader that fills it: both are used when a
+    # scan starts, never at import time
+    "automated_security_helper.base.support_register",
+    "automated_security_helper.utils.host_facts",
     # the lazily-registered subcommand modules themselves
     "automated_security_helper.cli.config",
     "automated_security_helper.cli.dependencies",
