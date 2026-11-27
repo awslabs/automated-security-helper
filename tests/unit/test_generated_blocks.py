@@ -4,12 +4,12 @@ Every generated table in README.md.template and in the docs pages sits between t
 marker lines, and that module is the one place that finds, rewrites and checks what is
 between them. A library that accepted every page would pass each positive test below,
 so the tests first plant every way a pair can be wrong (no markers, two begins, an end
-before its begin, nested blocks, an orphan end, a begin closed by another block's end,
-CRLF text, a placeholder in the body) and require a refusal that names the file and the
-block. Then they show that writing and checking agree: write, then check reports
-nothing; one character changed inside a block names that block and writes nothing;
-bytes outside the markers never move; a second write says "unchanged"; and a template
-and its rendered page get the same block bytes, so the round trip in
+before its begin, nested blocks, an end with no begin, a begin closed by another
+block's end, CRLF text, a placeholder in the body) and require a refusal that names the
+file and the block. Then they show that writing and checking agree: write, then check
+reports nothing; one character changed inside a block names that block and writes
+nothing; bytes outside the markers never move; a second write says "unchanged"; and a
+template and its rendered page get the same block bytes, so the round trip in
 tests/unit/test_version_template_round_trip.py keeps holding.
 
 Three more guarantees are pinned the same way. A body is a string or a sequence of
@@ -303,7 +303,7 @@ PLANTED = [
         page(begin(), "a", end(), end("other")),
         "other",
         "has no begin marker",
-        id="orphan-end-of-another-block",
+        id="end-of-another-block-with-no-begin",
     ),
     pytest.param(
         page(begin(), "a", end("other")),
@@ -352,7 +352,7 @@ def test_a_nested_block_names_the_block_it_sits_in():
 
 
 def test_a_broken_block_of_another_generator_refuses_the_whole_file():
-    """The file is read as a whole: someone else's orphan is still an orphan."""
+    """The file is read as a whole: another generator's broken block refuses it."""
     text = page(begin("a"), "x", end("a"), begin("b", OTHER_GENERATOR), "y")
     refused(
         lambda: gb.replace_blocks(text, FILE, {"a": ROWS}, GENERATOR),

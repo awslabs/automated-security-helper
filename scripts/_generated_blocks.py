@@ -24,9 +24,9 @@ What it refuses, each time with a ``MarkerError`` that names the file and the bl
 before it writes anything:
 
 - a block with no begin or no end marker, a repeated begin or end for one name, an end
-  before its begin, blocks nested in one another, an end with no begin (an orphan), and
-  a begin whose end names another block. The whole file is read, so a broken block that
-  belongs to another generator refuses a write of a healthy one too;
+  before its begin, blocks nested in one another, an end with no begin, and a begin
+  whose end names another block. The whole file is read, so a broken block that belongs
+  to another generator refuses a write of a healthy one too;
 - a begin marker that names a different generator than the caller;
 - when writing, an orphan block: one whose begin marker names the caller but that the
   call gives no body for (see ``partial`` below);
@@ -58,16 +58,25 @@ swap refused because another process has the page open is tried again a few time
 two files of a pair are written one after the other: if the second write fails, the
 first stays, ``check_blocks`` reports the second, and the next run finishes the pair.
 
-A generator owns every block whose begin marker names it. One it renders no body for
-(its name is not in ``bodies``) is an orphan block: it would keep its last body for
-good, so ``check_blocks`` reports it as drift (``Drift.orphan`` is true) and
-``write_blocks`` refuses to write around it. A generator that renders only some of its
-blocks in one call says so with ``partial=True``, and the others are then left alone
-and never reported.
+A generator owns every block whose begin marker names it: the marker holds the string
+the caller passes as ``generator``, character for character, so ``scripts/x.py`` and
+``./scripts/x.py`` are two generators. One it renders no body for (its name is not in
+``bodies``) is an orphan block: it would keep its last body for good, so
+``check_blocks`` reports it as drift (``Drift.orphan`` is true) and ``write_blocks``
+refuses to write around it. A generator that renders only some of its blocks in one
+call says so with ``partial=True``, and the others are then left alone and never
+reported.
 
-``check_blocks`` returns one ``Drift`` per block that differs from its body, with a
-unified diff that names the block, and writes nothing. A second ``write_blocks`` reports
-``unchanged`` and does not touch the file.
+An orphan block is found only where a generator looks. A call reads the file it is
+given and that file's template or page twin, and nothing else, so a block is checked
+only while its generator still calls ``check_blocks`` or ``write_blocks`` on its page.
+A begin marker that names a generator that was renamed or deleted, one that spells the
+path another way, and one on a page that no generator call reads are not found by
+anything here: such a block keeps its last body.
+
+``check_blocks`` returns one ``Drift`` per block that differs from its body, and one per
+orphan block, each with a unified diff that names the block, and writes nothing. A
+second ``write_blocks`` reports ``unchanged`` and does not touch the file.
 """
 
 from __future__ import annotations
@@ -780,7 +789,7 @@ def check_blocks(
     *,
     partial: bool = False,
 ) -> list[Drift]:
-    """The drift of the named blocks in ``root / file`` and its twin; writes nothing.
+    """The drifted and orphan blocks of ``root / file`` and its twin; writes nothing.
 
     Each body is read once, before any file is, so both files get the same lines. A
     block that names ``generator`` and has no body in ``bodies`` is drift too (an
