@@ -143,6 +143,12 @@
   when the operator's `scanners` list holds it; and syft's sdist harvest stays off when
   the operator turns it off, with `max_sdist_mb` never above the operator's. A value it
   writes that would turn fetching on is ignored with a warning.
+- **checkov, grype, syft and the sdist-lock-harvester converter stay off when the
+  operator turns them off,** and trivy-repo's `scanners` list loses `vuln` when the
+  operator's list lacks it, since each fetches from the network when it runs online.
+  This holds under a config file inside the scanned tree or a git checkout, or one an
+  MCP client delivered, whether it leaves the section out or turns the plugin on. A
+  config that is not the operator's may still turn them off.
 
 ### Maintenance
 

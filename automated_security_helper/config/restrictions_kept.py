@@ -71,9 +71,12 @@ value. A scanner the operator sets ``offline: true`` stays offline, whether the
 config leaves the option out or sets it false. guarddog's ``verify`` and syft's
 sdist harvest (``enabled``, and a ``max_sdist_mb`` above the operator's) are on only
 where the operator's config has them on. trivy-repo runs ``misconfig``, whose
-Terraform checks fetch the module sources a ``.tf`` file names, only when the
-operator's ``scanners`` list holds it; a list left with nothing takes the
-operator's.
+Terraform checks fetch the module sources a ``.tf`` file names, and ``vuln``, which
+opens the vulnerability database, only when the operator's ``scanners`` list holds
+them; a list left with nothing takes the operator's. checkov, grype and syft and the
+sdist-lock-harvester converter fetch when they run online (policies, a database,
+update checks, the sdists a lockfile pins), so a switch the operator turns off for
+one of them stays off, as it does for the eight off-host scanners.
 
 What is not done here
 ---------------------
@@ -279,49 +282,95 @@ def keep_operator_floors(
         )
 
 
+#: The scanners outside the eight off-host ones that fetch from the network when they
+#: run online: checkov downloads policies, grype updates its vulnerability database
+#: and syft checks for updates.
+FETCHING_SCANNERS = ("checkov", "grype", "syft")
+
+#: The converters that fetch when they run: sdist-lock-harvester downloads the sdists
+#: a lockfile pins.
+FETCHING_CONVERTERS = ("sdist-lock-harvester",)
+
+
 def _keep_switches_off(
     config: "AshConfig", trusted_config: "AshConfig", landings: Sequence[Landing]
 ) -> List[str]:
-    """Keep off each off-host scanner the operator turned off; return what was named.
+    """Keep off each scanner and converter the operator turned off; return what was named.
 
-    The scanners are the eight whose whole section is an always-denied path. The
-    operator's off is kept where the config leaves the section out and where it
-    sets ``enabled`` on; a config may still turn one of them off. Both sides are
-    read with ``section_enabled``, the reading the run uses.
+    They are the eight off-host scanners, whose whole section is an always-denied
+    path, and the scanners and the converter that fetch when they run online
+    (``FETCHING_SCANNERS``, ``FETCHING_CONVERTERS``). The operator's off is kept
+    where the config leaves the section out and where it sets ``enabled`` on; a
+    config may still turn one of them off. Both sides are read with
+    ``section_enabled``, the reading the run uses.
     """
-    from automated_security_helper.base.plugin_config import section_enabled
-    from automated_security_helper.config.client_scanner_exclusions import (
-        _scanner_sections,
-    )
     from automated_security_helper.config.runtime_patch import SECTION_FLOOR_ENTRIES
 
     ignored: List[str] = []
-    extra = getattr(config.scanners, "__pydantic_extra__", None)
-    for scanner in sorted(entry.split("/")[2] for entry in SECTION_FLOOR_ENTRIES):
-        trusted_section = trusted_config.get_plugin_config(PluginKind.SCANNER, scanner)
-        if section_enabled(trusted_section):
+    off_host = sorted(entry.split("/")[2] for entry in SECTION_FLOOR_ENTRIES)
+    for scanner in (*off_host, *FETCHING_SCANNERS):
+        ignored.extend(
+            _keep_off(config, trusted_config, landings, PluginKind.SCANNER, scanner)
+        )
+    for converter in FETCHING_CONVERTERS:
+        ignored.extend(
+            _keep_off(config, trusted_config, landings, PluginKind.CONVERTER, converter)
+        )
+    return ignored
+
+
+def _keep_off(
+    config: "AshConfig",
+    trusted_config: "AshConfig",
+    landings: Sequence[Landing],
+    kind: PluginKind,
+    name: str,
+) -> List[str]:
+    """Keep the plugin ``name`` off in the config where the operator turned it off."""
+    from automated_security_helper.base.plugin_config import section_enabled
+    from automated_security_helper.config.ash_config import (
+        plugin_key_lookup_names,
+        reduced_plugin_name,
+    )
+    from automated_security_helper.config.client_scanner_exclusions import (
+        _scanner_sections,
+    )
+
+    if section_enabled(trusted_config.get_plugin_config(kind, name)):
+        return []
+    group = kind.section
+    segment = getattr(config, group)
+    if kind == PluginKind.SCANNER:
+        sections = _scanner_sections(config, name)
+    else:
+        wanted = reduced_plugin_name(name)
+        sections = [
+            (key, section)
+            for key, section in _plugin_sections(segment)
+            if key == name or wanted in plugin_key_lookup_names(key)
+        ]
+    if not sections:
+        # Only a plugin's section can be missing: a built-in plugin's is a typed
+        # field and is always present.
+        extra = getattr(segment, "__pydantic_extra__", None)
+        if isinstance(extra, dict):
+            extra[name] = {"enabled": False}
+        return []
+    ignored: List[str] = []
+    for key, section in sections:
+        path = (group, key, "enabled")
+        # A value an override the trusted base could not take set is the
+        # operator's own; there is nothing of the base's to put in its place.
+        if _covered(landings, path) or not section_enabled(section):
             continue
-        sections = _scanner_sections(config, scanner)
-        if not sections:
-            # Only a plugin scanner's section can be missing: a built-in
-            # scanner's is a typed field and is always present.
-            if isinstance(extra, dict):
-                extra[scanner] = {"enabled": False}
-            continue
-        for key, section in sections:
-            path = ("scanners", key, "enabled")
-            # A value an override the trusted base could not take set is the
-            # operator's own; there is nothing of the base's to put in its place.
-            if _covered(landings, path) or not section_enabled(section):
-                continue
-            if isinstance(section, dict):
-                wrote = "enabled" in section
-                section["enabled"] = False
-            else:
-                wrote = _file_wrote(config, path, section.enabled)
-                section.enabled = False
-            if wrote:
-                ignored.append(f"scanners.{key}.enabled")
+        if isinstance(section, dict):
+            wrote = "enabled" in section
+            section["enabled"] = False
+        else:
+            wrote = _file_wrote(config, path, section.enabled)
+            section.enabled = False
+        if wrote:
+            ignored.append(f"{group}.{key}.enabled")
     return ignored
 
 
@@ -377,11 +426,13 @@ OPERATOR_FLOORS: Dict[Tuple[str, str], Floor] = {
     ("actionlint", "pyflakes"): Floor(OPERATOR_SET, None, Optional[str]),
     ("cfn-guard", "rules_paths"): Floor(OPERATOR_SET, [], List[str]),
     ("guarddog", "verify"): Floor(FALSE_NARROWS, False, bool),
+    # misconfig fetches the module sources a Terraform file names, and vuln opens the
+    # vulnerability database.
     ("trivy-repo", "scanners"): Floor(
         KEPT_OUT,
         ["vuln", "secret", "misconfig", "license"],
         List[str],
-        frozenset({"misconfig"}),
+        frozenset({"misconfig", "vuln"}),
     ),
     ("syft", "sdist_harvest.enabled"): Floor(FALSE_NARROWS, True, bool),
     ("syft", "sdist_harvest.max_sdist_mb"): Floor(LOWEST, 100, int),
