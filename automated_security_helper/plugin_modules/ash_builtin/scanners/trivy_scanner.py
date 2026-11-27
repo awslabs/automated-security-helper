@@ -758,17 +758,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         extra.extend(self._operator_skip_args(extra, operator_skips))
 
         if image.oci_layout is not None:
-            # trivy image has no input mode for a layout directory, so the layout
-            # is re-packed as a docker-archive in the results directory this scan
-            # owns and trivy reads that (utils/oci_layout_archive.py).
-            from automated_security_helper.utils.oci_layout_archive import (
-                layout_to_docker_archive,
-            )
-
-            repacked = layout_to_docker_archive(
-                image.oci_layout, results_file.parent / "layout-repacked.tar"
-            )
-            target_token = f"--input={repacked.absolute().as_posix()}"
+            # trivy's --input reads an OCI image-layout directory as well as a
+            # saved tar (the v0.76.2 container-image target docs' OCI Layout
+            # section), so the layout is handed over as it is: nothing is
+            # re-packed, and no copy of the image is written into the results
+            # directory.
+            target_token = f"--input={Path(image.oci_layout).absolute().as_posix()}"
         elif image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
         else:
