@@ -437,6 +437,11 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 and no 32-bit macOS asset (tool_downloads.py docstring)",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="trivy",
+                version_check=("trivy", "--version"),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="issue_severity is computed from the message and tags",

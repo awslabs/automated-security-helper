@@ -1240,6 +1240,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 provisionable=(),
                 note="a PyPI package under a version constraint (a bare install resolves differently); platform support was not read here",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.NOT_IN_IMAGE,
+                reason="ferret-scan's tool comes another way, so the image does not install it",
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="the tool's own per-finding severity is mapped",

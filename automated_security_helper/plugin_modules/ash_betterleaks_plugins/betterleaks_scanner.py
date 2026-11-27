@@ -475,6 +475,11 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 provisionable=opsf.PLATFORMS_ALL,
                 note="asset table lists all six platform/arch pairs",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="betterleaks",
+                version_check=("betterleaks", "--version"),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.CONSTANT,
                 note="every finding is CRITICAL",

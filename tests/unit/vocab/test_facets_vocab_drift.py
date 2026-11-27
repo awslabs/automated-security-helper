@@ -117,6 +117,7 @@ VOCABULARIES: tuple[Vocabulary, ...] = (
         },
     ),
     Vocabulary(ops_register.RuntimeKind, _OPS_HOME),
+    Vocabulary(ops_register.ImageRoute, _OPS_HOME),
     Vocabulary(
         ops_register.Invocations,
         _OPS_HOME,

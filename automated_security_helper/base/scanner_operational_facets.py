@@ -6,7 +6,8 @@
 :mod:`automated_security_helper.base.scanner_facets` classifies what a scanner's
 native output can map into the shared pipeline. This module is its companion
 for the operational side: network behavior, output types, scan-target types,
-runtime dependency, platform support, severity fidelity, suppression surfaces,
+runtime dependency, platform support, the route into the container image,
+severity fidelity, suppression surfaces,
 finding-identity stability, rules extensibility, exit-code semantics,
 provenance, and input prerequisites (the tier is the manifest's, not this
 register's). Every scanner class declares a
@@ -476,6 +477,72 @@ class PlatformsFacet(_Frozen):
     def _shape(self) -> "PlatformsFacet":
         if _blank(self.note):
             raise ValueError("a platforms row carries its note")
+        return self
+
+
+# --------------------------------------------------------------------------
+# G2. Container image route
+# --------------------------------------------------------------------------
+
+
+class ImageRoute(str, Enum):
+    """How a scanner's tool gets into the image the Dockerfile builds."""
+
+    #: A pinned release asset, installed with ``install-pinned-tool <tool>``.
+    RELEASE_ASSET = "release_asset"
+    #: ``ash dependencies install`` puts it in place during the build.
+    DEPENDENCIES_INSTALL = "dependencies_install"
+    #: The Gemfile and Bundler build step.
+    GEM_BUNDLE = "gem_bundle"
+    #: The base operating system's package manager, one package per family.
+    OS_PACKAGE = "os_package"
+    #: Nothing beyond the ASH wheel and the system programs it already needs.
+    ASH_WHEEL = "ash_wheel"
+    #: Another scanner's tool: the scanner runs a tool a different row installs.
+    SHARED_TOOL = "shared_tool"
+    #: The image does not carry it, and the row says why.
+    NOT_IN_IMAGE = "not_in_image"
+
+
+class ImageFacet(_Frozen):
+    """The scanner's route into the container image (design section G2)."""
+
+    route: ImageRoute
+    #: ``RELEASE_ASSET`` and ``SHARED_TOOL``: the ``tool_downloads.TOOL_VERSIONS`` key
+    #: of the tool.
+    tool: Optional[str] = None
+    #: ``OS_PACKAGE``: the key of a system package in ``base/image_register.py``.
+    package: Optional[str] = None
+    #: The argv the build runs after the install to prove the tool answers; empty
+    #: when the Dockerfile runs none for this scanner.
+    version_check: tuple[str, ...] = ()
+    #: Comment lines the Dockerfile carries directly above the scanner's install
+    #: lines, copied as they are. A comment about licensing is not copied.
+    dockerfile_note: tuple[str, ...] = ()
+    #: ``NOT_IN_IMAGE``: why the image leaves the scanner out.
+    reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _shape(self) -> "ImageFacet":
+        if self.route is ImageRoute.NOT_IN_IMAGE:
+            if _blank(self.reason):
+                raise ValueError("a not_in_image image row states its reason")
+            if self.tool is not None or self.version_check:
+                raise ValueError(
+                    "a not_in_image image row names no tool and no version check"
+                )
+        if self.route in (ImageRoute.RELEASE_ASSET, ImageRoute.SHARED_TOOL):
+            if _blank(self.tool):
+                raise ValueError(f"a {self.route.value} image row names its tool")
+        if self.route is ImageRoute.OS_PACKAGE and _blank(self.package):
+            raise ValueError("an os_package image row names its package")
+        for line in self.dockerfile_note:
+            if not line.startswith("#"):
+                raise ValueError(
+                    f"an image note line is a Dockerfile comment, not {line!r}"
+                )
+        if any(_blank(word) for word in self.version_check):
+            raise ValueError("an image version check holds no blank word")
         return self
 
 
@@ -995,6 +1062,7 @@ OPERATIONAL_FACET_NAMES: tuple[str, ...] = (
     "runtime",
     "runtime_compat",
     "platforms",
+    "image",
     "severity",
     "silencing",
     "identity",
@@ -1018,6 +1086,7 @@ class ScannerOperationalFacets(_Frozen):
     runtime: RuntimeFacet
     runtime_compat: RuntimeCompatFacet
     platforms: PlatformsFacet
+    image: ImageFacet
     severity: SeverityFacet
     silencing: SilencingFacet
     identity: IdentityFacet

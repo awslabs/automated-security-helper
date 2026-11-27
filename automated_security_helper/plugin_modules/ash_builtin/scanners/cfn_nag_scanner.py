@@ -629,6 +629,22 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 provisionable=(),
                 note="a Ruby gem closure from assets/Gemfile.lock, not a release binary; there is no asset table",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.GEM_BUNDLE,
+                dockerfile_note=(
+                    "# One RUN for install, build and purge. `core` is the base for both `ci` and",
+                    "# `non-root`, so a C toolchain left here ships in every published image, which is",
+                    "# its own finding in a security scanner. Docker layers are additive, so purging in",
+                    "# a later RUN would remove the compiler from the container while the image still",
+                    "# carried it -- keeping all three steps in one layer means it never lands at all.",
+                    "#",
+                    "# apt-get update runs again because the base layer clears the package lists.",
+                    "#",
+                    "# Some gems ship files mode 777 (lightly, which cfn-nag pulls in, does), and gem",
+                    "# install keeps the modes the gem was packed with. The chmod clears group and other",
+                    "# write in the same layer, so those modes never reach the image.",
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="the tool's own per-finding severity is mapped",

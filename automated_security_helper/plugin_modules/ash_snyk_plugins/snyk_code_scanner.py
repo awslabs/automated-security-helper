@@ -567,6 +567,13 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                 "run leaves behind is never swept; whether the Snyk CLI itself runs on a given "
                 "OS is the user's install",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.NOT_IN_IMAGE,
+                reason=(
+                    "its CLI is installed by the user and tied to the user's own "
+                    "account, so the image does not carry it"
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DEGRADED,
                 note="rules carry no security-severity, so the bare level maps (error to CRITICAL); "

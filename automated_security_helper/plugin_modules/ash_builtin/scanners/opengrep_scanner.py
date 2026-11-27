@@ -396,6 +396,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
                     "windows/arm64 asset (tool_downloads.py _OPENGREP_ASSETS)"
                 ),
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.DEPENDENCIES_INSTALL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="the SARIF level only: three grades",

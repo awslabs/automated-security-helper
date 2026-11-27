@@ -419,6 +419,11 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
                 provisionable=opsf.PLATFORMS_NO_WINDOWS_ARM64,
                 note="no windows/arm64 asset (tool_downloads.py docstring)",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.RELEASE_ASSET,
+                tool="hadolint",
+                version_check=("hadolint", "--version"),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="two tables plus a second-pass refinement join",

@@ -910,6 +910,14 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.DEPENDENCIES_INSTALL,
+                version_check=("zizmor", "--version"),
+                dockerfile_note=(
+                    "# zizmor (builtin scanner) is installed by the line above through `uv tool install`",
+                    "# within ZIZMOR_DEFAULT_VERSION_CONSTRAINT; this fails the build if it was not.",
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="a severity-by-confidence rewrite",

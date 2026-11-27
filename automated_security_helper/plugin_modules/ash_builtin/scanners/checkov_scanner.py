@@ -1120,6 +1120,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.DEPENDENCIES_INSTALL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.NATIVE,
                 note="the tool's own per-finding severity is mapped",
