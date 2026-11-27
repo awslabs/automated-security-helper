@@ -502,6 +502,18 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
     SHIPPED_DEFAULT_DENIED_PATHS[-1]
     | {"/global_settings/history", "/global_settings/history/**"},
 )
+#: The default after mcp-config's checks joined it: each of the four, set false,
+#: drops a whole kind of finding, so a client may not turn one off.
+SHIPPED_DEFAULT_DENIED_PATHS = (
+    *SHIPPED_DEFAULT_DENIED_PATHS,
+    SHIPPED_DEFAULT_DENIED_PATHS[-1]
+    | {
+        "/scanners/mcp-config/options/forbid_privilege_escalation",
+        "/scanners/mcp-config/options/forbid_unpinned_runners",
+        "/scanners/mcp-config/options/forbid_auto_approval",
+        "/scanners/mcp-config/options/flag_env_secrets",
+    },
+)
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):

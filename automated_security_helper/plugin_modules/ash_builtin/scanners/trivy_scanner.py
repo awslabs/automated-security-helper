@@ -772,17 +772,12 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         extra.extend(self._operator_skip_args(extra, operator_skips))
 
         if image.oci_layout is not None:
-            # trivy image has no input mode for a layout directory, so the layout
-            # is re-packed as a docker-archive in the results directory this scan
-            # owns and trivy reads that (utils/oci_layout_archive.py).
-            from automated_security_helper.utils.oci_layout_archive import (
-                layout_to_docker_archive,
-            )
-
-            repacked = layout_to_docker_archive(
-                image.oci_layout, results_file.parent / "layout-repacked.tar"
-            )
-            target_token = f"--input={repacked.absolute().as_posix()}"
+            # trivy's --input reads an OCI image-layout directory as well as a
+            # saved tar (the v0.76.2 container-image target docs' OCI Layout
+            # section), so the layout is handed over as it is: nothing is
+            # re-packed, and no copy of the image is written into the results
+            # directory.
+            target_token = f"--input={Path(image.oci_layout).absolute().as_posix()}"
         elif image.oci_archive is not None:
             target_token = f"--input={Path(image.oci_archive).absolute().as_posix()}"
         else:
@@ -859,26 +854,29 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         """Tie each dependency result to one package copy and set trivy's severity.
 
         The severity step is ``TrivyScannerBase._attach_trivy_severity``, shared
-        with trivy-repo; see "Severity" above for the rule. The package step is
-        host-tree work (it joins results to the TARGET's lockfiles) and is
-        skipped for an image scan: joining image packages to the host's
-        lockfiles would attribute a copy the image does not hold.
+        with trivy-repo; see "Severity" above for the rule. The package step
+        writes the package's name, its version and ``fix_available`` from
+        trivy's message, for an image as for a source tree: a finding's
+        correlation id and a package-scoped suppression read them, as they do
+        for grype's image findings. Its join to the TARGET's lockfiles is
+        host-tree work and is skipped for an image scan: joining image packages
+        to the host's lockfiles would attribute a copy the image does not hold.
 
-        Both image decisions read ONE signal, ``_image_scan_in_progress``: the
-        layer pass used to key on ``final_args[1]``, so anything placed before
-        the subcommand would have skipped it silently while the package join
-        still skipped, splitting the two halves of "this is an image scan".
-        The flag is read with a default because the facets corpus harness
-        replays captured reports through ``cls.__new__(cls)`` skeletons, which
-        have no pydantic private state and are never mid-image-scan.
+        Both image decisions (the layer pass runs, the lockfile join does not)
+        read ONE signal, ``_image_scan_in_progress``: the layer pass used to key
+        on ``final_args[1]``, so anything placed before the subcommand would
+        have skipped it silently while the lockfile join still skipped,
+        splitting the two halves of "this is an image scan". The flag is read
+        with a default because the facets corpus harness replays captured
+        reports through ``cls.__new__(cls)`` skeletons, which have no pydantic
+        private state and are never mid-image-scan.
         """
         in_image = bool(getattr(self, "_image_scan_in_progress", False))
         if in_image:
             self._attach_image_layers(sarif_report, final_args)
-        else:
-            # The package-identity join reads the source tree's lockfiles,
-            # which an image's results are not about.
-            sarif_report = self._attach_package_identity(sarif_report, target)
+        sarif_report = self._attach_package_identity(
+            sarif_report, target, join_lockfiles=not in_image
+        )
         sarif_report = self._attach_misconfig_resources(sarif_report, final_args)
         return self._attach_trivy_severity(sarif_report)
 
@@ -891,10 +889,13 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         once more with ``--format json`` and the two reports are joined
         (``utils/image_layer_digests``). The extra pass is an attribution
         read: any way it fails (no JSON option to translate, the tool failing,
-        a report that cannot be read) leaves the column empty, says so once,
-        and never fails or changes the scan. The pass reads the image the way
-        the scan did, so the layers it names are the ones the findings came
-        from. Returns the number of results given a layer digest.
+        a report that cannot be read, a time budget that cannot be worked out)
+        leaves the column empty, says so once, and never fails or changes the
+        scan. The pass reads the image the way the scan did, so the layers it
+        names are the ones the findings came from: it runs only for a payload
+        or a reference that carries its digest, the two cases where both runs
+        read the same bytes. Returns the number of results given a layer
+        digest.
         """
         from automated_security_helper.utils.image_layer_digests import (
             attach_layer_digests,
@@ -916,22 +917,22 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
             )
             return 0
         # The join is sound only when the second read is of the same bytes.
-        # A payload (--input) and a digest-pinned reference are; so is a tag
-        # an engine's own store serves (one store, read twice within one
-        # scan). A bare tag read remotely -- no consultable engine socket --
-        # can resolve to a different manifest on the second pull, and layers
-        # joined across two images would attribute the wrong build.
+        # A payload (--input) and a digest-pinned reference are. A bare tag is
+        # not, whatever engine is detected: --image-src names the engine's
+        # store and then the registry, so a tag the store does not hold is
+        # pulled from the registry by each of the two runs, and the pulls can
+        # resolve it to different manifests. Layers joined across two images
+        # would attribute the wrong build.
         subject = final_args[-1] if final_args else ""
         reads_a_payload = any(
             arg == "--input" or arg.startswith("--input=") for arg in final_args
         )
-        engine_socket = getattr(self, "_image_engine_socket", None)
-        if not reads_a_payload and "@" not in subject and engine_socket is None:
+        if not reads_a_payload and "@" not in subject:
             self._plugin_log(
                 "The image scan's layer attribution is skipped: the reference "
-                "is a tag without a digest and no local engine store serves "
-                "it, so a second remote read could name another build's "
-                "layers. Pin the reference by digest to attribute layers.",
+                "is a tag without a digest, so a second read could resolve it "
+                "to another build and name that build's layers. Pin the "
+                "reference by digest to attribute layers.",
                 level=logging.WARNING,
             )
             return 0
@@ -942,14 +943,16 @@ class TrivyScanner(TrivyScannerBase[TrivyScannerConfig]):
         # double the time an operator bounded. The floor keeps a nearly-spent
         # budget from turning into an unbounded wait (0 disables trivy's own
         # timeout). Cancellation passes through: ScanCancelled is a
-        # BaseException, which the attribution except below never catches.
-        budget = self._effective_scan_timeout()
-        if budget is not None and self.start_time is not None:
-            from datetime import datetime, timezone
-
-            elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
-            budget = max(1.0, budget - elapsed)
+        # BaseException, which the attribution except below never catches. The
+        # budget is worked out inside the try as well: a failure there is the
+        # pass's own, and the pass never fails a scan.
         try:
+            budget = self._effective_scan_timeout()
+            if budget is not None and self.start_time is not None:
+                from datetime import datetime, timezone
+
+                elapsed = (datetime.now(timezone.utc) - self.start_time).total_seconds()
+                budget = max(1.0, budget - elapsed)
             completed = spawn_run(
                 argv,
                 capture_output=True,
