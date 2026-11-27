@@ -232,6 +232,25 @@ _CONTAINER_BUILD = re.compile(
 )
 _RELEASE_NUMBER = re.compile(r"(\d+)\.(\d+)\.(\d+)(?!\d)")
 
+# What the `entry:` of a hook in `.pre-commit-hooks.yaml` runs, as that file ships it
+# for SUBJECTS_RELEASE and as the release before it shipped it. A page that says what a
+# hook runs quotes the entry, so it has to say what the manifest of the release it pins
+# says: the entry is not a command a reader types, and its older form is not the
+# `ash scan` that the general rewrite below would write (`ashv3 scan --mode=precommit
+# --staged`, which neither manifest holds). The 3.9 hooks also pass `--staged`, which
+# 3.8.0 lacks, so the earlier entry is not a respelling of the later one and is listed
+# whole. Keyed by the newer entry; tests/unit/test_pre_commit_hooks_manifest.py holds the
+# keys to the manifest, and the values to the entries `git show v3.8.0:.pre-commit-
+# hooks.yaml` prints.
+HOOK_ENTRIES_BEFORE_THE_SUBJECTS = {
+    "ashv3 scan fs --mode=precommit --staged": "ashv3 --mode=precommit",
+    "ashv3 scan fs --mode=container --simple": "ashv3 --mode=container --simple",
+}
+_HOOK_ENTRY = re.compile(
+    rf"(?<![\w./-])({'|'.join(map(re.escape, HOOK_ENTRIES_BEFORE_THE_SUBJECTS))})"
+    r"(?![\w-])"
+)
+
 
 def _scan_before_the_subjects(found: "re.Match[str]") -> str:
     """`ash scan fs [PATH]` as a release before SUBJECTS_RELEASE spells it."""
@@ -247,15 +266,20 @@ def spellings_for_release(text: str, version: str) -> str:
     For a release before SUBJECTS_RELEASE, ``ash scan fs PATH`` becomes
     ``ash scan --source-dir PATH`` and ``ash scan fs`` with no path ``ash scan``,
     ``ash results <verb>`` becomes ``ash <verb>``, and ``ash container build`` becomes
-    ``ash build-image``; ``ashv3`` is read as ``ash``. Text for SUBJECTS_RELEASE or a
-    later release comes back unchanged, as does text for a version that does not start
-    with a release number (a branch name, a placeholder).
+    ``ash build-image``; ``ashv3`` is read as ``ash``. The entries of the hooks in
+    ``.pre-commit-hooks.yaml`` (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that
+    release ships, whole. Text for SUBJECTS_RELEASE or a later release comes back
+    unchanged, as does text for a version that does not start with a release number (a
+    branch name, a placeholder).
     """
     found = _RELEASE_NUMBER.match(version.strip())
     if found is None:
         return text
     if tuple(int(part) for part in found.groups()) >= SUBJECTS_RELEASE:
         return text
+    text = _HOOK_ENTRY.sub(
+        lambda entry: HOOK_ENTRIES_BEFORE_THE_SUBJECTS[entry[1]], text
+    )
     text = _SCAN_FS.sub(_scan_before_the_subjects, text)
     text = _RESULTS_VERB.sub(
         lambda verb: f"{verb['ash']}{verb['blank']}{verb['verb']}", text

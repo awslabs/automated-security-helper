@@ -26,6 +26,12 @@ The rewrite, row by row, on the shapes the templates use; that every template re
 for 3.8.0 holds none of the newer spellings and renders for 3.9.0 with nothing but its
 placeholders replaced; and that each committed page, which pins the current release,
 names no spelling that release lacks.
+
+A page that says what a pre-commit hook runs quotes the hook's ``entry:``. For a
+release before 3.9 the render writes the entry that release's manifest holds, whole
+(``ashv3 --mode=precommit``), and not the general respelling of the newer entry (``ashv3
+scan --mode=precommit --staged``), which neither manifest has; the table behind that is
+held to the repository's manifest and to the v3.8.0 entries written out below.
 """
 
 from __future__ import annotations
@@ -36,6 +42,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -46,11 +53,23 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
+HOOK_MANIFEST = REPO_ROOT / ".pre-commit-hooks.yaml"
+PRE_COMMIT_PAGE = REPO_ROOT / "docs" / "content" / "how-to" / "pre-commit.md"
 
 #: The first release whose CLI reads the spellings below. Written here as well as in
 #: the manager, so a change to the manager's threshold fails
 #: test_the_threshold_is_the_release_that_introduced_the_spellings.
 SUBJECTS_RELEASE = (3, 9, 0)
+
+#: The ``entry:`` of each hook of ``.pre-commit-hooks.yaml`` at the v3.8.0 tag, the
+#: release the committed pages pin: lines 38, 48 and 60 of ``git show
+#: v3.8.0:.pre-commit-hooks.yaml``. Written out here, so the manager's table of the
+#: entries before the subjects is held to what that release shipped and not to itself.
+V3_8_0_HOOK_ENTRIES = {
+    "ash": "ashv3 --mode=precommit",
+    "ash-simple-scan": "ashv3 --mode=precommit",
+    "ash-full-scan": "ashv3 --mode=container --simple",
+}
 
 #: A spelling that ASH 3.8 does not read. ``ash scan workspace``, ``image`` and
 #: ``git`` are listed too: they have no 3.8 form, so a page pinned to 3.8 must not
@@ -142,10 +161,21 @@ ROWS = [
         "uvx --from git+https://example.invalid/a.git@v1.2.3 ash scan --mode container",
     ),
     ("entry: ash scan fs --mode precommit", "entry: ash scan --mode precommit"),
+    # The entries of this repository's hooks: the entry the earlier release ships, whole.
     (
         "`ashv3 scan fs --mode=precommit --staged`",
-        "`ashv3 scan --mode=precommit --staged`",
+        "`ashv3 --mode=precommit`",
     ),
+    (
+        "which runs `ashv3 scan fs --mode=container --simple`. It builds",
+        "which runs `ashv3 --mode=container --simple`. It builds",
+    ),
+    (
+        "  entry: ashv3 scan fs --mode=precommit --staged\n",
+        "  entry: ashv3 --mode=precommit\n",
+    ),
+    # Not an entry of this repository's manifest: the general rewrite applies.
+    ("`ashv3 scan fs --mode=precommit`", "`ashv3 scan --mode=precommit`"),
     ("on `ash scan fs`.", "on `ash scan`."),
     (
         'data-ash-copy="ash scan fs --mode container"',
@@ -261,3 +291,58 @@ def test_a_committed_page_names_only_the_spellings_of_the_release_it_pins(target
         f"{target} pins ASH {release}, which does not read these commands; render "
         "it with scripts/version_template_manager.py generate:\n  " + "\n  ".join(found)
     )
+
+
+def _manifest_entries() -> dict[str, str]:
+    hooks = yaml.safe_load(HOOK_MANIFEST.read_text(encoding="utf-8"))
+    return {hook["id"]: hook["entry"] for hook in hooks}
+
+
+def test_the_hook_entries_the_manager_swaps_are_the_manifests_and_the_3_8_0_ones():
+    """A page that says what a hook runs quotes its ``entry:``. The render for a release
+    before the subjects swaps each entry of this repository's manifest for the entry
+    that release shipped, so the table is keyed by the manifest and its values are the
+    v3.8.0 manifest's own, not a respelling of the newer entry."""
+    entries = _manifest_entries()
+    assert set(entries) == set(V3_8_0_HOOK_ENTRIES), (
+        "the manifest and the v3.8.0 manifest define different hooks; the table in "
+        "scripts/version_template_manager.py has to follow"
+    )
+    table = MODULE.HOOK_ENTRIES_BEFORE_THE_SUBJECTS
+    assert set(table) == set(entries.values()), (
+        "HOOK_ENTRIES_BEFORE_THE_SUBJECTS is not keyed by the entries of "
+        f"{HOOK_MANIFEST.name}: {sorted(table)} against {sorted(set(entries.values()))}"
+    )
+    for hook_id, entry in entries.items():
+        assert table[entry] == V3_8_0_HOOK_ENTRIES[hook_id], hook_id
+
+
+@pytest.mark.parametrize("hook_id", sorted(V3_8_0_HOOK_ENTRIES))
+def test_a_render_for_3_8_writes_the_entry_the_3_8_0_manifest_holds(hook_id):
+    entry = _manifest_entries()[hook_id]
+    assert MANAGER.render(f"`{entry}`", "3.8.0") == f"`{V3_8_0_HOOK_ENTRIES[hook_id]}`"
+    assert MANAGER.render(f"`{entry}`", "3.9.0") == f"`{entry}`"
+
+
+def test_the_committed_pre_commit_page_says_the_entries_its_pinned_release_ships():
+    """The page described the hooks as running ``ashv3 scan --mode=precommit --staged``,
+    which neither manifest holds. The release it pins is the one whose manifest it
+    quotes."""
+    release = _packaged_release()
+    entries = (
+        V3_8_0_HOOK_ENTRIES
+        if _release_tuple(release) < SUBJECTS_RELEASE
+        else _manifest_entries()
+    )
+    text = " ".join(PRE_COMMIT_PAGE.read_text(encoding="utf-8").split())
+    full_scan = entries["ash-full-scan"]
+    for sentence in (
+        f"The `ash` hook runs `{entries['ash']}` with your `args`.",
+        (
+            "`.pre-commit-hooks.yaml` also defines `ash-full-scan`, which runs "
+            f"`{full_scan}`."
+        ),
+    ):
+        assert sentence in text, (
+            f"{PRE_COMMIT_PAGE.name} pins ASH {release} and should say: {sentence}"
+        )

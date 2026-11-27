@@ -48,7 +48,7 @@ Do not ignore all of `.ash/`: an ASH config file at a legacy location, such as `
 
 ## What the hook runs {#behavior}
 
-The `ash` hook runs `ashv3 scan --mode=precommit --staged` with your `args`. Precommit mode:
+The `ash` hook runs `ashv3 --mode=precommit` with your `args`. Precommit mode:
 
 - runs five scanners by default: bandit, detect-secrets, checkov, cdk-nag, and npm-audit.
   `--add-scanners` adds others to that set; `--only-scanners` replaces the set and runs
@@ -376,7 +376,7 @@ matches.
 ## The ash-full-scan hook {#full-scan}
 
 `.pre-commit-hooks.yaml` also defines `ash-full-scan`, which runs
-`ashv3 scan --mode=container --simple`. It builds ASH's container image from the source that
+`ashv3 --mode=container --simple`. It builds ASH's container image from the source that
 pre-commit installed, then scans the repository inside it with every scanner the image
 carries. It needs a container runtime on the host: finch, docker, nerdctl, or podman, found
 in that order. The first run builds the image and takes several minutes, so give the hook

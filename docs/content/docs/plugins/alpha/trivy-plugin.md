@@ -559,8 +559,9 @@ services:
 
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
-# Set memory limits for container mode
-docker run --memory=2g ash scan fs --scanners trivy-repo
+# Set memory limits for container mode: the image, then the ash command it runs
+docker run --memory=2g --mount type=bind,source="$PWD",destination=/src \
+  ash:latest ash scan fs /src --scanners trivy-repo
 
 # Monitor memory usage
 ulimit -v 2097152  # 2GB virtual memory limit
@@ -1245,7 +1246,8 @@ EOF
 1. **Increase Memory Limits**: For container mode
    <!-- doctest: illustrative reason="needs a container runtime" -->
    ```bash
-   docker run --memory=2g --scanners trivy-repo
+   docker run --memory=2g --mount type=bind,source="$PWD",destination=/src \
+     ash:latest ash scan fs /src --scanners trivy-repo
    ```
 
 2. **Process Smaller Chunks**: Break down large scans
