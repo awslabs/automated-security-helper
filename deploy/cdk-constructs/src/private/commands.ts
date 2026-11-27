@@ -406,6 +406,69 @@ function onEitherAsh(
 /** The option the scan's directory used to be named with, and still is before ASH 3.9. */
 const SOURCE_DIR_OPTION = '--source-dir';
 
+/** Whether a word is a `--source-dir`, written `--source-dir` or `--source-dir=DIR`. */
+function isSourceDirWord(word: string): boolean {
+  return word === SOURCE_DIR_OPTION || word.startsWith(`${SOURCE_DIR_OPTION}=`);
+}
+
+/** A quote, a backtick, `$` or a backslash: what lets a shell word mean more than its own text. */
+const SHELL_SPECIAL = /["'`$\\]/;
+
+/**
+ * A long option, or `--`, as the whole of a value: `--verbose`, `--log-level=INFO`.
+ * Written after `--source-dir` it is a directory that was left out, not a directory.
+ */
+const LONG_OPTION = /^--(?:[A-Za-z][A-Za-z0-9-]*(?:=.*)?)?$/;
+
+/**
+ * Whether the words of one element are `--source-dir` and one plain directory word,
+ * which is read as the two elements `['--source-dir', 'DIR']` would be.
+ */
+function isSourceDirAndPlainDirectory(words: string[]): boolean {
+  return (
+    words.length === 2 &&
+    words[0] === SOURCE_DIR_OPTION &&
+    !SHELL_SPECIAL.test(words[1]) &&
+    !words[1].startsWith('-')
+  );
+}
+
+/**
+ * The directory text a `--source-dir` names, checked and safe to put after `ash scan fs`.
+ *
+ * The text is what the caller wrote, trimmed, and goes into the command as written. It
+ * is refused when it is empty, when it holds another `--source-dir`, which ASH 3.9
+ * refuses beside the PATH, and when it is written like a long option, which is a
+ * directory that was left out. A name that starts with a dash is made `./NAME`, the
+ * same directory, because `ash scan fs` would read the bare name as an option. The
+ * checks read the word the shell makes, with its quotes taken out, so `"-x"` is
+ * written `./"-x"`. The reusable workflow rewrites the same input the same way.
+ */
+function sourceDirectoryWord(text: string): string {
+  const directory = text.trim();
+  const word = directory.replace(/["']/g, '');
+  if (word.trim() === '') {
+    throw new Error(
+      `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it: pass ` +
+        `['${SOURCE_DIR_OPTION}', 'DIR'] or ['${SOURCE_DIR_OPTION}=DIR'].`,
+    );
+  }
+  const words = word.split(/\s+/);
+  if (words.some(isSourceDirWord)) {
+    throw new Error(
+      `${SOURCE_DIR_OPTION} in extraScanArguments is followed by ${JSON.stringify(directory)}, ` +
+        `which holds another ${SOURCE_DIR_OPTION}. Name one directory.`,
+    );
+  }
+  if (LONG_OPTION.test(words[0])) {
+    throw new Error(
+      `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it, but ` +
+        `${JSON.stringify(directory)} reads as an option.`,
+    );
+  }
+  return word.startsWith('-') ? `./${directory}` : directory;
+}
+
 /** Extra scan arguments with a `--source-dir` among them taken out. */
 export interface ExtraScanArguments {
   /** The directory the last `--source-dir` named, as the caller wrote it; absent if none did. */
@@ -426,12 +489,16 @@ export interface ExtraScanArguments {
  * way the installed ASH names a directory instead.
  *
  * The arguments are read one element at a time: `--source-dir` and the directory
- * as two elements, or `--source-dir=DIR` as one. An element that holds a
- * `--source-dir` among other words, a `--source-dir` with no directory after it, and
- * a directory that starts with a dash (which `ash scan fs` would read as an option)
- * are refused rather than guessed at. The directory is shell text the caller
- * wrote, like every extra argument, and is passed on as written. When several are
- * given, the last one is the directory, as click resolves a repeated option.
+ * as two elements, or `--source-dir=DIR` as one, or `--source-dir DIR` as one when
+ * DIR is a single word with no quote, backtick, `$` or backslash that does not start
+ * with a dash. An element that holds a `--source-dir` among other words, a
+ * `--source-dir` with no directory after it, a directory that holds another
+ * `--source-dir`, and a directory written like a long option (`--verbose`) are
+ * refused rather than guessed at. A directory name that starts with a dash is given
+ * as `./NAME`, the same directory, since `ash scan fs` would read the bare name as
+ * an option; the reusable workflow does the same. The directory is shell text the
+ * caller wrote, like every extra argument, and is passed on as written. When several
+ * are given, the last one is the directory, as click resolves a repeated option.
  */
 export function withoutSourceDirectory(extraScanArguments: string[]): ExtraScanArguments {
   let sourceDirectory: string | undefined;
@@ -446,31 +513,21 @@ export function withoutSourceDirectory(extraScanArguments: string[]): ExtraScanA
       directory = argument.slice(SOURCE_DIR_OPTION.length + 1);
     } else {
       const words = argument.trim().split(/\s+/);
-      if (
-        words.some((word) => word === SOURCE_DIR_OPTION || word.startsWith(`${SOURCE_DIR_OPTION}=`))
-      ) {
+      if (!words.some(isSourceDirWord)) {
+        rest.push(argument);
+        continue;
+      }
+      if (!isSourceDirAndPlainDirectory(words)) {
         throw new Error(
           `${SOURCE_DIR_OPTION} must be an element of its own in extraScanArguments, ` +
             `followed by the directory as the next element, or written ${SOURCE_DIR_OPTION}=DIR; ` +
-            `${JSON.stringify(argument)} holds it among other words.`,
+            `${JSON.stringify(argument)} holds it among other words, or with a directory that ` +
+            `is not one plain word. Write ['${SOURCE_DIR_OPTION}', 'DIR'] instead.`,
         );
       }
-      rest.push(argument);
-      continue;
+      directory = words[1];
     }
-    if (directory.trim() === '') {
-      throw new Error(
-        `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it: pass ` +
-          `['${SOURCE_DIR_OPTION}', 'DIR'] or ['${SOURCE_DIR_OPTION}=DIR'].`,
-      );
-    }
-    if (directory.startsWith('-')) {
-      throw new Error(
-        `${SOURCE_DIR_OPTION} in extraScanArguments needs a directory after it, but ` +
-          `${JSON.stringify(directory)} reads as an option.`,
-      );
-    }
-    sourceDirectory = directory;
+    sourceDirectory = sourceDirectoryWord(directory);
   }
   return { sourceDirectory, rest };
 }
@@ -490,7 +547,10 @@ function directoryScanCommand(
   extraScanArguments: string[],
 ): string {
   const extra = withoutSourceDirectory(extraScanArguments);
-  const directory = extra.sourceDirectory ?? shellArg(sourceDirectory);
+  // Rendered before the choice, so an unsafe `sourceDirectory` is refused whether or
+  // not a `--source-dir` among the extra arguments replaces it.
+  const defaultDirectory = shellArg(sourceDirectory);
+  const directory = extra.sourceDirectory ?? defaultDirectory;
   const after = [...options, ...extra.rest];
   return onEitherAsh(
     ash,

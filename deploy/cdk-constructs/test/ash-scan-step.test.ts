@@ -233,7 +233,6 @@ describe('extraScanArguments', () => {
     [['--source-dir='], /needs a directory after it/],
     [['--source-dir', ' '], /needs a directory after it/],
     [['--source-dir', '--verbose'], /reads as an option/],
-    [['--source-dir services/api'], /an element of its own/],
     [['--offline --source-dir=services/api'], /an element of its own/],
   ])('refuses the --source-dir of %j', (extraScanArguments, message) => {
     expect(() => buildStep({ extraScanArguments })).toThrow(message);

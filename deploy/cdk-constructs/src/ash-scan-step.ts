@@ -153,9 +153,14 @@ export interface ASHScanStepProps {
    *
    * `--source-dir DIR` names the directory scanned, relative to the input's root,
    * instead of the whole input. Pass it as two elements, `['--source-dir', 'DIR']`,
-   * or as one, `['--source-dir=DIR']`. The construct names DIR the way the installed
+   * or as one, `['--source-dir=DIR']`; one element `['--source-dir DIR']` is read the
+   * same way when DIR is a single word with no quote, `$`, backtick or backslash that
+   * does not start with a dash. The construct names DIR the way the installed
    * ASH names a directory: as the argument of `ash scan fs` from ASH 3.9, which
-   * refuses a `--source-dir` beside it, and with `--source-dir` before that.
+   * refuses a `--source-dir` beside it, and with `--source-dir` before that. A DIR that
+   * starts with a dash is written `./DIR`, the same directory, so ASH does not read it
+   * as an option. A `--source-dir` with no directory after it, one that holds another
+   * `--source-dir`, and a DIR written like a long option (`--verbose`) are refused.
    *
    * @default - none
    */
