@@ -6,8 +6,9 @@
 An image scan under express is the same scan warm: the forked child is the cold
 run and parses the real command line. The client's classification can only err
 toward the cold run, so each new option needs a row that it is still read as a
-scan, and the lookalike control that a value spelled like another subcommand
-still sends the invocation cold.
+scan. The word after --image is the option's value, so a value spelled like a
+subcommand is still a scan, and the control is a subcommand that comes after the
+value, which still sends the invocation cold.
 """
 
 from __future__ import annotations
@@ -28,15 +29,24 @@ pytestmark = pytest.mark.unit
         ["scan", "--image-layout", "/tmp/app-layout"],
         ["--image", "alpine:3.20"],
         ["--image-archive=/tmp/app.tar", "--output-dir", "/tmp/out"],
+        ["scan", "--source-git", "https://example.com/team/repo.git"],
+        ["--source-git=https://example.com/team/repo.git", "--git-ref", "main"],
     ],
 )
 def test_an_image_submission_is_a_scan_invocation(argv):
     assert is_scan_invocation(argv)
 
 
+@pytest.mark.parametrize(
+    "value", ["report", "build-image", "merge", "results", "container"]
+)
+def test_a_bare_invocation_whose_image_value_spells_a_subcommand_is_a_scan(value):
+    assert is_scan_invocation(["--image", value])
+
+
 @pytest.mark.parametrize("value", ["report", "build-image", "merge"])
-def test_a_bare_invocation_whose_image_value_spells_a_subcommand_runs_cold(value):
-    assert not is_scan_invocation(["--image", value])
+def test_a_subcommand_after_an_image_value_runs_cold(value):
+    assert not is_scan_invocation(["--image", "alpine:3.20", value])
 
 
 def test_a_scan_subcommand_keeps_an_image_value_that_spells_a_subcommand():
