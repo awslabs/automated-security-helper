@@ -2761,14 +2761,20 @@ def set_source_zip_finalize(
             central directory or a local header, that names another file, two
             members extracted to one path or one under a file (names that differ
             only in case or Unicode normalization are read as one path on Windows
-            and macOS), a symlink member, an encrypted member, or a file that holds
-            anything besides one zip: bytes before, between or after its members
-            (two zips end to end, a tar whose last member is a zip), or a local
-            header or data descriptor that disagrees with the central directory,
-            each refused as not a zip; or an archive zipfile cannot read (a zip
-            version or compression method it does not implement, a method whose
-            module this Python lacks, a member with damaged data), refused in the
-            words ``ash scan fs --archive`` uses. A refused upload is removed.
+            and macOS), a symlink member, an encrypted member, a member compressed
+            with any method but stored and deflated (kind ``unsupported-compression``,
+            refused before any data is read, whether or not this Python has the
+            method's module), or a file that holds anything besides one zip: bytes
+            before, between or after its members (two zips end to end, a tar whose
+            last member is a zip), a local header (its name, UTF-8 flag, method, data
+            descriptor flag, CRC-32 or sizes) or data descriptor that disagrees with
+            the central directory, a zip64 end record that its locator does not place
+            where it lies, or a member whose data is not the size it declares (stored
+            data of another length, or a deflated stream that does not end at its
+            size or has compressed bytes after it), each refused as not a zip; or an
+            archive zipfile cannot read (a zip version it does not implement, a
+            member with damaged data, a deflated stream zlib cannot read), refused in
+            the words ``ash scan fs --archive`` uses. A refused upload is removed.
         zipfile.BadZipFile: if the assembled bytes are not a zip archive. The
             refusal (kind ``not-a-zip``) is a ``BadZipFile`` as well. The
             checksum matching means the client sent what it meant to send, so
