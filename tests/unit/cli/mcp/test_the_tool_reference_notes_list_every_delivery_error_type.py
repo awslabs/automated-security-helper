@@ -25,7 +25,15 @@ exception's class name where the wrapper returns a string.
 The notes once told clients to branch on ``error_type: SourceDeliveryBusyError``
 while both wrappers return ``source_delivery_busy``, and named
 ``scan_target_not_permitted`` for a refusal ``set_source_git`` reports as
-``local_clone_source_refused``.
+``local_clone_source_refused``. The finalize note also gave ``BadZipFile`` as the
+``error_type`` of bytes that are not a zip, while the wrapper catches that exception
+beside the other refusals and answers with an ``error`` alone.
+
+The finalize note also names each rule that can refuse an archive, by the kind the
+refusal carries (``SourceArchiveRefusal``). The kind is not in the response, and the
+note says so. The rows hold the note to the enum: every kind the finalize can make is
+named, so a kind added to the enum fails here until the note names it, and the two kinds
+that only ``ash scan fs --archive`` makes are not named.
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import io
 import re
 import textwrap
 from pathlib import Path
@@ -42,6 +51,12 @@ import pytest
 from automated_security_helper.cli import mcp_tools
 from automated_security_helper.cli.mcp import source_delivery as sd
 from automated_security_helper.cli.mcp.error_types import McpErrorType
+from automated_security_helper.utils import source_archive
+from automated_security_helper.utils.source_archive import (
+    SourceArchiveRefusal,
+    SourceArchiveRefused,
+    open_zip,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -56,6 +71,13 @@ WRAPPERS = {
     "set_source_zip_finalize": mcp_tools.mcp_set_source_zip_finalize,
     "clear_source": mcp_tools.mcp_clear_source,
 }
+
+#: The two refusals that only ``ash scan fs --archive`` makes. It opens the file itself,
+#: where the finalize reads the zip it assembled
+#: (``test_the_two_refusals_left_out_are_made_only_by_the_archive_option``).
+ARCHIVE_OPTION_ONLY = frozenset(
+    {SourceArchiveRefusal.NOT_A_FILE, SourceArchiveRefusal.UNREADABLE_ARCHIVE}
+)
 
 
 def _member_value(node: ast.expr) -> str:
@@ -129,6 +151,45 @@ def _error_types_returned_by(wrapper) -> set[str]:
             and len(node.args) == 2
         ):
             found |= _values(node.args[1])
+    return found
+
+
+def _functions_naming(tree: ast.AST, members: set[str]) -> set[str]:
+    """The functions of ``tree`` that name ``SourceArchiveRefusal.<member>``."""
+    found: set[str] = set()
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        for node in ast.walk(function):
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr in members
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "SourceArchiveRefusal"
+            ):
+                found.add(function.name)
+    return found
+
+
+def _with_their_callers(tree: ast.AST, names: set[str]) -> set[str]:
+    """``names``, and every function of ``tree`` that calls one of them, however many
+    calls away."""
+    functions = [f for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)]
+    found = set(names)
+    grew = True
+    while grew:
+        grew = False
+        for function in functions:
+            if function.name in found:
+                continue
+            called = {
+                node.func.id
+                for node in ast.walk(function)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            }
+            if called & found:
+                found.add(function.name)
+                grew = True
     return found
 
 
@@ -223,12 +284,103 @@ def test_the_busy_refusal_is_quoted_as_the_module_raises_it(tool_notes, tool):
 
 
 def test_the_finalize_note_says_what_each_kind_of_failure_returns(tool_notes):
-    """A client that branches on ``error_type`` has to know a checksum mismatch or a
-    refused archive has none, and that an archive that is not a zip, or a failure on
-    disk, is answered with the exception's class name."""
+    """A client that branches on ``error_type`` has to know that a checksum mismatch or
+    a refused archive has none, and that a failure on disk is answered with the
+    exception's class name."""
     text = _text(tool_notes, "set_source_zip_finalize")
 
     assert "with no `error_type`" in text
     assert _names(text, McpErrorType.SOURCE_DELIVERY_BUSY.value)
-    assert _names(text, "BadZipFile")
     assert _names(text, "OSError")
+
+
+def test_the_finalize_note_does_not_give_bad_zip_file_as_an_error_type(tool_notes):
+    assert not _names(_text(tool_notes, "set_source_zip_finalize"), "BadZipFile")
+
+
+def _unsupported_compression() -> SourceArchiveRefused:
+    return SourceArchiveRefused(
+        SourceArchiveRefusal.UNSUPPORTED_COMPRESSION,
+        "zip entry 'a.txt' is compressed with bzip2 (method 12): only stored "
+        "and deflated members are read",
+    )
+
+
+def _not_a_zip() -> SourceArchiveRefused:
+    with pytest.raises(SourceArchiveRefused) as refused:
+        open_zip(io.BytesIO(b"plain text, not an archive\n"))
+    return refused.value
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        pytest.param(_unsupported_compression, id="unsupported-compression"),
+        pytest.param(_not_a_zip, id="not-a-zip"),
+    ],
+)
+def test_a_refused_archive_is_answered_with_an_error_and_no_kind(monkeypatch, refusal):
+    """The kind a refusal carries is not in the response: the note names the kinds as
+    the rules' names, and says the response has no field for one. A refusal is
+    answered as the checksum mismatch is, with an ``error`` and no ``error_type``."""
+    refused = refusal()
+
+    def refuse(**_arguments):
+        raise refused
+
+    monkeypatch.setattr(sd, "set_source_zip_finalize", refuse)
+
+    answer = mcp_tools.mcp_set_source_zip_finalize(
+        "upload", "0" * 64, session_id="session"
+    )
+
+    assert answer["success"] is False
+    assert str(refused) in answer["error"]
+    assert "error_type" not in answer
+    assert "kind" not in answer
+    assert refused.kind.value not in answer.values()
+
+
+def test_the_finalize_note_names_every_rule_that_can_refuse_an_archive(tool_notes):
+    text = _text(tool_notes, "set_source_zip_finalize")
+    made = [kind for kind in SourceArchiveRefusal if kind not in ARCHIVE_OPTION_ONLY]
+
+    # Control: the kind the note was missing when this row was written is among them.
+    assert SourceArchiveRefusal.UNSUPPORTED_COMPRESSION in made
+    assert sorted(kind.value for kind in made if not _names(text, kind.value)) == []
+
+
+def test_the_finalize_note_names_no_rule_that_only_the_archive_option_applies(
+    tool_notes,
+):
+    text = _text(tool_notes, "set_source_zip_finalize")
+
+    assert (
+        sorted(kind.value for kind in ARCHIVE_OPTION_ONLY if _names(text, kind.value))
+        == []
+    )
+
+
+def test_the_finalize_note_says_the_rule_is_not_a_field_of_the_response(tool_notes):
+    text = _text(tool_notes, "set_source_zip_finalize")
+
+    assert "the name of the rule is not a field of the response" in text
+
+
+def test_the_two_refusals_left_out_are_made_only_by_the_archive_option():
+    """Control for ``ARCHIVE_OPTION_ONLY``: the two kinds are named only in the helpers
+    that open the file at a path, which only ``extract_source_archive`` reaches, and
+    the delivery module neither calls it nor reads a file by that route. A function that
+    comes to name one of them, or to call those helpers, changes this set and fails
+    here, so the note is read again."""
+    tree = ast.parse(inspect.getsource(source_archive))
+    members = {kind.name for kind in ARCHIVE_OPTION_ONLY}
+
+    naming = _functions_naming(tree, members)
+    reaching = _with_their_callers(tree, naming)
+
+    assert naming == {"_opened_regular_file", "_unreadable_path", "_not_a_file"}
+    assert reaching == naming | {"_read_archive", "extract_source_archive"}
+    delivery = inspect.getsource(sd)
+    assert "extract_source_archive" not in delivery
+    assert "_read_archive" not in delivery
