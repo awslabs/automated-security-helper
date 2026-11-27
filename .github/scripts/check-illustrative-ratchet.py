@@ -738,6 +738,28 @@ def _case_command_seed_lost_and_left(r: _SelfRepo) -> list[tuple[str, str]]:
     return [("", lost)]
 
 
+def _case_seed_deleted_in_range(r: _SelfRepo) -> list[tuple[str, str]]:
+    shutil.rmtree(r.path / ILLUSTRATIVE_SEED_DIR)
+    removed = r.commit("the seed directory deleted, the .gitkeep with it")
+    return [("", removed)]
+
+
+def _case_command_seed_deleted_in_range(r: _SelfRepo) -> list[tuple[str, str]]:
+    (r.path / UNEXECUTED_SEED_FILE).unlink()
+    removed = r.commit("the unexecuted-command seed deleted")
+    return [("", removed)]
+
+
+def _case_deleted_and_restored_in_range(r: _SelfRepo) -> list[tuple[str, str]]:
+    before = r.base
+    shutil.rmtree(r.path / ILLUSTRATIVE_SEED_DIR)
+    (r.path / UNEXECUTED_SEED_FILE).unlink()
+    r.commit("both seeds deleted")
+    r.git("checkout", "-q", before, "--", ILLUSTRATIVE_SEED_DIR, UNEXECUTED_SEED_FILE)
+    r.commit("and restored as they were, in the same range")
+    return []
+
+
 def _case_lost_and_restored(r: _SelfRepo) -> list[tuple[str, str]]:
     before = r.base
     r.lose(ILLUSTRATIVE_SEED_DIR, UNEXECUTED_SEED_FILE)
@@ -779,6 +801,21 @@ _CASES: tuple[tuple[str, Case, bool], ...] = (
     (
         "the unexecuted-command seed lost, and left gone",
         _case_command_seed_lost_and_left,
+        True,
+    ),
+    (
+        "the illustrative seed deleted inside the range",
+        _case_seed_deleted_in_range,
+        True,
+    ),
+    (
+        "the unexecuted-command seed deleted inside the range",
+        _case_command_seed_deleted_in_range,
+        True,
+    ),
+    (
+        "both seeds deleted and restored inside the range",
+        _case_deleted_and_restored_in_range,
         True,
     ),
     ("both seeds lost, and restored as they were", _case_lost_and_restored, True),

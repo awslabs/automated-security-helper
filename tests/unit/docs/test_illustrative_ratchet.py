@@ -1087,15 +1087,21 @@ def _violations(repo: _Repo):
     return violations
 
 
-def _lose(repo: _Repo, *rels: str) -> str:
-    """Delete each of ``rels`` (a file, or a directory with what it holds) and commit
-    that, then make the commit the fork point: a base that has lost them. Its sha."""
+def _delete(repo: _Repo, *rels: str) -> None:
+    """Delete each of ``rels``, a file or a directory with what it holds, from the
+    working tree. Nothing is committed and the base stays where it was."""
     for rel in rels:
         target = repo.path / rel
         if target.is_dir():
             shutil.rmtree(target)
         else:
             target.unlink()
+
+
+def _lose(repo: _Repo, *rels: str) -> str:
+    """Delete each of ``rels`` and commit that, then make the commit the fork point: a
+    base that has lost them. Its sha."""
+    _delete(repo, *rels)
     repo.base = repo.commit("the seed deleted")
     return repo.base
 
@@ -1229,6 +1235,130 @@ def test_the_script_exits_one_when_the_fork_point_lost_a_seed(repo):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "::error" in result.stdout
     assert ".gitkeep" in result.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("seed", "constant"),
+    [
+        ("illustrative", "ILLUSTRATIVE_SEED_DIR"),
+        ("unexecuted", "UNEXECUTED_SEED_FILE"),
+    ],
+    ids=["the illustrative seed", "the unexecuted-command seed"],
+)
+def test_a_range_that_deletes_a_seed_the_fork_point_holds_fails(repo, seed, constant):
+    """The fork point has the seed and the head holds none of its files. The head has no
+    line to compare, which read as a range that adds nothing, so the range passed and
+    the next range cut from it found a lost seed instead, in a pull request that had
+    deleted nothing."""
+    _delete(repo, getattr(checks(), constant))
+    removed = repo.commit("the seed deleted in the range")
+
+    violations = _violations(repo)
+
+    assert [(v.seed, v.page, v.text) for v in violations] == [(seed, "", removed)]
+
+
+@pytest.mark.integration
+def test_a_range_that_converts_every_page_and_deletes_the_gitkeep_fails(repo):
+    """Converting every page passes while a ``.gitkeep`` holds the directory in git. A
+    range that deletes the ``.gitkeep`` too leaves the head no file under the seed
+    directory, which is the seed deleted: ``git rm -r docs/illustrative-seed``."""
+    dc = checks()
+    _write(repo.path, f"{dc.ILLUSTRATIVE_SEED_DIR}/.gitkeep", "")
+    repo.base = repo.commit("the directory kept")
+    _delete(repo, dc.ILLUSTRATIVE_SEED_DIR)
+    for page in ("docs/a.md", "docs/b.md"):
+        _write(repo.path, page, _long_page())
+    removed = repo.commit("every page converted and the seed directory deleted")
+
+    violations = _violations(repo)
+
+    assert [(v.seed, v.page, v.text) for v in violations] == [
+        ("illustrative", "", removed)
+    ]
+
+
+@pytest.mark.integration
+def test_a_range_that_empties_the_command_seed_instead_of_deleting_it_passes(repo):
+    """The control: the file is what arms the check, and an empty one is still there."""
+    _write(repo.path, checks().UNEXECUTED_SEED_FILE, "")
+    repo.commit("the last command converted, the seed file left empty")
+
+    assert _violations(repo) == []
+
+
+@pytest.mark.integration
+def test_a_range_that_deletes_a_seed_and_restores_it_as_it_was_passes(repo):
+    """The range is read from its fork point to its head, not commit by commit: a delete
+    that a later commit of the same range undoes leaves the head what the fork point
+    was."""
+    dc = checks()
+    before = repo.base
+    _delete(repo, dc.ILLUSTRATIVE_SEED_DIR, dc.UNEXECUTED_SEED_FILE)
+    repo.commit("both seeds deleted")
+    repo.git(
+        "checkout",
+        "-q",
+        before,
+        "--",
+        dc.ILLUSTRATIVE_SEED_DIR,
+        dc.UNEXECUTED_SEED_FILE,
+    )
+    repo.commit("and restored as they were")
+
+    assert _violations(repo) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("constant", "keeps"),
+    [
+        ("ILLUSTRATIVE_SEED_DIR", ".gitkeep"),
+        ("UNEXECUTED_SEED_FILE", "empty if no line is left"),
+    ],
+    ids=["the illustrative seed", "the unexecuted-command seed"],
+)
+def test_the_script_exits_one_when_a_range_deletes_a_seed(repo, constant, keeps):
+    _delete(repo, getattr(checks(), constant))
+    head = repo.commit("the seed deleted in the range")
+
+    result = _ratchet_cli(repo, head)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "::error" in result.stdout
+    assert keeps in result.stdout
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("seed", "file", "keeps"),
+    [
+        ("ILLUSTRATIVE", "ILLUSTRATIVE_SEED_DIR", ".gitkeep"),
+        ("UNEXECUTED", "UNEXECUTED_SEED_FILE", "empty if no line is left"),
+    ],
+    ids=["the illustrative seed", "the unexecuted-command seed"],
+)
+def test_the_failure_for_a_deleted_seed_names_the_fork_point_that_held_it(
+    seed, file, keeps
+):
+    module = ratchet()
+    deleted = module.Violation(
+        getattr(module, seed),
+        getattr(module, file),
+        "",
+        "",
+        "b" * 40,
+        1,
+        removed_in_range=True,
+    )
+
+    message = module.explain(deleted, "0123456789abcdef")
+
+    assert "is at the fork point (0123456789) and gone at the head" in message
+    assert "b" * 10 in message
+    assert keeps in message
+    assert "is gone at the fork point" not in message
 
 
 @pytest.mark.unit
