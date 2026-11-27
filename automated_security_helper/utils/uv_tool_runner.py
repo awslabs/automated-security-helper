@@ -112,19 +112,42 @@ UV_NO_ENV_FILE = "--no-env-file"
 # value names such a path. uv reads ``UV_CONFIG_FILE`` even ahead of ``--no-config``.
 #
 # The names are the ``[env: ...]`` ones that ``uv help tool run`` and ``uv help tool
-# install`` show for the options that take a file or a directory (uv 0.13.5). How uv
-# splits each value was measured with ``uv tool run --show-settings``. Each name maps to
-# how its value is split (one entry, or a list split at whitespace or at commas) and to
-# whether an entry may start with an index name, as in ``corp=https://host/simple``.
+# install`` show for the options that take a file or a directory (uv 0.13.5), and the
+# location variables that no option names, among the ``UV_*`` names in the uv binary:
+# the mirrors uv downloads from, the list of Python downloads it uses instead of its
+# own, the directories of its Python archive cache and of its stored credentials, and
+# the Python search path. That path replaces ``PATH`` when uv looks for an interpreter,
+# and uv runs each candidate it finds there to ask what it is, so a search path that
+# names a directory of the tree makes uv run a program from the tree.
+#
+# How uv splits each value was measured with ``uv tool run --show-settings`` for the
+# option variables, the mirrors and the list of downloads, and with ``uv python find``
+# and stub interpreters for the search path: it is split at the path separator, a
+# relative entry is read against the directory uv starts in, and an empty entry names
+# nothing (uv does not read it as the working directory, as a shell does for ``PATH``).
+# ``UV_ASTRAL_MIRROR_URL``, ``UV_PYTHON_CACHE_DIR`` and ``UV_CREDENTIALS_DIR`` are read
+# only when uv downloads or authenticates, which an offline read cannot show, so their
+# splits are not measured: each is taken as one entry. Each name maps to how its value
+# is split (one entry, or a list split at whitespace, at commas or at the path
+# separator) and to whether an entry may start with an index name, as in
+# ``corp=https://host/simple``.
 #
 # Four directory variables are left out: ``UV_CACHE_DIR``, ``UV_TOOL_DIR``,
 # ``UV_TOOL_BIN_DIR`` and ``UV_PYTHON_INSTALL_DIR``. ASH resolves them itself, in the
 # sandbox's mounts and in ``_uv_tools_dir``, so dropping one from the child alone would
-# split ASH from uv. ``UV_PYTHON`` is left out too: it names an interpreter or a version
-# request, and ``plugin_base`` judges it on the scan route.
+# split ASH from uv. ``UV_PYTHON_BIN_DIR``, where ``uv python install`` writes the
+# executables it links, is another of the directories uv keeps its own state in, and is
+# left out with the four. ``UV_PYTHON`` is left out too: it names an interpreter or a
+# version request, and ``plugin_base`` judges it on the scan route.
+# ``UV_PROJECT_ENVIRONMENT`` names a project's environment, and the uv tool commands run
+# no project. The endpoints of remote services (``UV_S3_ENDPOINT_URL``,
+# ``UV_GCS_ENDPOINT_URL``, ``UV_AZURE_ENDPOINT_URL``, ``UV_MALWARE_CHECK_URL`` and
+# ``UV_GITHUB_FAST_PATH_URL``) are never a local location, and no uv tool command reads
+# the installer's variables or those of ``uv publish``.
 _ONE_ENTRY = "one entry"
 _AT_WHITESPACE = "at whitespace"
 _AT_COMMAS = "at commas"
+_AT_PATH_SEPARATOR = "at the path separator"
 
 _UV_PATH_VARIABLES: Dict[str, Tuple[str, bool]] = {
     "UV_CONFIG_FILE": (_ONE_ENTRY, False),
@@ -140,6 +163,15 @@ _UV_PATH_VARIABLES: Dict[str, Tuple[str, bool]] = {
     "UV_DEFAULT_INDEX": (_ONE_ENTRY, True),
     "UV_INDEX_URL": (_ONE_ENTRY, False),
     "UV_FIND_LINKS": (_AT_COMMAS, False),
+    "UV_PYTHON_INSTALL_MIRROR": (_ONE_ENTRY, False),
+    "UV_PYPY_INSTALL_MIRROR": (_ONE_ENTRY, False),
+    "UV_GRAALPY_INSTALL_MIRROR": (_ONE_ENTRY, False),
+    "UV_PYODIDE_INSTALL_MIRROR": (_ONE_ENTRY, False),
+    "UV_ASTRAL_MIRROR_URL": (_ONE_ENTRY, False),
+    "UV_PYTHON_DOWNLOADS_JSON_URL": (_ONE_ENTRY, False),
+    "UV_PYTHON_CACHE_DIR": (_ONE_ENTRY, False),
+    "UV_CREDENTIALS_DIR": (_ONE_ENTRY, False),
+    "UV_PYTHON_SEARCH_PATH": (_AT_PATH_SEPARATOR, False),
 }
 
 # An entry that starts with a URL scheme of two characters or more followed by ``://``
@@ -192,17 +224,20 @@ def _file_url_path(url: str) -> Optional[str]:
 def _uv_value_paths(name: str, value: str) -> List[str]:
     """The local paths ``value`` names, read as uv reads the value of ``name``.
 
-    The value is split as ``_UV_PATH_VARIABLES`` says. An entry is not stripped, as uv
-    does not strip it: a leading space is part of the path. An empty entry names
-    nothing. An entry of an index variable loses a leading ``name=``. An entry that
-    starts with a URL scheme is a URL (``_file_url_path``); every other entry is a
-    path, as written.
+    The value is split as ``_UV_PATH_VARIABLES`` says: it is one entry, or a list split
+    at whitespace, at commas or at the path separator (``os.pathsep``). An entry is not
+    stripped, as uv does not strip it: a leading space is part of the path. An empty
+    entry names nothing. An entry of an index variable loses a leading ``name=``. An
+    entry that starts with a URL scheme is a URL (``_file_url_path``); every other
+    entry is a path, as written.
     """
     splitting, carries_name = _UV_PATH_VARIABLES[name]
     if splitting == _AT_WHITESPACE:
         entries = value.split()
     elif splitting == _AT_COMMAS:
         entries = value.split(",")
+    elif splitting == _AT_PATH_SEPARATOR:
+        entries = value.split(os.pathsep)
     else:
         entries = [value]
     paths: List[str] = []

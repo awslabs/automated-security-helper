@@ -170,16 +170,22 @@
 
 - **ASH's uv tool commands use no file or directory the scanned tree names through a uv
   setting.** Every `uv tool run` ASH starts passes `--no-env-file`. Every `uv tool run`,
-  `uv tool install`, `uv tool list` and version probe ASH starts gets none of
-  `UV_CONFIG_FILE`, `UV_ENV_FILE`, `UV_CONSTRAINT`, `UV_BUILD_CONSTRAINT`, `UV_OVERRIDE`,
-  `UV_EXCLUDE`, `UV_INDEX`, `UV_DEFAULT_INDEX`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`,
-  `UV_FIND_LINKS`, `UV_PROJECT` or `UV_WORKING_DIR` when a path in its value is relative,
-  starts with `~` (uv does not expand it), or lies inside the tree being scanned, by its
-  spelling or by where its links lead. A scanner's own runs, and the notebook converter's,
-  also leave out such a value when it lies inside the output directory. Other URLs than
-  `file:` URLs, and absolute paths outside those directories, are passed on unchanged.
-  The GuardDog hit-limit bootstrap also drops the working directory from its import path
-  before importing GuardDog.
+  `uv tool install`, `uv tool list` and version probe ASH starts gets none of these uv
+  variables when a path in its value is relative, starts with `~` (uv does not expand
+  it), or lies inside the tree being scanned, by its spelling or by where its links
+  lead: the requirements files (`UV_CONSTRAINT`, `UV_BUILD_CONSTRAINT`, `UV_OVERRIDE`,
+  `UV_EXCLUDE`), the config and env files (`UV_CONFIG_FILE`, `UV_ENV_FILE`), the index
+  and find-links locations (`UV_INDEX`, `UV_DEFAULT_INDEX`, `UV_INDEX_URL`,
+  `UV_EXTRA_INDEX_URL`, `UV_FIND_LINKS`), the managed-Python download locations
+  (`UV_PYTHON_INSTALL_MIRROR`, `UV_PYPY_INSTALL_MIRROR`, `UV_GRAALPY_INSTALL_MIRROR`,
+  `UV_PYODIDE_INSTALL_MIRROR`, `UV_ASTRAL_MIRROR_URL`, `UV_PYTHON_DOWNLOADS_JSON_URL`),
+  the Python archive cache and credentials directories (`UV_PYTHON_CACHE_DIR`,
+  `UV_CREDENTIALS_DIR`), the interpreter search path (`UV_PYTHON_SEARCH_PATH`), and the
+  project and working directories (`UV_PROJECT`, `UV_WORKING_DIR`). A scanner's own
+  runs, and the notebook converter's, also leave out such a value when it lies inside
+  the output directory. URLs other than `file:` URLs, and absolute paths outside those
+  directories, are passed on unchanged. The GuardDog hit-limit bootstrap also drops the
+  working directory from its import path before importing GuardDog.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
