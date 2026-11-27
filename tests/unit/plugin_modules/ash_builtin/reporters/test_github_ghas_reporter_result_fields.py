@@ -162,7 +162,7 @@ class TestKind:
         out = json.loads(reporter.report(_model(run)))["runs"][0]
 
         (slim_rule,) = out["tool"]["driver"]["rules"]
-        assert slim_rule["properties"]["security-severity"] == "8.0"
+        assert slim_rule["properties"]["security-severity"] == "9.5"
 
     def test_a_failing_result_carries_no_kind_key(self, reporter):
         result = Result(ruleId="R", level=Level.error, message=Message(text="m"))
