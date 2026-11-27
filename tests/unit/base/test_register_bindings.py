@@ -466,3 +466,82 @@ def test_the_image_registers_host_match_matches_the_hosts_the_facets_match(
         assert local.matches(os_id, version_id) is shared.matches(
             ipf.OsRelease(id=os_id, version_id=version_id)
         ), (ids, versions, os_id, version_id)
+
+
+_BOTH_HOST_MATCHES = ["facets", "image register"]
+
+
+def _host_match_of(which: str) -> type:
+    """One copy of HostMatch: the facets module's or the image register's."""
+    return {"facets": ipf.HostMatch, "image register": _ir().HostMatch}[which]
+
+
+#: What both copies must refuse, and the words the refusal carries. A one-element tuple
+#: written without its comma is a string: ``in`` then becomes a substring test, so a
+#: row for ``ubuntu-core`` matched ubuntu 24.04, a row for ``opensuse-tumbleweed``
+#: matched opensuse, and ``versions="3.24"`` made every prefix one character long, so
+#: alpine 3.18 matched the prefix ``3``.
+_REFUSED_HOST_MATCHES = {
+    "ids as a string that holds another id": (
+        {"ids": "ubuntu-core"},
+        "tuple of strings",
+    ),
+    "ids as a string that holds a longer id": (
+        {"ids": "opensuse-tumbleweed"},
+        "tuple of strings",
+    ),
+    "versions as a string": (
+        {"ids": ("alpine",), "versions": "3.24"},
+        "tuple of strings",
+    ),
+    "ids as a list": ({"ids": ["ubuntu"]}, "tuple of strings"),
+    "versions as a list": (
+        {"ids": ("alpine",), "versions": ["3.24"]},
+        "tuple of strings",
+    ),
+    "an id that is not a string": ({"ids": ("ubuntu", 24)}, "tuple of strings"),
+    "a version prefix that is not a string": (
+        {"ids": ("alpine",), "versions": (3.24,)},
+        "tuple of strings",
+    ),
+    "a blank version prefix": (
+        {"ids": ("alpine",), "versions": ("",)},
+        "no blank version prefix",
+    ),
+    "a blank version prefix beside a real one": (
+        {"ids": ("alpine",), "versions": ("3.24", " ")},
+        "no blank version prefix",
+    ),
+}
+
+
+@pytest.mark.parametrize("which", _BOTH_HOST_MATCHES)
+@pytest.mark.parametrize("case", sorted(_REFUSED_HOST_MATCHES))
+def test_a_host_match_whose_ids_or_versions_are_not_a_tuple_of_strings_is_refused(
+    which: str, case: str
+) -> None:
+    kwargs, words = _REFUSED_HOST_MATCHES[case]
+
+    with pytest.raises(ValueError, match=words):
+        _host_match_of(which)(**kwargs)
+
+
+@pytest.mark.parametrize("which", _BOTH_HOST_MATCHES)
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"ids": ("ubuntu-core",)},
+        {"ids": ("opensuse-tumbleweed",)},
+        {"ids": ("alpine",), "versions": ("3.24",)},
+        {"ids": ("rhel", "rocky"), "versions": ("9", "10")},
+        {"ids": ("debian",), "versions": ("12",), "arches": ("amd64",)},
+    ],
+)
+def test_the_tuple_forms_of_those_host_matches_are_accepted(
+    which: str, kwargs: dict
+) -> None:
+    """The control for the refusals above: the same ids and versions, as tuples."""
+    match = _host_match_of(which)(**kwargs)
+
+    assert match.ids == kwargs["ids"]
+    assert match.versions == kwargs.get("versions", ())
