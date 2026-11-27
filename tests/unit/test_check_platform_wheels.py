@@ -122,8 +122,8 @@ NETWORK_DOWN = (
     "error: Failed to fetch: `https://pypi.org/simple/{name}/`\n"
     "  Caused by: error sending request for url (https://pypi.org/simple/{name}/)\n"
 )
-#: What uv 0.13.5 printed when it ran offline and a package was not in its cache,
-#: read on a desk: the words of a failed resolution, with a hint that the network was
+#: What uv printed when it ran offline and a package was not in its cache, measured
+#: with uv 0.13.5: the words of a failed resolution, with a hint that the network was
 #: disabled.
 OFFLINE = (
     "error: No solution found when resolving dependencies\n"
@@ -771,33 +771,111 @@ class TestMeasuring:
                 runner, "uv", {"core": ("a",)}, ("3.12",), CUTOFF, ENVIRONMENT
             )
 
-    def test_a_pin_that_differs_from_the_first_resolved_platform_is_backtracked(
-        self, script
-    ):
+    def _requests_cells(self, script, versions, *, broken=None):
+        """The ``core`` row's cells for Python 3.12 when the platforms named in
+        *versions* (triple to version) resolve ``requests`` at that version, and every
+        other platform resolves it at 1.0.0."""
         fake = FakeUv(
             script,
-            versions={("aarch64-unknown-linux-musl", "requests"): "0.9.0"},
+            broken=broken,
+            versions={(triple, "requests"): v for triple, v in versions.items()},
         )
         measured = script.measure_sets(
             fake, "uv", {"core": ("requests>=0.1",)}, ("3.12",), CUTOFF, ENVIRONMENT
         )
-        cells = {key: row["3.12"] for key, row in measured["core"].items()}
+        return {key: row["3.12"] for key, row in measured["core"].items()}
+
+    def test_a_pin_older_than_the_newest_any_platform_resolved_is_backtracked(
+        self, script
+    ):
+        cells = self._requests_cells(script, {"aarch64-unknown-linux-musl": "0.9.0"})
         assert cells["linux-aarch64-musl"] == "backtracked: requests 1.0.0 -> 0.9.0"
         assert {v for key, v in cells.items() if key != "linux-aarch64-musl"} == {"ok"}
 
-    def test_the_reference_is_the_first_platform_that_resolved(self, script):
-        fake = FakeUv(
+    def test_a_platform_that_failed_to_resolve_is_no_reference(self, script):
+        cells = self._requests_cells(
             script,
+            {"aarch64-unknown-linux-musl": "0.9.0"},
             broken={"requests": {"x86_64-unknown-linux-gnu"}},
-            versions={("aarch64-unknown-linux-musl", "requests"): "0.9.0"},
         )
-        measured = script.measure_sets(
-            fake, "uv", {"core": ("requests>=0.1",)}, ("3.12",), CUTOFF, ENVIRONMENT
-        )
-        cells = {key: row["3.12"] for key, row in measured["core"].items()}
         assert cells["linux-x86_64-glibc"] == "fail: requests"
         assert cells["linux-aarch64-glibc"] == "ok"
         assert cells["linux-aarch64-musl"] == "backtracked: requests 1.0.0 -> 0.9.0"
+
+    def test_the_first_platform_is_the_one_that_backtracked_when_it_is_held_back(
+        self, script
+    ):
+        first = script.PLATFORMS[0]
+        cells = self._requests_cells(script, {first.triple: "0.9.0"})
+        assert cells.pop(first.key) == "backtracked: requests 1.0.0 -> 0.9.0"
+        assert set(cells.values()) == {"ok"}
+
+    def test_both_glibc_platforms_held_back_are_the_two_that_backtracked(self, script):
+        cells = self._requests_cells(
+            script,
+            {"x86_64-unknown-linux-gnu": "0.9.0", "aarch64-unknown-linux-gnu": "0.9.0"},
+        )
+        held = {"linux-x86_64-glibc", "linux-aarch64-glibc"}
+        for key, cell in cells.items():
+            expected = "backtracked: requests 1.0.0 -> 0.9.0" if key in held else "ok"
+            assert cell == expected, key
+
+    def test_a_platform_that_resolved_a_newer_version_is_not_the_one_that_backtracked(
+        self, script
+    ):
+        cells = self._requests_cells(script, {"x86_64-pc-windows-msvc": "1.1.0"})
+        assert cells["windows-x86_64"] == "ok"
+        for key, cell in cells.items():
+            if key != "windows-x86_64":
+                assert cell == "backtracked: requests 1.1.0 -> 1.0.0", key
+
+    @pytest.mark.parametrize(
+        "older,newer",
+        [
+            ("1.9.0", "1.10.0"),
+            ("1.0rc1", "1.0"),
+            ("1.0.dev1", "1.0a1"),
+            ("1.0a2", "1.0b1"),
+            ("1.0b2", "1.0rc1"),
+            ("1.0", "1.0.post1"),
+            ("1.0.post1", "1.0.post2"),
+            ("1.0", "1.0.0.1"),
+            ("2.0", "1!0.5"),
+            ("1.0+a", "1.0+b"),
+            ("1.0+b", "1.0+1"),
+        ],
+    )
+    def test_versions_are_ordered_the_way_pep_440_orders_them(
+        self, script, older, newer
+    ):
+        # The first platform is the one held back, so a reference taken from it
+        # would reverse every one of these labels.
+        first, *others = script.PLATFORMS
+        versions = {first.triple: older, **{p.triple: newer for p in others}}
+        cells = self._requests_cells(script, versions)
+        assert cells.pop(first.key) == f"backtracked: requests {newer} -> {older}"
+        assert set(cells.values()) == {"ok"}
+
+    @pytest.mark.parametrize(
+        "spelled,other", [("1.0", "1.0.0"), ("1.0.0", "1.0"), ("1.0a1", "1.0alpha1")]
+    )
+    def test_one_version_spelled_two_ways_is_not_a_backtrack(
+        self, script, spelled, other
+    ):
+        first, *others = script.PLATFORMS
+        versions = {first.triple: spelled, **{p.triple: other for p in others}}
+        assert set(self._requests_cells(script, versions).values()) == {"ok"}
+
+    def test_versions_every_platform_agrees_on_are_never_ordered(self, script):
+        # uv prints normalized versions, but nothing about a package every platform
+        # pinned alike needs reading, so an odd one costs the run nothing.
+        versions = {p.triple: "odd.version" for p in script.PLATFORMS}
+        assert set(self._requests_cells(script, versions).values()) == {"ok"}
+
+    def test_a_version_that_cannot_be_ordered_stops_the_measurement(self, script):
+        first = script.PLATFORMS[0]
+        with pytest.raises(script.ResolverError, match="cannot order.*odd.version"):
+            self._requests_cells(script, {first.triple: "odd.version"})
 
     def test_the_macos_target_reaches_the_resolver_and_the_index_settings_do_not(
         self, script
@@ -1480,6 +1558,56 @@ class TestTheCommandLine:
 
     def test_recording_while_a_requirement_is_planted_is_not_offered(self, script):
         assert "--plant" not in script.build_parser().format_help()
+
+
+class TestARegisterThatCannotBeRead:
+    """The register is executed, so a broken one raises whatever Python raises. The run
+    still ends the way the exit codes say: 2 and a "cannot measure" line, not a
+    traceback with the code for a difference."""
+
+    SHAPES = {
+        "does not parse": "PROVISIONING = (\n",
+        "has no PROVISIONING": "OTHER = {}\n",
+        "fails an import": "import ash_no_such_module_for_platform_wheels\n",
+        "raises when it runs": "raise RuntimeError('broken register')\n",
+    }
+
+    @pytest.mark.parametrize("shape", sorted(SHAPES))
+    def test_the_run_cannot_measure_and_names_the_register(
+        self, script, project, capsys, shape
+    ):
+        register = project / "register.py"
+        register.write_text(self.SHAPES[shape], encoding="utf-8")
+        argv = _argv(project, "--cooldown-report", registry=register)
+        assert script.main(argv, now=NOW) == 2
+        captured = capsys.readouterr()
+        assert "cannot measure" in captured.err and str(register) in captured.err
+        assert captured.out == ""
+
+    @pytest.mark.parametrize("shape", sorted(SHAPES))
+    def test_nothing_is_recorded_and_uv_is_never_asked(self, script, project, shape):
+        register = project / "register.py"
+        register.write_text(self.SHAPES[shape], encoding="utf-8")
+
+        def refuse(argv, stdin, env):
+            raise AssertionError("uv must not run when the register cannot be read")
+
+        argv = _argv(project, "--record", registry=register)
+        assert script.main(argv, runner=refuse, now=NOW) == 2
+        assert not (project / "platform_wheels.json").exists()
+
+    @pytest.mark.parametrize("shape", sorted(SHAPES))
+    def test_a_failed_load_is_a_value_error_and_leaves_no_module_behind(
+        self, script, tmp_path, shape
+    ):
+        register = tmp_path / "register.py"
+        register.write_text(self.SHAPES[shape], encoding="utf-8")
+        with pytest.raises(ValueError, match="cannot read the plugin register"):
+            script.load_blocks(register)
+        assert "ash_plugin_provisioning_for_platform_wheels" not in sys.modules
+
+    def test_the_real_register_still_loads(self, script):
+        assert script.load_blocks(REGISTRY_PATH)
 
 
 class TestTheCommittedFiles:
