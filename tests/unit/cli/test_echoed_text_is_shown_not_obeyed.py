@@ -95,7 +95,7 @@ def test_two_workspace_candidates_are_named_shown_not_obeyed(
     _workspace(tmp_path, ["api"], name=f"{HOSTILE_NAME}.code-workspace")
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(app, ["scan", "--workspace", "auto"])
+    result = runner.invoke(app, ["scan", "workspace", "auto"])
 
     assert result.exit_code == 4, result.output
     assert "alpha.code-workspace" in result.output, result.output
@@ -122,7 +122,7 @@ def test_a_dry_run_plan_shows_the_folders_it_quotes(
     _workspace(tmp_path, [folder])
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(app, ["scan", "--workspace", "auto", "--dry-run"])
+    result = runner.invoke(app, ["scan", "workspace", "auto", "--dry-run"])
 
     assert result.exit_code == 0, result.output
     assert "Succeeded" in result.output or "add-mask" in result.output, result.output
@@ -143,7 +143,7 @@ def test_a_refused_policy_pattern_is_shown_on_one_line(tmp_path, no_scan, monkey
     )
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(app, ["scan", "--workspace", str(workspace), "--dry-run"])
+    result = runner.invoke(app, ["scan", "workspace", str(workspace), "--dry-run"])
 
     assert result.exit_code == 4, result.output
     assert result.output.endswith("\n"), repr(result.output)
@@ -166,7 +166,7 @@ def test_a_listed_refusal_keeps_each_project_inside_its_item(
     workspace = _workspace(tmp_path, ["api\n  - forged"])
     monkeypatch.chdir(tmp_path)
 
-    result = runner.invoke(app, ["scan", "--workspace", str(workspace), "--dry-run"])
+    result = runner.invoke(app, ["scan", "workspace", str(workspace), "--dry-run"])
 
     assert result.exit_code == 4, result.output
     lines = result.output.splitlines()

@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""In ``ash scan --workspace``, ``--config`` is the operator's config, layered over every project's.
+"""In ``ash scan workspace``, ``--config`` is the operator's config, layered over every project's.
 
 That is the design (``ProjectScanSettings.default_config_path``,
 ``resolver._resolve_project_config``): every field the operator's file sets is
@@ -76,7 +76,7 @@ def test_a_project_without_a_config_is_planned_under_the_named_config(
     workspace, operator_config = _workspace(tmp_path)
 
     result = runner.invoke(
-        app, ["scan", "--workspace", str(workspace), "--config", str(operator_config)]
+        app, ["scan", "workspace", str(workspace), "--config", str(operator_config)]
     )
 
     assert result.exit_code == 0, result.output
@@ -94,7 +94,7 @@ def test_a_project_with_its_own_config_keeps_it(tmp_path, scan_calls):
     workspace, operator_config = _workspace(tmp_path)
 
     runner.invoke(
-        app, ["scan", "--workspace", str(workspace), "--config", str(operator_config)]
+        app, ["scan", "workspace", str(workspace), "--config", str(operator_config)]
     )
 
     web = next(p for p in scan_calls[0]["workspace_plan"].projects if p.key == "web")
@@ -112,7 +112,7 @@ def test_dry_run_prints_the_threshold_the_scan_applies(tmp_path, scan_calls):
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace),
             "--config",
             str(operator_config),
