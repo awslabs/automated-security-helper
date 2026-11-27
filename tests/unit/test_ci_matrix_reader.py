@@ -1435,10 +1435,18 @@ LOADER_HELPER = "tests/utils/ci_matrix_loader.py"
 THIS_FILE = Path(__file__).resolve().relative_to(REPO_ROOT).as_posix()
 
 
-#: The two spellings by which a module names the reader: its file, and the module name
-#: the shared helper registers it under.
+#: The spellings by which a module names the reader: its file, the module name the
+#: shared helper registers it under, and the helper's two constants that hold them.
 READER_FILE = "_ci_matrix.py"
 READER_NAME = "_ash_ci_matrix"
+HELPER_CONSTANTS = frozenset({"CI_MATRIX_NAME", "CI_MATRIX_PATH"})
+
+#: The function a loader calls, and what the scan reads of a module's bytes before it
+#: parses the module: that function's name, and ``ci_matrix`` in any case, which every
+#: spelling above holds (``_ci_matrix.py``, ``_ash_ci_matrix``, ``CI_MATRIX_NAME``).
+LOADER_FUNCTION = "spec_from_file_location"
+LOADER_BYTES = LOADER_FUNCTION.encode()
+READER_BYTES = b"ci_matrix"
 
 
 def _docstring_values(tree: ast.AST) -> set[int]:
@@ -1454,36 +1462,68 @@ def _docstring_values(tree: ast.AST) -> set[int]:
     return found
 
 
+def _names_the_reader(tree: ast.AST) -> bool:
+    """Whether a module names the reader outside its docstrings: by its file name or its
+    module name as a string, or by a constant of the shared helper, imported under its
+    name or another, or read as an attribute of the helper."""
+    prose = _docstring_values(tree)
+
+    def names_it(node: ast.AST) -> bool:
+        if isinstance(node, ast.Constant):
+            return (
+                isinstance(node.value, str)
+                and id(node) not in prose
+                and (
+                    node.value == READER_NAME
+                    or node.value == READER_FILE
+                    or node.value.endswith("/" + READER_FILE)
+                )
+            )
+        if isinstance(node, ast.ImportFrom):
+            return any(alias.name in HELPER_CONSTANTS for alias in node.names)
+        return isinstance(node, ast.Attribute) and node.attr in HELPER_CONSTANTS
+
+    return any(names_it(node) for node in ast.walk(tree))
+
+
+def _loader_names(tree: ast.AST) -> set[str]:
+    """The bare names a module calls ``spec_from_file_location`` by: its own, and the
+    name it imports it as."""
+    names = {LOADER_FUNCTION}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            names.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == LOADER_FUNCTION
+            )
+    return names
+
+
 def _own_loader_lines(source: bytes | str, filename: str) -> list[int]:
     """The lines where a test module loads the reader with its own loader.
 
-    A module has one when it calls ``spec_from_file_location`` and also writes the
-    reader's file name or its module name as a string, outside a docstring. Its calls
-    are the lines. The call need not hold the name: a loader that takes the path or the
-    name from a constant, as ``MODULE`` or ``name`` here, is still one. ``filename``
-    names the module in a SyntaxError.
+    A module has one when it calls ``spec_from_file_location`` and also names the
+    reader, outside a docstring, as _names_the_reader reads it: the reader's file name
+    or its module name as a string, or a constant of the helper that holds one. The
+    call is the function's name as an attribute, or the bare name it is imported as.
+    Its calls are the lines. The call need not hold the name: a loader that takes the
+    path or the name from a constant, as ``MODULE`` or ``name`` here, is still one.
+    ``filename`` names the module in a SyntaxError.
     """
     tree = ast.parse(source, filename=filename)
-    prose = _docstring_values(tree)
-    names_the_reader = any(
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and id(node) not in prose
-        and (
-            node.value == READER_NAME
-            or node.value == READER_FILE
-            or node.value.endswith("/" + READER_FILE)
-        )
-        for node in ast.walk(tree)
-    )
-    if not names_the_reader:
+    if not _names_the_reader(tree):
         return []
+    bare = _loader_names(tree)
     return sorted(
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and getattr(node.func, "attr", getattr(node.func, "id", ""))
-        == "spec_from_file_location"
+        and (
+            node.func.attr == LOADER_FUNCTION
+            if isinstance(node.func, ast.Attribute)
+            else isinstance(node.func, ast.Name) and node.func.id in bare
+        )
     )
 
 
@@ -1500,7 +1540,7 @@ def _own_loaders(root: Path, modules: Iterable[Path]) -> dict[str, list[int]]:
         if name in (LOADER_HELPER, THIS_FILE):
             continue
         data = path.read_bytes()
-        if b"spec_from_file_location" not in data or b"_ci_matrix" not in data:
+        if LOADER_BYTES not in data or READER_BYTES not in data.lower():
             continue
         lines = _own_loader_lines(data, name)
         if lines:
