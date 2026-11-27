@@ -176,6 +176,7 @@ from automated_security_helper.utils.severity_ladder import (
     result_fails_scanner_threshold,
     result_scanner_name,
     result_severity,
+    result_states_no_finding as result_states_no_finding,
 )
 from automated_security_helper.utils.workspace_paths import (
     drive_anchor,
@@ -844,21 +845,6 @@ def result_is_suppressed(result: Mapping[str, Any]) -> bool:
     return is_result_suppressed(result)
 
 
-def result_states_no_finding(result: Mapping[str, Any]) -> bool:
-    """Whether *result*'s kind says no problem was found.
-
-    A result of kind ``pass``, ``notApplicable`` or ``informational`` states no
-    finding (``utils.sarif_utils.is_not_a_finding``): SARIF gives it level
-    ``none``, which ASH grades INFO, and the exit code and the per-scanner counts
-    leave it out. A project's finding counts and the rollup that sums them ask it
-    here, so the two cannot disagree on a result. Imported inside the function for
-    the reason :func:`result_is_suppressed` is.
-    """
-    from automated_security_helper.utils.sarif_utils import is_not_a_finding
-
-    return is_not_a_finding(result)
-
-
 def effective_threshold_resolver(
     threshold: Optional[str],
     threshold_for: Optional[OwnThresholdResolver] = None,
@@ -1014,10 +1000,13 @@ def has_finding_at_min_severity(
     LOW actionable: the same project exited 0 as ``ash --source-dir P`` and 2
     inside a workspace.
 
-    A result whose kind states no finding (``pass``, ``notApplicable``,
-    ``informational``: ``utils.sarif_utils.is_not_a_finding``) never qualifies.
-    Its level is ``none``, which this scale reads as low, so with no gate to turn
-    it away a rule that was not evaluated met ``--min-severity low``.
+    A result that states no finding (:func:`result_states_no_finding`: kind
+    ``pass``, ``notApplicable`` or ``informational``, and nothing in it reports a
+    problem) never qualifies. Its level is ``none``, which this scale reads as low,
+    so with no gate to turn it away a rule that was not evaluated met
+    ``--min-severity low``. The guard here covers the call that passes no
+    threshold; the gated call is already covered by
+    ``severity_ladder.result_fails_scanner_threshold``, which reads the same rule.
 
     Note that this scale is not the severity ladder's. It has no ``info``, and it
     treats ``critical`` and ``high`` as equal because SARIF's ``error`` covers
@@ -1035,20 +1024,16 @@ def has_finding_at_min_severity(
         return True
     gated = threshold is not None or threshold_for is not None
     effective = effective_threshold_resolver(threshold, threshold_for)
-    # Imported here, as result_is_suppressed imports its own: sarif_utils imports
-    # the results model this module also imports, and the module-level order is
-    # not fixed.
-    from automated_security_helper.utils.sarif_utils import is_not_a_finding
 
     for result in results:
         if not isinstance(result, Mapping):
             continue
         if result_is_suppressed(result):
             continue
-        # The kind is read before the level: a pass, notApplicable or
-        # informational result carries level none, which the scale below reads
-        # as low, and states no finding at any severity.
-        if is_not_a_finding(result):
+        # A result that states no finding carries level none, which the scale
+        # below reads as low, so it is turned away before the scale. One whose
+        # level or issue_severity reports a problem is graded by that instead.
+        if result_states_no_finding(result):
             continue
         # The resolver run_ash_scan._severity_filters_finding uses: the
         # declared issue_severity first, a missing level as
@@ -1491,7 +1476,7 @@ class WorkspaceAggregator:
         # is one of its findings) stay on the host, in row order; the per-scanner
         # counts are one frame of (name, counted) and two ordered counts over it.
         # A result is one of the scanner's findings when it is not suppressed and
-        # its kind does not state no finding, as in the project's own count
+        # it does not state no finding, as in the project's own count
         # (execution._reduce_project_scan), which this rollup sums. The partition
         # of the results by scanner is read only by the fallback below, so it is
         # built only when that branch is armed.

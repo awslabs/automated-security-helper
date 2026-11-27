@@ -1682,9 +1682,10 @@ def _reduce_project_scan(
 
     # A suppression that has not taken effect (rejected, underReview) hides
     # nothing: the same reading the per-scanner counts and the flat finding make.
-    # A result whose kind states no finding (pass, notApplicable, informational)
-    # is none of the project's findings, whatever its level: the exit code and
-    # the per-scanner counts leave it out, and so does the rollup that sums these.
+    # A result that states no finding (kind pass, notApplicable or informational,
+    # with nothing in it that reports a problem) is none of the project's
+    # findings: the exit code and the per-scanner counts leave it out, and so does
+    # the rollup that sums these.
     counted = [
         entry
         for entry in results_list

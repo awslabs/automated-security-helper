@@ -111,7 +111,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Tuple
 
 from automated_security_helper.models.vocab import (
     SEVERITY_BUCKETS,
@@ -233,6 +233,148 @@ def effective_sarif_level(result: object) -> str:
     raw = getattr(level, "value", level)
     normalized = str(raw).strip().lower() if raw else ""
     return normalized if normalized in _SARIF_LEVEL_TO_SEVERITY else MISSING_SARIF_LEVEL
+
+
+# ---------------------------------------------------------------------------
+# What a result states: its kind, and whether anything in it reports a problem.
+#
+# The reporters, the counters and the gates each carried a copy of what is not a
+# finding, and the copies drifted apart: one left ``notApplicable`` out of the
+# kinds that state no finding, and a report that emitted such a result as a
+# finding put a New vulnerability in a SIEM. The definitions below are the one
+# each of them imports, and they live in this module because the models and
+# ``sarif_utils`` import it, so none of them can import the others. ``sarif_utils``
+# re-exports every name.
+# ---------------------------------------------------------------------------
+
+#: The SARIF 2.1.0 result kinds (3.27.9) that state NO finding: the rule was
+#: evaluated and passed, did not apply to the target, or produced information
+#: only. ``notApplicable`` belongs here: the rule was not evaluated, so there is
+#: nothing to grade; a copy without it graded a cdk-nag rule that was skipped,
+#: and a report that emitted such a result as a finding put a New vulnerability
+#: in a SIEM. The complement is :data:`FINDING_KINDS`.
+NON_FINDING_KINDS = frozenset({"pass", "notApplicable", "informational"})
+
+#: The kinds that assert a finding: ``fail``, and ``open`` and ``review``,
+#: whose results a reader still has to judge. The two sets together are the
+#: schema's ``Kind`` enum, which the tests check, so a kind the schema adds is
+#: caught there and not in a reporter at run time.
+FINDING_KINDS = frozenset({"fail", "open", "review"})
+
+#: SARIF 3.27.9: a result that states no ``kind`` is a failing one.
+DEFAULT_RESULT_KIND = "fail"
+
+
+def result_kind(result: Any) -> str:
+    """*result*'s SARIF ``kind`` as text; an absent or empty kind is ``fail``.
+
+    Reads the ``Kind`` enum's value, a plain string, or the ``kind`` key of a
+    mapping, so the same function serves a model, a stand-in and raw SARIF.
+    """
+    if isinstance(result, dict):
+        kind = result.get("kind")
+    else:
+        kind = getattr(result, "kind", None)
+    value = getattr(kind, "value", kind)
+    return str(value) if value else DEFAULT_RESULT_KIND
+
+
+def is_not_a_finding(
+    result: Any, non_finding_kinds: Iterable[str] = NON_FINDING_KINDS
+) -> bool:
+    """Whether *result*'s kind says no problem was found.
+
+    *non_finding_kinds* is the caller's set; the default is
+    :data:`NON_FINDING_KINDS`. A report whose consumer reads no ``kind`` (GitHub
+    code scanning documents none) keeps only failing results and passes the
+    kinds it leaves out; whether ``open`` and ``review`` belong among them is
+    that reporter's decision, not this function's.
+
+    This reads the kind alone. Whether a result is a finding is
+    :func:`result_states_no_finding`'s answer, which also reads the level and the
+    declared severity.
+    """
+    return result_kind(result) in non_finding_kinds
+
+
+def _stated_level(result: object) -> Optional[str]:
+    """The level *result* states, lower-case, or None when it states none.
+
+    A model ``Result`` whose level was never set holds the field's default, which
+    is not a stated level: ``resolve_missing_levels`` reads an unset level the same
+    way. Accepts a ``Level`` enum member as well as a string.
+    """
+    if isinstance(result, dict):
+        level = result.get("level")
+    elif "level" not in getattr(result, "model_fields_set", ("level",)):
+        return None
+    else:
+        level = getattr(result, "level", None)
+    # `.value` first, as effective_sarif_level reads it.
+    raw = getattr(level, "value", level)
+    return (str(raw).strip().lower() if raw else "") or None
+
+
+def _declared_severity(result: object) -> Optional[str]:
+    """The severity *result* declares in ``properties.issue_severity``, upper-case.
+
+    None when it declares none, or one that names none of :data:`SEVERITIES`:
+    :func:`result_severity` ignores such a value, so this does too.
+    """
+    if isinstance(result, dict):
+        properties = result.get("properties")
+    else:
+        properties = getattr(result, "properties", None)
+    if isinstance(properties, dict):
+        declared = properties.get("issue_severity")
+    else:
+        declared = getattr(properties, "issue_severity", None)
+    if isinstance(declared, str) and declared.strip().upper() in _SEVERITY_RANK:
+        return declared.strip().upper()
+    return None
+
+
+def result_states_no_finding(result: object) -> bool:
+    """Whether *result* states no finding: the one rule every count, gate and export reads.
+
+    A result states no finding only when its SARIF kind is ``pass``,
+    ``notApplicable`` or ``informational`` and nothing in it reports a problem: its
+    level is ``none`` or not stated, and no ``issue_severity`` it declares is above
+    INFO. SARIF 3.27.10 gives a result of such a kind level ``none``, which ASH
+    grades INFO.
+
+    A result of such a kind that reports a problem anyway contradicts itself, and a
+    scanner fails closed on contradictory data: it is a finding, graded as any other
+    result is (:func:`result_severity`: by its ``issue_severity`` when that names an
+    ASH severity, otherwise by its level). A level that is not one of SARIF's four
+    reports a problem too, since :func:`effective_sarif_level` grades it MEDIUM. An
+    ``issue_severity`` that names none of the five severities changes nothing, as
+    the grader ignores it.
+
+    Accepts a ``Result`` model or its JSON form (a dict).
+    """
+    if result_kind(result) not in NON_FINDING_KINDS:
+        return False
+    level = _stated_level(result)
+    if level is not None and level != "none":
+        return False
+    declared = _declared_severity(result)
+    return declared is None or declared == Severity.INFO.value
+
+
+def row_states_no_finding(kind: object, severity: object) -> bool:
+    """:func:`result_states_no_finding` for a record that kept only a kind and a severity.
+
+    A flat row, an inspect entry or a history row is built from a result, and takes
+    the verdict the rule gave while it still held the whole result. This is the
+    reading for one that has none (a row read back from a dump, a stand-in): the
+    answer for a result of that *kind* and that graded *severity* with no level, so
+    INFO beside a kind that states no finding reads as stating none, and anything
+    above INFO as a finding.
+    """
+    return result_states_no_finding(
+        {"kind": kind, "properties": {"issue_severity": severity}}
+    )
 
 
 def _rule_default_level(rule: object) -> Optional[str]:
@@ -852,20 +994,20 @@ def result_fails_scanner_threshold(
     exited 0 in ``ash --source-dir P`` and 2 for P inside a workspace while the
     workspace's gate judged severity alone.
 
-    A result whose kind states no finding (``pass``, ``notApplicable``,
-    ``informational``: ``sarif_utils.is_not_a_finding``) fails no gate. SARIF asks
-    for level ``none`` beside those kinds, which grades INFO, and a threshold of
-    ``ALL`` fails INFO. The kind is read before the level, here and not in each
-    caller, so the workspace verdict and the single scan's exit code agree on it.
+    A result that states no finding (:func:`result_states_no_finding`) fails no
+    gate: its SARIF kind is ``pass``, ``notApplicable`` or ``informational`` and
+    nothing in it reports a problem, meaning its level is ``none`` or not stated and
+    no ``issue_severity`` it declares is above INFO. SARIF asks for level ``none``
+    beside those kinds, which grades INFO, and a threshold of ``ALL`` fails INFO.
+    A result of such a kind whose level or ``issue_severity`` reports a problem is
+    graded as any other result is. The rule is read here and not in each caller, so
+    the workspace verdict and the single scan's exit code agree on it.
 
     Suppressions are the caller's to read (``sarif_utils.suppressions_in_effect``;
     this module cannot import ``sarif_utils`` at load): a suppressed result never
     reaches the gate.
     """
-    # Imported here and not at module level: sarif_utils imports this module.
-    from automated_security_helper.utils.sarif_utils import is_not_a_finding
-
-    if is_not_a_finding(result):
+    if result_states_no_finding(result):
         return False
     return severity_fails_threshold(
         result_severity(result), threshold_for(result_scanner_name(result))

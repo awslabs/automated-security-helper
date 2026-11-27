@@ -979,10 +979,11 @@ class ScanPhase(EnginePhase):
         ``kind=informational`` with ``level=none``: SARIF 3.27.9 defines the
         kind as information only, and 3.27.10 requires a present ``level`` to
         be ``none`` for any kind but ``fail``. Every reporter reads it as
-        not-a-finding (utils/sarif_utils.NON_FINDING_KINDS), so it can never
-        grade, never fail a threshold and never put a vulnerability row in a
-        SIEM -- the green-by-contract half -- while it stays in ash.sarif and
-        the aggregated results for any reader -- the visibly-incomplete half.
+        stating no finding (utils/severity_ladder.result_states_no_finding), so
+        it can never grade, never fail a threshold and never put a vulnerability
+        row in a SIEM -- the green-by-contract half -- while it stays in
+        ash.sarif and the aggregated results for any reader -- the
+        visibly-incomplete half.
 
         Appended to the model's own ASH run (the default ``sarif`` skeleton's
         one run); when a caller supplied a model with no SARIF or no runs,

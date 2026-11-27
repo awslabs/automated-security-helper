@@ -437,13 +437,14 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     """
     Filter results to the actionable findings, the ones that make a scan exit 2.
 
-    A finding is actionable when it is not suppressed, is not a result whose kind
-    states no finding (``pass``, ``notApplicable`` or ``informational``), and is
-    at or above the severity threshold the scan was judged by: its scanner's own
-    threshold when the scan's config sets one, else the global one. That is the
-    set ``run_ash_scan._compute_exit_code`` counts. Dropping only the suppressed
-    findings would keep findings below the threshold, which the scan reports but
-    does not fail on, so a client gating on them would fail a scan that exited 0.
+    A finding is actionable when it is not suppressed, is not a result that states
+    no finding (kind ``pass``, ``notApplicable`` or ``informational``, with nothing
+    in it that reports a problem), and is at or above the severity threshold the
+    scan was judged by: its scanner's own threshold when the scan's config sets
+    one, else the global one. That is the set ``run_ash_scan._compute_exit_code``
+    counts. Dropping only the suppressed findings would keep findings below the
+    threshold, which the scan reports but does not fail on, so a client gating on
+    them would fail a scan that exited 0.
 
     Returns a deep copy of *results* with the SARIF entries that are not
     actionable removed, and the suppressed counts zeroed. ``summary_stats.total``
@@ -794,25 +795,25 @@ def _actionable_in_view(
 def _counts_toward_exit_2(result: Dict[str, Any], threshold: Optional[str]) -> bool:
     """Whether ``_compute_exit_code`` counts *result* toward exit 2 at *threshold*.
 
-    Its per-result test, step for step: a result whose kind states no finding
-    (``sarif_utils.is_not_a_finding``) never counts, and neither does a
-    suppressed one, where suppressed means a suppression in effect
-    (``sarif_utils.is_result_suppressed``: a ``rejected`` or ``underReview`` one
-    hides nothing, SARIF 3.35.4); ``properties.issue_severity`` decides when it
-    names an ASH severity; otherwise the SARIF ``level`` does. Both comparisons
-    are ``utils.severity_ladder``'s, so a falsy threshold counts nothing here too.
+    Its per-result test, step for step: a result that states no finding
+    (``severity_ladder.result_states_no_finding``: kind ``pass``,
+    ``notApplicable`` or ``informational``, and nothing in it reports a problem)
+    never counts, and neither does a suppressed one, where suppressed means a
+    suppression in effect (``sarif_utils.is_result_suppressed``: a ``rejected`` or
+    ``underReview`` one hides nothing, SARIF 3.35.4); ``properties.issue_severity``
+    decides when it names an ASH severity; otherwise the SARIF ``level`` does. Both
+    comparisons are ``utils.severity_ladder``'s, so a falsy threshold counts nothing
+    here too.
     """
-    from automated_security_helper.utils.sarif_utils import (
-        is_not_a_finding,
-        is_result_suppressed,
-    )
+    from automated_security_helper.utils.sarif_utils import is_result_suppressed
     from automated_security_helper.utils.severity_ladder import (
         SEVERITIES,
+        result_states_no_finding,
         sarif_level_fails_threshold,
         severity_fails_threshold,
     )
 
-    if is_not_a_finding(result):
+    if result_states_no_finding(result):
         return False
     if is_result_suppressed(result):
         return False
