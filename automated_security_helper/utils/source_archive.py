@@ -161,7 +161,10 @@ opens the archive or reads a link's target is refused as unreadable ("the archiv
 cannot be read: ..."), and while it extracts a member, as unreadable with the member
 named ("zip entry '...' cannot be read: ..."). An ``OSError`` is raised as it is, since
 it is a problem with the destination or the disk, and so is a ``MemoryError``, which
-is the process's. What ASH's own code raises is not caught.
+is the process's. What ASH's own code raises is not caught. The check of the zip64
+locator that ``open_zip`` makes before zipfile reads the file (rule 6) is such code: it
+refuses a misplaced record, and anything else it raises, an error of the handle
+included, is raised as it is.
 
 A refusal is a ``SourceArchiveRefused``, a ``ValueError`` whose ``kind``
 (``SourceArchiveRefusal``) names the rule. Import this module where an archive is
@@ -730,6 +733,10 @@ def _refuse_a_misplaced_zip64_record(handle: IO[bytes]) -> None:
     :func:`_zip64_end_record` says "N bytes come before the archive". The releases
     before them admit such an archive, and rule 6 refuses it with the same call.
 
+    ``open_zip`` calls this outside the classification of what zipfile raises, since
+    it is this module's own code and not zipfile's. It raises a refusal; what else it
+    raises, an error of the handle or a defect of this module's, is raised as it is.
+
     A file with no end record is not judged: zipfile refuses it, in its own words, and
     this reads no locator for it.
     """
@@ -1257,17 +1264,19 @@ def open_zip(handle: IO[bytes]) -> zipfile.ZipFile:
     its locator places it (:func:`_refuse_a_misplaced_zip64_record`). Some zipfile
     releases refuse a locator that misplaces it as they open the archive, in words
     that are not the rule's, and others admit it, so the rule runs first and gives
-    one verdict, in one set of words, whichever zipfile reads the file.
+    one verdict, in one set of words, whichever zipfile reads the file. That check is
+    this module's own code, not zipfile's, so the classification above does not apply
+    to it: it refuses a misplaced record, and anything else it raises, an error of the
+    handle or a defect of this module's, is raised as it is.
 
     Raises:
         SourceArchiveRefused: the archive was refused; ``kind`` names the rule.
     """
+    # The try below classifies what zipfile raises, and this check is our own code.
+    _refuse_a_misplaced_zip64_record(handle)
     try:
-        _refuse_a_misplaced_zip64_record(handle)
         return zipfile.ZipFile(handle)
     except _NOT_THE_ARCHIVES:
-        raise
-    except SourceArchiveRefused:
         raise
     except (zipfile.BadZipFile, EOFError, ValueError) as error:
         raise _not_a_zip(str(error)) from error
