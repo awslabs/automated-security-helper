@@ -32,22 +32,36 @@ What is asserted
   names: a subcommand after a flag (`--verbose scan`), every subcommand ash registers,
   a word after `--phases scan`, and `--` (after which click reads every word as bare).
 * Options whose values name a subcommand reach uvx unchanged, after the workflow's own
-  options, and ash's own CLI parses that command line as the scan with the workflow's
-  options: no subcommand, --fail-on-findings set, --source-dir `.`.
+  options, and ash's own CLI parses that command line, strictly as a run does (an
+  option the command lacks, or a value its type refuses, is a failure here too), as the
+  scan with the workflow's options: no subcommand, --fail-on-findings set, the checkout
+  as the directory.
+* What the workflow adds from its own inputs (--config, --verbose, --changed-files-only
+  with --base-ref, and the three --config-overrides of the betterleaks switch) reaches
+  uvx in order and is parsed by `ash` and by `ash scan fs` alike.
+* A directory named in ash-args (`--source-dir sub`) is the directory scanned, on both
+  spellings. What else names what is scanned and which `fs` takes beside its PATH
+  (`--workspace`, `--source-git`) is refused by `fs` or handed on to the engine as it
+  was typed, and never dropped.
 * The step's list of options that take a value is the `ash` group's: every option that
-  is not a flag or a count, long and short spellings, each taking one word.
+  is not a flag or a count, long and short spellings, each taking one word. It holds
+  every one that `ash scan fs` takes as well, bar the one it names below.
 * Click does read a bare word after the options as a subcommand, and a word after a
   value-taking option as its value (a control on ASH's own CLI).
 * An ASH that has the `fs` subject (3.9 and later) scans the checkout as the path of
   `ash scan fs`, so its log carries no deprecation line for the subject-less form;
-  the step asks that ASH's `ash scan fs --help`, from RUNNER_TEMP, before it scans. An
+  the step asks that ASH's `ash scan fs --help`, with color off, before it scans. An
   ASH whose help does not name `scan fs` (an older release that ash-version names), or
-  a help that cannot be read, gets the command line it always got.
+  that refuses the word, gets the command line it always got, and a help that cannot be
+  read never makes the step scan with the newer spelling.
 
 What it does not cover
 ----------------------
 ash-args is split by `read -r -a`, which reads its first line only; a second line is
 dropped, not passed.
+
+The engine is replaced by a recorder where a test runs `ash scan fs`: it is the
+command's own parsing and refusals that are read, and nothing is scanned.
 """
 
 from __future__ import annotations
@@ -60,6 +74,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+
+# Typer 0.27 vendors click as ``typer._click``, so the usage errors of ASH's commands
+# are that copy's, not the ``click`` package's.
+from typer._click.exceptions import UsageError
 
 from tests.utils.workflow_one_line import COMMAND_TEXT, command_lines, write_helper
 
@@ -117,9 +135,14 @@ _SUBJECT_OPTIONS = [
 ]
 #: The first lines `ash scan fs --help` prints, from an ASH with the subject and from
 #: one without it (which prints its subject-less scan's help, as click reads --help
-#: before it refuses `fs` as an extra argument). The first is written with the color
-#: codes rich puts around each part of the usage line in a terminal that takes them.
+#: before it refuses `fs` as an extra argument). With NO_COLOR set, as the step asks, it
+#: prints the first; in a terminal that takes color it puts the codes rich writes around
+#: each part of the usage line, which fall between the words `scan` and `fs`.
 SUBJECT_HELP = (
+    "\n Usage: ash scan fs [OPTIONS] [PATH]\n\n"
+    " Scan a directory for code, infrastructure, secrets, and dependency findings.\n"
+)
+SUBJECT_HELP_IN_COLOR = (
     "\n \x1b[33mUsage:\x1b[0m \x1b[1mash scan\x1b[0m \x1b[1mfs\x1b[0m [OPTIONS] [PATH]\n\n"
     " Scan a directory for code, infrastructure, secrets, and dependency findings.\n"
 )
@@ -127,21 +150,73 @@ OLDER_HELP = (
     "\n Usage: ash scan [OPTIONS]\n\n"
     " Scan code, infrastructure, secrets, dependencies.\n"
 )
+#: What an ASH that is strict about the extra word prints, and exits 2 with: a usage error.
+OLDER_REFUSAL = (
+    "Usage: ash scan [OPTIONS]\n"
+    "Try 'ash scan --help' for help.\n\n"
+    "Error: Got unexpected extra argument (fs)\n"
+)
+
+#: The values of the step's own inputs that `_run` leaves empty: the flags it adds from
+#: `verbose` and `changed-files-only`, the config, and the betterleaks switch. The base
+#: is not ASH's own default (`origin/main`), so a parse that read it back would show it
+#: came from the command line.
+_ALL_INPUTS = {
+    "VERBOSE": "--verbose",
+    "CHANGED_FILES_ONLY": "--changed-files-only",
+    "BASE_REF": "origin/release",
+    "ASH_CONFIG": "ash.yaml",
+    "USE_BETTERLEAKS": "true",
+}
+#: What those inputs add: the first group right after the workflow's own options, in the
+#: order the step writes them, and the three overrides of the betterleaks switch after
+#: ash-args.
+_INPUT_FLAGS = [
+    "--config",
+    "ash.yaml",
+    "--verbose",
+    "--changed-files-only",
+    "--base-ref",
+    "origin/release",
+]
+_BETTERLEAKS_OVERRIDES = [
+    "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]",
+    "scanners.betterleaks.enabled=true",
+    "scanners.gitleaks.enabled=false",
+]
+_BETTERLEAKS_FLAGS = [
+    word
+    for override in _BETTERLEAKS_OVERRIDES
+    for word in ("--config-overrides", override)
+]
 
 
-def _run(tmp_path: Path, ash_args: str, help_text: str = "", help_exit: int = 0):
+def _run(
+    tmp_path: Path,
+    ash_args: str,
+    help_text: str = "",
+    help_exit: int = 0,
+    *,
+    in_color: str | None = None,
+    inputs: dict[str, str] | None = None,
+):
     """Run the step's script with a uvx that records its argv; return (result, argv).
 
     A call whose last word is ``--help`` is the step asking which spelling the ASH it
-    installed reads: the stand-in prints ``help_text``, exits ``help_exit``, and writes
-    the directory it was started in to ``uvx-help-cwd``. Any other call is the scan,
-    whose argv is returned.
+    installed reads: the stand-in prints ``help_text``, or ``in_color`` (the same text
+    unless given) when NO_COLOR is not set, exits ``help_exit``, and writes the
+    directory it was started in to ``uvx-help-cwd``. Any other call is the scan, whose
+    argv is returned. ``inputs`` gives the step's own inputs a value on top of the ones
+    left empty (VERBOSE, CHANGED_FILES_ONLY, BASE_REF), as ASH_CONFIG and
+    USE_BETTERLEAKS, which are not set at all otherwise.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "uvx-argv"
     help_file = tmp_path / "uvx-help.txt"
     help_file.write_text(help_text, encoding="utf-8")
+    color_file = tmp_path / "uvx-help-in-color.txt"
+    color_file.write_text(help_text if in_color is None else in_color, encoding="utf-8")
     help_cwd = tmp_path / "uvx-help-cwd"
     uvx = bin_dir / "uvx"
     uvx.write_text(
@@ -149,7 +224,11 @@ def _run(tmp_path: Path, ash_args: str, help_text: str = "", help_exit: int = 0)
         "for last; do :; done\n"
         'if [ "${last:-}" = "--help" ]; then\n'
         f'  pwd > "{help_cwd}"\n'
-        f'  cat "{help_file}"\n'
+        '  if [ -n "${NO_COLOR:-}" ]; then\n'
+        f'    cat "{help_file}"\n'
+        "  else\n"
+        f'    cat "{color_file}"\n'
+        "  fi\n"
         f"  exit {help_exit}\n"
         "fi\n"
         f'printf "%s\\n" "$@" > "{calls}"\n',
@@ -181,6 +260,7 @@ def _run(tmp_path: Path, ash_args: str, help_text: str = "", help_exit: int = 0)
             "VERBOSE": "",
             "CHANGED_FILES_ONLY": "",
             "BASE_REF": "",
+            **(inputs or {}),
         },
         capture_output=True,
         text=True,
@@ -306,6 +386,7 @@ _VALUES_NAMING_A_SUBCOMMAND = [
         "--exclude-scanners grype",
         "--mode=local --verbose",
         "--config .ash.yaml --exclude-scanners npm-audit",
+        "--workspace services.code-workspace --workspace-config policy.yaml",
         *_VALUES_NAMING_A_SUBCOMMAND,
     ],
 )
@@ -316,14 +397,71 @@ def test_options_reach_uvx_after_the_workflows_own(tmp_path, ash_args):
     assert argv == _OWN_OPTIONS + ash_args.split(), argv
 
 
-def _parse(ash_argv: list[str]):
-    """ASH's own CLI parsing a command line: (subcommand or None, params)."""
-    context = _ash_group().make_context("ash", list(ash_argv), resilient_parsing=True)
+def _fs():
+    """The `fs` subject of `ash scan`: the command the step's scan runs on ASH 3.9."""
+    return _ash_group().commands["scan"].commands["fs"]
+
+
+def _parse(ash_argv: list[str], *, strict: bool = True):
+    """ASH's own CLI parsing a command line: (subcommand or None, params).
+
+    Strict, as a run parses it: an option the group lacks, or a value its type refuses,
+    raises. Not strict, it is click reading the grammar alone, which the tests of the
+    step's reading of words use: they give it a word that is no valid value on purpose
+    (``--mode --verbose``), to see that click takes it as the value all the same.
+    """
+    context = _ash_group().make_context(
+        "ash", list(ash_argv), resilient_parsing=not strict
+    )
     protected = getattr(context, "_protected_args", None)
     if protected is None:
         protected = context.protected_args
     rest = [*protected, *context.args]
     return (rest[0] if rest else None), context.params
+
+
+def _parse_fs(after_fs: list[str]):
+    """The parameters `ash scan fs` reads from the words after `fs`, strictly."""
+    return _fs().make_context("fs", list(after_fs)).params
+
+
+def _ash_words(argv: list[str]) -> list[str]:
+    """What `ash` itself is given in the uvx call: the words after the command."""
+    return argv[argv.index("ash") + 1 :]
+
+
+def _runs_the_fs_subject(words: list[str]) -> bool:
+    return words[:2] == ["scan", "fs"]
+
+
+def _hand_to_the_engine(after_fs: list[str], monkeypatch) -> dict:
+    """Run `ash scan fs` on its words with the engine replaced by a recorder.
+
+    Returns the keywords the engine is handed, or raises the usage error `fs` refuses
+    with: an option it lacks, a value its type refuses, a directory named twice. Nothing
+    is scanned: the command's own parsing and refusals are what is read.
+    """
+    from automated_security_helper.cli import scan_group
+
+    handed: dict = {}
+
+    def engine(*_args, **kwargs):
+        handed.update(kwargs)
+
+    monkeypatch.setattr(scan_group, "run_ash_scan_cli_command", engine)
+    _fs().main(args=list(after_fs), prog_name="ash scan fs", standalone_mode=False)
+    return handed
+
+
+def _what_the_scan_is_given(argv: list[str], monkeypatch) -> dict:
+    """What the scan of a uvx call is given, by the spelling it runs: the keywords the
+    engine is handed by `ash scan fs`, or the parameters the `ash` group parses."""
+    words = _ash_words(argv)
+    if _runs_the_fs_subject(words):
+        return _hand_to_the_engine(words[2:], monkeypatch)
+    subcommand, params = _parse(words)
+    assert subcommand is None, f"click runs {subcommand!r} for {argv}"
+    return params
 
 
 @pytest.mark.integration
@@ -333,7 +471,7 @@ def test_ash_runs_the_scan_with_the_workflows_options(tmp_path, ash_args):
     result, argv = _run(tmp_path, ash_args)
     assert result.returncode == 0, result.stdout + result.stderr
 
-    subcommand, params = _parse(argv[argv.index("ash") + 1 :])
+    subcommand, params = _parse(_ash_words(argv))
 
     assert subcommand is None, f"click runs {subcommand!r} for {argv}"
     assert params["fail_on_findings"] is True, params
@@ -346,22 +484,24 @@ def test_ash_runs_the_scan_with_the_workflows_options(tmp_path, ash_args):
 @pytest.mark.parametrize(
     "ash_args", ["", "--exclude-scanners grype", *_VALUES_NAMING_A_SUBCOMMAND]
 )
-def test_an_ash_with_the_fs_subject_scans_the_checkout_as_its_path(tmp_path, ash_args):
+def test_an_ash_with_the_fs_subject_scans_the_checkout_as_its_path(
+    tmp_path, monkeypatch, ash_args
+):
     """ASH 3.9 and later print a deprecation line for the subject-less scan (bare
     `ash` with --source-dir), so an ASH whose help names `scan fs` is run as
     `ash scan fs .`, and its own CLI reads that as the fs scan of the checkout with
-    the workflow's options."""
-    result, argv = _run(tmp_path, ash_args, help_text=SUBJECT_HELP)
+    the workflow's options. The help it is asked is the one a terminal that takes color
+    would color, so this holds only when the step has color off or strips it."""
+    monkeypatch.delenv("ASH_SOURCE_DIR", raising=False)
+    result, argv = _run(
+        tmp_path, ash_args, help_text=SUBJECT_HELP, in_color=SUBJECT_HELP_IN_COLOR
+    )
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert argv == _SUBJECT_OPTIONS + ash_args.split(), argv
-    # The help is asked outside the checkout, as the install preflight asks it.
-    assert (tmp_path / "uvx-help-cwd").read_text(encoding="utf-8").strip() == str(
-        tmp_path / "runner_temp"
-    )
-    fs = _ash_group().commands["scan"].commands["fs"]
-    after_fs = argv[argv.index("fs") + 1 :]
-    params = fs.make_context("fs", after_fs, resilient_parsing=True).params
+    words = _ash_words(argv)
+    assert _runs_the_fs_subject(words), words
+    params = _parse_fs(words[2:])
     assert params["path"] == ".", params
     assert params["source_dir"] is None, params
     assert params["fail_on_findings"] is True, params
@@ -370,20 +510,166 @@ def test_an_ash_with_the_fs_subject_scans_the_checkout_as_its_path(tmp_path, ash
 
 @pytest.mark.integration
 @posix_only
+def test_the_help_is_asked_outside_the_checkout(tmp_path):
+    """The install preflight asks `ash scan fs --help` from RUNNER_TEMP, with no
+    config of the scanned repository to read, and the step asks it the same way."""
+    result, argv = _run(tmp_path, "", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "uvx-help-cwd").read_text(encoding="utf-8").strip() == str(
+        tmp_path / "runner_temp"
+    )
+
+
+@pytest.mark.integration
+@posix_only
 @pytest.mark.parametrize(
     ("help_text", "help_exit"),
-    [(OLDER_HELP, 0), ("", 0), (SUBJECT_HELP, 1)],
-    ids=["an-older-ash", "no-help", "help-failed"],
+    [(OLDER_HELP, 0), ("", 0), (OLDER_REFUSAL, 2)],
+    ids=["an-older-ash", "no-help", "an-older-ash-refuses-fs"],
 )
 def test_an_ash_without_the_fs_subject_gets_the_command_line_it_always_got(
     tmp_path, help_text, help_exit
 ):
     """ash-version can name an ASH older than 3.9, which has no `fs` subject; a help
-    that does not name it, or that cannot be read, gives the spelling every ASH reads."""
+    that does not name it, or the usage error that refuses the word, gives the
+    spelling every ASH reads."""
     result, argv = _run(tmp_path, "--verbose", help_text=help_text, help_exit=help_exit)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert argv == _OWN_OPTIONS + ["--verbose"], argv
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_help_that_fails_never_picks_the_newer_spelling(tmp_path):
+    """A help that cannot be read says nothing about the ASH. The step either runs the
+    scan with the spelling every ASH reads or stops before uvx scans: it never takes
+    the newer one on a guess, which an ASH older than 3.9 would refuse."""
+    result, argv = _run(tmp_path, "--verbose", help_text=SUBJECT_HELP, help_exit=1)
+
+    if result.returncode == 0:
+        assert argv == _OWN_OPTIONS + ["--verbose"], argv
+    else:
+        assert argv is None, f"uvx scanned with {argv}"
+        assert "::error::" in result.stdout + result.stderr
+
+
+_BOTH_SPELLINGS = pytest.mark.parametrize(
+    ("help_text", "own"),
+    [(OLDER_HELP, _OWN_OPTIONS), (SUBJECT_HELP, _SUBJECT_OPTIONS)],
+    ids=["older", "fs"],
+)
+
+
+@pytest.mark.integration
+@posix_only
+@_BOTH_SPELLINGS
+@pytest.mark.parametrize("ash_args", ["", "--exclude-scanners grype"])
+def test_the_workflows_own_inputs_reach_ash_in_order_on_both_spellings(
+    tmp_path, monkeypatch, help_text, own, ash_args
+):
+    """The inputs the other cases leave empty: the config, `verbose`, `changed-files-only`
+    with its base, and the betterleaks switch. Each is passed where the step writes it,
+    and each is read by `ash` and by `ash scan fs` as the option it is."""
+    result, argv = _run(tmp_path, ash_args, help_text=help_text, inputs=_ALL_INPUTS)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == own + _INPUT_FLAGS + ash_args.split() + _BETTERLEAKS_FLAGS, argv
+    given = _what_the_scan_is_given(argv, monkeypatch)
+    assert given["config"] == "ash.yaml", given
+    assert given["verbose"] is True, given
+    assert given["changed_files_only"] is True, given
+    assert given["base_ref"] == "origin/release", given
+    assert list(given["config_overrides"]) == _BETTERLEAKS_OVERRIDES, given
+    assert given["source_dir"] == ".", given
+    assert given["fail_on_findings"] is True, given
+
+
+#: What a caller can put in ash-args to name the directory scanned, with the directory
+#: it names. The workflow names the checkout, `.`, when ash-args does not.
+_DIRECTORY_IN_ASH_ARGS = [
+    ("", "."),
+    ("--source-dir .", "."),
+    ("--source-dir sub", "sub"),
+    ("--source-dir=sub", "sub"),
+    ("--verbose --source-dir sub --exclude-scanners grype", "sub"),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("help_text", [OLDER_HELP, SUBJECT_HELP], ids=["older", "fs"])
+@pytest.mark.parametrize(("ash_args", "directory"), _DIRECTORY_IN_ASH_ARGS)
+def test_the_directory_a_caller_names_is_the_directory_scanned(
+    tmp_path, monkeypatch, help_text, ash_args, directory
+):
+    """A --source-dir in ash-args names the directory the scan scans, as it always has:
+    the step passed its own `--source-dir .` ahead of ash-args and click kept the last
+    value. `ash scan fs` takes the directory as its PATH and refuses a --source-dir
+    that names another one ("Name the directory once"), so on that spelling the
+    directory has to be named once, by the step, whichever way the caller named it."""
+    result, argv = _run(tmp_path, ash_args, help_text=help_text)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _what_the_scan_is_given(argv, monkeypatch)["source_dir"] == directory, argv
+
+
+_WORKSPACE = "services.code-workspace"
+
+
+@pytest.mark.integration
+@posix_only
+@_BOTH_SPELLINGS
+def test_a_workspace_in_ash_args_is_refused_or_handed_on_never_dropped(
+    tmp_path, monkeypatch, help_text, own
+):
+    """--workspace is an option that takes a value, so it reaches uvx as the caller typed
+    it. A scan of the checkout is not a scan of a workspace: `ash` refuses the pair
+    (--workspace and --source-dir are exclusive) once the engine has it, and `ash scan
+    fs` either takes the option and hands it on to the same refusal or refuses it as an
+    option it does not have. It is not left out of the scan."""
+    result, argv = _run(tmp_path, f"--workspace {_WORKSPACE}", help_text=help_text)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == own + ["--workspace", _WORKSPACE], argv
+    try:
+        given = _what_the_scan_is_given(argv, monkeypatch)
+    except UsageError as refusal:
+        assert "--workspace" in str(refusal), refusal
+    else:
+        assert given["workspace"] == _WORKSPACE, given
+
+
+_CLONE = "https://example.invalid/repo.git"
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_source_git_in_ash_args_reaches_the_older_spelling_as_typed(
+    tmp_path, monkeypatch
+):
+    result, argv = _run(tmp_path, f"--source-git {_CLONE}", help_text=OLDER_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _OWN_OPTIONS + ["--source-git", _CLONE], argv
+    assert _what_the_scan_is_given(argv, monkeypatch)["source_git"] == _CLONE
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_source_git_in_ash_args_is_refused_beside_the_path_of_fs(
+    tmp_path, monkeypatch
+):
+    """The clone is the directory `ash scan fs` scans, so it refuses a PATH beside
+    --source-git, or an option it does not have: a caller's clone stops the scan with an
+    error that names it, and is not scanned in place of the checkout or dropped."""
+    result, argv = _run(tmp_path, f"--source-git {_CLONE}", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + ["--source-git", _CLONE], argv
+    with pytest.raises(UsageError, match="--source-git"):
+        _what_the_scan_is_given(argv, monkeypatch)
 
 
 def _value_option_lists() -> dict[str, set[str]]:
@@ -414,31 +700,51 @@ def _value_options_in_the_step() -> set[str]:
     return first
 
 
-@pytest.mark.unit
-def test_the_options_that_take_a_value_are_the_ash_groups():
-    options = [p for p in _ash_group().params if p.param_type_name == "option"]
-    takes_a_value = {
+def _options_of(command) -> list:
+    return [p for p in command.params if p.param_type_name == "option"]
+
+
+def _takes_a_value(command) -> set[str]:
+    """Every spelling of the options of ``command`` that is not a flag or a count."""
+    return {
         spelling
-        for option in options
+        for option in _options_of(command)
         if not option.is_flag and not option.count
         for spelling in option.opts
     }
 
-    assert _value_options_in_the_step() == takes_a_value
+
+@pytest.mark.unit
+def test_the_options_that_take_a_value_are_the_ash_groups():
+    assert _value_options_in_the_step() == _takes_a_value(_ash_group())
     # The step skips exactly one word after each, as click does for nargs 1; that the
     # word is skipped even when it starts with a dash is the next test's.
-    assert all(option.nargs == 1 for option in options)
+    assert all(option.nargs == 1 for option in _options_of(_ash_group()))
+
+
+#: The options that take a value on `ash scan fs` and are not in the step's list. The
+#: step reads the word after one of them as a bare word and refuses it, so a document
+#: of parameters cannot come in through ash-args; the options of the scan itself all
+#: sit in the list.
+_FS_OPTIONS_THE_STEP_DOES_NOT_LIST = {"--cli-json-input"}
+
+
+@pytest.mark.unit
+def test_the_options_that_take_a_value_include_those_of_the_fs_subject():
+    """ash-args goes to `ash scan fs` on an ASH that has the subject, so the step has to
+    know every option that takes a value there. One it does not know would have its
+    value read as a bare word and refused, though the scan takes it as the value; the
+    step's reading of a cluster of short options and of `--name=value` follows from
+    the same list."""
+    fs = _fs()
+    missing = _takes_a_value(fs) - _value_options_in_the_step()
+
+    assert missing <= _FS_OPTIONS_THE_STEP_DOES_NOT_LIST, sorted(missing)
+    assert all(option.nargs == 1 for option in _options_of(fs))
 
 
 def _value_spellings() -> list[str]:
-    return sorted(
-        spelling
-        for option in _ash_group().params
-        if option.param_type_name == "option"
-        and not option.is_flag
-        and not option.count
-        for spelling in option.opts
-    )
+    return sorted(_takes_a_value(_ash_group()))
 
 
 @pytest.mark.integration
@@ -450,9 +756,9 @@ def test_a_value_option_takes_the_next_word_even_with_a_dash(tmp_path, spelling)
     refuse it. An option whose value were optional would stop at the dash in click
     (and the step would let `scan` through as `--phases`'s value); this measures it.
     """
-    subcommand, params = _parse([spelling, "--verbose"])
+    subcommand, params = _parse([spelling, "--verbose"], strict=False)
     assert subcommand is None and params["verbose"] is False, (spelling, params)
-    assert _parse([spelling, "--phases", "scan"])[0] == "scan", spelling
+    assert _parse([spelling, "--phases", "scan"], strict=False)[0] == "scan", spelling
 
     result, argv = _run(tmp_path, f"{spelling} --phases scan")
     _assert_refused(result, argv)
@@ -461,30 +767,31 @@ def test_a_value_option_takes_the_next_word_even_with_a_dash(tmp_path, spelling)
 @pytest.mark.unit
 def test_the_config_option_takes_a_dash_word_as_its_value():
     """The row measured by hand: --config's value is '--verbose', and verbose is off."""
-    subcommand, params = _parse(["--config", "--verbose"])
+    subcommand, params = _parse(["--config", "--verbose"], strict=False)
     assert subcommand is None
     assert params["config"] == "--verbose" and params["verbose"] is False, params
 
 
 @pytest.mark.unit
-def test_every_short_option_is_one_letter():
+@pytest.mark.parametrize("command", ["ash", "fs"])
+def test_every_short_option_is_one_letter(command):
     """The step reads a single-dash word letter by letter; click tries it whole first.
 
     click's parser matches a word such as `-dc` against the option names before it
     splits it into `-d` and `-c`, so a two-letter short option `-dc` would be taken
     whole, while the step would read `-c` and skip the next word as its value: a
     subcommand there would run. Every single-dash spelling must be one letter for
-    the two readings to agree.
+    the two readings to agree, on the `ash` group and on `ash scan fs`, which the
+    step's scan runs on an ASH that has the subject.
     """
     spellings = [
         spelling
-        for option in _ash_group().params
-        if option.param_type_name == "option"
+        for option in _options_of(_ash_group() if command == "ash" else _fs())
         for spelling in [*option.opts, *option.secondary_opts]
         if not spelling.startswith("--")
     ]
 
-    assert spellings, "the ash group has no short options to check"
+    assert spellings, f"{command} has no short options to check"
     longer = sorted(spelling for spelling in spellings if len(spelling) != 2)
     assert not longer, f"short options longer than one letter: {longer}"
 
@@ -504,4 +811,4 @@ def test_every_short_option_is_one_letter():
 )
 def test_click_reads_bare_words_as_subcommands_and_values_as_values(argv, subcommand):
     """Control on ASH's own CLI: the premise of the step's reading."""
-    assert _parse(argv)[0] == subcommand
+    assert _parse(argv, strict=False)[0] == subcommand
