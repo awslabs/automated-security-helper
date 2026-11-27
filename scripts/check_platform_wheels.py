@@ -742,10 +742,11 @@ def closure_findings(
         "the base closure with the alpha requirements",
     )
     if not widened.ok:
-        return [
+        message = (
             "the base install plus the alpha extra does not resolve "
             f"universally{_because(widened)}"
-        ]
+        )
+        return [message]
     return closure_differences(base.pins, widened.pins)
 
 
@@ -1217,8 +1218,10 @@ def _check(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
         "",
         f"- uv {uv_version}, index {INDEX}",
         f"- cutoff {cutoff}: {cooldown} before {format_timestamp(moment)}",
-        f"- {_count(measured)} cells measured in {len(measured)} rows "
-        f"({len(PLATFORMS)} platforms, Python {', '.join(pythons)})",
+        (
+            f"- {_count(measured)} cells measured in {len(measured)} rows "
+            f"({len(PLATFORMS)} platforms, Python {', '.join(pythons)})"
+        ),
     ]
     recorded_uv = record["metadata"].get("uv_version")
     if recorded_uv and recorded_uv != uv_version:
@@ -1246,9 +1249,11 @@ def _check(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
     if failed:
         lines += [
             "",
-            "If the change is intended, re-record with "
-            "`python scripts/check_platform_wheels.py --record` (it needs network "
-            "access) and commit scripts/platform_wheels.json.",
+            (
+                "If the change is intended, re-record with "
+                "`python scripts/check_platform_wheels.py --record` (it needs network "
+                "access) and commit scripts/platform_wheels.json."
+            ),
         ]
     print(defuse("\n".join(lines)))
     return EXIT_FOUND if failed else EXIT_OK
