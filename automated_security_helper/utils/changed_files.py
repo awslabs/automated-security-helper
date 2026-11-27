@@ -336,7 +336,7 @@ def filter_results_to_changed_files(
             "one at a location no path resolves is kept without a line). This "
             "report is therefore not evidence that the tree is clean. Either the "
             "diff against --base-ref is empty, or none of the paths it names are "
-            "inside --source-dir.",
+            "inside the scanned directory.",
             discarded,
         )
     return results
