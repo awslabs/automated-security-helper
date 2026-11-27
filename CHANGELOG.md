@@ -173,7 +173,11 @@
   directory.** A gitleaks or betterleaks config whose `[extend] path` is relative
   (from `config_file`, `GITLEAKS_CONFIG`, `BETTERLEAKS_CONFIG` or a `*_CONFIG_TOML`
   variable) is refused with an error naming `extend` and the file, because the tools
-  open a relative path from the scanned tree; use an absolute path. A config from the
+  open a relative path from the scanned tree; use an absolute path. The keys are read
+  as the tools read them (any case, a dotted key split into its parts). A config is
+  also refused when its extend path is not a string or is set twice, or has a root
+  but no drive on Windows, and when ASH cannot read the file (missing, not a regular
+  file, larger than 4 MiB, not UTF-8 or not valid TOML). A config from the
   environment is now passed to gitleaks as `--config`, so gitleaks no longer looks
   for `.gitleaks.toml` in the tree. ferret-scan's `--version` check now runs outside
   the tree with an empty config.

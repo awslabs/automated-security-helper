@@ -111,6 +111,7 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
+from automated_security_helper.core.constants import is_anchored
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ASHRespelledOverrideError,
@@ -1163,6 +1164,141 @@ def empty_tool_directory(name: str, *, context: Any) -> Path:
 #: are given (``maxExtendDepth`` in each tool's ``config/config.go``).
 EXTEND_DEPTH_LIMIT = 2
 
+#: The most bytes ASH reads from one config file when it checks that file's
+#: ``[extend]`` path. ASH reads the file itself, in its own process before the tool
+#: runs and outside the scan timeout, and an ``[extend]`` path can name any file the
+#: operator's account can open, so a longer file is refused instead of being read
+#: into memory whole.
+TOOL_CONFIG_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _read_tool_config(tool: str, source: str, path: Path) -> str:
+    """The text of the config file at ``path``, for the ``[extend]`` check.
+
+    Opened the way ``config/config_sources.read_config_bytes`` opens a config:
+    ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and ``O_NOCTTY``,
+    so a terminal swapped in at the name cannot become the process's controlling
+    terminal. Symbolic links are followed, as the tools follow them. What was
+    opened is checked with ``fstat`` on the descriptor, so anything but a regular
+    file (a FIFO, a device, a directory) is refused, and at most
+    ``TOOL_CONFIG_MAX_BYTES`` are read.
+
+    Args:
+        tool: The tool's name, for the message.
+        source: Where the config came from, for the message.
+        path: The config file.
+
+    Returns:
+        The file's text.
+
+    Raises:
+        ScannerError: The file could not be opened or read, is not a regular file,
+            is longer than ``TOOL_CONFIG_MAX_BYTES``, or is not UTF-8. The message
+            names the file and quotes none of it.
+    """
+    import errno
+    import os
+    import stat
+
+    limit = TOOL_CONFIG_MAX_BYTES
+    named = str(path)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY | nonblock | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
+    )
+    chunks: List[bytes] = []
+    remaining = limit + 1
+    try:
+        fd = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "not a regular file")
+            if nonblock:
+                # O_NONBLOCK was for the open. A regular file is then read normally.
+                os.set_blocking(fd, True)
+            while remaining > 0:
+                chunk = os.read(fd, min(remaining, 1 << 20))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError) as error:
+        # A ValueError is an embedded NUL in the path, which has no strerror.
+        reason = getattr(error, "strerror", None) or type(error).__name__
+        raise ScannerError(
+            f"{source}: {named!r} could not be read ({reason}), so ASH cannot "
+            f"check its [extend] path; {tool} is not run."
+        ) from None
+    if remaining <= 0:
+        raise ScannerError(
+            f"{source}: {named!r} is larger than {limit} bytes, the most ASH reads "
+            f"from one config file, so ASH cannot check its [extend] path; {tool} "
+            "is not run."
+        ) from None
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
+        raise ScannerError(
+            f"{source}: {named!r} is not UTF-8, so ASH cannot check its [extend] "
+            f"path; {tool} is not run."
+        ) from None
+
+
+def _extend_path_values(tool: str, source: str, data: Dict[str, Any]) -> List[Any]:
+    """Every value ``data`` sets as ``extend.path``, reading keys the way the tools do.
+
+    gitleaks reads its config through viper, which lower-cases every key and splits
+    a key on ``.``, so ``[Extend] Path``, ``[extend] PATH``, ``"extend.path"`` and
+    ``"Extend.Path"`` all set ``extend.path``. betterleaks' TOML decoder matches
+    field names in any case. One reading covers both: each key is folded with
+    ``key.lower().split(".")``.
+
+    Args:
+        tool: The tool's name, for the message.
+        source: Where the config came from, for the message.
+        data: The parsed document.
+
+    Returns:
+        The values in document order. A key with more parts than ``path``
+        (``"extend.path.x"``) is recorded as a value that is not a string.
+
+    Raises:
+        ScannerError: ``extend`` is not a table, or ``[extend]`` or its path is set
+            more than once under keys the tools read as one.
+    """
+    not_a_string = object()
+    values: List[Any] = []
+    tables = 0
+    for key, value in data.items():
+        parts = key.lower().split(".")
+        if parts[0] != "extend":
+            continue
+        if len(parts) == 1:
+            if not isinstance(value, dict):
+                raise ScannerError(
+                    f"{source} sets [extend] to something that is not a table. "
+                    f"ASH cannot tell what {tool} reads from it, and it may open a "
+                    "file from the scanned tree. Make [extend] a table with an "
+                    f"absolute path; {tool} is not run."
+                )
+            tables += 1
+            for inner_key, inner_value in value.items():
+                inner = inner_key.lower().split(".")
+                if inner[0] == "path":
+                    values.append(inner_value if len(inner) == 1 else not_a_string)
+        elif parts[1] == "path":
+            values.append(value if len(parts) == 2 else not_a_string)
+    if tables > 1 or len(values) > 1:
+        raise ScannerError(
+            f"{source} sets [extend] or its path more than once when the keys are "
+            f"read as {tool} reads them (in any case, a dotted key split into a "
+            f"table and a key). ASH cannot tell which one {tool} uses. Set each "
+            f"once, with an absolute path; {tool} is not run."
+        )
+    return values
+
 
 def refuse_relative_extend_path(
     tool: str,
@@ -1177,41 +1313,68 @@ def refuse_relative_extend_path(
     gitleaks and betterleaks run with the scanned tree as their working
     directory and open a relative ``extend.path`` from it, then append that
     file's allowlists, so the scanned repository would supply a file the
-    operator's config names. The config is read the way the tool does (TOML,
-    ``extend.path``) and each absolute extended file is followed to the tool's own
-    depth limit.
+    operator's config names. The config is read the way the tools read it: TOML,
+    with each key folded to lower case and split on ``.`` (gitleaks reads its
+    config through viper, and betterleaks' decoder matches names in any case), so
+    ``[Extend] Path``, ``[extend] PATH`` and ``"extend.path"`` are all
+    ``extend.path``. A path is absolute when it is anchored
+    (``core.constants.is_anchored``): on Windows one with a root and no drive names
+    a file on the drive of the scanned tree, where ASH would read it on its own.
+    An empty path is skipped, as both tools skip it. Each file is read as a
+    regular file of at most ``TOOL_CONFIG_MAX_BYTES``, and each absolute extended
+    file is followed to the tool's own depth limit.
+
+    A file or text ASH cannot read or parse (missing, not a regular file, too
+    large, not UTF-8, not TOML) is refused, not left to the tool, because ASH could
+    not check its ``[extend]`` path. So is an ``[extend]`` ASH cannot read the way
+    the tools do: not a table, a path that is not a string, or either set more
+    than once under keys the tools read as one.
 
     Args:
         tool: The tool's name, for the message.
         source: Where the config came from (an option or variable name, or the
             path of the extended file), for the message.
         text: The config's text, when the operator gave text.
-        path: The config file, when the operator gave a file. A file that is
-            missing or unreadable is left to the tool, which reports it.
+        path: The config file, when the operator gave a file.
 
     Raises:
         ScannerError: ``extend.path`` in the config, or in a file it extends, is
-            not absolute.
+            not absolute; the config or a file it extends cannot be read or
+            parsed; or its ``[extend]`` cannot be read the way the tools read it.
     """
-    import os
     import tomllib
 
     if text is None:
         if path is None:
             return
-        try:
-            text = Path(path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return
+        text = _read_tool_config(tool, source, path)
+        where = repr(str(path))
+    else:
+        where = f"the config text in {source}"
     try:
         data = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
+    except (ValueError, RecursionError):
+        # A TOMLDecodeError is a ValueError, and so is the interpreter's integer
+        # digit limit; deeply nested arrays raise RecursionError. Neither the text
+        # nor the parser's message is quoted: both can hold what the config holds.
+        raise ScannerError(
+            f"{source}: {where} could not be parsed as TOML, so ASH cannot check "
+            f"its [extend] path; {tool} is not run."
+        ) from None
+    values = _extend_path_values(tool, source, data)
+    if not values:
         return
-    extend = data.get("extend")
-    extended = extend.get("path") if isinstance(extend, dict) else None
-    if not isinstance(extended, str) or not extended:
+    extended = values[0]
+    if not isinstance(extended, str):
+        raise ScannerError(
+            f"{source} sets [extend] path to something that is not a string. "
+            f"{tool} may read it as text, a file name in the scanned tree, and "
+            "ASH cannot tell which file it would open. Use a string holding an "
+            f"absolute path to the file; {tool} is not run."
+        )
+    if not extended:
         return
-    if not os.path.isabs(extended):
+    if not is_anchored(extended):
         raise ScannerError(
             f"{source} sets [extend] path = {extended!r}, which is not an "
             f"absolute path. {tool} opens a relative extend path from its working "

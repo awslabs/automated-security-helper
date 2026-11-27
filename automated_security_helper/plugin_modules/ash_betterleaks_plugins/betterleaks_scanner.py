@@ -164,6 +164,7 @@ from automated_security_helper.config.tool_config_trust import (
     empty_tool_directory,
     refuse_relative_extend_path,
 )
+from automated_security_helper.core.constants import is_anchored
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -675,12 +676,13 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
         """The config to pass as ``--config``; None leaves it to Betterleaks.
 
         The operator's ``options.config_file``. Otherwise a config path variable the
-        operator set, passed as ``--config`` only when it is not absolute as given:
-        Betterleaks would resolve it against its working directory, the scanned tree,
-        so the repository would supply the config file. Anchored where the operator
-        typed it instead. An absolute path, and a TOML-content variable, are left to
-        Betterleaks. Without any, Betterleaks uses its built-in rules and reads no
-        config from the tree (see the module docstring).
+        operator set, passed as ``--config`` only when it is not anchored as given
+        (absolute, and on Windows with a drive or share): Betterleaks would resolve
+        it against its working directory, the scanned tree, so the repository would
+        supply the config file. Anchored where the operator typed it instead. An
+        absolute path, and a TOML-content variable, are left to Betterleaks. Without
+        any, Betterleaks uses its built-in rules and reads no config from the tree
+        (see the module docstring).
         """
         operator_config = self._operator_config_path()
         if operator_config is not None:
@@ -713,7 +715,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                         path=Path(os.path.abspath(os.path.expanduser(value))),
                     )
             given = _config_env_value()
-            if given is not None and not os.path.isabs(given[1]):
+            if given is not None and not is_anchored(given[1]):
                 ASH_LOGGER.debug(
                     f"{given[0]} is not an absolute path; passing it to Betterleaks "
                     "resolved against the working directory ASH runs in"

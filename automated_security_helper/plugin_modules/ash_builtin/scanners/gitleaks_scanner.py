@@ -179,6 +179,7 @@ from automated_security_helper.config.tool_config_trust import (
     empty_tool_directory,
     refuse_relative_extend_path,
 )
+from automated_security_helper.core.constants import is_anchored
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
@@ -941,12 +942,16 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # An absolute path and GITLEAKS_CONFIG_TOML (the config's text,
             # written to a file outside the tree) are passed as --config too.
             # With none, gitleaks sets its config path to
-            # ``<source>/.gitleaks.toml`` and skips that one file.
+            # ``<source>/.gitleaks.toml`` and skips that one file. "Absolute"
+            # means anchored (``core.constants.is_anchored``): on Windows a path
+            # with a root and no drive (``\rules.toml``) is on whichever drive is
+            # current, so it is anchored where ASH runs and gitleaks is given the
+            # file ASH checked.
             given = self._config_env_value()
             if given:
                 chosen = (
                     Path(given)
-                    if os.path.isabs(given)
+                    if is_anchored(given)
                     else self._anchored_config_env(given)
                 )
                 refuse_relative_extend_path("gitleaks", "GITLEAKS_CONFIG", path=chosen)
