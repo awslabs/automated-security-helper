@@ -781,9 +781,9 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/deploy/test_deploy_mcp_entrypoint_secret_off_the_command_line.py
       reason: >-
-        "ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN": "probe-secret-arn" is the probe
-        fixture of a test that exists to assert the real secret stays OFF the
-        command line. The probe names itself.
+        The match is the probe value the test sets for the auth-header ARN
+        variable, a value that says it is a probe, in a test that exists to
+        assert the real secret stays OFF the command line.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/docs/test_page_claims.py
       reason: >-
@@ -3192,7 +3192,7 @@ global_settings:
       path: deploy/cdk/lib/ash-container-scripts.ts
       line_start: 559
       line_end: 559
-      reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
+      reason: "The entrypoint reads one variable by name, the one beginning ASH_MCP_AUTH_HEADER_VALUE and ending in _ARN, which locates the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/cli/mcp/source_delivery.py
       symbol: _validate_zip_member
@@ -3342,8 +3342,8 @@ global_settings:
     - rule_id: "generic-api-key"
       path: "tests/unit/docs/test_page_claims.py"
       reason: >-
-        The match is the docs' illustrative example DATABASE_PASSWORD =
-        "correct-horse-battery-staple-1234", embedded here because this test
+        The match is the docs' illustrative database password example (four
+        words and a number joined by hyphens), embedded here because this test
         executes the documentation's own snippets verbatim. A published doc
         example, not a credential.
     - rule_id: "generic-api-key"

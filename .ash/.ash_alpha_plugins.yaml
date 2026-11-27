@@ -1309,10 +1309,10 @@ global_settings:
         open deliberately and recorded here so it is visible in review.
     # === trivy AWS-0036 matches the variable NAME, not a value ===
     #
-    # MEASURED. Renaming ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN to
-    # ASH_MCP_AUTH_HEADER_VALUE_LOCATOR in AshFargate.template.json and changing
-    # nothing else takes trivy's AWS-0036 count from one to zero, so the rule is
-    # matching on the name. That is the same heuristic .ash.yaml already
+    # MEASURED. Renaming the variable (its name begins ASH_MCP_AUTH_HEADER_VALUE
+    # and ends in _ARN) to end in _LOCATOR instead, in AshFargate.template.json,
+    # and changing nothing else takes trivy's AWS-0036 count from one to zero, so
+    # the rule is matching on the name. That is the same heuristic .ash.yaml already
     # records for detect-secrets on deploy/terraform/modules/ash-image-pipeline/
     # files/ash-container-init, where the match was the NAME of the variable holding
     # an ARN.
@@ -1328,11 +1328,11 @@ global_settings:
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
         The match is an environment variable NAME on the ECS task definition,
-        beginning ASH_MCP_AUTH_HEADER_VALUE and ending in _ARN. Written split
-        rather than spelled out, because spelling it contiguously makes this
-        reason itself a keyword finding -- the same trap the hex entry in
-        .ash.yaml records, and the reason this file previously failed the
-        Windows scan. Its value is not a credential. mcpEnvironment in
+        beginning ASH_MCP_AUTH_HEADER_VALUE and ending in _ARN. Named by its two
+        ends, as every mention of it in this file is, so that no line here holds
+        the keyword-suffixed name beside a colon or an equals sign, the shape a
+        keyword detector reads as a credential assignment. Its value is not a
+        credential. mcpEnvironment in
         deploy/cdk/lib/ash-runtime-config.ts sets it from the auth secret's ARN
         behind an Fn::If, and the entrypoint generated
         by deploy/cdk/lib/ash-container-scripts.ts calls GetSecretValue on that ARN
@@ -1452,7 +1452,7 @@ global_settings:
       path: deploy/cdk/lib/ash-container-scripts.ts
       line_start: 559
       line_end: 559
-      reason: "The entrypoint reads one variable by name, ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN, the secret it needs to resolve; nothing else in the environment."
+      reason: "The entrypoint reads one variable by name, the one beginning ASH_MCP_AUTH_HEADER_VALUE and ending in _ARN, which locates the secret it needs to resolve; nothing else in the environment."
     - rule_id: threat-filesystem-read
       path: automated_security_helper/plugin_modules/ash_builtin/converters/archive_converter.py
       line_start: 145
@@ -1648,8 +1648,8 @@ global_settings:
     - rule_id: "generic-api-key"
       path: "tests/unit/docs/test_page_claims.py"
       reason: >-
-        The match is the docs' illustrative example DATABASE_PASSWORD =
-        "correct-horse-battery-staple-1234", embedded here because this test
+        The match is the docs' illustrative database password example (four
+        words and a number joined by hyphens), embedded here because this test
         executes the documentation's own snippets verbatim. A published doc
         example, not a credential.
     - rule_id: "generic-api-key"
