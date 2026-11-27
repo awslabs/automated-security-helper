@@ -1878,18 +1878,27 @@ class TestEachRuleRefusesBeforeAnythingIsWritten:
 
     @pytest.mark.parametrize("source,kind,message", REFUSED)
     def test_the_finalize_refuses_it_in_the_same_words(
-        self, request, tmp_path, source, kind, message
+        self, request, monkeypatch, tmp_path, source, kind, message
     ):
         """Red at the base for the NUL row: the finalize extracted ``tool<NUL>.py``
-        as ``tool``, which no Python scanner reads."""
+        as ``tool``, which no Python scanner reads.
+
+        The words of a refusal do not say when it was made, and the finalize removes
+        its staging directory and the upload either way, so the verdict alone passes a
+        finalize that extracted first and refused afterwards. Every row is refused
+        before anything is written, so the finalize has to ask zipfile to extract
+        nothing."""
         payload = _payload(request, source)
         shared = _verdict(
             _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "tree")
         )
+        extractions = _recording_extractions(monkeypatch)
+
         delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
 
         assert delivered == (shared[0], _in_the_finalizes_words(shared[1]))
         assert delivered[0] is kind
+        assert extractions == [], "the finalize extracted from a refused archive"
 
     def test_the_finalize_keeps_its_own_words_for_a_link(self, tmp_path):
         payload = _zip_with_modes({"evil": (b"/outside/the/tree", 0o120777)})
