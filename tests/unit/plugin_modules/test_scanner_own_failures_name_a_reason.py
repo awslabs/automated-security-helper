@@ -156,6 +156,12 @@ def _raised(action: Callable[[], object]) -> BaseException:
     """What ``action`` raised; a skip or a failed assertion passes through."""
     try:
         action()
+    except AssertionError:
+        # A failed assertion inside the action is a failed case, not the error the
+        # case is waiting for: it is an Exception too, and would be returned as one.
+        # pytest's own outcomes (skip, fail, xfail) derive from BaseException and
+        # already pass through the handler below.
+        raise
     except Exception as error:  # noqa: BLE001 - the case reads whatever was raised
         return error
     raise _DidNotFail("the action a case expects to fail returned")
@@ -164,8 +170,15 @@ def _raised(action: Callable[[], object]) -> BaseException:
 class _DropsTheReason(ScannerError):
     """A ``ScannerError`` that keeps no reason: a raise site written without one."""
 
-    def __init__(self, *args: object, reason: Optional[FailureReason] = None) -> None:
-        super().__init__(*args)
+    def __init__(
+        self,
+        *args: object,
+        reason: Optional[FailureReason] = None,
+        **kwargs: Any,
+    ) -> None:
+        # Drops the reason and forwards everything else, so a site that passes
+        # another keyword fails the control for its own reason, not on a TypeError.
+        super().__init__(*args, **kwargs)
 
 
 def _drop_in(module: Any) -> Callable[[pytest.MonkeyPatch], None]:
@@ -187,8 +200,15 @@ def _links(error: BaseException) -> Iterator[BaseException]:
             continue
         seen.add(id(link))
         yield link
+        # As reason_of follows them: a context that ``raise ... from None`` (or
+        # ``from`` anything) suppressed is not a link.
         pending.extend(
-            other for other in (link.__cause__, link.__context__) if other is not None
+            other
+            for other in (
+                link.__cause__,
+                None if link.__suppress_context__ else link.__context__,
+            )
+            if other is not None
         )
 
 
@@ -203,6 +223,23 @@ def _came_from_a_dropped_site(error: BaseException) -> bool:
         isinstance(link, (_DropsTheReason, zizmor_module._ConfigFileMissing))
         for link in _links(error)
     )
+
+
+def _site_of(error: BaseException, *, dropped: bool) -> Optional[BaseException]:
+    """The link of the error that the raise site made.
+
+    For the run that keeps its reason, the link that carries one; for the control,
+    the link the drop-in built. Both are the error raised at the site under test,
+    so their text and type can be compared: a control that failed at some other
+    raise of the same module would show another text.
+    """
+    for link in _links(error):
+        if dropped:
+            if isinstance(link, (_DropsTheReason, zizmor_module._ConfigFileMissing)):
+                return link
+        elif isinstance(getattr(link, "reason", None), FailureReason):
+            return link
+    return None
 
 
 @dataclass(frozen=True)
@@ -791,7 +828,15 @@ CASES = [
         _drop_in(zizmor_module),
         ReasonCode.CONFIG_FILE_OUTSIDE_TREE,
         holds=("config_file",),
-        never=("zizmor-ci.yml", "creds"),
+        never=(
+            "zizmor-ci.yml",
+            "creds",
+            "first-line-of-a-file-outside-the-tree",
+            # The linked file's directory, as a path component (the sentence says
+            # "outside the scanned tree" in words, so the bare word is no leak).
+            "/outside",
+            "outside/",
+        ),
     ),
     Case(
         "trivy config option names no file",
@@ -940,14 +985,35 @@ def test_the_failure_names_its_reason(case, tmp_path, monkeypatch):
 def test_control_a_site_with_its_reason_removed_fails_its_case(
     case, tmp_path, monkeypatch
 ):
-    case.drop(monkeypatch)
+    # The run that keeps its reason, first, in a directory of its own: the control
+    # has to fail at the same site, with the same error, and not at any other
+    # raise of the module the drop-in touched.
+    kept_dir = tmp_path / "kept"
+    kept_dir.mkdir()
+    kept = case.scenario(kept_dir, monkeypatch)
+    kept_site = _site_of(kept, dropped=False)
+    assert kept_site is not None, "the run that keeps its reason has no site"
 
-    error = case.scenario(tmp_path, monkeypatch)
+    case.drop(monkeypatch)
+    dropped_dir = tmp_path / "dropped"
+    dropped_dir.mkdir()
+
+    error = case.scenario(dropped_dir, monkeypatch)
 
     assert reason_of(error) is None, "the control left a reason in place"
     assert _came_from_a_dropped_site(error), (
         f"the case failed before it reached the site: {type(error).__name__}"
     )
+    dropped_site = _site_of(error, dropped=True)
+    assert dropped_site is not None
+    assert str(dropped_site) == str(kept_site), (
+        "the control failed at another site than the case it controls",
+        str(dropped_site),
+        str(kept_site),
+    )
+    assert isinstance(dropped_site, type(kept_site)) or isinstance(
+        kept_site, type(dropped_site)
+    ), (type(dropped_site).__name__, type(kept_site).__name__)
     with pytest.raises(AssertionError):
         _reason(error, case.code, holds=case.holds, never=case.never)
 
@@ -1015,3 +1081,56 @@ class TestTheCheckCanFail:
         )
 
         assert reason_of(error) is None
+
+    def test_the_dropped_error_forwards_a_keyword_it_does_not_drop(self):
+        """Only ``reason`` is dropped; another keyword reaches ``ScannerError``, so a
+        site that passes one fails the control for its own reason."""
+        with pytest.raises(TypeError, match="unexpected keyword"):
+            _DropsTheReason("x", not_a_keyword=1)
+
+    def test_a_failed_assertion_inside_the_action_is_not_returned_as_its_error(self):
+        def asserts_false():
+            assert False, "the action's own assertion"
+
+        with pytest.raises(AssertionError, match="the action's own assertion"):
+            _raised(asserts_false)
+
+    def test_control_another_error_is_returned_and_a_skip_passes_through(self):
+        def raises_a_value_error():
+            raise ValueError("what the case waits for")
+
+        def skips():
+            pytest.skip("a skip is not an error")
+
+        assert isinstance(_raised(raises_a_value_error), ValueError)
+        with pytest.raises(pytest.skip.Exception):
+            _raised(skips)
+
+    def test_a_context_that_from_none_suppressed_is_no_link(self):
+        inner = ScannerError(
+            "inner", reason=FailureReason(ReasonCode.TIMED_OUT, "it timed out")
+        )
+        try:
+            try:
+                raise inner
+            except ScannerError:
+                raise ScannerError("wrapper") from None
+        except ScannerError as outer:
+            error = outer
+
+        assert inner not in list(_links(error))
+        assert reason_of(error) is None
+
+    def test_control_a_context_that_was_not_suppressed_is_a_link(self):
+        inner = ScannerError(
+            "inner", reason=FailureReason(ReasonCode.TIMED_OUT, "it timed out")
+        )
+        try:
+            try:
+                raise inner
+            except ScannerError:
+                raise ScannerError("wrapper")
+        except ScannerError as outer:
+            error = outer
+
+        assert inner in list(_links(error))
