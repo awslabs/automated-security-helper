@@ -84,10 +84,11 @@ destination as it was.
    zip64 archive, its end record and the locator that places that record where it
    lies, since readers differ in where they look for it; then the end record and its
    comment.
-   A local header that gives another compression method, data descriptor flag, CRC-32
-   or size than its central directory entry is refused too, since a reader of the
-   local headers would find that member's data, and the next member, elsewhere. Each
-   of these is refused as not a zip.
+   A local header that gives another name (the bytes, or the UTF-8 flag that says how
+   they are decoded), compression method, data descriptor flag, CRC-32 or size than
+   its central directory entry is refused too, since a reader of the local headers
+   would extract that member under another name, or find its data, and the next
+   member, elsewhere. Each of these is refused as not a zip.
 7. Encryption. A member whose data is encrypted is refused, a link included: its data
    cannot be read, so no rule could judge it and no scan read it. The members are
    checked for it right after they are counted, before any other rule reads the file,
@@ -209,6 +210,9 @@ _ENCRYPTED_FLAG = 0x1
 #: Bit 3 of a member's general purpose flags: its local header leaves its CRC-32 and
 #: sizes out, and a data descriptor after its data gives them.
 _DATA_DESCRIPTOR_FLAG = 0x8
+#: Bit 11 of a member's general purpose flags: its name is UTF-8, not the legacy code
+#: page, which is how a reader decodes the bytes it finds where the name is.
+_UTF8_NAME_FLAG = 0x800
 
 # The records a zip is made of, as PKWARE's APPNOTE (section 4.3) lays them out and
 # zipfile reads them (rule 6).
@@ -499,8 +503,9 @@ def _refuse_anything_but_one_zip(
     The end record has to end the file with its comment; the central directory has to
     be where the end record (or the zip64 end record) says, as many entries as it
     counts, none running past it; and the members' local records have to fill the file
-    from byte 0 to the central directory (:func:`_local_extras`). zipfile opened the
-    archive, so the records it read are there to be found the way it found them.
+    from byte 0 to the central directory, each local header agreeing with the entry
+    that lists it (:func:`_local_extras`). zipfile opened the archive, so the records
+    it read are there to be found the way it found them.
 
     Returns each member's name in the bytes the central directory spells it with, and
     the extra field of its local header, in archive order, for rule 3.
@@ -547,7 +552,7 @@ def _refuse_anything_but_one_zip(
             f"directory holds {held}"
         )
     spelled = _spelled_names(handle, archive.start_dir, directory_size, members)
-    return spelled, _local_extras(handle, archive.start_dir, members)
+    return spelled, _local_extras(handle, archive.start_dir, members, spelled)
 
 
 def _not_a_zip(message: str) -> SourceArchiveRefused:
@@ -660,14 +665,19 @@ def _spelled_names(
 
 
 def _local_extras(
-    handle: IO[bytes], directory_start: int, members: List[zipfile.ZipInfo]
+    handle: IO[bytes],
+    directory_start: int,
+    members: List[zipfile.ZipInfo],
+    spelled: List[bytes],
 ) -> List[bytes]:
     """Refuse bytes before, between or after the members' local records.
 
     Taken in the order of their local headers, each record has to start where the one
     before it ends, the first at byte 0, and the last has to end where the central
-    directory starts (:func:`_local_record_end` says where each ends). Returns each
-    member's local extra field, in archive order.
+    directory starts (:func:`_local_record_end` says where each ends, and what its
+    local header has to agree on with the entry that lists it, ``spelled`` being that
+    entry's name for each member). Returns each member's local extra field, in archive
+    order.
     """
     extras = [b""] * len(members)
     order = sorted(range(len(members)), key=lambda at: members[at].header_offset)
@@ -683,7 +693,9 @@ def _local_extras(
             )
         if info.header_offset != reached:
             raise _misplaced(previous, info, reached)
-        reached, extras[position] = _local_record_end(handle, info, boundary)
+        reached, extras[position] = _local_record_end(
+            handle, info, boundary, spelled[position]
+        )
         previous = info
     if reached != directory_start:
         if previous is None:
@@ -720,7 +732,7 @@ def _misplaced(
 
 
 def _local_record_end(
-    handle: IO[bytes], info: zipfile.ZipInfo, boundary: int
+    handle: IO[bytes], info: zipfile.ZipInfo, boundary: int, spelled: bytes
 ) -> Tuple[int, bytes]:
     """Where the local record of ``info`` ends, and its local header's extra field.
 
@@ -728,8 +740,10 @@ def _local_record_end(
     directory says; then, when the member has a data descriptor, the bytes up to
     ``boundary``, where the next record or the central directory starts, which have to
     be that descriptor. The local header has to agree with the central directory on
-    what places the data and says how to read it: the method, the data descriptor flag
-    and, without a descriptor, the CRC-32 and sizes.
+    what names the member, what places its data and says how to read it: the name, in
+    the bytes ``spelled`` and with the flag that says how they are decoded, the method,
+    the data descriptor flag and, without a descriptor, the CRC-32 and sizes. A reader
+    that walks the local headers extracts each member under the name it finds there.
     """
     offset = info.header_offset
     header = _read_at(handle, offset, _LOCAL_HEADER.size)
@@ -742,13 +756,20 @@ def _local_record_end(
     (_, _, flags, method, _, _, crc, compressed, size, name_length, extra_length) = (
         _LOCAL_HEADER.unpack(header)
     )
-    extra_at = offset + _LOCAL_HEADER.size + name_length
+    name_at = offset + _LOCAL_HEADER.size
+    extra_at = name_at + name_length
     extra = _read_at(handle, extra_at, extra_length)
     data_end = extra_at + extra_length + info.compress_size
     descriptor = bool(info.flag_bits & _DATA_DESCRIPTOR_FLAG)
     compared = [
         ("compression method", method, info.compress_type),
         ("data descriptor flag", bool(flags & _DATA_DESCRIPTOR_FLAG), descriptor),
+        ("name", _read_at(handle, name_at, name_length), spelled),
+        (
+            "UTF-8 name flag",
+            bool(flags & _UTF8_NAME_FLAG),
+            bool(info.flag_bits & _UTF8_NAME_FLAG),
+        ),
     ]
     if not descriptor:
         compressed, size = _local_zip64_sizes(info, extra, compressed, size)

@@ -21,18 +21,18 @@ as a placeholder of the same length and swapped into the archive's bytes afterwa
 
 Archives zipfile cannot read are built the same way, by changing the bytes of a good
 one where the zip format puts the field: a central directory entry that needs a newer
-reader, a damaged compressed stream, and a local header whose name is not the UTF-8 it
-claims. Every one of them has to reach the caller of ``extract_source_archive`` as a
-refusal.
+reader, and a damaged compressed stream. Every one of them has to reach the caller of
+``extract_source_archive`` as a refusal.
 
 A file has to be one zip and nothing else (rule 6). zipfile reads the zip whose end
 record it finds last and lets the rest of the file pass, while a reader that starts at
 the first byte reads what is there, so the rows hand both entry points each shape that
 gives the two readers two trees: two zips end to end, a tar whose last member is a zip,
 a program before the archive, bytes after its end record, a member the central
-directory leaves out, and local headers and data descriptors that disagree with the
-central directory. Some are written byte by byte (``_Raw``), since no zip writer makes
-them. The controls hand both entry points every layout a writer does make: data
+directory leaves out, and local headers (a name or a flag included) and data
+descriptors that disagree with the central directory, and a zip64 end record that its
+locator does not place where it lies. Some are written byte by byte (``_Raw``), since
+no zip writer makes them. The controls hand both entry points every layout a writer does make: data
 descriptors with and without their signature, in four-byte and eight-byte sizes, zip64
 end records, an archive comment and an empty archive.
 
@@ -298,13 +298,30 @@ def _with_first_data_byte_flipped(payload: bytes) -> bytes:
     return bytes(data)
 
 
+def _with_local_name(payload: bytes, name: str, local: bytes) -> bytes:
+    """``payload``, whose one member is named ``name``, with ``local`` (as many bytes) as
+    the name in its local header. The central directory still spells ``name``, so the
+    archive opens."""
+    spelled = name.encode("ascii")
+    assert len(local) == len(spelled) and payload[:4] == b"PK\x03\x04"
+    assert payload.count(spelled) == 2, "the name must appear in the two headers only"
+    return _patched(payload, payload.index(spelled), local)
+
+
+def _with_local_flags(payload: bytes, flags: int) -> bytes:
+    """``payload``, a zip of one member, whose local header gives ``flags`` for its
+    general purpose flags (at 6); the central directory entry keeps its own."""
+    assert payload[:4] == b"PK\x03\x04"
+    return _patched(payload, 6, struct.pack("<H", flags))
+
+
 def _with_local_name_not_utf8(payload: bytes, name: str) -> bytes:
     """``payload``, whose one member is named ``name``, with a local header that lies.
 
     The local header's copy of the name gets a first byte that starts no UTF-8
     sequence, and the header claims UTF-8 (flag bit 11, offset 6). The central
-    directory still spells ``name``, so the archive opens; reading the member decodes
-    the local name and fails.
+    directory still spells ``name``, so the archive opens; a reader that decodes the
+    local name finds no name at all.
     """
     spelled = name.encode("ascii")
     data = bytearray(payload)
@@ -1180,6 +1197,40 @@ REFUSED = [
         "the central directory",
         id="a-local-header-that-gives-another-method",
     ),
+    # A reader that walks the local headers extracts each member under the name it finds
+    # there. zipfile compares the two names only as it extracts the member, after the
+    # members before it were written, and says so in the words of an unreadable member.
+    # Red at the base: each was admitted, and refused as an unreadable member once
+    # extraction reached it.
+    pytest.param(
+        _with_local_name(_zip({"aa.py": b"x"}), "aa.py", b"ab.py"),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'aa.py' gives another name than the central "
+        "directory",
+        id="a-local-header-that-names-another-file",
+    ),
+    pytest.param(
+        _with_local_name_not_utf8(_zip({"aa.py": b"x"}), "aa.py"),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'aa.py' gives another name than the central "
+        "directory",
+        id="a-local-header-whose-name-is-not-the-utf8-it-claims",
+    ),
+    pytest.param(
+        # The same bytes, decoded as UTF-8 by one reader and as cp437 by another.
+        _with_local_flags(_zip({"a.py": b"x"}), 0x800),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'a.py' gives another UTF-8 name flag than the "
+        "central directory",
+        id="a-local-header-that-claims-utf8-where-the-central-entry-does-not",
+    ),
+    pytest.param(
+        _with_local_flags(_zip({"caf\xe9.py": b"x"}), 0),
+        Kind.NOT_A_ZIP,
+        "the local header of zip entry 'caf\xe9.py' gives another UTF-8 name flag than "
+        "the central directory",
+        id="a-local-header-that-does-not-claim-the-utf8-the-central-entry-does",
+    ),
     pytest.param(
         _raw_zip(
             [
@@ -1742,6 +1793,15 @@ class TestOneZipIsAdmittedHoweverItsWriterLaysItOut:
 
         assert _tree(extracted) == tree
         assert _tree(delivered) == tree
+
+    def test_a_name_outside_ascii_that_both_headers_flag_as_utf8_is_admitted(self):
+        """Control for the comparison of a local header's name and UTF-8 flag with the
+        central directory's: zipfile writes the same bytes and the same flag in both."""
+        payload = _zip({"caf\xe9.py": b"x"})
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            members = sa.admit_zip_members(archive)
+
+        assert [member.filename for member in members] == ["caf\xe9.py"]
 
 
 class TestAUnicodePathField:
@@ -2321,20 +2381,6 @@ class TestWhatZipfileCannotReadIsARefusal:
             "Compression requires the (missing) lzma module"
         )
 
-    def test_a_local_header_whose_name_is_not_the_utf8_it_claims_is_refused(
-        self, tmp_path
-    ):
-        """UnicodeDecodeError: a ValueError, but not a refusal."""
-        payload = _with_local_name_not_utf8(_zip({"aa.py": b"x"}), "aa.py")
-
-        refused = _extraction_refusal(
-            _archive_file(tmp_path, payload), tmp_path / "tree"
-        )
-
-        assert refused.kind is Kind.UNREADABLE_MEMBER
-        assert str(refused).startswith("zip entry 'aa.py' cannot be read: ")
-        assert "can't decode byte 0xff" in str(refused)
-
 
 # ---------------------------------------------------------------------------
 # What zipfile cannot read is classified once, for both entry points.
@@ -2413,15 +2459,6 @@ UNREADABLE = [
         False,
         None,
         id="a-member-whose-data-fails-its-checksum",
-    ),
-    pytest.param(
-        _with_local_name_not_utf8(_zip({"aa.py": b"x"}), "aa.py"),
-        Kind.UNREADABLE_MEMBER,
-        "zip entry 'aa.py' cannot be read: 'utf-8' codec can't decode byte 0xff in "
-        "position 0: invalid start byte",
-        False,
-        None,
-        id="a-local-header-whose-name-is-not-the-utf8-it-claims",
     ),
     pytest.param(
         _lzma_member,
