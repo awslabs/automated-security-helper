@@ -1168,3 +1168,62 @@ def test_a_set_member_the_operator_read_from_the_environment_is_shown_by_referen
 
     assert _OPERATOR_SCOPE_VALUE not in json.dumps(result, default=str), result
     assert _options(result)["findings_scope"] == {_OPERATOR_SCOPE_REFERENCE}, result
+
+
+# Whether a checkout's literal equals the server's value is never visible in an
+# answer, and a name that differs from an option's only in case is its own key:
+#   1. an equal literal and a different one: the operator's reference is shown
+#      at the destination option whichever literal the checkout wrote, so the
+#      answer to a guess is the same as the answer to a miss.
+#   2. a checkout's reference at ``AWS_Region``: it describes that key alone and
+#      is never read into the operator's ``aws_region`` beside it.
+@pytest.mark.parametrize(
+    "written",
+    ["xx-test-9", "checkout-region-1"],
+    ids=["a-literal-equal-to-the-value", "a-different-literal"],
+)
+def test_a_literal_in_another_checkout_does_not_tell_whether_it_equals_the_value(
+    tmp_path, monkeypatch, written
+):
+    """The operator's file reads aws_region from a variable, and the file in
+    another checkout writes a literal aws_region: the value itself, or another
+    text. The load replaces the checkout's literal with the operator's value
+    either way, and the answer shows the operator's reference there, with the
+    value nowhere."""
+    monkeypatch.setenv(_OPERATOR_REGION_VAR, _OPERATOR_REGION_VALUE)
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("aws_region: ${ASH_TEST_OPERATOR_REGION}\n"),
+        _section(f"aws_region: {written}\n"),
+    )
+
+    assert _OPERATOR_REGION_VALUE not in json.dumps(result, default=str), result
+    assert written not in json.dumps(result, default=str), result
+    assert _options(result).get("aws_region", _ABSENT) == (
+        _OPERATOR_REGION_REFERENCE
+    ), result
+
+
+def test_a_reference_at_a_case_variant_of_a_destination_is_not_read_into_the_option(
+    tmp_path, monkeypatch
+):
+    """The operator's file holds a literal aws_region ("eu-test-7"), and the file
+    in another checkout writes ``AWS_Region`` as a reference to a variable whose
+    value ("test") is inside that text. The two names are two keys: the
+    reference describes ``AWS_Region`` alone, so ``aws_region`` reads the
+    operator's literal whole and ``AWS_Region`` shows the reference."""
+    monkeypatch.setenv(_REPO_REGION_VAR, "test")
+
+    result = _named_beside_an_operators_file(
+        tmp_path,
+        monkeypatch,
+        _section("aws_region: eu-test-7\n"),
+        _section("AWS_Region: ${ASH_TEST_REPO_REGION}\n"),
+    )
+
+    options = _options(result)
+    assert options.get("aws_region", _ABSENT) == "eu-test-7", result
+    assert options.get("AWS_Region", _ABSENT) == _REPO_REGION_REFERENCE, result
+    assert "test" not in options["AWS_Region"], result
