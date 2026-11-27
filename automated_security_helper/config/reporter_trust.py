@@ -93,6 +93,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
 )
 
@@ -474,6 +475,15 @@ def confine_declared_reporter_destinations(
     view is confined too, and a reporter that sends findings off the host and
     declares no destination options is given the trusted base's whole section.
 
+    The confinement copies the trusted base's values, with the loader's mark on
+    each one it read from the environment, into those options and sections. Once
+    it has run, ``resolve_config._take_destination_references`` drops the
+    references the files inside the tree wrote there, whatever they resolved to,
+    and describes each copied value by its own mark, in the record the results
+    file is written from and in what a message or ``ash config get`` shows. For
+    a built-in reporter, which ``resolve_config`` already described, it adds
+    nothing.
+
     Args:
         config: The config ``resolve_config`` returned, changed in place.
         reporter_classes: The reporter classes the plugin manager loaded.
@@ -496,23 +506,45 @@ def confine_declared_reporter_destinations(
         return
     if source is None:
         source = config._untrusted_membership_source or IN_TREE_OR_DELIVERED
+    from automated_security_helper.config.resolve_config import (
+        _take_destination_references,
+    )
+
     reporter_classes = list(reporter_classes)
+    destinations = declared_destination_options(reporter_classes)
+    enabled_defaults = declared_enabled_defaults(reporter_classes)
+    # Only where the command takes an off-host reporter's settings from the
+    # overrides alone: a scan builds such a reporter from its operator view.
+    whole_sections = (
+        declared_off_host_sections(reporter_classes)
+        if config._reporters_from_overrides
+        else ()
+    )
+    off_host = declared_off_host_reporters(reporter_classes)
+    reporters = [plugin_config_key(reporter) for reporter in reporter_classes]
     _confine(
         config,
         trusted_config,
-        declared_destination_options(reporter_classes),
-        declared_enabled_defaults(reporter_classes),
+        destinations,
+        enabled_defaults,
         config._in_tree_config_files,
         source,
-        # Only where the command takes an off-host reporter's settings from the
-        # overrides alone: a scan builds such a reporter from its operator view.
-        whole_sections=(
-            declared_off_host_sections(reporter_classes)
-            if config._reporters_from_overrides
-            else ()
+        whole_sections=whole_sections,
+        off_host=off_host,
+        reporters=reporters,
+    )
+    # What the confinement copied from the trusted base carries the loader's
+    # mark, and no record describes the copy: the results file would hold it in
+    # clear. The step ``resolve_config`` runs for the built-in reporters runs
+    # here for the declared ones, over the same sections the confinement walked.
+    _take_destination_references(
+        config,
+        destinations,
+        config._in_tree_config_files,
+        loaded=loaded_reporters(
+            destinations, enabled_defaults, whole_sections, off_host, reporters
         ),
-        off_host=declared_off_host_reporters(reporter_classes),
-        reporters=[plugin_config_key(reporter) for reporter in reporter_classes],
+        whole_sections=whole_sections,
     )
 
 
@@ -708,13 +740,9 @@ def _confine(
     tree_keys = config._in_tree_reporter_keys
     # A section named exactly as one of these is that reporter's own, whatever
     # another reporter's lookup could read.
-    loaded = {
-        *reporters,
-        *destinations,
-        *enabled_defaults,
-        *whole_sections,
-        *off_host,
-    }
+    loaded = loaded_reporters(
+        destinations, enabled_defaults, whole_sections, off_host, reporters
+    )
     covered = tuple(dict.fromkeys([*destinations, *enabled_defaults, *whole_sections]))
     for target in targets:
         _pin_to_an_exact_section(target, covered, loaded)
@@ -773,6 +801,42 @@ def _confine(
     for plugin in replaced:
         if plugin not in config._off_host_sections_warned:
             config._off_host_sections_warned.append(plugin)
+
+
+def loaded_reporters(
+    destinations: Iterable[str] = (),
+    enabled_defaults: Iterable[str] = (),
+    whole_sections: Iterable[str] = (),
+    off_host: Iterable[str] = (),
+    reporters: Iterable[str] = (),
+) -> Set[str]:
+    """The names of the reporters one call of ``_confine`` treats as loaded.
+
+    A section named exactly as one of them is that reporter's own, whatever
+    another reporter's lookup could read (``_sections_of``). ``_confine`` builds
+    its set here, and the steps that describe the values it copied
+    (``resolve_config._take_destination_references``) take the same set from
+    the same arguments, so both walk the same sections.
+    """
+    return {
+        *reporters,
+        *destinations,
+        *enabled_defaults,
+        *whole_sections,
+        *off_host,
+    }
+
+
+def built_in_loaded_reporters() -> Set[str]:
+    """The ``loaded`` set of the built-in reporters' confinement
+    (``confine_reporter_destinations``): the four off-host reporters, which are
+    the ones ``REPORTER_DESTINATION_OPTIONS`` and ``REPORTER_ENABLED_DEFAULTS``
+    list and which all send findings off the host."""
+    return loaded_reporters(
+        REPORTER_DESTINATION_OPTIONS,
+        REPORTER_ENABLED_DEFAULTS,
+        off_host=tuple(REPORTER_ENABLED_DEFAULTS),
+    )
 
 
 def _operator_view(config: "AshConfig") -> Optional["AshConfig"]:

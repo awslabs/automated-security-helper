@@ -468,6 +468,17 @@ def _exact_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
     )
 
 
+def _case_kept_path(path: Iterable[PathSegment]) -> Tuple[PathSegment, ...]:
+    """``path`` with ``-`` and ``_`` folded in its keys, the case kept, and its
+    list indices and unknown index as they are: the names the display walk
+    reads a reference into when a mapping holds two keys that differ only in
+    case (``_Index._references_at``), which ``_exact_path`` would run together."""
+    return tuple(
+        segment.replace("-", "_") if isinstance(segment, str) else segment
+        for segment in path
+    )
+
+
 def _bare(written: str) -> str:
     """The reference alone, ``${VAR}`` or ``${VAR:default}``, from ``written``
     (``_reference_match``); the text without its tag when it is none."""
@@ -1058,15 +1069,19 @@ def references_to_marked_values(
     index, so a walk reads the reference into the member by its shape at any
     position (``EnvironmentReference.position_unknown``).
 
-    ``described`` are the references already at hand; a marked value or key is
-    described when one of them is at its exact place (a list index kept) and
-    resolved to it as a whole. The marks never leave this module in clear: a
-    reference holds ``value``, as every one does, and is held in memory only.
+    ``described`` are the references already at hand. A marked value or key is
+    described when one of them is at its place and resolved to it as a whole:
+    the place is compared with ``-`` and ``_`` folded in its keys and the case
+    kept (``_case_kept_path``), a list index kept, so two keys that differ only
+    in case are two places, as the display walk reads them. A string that a
+    reference describes only in part is not described. The marks never leave
+    this module in clear: a reference holds ``value``, as every one does, and
+    is held in memory only.
     """
     from automated_security_helper.config.config_validator import _rewrite_for
 
     known = {
-        (_exact_path(reference.path), reference.key, reference.resolved)
+        (_case_kept_path(reference.path), reference.key, reference.resolved)
         for reference in described
     }
     found: List[EnvironmentReference] = []
@@ -1078,7 +1093,7 @@ def references_to_marked_values(
         innermost: Optional[Tuple[int, int]],
     ) -> None:
         resolved = str(text)
-        if (_exact_path(path), key, resolved) in known:
+        if (_case_kept_path(path), key, resolved) in known:
             return
         written = str(text.shown)
         part = _rewrite_for("key" if key else "value", path, written, resolved)
@@ -1086,7 +1101,7 @@ def references_to_marked_values(
         reference = EnvironmentReference(
             path, written, resolved, part.environment_part, key, None, length, index_at
         )
-        known.add((_exact_path(path), key, resolved))
+        known.add((_case_kept_path(path), key, resolved))
         found.append(reference)
 
     def walk(

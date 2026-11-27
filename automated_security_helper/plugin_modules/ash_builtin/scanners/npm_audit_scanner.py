@@ -1,7 +1,6 @@
 """Module containing the NPM Audit security scanner implementation."""
 
 import copy
-import errno
 import hashlib
 import json
 import logging
@@ -346,6 +345,12 @@ _UNPLACED_LOCKFILE_CONSEQUENCE = (
     "projects share one identity"
 )
 
+#: The reason ``_shown_lockfile`` gives for the link loop ``Path.resolve`` reports
+#: with a ``RuntimeError`` before Python 3.13. A fixed English text: the system's
+#: own text for a loop (``os.strerror(errno.ELOOP)``) can read ``Unknown error``
+#: on Windows.
+_LINK_LOOP_REASON = "too many levels of symbolic links"
+
 
 def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | None:
     """``lock_file`` relative to the scanned target as a POSIX path, or None.
@@ -370,9 +375,12 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
     says nothing about where the lockfile is. That is an ``OSError`` for a
     directory the process cannot search; for a link loop, ``Path.resolve`` raises
     ``RuntimeError`` before Python 3.13 and nothing from 3.13, where the loop
-    shows as the place not being under the directory. A ``RuntimeError`` is named
-    by the system's reason for a loop, never by its own text, which names the
-    looped path.
+    shows as the place not being under the directory. Only that loop's
+    ``RuntimeError`` (CPython's own, whose text starts ``Symlink loop``) is named
+    by a fixed reason for a loop (``_LINK_LOOP_REASON``), never by its own text,
+    which names the looped path. Any other ``RuntimeError`` (a
+    ``RecursionError``, a ``NotImplementedError``, Windows' winerror 1921 before
+    3.13) is named by its class, and its text never reaches the message either.
     """
     if lock_file is None:
         return None
@@ -406,11 +414,18 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
         # The same consequence, for another cause: a place could not be read, so
         # the lockfile may well be under the scanned directory and the message
         # must not say it is not. The error's own reason alone: its full text
-        # repeats the path, which this message already names. A RuntimeError is
-        # Path.resolve()'s link loop before Python 3.13; its text names the
-        # looped path, so the loop's reason is the system's own.
+        # repeats the path, which this message already names. Only the
+        # RuntimeError Path.resolve() raises for a link loop before Python 3.13
+        # (CPython's own, whose text starts "Symlink loop") reads as a loop, with
+        # a fixed reason: its text names the looped path. Any other RuntimeError
+        # (a RecursionError, a NotImplementedError, Windows' winerror 1921 before
+        # 3.13) is named by its class.
         if isinstance(error, RuntimeError):
-            reason = os.strerror(errno.ELOOP)
+            reason = (
+                _LINK_LOOP_REASON
+                if str(error).startswith("Symlink loop")
+                else type(error).__name__
+            )
         else:
             reason = error.strerror or type(error).__name__
         ASH_LOGGER.warning(
