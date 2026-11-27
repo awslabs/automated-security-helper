@@ -29,9 +29,10 @@ repository's `pyproject.toml` uses for cdk-nag: 2.273.0 is the oldest release
 with no known advisories against it or its bundled dependencies
 (2.272.0 and earlier bundle brace-expansion 5.0.9, affected by CVE-2026-102276,
 CVE-2026-102277 and CVE-2026-102278), and a floor that starts at a version with a
-published advisory is a poor default for a security tool. The development
-dependency is pinned to exactly the floor so the package is always compiled
-against the oldest version it claims to support.
+published advisory is a poor default for a security tool. `package.json` pins the
+development dependencies to exact versions: `constructs` at its floor, 10.8.1, and
+`aws-cdk-lib` at 2.278.0, which is newer than its floor, so the package is compiled
+against 2.278.0 and not against the oldest `aws-cdk-lib` the peer range admits.
 
 To use it today, build it and depend on the directory:
 
