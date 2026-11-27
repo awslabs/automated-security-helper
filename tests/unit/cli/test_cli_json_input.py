@@ -459,6 +459,9 @@ class TestSkeleton:
             - hidden
             - ARGV_ONLY_PARAMETERS
             - not_taken
+            # Taken, and still read from a document, but deprecated: the skeleton
+            # leaves it out.
+            - {"scanners"}
         ) | {"file"}
         assert set(skeleton) == expected
         assert skeleton["file"] is None

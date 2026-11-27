@@ -25,6 +25,10 @@ directory. The option is declared on that subject and read by its callback, whic
 extracts the archive and hands the engine the extracted directory as the one to scan,
 so the engine and the forms that share it know nothing of archives, and the module
 that reads the zip (``utils/source_archive``) is imported only when one is given.
+
+The skeleton of a subject (``--generate-cli-skeleton``) leaves out the deprecated keys,
+``source_dir`` and ``scanners``, while a ``--cli-json-input`` document that names one is
+still read, so a document written by filling in the skeleton prints no deprecation line.
 """
 
 from __future__ import annotations
@@ -97,6 +101,14 @@ OTHER_SUBJECT_OPTIONS = (
     "git_ref",
     "git_depth",
 )
+#: The deprecated options a subject still reads from a ``--cli-json-input`` document
+#: and leaves out of its skeleton. The skeleton is the template a document is written
+#: from, so listing one would send whoever fills it in to a key that prints its
+#: deprecation line. ``source_dir`` is the older spelling of the PATH argument and
+#: ``scanners`` of ``--only-scanners`` and ``--add-scanners``. ``--workspace`` is
+#: deprecated too and is no key of either subject: ``fs`` takes none of the workspace
+#: options, and the FILE argument of ``workspace`` is named ``file``.
+DEPRECATED_KEYS = frozenset({"source_dir", "scanners"})
 
 #: The name the subject-less form's command is registered under. It is not a subject,
 #: so ``ScanTyperGroup`` takes it out of its commands as the group is built.
@@ -601,6 +613,17 @@ run_ash_scan_without_subject_cli_command.__doc__ = run_ash_scan_fs_cli_command._
 _declared(run_ash_scan_without_subject_cli_command, _legacy_signature())
 
 
+class _SubjectCommand(CliJsonInputCommand):
+    """A subject's command: its skeleton leaves out the deprecated keys.
+
+    A document that names one is still read, with the deprecation line it always
+    printed. The command of the form with no subject keeps them in its skeleton: that
+    form is the scan as it was, and is deprecated as a whole.
+    """
+
+    skeleton_omits = DEPRECATED_KEYS
+
+
 def build_scan_app() -> typer.Typer:
     """The ``scan`` Typer app with its subjects registered."""
     scan_app = typer.Typer(
@@ -615,14 +638,14 @@ def build_scan_app() -> typer.Typer:
         ),
         no_args_is_help=False,
     )
-    for name, callback in (
-        (DEFAULT_SUBJECT, run_ash_scan_fs_cli_command),
-        (WORKSPACE_SUBJECT, run_ash_scan_workspace_cli_command),
-        (_LEGACY_KEY, run_ash_scan_without_subject_cli_command),
+    for name, callback, command_class in (
+        (DEFAULT_SUBJECT, run_ash_scan_fs_cli_command, _SubjectCommand),
+        (WORKSPACE_SUBJECT, run_ash_scan_workspace_cli_command, _SubjectCommand),
+        (_LEGACY_KEY, run_ash_scan_without_subject_cli_command, CliJsonInputCommand),
     ):
         scan_app.command(
             name=name,
-            cls=CliJsonInputCommand,
+            cls=command_class,
             no_args_is_help=False,
             # `ash scan --help` is the legacy command's help (see
             # ScanTyperGroup._routed), so the list of subjects is shown here, where

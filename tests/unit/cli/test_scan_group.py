@@ -297,11 +297,12 @@ def test_a_json_document_that_names_one_directory_twice_is_not_a_conflict(
 
 
 def test_a_null_key_in_a_json_document_names_no_directory(engine, tmp_path):
-    # The skeleton `--generate-cli-skeleton` prints lists `path` and `source_dir`
-    # side by side, both null, and a document reads null as not given: filling in
-    # `path` alone is one name.
+    # A document reads null as not given, so a `source_dir` key left null beside a
+    # filled-in `path` is one name. The skeleton `--generate-cli-skeleton` prints lists
+    # `path` alone, null (`source_dir` is deprecated, so the template leaves it out),
+    # but a document written from an earlier skeleton still carries `source_dir`, null.
     skeleton = json.loads(_invoke(["scan", "fs", "--generate-cli-skeleton"]).stdout)
-    assert skeleton["path"] is None and skeleton["source_dir"] is None
+    assert skeleton["path"] is None and "source_dir" not in skeleton
     document = _document(tmp_path, {"path": "svc", "source_dir": None})
 
     result = _invoke(["scan", "fs", "--cli-json-input", document])
@@ -379,7 +380,9 @@ def test_fs_skeleton_lists_the_path_key():
     assert result.exit_code == 0, result.output
     skeleton = json.loads(result.stdout)
     assert "path" in skeleton
-    assert "source_dir" in skeleton
+    # The directory is named with `path`. The deprecated `source_dir` is still read from
+    # a document, but the template a document is written from does not list it.
+    assert "source_dir" not in skeleton
 
 
 def test_the_subject_less_form_still_reads_a_skeleton():

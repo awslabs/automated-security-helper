@@ -253,8 +253,8 @@ def test_a_document_without_the_deprecated_key_prints_no_deprecation_line(
     tmp_path, isolated
 ):
     """The control for the two document rows: the fs skeleton as it is generated
-    (its ``source_dir`` is null, which a document reads as not given) and a document
-    that uses the ``path`` key run as ``ash scan fs src`` runs, and say nothing."""
+    (it does not list ``source_dir``) and a document that uses the ``path`` key run as
+    ``ash scan fs src`` runs, and say nothing."""
     skeleton = _invoke(["scan", "fs", "--generate-cli-skeleton"])
     assert skeleton.exit_code == 0, skeleton.output
     noun = _invoke(["scan", "fs", "src", *FAILS_FAST])
@@ -341,12 +341,15 @@ def test_a_legacy_spelling_that_prints_keeps_the_nouns_stdout(name, tmp_path, is
     assert _deprecation_lines(noun.stderr) == [], noun.stderr
 
 
-def test_the_skeleton_of_scan_without_a_subject_is_the_fs_one_plus_the_workspace_keys():
+def test_the_skeleton_without_a_subject_adds_the_workspace_and_deprecated_keys():
     """The one stdout an old spelling does not share with its noun. ``ash scan`` with
     no subject still takes the workspace options, as it always did, and ``fs`` does
-    not, so its skeleton lists the four keys of those options as well. ``fs`` alone
-    takes ``--archive``, so only its skeleton lists that key. Everything else is the
-    same, and neither prints a line: a skeleton only lists what a command takes."""
+    not, so its skeleton lists the four keys of those options as well. It lists the two
+    deprecated keys too, ``source_dir`` and ``scanners``, which the skeleton of ``fs``
+    leaves out so that filling it in never names one: the form with no subject is
+    deprecated as a whole and keeps its template as it was. ``fs`` alone takes
+    ``--archive``, so only its skeleton lists that key. Everything else is the same,
+    and neither prints a line: a skeleton only lists what a command takes."""
     legacy = _invoke(["scan", "--generate-cli-skeleton"])
     noun = _invoke(["scan", "fs", "--generate-cli-skeleton"])
 
@@ -357,6 +360,8 @@ def test_the_skeleton_of_scan_without_a_subject_is_the_fs_one_plus_the_workspace
         "workspace_config",
         "allow_missing_projects",
         "dry_run",
+        "source_dir",
+        "scanners",
     }
     assert set(noun_keys) - set(legacy_keys) == {"archive"}
     shared = set(noun_keys) & set(legacy_keys)
