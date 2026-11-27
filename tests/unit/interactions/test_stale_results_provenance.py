@@ -35,8 +35,9 @@ The tests below pin five properties:
 3. A run that legitimately consumes an existing results file (``--use-existing``, which
    the host resolves into ``existing_results``) is exempt from (1), otherwise the fix
    would delete the very input that shape exists to read -- and the exemption is decided
-   on the same truthiness ``run_ash_container`` uses to send ``--use-existing``, so the
-   empty string cannot fall between them.
+   on the same condition the container's command and the Nix shell's use to send
+   ``--use-existing``, so neither the empty string nor a workspace scan, which reads no
+   saved results, can fall between them.
 4. The refusal when cleanup fails is conditioned on the artifact still being there, not on
    the call having raised. A lost race, or a partial removal that finished the job, is not
    a reason to refuse a scan that would work.
