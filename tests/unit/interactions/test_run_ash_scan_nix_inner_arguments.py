@@ -702,9 +702,9 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
     """The test above spells the command line out; this one hands it to the command
     that runs inside the shell, so a flag the subject does not take is an error here
     and not a Nix run that fails inside the shell. The options of a directory scan that
-    a workspace scan does not take (a shard, saved results) are not given to it, so
-    none is set. The changed-files scope is given: the subject takes it and applies it
-    to each project."""
+    a workspace scan does not take are not given to it: no shard is set here, and the
+    saved results, which are set, are left out of the command by the builder. The
+    changed-files scope is given: the subject takes it and applies it to each project."""
     import typer
 
     from automated_security_helper.cli.main import app
@@ -719,15 +719,16 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
         update={
             "workspace_plan": plan,
             "allow_missing_projects": True,
-            "existing_results": None,
             "shard_index": None,
             "shard_count": None,
         }
     )
+    assert opts.existing_results, "saved results are set; the builder drops them"
     argv = ras._nix_inner_argv(opts)
 
     subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
     assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    assert "--use-existing" not in argv
     parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
 
     def read(name):
@@ -780,6 +781,41 @@ def test_a_workspace_scan_in_nix_mode_gives_the_inner_scan_its_changed_files_sco
     parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
     assert parsed["changed_files_only"] is True
     assert parsed["base_ref"] == "origin/trunk"
+
+
+def test_a_workspace_scan_in_nix_mode_is_asked_to_read_no_saved_results(
+    tmp_path, monkeypatch
+):
+    """``ash --workspace FILE --use-existing --mode nix`` is taken by the host, which
+    hands the run the output directory's results file, and the scan inside the shell
+    reads none: the workspace executor scans every project afresh. The ``workspace``
+    subject declares no ``--use-existing``, so the option in the command would end the
+    scan with a usage error. A directory scan is still given it."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
+    out = tmp_path / "out"
+    plan = SimpleNamespace(
+        workspace_file="/ws/dev.code-workspace", workspace_config_source=None
+    )
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=out,
+        mode=RunMode.nix,
+        existing_results=str(out / "ash_aggregated_results.json"),
+    )
+
+    argv = ras._nix_inner_argv(opts.model_copy(update={"workspace_plan": plan}))
+
+    assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    assert "--use-existing" not in argv
+    subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
+    parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
+    assert parsed["file"] == "/ws/dev.code-workspace"
+    assert "--use-existing" in ras._nix_inner_argv(opts), "the directory scan's control"
 
 
 @pytest.fixture

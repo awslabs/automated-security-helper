@@ -3578,6 +3578,26 @@ def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
     )
 
 
+def _inner_scan_reads_saved_results(opts: ScanOptions) -> bool:
+    """Whether the scan a container or a shell runs is asked to read the saved results.
+
+    ``--use-existing`` is forwarded to it (``_nix_inner_argv``, and
+    ``_assemble_run_command``, which asks the same question of its own parameters),
+    and ``_discard_prior_run_artifacts`` keeps the results file for it, only when
+    this is true. The two have to agree: a file kept for a scan that was never asked
+    to read it is read back as this run's own.
+
+    A workspace scan reads none. Its executor scans every project afresh (each
+    project's orchestrator runs with ``existing_results_path=None``,
+    workspace/execution.py), and the ``workspace`` subject has no such option, so
+    the flag would end the scan inside with a usage error. The host still accepts
+    ``--use-existing`` with a workspace, as it did in 3.8 (``_settle_output_dir``).
+    Truthiness, as everywhere ``existing_results`` is read: an empty value reads
+    nothing.
+    """
+    return bool(opts.existing_results) and opts.workspace_plan is None
+
+
 # The output-directory entries a local scan clears before it starts: the working
 # directories the orchestrator's ``ensure_directories`` rmtrees and the files its
 # ``initialize`` unlinks, read from the shared constants both sides keep (one list
@@ -3659,7 +3679,7 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
         (opts.output_dir / INNER_RUN_OUTCOME_FILE).unlink(missing_ok=True)
     except OSError as error:
         logger.debug(f"Could not remove {INNER_RUN_OUTCOME_FILE}: {error}")
-    if opts.existing_results:
+    if _inner_scan_reads_saved_results(opts):
         # The one shape that legitimately consumes a file from before this invocation.
         # --use-existing resolves to a path in this directory and the inner scan is asked
         # to read it, so removing it would delete the run's only input. --phases report
@@ -3672,6 +3692,10 @@ def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
         # inner scan to read nothing. Exempting it here on `is not None` would keep the
         # stale file AND leave it unread by the container -- the read-back then answers
         # from it, which is the exact failure this function closes.
+        #
+        # The same gap opens for a workspace scan, which is asked to read nothing
+        # (_inner_scan_reads_saved_results), so it takes the clearing below like a
+        # scan with no saved results: the scan inside writes its own.
         #
         # The restore marker stays with them for now. It says the results here
         # were put back by a scan that ended without its own; this scan reads
@@ -4795,6 +4819,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       shell keeps the variable, so the inner CLI reads it the same way.
       ``scanners``, the legacy list, is spelled ``--add-scanners``: the scan CLI
       reads that as it reads ``--scanners`` and does not deprecate it.
+      ``existing_results`` is given as ``--use-existing`` to a directory scan only:
+      a workspace scan reads no saved results (``_inner_scan_reads_saved_results``).
     * REFUSED before this point, in ``run_ash_scan``, because the scan CLI has
       no flag for them and the scan inside the shell cannot be given them:
       ``config_base_gate``, ``untrusted_config``, ``client_config_policy``,
@@ -4920,11 +4946,13 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         argv.extend(["--min-severity", opts.min_severity])
     if opts.changed_files_only:
         argv.extend(["--changed-files-only", "--base-ref", opts.base_ref])
-    if opts.existing_results:
+    if _inner_scan_reads_saved_results(opts):
         # The CLI resolves --use-existing to the output directory's own results
         # file. _refuse_a_results_file_the_shell_cannot_be_handed, run before
         # this, has checked that the file this option names IS that file; the
         # shell shares this filesystem, so the inner scan resolves the same one.
+        # Not for a workspace: its scan reads no saved results, and the `workspace`
+        # subject has no such option.
         argv.append("--use-existing")
     # Each value on its own: ScanPhase is the one place that refuses an unusable
     # pair (see the ScanOptions comment on shard_index), and it can refuse only

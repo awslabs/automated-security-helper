@@ -5173,12 +5173,19 @@ def _assemble_run_command(
     for override in config_overrides:
         ash_args.extend(["--config-overrides", override])
 
-    if existing_results:
+    if existing_results and workspace_relative_file is None:
         # Truthiness here and truthiness in _discard_prior_run_artifacts, which grants the
         # matching exemption from the pre-run cleanup. The two have to agree on the empty
         # string or it falls between them: the host would keep a previous run's results
         # file for an inner scan that was never asked to read it, and then read that file
         # back as this invocation's own.
+        #
+        # They agree on a workspace too (_inner_scan_reads_saved_results, which the
+        # cleanup asks of the options): a workspace scan is asked to read nothing. Its
+        # executor scans every project afresh (existing_results_path=None for each,
+        # workspace/execution.py) and `ash scan workspace` has no such option, so the
+        # flag would end the scan inside with a usage error. The host still accepts
+        # --use-existing with a workspace, as it did in 3.8.
         #
         # `--use-existing`, not `--existing-results`. The latter is not declared anywhere
         # on the CLI -- it exists only as a local variable in cli/scan.py, where

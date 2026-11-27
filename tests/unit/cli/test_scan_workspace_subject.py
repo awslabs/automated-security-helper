@@ -518,6 +518,49 @@ def test_container_mode_refuses_the_changed_files_variable_for_the_subject(
 
 
 # --------------------------------------------------------------------------- #
+# Saved results: the two forms with no subject still take them
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("mode", ["container", "nix"])
+@pytest.mark.parametrize("spelling", WORKSPACE_SPELLINGS[1:])
+def test_the_forms_with_no_subject_take_saved_results_in_the_outer_modes(
+    tmp_path, no_scan, monkeypatch, spelling, mode
+):
+    """``ash --workspace FILE --use-existing --mode container`` and the ``nix`` form are
+    taken by the host, as they were before the subject existed: it resolves the output
+    directory's results file and hands the scan that file and the plan. The subject
+    refuses the option (``test_the_subject_refuses_what_belongs_to_another_subject``),
+    and the scan inside the container or the shell is that subject, so what keeps these
+    forms working is the two commands leaving ``--use-existing`` out for a workspace,
+    each pinned beside its builder."""
+    monkeypatch.delenv("OCI_RUNNER", raising=False)
+    monkeypatch.delenv("OCI_RUNNER_WRAPPER", raising=False)
+    workspace = _workspace(tmp_path / "ws")
+    out = tmp_path / "out"
+    out.mkdir()
+    results = out / "ash_aggregated_results.json"
+    results.write_text("{}", encoding="utf-8")
+
+    result = _invoke(
+        [
+            *spelling(str(workspace)),
+            "--use-existing",
+            "--output-dir",
+            str(out),
+            "--mode",
+            mode,
+        ]
+    )
+
+    assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
+    (call,) = no_scan
+    assert Path(call["existing_results"]).resolve() == results.resolve()
+    assert call["mode"] == mode
+    assert [project.key for project in call["workspace_plan"].projects] == ["api"]
+
+
+# --------------------------------------------------------------------------- #
 # Where the subject sits in the command line
 # --------------------------------------------------------------------------- #
 

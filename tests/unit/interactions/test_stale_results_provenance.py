@@ -53,10 +53,14 @@ import pytest
 
 from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
+    _discard_prior_run_artifacts,
+    _nix_inner_argv,
     _run_container_mode,
     _run_nix_mode,
+    _workspace_relative_file,
 )
 from automated_security_helper.utils.subprocess_utils import create_completed_process
+from tests.unit.interactions.test_workspace_container_mode import _plan, _run_command
 
 # The refusals Nix mode asks before clearing the previous run's output; replaced by a
 # no-op beside each stand-in runner, since the preflight is asked whatever the runner is.
@@ -757,3 +761,77 @@ class TestNixModeStaleResults:
 
         assert existing.exists()
         assert results.name == STALE_MARKER
+
+
+class TestTheCleanupAgreesWithTheInnerCommandsOnSavedResults:
+    """Three readers of one question: is the scan inside asked to read saved results?
+
+    The cleanup keeps the results file for a scan that is. The container's command
+    names ``--use-existing`` to one that is, and so does the Nix shell's. A file kept for
+    a scan that was never asked to read it survives unread, and the read-back answers
+    from it: the failure this module closes. The three answers have to be one answer for
+    every shape a run takes.
+
+    A workspace scan is the shape that fell between them. The host takes
+    ``--use-existing`` with a workspace file, the workspace executor scans every project
+    afresh, and ``ash scan workspace`` declares no such option, so neither command names
+    it and the cleanup has nothing to keep. The container command's half is pinned in
+    ``test_workspace_container_mode`` and the shell command's in
+    ``test_run_ash_scan_nix_inner_arguments``; this is the half that has to agree.
+    """
+
+    def test_a_workspace_scan_does_not_exempt_the_cleanup(self, tmp_path):
+        out = tmp_path / "out"
+        opts = _opts(
+            tmp_path,
+            existing_results=(out / "ash_aggregated_results.json").as_posix(),
+            workspace_plan=_plan(tmp_path, "api"),
+        )
+        stale = _seed_stale_results(opts.output_dir)
+
+        _discard_prior_run_artifacts(opts, MagicMock())
+
+        assert not stale.exists(), (
+            "a workspace scan reads no saved results, so a file kept for it would "
+            "survive unread and be read back as this run's own"
+        )
+
+    @pytest.mark.parametrize(
+        ("saved", "workspace", "asked"),
+        [
+            pytest.param(None, False, False, id="directory-nothing-saved"),
+            pytest.param("", False, False, id="directory-empty"),
+            pytest.param("file", False, True, id="directory-saved"),
+            pytest.param(None, True, False, id="workspace-nothing-saved"),
+            pytest.param("", True, False, id="workspace-empty"),
+            pytest.param("file", True, False, id="workspace-saved"),
+        ],
+    )
+    def test_the_cleanup_and_both_commands_answer_alike(
+        self, tmp_path, saved, workspace, asked
+    ):
+        out = tmp_path / "out"
+        existing = (
+            (out / "ash_aggregated_results.json").as_posix()
+            if saved == "file"
+            else saved
+        )
+        opts = _opts(
+            tmp_path,
+            existing_results=existing,
+            workspace_plan=_plan(tmp_path, "api") if workspace else None,
+        )
+        stale = _seed_stale_results(opts.output_dir)
+
+        container = _run_command(
+            tmp_path,
+            opts.output_dir,
+            existing_results=existing,
+            workspace_relative_file=_workspace_relative_file(opts),
+        )
+        shell = _nix_inner_argv(opts)
+        _discard_prior_run_artifacts(opts, MagicMock())
+
+        assert ("--use-existing" in container) is asked
+        assert ("--use-existing" in shell) is asked
+        assert stale.exists() is asked
