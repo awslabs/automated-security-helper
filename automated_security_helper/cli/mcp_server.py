@@ -3594,7 +3594,7 @@ def get_ash_help() -> str:
     return (
         """ASH (Automated Security Helper) Usage Guide
 
-ASH is a security scanning orchestrator that runs multiple security tools.
+ASH is Automated Security Helper, the agentic security harness: a security scanning orchestrator that runs multiple security tools.
 
 🔍 **Built-in scanners:**
 """
