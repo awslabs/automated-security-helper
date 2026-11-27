@@ -566,15 +566,39 @@ def test_the_merge_warning_about_ignore_paths_names_scan_fs(monkeypatch):
     assert "where ash scan fs --ignore-suppressions keeps them" in message, message
 
 
-#: The legacy spellings: a scan with no subject, a bare root with an option, and the
-#: top-level commands that moved.
-_LEGACY_COMMAND = re.compile(
-    r"\b(?:ash|ashv3) scan\b(?! (?:fs|workspace|image|git)\b)"
-    r"|(?<![\w./-])(?:\./)?(?:ash|ashv3|automated-security-helper) "
-    r"--(?!version\b|help\b|install-completion\b|show-completion\b)"
-    r"|(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|merge|inspect|build-image)\b"
+#: The subjects of ``ash scan``, read from the CLI's own scan group: a subject a later
+#: change adds (``workspace``) is accepted as soon as the group has it, and a subject
+#: a page names before then is a command that does not exist.
+_SCAN_SUBJECTS = tuple(typer.main.get_command(app).commands["scan"].commands)
+
+
+def _no_subject_command(subjects) -> re.Pattern[str]:
+    """The forms that run the scan with no subject, and so warn: ``ash scan`` with
+    no word after it or a word that is not one of *subjects*, and a bare root with
+    an option, long or short (``ash --mode container``, ``ash -c x.yaml``)."""
+    named = "|".join(re.escape(subject) for subject in subjects)
+    return re.compile(
+        rf"\b(?:ash|ashv3) scan\b(?! (?:{named})\b)"
+        r"|(?<![\w./-])(?:\./)?(?:ash|ashv3|automated-security-helper) "
+        r"-(?!-(?:version|install-completion|show-completion)\b)"
+    )
+
+
+_NO_SUBJECT = _no_subject_command(_SCAN_SUBJECTS)
+#: A fenced line that is only the program, which runs the scan with no subject. In
+#: prose ``ash`` is the program's name, not a command to type.
+_BARE_PROGRAM = re.compile(
+    r"^\s*(?:\$\s+)?(?:uv run\s+)?(?:\./)?(?:ash|ashv3|automated-security-helper)\s*$"
+)
+#: The top-level commands that moved.
+_MOVED_COMMAND = re.compile(
+    r"(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|merge|inspect|build-image)\b"
 )
 _SCAN_FS = re.compile(r"\b(?:ash|ashv3) scan fs\b")
+#: A help request never warns. A ``--workspace`` scan has no subject to move to yet,
+#: so the forms with no subject print nothing for it either.
+_HELP = re.compile(r"(?<!\S)--help(?=\s|$)")
+_WORKSPACE = re.compile(r"(?<!\S)--workspace(?=[=\s]|$)")
 _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 
 #: The markdown under the package that is a dated record, not documentation a reader
@@ -586,28 +610,66 @@ _NOT_DOCUMENTATION = (
 )
 
 
-def _is_legacy(command: str) -> bool:
-    return bool(_LEGACY_COMMAND.search(command)) or bool(
-        _SCAN_FS.search(command) and "--source-dir" in command
+def _is_legacy(command: str, fenced: bool = False) -> bool:
+    """Whether *command*, as a reader is shown it, runs a spelling that warns.
+
+    A help request never warns, whatever it follows. A scan with ``--workspace`` has
+    no subject to move to yet, so the forms with no subject print nothing for it. The
+    program alone is the bare scan only as a line of a fenced block.
+    """
+    if _HELP.search(command):
+        return False
+    no_subject = _NO_SUBJECT.search(command) or (
+        fenced and _BARE_PROGRAM.search(command)
     )
+    if no_subject and not _WORKSPACE.search(command):
+        return True
+    if _MOVED_COMMAND.search(command):
+        return True
+    return bool(_SCAN_FS.search(command) and "--source-dir" in command)
 
 
 def _commands(markdown: str):
-    """(line number, text) of each command a reader of *markdown* is shown: every
-    line of a fenced block that is not a comment, and every inline code span. A
+    """(line number, text, fenced) of each command a reader of *markdown* is shown:
+    every line of a fenced block that is not a comment, and every inline code span. A
     span with no option counts too: ``to run a scan, use `ash scan``` is a command
-    to type even though it passes nothing."""
+    to type even though it passes nothing. A fenced line that ends in a backslash
+    goes on in the next one, and the lines are one command, numbered from its first."""
     fenced = False
+    held: list[str] = []  # the lines of a command that goes on, without their backslash
+    first = 0
     for number, line in enumerate(markdown.splitlines(), start=1):
         if line.lstrip().startswith("```"):
             fenced = not fenced
+            if held:  # the block ends in the middle of a command
+                yield first, " ".join(held), True
+                held = []
             continue
         if fenced:
-            if not line.lstrip().startswith("#"):
-                yield number, line
+            if not held:
+                if line.lstrip().startswith("#"):
+                    continue
+                first = number
+            if line.rstrip().endswith("\\"):
+                held.append(line.rstrip()[:-1].strip())
+                continue
+            yield first, " ".join([*held, line.strip()]), True
+            held = []
             continue
         for span in _INLINE_CODE.findall(line):
-            yield number, span
+            yield number, span, False
+    if held:
+        yield first, " ".join(held), True
+
+
+def _legacy_commands(markdown: str) -> list[tuple[int, str]]:
+    """(line number, text) of each command in *markdown* that runs a spelling
+    that warns."""
+    return [
+        (number, command)
+        for number, command, fenced in _commands(markdown)
+        if _is_legacy(command, fenced)
+    ]
 
 
 def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
@@ -620,10 +682,9 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
     assert pages, "no markdown found under the package"
 
     found = [
-        f"{page.relative_to(package).as_posix()}:{number}: {command.strip()}"
+        f"{page.relative_to(package).as_posix()}:{number}: {command}"
         for page in pages
-        for number, command in _commands(page.read_text(encoding="utf-8"))
-        if _is_legacy(command)
+        for number, command in _legacy_commands(page.read_text(encoding="utf-8"))
     ]
 
     assert found == [], "\n".join(found)
@@ -636,14 +697,102 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
         ("ash scan --ash-plugin-modules x", True),
         ("uv run ash scan fs src --source-dir src", True),
         ("ash report --format text", True),
+        # No subject, a short option on the bare root, and a word that is no subject.
+        ("ash scan", True),
+        ("ash -c x.yaml", True),
+        ("uv run ash -c x.yaml --mode container", True),
+        ("ash scan nosuchsubject src", True),
+        # A workspace scan has no subject to move to, but a deprecated option on
+        # a subject still warns.
+        ("ash scan fs --workspace ws.yaml --source-dir src", True),
         ("ash scan fs --ash-plugin-modules x", False),
         ("uv run ash scan fs /path/to/project --scanners trivy-repo", False),
         ("ash config get --source-dir src", False),
         ("ash --version", False),
+        ("ash --install-completion", False),
+        ("ash --show-completion", False),
         ("uv run ash plugin list --ash-plugin-modules x", False),
+        # A workspace scan has no subject to move to yet, and a help request never
+        # warns, on any spelling.
+        ("ash scan --workspace ws.yaml", False),
+        ("ash --workspace ws.yaml", False),
+        ("ash --workspace=ws.yaml --mode container", False),
+        ("ash scan --help", False),
+        ("ash --help", False),
+        ("ash report --help", False),
+        # Every subject the scan group has is one a page may name.
+        *[(f"ash scan {subject} src", False) for subject in _SCAN_SUBJECTS],
     ],
 )
 def test_the_markdown_check_tells_a_legacy_command_from_a_noun_one(command, legacy):
     """The check's own controls: it flags each kind of old spelling, and passes the
     noun forms and the commands whose ``--source-dir`` is their own option."""
     assert _is_legacy(command) is legacy
+
+
+_FENCE = "`" * 3
+
+
+def _fenced(*lines: str) -> str:
+    """A markdown snippet that holds *lines* as one fenced block."""
+    return "\n".join([f"{_FENCE}console", *lines, _FENCE])
+
+
+@pytest.mark.parametrize(
+    ("markdown", "flagged"),
+    [
+        pytest.param(
+            _fenced("uv run ash \\", "    --mode container"),
+            [(2, "uv run ash --mode container")],
+            id="a-bare-root-continued-onto-its-option",
+        ),
+        pytest.param(
+            _fenced("uv run ash scan fs . \\", "    --source-dir src"),
+            [(2, "uv run ash scan fs . --source-dir src")],
+            id="a-deprecated-option-on-the-continuation-line",
+        ),
+        pytest.param(
+            _fenced("uv run ash scan fs . \\", "    --scanners bandit"),
+            [],
+            id="a-continued-scan-fs-with-its-own-options",
+        ),
+        pytest.param(
+            _fenced("ash scan \\", "    --workspace ws.yaml"),
+            [],
+            id="a-workspace-scan-continued",
+        ),
+        pytest.param(
+            _fenced("uv run ash scan \\"),
+            [(2, "uv run ash scan")],
+            id="a-continuation-at-the-end-of-the-block",
+        ),
+        pytest.param(
+            _fenced("uv run ash"), [(2, "uv run ash")], id="the-program-alone"
+        ),
+        pytest.param(
+            _fenced("$ ash"), [(2, "$ ash")], id="the-program-alone-after-a-prompt"
+        ),
+        pytest.param(_fenced("which ash"), [], id="the-program-as-an-argument"),
+        pytest.param("Run `ash` to scan.", [], id="the-program-named-in-prose"),
+        pytest.param(_fenced("# ash scan"), [], id="a-comment"),
+    ],
+)
+def test_the_markdown_check_reads_a_command_as_its_reader_does(markdown, flagged):
+    """A command that goes on after a backslash is one command, and the program on
+    a line by itself is the bare scan in a fenced block only."""
+    assert _legacy_commands(markdown) == flagged
+
+
+def test_the_subjects_the_markdown_check_admits_are_the_scan_groups():
+    """They are read from the CLI, not listed in this file."""
+    group = typer.main.get_command(app).commands["scan"]
+
+    assert _SCAN_SUBJECTS == tuple(group.commands)
+    assert "fs" in _SCAN_SUBJECTS
+
+
+def test_a_subject_the_scan_group_gains_is_admitted_once_it_has_it():
+    command = "ash scan workspace ."
+
+    assert _no_subject_command(("fs",)).search(command)
+    assert not _no_subject_command(("fs", "workspace")).search(command)
