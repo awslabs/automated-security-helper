@@ -142,6 +142,30 @@ def _recorded(
     return model
 
 
+def _beside_a_recorded_reason(model: AshAggregatedResults) -> AshAggregatedResults:
+    """``model`` with a second scanner whose row records a reason a report must list.
+
+    A test that expects a report to leave something out passes before the reasons
+    are read at all, when nothing is read to be left out. Beside a scanner whose
+    reason is listed, it passes only once a recorded reason is read and this one
+    is the only thing the report holds back.
+    """
+    model.scanner_results["trivy"] = ScannerTargetStatusInfo(
+        status=ScannerStatus.ERROR,
+        error_reason=RECORDED_REASON,
+        error_reason_code=RECORDED_CODE,
+    )
+    model.additional_reports["trivy"] = {
+        "source": {"scanner_name": "trivy", "status": "ERROR", "errors": []}
+    }
+    model._flat_cache = None
+    return model
+
+
+#: What the second scanner of ``_beside_a_recorded_reason`` is listed with.
+BESIDE = ("ERROR", RECORDED_REASON)
+
+
 class TestTheShortReason:
     @pytest.mark.parametrize(
         "error, reason",
@@ -272,7 +296,10 @@ class TestTheEmitterListsTheRecordedReason:
     def test_an_error_that_recorded_no_reason_is_listed_by_its_first_sentence(self):
         model = _recorded(sentence=None, code=None, errors=(CHECKOV_EXIT,))
 
-        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+        assert _entries(_beside_a_recorded_reason(model)) == {
+            "checkov": ("ERROR", CHECKOV_REASON),
+            "trivy": BESIDE,
+        }
 
     @pytest.mark.parametrize(
         "errors", [(), ("something the scan phase did not write",)]
@@ -280,12 +307,15 @@ class TestTheEmitterListsTheRecordedReason:
     def test_a_scanner_with_neither_has_no_entry(self, errors):
         model = _recorded(sentence=None, code=None, errors=errors)
 
-        assert _entries(model) == {}
+        assert _entries(_beside_a_recorded_reason(model)) == {"trivy": BESIDE}
 
     def test_a_sentence_with_no_code_is_not_a_recorded_reason(self):
         model = _recorded(code=None, errors=(CHECKOV_EXIT,))
 
-        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+        assert _entries(_beside_a_recorded_reason(model)) == {
+            "checkov": ("ERROR", CHECKOV_REASON),
+            "trivy": BESIDE,
+        }
 
     def test_scanners_that_recorded_the_same_reason_share_an_entry(self):
         entries = ReportContentEmitter(
@@ -327,7 +357,7 @@ class TestTheEmitterListsTheRecordedReason:
             lambda model: {"checkov"},
         )
 
-        assert _entries(_recorded()) == {}
+        assert _entries(_beside_a_recorded_reason(_recorded())) == {"trivy": BESIDE}
 
 
 class TestTheFirstSentenceIsOneLine:
@@ -375,13 +405,20 @@ class TestAPathInARecordedReasonIsNotShown:
 
     @pytest.mark.parametrize("sentence", NOT_SHORT_REASONS)
     def test_it_is_not_listed(self, sentence):
-        assert _entries(_recorded(sentence=sentence)) == {}
+        model = _beside_a_recorded_reason(_recorded(sentence=sentence))
+
+        assert _entries(model) == {"trivy": BESIDE}
 
     @pytest.mark.parametrize("sentence", NOT_SHORT_REASONS)
     def test_the_first_sentence_of_the_error_is_read_instead(self, sentence):
-        model = _recorded(sentence=sentence, errors=(CHECKOV_EXIT,))
+        model = _beside_a_recorded_reason(
+            _recorded(sentence=sentence, errors=(CHECKOV_EXIT,))
+        )
 
-        assert _entries(model) == {"checkov": ("ERROR", CHECKOV_REASON)}
+        assert _entries(model) == {
+            "checkov": ("ERROR", CHECKOV_REASON),
+            "trivy": BESIDE,
+        }
 
     def test_control_without_the_check_the_path_is_listed(self, monkeypatch):
         """The check at render is what keeps the planted path out: remove it and it shows."""
@@ -427,13 +464,16 @@ class TestEveryReportShowsTheRecordedReason:
 
 
 class TestNoReportShowsAPlantedPath:
+    """The scanner with the planted path is held back; the one beside it is listed."""
+
     def test_text(self, test_plugin_context):
         text = TextReporter(context=test_plugin_context).report(
-            _recorded(sentence=PLANTED)
+            _beside_a_recorded_reason(_recorded(sentence=PLANTED))
         )
 
         assert "/home/me" not in text
-        assert HEADING not in text
+        assert "- checkov (ERROR)" not in text
+        assert f"- trivy (ERROR): {RECORDED_REASON}" in text
 
     @pytest.mark.parametrize("compact", [False, True])
     def test_markdown(self, test_plugin_context, compact):
@@ -442,18 +482,22 @@ class TestNoReportShowsAPlantedPath:
             {"options": {"compact": compact}}
         )
 
-        markdown = reporter.report(_recorded(sentence=PLANTED))
+        markdown = reporter.report(
+            _beside_a_recorded_reason(_recorded(sentence=PLANTED))
+        )
 
         assert "/home/me" not in markdown
-        assert HEADING not in markdown
+        assert "- checkov (ERROR)" not in markdown
+        assert f"- trivy (ERROR): {RECORDED_REASON}" in markdown
 
     def test_html(self, test_plugin_context):
         page = HtmlReporter(context=test_plugin_context).report(
-            _recorded(sentence=PLANTED)
+            _beside_a_recorded_reason(_recorded(sentence=PLANTED))
         )
 
         assert "/home/me" not in page
-        assert HEADING not in page
+        assert "<strong>checkov</strong> (ERROR)" not in page
+        assert f"<strong>trivy</strong> (ERROR): {RECORDED_REASON}" in page
 
 
 class TestTheScannerResultsRowsCarryTheReason:
