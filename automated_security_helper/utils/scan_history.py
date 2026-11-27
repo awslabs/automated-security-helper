@@ -22,8 +22,10 @@ scanner payloads and the whole resolved configuration, and fifty of them are a
 disk and privacy cost a trend never reads. A record holds one row per finding
 with what ``utils.finding_diff.match_findings`` needs to pair it with the same
 finding in the next run (its id, scanner, rule, severity, suppression state, place,
-and the identity ingredients ``fallback_key`` reads), plus the run's metadata and
-the coverage markers ``coverage_warnings`` compares. ``record_version`` is 1.
+and the identity ingredients ``fallback_key`` reads), the kind of its SARIF result,
+which the trend reads to leave out a row that states no finding, plus the run's
+metadata and the coverage markers ``coverage_warnings`` compares. ``record_version``
+is 1, and a row with no kind, from before it was stored, reads as a finding.
 
 Which scans are recorded
 ------------------------
