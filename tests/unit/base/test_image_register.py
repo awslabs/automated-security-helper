@@ -49,15 +49,40 @@ def _ir():
 # ---------------------------------------------------------------------------
 
 
+_FROM = re.compile(r"^\s*FROM\b", flags=re.IGNORECASE)
+_STAGE_NAME = re.compile(r"[a-z][a-z0-9_.-]*")
+
+
+def _stage_key(line: str, index: int) -> str:
+    """What a ``FROM [--flag=value ...] image [AS name]`` line files its stage under:
+    the name, folded to lower case as the builder folds it, or the position when the
+    stage has none, which is how ``COPY --from=<n>`` refers to it."""
+    if line.rstrip().endswith("\\"):
+        raise ValueError(
+            f"cannot name the stage of a FROM line that continues: {line!r}"
+        )
+    words = [word for word in line.split()[1:] if not word.startswith("--")]
+    if len(words) == 1:
+        return str(index)
+    if len(words) == 3 and words[1].lower() == "as":
+        name = words[2].lower()
+        if _STAGE_NAME.fullmatch(name):
+            return name
+    raise ValueError(f"cannot name the stage of {line!r}")
+
+
 def dockerfile_stages(text: str) -> dict[str, str]:
     """``{stage name: the stage's lines}`` in file order. A commented-out FROM is not
-    a stage, and lines before the first FROM (the global ARGs) belong to none."""
+    a stage, lines before the first FROM (the global ARGs) belong to none, and a FROM
+    line the reader cannot name is refused, because its lines would be read as the
+    stage before it."""
     stages: dict[str, list[str]] = {}
     current = None
     for line in text.splitlines():
-        match = re.match(r"^FROM\s+\S+\s+AS\s+(\S+)\s*$", line, flags=re.IGNORECASE)
-        if match:
-            current = match.group(1)
+        if _FROM.match(line):
+            current = _stage_key(line, len(stages))
+            if current in stages:
+                raise ValueError(f"the stage {current!r} is named twice")
             stages[current] = []
         elif current is not None:
             stages[current].append(line)
