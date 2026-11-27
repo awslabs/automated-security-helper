@@ -230,9 +230,16 @@ _SCAN_FS = re.compile(
     rf"{_ASH_COMMAND}(?P<before_scan>{_WORD_GAP})scan{_WORD_GAP}fs(?![\w/-])(?!\.\w)"
     rf"(?:(?P<before_path>{_WORD_GAP}){_FS_PATH})?"
 )
+# The verbs of `ash results` that 3.8.0 has as top-level commands. `diff` and `trend` are
+# not here: 3.8.0 has neither (it registers `scan`, `build-image`, `report`, `merge`,
+# `mcp`, `get-genai-guide`, `config`, `dependencies`, `inspect` and `plugin`), and no
+# release has had a top-level `ash diff` or `ash trend`, so `ash results diff` has no
+# older spelling to be written as. It is left as it is, and the checks refuse it beside
+# a pin before SUBJECTS_RELEASE (tests/utils/release_spellings.py). The verbs are held to
+# that module's RESULTS_VERBS_MOVED by tests/unit/test_version_template_release_spellings.py.
 _RESULTS_VERB = re.compile(
     rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})results{_WORD_GAP}"
-    r"(?P<verb>report|diff|trend|merge|inspect)(?![\w-])"
+    r"(?P<verb>report|merge|inspect)(?![\w-])"
 )
 _CONTAINER_BUILD = re.compile(
     rf"{_ASH_COMMAND}(?P<blank>{_WORD_GAP})container{_WORD_GAP}build(?![\w-])"
@@ -288,13 +295,16 @@ def spellings_for_release(text: str, version: str) -> str:
 
     For a release before SUBJECTS_RELEASE, ``ash scan fs PATH`` becomes
     ``ash scan --source-dir PATH`` and ``ash scan fs`` with no path ``ash scan``,
-    ``ash results <verb>`` becomes ``ash <verb>``, and ``ash container build`` becomes
-    ``ash build-image``; ``ashv3`` is read as ``ash``. Inside an ``ash scan`` command,
-    ``--only-scanners`` and ``--add-scanners`` become ``--scanners``, the one flag that
-    release has for both. The entries of the hooks in ``.pre-commit-hooks.yaml``
-    (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that release ships, whole. Text
-    for SUBJECTS_RELEASE or a later release comes back unchanged, as does text for a
-    version that does not start with a release number (a branch name, a placeholder).
+    ``ash results <verb>`` becomes ``ash <verb>`` for ``report``, ``merge`` and
+    ``inspect``, and ``ash container build`` becomes ``ash build-image``; ``ashv3`` is
+    read as ``ash``. ``ash results diff`` and ``ash results trend`` stay as they are:
+    that release has neither command, so there is nothing to write them as. Inside an
+    ``ash scan`` command, ``--only-scanners`` and ``--add-scanners`` become
+    ``--scanners``, the one flag that release has for both. The entries of the hooks in
+    ``.pre-commit-hooks.yaml`` (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries
+    that release ships, whole. Text for SUBJECTS_RELEASE or a later release comes back
+    unchanged, as does text for a version that does not start with a release number (a
+    branch name, a placeholder).
 
     A command is read as a shell writes it, with its words on one line or on lines
     joined by a backslash, and as a list of arguments (``["ash", "scan", "fs", "."]``).

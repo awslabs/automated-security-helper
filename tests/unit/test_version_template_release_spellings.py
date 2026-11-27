@@ -13,8 +13,10 @@ subcommand. The README on GitHub and the ``main`` docs showed that pairing.
 
 A template now holds the newest spellings, and rendering it for a release older than
 the one that introduced them writes the spellings that release reads in its code: ``ash
-scan`` (with ``--source-dir`` for a path argument), the top-level results commands, and
-``ash build-image``. The prose around the code is rendered as the template writes it. A
+scan`` (with ``--source-dir`` for a path argument), the top-level results commands
+(``report``, ``merge`` and ``inspect``; ``diff`` and ``trend`` have none, so a render
+leaves them and the checks refuse them), and ``ash build-image``. The prose around the
+code is rendered as the template writes it. A
 sentence that names a spelling says what it says on every page, and a rewrite of it can
 make it say the opposite: a page that tells its reader an older ASH has no ``fs``
 subject, rendered for that older ASH, would tell its reader the subject is gone. A
@@ -55,6 +57,8 @@ from tests.utils.release_spellings import (
     NEWER_SCANNER_FLAG,
     NEWER_SPELLING,
     RESULTS_VERBS,
+    RESULTS_VERBS_ADDED,
+    RESULTS_VERBS_MOVED,
     SUBJECTS_RELEASE,
     release_tuple,
 )
@@ -99,6 +103,25 @@ V3_8_0_HOOK_ENTRIES = {
     "ash-simple-scan": "ashv3 --mode=precommit",
     "ash-full-scan": "ashv3 --mode=container --simple",
 }
+
+#: The commands the root group of ASH 3.8.0 registers, from lines 424 to 774 of ``git show
+#: v3.8.0:automated_security_helper/cli/main.py``. Written out here, so the verbs the
+#: manager writes back are held to what that release shipped and not to the manager.
+#: There is no ``diff`` and no ``trend`` among them.
+V3_8_0_COMMANDS = frozenset(
+    {
+        "scan",
+        "build-image",
+        "report",
+        "merge",
+        "mcp",
+        "get-genai-guide",
+        "config",
+        "dependencies",
+        "inspect",
+        "plugin",
+    }
+)
 
 
 def _load_module():
@@ -242,7 +265,28 @@ ROWS = [
     ("ash results inspect findings", "ash inspect findings"),
     ("ash results report --format markdown", "ash report --format markdown"),
     ("ash results merge --fail-on-findings", "ash merge --fail-on-findings"),
-    ("`ash results diff`, `ash results trend`", "`ash diff`, `ash trend`"),
+    # 3.8.0 has neither `diff` nor `trend`, and no release has had either at the top
+    # level, so there is no spelling to write them as: both stay as the template has
+    # them, and the checks refuse them beside a pin before 3.9.
+    (
+        "`ash results diff`, `ash results trend`",
+        "`ash results diff`, `ash results trend`",
+    ),
+    (
+        "ash results diff before.json after.json",
+        "ash results diff before.json after.json",
+    ),
+    (
+        "ash results trend runs/a.json runs/b.json --format json",
+        "ash results trend runs/a.json runs/b.json --format json",
+    ),
+    ("ash \\\n  results trend", "ash \\\n  results trend"),
+    ('["ash", "results", "diff"]', '["ash", "results", "diff"]'),
+    (
+        "ash results diff a.json b.json && ash results report",
+        "ash results diff a.json b.json && ash report",
+    ),
+    ("ash diff a.json b.json", "ash diff a.json b.json"),
     ("ash container build --no-run", "ash build-image --no-run"),
     # Not a command of ASH, or already a spelling 3.8 reads: left alone.
     ("ash scan --mode local", "ash scan --mode local"),
@@ -552,6 +596,25 @@ DETECTOR_ROWS = [
     ('[\n    "ash",\n    "scan",\n    "fs",\n]', 1),
     ('["ash", "scan", "--mode", "local"]', 0),
     ('["dash", "scan", "fs"]', 0),
+    # `diff` and `trend`: 3.8.0 has neither, in either spelling, and the render leaves
+    # both, so the detectors are what refuses them beside a pin before 3.9.
+    ("ash results diff a.json b.json", 1),
+    ("ash results trend", 1),
+    ("ash diff a.json b.json", 1),
+    ("ash trend runs/a.json runs/b.json", 1),
+    ("ash \\\n  diff a.json b.json", 1),
+    ('["ash", "diff"]', 1),
+    ('["ash", "results", "trend"]', 1),
+    ("`ash diff` and `ash results trend`", 2),
+    ("ash diffs", 0),
+    ("ash trending", 0),
+    ("ash diff-tool", 0),
+    ("dash diff a.json b.json", 0),
+    ("/usr/local/bin/ash trend", 0),
+    # The commands 3.8.0 has as top-level commands are not what the detectors read.
+    ("ash report", 0),
+    ("ash merge --results a --results b", 0),
+    ("ash inspect findings", 0),
 ]
 
 
@@ -577,18 +640,40 @@ def test_the_threshold_is_the_release_that_introduced_the_spellings():
 
 
 def test_the_results_verbs_are_the_ones_the_manager_moves():
-    """The detectors list the commands 3.9 moved under ``ash results``; the manager lists
-    the ones it writes back, in its own pattern. A verb in one and not the other is a
-    page the detectors flag and the render cannot fix, or the reverse."""
+    """The detectors list the commands 3.9 moved under ``ash results`` and the ones it
+    added there; the manager lists the ones it writes back, in its own pattern. A verb
+    the manager writes back that 3.8.0 lacks is a command the render invents, and a verb
+    in the detectors' list of moved verbs and not the manager's is a page the detectors
+    flag and the render cannot fix."""
     listed = re.search(r"\(\?P<verb>([^)]*)\)", MODULE._RESULTS_VERB.pattern)
     assert listed is not None, (
         "the manager no longer names its verbs as `(?P<verb>...)`"
     )
-    assert set(listed[1].split("|")) == set(RESULTS_VERBS)
-    for verb in RESULTS_VERBS:
+    assert set(listed[1].split("|")) == set(RESULTS_VERBS_MOVED)
+    for verb in RESULTS_VERBS_MOVED:
         assert MODULE.spellings_for_release(f"ash results {verb}", "3.8.0") == (
             f"ash {verb}"
         )
+
+
+def test_the_verbs_added_in_3_9_are_left_as_they_are_for_3_8():
+    """3.8.0 has neither ``diff`` nor ``trend``, as ``ash results <verb>`` or at the top
+    level, so the render writes nothing for them: a page that pins 3.8 and names one is
+    the detectors' to refuse."""
+    assert RESULTS_VERBS_ADDED == ("diff", "trend")
+    for verb in RESULTS_VERBS_ADDED:
+        for command in (f"ash results {verb}", f"ash {verb}"):
+            assert MODULE.spellings_for_release(command, "3.8.0") == command
+            assert MANAGER.render(_fenced(command), "3.8.0") == _fenced(command)
+            assert len(_newer_spellings(command)) == 1, command
+
+
+def test_the_verbs_are_split_by_what_3_8_0_has():
+    """The moved verbs are commands of the 3.8.0 root group; the added ones are not."""
+    assert set(RESULTS_VERBS_MOVED) <= V3_8_0_COMMANDS
+    assert not set(RESULTS_VERBS_ADDED) & V3_8_0_COMMANDS
+    assert not set(RESULTS_VERBS_MOVED) & set(RESULTS_VERBS_ADDED)
+    assert set(RESULTS_VERBS) == set(RESULTS_VERBS_MOVED) | set(RESULTS_VERBS_ADDED)
 
 
 @pytest.mark.parametrize("target", _templated_targets())

@@ -24,9 +24,11 @@ there, so the page cannot ship the old commands with a new pin.
 What is asserted
 ----------------
 Every hand-written page under ``docs/content/`` that pins a release before 3.9 holds no
-spelling only 3.9 reads: a scan subject, a results verb, ``container build``, or one of
-the scanner options ``--only-scanners`` and ``--add-scanners`` (3.8 has ``--scanners``,
-which 3.9 deprecates). The scope is the page, except for the pages in ``BY_BLOCK``,
+spelling only 3.9 reads: a scan subject, a results verb, ``ash diff`` or ``ash trend``
+(3.8 has neither, and no release has had them at the top level, so a page for it names
+them in neither spelling), ``container build``, or one of the scanner options
+``--only-scanners`` and ``--add-scanners`` (3.8 has ``--scanners``, which 3.9
+deprecates). The scope is the page, except for the pages in ``BY_BLOCK``,
 where it is each fenced block that holds a pin. The rows check the detector on planted
 text, and the control checks that the two pages this was written for are still found.
 """
@@ -269,6 +271,21 @@ ROWS = [
     (_page("3.8.0", 'cmd = ["ash", "container", "build"]'), True, 1),
     (_page("3.8.0", 'cmd = ["ash", "scan", "--mode", "local"]'), False, 0),
     (_page("3.9.0", 'cmd = ["ash", "scan", "fs", "."]'), False, 0),
+    # `diff` and `trend`: 3.8.0 has neither command, so a page that pins it names them
+    # in neither spelling, as `ash results <verb>` or at the top level.
+    (_page("3.8.0", "ash results diff a.json b.json"), False, 1),
+    (_page("3.8.0", "ash results trend runs/a.json runs/b.json"), True, 1),
+    (_page("3.8.0", "ash diff a.json b.json"), False, 1),
+    (_page("3.8.0", "ash trend runs/a.json runs/b.json"), True, 1),
+    (_page("3.8.0", 'cmd = ["ash", "diff", "a.json", "b.json"]'), False, 1),
+    (_page("3.8.0", "ash \\\n  trend runs/a.json"), False, 1),
+    (
+        _page("3.8.0", "ash report\nash merge --results a\nash inspect findings"),
+        False,
+        0,
+    ),
+    (_page("3.9.0", "ash results diff a.json b.json"), False, 0),
+    (_page(None, "ash diff a.json b.json"), False, 0),
 ]
 
 
