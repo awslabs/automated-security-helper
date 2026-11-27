@@ -55,7 +55,10 @@ from typing import (
 )
 
 from automated_security_helper.utils import frame_text
-from automated_security_helper.utils.path_matching import _path_pattern_matches
+from automated_security_helper.utils.path_matching import (
+    _path_pattern_matches,
+    has_glob_syntax,
+)
 from automated_security_helper.utils.suppression_scope_registry import (
     engine_hooks_for,
     split_rule_qualifier_for,
@@ -204,10 +207,26 @@ def _package_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> boo
         # package_path separates two installed copies, so it is an identity,
         # not a scope: the bare-directory rule (issue #894) must not make a
         # glob-free entry cover packages nested below the copy it names.
-        return _path_pattern_matches(
+        if _path_pattern_matches(
             finding.package_path, entry.package_path, bare_directory=False
+        ):
+            return True
+        return _names_the_copy_with_a_trailing_slash(
+            finding.package_path, entry.package_path
         )
     return True
+
+
+def _names_the_copy_with_a_trailing_slash(finding_path: str, pattern: str) -> bool:
+    """A glob-free ``package_path`` also names the copy when the finding spells
+    that same copy's path with trailing slashes (``node_modules/a/`` for
+    ``node_modules/a``). Only the slashes: a path below the copy, or another name
+    that starts the same (``node_modules/ab/``), is not the copy."""
+    stripped = finding_path.rstrip("/")
+    directory = pattern.rstrip("/\\")
+    if stripped == finding_path or not directory or has_glob_syntax(pattern):
+        return False
+    return _path_pattern_matches(stripped, directory, bare_directory=False)
 
 
 def _image_holds(entry: "AshSuppression", finding: "FlatVulnerability") -> bool:

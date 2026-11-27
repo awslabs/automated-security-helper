@@ -32,6 +32,18 @@ _SESSION = {"mcp-session-id": "session-image"}
 _REF = "registry.example.com/team/app@sha256:" + "ab" * 32
 
 
+@pytest.fixture(autouse=True)
+def _registries_allowed(monkeypatch):
+    # The operator's registry allowlist is empty by default and then admits no
+    # reference; these snapshots are of the delivery shapes, not the gate, so
+    # both registries the refs here resolve against are listed (docker.io for
+    # the bare "alpine:3.20"). The gate's own refusal is pinned in
+    # tests/unit/cli/mcp/test_image_delivery_names_one_subject.py.
+    monkeypatch.setenv(
+        "ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com docker.io"
+    )
+
+
 async def _call(tool: str, *args, headers=None, **kwargs) -> Dict[str, Any]:
     ctx = make_ctx(headers)
     result = await getattr(mcp_server, tool)(ctx, *args, **kwargs)

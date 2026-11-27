@@ -38,6 +38,9 @@ IMAGE_REF = "registry.example.com/team/app@sha256:" + "a" * 64
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
+    # The operator's registry allowlist admits nothing by default; these rows
+    # are about the binding's lifecycle, not the gate.
+    monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
     yield tmp_path
     sd._drop_session_source_dir(_SESSION)
 

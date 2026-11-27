@@ -56,12 +56,39 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_
     _projection_schema,
 )
 from automated_security_helper.utils.finding_diff import SIDE_SPEC, _side
+from automated_security_helper.utils.finding_clusters import (
+    _key_columns,
+    _key_frame,
+    _key_schema,
+)
 from automated_security_helper.utils.finding_identity import identity_frame_spec
+from automated_security_helper.utils.finding_trend import (
+    _candidates_frame,
+    _candidates_schema,
+    _cell_frame,
+    _cell_schema,
+    _changes_frame,
+    _changes_schema,
+    _evaluated_frame,
+    _evaluated_schema,
+    _presence_frame,
+    _presence_schema,
+    _status_frame,
+    _status_schema,
+)
 from automated_security_helper.utils.frame_text import unwire, wire
 from automated_security_helper.utils.suppression_frame import (
     _chunk_frame,
     _span_frame,
     line_span_spec,
+)
+from automated_security_helper.workspace.aggregation import (
+    _scanner_count_frame,
+    _scanner_count_schema,
+)
+from automated_security_helper.workspace.policy import (
+    _unreachable_name_frame,
+    _unreachable_name_schema,
 )
 from tests.unit.models.test_flat_frame import SCHEMA as FLAT_HAND_SCHEMA
 from tests.unit.models.test_flat_frame import row
@@ -105,6 +132,24 @@ HAND_SCHEMAS: Dict[
     ),
     "asff_derived_input": (_derived_schema, lambda: _derived_frame([])),
     "gitlab_sast_projection": (_projection_schema, lambda: _projection([])),
+    "finding_cluster_keys": (_key_schema, lambda: _key_frame(_key_columns())),
+    "trend_changes_sort": (_changes_schema, lambda: _changes_frame([])),
+    "trend_status_totals": (_status_schema, lambda: _status_frame([])),
+    "trend_cell_counts": (_cell_schema, lambda: _cell_frame([])),
+    "trend_streak_presence": (_presence_schema, lambda: _presence_frame([])),
+    "trend_streak_candidates": (
+        _candidates_schema,
+        lambda: _candidates_frame([], {}, [], {}),
+    ),
+    "trend_streak_evaluated": (_evaluated_schema, lambda: _evaluated_frame([])),
+    "workspace_scanner_counts": (
+        _scanner_count_schema,
+        lambda: _scanner_count_frame([], []),
+    ),
+    "workspace_ceiling_unreachable": (
+        _unreachable_name_schema,
+        lambda: _unreachable_name_frame([]),
+    ),
 }
 
 
