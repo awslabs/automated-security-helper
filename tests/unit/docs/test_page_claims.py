@@ -17986,19 +17986,9 @@ def test_the_extras_table_lists_each_extra_and_what_it_adds() -> None:
 
 def _ci_matrix_reader() -> Any:
     """scripts/_ci_matrix.py, the one expansion of a workflow's matrices, loaded by path."""
-    import importlib.util
+    from tests.utils.ci_matrix_loader import load_ci_matrix
 
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
-        )
-        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
+    return load_ci_matrix()
 
 
 def _install_matrix(workflow: Dict[str, Any]) -> List[Dict[str, Any]]:

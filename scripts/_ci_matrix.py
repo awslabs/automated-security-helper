@@ -10,13 +10,15 @@ share, and the one the support-matrix generators read.
 * cells and axis_cells give the jobs GitHub creates for one entry under ``jobs:``, per
   event. PULL_REQUEST_OVERLAY is the one event-conditioned matrix entry the workflows use.
 * RUNNER_LABELS, runs_on and check_runner_labels say what each runner label is, and fail
-  on a label a workflow names that the table does not list.
+  on a label a workflow names that the table does not list: in a runs-on, in a matrix
+  ``os`` or in the ``with:`` of a call to a reusable workflow that feeds it to a runs-on.
 * evaluate_condition and step_runs say whether a step's ``if:`` holds in a leg, for the
   few condition shapes the validator steps use.
 
 The file refuses what it cannot read. A matrix, a runs-on or a condition in a shape it
-does not know raises a CiMatrixError that names the shape. Nothing is read as true, or as
-a match, because it could not be read.
+does not know raises a CiMatrixError that names the shape, and so does a runs-on that
+reads a matrix key some leg lacks and an exclude entry that names a key no axis has.
+Nothing is read as true, or as a match, because it could not be read.
 
 scripts/ is not a package. A caller loads this file by path, and this file loads
 scripts/_ci_pipelines.py the same way for its workflow parser.
@@ -255,16 +257,30 @@ def axis_cells(matrix: Mapping[str, Any], event: str = "push") -> list[dict[str,
     An ``include`` entry is not applied here: cells applies them. A matrix with no axis has
     no product, so this is empty for one that only includes. An exclude entry with a void
     value (see resolve_overlay) matches nothing.
+
+    An exclude entry names axes. A key it names that is no axis (a typo, or a key only an
+    ``include`` adds) is refused with UnsupportedMatrix, on every event and for a void
+    entry too: GitHub rejects the workflow, and an entry that matched nothing would leave
+    the legs looking right.
     """
     _check_event(event)
     _refuse_unread_expressions(matrix)
     axes = _axes(matrix)
+    excludes = _entries(matrix, "exclude")
+    for excluded in excludes:
+        for key in excluded:
+            if key not in axes:
+                raise UnsupportedMatrix(
+                    f"matrix exclude key {key!r} does not match any axis of the "
+                    f"matrix (the axes are {', '.join(map(str, axes)) or 'none'}): "
+                    f"{dict(excluded)!r}"
+                )
     legs = (
         [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
         if axes
         else []
     )
-    for excluded in _entries(matrix, "exclude"):
+    for excluded in excludes:
         resolved = {
             key: resolve_overlay(value, event) for key, value in excluded.items()
         }
@@ -653,6 +669,28 @@ def _input_default(workflow: Mapping[str, Any] | None, name: str, text: str) -> 
     return default
 
 
+def _matrix_labels(job: Mapping[str, Any], key: str) -> set[str]:
+    """Every label ``matrix.<key>`` gives the legs of ``job``.
+
+    A matrix that names no ``key``, or a leg without one on any event, is refused: GitHub
+    reads that leg's runs-on as empty, and a set with no label for it would pass the
+    check of the table.
+    """
+    values = matrix_values(job, key)
+    if not values:
+        raise CiMatrixError(
+            f"runs-on reads matrix.{key}, and the job's matrix names no {key}"
+        )
+    for event in EVENTS:
+        for cell in cells(job, event):
+            if key not in cell:
+                raise CiMatrixError(
+                    f"runs-on reads matrix.{key}, and on {event} the leg "
+                    f"{dict(cell)!r} has no value for it"
+                )
+    return {str(value) for value in values}
+
+
 def runs_on_labels(
     job: Mapping[str, Any], workflow: Mapping[str, Any] | None = None
 ) -> set[str]:
@@ -660,7 +698,10 @@ def runs_on_labels(
 
     Read: a literal label, ``${{ matrix.<key> }}``, the override shape above, and
     ``${{ inputs.<name> }}`` (the default of that ``workflow_call`` input of ``workflow``).
-    A job that calls a reusable workflow names none. Anything else raises.
+    A job that calls a reusable workflow names none: check_runner_labels reads what its
+    ``with:`` passes. Anything else raises. So does a matrix key that the job's matrix does
+    not name or that a leg lacks. The override needs the axis it compares to be named, and
+    an ``os`` in every leg.
     """
     declared = _declared_runs_on(job)
     if declared is None:
@@ -669,11 +710,15 @@ def runs_on_labels(
         return {declared}
     by_key = _RUNS_ON_MATRIX.match(declared)
     if by_key:
-        return {str(value) for value in matrix_values(job, by_key.group(1))}
+        return _matrix_labels(job, by_key.group(1))
     override = _RUNS_ON_OVERRIDE.match(declared)
     if override:
-        axis_labels = {str(value) for value in matrix_values(job, "os")}
-        return axis_labels | {override.group("label")}
+        axis = override.group("axis")
+        if not matrix_values(job, axis):
+            raise CiMatrixError(
+                f"runs-on compares matrix.{axis}, and the job's matrix names no {axis}"
+            )
+        return _matrix_labels(job, "os") | {override.group("label")}
     from_input = _RUNS_ON_INPUT.match(declared)
     if from_input:
         return {_input_default(workflow, from_input.group(1), declared)}
@@ -691,7 +736,11 @@ def runs_on(
     cell: Mapping[str, Any],
     workflow: Mapping[str, Any] | None = None,
 ) -> str:
-    """The label the leg ``cell`` of ``job`` runs on (the shapes runs_on_labels reads)."""
+    """The label the leg ``cell`` of ``job`` runs on (the shapes runs_on_labels reads).
+
+    The override compares as GitHub's == does (see _loosely_equal): a leg whose value
+    differs from the override's text only in case is still overridden.
+    """
     declared = _declared_runs_on(job)
     if declared is None:
         raise CiMatrixError("the job names no runner (it calls a reusable workflow)")
@@ -702,8 +751,10 @@ def runs_on(
         return _leg_value(cell, by_key.group(1))
     override = _RUNS_ON_OVERRIDE.match(declared)
     if override:
-        axis_matches = cell.get(override.group("axis")) == override.group("value")
-        os_matches = cell.get("os") == override.group("os")
+        axis_matches = _loosely_equal(
+            cell.get(override.group("axis")), override.group("value")
+        )
+        os_matches = _loosely_equal(cell.get("os"), override.group("os"))
         if axis_matches and os_matches:
             return override.group("label")
         return _leg_value(cell, "os")
@@ -713,12 +764,83 @@ def runs_on(
     raise UnsupportedExpression("runs-on expression", declared, "runs-on")
 
 
-def check_runner_labels(workflow: Mapping[str, Any]) -> set[str]:
+def _runs_on_input_names(workflow: Mapping[str, Any]) -> set[str]:
+    """The ``workflow_call`` inputs a job of ``workflow`` reads as its ``runs-on``.
+
+    A runs-on in a shape this file does not read is refused here as runs_on_labels refuses
+    it, so an input that reaches a runner through such a shape is never skipped. Whether the
+    input has a default does not matter: the caller's value is the one that is read.
+    """
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, Mapping):
+        raise WorkflowError("the called workflow has no jobs mapping")
+    names: set[str] = set()
+    for job in jobs.values():
+        declared = _declared_runs_on(job)
+        if declared is None or "${{" not in declared:
+            continue
+        from_input = _RUNS_ON_INPUT.match(declared)
+        if from_input:
+            names.add(from_input.group(1))
+        elif not (_RUNS_ON_MATRIX.match(declared) or _RUNS_ON_OVERRIDE.match(declared)):
+            raise UnsupportedExpression("runs-on expression", declared, "runs-on")
+    return names
+
+
+def _called_labels(
+    job_id: str, job: Mapping[str, Any], called: Mapping[str, Mapping[str, Any]]
+) -> set[tuple[str, str]]:
+    """The ``(where, label)`` pairs ``job`` passes in ``with:`` to the ``runs-on`` of the
+    reusable workflow it calls.
+
+    Only an input the called workflow feeds to a runs-on is a label. An input ``job`` leaves
+    out names none here: the called workflow's own default is read with that workflow.
+    """
+    uses = job.get("uses")
+    given = job.get("with")
+    if not isinstance(uses, str) or not given:
+        return set()
+    where = f"job {job_id}"
+    if not isinstance(given, Mapping):
+        raise UnsupportedExpression("a with: that is not a mapping", repr(given), where)
+    callee = called.get(uses)
+    if callee is None:
+        raise UnsupportedExpression(
+            "a call that passes inputs to a reusable workflow that was not given",
+            uses,
+            where,
+        )
+    named: set[tuple[str, str]] = set()
+    for name in sorted(_runs_on_input_names(callee) & set(given)):
+        value = given[name]
+        if not isinstance(value, str):
+            raise UnsupportedExpression(
+                "a runner input that is not a string",
+                repr(value),
+                f"{where} with.{name}",
+            )
+        if "${{" in value:
+            raise UnsupportedExpression(
+                "a runner input given as an expression", value, f"{where} with.{name}"
+            )
+        named.add((f"with {name}", value))
+    return named
+
+
+def check_runner_labels(
+    workflow: Mapping[str, Any],
+    called: Mapping[str, Mapping[str, Any]] | None = None,
+) -> set[str]:
     """Fail on a runner label ``workflow`` names that RUNNER_LABELS does not list.
 
     Every job's runs-on labels and every value of its matrix ``os`` are checked, whether or
-    not a leg runs them. Raises UnknownRunnerLabel naming each such label and its job, and
-    otherwise returns the labels it checked, so a caller can see it read some.
+    not a leg runs them. So is every label a job passes in ``with:`` to an input that the
+    reusable workflow it calls feeds to a runs-on. ``called`` holds the workflows the jobs
+    call, by the ``uses:`` text that names them, each read by load_workflow or
+    parse_workflow. A job that passes inputs to a workflow ``called`` does not hold is
+    refused, because which of them reach a runner cannot be told; a ``with:`` value that is
+    not a plain string is refused too. Raises UnknownRunnerLabel naming each such label and
+    its job, and otherwise returns the labels it checked, so a caller can see it read some.
     """
     jobs = workflow.get("jobs")
     if not isinstance(jobs, Mapping):
@@ -728,6 +850,7 @@ def check_runner_labels(workflow: Mapping[str, Any]) -> set[str]:
     for job_id, job in jobs.items():
         named = {("runs-on", label) for label in runs_on_labels(job, workflow)}
         named |= {("matrix os", str(value)) for value in matrix_values(job, "os")}
+        named |= _called_labels(job_id, job, called or {})
         for where, label in sorted(named):
             checked.add(label)
             if label not in RUNNER_LABELS:

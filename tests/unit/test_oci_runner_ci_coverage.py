@@ -48,9 +48,7 @@ is the only authority on what ASH will actually try.
 
 from __future__ import annotations
 
-import importlib.util
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +58,7 @@ import yaml
 from automated_security_helper.interactions.run_ash_container import (
     _OCI_RUNNER_CANDIDATES,
 )
+from tests.utils.ci_matrix_loader import load_ci_matrix
 
 pytestmark = pytest.mark.unit
 
@@ -82,22 +81,7 @@ _EXCLUSIONS: dict[str, str] = {}
 _MINIMUM_CANDIDATES = 3
 
 
-def _load_ci_matrix() -> Any:
-    """scripts/_ci_matrix.py, loaded by path: scripts/ is not a package."""
-    name = "_ash_ci_matrix"
-    module = sys.modules.get(name)
-    if module is None:
-        spec = importlib.util.spec_from_file_location(
-            name, REPO_ROOT / "scripts" / "_ci_matrix.py"
-        )
-        assert spec and spec.loader, "cannot load scripts/_ci_matrix.py"
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        spec.loader.exec_module(module)
-    return module
-
-
-ci_matrix = _load_ci_matrix()
+ci_matrix = load_ci_matrix()
 
 #: The event whose matrix is the static axes less the static excludes: the pull-request
 #: overlay is void on a manual run, and this file reads the full matrix, as it did when it
