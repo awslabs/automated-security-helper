@@ -1,0 +1,3 @@
+docs/content/how-to/run-offline.md	downloads the grype and trivy databases from the network
+docs/content/how-to/run-offline.md	checks databases already provisioned on the scan host
+docs/content/how-to/run-offline.md	needs a container runtime and an offline image built elsewhere

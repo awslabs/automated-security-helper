@@ -107,6 +107,64 @@ This block runs in CI. The default fixture has one finding, so the scan exits wi
 ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
 
+### The illustrative ratchet
+
+The `illustrative` blocks only get fewer. The ones that existed when the ratchet was
+added are listed in
+[`docs/illustrative-seed`](https://github.com/awslabs/automated-security-helper/tree/main/docs/illustrative-seed),
+one file for each page, and that list only shrinks. A file is named by its page's path
+with every `/` written `%2F`: the page `docs/content/how-to/install.md` is listed in
+`docs%2Fcontent%2Fhow-to%2Finstall.md.tsv`, and its template, `install.md.template`, in
+a file of its own. A line is the page's path, a tab, and the marker's reason with its
+words one space apart. Each marker that sits directly above a block has one line. A
+marker shown inside an example fence, like the one under [Markers](#markers), or in a
+table cell governs no block and has none.
+
+Two checks hold the list to that:
+
+- `markers`, in the `lint` job, fails on an `illustrative` marker that has no line, and
+  on a line that no marker on its page matches. A commit that converts a block deletes
+  the marker and its line together.
+- The `snapshot-trailers` job runs
+  [`.github/scripts/check-illustrative-ratchet.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-illustrative-ratchet.py),
+  which fails on any line the list did not have where your branch left `main`. That
+  catches the line added to cover a new marker, which the first check cannot, and it
+  also fails a reworded reason, a second copy of a line, and a line moved to another
+  page. A page that moves takes its lines with it, but move it in a pull request of its
+  own: git pairs a moved page with its old path from 50% similarity, and a page moved
+  and rewritten at once reads as new lines.
+
+A block that cannot run yet is no reason to add a marker. To convert one:
+
+1. Delete the marker above the block. The block then runs as `run`, like its neighbors.
+2. Change what kept it from running: point it at a fixture, add `expect-exit`, make the
+   command work offline, or replace it with one that does. An example that cannot run
+   in the docs job at all is written in prose instead of a block.
+3. Delete the block's line from the page's file in `docs/illustrative-seed`, and the
+   file itself once it has no line left.
+4. Run the page and the static checks, as under
+   [Run the checks locally](#run-the-checks-locally).
+
+Fencing a block as `text` takes it out of the runs with no marker, so the same list has
+a second part. A block in a language nothing runs that shows an `ash` command or a `$`
+prompt line fails `markers` unless it is the output sample of the block above it, or sits
+in a record of a past release (`CHANGELOG.md` and the notes under
+`.github/release-notes/`), or is listed in
+[`scripts/docs_unexecuted_commands_seed.tsv`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_unexecuted_commands_seed.tsv).
+That file holds a line for each such block as it was when the check was added: the
+page's path, a tab, and the block's first command. It only shrinks too. Fence the block
+as `bash`, or mark it `output`, and delete its line.
+
+The check does not read a page that a generator writes. A page is one when
+`REFERENCE_PAGES` in the freshness test lists it and the banner that opens it names the
+generator listed for it, as
+[Add a generated reference page](#add-a-generated-reference-page) describes. The
+freshness test holds the page's text to that generator's output, so the usage line of a
+new command in the CLI reference needs no line in the seed. A banner alone is not
+enough: the getting-started pages open with one, but a person writes their blocks in a
+journey file, so they are read like any other page, and so is a page that copies a
+banner.
+
 ### Output samples
 
 A `text` block marked `output` directly after a block the runner runs is a sample of
@@ -857,6 +915,11 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | has no runner, has no merge rule, takes no event=, is not an event of | use the key only on a kind that takes it (see [CI pipelines](#ci-pipelines)) |
 | names no earlier block on this page saved with, can extend only a block of its own kind, cannot also be saved | point `extends=` at a block above it, of its own kind, saved with `save-as=` at that path |
 | runner= takes only none, runner=none needs reason=, reason= goes with runner=none | mark a block no runner can run `runner=none reason="..."`, and give `reason=` only there |
+| is not in the illustrative seed | the list takes no new marker: make the block run, or take it out (see [the illustrative ratchet](#the-illustrative-ratchet)) |
+| the seed has a line for this page | the marker was converted or deleted: delete its line from the page's file in `docs/illustrative-seed`, and the file once it has no line left |
+| shows a command that nothing runs | fence the block as `bash` so the runner executes it, mark it `output` when it is what the block above prints, or write the command in prose |
+| no block on this page shows this command | the block was converted or deleted: delete its line from `scripts/docs_unexecuted_commands_seed.tsv` |
+| malformed seed line, is not the name of a page's seed file, which belongs in, which does not exist | a seed file has a line in the wrong shape, a name that is not its page's, a line for another page, or a line for a page that is gone: fix the file the finding names |
 
 ### `cli`
 
@@ -993,7 +1056,10 @@ tools) is generated, never written by hand. To add one:
    [`tests/unit/test_generated_docs_freshness.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/unit/test_generated_docs_freshness.py).
    That one entry runs `generate_<name>.py --check` in the unit suite, so the suite fails
    when the code changes and the page does not, and checks the banner in the page's
-   first 600 characters.
+   first 600 characters. The docs checks read the same entry: the check for commands
+   shown in blocks that nothing runs
+   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page out only when
+   this entry names it and the banner from step 2 names the script the entry gives it.
 4. Add the page to `GOLDEN` in
    [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py),
    so a commit that changes it needs a `Snapshot-Update:` trailer.

@@ -1,0 +1,2 @@
+deploy/terraform/modules/ash-image-pipeline/examples/basic/README.md	needs Terraform, network access and AWS credentials
+deploy/terraform/modules/ash-image-pipeline/examples/basic/README.md	needs AWS credentials and an applied Terraform state

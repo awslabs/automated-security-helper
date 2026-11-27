@@ -1,0 +1,3 @@
+docs/content/how-to/express-mode.md	starts a resident daemon that would outlive the docs run, and only on unix
+docs/content/how-to/express-mode.md	starts a resident daemon that would outlive the docs run, and only on unix
+docs/content/how-to/express-mode.md	the cold run is the ordinary scan; running it here would only rescan the fixture

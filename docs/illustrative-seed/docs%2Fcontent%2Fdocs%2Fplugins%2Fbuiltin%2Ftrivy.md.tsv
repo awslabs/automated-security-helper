@@ -1,0 +1,2 @@
+docs/content/docs/plugins/builtin/trivy.md	runs a full scan, which needs every scanner installed
+docs/content/docs/plugins/builtin/trivy.md	needs trivy and the network

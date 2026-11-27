@@ -8,7 +8,9 @@ Loaded by path from scripts/verify_docs_freshness.py, which registers each publi
 tests/integration/docs/, which uses the same block parser to decide what to execute.
 The CI pipeline runners there read the CI pages' blocks through the same parser too
 (ci_marker, ci_pipeline_text and ci_runner_census). scripts/ is not a package, so
-nothing here is imported by name.
+nothing here is imported by name. Run as a script it does one thing, ``python
+scripts/docs_checks.py write-seeds``, which writes the seeds that keep the blocks the
+docs runner skips from growing (the section "The illustrative ratchet" below).
 
 The contract these checks implement is the contributor page
 docs/content/contributing/documentation.md. In short: a fenced block may carry a
@@ -51,8 +53,8 @@ import textwrap
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
-from urllib.parse import unquote, urlsplit
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
+from urllib.parse import quote, unquote, urlsplit
 
 # ---------------------------------------------------------------------------
 # Layout constants. Everything that names a page, a directory or a URL lives here.
@@ -1336,9 +1338,15 @@ def unchecked_exit_problems(page: Page) -> list[Finding]:
 
 
 def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding]:
-    """Markers are well formed, bind to a block, and suit the block they govern."""
+    """Markers are well formed, bind to a block, and suit the block they govern.
+
+    Where ``root`` has the seeds, the illustrative blocks are those the illustrative seed
+    lists, and so are the blocks that show a command in a language nothing runs; see
+    the section below.
+    """
     findings: list[Finding] = []
-    for page in load_pages(files, root):
+    pages = load_pages(files, root)
+    for page in pages:
         findings += page.structure
         for block in page.blocks:
             line = block.marker.line if block.marker else block.fence_line
@@ -1348,7 +1356,487 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
         findings += unchecked_exit_problems(page)
         findings += ci_extends_problems(page)
         findings += ci_event_problems(page)
+    findings += illustrative_seed_problems(pages, root)
+    findings += unexecuted_command_problems(pages, root)
     return findings
+
+
+# ---------------------------------------------------------------------------
+# The illustrative ratchet and the relabeling ratchet
+# ---------------------------------------------------------------------------
+#
+# ``<!-- doctest: illustrative reason="..." -->`` keeps a block out of the runs, and the
+# docs are moving to blocks that all run. The markers that exist today are frozen in a
+# seed that may only shrink.
+#
+# THE SEED. One file per page under ILLUSTRATIVE_SEED_DIR, so that changes converting
+# two pages edit two files. A file is named by its page's repository path, percent-
+# encoded (illustrative_seed_name: a page has one name, and a name gives back one page).
+# A line is the page's path, a tab, and the marker's reason with its whitespace
+# collapsed, one line for each marker the parser binds to a block, in the order of the
+# page. A marker that binds to no block (one inside an example fence, in a table cell,
+# or with a blank line before its fence) governs nothing and has no line. A
+# ``.md.template`` and the page it renders to have a marker each, so a file each.
+#
+# THE SEED CHECK, in check_markers: a marker the seed does not list is a finding, and so
+# is a seed line no marker matches, so a commit that converts a block deletes its line
+# in the same commit. That alone would let a change add the line that covers its own new
+# marker, so .github/scripts/check-illustrative-ratchet.py (the snapshot-trailers job)
+# compares the seed at the head with the seed at the fork point and refuses a line the
+# fork point lacks.
+#
+# ARMED BY THE SEED. A root with no ILLUSTRATIVE_SEED_DIR is not held to one, and a root
+# with no UNEXECUTED_SEED_FILE is not held to that: the pages the unit tests write in a
+# temporary root are checked without either. This checkout has both, and
+# tests/unit/docs/test_illustrative_ratchet.py fails when it stops having them.
+#
+# AGAINST RELABELING. Fencing a bash block as ``text`` takes it out of the runs with no
+# marker, so the seed check never sees it. A block in a language nothing runs (the
+# family "other": text and the rest, groovy aside) that shows an ``ash`` command line or
+# a ``$`` prompt line is a finding, unless it is the output of the run block above it
+# (output_samples), or the page is a record of a past release (is_historical_doc) or one
+# a generator writes (is_generated_page: the repository's list of those names the page,
+# and the banner that opens it names the generator the list gives it), or
+# UNEXECUTED_SEED_FILE lists it. That seed holds a line for each such block of a page a
+# person writes, as measured at main: the page's path, a tab, and the block's first
+# command. It is read like the illustrative seed, and may only shrink. The journey
+# pages (getting-started/local.md and ci.md, and their templates) open with a banner
+# too, but their blocks are written by hand in a journey file, so the list does not
+# name them and they are read like any page.
+
+#: The illustrative seed: one file per page, in this directory.
+ILLUSTRATIVE_SEED_DIR = "docs/illustrative-seed"
+ILLUSTRATIVE_SEED_SUFFIX = ".tsv"
+#: The unexecuted-command seed: one file for every page.
+UNEXECUTED_SEED_FILE = "scripts/docs_unexecuted_commands_seed.tsv"
+#: What the path of a page ends in, as the corpus collects them (``**/*.md`` and
+#: ``**/*.md.template``): a seed file is named for a page and for nothing else.
+_PAGE_SUFFIXES = (".md", ".md.template")
+
+_PROMPT_LINE = re.compile(r"^\s*\$ +(?P<command>\S.*)$")
+
+
+def illustrative_seed_name(page: str) -> str:
+    """The file name of a page's seed: its path, percent-encoded, then ``.tsv``.
+
+    ``/`` is written ``%2F`` and a ``%`` in a path ``%25``, so every page has one name
+    and every name gives one page back (illustrative_seed_page). The directory stays
+    flat: nothing walks it, and where a page sits in the tree does not move its file.
+    """
+    return quote(page, safe="") + ILLUSTRATIVE_SEED_SUFFIX
+
+
+def illustrative_seed_file(page: str) -> str:
+    """The seed file of a page, as a path relative to the repository root."""
+    return f"{ILLUSTRATIVE_SEED_DIR}/{illustrative_seed_name(page)}"
+
+
+def illustrative_seed_page(name: str) -> str | None:
+    """The page a seed file name belongs to, or None when it is no page's name.
+
+    Only the one name illustrative_seed_name gives a page reads back: a name written
+    with a lower-case escape, or with its ``/`` left in, belongs to no page, and neither
+    does one that spells a path that is no markdown page (``notes.tsv``).
+    """
+    if not name.endswith(ILLUSTRATIVE_SEED_SUFFIX):
+        return None
+    page = unquote(name[: -len(ILLUSTRATIVE_SEED_SUFFIX)])
+    if not page.endswith(_PAGE_SUFFIXES):
+        return None
+    return page if illustrative_seed_name(page) == name else None
+
+
+def illustrative_markers(page: Page) -> list[tuple[int, str]]:
+    """(line, reason) of each illustrative marker bound to a block of ``page``, in page
+    order: the markers the seed lists.
+
+    A reason has each run of whitespace read as one space, which is how the seed holds
+    it, so two spellings of one reason are one reason. A marker with no reason
+    (marker_problems reports it) reads as the empty string.
+    """
+    found: list[tuple[int, str]] = []
+    for block in page.blocks:
+        marker = block.marker
+        if marker is not None and marker.mode == "illustrative":
+            reason = marker.keys.get("reason")
+            text = " ".join(reason.split()) if isinstance(reason, str) else ""
+            found.append((marker.line, text))
+    return found
+
+
+def _continued(lines: list[str], index: int, command: str) -> str:
+    """``command``, which starts on ``lines[index]``, with the lines it continues joined.
+
+    A line that ends in a backslash continues on the next, as ash_lines reads one.
+    """
+    while command.rstrip().endswith("\\") and index + 1 < len(lines):
+        index += 1
+        command = command.rstrip()[:-1] + " " + lines[index].strip()
+    return command
+
+
+def _first_command(block: Block) -> str | None:
+    """The first command a block shows, without its prompt and with its words one space
+    apart; None when it shows none.
+
+    A command is an ``ash`` command line (ash_lines, which reads a diff as the lines it
+    adds and keeps) or any line that is a ``$`` prompt and a command. Whichever comes
+    first names the block, and where one line is both, it is read as an ash line.
+    """
+    first_ash = ash_lines(block.body, block.lang)[:1]
+    lines = block.body.split("\n")
+    if block.lang == "diff":
+        lines = ["" if _DIFF_NOT_RUN.match(line) else line[1:] for line in lines]
+    for index, line in enumerate(lines):
+        if first_ash and first_ash[0][0] <= index:
+            break
+        prompt = _PROMPT_LINE.match(line)
+        if prompt:
+            return " ".join(_continued(lines, index, prompt.group("command")).split())
+    return " ".join(first_ash[0][1].split()) if first_ash else None
+
+
+def unexecuted_command_blocks(
+    page: Page, generated: Mapping[str, str]
+) -> list[tuple[Block, str]]:
+    """The blocks of ``page`` that show a command in a language nothing runs, each with
+    its first command, which is how the unexecuted-command seed names it.
+
+    A block of the family "other" (text, markdown, diff, ...) holding an ash command
+    line or a ``$`` prompt line. Not the output of a run block (output_samples), which
+    the runner compares with what that block prints; not groovy, whose ``sh`` steps the
+    CLI check parses; and nothing in a record of a past release, or in a page a
+    generator writes (is_generated_page, with ``generated`` as read_generated_pages
+    gives it). The freshness test holds that page to the generator's output, and a
+    usage line printed from the CLI's own command tree is no command the page tells a
+    reader to run, so a person has no seed to keep for it. A page that only opens with
+    a banner is read: a journey page does.
+    """
+    # A generated block in a hand-written page gets the same rule, not a seed line.
+    if is_historical_doc(page.rel) or is_generated_page(page, generated):
+        return []
+    samples = output_samples(page)
+    found: list[tuple[Block, str]] = []
+    for block in page.blocks:
+        if block.family != "other" or block.lang == "groovy" or id(block) in samples:
+            continue
+        command = _first_command(block)
+        if command is not None:
+            found.append((block, command))
+    return found
+
+
+def _seed_line(page: str, text: str) -> str:
+    if not page or any(char in page for char in "\t\r\n"):
+        raise ValueError(
+            f"{page!r} cannot be written to a seed: it holds a tab or a newline"
+        )
+    return f"{page}\t{text}"
+
+
+def illustrative_seed_lines(pages: Iterable[Page]) -> dict[str, list[str]]:
+    """The illustrative seed of ``pages``: the path of each seed file, relative to the
+    repository root, and its lines, in the order of the pages and of each page.
+
+    A marker with no reason cannot be written down, so it raises ValueError rather than
+    leave a line the seed's own reader refuses.
+    """
+    seed: dict[str, list[str]] = {}
+    for page in pages:
+        for line, reason in illustrative_markers(page):
+            if not reason:
+                raise ValueError(
+                    f"{page.rel}:{line}: this illustrative marker has no reason, so it "
+                    "cannot be written to the seed; fix the marker first"
+                )
+            seed.setdefault(illustrative_seed_file(page.rel), []).append(
+                _seed_line(page.rel, reason)
+            )
+    return seed
+
+
+def unexecuted_seed_lines(
+    pages: Iterable[Page], generated: Mapping[str, str]
+) -> list[str]:
+    """The unexecuted-command seed of ``pages``: a line for each of their
+    unexecuted_command_blocks, given ``generated`` as that function takes it, in the
+    order of the pages and of each page."""
+    return [
+        _seed_line(page.rel, command)
+        for page in pages
+        for _block, command in unexecuted_command_blocks(page, generated)
+    ]
+
+
+def render_seeds(pages: Iterable[Page], generated: Mapping[str, str]) -> dict[str, str]:
+    """Both seeds of ``pages`` as the files they are: the path of each, relative to the
+    repository root, and its text. The unexecuted-command seed is always there, empty
+    when no block shows a command, since the file is what arms that check."""
+    listed = list(pages)
+    files = {
+        file: "".join(f"{line}\n" for line in lines)
+        for file, lines in sorted(illustrative_seed_lines(listed).items())
+    }
+    files[UNEXECUTED_SEED_FILE] = "".join(
+        f"{line}\n" for line in unexecuted_seed_lines(listed, generated)
+    )
+    return files
+
+
+def refuse_a_second_seed(root: Path) -> None:
+    """Raise FileExistsError when either seed already exists under ``root``."""
+    existing = [
+        rel
+        for rel in (ILLUSTRATIVE_SEED_DIR, UNEXECUTED_SEED_FILE)
+        if (root / rel).exists()
+    ]
+    if existing:
+        raise FileExistsError(
+            f"the seed already exists ({', '.join(existing)}); it is written once, "
+            "from main, and only shrinks, by deleting lines"
+        )
+
+
+def write_seeds(files: Iterable[Path], root: Path = REPO_ROOT) -> list[str]:
+    """Write both seeds of the pages in ``files`` under ``root``; the paths written,
+    relative to it.
+
+    The seed is written once, from main. Where a seed already exists this refuses, so
+    the markers added since are never written into it: a seed only shrinks, by deleting
+    lines. It refuses too (ValueError) when the list of generated pages under ``root``
+    cannot be read, because a seed written without it would list the blocks of every
+    generated page. ``python scripts/docs_checks.py write-seeds`` runs it on this
+    checkout.
+    """
+    refuse_a_second_seed(root)
+    generated, problems = read_generated_pages(root)
+    if problems:
+        raise ValueError("; ".join(str(problem) for problem in problems))
+    contents = render_seeds(load_pages(files, root), generated)
+    for rel, text in contents.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    return sorted(contents)
+
+
+@dataclass(frozen=True)
+class SeedLine:
+    """One line of a seed: where it is, the page it is for, and its text (a reason or
+    a command)."""
+
+    file: str
+    number: int
+    page: str
+    text: str
+
+
+def _parse_seed(text: str, file: str) -> tuple[list[SeedLine], list[Finding]]:
+    """The lines of a seed file's ``text``, and a finding for each row that is not the
+    page's path, a tab, and text whose words are one space apart."""
+    lines: list[SeedLine] = []
+    findings: list[Finding] = []
+    rows = text.split("\n")
+    if rows[-1] == "":
+        rows.pop()
+    for number, row in enumerate(rows, 1):
+        page, _tab, rest = row.partition("\t")
+        if not page or not rest or rest != " ".join(rest.split()):
+            findings.append(
+                Finding(
+                    "markers",
+                    file,
+                    number,
+                    "malformed seed line: write the page's path, a tab, and the text "
+                    "with its words one space apart, on one line",
+                )
+            )
+            continue
+        lines.append(SeedLine(file, number, page, rest))
+    return lines, findings
+
+
+def read_illustrative_seed(root: Path) -> tuple[list[SeedLine], list[Finding]] | None:
+    """The illustrative seed under ``root``, or None when ``root`` has none.
+
+    The findings are the seed's own faults: a file that cannot be read, a name that is
+    no page's, a malformed line, a line in the file of another page.
+    """
+    directory = root / ILLUSTRATIVE_SEED_DIR
+    if not directory.is_dir():
+        return None
+    lines: list[SeedLine] = []
+    findings: list[Finding] = []
+    for path in sorted(directory.iterdir()):
+        if path.suffix != ILLUSTRATIVE_SEED_SUFFIX or not path.is_file():
+            continue
+        file = f"{ILLUSTRATIVE_SEED_DIR}/{path.name}"
+        page = illustrative_seed_page(path.name)
+        if page is None:
+            findings.append(
+                Finding(
+                    "markers",
+                    file,
+                    1,
+                    "this file name is not the name of a page's seed file; a seed file "
+                    "is named by its page's path with every / written %2F, as in "
+                    f"{illustrative_seed_name('docs/content/index.md')}",
+                )
+            )
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            findings.append(
+                Finding("markers", file, 1, f"the seed file cannot be read: {exc}")
+            )
+            continue
+        parsed, problems = _parse_seed(text, file)
+        findings += problems
+        for line in parsed:
+            if page is not None and line.page != page:
+                findings.append(
+                    Finding(
+                        "markers",
+                        file,
+                        line.number,
+                        f"this line is for {line.page}, which belongs in "
+                        f"{illustrative_seed_file(line.page)}: each page has a seed "
+                        "file of its own, so that changes converting different pages "
+                        "edit different files",
+                    )
+                )
+        lines += parsed
+    return lines, findings
+
+
+def read_unexecuted_seed(root: Path) -> tuple[list[SeedLine], list[Finding]] | None:
+    """The unexecuted-command seed under ``root``, or None when ``root`` has none."""
+    path = root / UNEXECUTED_SEED_FILE
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return [], [
+            Finding(
+                "markers",
+                UNEXECUTED_SEED_FILE,
+                1,
+                f"the seed file cannot be read: {exc}",
+            )
+        ]
+    return _parse_seed(text, UNEXECUTED_SEED_FILE)
+
+
+def _seed_findings(
+    pages: Sequence[Page],
+    seed: list[SeedLine],
+    root: Path,
+    wanted: Callable[[Page], list[tuple[int, str]]],
+    unlisted: Callable[[str], str],
+    stale: Callable[[str], str],
+) -> list[Finding]:
+    """What the seed and the pages disagree about.
+
+    ``wanted`` gives each page's (line, text) entries, which the seed must list one line
+    each for. An entry no line lists is reported on the page with ``unlisted``'s words,
+    and a line no entry uses is reported in its seed file with ``stale``'s. A line for
+    a page that was not handed over is left alone while the page exists, since a run
+    over some pages cannot say what the rest hold, and reported when it does not.
+    """
+    by_page: dict[str, list[SeedLine]] = {}
+    for line in seed:
+        by_page.setdefault(line.page, []).append(line)
+    findings: list[Finding] = []
+    for page in pages:
+        available = list(by_page.get(page.rel, []))
+        for number, text in wanted(page):
+            listed = next((line for line in available if line.text == text), None)
+            if listed is None:
+                findings.append(Finding("markers", page.rel, number, unlisted(text)))
+            else:
+                available.remove(listed)
+        findings += [
+            Finding("markers", line.file, line.number, stale(line.text))
+            for line in available
+        ]
+    handed_over = {page.rel for page in pages}
+    for rel, lines in by_page.items():
+        if rel not in handed_over and not (root / rel).is_file():
+            findings += [
+                Finding(
+                    "markers",
+                    line.file,
+                    line.number,
+                    f"this seed line is for {rel}, which does not exist: delete the "
+                    "line, and its file once it has none, in the commit that deletes "
+                    "or renames the page",
+                )
+                for line in lines
+            ]
+    return findings
+
+
+def illustrative_seed_problems(pages: Sequence[Page], root: Path) -> list[Finding]:
+    """The illustrative markers of ``pages`` are the lines of the seed under ``root``.
+    Nothing when ``root`` has no seed directory (see the section above)."""
+    read = read_illustrative_seed(root)
+    if read is None:
+        return []
+    seed, findings = read
+    return findings + _seed_findings(
+        pages,
+        seed,
+        root,
+        illustrative_markers,
+        lambda reason: (
+            f"this illustrative marker (reason {reason!r}) is not in the illustrative "
+            "seed, and the seed only shrinks: make the block run, or delete it. A "
+            "block that cannot run yet is no reason to add a line; see 'The "
+            "illustrative ratchet' on the contributor page"
+        ),
+        lambda reason: (
+            f"the seed has a line for this page with the reason {reason!r}, and no "
+            "illustrative marker on the page has it: delete the line in the commit "
+            "that converts or deletes the block"
+        ),
+    )
+
+
+def unexecuted_command_problems(pages: Sequence[Page], root: Path) -> list[Finding]:
+    """The blocks of ``pages`` that show a command nothing runs are the lines of the
+    unexecuted-command seed under ``root``. Nothing when ``root`` has no such seed.
+
+    The pages a generator writes, which are not read, are the ones the list under
+    ``root`` names (read_generated_pages). A list it cannot read is a finding, and
+    names no page.
+    """
+    read = read_unexecuted_seed(root)
+    if read is None:
+        return []
+    seed, findings = read
+    generated, listing = read_generated_pages(root)
+    findings += listing
+    return findings + _seed_findings(
+        pages,
+        seed,
+        root,
+        lambda page: [
+            (block.fence_line, command)
+            for block, command in unexecuted_command_blocks(page, generated)
+        ],
+        lambda command: (
+            f"this block shows a command that nothing runs ({command!r}): fence it as "
+            "bash so the docs runner executes it, mark it output if it is what the "
+            "block above prints, or write the command in prose. The blocks like this "
+            f"are listed in {UNEXECUTED_SEED_FILE}, which only shrinks"
+        ),
+        lambda command: (
+            f"no block on this page shows this command ({command!r}), which this seed "
+            "line names: delete the line in the commit that converts or deletes the "
+            "block"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3436,8 +3924,115 @@ def _block_cli_findings(
     return findings
 
 
-#: The comment a reference generator opens its page with.
-_GENERATED_BY = re.compile(r"\s*<!--\s*Generated by scripts/generate_\w+\.py\b")
+#: The comment a reference generator opens its page with, and the script it names.
+_GENERATED_BY = re.compile(
+    r"\s*<!--\s*Generated by scripts/(?P<script>generate_\w+\.py)\b"
+)
+#: Where the repository lists the reference pages a generator writes: a dict from a
+#: generator script's file name to the file name of its page under GENERATED_PAGES_DIR.
+#: The freshness test holds each page on it to its generator's output, and the
+#: contributor page asks whoever adds a generated reference page to add it there.
+GENERATED_PAGES_LIST = "tests/unit/test_generated_docs_freshness.py"
+GENERATED_PAGES_LIST_NAME = "REFERENCE_PAGES"
+GENERATED_PAGES_DIR = "docs/content/reference"
+
+
+def generator_banner(page: Page) -> str | None:
+    """The file name of the generator script whose banner opens ``page``, or None.
+
+    The contributor page asks every generated reference page to start with the banner
+    (``Generated by scripts/generate_<name>.py``). A banner further down a page, or
+    quoted in a block, is not one. A banner alone does not make a page generated
+    (is_generated_page): any page can open with one, and the journey pages do, though
+    a person writes their blocks. plugin_written_rows reads the banner alone.
+    """
+    match = _GENERATED_BY.match(page.text)
+    return match.group("script") if match else None
+
+
+def _assigned_values(tree: ast.Module, name: str) -> list[ast.expr]:
+    """The value of each top-level statement of ``tree`` that assigns ``name``."""
+    values: list[ast.expr] = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        else:
+            continue
+        names = [target.id for target in targets if isinstance(target, ast.Name)]
+        if name in names:
+            values.append(node.value)
+    return values
+
+
+def _is_dict_of_strings(value: object) -> bool:
+    """Whether ``value`` is a dict whose keys and values are all strings."""
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
+def read_generated_pages(root: Path) -> tuple[dict[str, str], list[Finding]]:
+    """The reference pages a generator writes under ``root``, as the repository's own
+    list gives them, and what is wrong with that list, if anything.
+
+    The answer maps each generator script's file name to the path of the page it writes,
+    relative to ``root``. The list is GENERATED_PAGES_LIST_NAME in GENERATED_PAGES_LIST.
+    It is read as source, with ``ast``, and never imported: that module imports the
+    whole test environment, and these checks run without it. A root with no such file
+    has no generated pages. A list that cannot be read (the file does not parse, the
+    name is not assigned exactly once at its top level, or its value is not a dict of
+    strings written out as a literal) names no page, so every page is read like one a
+    person writes, and a finding says why.
+    """
+    path = root / GENERATED_PAGES_LIST
+    if not path.is_file():
+        return {}, []
+
+    def unreadable(line: int, why: str) -> tuple[dict[str, str], list[Finding]]:
+        message = (
+            f"the list of generated reference pages, {GENERATED_PAGES_LIST_NAME}, "
+            f"cannot be read: {why}. Until it can, no page counts as one a generator "
+            "writes, and every page is read like one a person writes"
+        )
+        return {}, [Finding("markers", GENERATED_PAGES_LIST, line, message)]
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), GENERATED_PAGES_LIST)
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+        return unreadable(1, f"the file cannot be parsed: {exc}")
+    values = _assigned_values(tree, GENERATED_PAGES_LIST_NAME)
+    if len(values) != 1:
+        why = f"the file assigns it {len(values)} times at its top level, not once"
+        return unreadable(values[1].lineno if values else 1, why)
+    try:
+        listed = ast.literal_eval(values[0])
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return unreadable(values[0].lineno, "its value is not a literal")
+    if not _is_dict_of_strings(listed):
+        return unreadable(values[0].lineno, "its value is not a dict of strings")
+    generated = {
+        script: f"{GENERATED_PAGES_DIR}/{page}" for script, page in listed.items()
+    }
+    return generated, []
+
+
+def is_generated_page(page: Page, generated: Mapping[str, str]) -> bool:
+    """Whether a generator writes ``page``, as the repository's list of generated pages
+    (``generated``, as read_generated_pages gives it) and the page itself agree: the
+    banner that opens the page names a script, and the list says that script writes
+    this page.
+
+    Both are needed. A banner is a comment any page can open with, a copied one or one
+    naming a script that does not exist included, and the journey pages open with one
+    although a person writes their blocks in a journey file. The list alone does not
+    say the page still is what the freshness test holds to its generator.
+    """
+    script = generator_banner(page)
+    return script is not None and generated.get(script) == page.rel
+
+
 #: The sections whose plugins' options tables the generated reference pages carry.
 PLUGIN_SECTIONS = frozenset({"scanners", "reporters", "converters"})
 #: The end of an environment variable's purpose quoted from a plugin module's code,
@@ -3455,7 +4050,7 @@ def plugin_written_rows(page: Page) -> set[int]:
     variable table whose purpose is quoted from a plugin module. A hand-written page
     has none: its author chose each word.
     """
-    if not _GENERATED_BY.match(page.text):
+    if generator_banner(page) is None:
         return set()
     rows: set[int] = set()
     for table in page.tables:
@@ -10736,3 +11331,56 @@ def site_pages(files: Iterable[Path], root: Path) -> list[Path]:
     """The corpus files mkdocs renders: markdown under docs_dir."""
     docs_dir = load_site(str(root)).docs_dir
     return [path for path in files if path.suffix == ".md" and _in_dir(path, docs_dir)]
+
+
+# ---------------------------------------------------------------------------
+# Run as a script: writing the seeds
+# ---------------------------------------------------------------------------
+
+_USAGE = (
+    "usage: python scripts/docs_checks.py write-seeds\n"
+    "  writes docs/illustrative-seed/ and scripts/docs_unexecuted_commands_seed.tsv "
+    "from the\n"
+    "  pages of this checkout. It is for the commit that introduces the seeds, and "
+    "it refuses\n"
+    "  to run where they exist: a seed only shrinks, by deleting lines."
+)
+
+
+def _main(argv: Sequence[str]) -> int:
+    """``write-seeds``, the one thing this file does when it is run.
+
+    Returns 0 when the seeds were written, 1 when they already exist, and 64 for any
+    other command line.
+    """
+    if list(argv) != ["write-seeds"]:
+        print(_USAGE, file=sys.stderr)
+        return 64
+    try:
+        refuse_a_second_seed(REPO_ROOT)
+        # The corpus is the one verify_docs_freshness.py checks, so the seed lists the
+        # pages the checks read. That script takes this module from sys.modules under
+        # the name below, so a run registers itself there first and is loaded once.
+        sys.modules.setdefault("_ash_docs_checks", sys.modules[__name__])
+        gate = _load_by_path(
+            "_ash_docs_gate", REPO_ROOT / "scripts" / "verify_docs_freshness.py"
+        )
+        written = write_seeds(gate.collect_md_files(), REPO_ROOT)
+    except FileExistsError as exc:
+        print(f"docs_checks: {exc}", file=sys.stderr)
+        return 1
+    counts = {
+        rel: (REPO_ROOT / rel).read_text(encoding="utf-8").count("\n")
+        for rel in written
+    }
+    per_page = [rel for rel in written if rel != UNEXECUTED_SEED_FILE]
+    print(
+        f"wrote {len(per_page)} files under {ILLUSTRATIVE_SEED_DIR} with "
+        f"{sum(counts[rel] for rel in per_page)} lines, and {UNEXECUTED_SEED_FILE} "
+        f"with {counts[UNEXECUTED_SEED_FILE]} lines"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_main(sys.argv[1:]))

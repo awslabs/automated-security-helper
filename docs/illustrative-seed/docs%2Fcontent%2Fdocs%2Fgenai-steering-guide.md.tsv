@@ -1,0 +1,51 @@
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	needs ijson, a third-party package that ASH does not install
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a report file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a report file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	runs every enabled scanner, which needs each scanner's tool
+docs/content/docs/genai-steering-guide.md	reads the results of the full scan above
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a results file that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads a software bill of materials that an earlier scan has to have written to the current directory
+docs/content/docs/genai-steering-guide.md	reads .ash/ash_output, which a scan has to have written first
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	reads .ash/ash_output, which a scan has to have written first
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	reads .ash/ash_output, which a scan has to have written first
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	calls the MCP tools, which need a client connected to ash mcp
+docs/content/docs/genai-steering-guide.md	runs every scanner, which needs the scanner tools and network access

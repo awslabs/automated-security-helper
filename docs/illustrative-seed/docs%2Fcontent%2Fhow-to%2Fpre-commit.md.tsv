@@ -1,0 +1,4 @@
+docs/content/how-to/pre-commit.md	installs the hook environment from GitHub
+docs/content/how-to/pre-commit.md	installs pre-commit from PyPI
+docs/content/how-to/pre-commit.md	builds ASH's container image, which needs a container runtime and the network
+docs/content/how-to/pre-commit.md	runs ASH in Nix mode, which needs Nix and the network

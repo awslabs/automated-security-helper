@@ -1,0 +1,3 @@
+docs/content/how-to/run-in-a-container.md.template	needs a container runtime and network access to build the image
+docs/content/how-to/run-in-a-container.md.template	needs a container runtime, network access, and a registry
+docs/content/how-to/run-in-a-container.md.template	needs a container runtime and network access

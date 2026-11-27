@@ -1,0 +1,1 @@
+deploy/terraform/modules/codepipeline-executor/README.md	excerpt of the two buildspecs; runs inside the ASH image in CodeBuild

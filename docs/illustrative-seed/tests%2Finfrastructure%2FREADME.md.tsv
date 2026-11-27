@@ -1,0 +1,4 @@
+tests/infrastructure/README.md	needs the AWS CDK CLI and AWS credentials
+tests/infrastructure/README.md	needs AWS credentials and the deployed stack
+tests/infrastructure/README.md	needs AWS credentials and the deployed stack
+tests/infrastructure/README.md	needs the AWS CDK CLI and AWS credentials

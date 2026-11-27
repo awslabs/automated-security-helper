@@ -1,0 +1,3 @@
+ash-agent-plugins/agentic-coding/plugins/kiro/POWER.md	calls the MCP tools, which need a client connected to ash mcp
+ash-agent-plugins/agentic-coding/plugins/kiro/POWER.md	calls the MCP tools, which need a client connected to ash mcp
+ash-agent-plugins/agentic-coding/plugins/kiro/POWER.md	installs ASH from GitHub over the network and starts the MCP server, which waits for a client

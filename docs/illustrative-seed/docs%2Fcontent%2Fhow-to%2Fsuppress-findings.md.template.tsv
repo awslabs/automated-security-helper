@@ -1,0 +1,3 @@
+docs/content/how-to/suppress-findings.md.template	shows the command the warning prints, with a placeholder for the interpreter path
+docs/content/how-to/suppress-findings.md.template	installs ASH from GitHub over the network
+docs/content/how-to/suppress-findings.md.template	shows where the comments go; running it would call make deploy
