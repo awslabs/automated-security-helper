@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -53,6 +54,7 @@ from typing import (
     Optional,
     Union,
     List,
+    get_args,
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
@@ -915,7 +917,8 @@ def new_report_id(
 #: it holds when it is imported, and a results file has to load without that, because
 #: ``ash report`` and ``ash merge`` read notices and never evaluate a row.
 #: tests/unit/models/test_support_notice_binds_to_the_register.py holds each of them
-#: equal to the register's enum, so a member added there fails here.
+#: equal to the register's enum, and the fact names equal to the register's ``FIELDS``,
+#: so a member or a fact added there fails here.
 SupportLevelText = Literal["polyfilled", "degraded", "unsupported"]
 SupportBehaviorText = Literal[
     "continues", "skips-scanner", "scanner-missing", "scanner-error", "refuses"
@@ -925,6 +928,35 @@ UpgradePathKindText = Literal[
     "same-os", "container", "wsl", "other-os", "other-host", "ci-runner"
 ]
 UpgradePathGroupText = Literal["this-machine", "elsewhere"]
+
+#: The names a notice's facts may have: the facts the register's host readers fill, in
+#: its order, ``os_release`` (a free-text version string) among them. A closed list, so
+#: a notice cannot record a host name or a user name as a fact, whatever its value is.
+SupportFactNameText = Literal[
+    "os",
+    "host_os",
+    "os_release",
+    "arch",
+    "translation",
+    "cpu_level",
+    "polars_runtime",
+    "libc",
+    "python_in_range",
+    "python_build",
+    "install_channel",
+    "run_mode",
+    "wsl",
+    "shell",
+    "image_arch_matches",
+    "sandbox_mode",
+    "sandbox_backend",
+    "sandbox_loss",
+    "express_requested",
+    "express_available",
+    "tool_sandbox",
+    "ignore_paths",
+]
+_SUPPORT_FACT_NAMES = frozenset(get_args(SupportFactNameText))
 
 #: The path kinds that change the machine the scan runs on. Every other kind moves the
 #: scan to another machine, another operating system or a CI runner.
@@ -1147,12 +1179,13 @@ class SupportNotice(StrippedRecordModel):
         ),
     ] = None
     facts: Annotated[
-        Dict[str, str],
+        Dict[SupportFactNameText, str],
         Field(
             default_factory=dict,
             description=(
                 "The tokens the row matched, by fact name, for example arch amd64 and "
-                "cpu_level compat-only."
+                "cpu_level compat-only. The names are the support register's facts, "
+                "and no other name is accepted."
             ),
         ),
     ]
@@ -1196,11 +1229,25 @@ class SupportNotice(StrippedRecordModel):
             return value
         return _refuse_a_local_path(str(info.field_name), value)
 
+    @field_validator("facts", mode="before")
+    @classmethod
+    def _facts_are_named_as_the_register_names_them(cls, value: Any) -> Any:
+        # Before the keys are checked against the closed list, because the error for a
+        # key outside it carries the key in its location, and a refusal quotes nothing
+        # it was given.
+        if isinstance(value, Mapping) and not _SUPPORT_FACT_NAMES.issuperset(value):
+            raise ValueError(
+                "a fact has a name the support register does not declare, and a "
+                "support notice carries no other, because results are shared"
+            )
+        return value
+
     @field_validator("facts", mode="after")
     @classmethod
-    def _facts_hold_no_local_path(cls, value: Dict[str, str]) -> Dict[str, str]:
-        for name, token in value.items():
-            _refuse_a_local_path("a fact name", name)
+    def _facts_hold_no_local_path(
+        cls, value: Dict[SupportFactNameText, str]
+    ) -> Dict[SupportFactNameText, str]:
+        for token in value.values():
             _refuse_a_local_path("a fact", token)
         return value
 

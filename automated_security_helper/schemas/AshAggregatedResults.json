@@ -23804,7 +23804,33 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The tokens the row matched, by fact name, for example arch amd64 and cpu_level compat-only.",
+          "description": "The tokens the row matched, by fact name, for example arch amd64 and cpu_level compat-only. The names are the support register's facts, and no other name is accepted.",
+          "propertyNames": {
+            "enum": [
+              "os",
+              "host_os",
+              "os_release",
+              "arch",
+              "translation",
+              "cpu_level",
+              "polars_runtime",
+              "libc",
+              "python_in_range",
+              "python_build",
+              "install_channel",
+              "run_mode",
+              "wsl",
+              "shell",
+              "image_arch_matches",
+              "sandbox_mode",
+              "sandbox_backend",
+              "sandbox_loss",
+              "express_requested",
+              "express_available",
+              "tool_sandbox",
+              "ignore_paths"
+            ]
+          },
           "title": "Facts",
           "type": "object"
         },
