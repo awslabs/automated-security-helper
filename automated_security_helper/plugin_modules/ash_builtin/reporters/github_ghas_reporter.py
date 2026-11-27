@@ -846,13 +846,13 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         """Say how many results of each kind a reader still has to judge are left
         out of the file (:data:`_UNJUDGED_KINDS`).
 
-        ``_left_out`` drops every result whose kind is not ``fail``, ``open`` and
-        ``review`` included, and the file said nothing about them, so a reviewer
-        comparing it with another report of the same scan found results that were
-        not in the file. Only the count is logged, and only what this file does:
-        whether those kinds belong in the file is a decision this method does
-        not take, and what another report does with them depends on which
-        reports are enabled.
+        ``_left_out`` drops every result that states no finding, and every ``open``
+        and ``review`` result as well. The file said nothing about those last two,
+        so a reviewer comparing it with another report of the same scan found
+        results that were not in the file. Only the count is logged, and only what
+        this file does: whether those kinds belong in the file is a decision this
+        method does not take, and what another report does with them depends on
+        which reports are enabled.
         """
         counts = dict.fromkeys(_UNJUDGED_KINDS, 0)
         for run in runs:

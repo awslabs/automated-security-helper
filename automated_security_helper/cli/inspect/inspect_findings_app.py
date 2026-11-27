@@ -966,8 +966,9 @@ def _summary_line(findings: list) -> Text:
 
     Built from counts and this module's own words alone - no finding text
     reaches it - and listed with the vetted text builders so the markup guard
-    can hold every widget to them. A result whose kind states no finding is
-    counted as information alone: never active, in no severity and never
+    can hold every widget to them. A result that states no finding (kind pass,
+    notApplicable or informational, with nothing in it that reports a problem)
+    is counted as information alone: never active, in no severity and never
     suppressed.
     """
     summary = Text()

@@ -886,8 +886,9 @@ def actionable_results_by_scanner(
     project-wide *threshold* governing a scanner that has no setting of its own
     and a finding that names no scanner; ``properties.issue_severity`` decides
     when it names a severity ASH knows, otherwise the SARIF ``level`` does; and a
-    suppressed finding never counts, nor does a result whose kind states no
-    finding (``pass``, ``notApplicable``, ``informational``). Both arms go
+    suppressed finding never counts, nor does a result that states no finding
+    (kind ``pass``, ``notApplicable`` or ``informational``, and nothing in it
+    reports a problem). Both arms go
     through Phase 0's severity ladder, which was verified to gate identically to
     the inline tables in ``_compute_exit_code`` for all five real threshold
     values.
