@@ -994,14 +994,21 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # Undone in the finally: the copy snyk tests for the source target, and
             # the sandbox's read grant for it.
             cleanup = ExitStack()
-            target_results_dir = self.results_dir.joinpath(target_type)
+            # Absolute, because snyk runs from a directory of its own (the
+            # _run_subprocess call below), where a relative path names something
+            # else.
+            target_results_dir = Path(
+                os.path.abspath(self.results_dir.joinpath(target_type))
+            )
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
             # A report left by an earlier run must not be read as this run's: snyk
             # writes none when it fails, and the read below takes whatever is here.
             results_file.unlink(missing_ok=True)
 
-            tested = target
+            # Absolute for the same reason. The converted target is tested in
+            # place; the copy that stands in for the source target is absolute.
+            tested = Path(os.path.abspath(target))
             if target_type == TargetType.SOURCE:
                 staged = self._stage_source(target, global_ignore_paths or [], cleanup)
                 if staged is None:
@@ -1064,7 +1071,8 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             effective_timeout = self._effective_scan_timeout()
             # The CLI reads a snyk.<ext> configuration file from its working
             # directory, so it starts in a new empty directory outside the scanned
-            # tree. Its target is the absolute path in final_args, not ".".
+            # tree. The target and the SARIF output path in final_args are
+            # absolute (made so above), so they name the same files from there.
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
