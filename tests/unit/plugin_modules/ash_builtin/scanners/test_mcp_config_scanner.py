@@ -38,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_sc
 from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 from automated_security_helper.utils.mcp_config import (
     FORMATS,
+    McpServerEntry,
     parse_mcp_config_text,
 )
 
@@ -780,6 +781,13 @@ LISTED_COMMANDS_WITH_ENV = [
     ListedCommand(
         "a-second-bare-name", stdio("uvx", env=PATH_SET), ["npx", "uvx"], False
     ),
+    ListedCommand("a-null-value", stdio("npx", env={"PATH": None}), BARE_NAME, False),
+    ListedCommand(
+        "a-list-value", stdio("npx", env={"PATH": ["./tools"]}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "an-object-value", stdio("npx", env={"PATHEXT": {"x": 1}}), BARE_NAME, False
+    ),
     ListedCommand("no-env", stdio("npx"), BARE_NAME, True),
     ListedCommand("an-empty-env", stdio("npx", env={}), BARE_NAME, True),
     ListedCommand(
@@ -791,6 +799,12 @@ LISTED_COMMANDS_WITH_ENV = [
     ListedCommand(
         "names-that-only-contain-path",
         stdio("npx", env={"NODE_PATH": "/x", "PYTHONPATH": "/y", "MANPATH": "/z"}),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand(
+        "values-that-are-not-text-under-other-names",
+        stdio("npx", env={"NODE_ENV": None, "LOG_LEVEL": ["debug"]}),
         BARE_NAME,
         True,
     ),
@@ -857,6 +871,80 @@ def test_an_env_that_sets_the_lookup_adds_the_prefix_finding_and_no_other() -> N
     assert findings(".mcp.json", server, allowed_command_prefixes=BARE_NAME) == [
         (RULE_COMMAND_PREFIX, "/mcpServers/s/command")
     ]
+
+
+# ---------------------------------------------------------------------------
+# A PATH or PATHEXT whose value is not text. The reader keeps an env value only when
+# it is a string, number or boolean, so a key set to null, a list or an object, or in
+# TOML to an array, a table or a date-time, leaves no text behind. The rule reads the
+# key and not its value, so each of them takes the allowance away as a PATH set to a
+# string does. The JSON shapes are rows of the list above. TOML has no null, so these
+# are the shapes a Codex config can write, with rows around them that must pass.
+# ---------------------------------------------------------------------------
+
+
+class TomlEntry(NamedTuple):
+    """The lines after `command = "npx"` in a Codex entry, and whether it passes."""
+
+    name: str
+    lines: str
+    allowed: bool
+
+
+TOML_ENTRIES = [
+    TomlEntry("an-array-value", 'env = { PATH = ["./tools"] }\n', False),
+    TomlEntry("a-table-value", "[mcp_servers.s.env.PATHEXT]\nx = 1\n", False),
+    TomlEntry(
+        "a-date-time-value", "[mcp_servers.s.env]\nPATH = 1979-05-27T07:32:00Z\n", False
+    ),
+    TomlEntry("a-string-value", 'env = { PATH = "/tmp/shims" }\n', False),
+    TomlEntry("no-env-table", "", True),
+    TomlEntry(
+        "a-date-time-under-another-name",
+        "[mcp_servers.s.env]\nRELEASED_AT = 1979-05-27T07:32:00Z\n",
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize("row", TOML_ENTRIES, ids=lambda row: row.name)
+def test_a_toml_bare_name_allows_its_command_only_while_env_leaves_the_lookup_alone(
+    row,
+) -> None:
+    """A listed bare name passes a Codex entry's command unless its env sets the lookup.
+
+    A key set to an array, a table or a date-time counts as set, whatever it holds. A
+    PATH set to a string, an entry with no env table and a date-time under another
+    name are the rows around them.
+    """
+    text = '[mcp_servers.s]\ncommand = "npx"\n' + row.lines
+    found: List[str] = []
+    for entry in parse_mcp_config_text(text, ".codex/config.toml"):
+        found.extend(
+            f.rule_id
+            for f in evaluate_entry(entry, options(allowed_command_prefixes=BARE_NAME))
+        )
+    assert found == ([] if row.allowed else [RULE_COMMAND_PREFIX])
+
+
+def test_an_entry_made_by_hand_is_checked_on_the_env_it_carries() -> None:
+    """The rule reads the entry it is given, however the entry was made.
+
+    No reader made these two entries. The one whose env is set in the constructor is
+    refused, and the same entry with no env still passes.
+    """
+    base = {
+        "source_file": ".mcp.json",
+        "format_id": "claude_code",
+        "server_name": "s",
+        "pointer": "/mcpServers/s",
+        "kind": "stdio",
+        "command": "npx",
+    }
+    listed = options(allowed_command_prefixes=BARE_NAME)
+    set_by_hand = evaluate_entry(McpServerEntry(**base, env=PATH_SET), listed)
+    assert [found.rule_id for found in set_by_hand] == [RULE_COMMAND_PREFIX]
+    assert evaluate_entry(McpServerEntry(**base), listed) == []
 
 
 # ---------------------------------------------------------------------------
