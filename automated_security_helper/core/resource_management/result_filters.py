@@ -1164,8 +1164,9 @@ def _stats_of_sarif(
     """The severity buckets, ``total`` and ``actionable`` of *sarif*'s results.
 
     The counts a scanner row would carry, read from the findings themselves:
-    a result whose kind states no finding (pass, notApplicable or
-    informational) is in no bucket and no total, a result with a suppression in
+    a result that states no finding (``severity_ladder.result_states_no_finding``:
+    kind pass, notApplicable or informational, and nothing in it reports a problem)
+    is in no bucket and no total, suppressed or not, a result with a suppression in
     effect is in the ``suppressed`` bucket, every other one in its severity's,
     ``total`` is every non-suppressed result that states a finding, and
     ``actionable`` is exit 2's test at the scan's thresholds, or None when the
@@ -1178,8 +1179,8 @@ def _stats_of_sarif(
     "non-suppressed results" figure whatever the bucket set becomes.
     """
     from automated_security_helper.utils.sarif_utils import (
-        is_not_a_finding,
         is_result_suppressed,
+        result_states_no_finding,
     )
 
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
@@ -1189,7 +1190,7 @@ def _stats_of_sarif(
     kinds: List[str] = []
     for run in sarif.get("runs") or []:
         for result in (run.get("results") or []) if isinstance(run, dict) else []:
-            if is_not_a_finding(result):
+            if result_states_no_finding(result):
                 continue
             if is_result_suppressed(result):
                 kinds.append("suppressed")

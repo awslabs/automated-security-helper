@@ -1391,23 +1391,24 @@ def _add_aggregated_scanner_progress(
     rejected here with its scanner named.
     """
     from automated_security_helper.utils.sarif_utils import (
-        is_not_a_finding,
         is_result_suppressed,
+        result_states_no_finding,
     )
 
     # The scanner and the bucket of each finding of the SARIF. A result with a
     # suppression in effect is graded ``suppressed``, as the completed view
     # grades it (_completed_findings_summary): it is in that bucket and not in
-    # its severity or in the count. A result whose kind states no finding (pass,
-    # notApplicable, informational) is in neither: the counts a scan records
-    # leave it out, and this tally is read in their place when the document
-    # records none for the scanner.
+    # its severity or in the count. A result that states no finding (kind pass,
+    # notApplicable or informational, with nothing in it that reports a problem)
+    # is in no bucket, suppressed or not: the counts a scan records leave it
+    # out, and this tally is read in their place when the document records none
+    # for the scanner.
     finding_scanners: List[str] = []
     finding_buckets: List[str] = []
     for run, result in _sarif_run_results(results.get("sarif")):
-        suppressed = is_result_suppressed(result)
-        if is_not_a_finding(result) and not suppressed:
+        if result_states_no_finding(result):
             continue
+        suppressed = is_result_suppressed(result)
         severity = "suppressed" if suppressed else result_severity(result)
         # The scanner the result names, as every other reader of the aggregated
         # SARIF attributes it (sarif_utils). The run's tool is the fallback
@@ -1968,9 +1969,9 @@ def _completed_findings_summary(
     at the top. Without them, from the SARIF results; and likewise when the
     stats name no bucket at all (``total_findings`` and ``actionable`` alone, say),
     which used to give all-zero buckets beside SARIF results that were never
-    graded. A result whose kind states no finding (pass, notApplicable,
-    informational) is in no bucket of that grading, as it is in none the scan
-    records; one with a suppression in effect is still a suppressed result.
+    graded. A result that states no finding (kind pass, notApplicable or
+    informational, with nothing in it that reports a problem) is in no bucket of
+    that grading, suppressed or not, as it is in none the scan records.
     """
     summary = empty_severity_counts()
     if summary_stats:
@@ -1985,14 +1986,14 @@ def _completed_findings_summary(
             return summary
 
     from automated_security_helper.utils.sarif_utils import (
-        is_not_a_finding,
         is_result_suppressed,
+        result_states_no_finding,
     )
 
     for result in findings:
-        suppressed = is_result_suppressed(result)
-        if is_not_a_finding(result) and not suppressed:
+        if result_states_no_finding(result):
             continue
+        suppressed = is_result_suppressed(result)
         bucket = ("suppressed" if suppressed else result_severity(result)).lower()
         summary[bucket if bucket in summary else UNKNOWN_SEVERITY] += 1
     return summary
@@ -2006,7 +2007,7 @@ def _completed_findings_count(
 
     From ``summary_stats.total`` when the document carries one; else what the
     buckets of ``findings_summary`` other than ``suppressed`` add up to: the SARIF
-    results less the suppressed ones and the ones whose kind states no finding
+    results less the suppressed ones and the ones that state no finding
     when the buckets were graded from them, and the recorded buckets' sum when
     they came from the summary stats. Taken from the SARIF alone, a document
     whose stats gave ``{"critical": 7}`` and no ``total`` read 7 critical beside

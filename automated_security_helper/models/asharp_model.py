@@ -1641,7 +1641,8 @@ class AshAggregatedResults(RecordModel):
         # count twice is idempotent, and a model no metrics pass has visited
         # still gets its counts from here. A scanner's count is the one those
         # metrics give it: its suppressed SARIF results plus the suppressed
-        # findings its dict result recorded (_suppressed_by_scanner).
+        # findings its dict result recorded (_suppressed_by_scanner); results
+        # that state no finding are in neither count.
         from automated_security_helper.core.scanner_statistics_calculator import (
             ScannerStatisticsCalculator,
         )
