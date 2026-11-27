@@ -1309,14 +1309,12 @@ def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
         ``findings_available``: whether the document carried the SARIF the list
         is built from. An empty list beside False means the findings could not
         be listed; beside True it means there are none. The two used to read
-        the same. Each entry names the ``result_kind`` of its SARIF result, and
-        ``findings_count`` counts the entries that state a finding: a result of
-        kind pass, notApplicable or informational is listed and counted nowhere.
+        the same. The list holds the findings the actionable view kept, so no
+        result that states no finding reaches it; each entry names the
+        ``result_kind`` of its SARIF result, and ``findings_count`` is the
+        number of entries.
     """
-    from automated_security_helper.utils.sarif_utils import (
-        NON_FINDING_KINDS,
-        result_kind,
-    )
+    from automated_security_helper.utils.sarif_utils import result_kind
 
     findings_list = []
 
@@ -1376,8 +1374,6 @@ def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
                 findings_list.append(finding)
 
     results["findings"] = findings_list
-    results["findings_count"] = sum(
-        finding["result_kind"] not in NON_FINDING_KINDS for finding in findings_list
-    )
+    results["findings_count"] = len(findings_list)
 
     return results
