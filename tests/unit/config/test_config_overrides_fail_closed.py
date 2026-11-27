@@ -613,6 +613,13 @@ def _resolve_config_module():
     return importlib.import_module("automated_security_helper.config.resolve_config")
 
 
+def _keys_warned_of() -> set[str]:
+    """The keys the append warning has named in any run: the warned set holds each as
+    (run log scope, key as logged)."""
+    warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
+    return {key for _scope, key in warned}
+
+
 def _bedrock_default_excluded_types() -> list:
     """The default of the Bedrock reporter's ``exclude_scanner_types``, read from its
     options model, so a test that expects it does not copy the model's literal."""
@@ -826,11 +833,11 @@ class TestAppendOntoAnUntypedPluginOption:
     def test_an_append_to_a_written_external_list_extends_it(self, caplog):
         """A plugin from a module outside ASH has no row in the defaults table, so no
         default to add to. When the file wrote the list, the append extends it and
-        nothing is warned of: the warning is for a list the document lacks."""
+        nothing is warned of, though the application asks for the warning: it is for
+        a list the document lacks."""
         key = "reporters.acme-written-exporter.options.destinations"
         unread = "reporters.acme-findings-exporter.options.destinations"
-        warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
-        assert key not in warned, "control: no earlier append has warned of the key"
+        assert key not in _keys_warned_of(), "control: no earlier append named the key"
         written = AshConfig.model_validate(
             {
                 "reporters": {
@@ -840,8 +847,12 @@ class TestAppendOntoAnUntypedPluginOption:
         )
 
         with caplog.at_level("WARNING", logger="ash"):
-            config = apply_config_overrides(written, [f'{key}+=["b"]'])
-            apply_config_overrides(AshConfig(), [f'{unread}+=["x"]'])
+            config = apply_config_overrides(
+                written, [f'{key}+=["b"]'], warn_unread_appends=True
+            )
+            apply_config_overrides(
+                AshConfig(), [f'{unread}+=["x"]'], warn_unread_appends=True
+            )
 
         assert config.get_plugin_config("reporter", "acme-written-exporter") == {
             "options": {"destinations": ["a", "b"]}
@@ -1012,7 +1023,9 @@ class TestAppendOntoAnUntypedPluginOption:
 
         with caplog.at_level("WARNING", logger="ash"):
             config = apply_config_overrides(
-                AshConfig(), [f'{key}+=["appended-value-7f3a"]']
+                AshConfig(),
+                [f'{key}+=["appended-value-7f3a"]'],
+                warn_unread_appends=True,
             )
 
         assert config.get_plugin_config(kind, plugin) == {
@@ -1025,15 +1038,22 @@ class TestAppendOntoAnUntypedPluginOption:
         assert "appended-value-7f3a" not in warnings[0]
 
     def test_the_same_append_applied_twice_warns_once(self, caplog):
-        """The same overrides are applied again to other bases (the trusted views,
-        the replays, the MCP gate): each key is named once for the process."""
+        """The run's own overrides are applied more than once to its configuration
+        (a workspace scan applies them to each project): each key is named once in
+        a run."""
         key = "reporters.acme-findings-exporter.options.destinations"
         other = "scanners.acme-scanner.options.destinations"
 
         with caplog.at_level("WARNING", logger="ash"):
-            apply_config_overrides(AshConfig(), [f'{key}+=["first"]'])
-            apply_config_overrides(AshConfig(), [f'{key}+=["second"]'])
-            apply_config_overrides(AshConfig(), [f'{other}+=["first"]'])
+            apply_config_overrides(
+                AshConfig(), [f'{key}+=["first"]'], warn_unread_appends=True
+            )
+            apply_config_overrides(
+                AshConfig(), [f'{key}+=["second"]'], warn_unread_appends=True
+            )
+            apply_config_overrides(
+                AshConfig(), [f'{other}+=["first"]'], warn_unread_appends=True
+            )
 
         assert len(_warnings_naming(caplog, key)) == 1
         assert len(_warnings_naming(caplog, other)) == 1, "control: a key of its own"
@@ -1183,14 +1203,17 @@ class TestAppendOntoAnUntypedPluginOption:
         module = _resolve_config_module()
         warned = module._APPEND_TO_UNREAD_SECTION_WARNED
         bound = module._APPEND_TO_UNREAD_SECTION_BOUND
-        warned.update(f"filler-{index}" for index in range(bound))
+        scope = current_run_log_scope()
+        warned.update((scope, f"filler-{index}") for index in range(bound))
         key = "reporters.acme-findings-exporter.options.destinations"
 
         with caplog.at_level("WARNING", logger="ash"):
-            apply_config_overrides(AshConfig(), [f'{key}+=["x"]'])
+            apply_config_overrides(
+                AshConfig(), [f'{key}+=["x"]'], warn_unread_appends=True
+            )
 
         assert len(_warnings_naming(caplog, key)) == 1
-        assert key in warned
+        assert (scope, key) in warned
         assert len(warned) <= bound
 
     @pytest.mark.parametrize(("segment", "kind", "plugin"), _UNREAD_SECTIONS)
@@ -1207,13 +1230,18 @@ class TestAppendOntoAnUntypedPluginOption:
         self, caplog
     ):
         """The plugin's own options model refuses the list when the plugin loads,
-        as it does on main; the append adds no warning of its own."""
+        as it does on main; the append adds no warning of its own, though the
+        application asks for the warning."""
         key = f"reporters.{_BEDROCK}.options.aws_region"
         unread = "reporters.acme-findings-exporter.options.destinations"
 
         with caplog.at_level("WARNING", logger="ash"):
-            config = apply_config_overrides(AshConfig(), [f"{key}+=us-east-1"])
-            apply_config_overrides(AshConfig(), [f'{unread}+=["x"]'])
+            config = apply_config_overrides(
+                AshConfig(), [f"{key}+=us-east-1"], warn_unread_appends=True
+            )
+            apply_config_overrides(
+                AshConfig(), [f'{unread}+=["x"]'], warn_unread_appends=True
+            )
 
         section = config.get_plugin_config("reporter", _BEDROCK)
         assert section == {"options": {"aws_region": ["us-east-1"]}}
@@ -1225,16 +1253,20 @@ class TestAppendOntoAnUntypedPluginOption:
     def test_an_append_to_a_plugin_with_no_list_option_is_not_warned_of(self, caplog):
         """A shipped plugin with no list option at all (the S3 reporter) has an empty
         row in the defaults table, so the section is read by a plugin ASH ships: the
-        append is applied with no warning that no plugin reads it, and the plugin's
-        own options model decides about the value when the plugin loads."""
+        append is applied with no warning that no plugin reads it, though the
+        application asks for the warning, and the plugin's own options model decides
+        about the value when the plugin loads."""
         key = "reporters.s3.options.bucket_name"
         unread = "reporters.acme-findings-exporter.options.destinations"
-        warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
-        assert key not in warned, "control: no earlier append has warned of the key"
+        assert key not in _keys_warned_of(), "control: no earlier append named the key"
 
         with caplog.at_level("WARNING", logger="ash"):
-            config = apply_config_overrides(AshConfig(), [f"{key}+=appended-bucket"])
-            apply_config_overrides(AshConfig(), [f'{unread}+=["x"]'])
+            config = apply_config_overrides(
+                AshConfig(), [f"{key}+=appended-bucket"], warn_unread_appends=True
+            )
+            apply_config_overrides(
+                AshConfig(), [f'{unread}+=["x"]'], warn_unread_appends=True
+            )
 
         section = config.get_plugin_config("reporter", "s3")
         assert section == {"options": {"bucket_name": ["appended-bucket"]}}

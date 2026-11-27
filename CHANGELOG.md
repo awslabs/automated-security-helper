@@ -252,7 +252,9 @@
   guarddog's `ecosystems` and trivy-repo's `scanners` behave the same way. `=` still
   replaces the list. For a plugin from a module outside ASH, whose default ASH cannot
   read when it applies the overrides, `+=` still starts the list from the appended
-  items, and it now logs one warning that names the key.
+  items, and the configuration the scan runs with logs one warning that names the key,
+  once in each run. A list that the config file already sets is extended with no
+  warning.
 
 ### Features
 

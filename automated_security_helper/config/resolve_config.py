@@ -207,7 +207,11 @@ from automated_security_helper.utils.error_text import (
     error_text,
     os_error_without_named_file,
 )
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    NO_MARKUP,
+    current_run_log_scope,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 
@@ -515,34 +519,47 @@ def _row_of_the_shipped_plugin_reading(
     return None
 
 
-#: The keys of a ``+=`` that ``_warn_that_no_shipped_plugin_reads`` has named in this
-#: process, as logged (redacted). The same overrides are applied again to other
-#: bases (the trusted reporter view, the scanner views, ``ash merge`` and ``ash
-#: report`` replays, the MCP workspace gate), and one key is one warning.
-_APPEND_TO_UNREAD_SECTION_WARNED: Set[str] = set()
+#: The keys of a ``+=`` that ``_warn_that_no_shipped_plugin_reads`` has named, each
+#: as (the run log scope it was named in, the key as logged, redacted). A run names
+#: a key once however often its own overrides are applied, and a later run in the
+#: same process (the MCP server runs every scan in one) names it again, as the path
+#: refusals do (``path_trust._WARNED``); None is the scope outside every run. Only
+#: the application that builds the run's own configuration asks for the warning
+#: (``apply_config_overrides(..., warn_unread_appends=True)``). The same overrides
+#: are applied again to other bases (the trusted reporter view, the scanner views,
+#: ``ash merge`` and ``ash report`` replays, the MCP workspace gate), where a key the
+#: real document holds can be missing, and those applications never warn.
+_APPEND_TO_UNREAD_SECTION_WARNED: Set[Tuple[Optional[str], str]] = set()
 _APPEND_TO_UNREAD_SECTION_LOCK = threading.Lock()
-#: Past this many keys the set starts over, so a long-lived process (the MCP server)
-#: stays bounded; a key can then be named again.
+#: Past this many (run, key) entries the set starts over, so a long-lived process
+#: (the MCP server) stays bounded; a key can then be named again.
 _APPEND_TO_UNREAD_SECTION_BOUND = 1024
 
 
 def _warn_that_no_shipped_plugin_reads(
     key_path: str, logged_path: str, environment_values: Sequence[str]
 ) -> None:
-    """Say, once per process for each key, that a ``+=`` landed in a section that no
+    """Say, once per key in each run, that a ``+=`` landed in a section that no
     plugin ASH ships reads, so there is no default for it to add to.
+
+    Only the application that builds the run's own configuration calls this
+    (``warn_unread_appends``). A replay or a view of the same overrides applies them
+    to a base that can lack a key the real document holds, and would say the list
+    starts from the appended items for a list the file wrote.
 
     *key_path* is the override's key as typed, without its ``+``; *logged_path* is
     the same key redacted, the text every log line of ``_apply_config_override``
-    names it by and the key this remembers. The text names the key and the section
-    and never the value, which can be a credential.
+    names it by and, with the run's log scope (``current_run_log_scope``), the key
+    this remembers. The text names the key and the section and never the value,
+    which can be a credential.
     """
+    named = (current_run_log_scope(), logged_path)
     with _APPEND_TO_UNREAD_SECTION_LOCK:
-        if logged_path in _APPEND_TO_UNREAD_SECTION_WARNED:
+        if named in _APPEND_TO_UNREAD_SECTION_WARNED:
             return
         if len(_APPEND_TO_UNREAD_SECTION_WARNED) >= _APPEND_TO_UNREAD_SECTION_BOUND:
             _APPEND_TO_UNREAD_SECTION_WARNED.clear()
-        _APPEND_TO_UNREAD_SECTION_WARNED.add(logged_path)
+        _APPEND_TO_UNREAD_SECTION_WARNED.add(named)
     section = redact_values(".".join(key_path.split(".")[:2]), environment_values)
     ASH_LOGGER.warning(
         f"No plugin ASH ships reads {section} (a plugin from a module outside ASH "
@@ -560,6 +577,8 @@ def _apply_config_override(
     key_path: str,
     value: str,
     environment_values: Sequence[str] = (),
+    *,
+    warn_unread_appends: bool = False,
 ) -> Tuple[List[str], Any, bool]:
     """
     Apply a single config override to a configuration dictionary.
@@ -573,6 +592,10 @@ def _apply_config_override(
             (resolve_override_segment reads them at each segment, and refuses
             a single-use iterator: a caller reusing an exhausted one across
             calls would print an env-read key unredacted).
+        warn_unread_appends: Log the warning for an append that lands in a
+            section no plugin ASH ships reads (``_warn_that_no_shipped_plugin_reads``),
+            where the list starts from the appended items. Set only for the
+            application that builds the run's own configuration.
 
     Returns:
         The key segments the override landed on, as this apply resolved them
@@ -650,16 +673,21 @@ def _apply_config_override(
         # by the plugin's own options model when the plugin loads, with its own
         # message. For a section no shipped plugin reads (a plugin from a module
         # outside ASH, which is imported after the overrides are applied, or a
-        # misspelled section name) no default can be known, so one warning names
-        # the key. It does not refuse: this function applies the same overrides
-        # to other bases as well (the trusted reporter view, the scanner views,
-        # the ``ash merge`` and ``ash report`` replays, the MCP workspace gate),
-        # and a base that lacks a key the real document holds would refuse what
-        # the operator's own application accepts, dropping an external
-        # reporter's whole section from the trusted view or refusing a call each
-        # project would accept. A typed section holds every default already, and
-        # an override of a section as a whole has no option to read one for, so
-        # both keep the rule above.
+        # misspelled section name) no default can be known, so the list starts
+        # from the items, and the application that builds the run's own
+        # configuration (``warn_unread_appends``) names the key in one warning for
+        # each run. Nothing refuses: this function applies the same overrides to
+        # other bases as well (the trusted reporter view, the scanner views, the
+        # ``ash merge`` and ``ash report`` replays, the MCP workspace gate), and a
+        # base that lacks a key the real document holds would refuse what the
+        # operator's own application accepts, dropping an external reporter's
+        # whole section from the trusted view or refusing a call each project
+        # would accept. Those applications say nothing either: the operator's own
+        # application extends a list the file wrote with no word, and the replay
+        # onto a base without the section would say that the list starts from the
+        # items, an outcome the scan does not have. A typed section holds every
+        # default already, and an override of a section as a whole has no option
+        # to read one for, so both keep the rule above.
         items = list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
         default: Optional[Tuple[Any, ...]] = None
         if _is_in_an_untyped_plugin_section(resolved_keys):
@@ -667,9 +695,10 @@ def _apply_config_override(
                 config_dict[resolved_keys[0]], resolved_keys
             )
             if row is None:
-                _warn_that_no_shipped_plugin_reads(
-                    key_path, logged_path, environment_values
-                )
+                if warn_unread_appends:
+                    _warn_that_no_shipped_plugin_reads(
+                        key_path, logged_path, environment_values
+                    )
             else:
                 default = row.get(tuple(resolved_keys[2:]))
         if default is not None:
@@ -855,13 +884,27 @@ def _validated_with_overrides(
         return AshConfig.model_validate(config_dict, context=context)
 
 
-def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> AshConfig:
+def apply_config_overrides(
+    config: AshConfig,
+    config_overrides: List[str],
+    *,
+    warn_unread_appends: bool = False,
+) -> AshConfig:
     """
     Apply configuration overrides to an AshConfig object.
 
     Args:
         config: The AshConfig object to modify
         config_overrides: List of strings in the format 'key.path=value'
+        warn_unread_appends: Log one warning for each key, in each run (the run
+            log scope), for a ``+=`` on a plugin option in a section no plugin ASH
+            ships reads, where the list starts from the appended items
+            (``_warn_that_no_shipped_plugin_reads``). For the application that
+            builds the document a run uses as its own configuration, or the file
+            ``ash config update --set`` writes. A view, a replay, a gate or a
+            reconstruction of the same overrides leaves it off: it applies them to a
+            base that can lack a key the real document holds, and a warning there
+            states an outcome the scan does not have.
 
     Returns:
         The modified AshConfig object
@@ -958,7 +1001,13 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
             )
         try:
             applied.append(
-                _apply_config_override(config_dict, key_path, value, environment_values)
+                _apply_config_override(
+                    config_dict,
+                    key_path,
+                    value,
+                    environment_values,
+                    warn_unread_appends=warn_unread_appends,
+                )
             )
             raw_values.append(value)
         except ASHConfigValidationError:
@@ -1234,7 +1283,13 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
         # applied, so the rebuilt model's deep-copied private state keeps them.
         config._resolution_warnings.extend(warned)
     if config_overrides:
-        config = apply_config_overrides(config, config_overrides)
+        # The one application of the overrides to the document the run uses as
+        # its own configuration, so the one that says an append had no default to
+        # add to; the replays and views of the same overrides onto other bases
+        # (resolve_config's trusted views, the merge and report replays) do not.
+        config = apply_config_overrides(
+            config, config_overrides, warn_unread_appends=True
+        )
     return config
 
 
@@ -5370,9 +5425,13 @@ def _resolve_config(
                 "source_dir and config_path are both null, returning the default config"
             )
             config = overlaid_fallback(config)
-            # Apply overrides to default config if provided
+            # Apply overrides to default config if provided. This is the run's
+            # own configuration, so an append with no default to add to is named
+            # (build_config's rule).
             if config_overrides:
-                return apply_config_overrides(config, config_overrides)
+                return apply_config_overrides(
+                    config, config_overrides, warn_unread_appends=True
+                )
             return config
 
         # Only a source_dir the caller passed may widen where `extends` bases
@@ -5451,9 +5510,13 @@ def _resolve_config(
                     "Configuration file not found or provided, using default config"
                 )
                 config = overlaid_fallback(config)
-                # Apply overrides to default config if provided
+                # Apply overrides to default config if provided. This is the
+                # run's own configuration, so an append with no default to add to
+                # is named (build_config's rule).
                 if config_overrides:
-                    return apply_config_overrides(config, config_overrides)
+                    return apply_config_overrides(
+                        config, config_overrides, warn_unread_appends=True
+                    )
                 return config  # Return default config if no config file found
             else:
                 raise ValueError("Configuration file not found or provided")
