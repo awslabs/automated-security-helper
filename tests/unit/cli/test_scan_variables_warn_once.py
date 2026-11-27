@@ -14,6 +14,9 @@ What is pinned here:
 * a scan that was given the argument prints none: the PATH argument, an archive, a
   clone, ``--source-dir`` (which prints its own line), a ``--cli-json-input`` document
   that names the directory, the FILE argument and ``--workspace-config``;
+* a scan that names a ``--cli-json-input`` document prints no line for
+  ``ASH_SOURCE_DIR``, whatever the document holds: the container run of ``./ash``
+  hands the directory over in the variable and cannot give a PATH beside a document;
 * a form with no subject prints the line of its own form and nothing more, so no run
   prints two;
 * ``ash config`` reads ``ASH_SOURCE_DIR`` for its own option and prints nothing.
@@ -192,6 +195,29 @@ def test_a_json_document_that_names_the_path_beside_the_variable_is_not_told(
 
     assert result.exit_code == 0, result.output
     assert [call["source_dir"] for call in engine.calls] == ["given"]
+    assert _deprecation_lines(result.stderr) == [], result.stderr
+
+
+def test_a_json_document_that_names_no_directory_beside_the_variable_is_not_told(
+    engine, tmp_path, monkeypatch
+):
+    """``./ash scan fs --cli-json-input DOC`` runs the scan inside its container with
+    ``ASH_SOURCE_DIR=/src`` and no PATH, since the document may name a clone or an
+    image, which a PATH would conflict with. A document that names none of them leaves
+    the variable as the only name of the directory, and the line that asks for a PATH
+    would tell its reader to type what the wrapper cannot pass."""
+    monkeypatch.setenv("ASH_SOURCE_DIR", "/from/env")
+    document = tmp_path / "scan.json"
+    document.write_text(json.dumps({"only_scanners": ["bandit"]}), encoding="utf-8")
+
+    told = _invoke(["scan", "fs"])
+    result = _invoke(["scan", "fs", "--cli-json-input", str(document)])
+
+    assert len(_deprecation_lines(told.stderr)) == 1, "the control: no document, told"
+    assert result.exit_code == 0, result.output
+    call = engine.calls[-1]
+    assert call["source_dir"] == "/from/env", "the variable still names the directory"
+    assert list(call["only_scanners"]) == ["bandit"], "the document was read"
     assert _deprecation_lines(result.stderr) == [], result.stderr
 
 
