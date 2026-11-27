@@ -688,6 +688,10 @@ jobs:
   #
   # Python on the runner image is enough: the script is stdlib only and calls git, so
   # there is no setup-python or uv step to fail on a registry round trip.
+  #
+  # The last step belongs to the docs rather than to snapshots: it holds the seeds of the
+  # docs' unrun blocks to the seeds at the fork point. It reads the same history and the
+  # same event ranges as the trailer check, so it is a step here and not a job of its own.
   snapshot-trailers:
     name: snapshot-trailers
     # arm64 for the reason given on `lint`; the script is stdlib Python plus git.
@@ -712,6 +716,19 @@ jobs:
       - name: Assert every snapshot belongs to an existing test module
         shell: bash
         run: python3 .github/scripts/check-snapshot-trailers.py --orphans
+      # The docs mark a block `illustrative` when it cannot run, and the markers that
+      # exist are frozen in docs/illustrative-seed/, with the commands in blocks nothing
+      # runs in scripts/docs_unexecuted_commands_seed.tsv. The lint job holds each seed
+      # equal to the pages. That lets a change add the seed line that covers its own new
+      # marker, so this step holds the seeds at the head to the seeds at the fork point:
+      # a change may delete a line (it converted a block) and may not add one. Its
+      # --self-test runs first, as in the trailer step.
+      - name: Assert the seeds of the docs' unrun blocks only shrink
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-illustrative-ratchet.py --self-test
+          python3 .github/scripts/check-illustrative-ratchet.py
 
   # WHY THE UNIT TIER IS NOT SHARDED AND THE INTEGRATION TIER IS
   #

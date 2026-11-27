@@ -1,4 +1,4 @@
-"""The illustrative blocks only shrink: the seed, the two gates that hold it, and its writer.
+"""The illustrative blocks only shrink: the seed, the two checks that hold it, its writer.
 
 WHY THIS EXISTS
 ---------------
@@ -8,17 +8,19 @@ it cannot run yet adds one more marker, and the number only grows. So the marker
 exist at main are frozen in a seed (``docs/illustrative-seed/``, one file per page, a
 line ``<page path>`` TAB ``<reason>`` for each), and two gates keep it from growing:
 
-* G1, in ``check_markers`` (the lint job, and ``verify_docs_freshness.py`` locally): a
-  marker the seed does not list is a finding, and so is a seed line that no marker
-  matches, so a commit that converts a block deletes its line in the same commit;
-* G2, ``.github/scripts/check-illustrative-ratchet.py`` in the snapshot-trailers job:
-  the seed at the head may hold no line the seed at the fork point lacks. G1 alone would
-  let a pull request add the line that covers its own new marker.
+* the seed check, in ``check_markers`` (the lint job, and ``verify_docs_freshness.py``
+  locally): a marker the seed does not list is a finding, and so is a seed line that no
+  marker matches, so a commit that converts a block deletes its line in the same commit;
+* the fork-point check, ``.github/scripts/check-illustrative-ratchet.py`` in the
+  snapshot-trailers job: the seed at the head may hold no line the seed at the fork
+  point lacks. The seed check alone would let a pull request add the line that covers
+  its own new marker.
 
-Each case below plants the defect a gate exists for and requires the gate to report it,
-with a clean control beside it, so a gate that reports everything, or nothing, fails one
-of the two. G2 reads git history, so its cases build their own repositories in a temporary
-directory: a fork point, a head, renames. They never read this checkout's history.
+Each case below plants the defect a check exists for and requires the check to report
+it, with a clean control beside it, so a check that reports everything, or nothing,
+fails one of the two. The fork-point check reads git history, so its cases build their
+own repositories in a temporary directory: a fork point, a head, renames. They never
+read this checkout's history.
 
 WHAT THIS DOES NOT CHECK
 ------------------------
@@ -105,7 +107,7 @@ def _seed(root: Path, page: str, *reasons: str) -> Path:
 
 
 def _armed(root: Path) -> None:
-    """Make root a root that has a seed, which is what turns G1 on for it."""
+    """Make root a root that has a seed, which turns the seed check on for it."""
     (root / checks().ILLUSTRATIVE_SEED_DIR).mkdir(parents=True, exist_ok=True)
 
 
@@ -114,12 +116,12 @@ def _problems(root: Path, *pages: Path):
 
 
 # ---------------------------------------------------------------------------
-# G1: the seed lists the markers a page has
+# The seed check: the seed lists the markers a page has
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_a_seed_that_lists_every_marker_passes_g1(tmp_path):
+def test_a_seed_that_lists_every_marker_passes_the_seed_check(tmp_path):
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER, WRITES_BUCKET))
     _seed(tmp_path, "docs/page.md", NEEDS_DOCKER, WRITES_BUCKET)
 
@@ -127,7 +129,7 @@ def test_a_seed_that_lists_every_marker_passes_g1(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_new_marker_fails_g1(tmp_path):
+def test_a_new_marker_fails_the_seed_check(tmp_path):
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER, WRITES_BUCKET))
     _seed(tmp_path, "docs/page.md", NEEDS_DOCKER)
 
@@ -138,7 +140,7 @@ def test_a_new_marker_fails_g1(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_converted_marker_whose_seed_line_stays_fails_g1(tmp_path):
+def test_a_converted_marker_whose_seed_line_stays_fails_the_seed_check(tmp_path):
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER))
     seed = _seed(tmp_path, "docs/page.md", NEEDS_DOCKER, WRITES_BUCKET)
 
@@ -152,7 +154,7 @@ def test_a_converted_marker_whose_seed_line_stays_fails_g1(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_page_with_markers_and_no_seed_file_fails_g1_for_each_marker(tmp_path):
+def test_a_page_with_markers_and_no_seed_file_fails_for_each_marker(tmp_path):
     _armed(tmp_path)
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER, WRITES_BUCKET))
 
@@ -209,7 +211,7 @@ def test_a_template_and_the_page_it_renders_each_have_their_own_seed_file(tmp_pa
 
 
 @pytest.mark.unit
-def test_a_seed_line_in_another_pages_file_fails_g1(tmp_path):
+def test_a_seed_line_in_another_pages_file_fails_the_seed_check(tmp_path):
     first = _write(tmp_path, "docs/a.md", _page(NEEDS_DOCKER))
     second = _write(tmp_path, "docs/b.md", _page(NEEDS_DOCKER))
     # b's line is written into a's file, so two conversion units would share one file.
@@ -239,7 +241,7 @@ def test_a_seed_line_in_another_pages_file_fails_g1(tmp_path):
     ],
     ids=["no tab", "no reason", "no page", "blank line", "uncollapsed whitespace"],
 )
-def test_a_malformed_seed_line_fails_g1(tmp_path, line):
+def test_a_malformed_seed_line_fails_the_seed_check(tmp_path, line):
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER))
     _write(tmp_path, _seed_file("docs/page.md"), f"{line}\n")
 
@@ -249,7 +251,7 @@ def test_a_malformed_seed_line_fails_g1(tmp_path, line):
 
 
 @pytest.mark.unit
-def test_a_seed_line_for_a_page_that_does_not_exist_fails_g1(tmp_path):
+def test_a_seed_line_for_a_page_that_does_not_exist_fails_the_seed_check(tmp_path):
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER))
     _seed(tmp_path, "docs/page.md", NEEDS_DOCKER)
     gone = _seed(tmp_path, "docs/gone.md", NEEDS_DOCKER)
@@ -266,7 +268,7 @@ def test_a_seed_line_for_a_page_that_does_not_exist_fails_g1(tmp_path):
 def test_a_seed_line_for_a_page_that_exists_but_was_not_handed_over_is_left_alone(
     tmp_path,
 ):
-    """A run over some of the pages, as the tests make, reports no seed line of the rest."""
+    """A run over some of the pages, as the tests make, reports no line of the rest."""
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER))
     _write(tmp_path, "docs/other.md", _page(NEEDS_DOCKER))
     _seed(tmp_path, "docs/page.md", NEEDS_DOCKER)
@@ -276,7 +278,7 @@ def test_a_seed_line_for_a_page_that_exists_but_was_not_handed_over_is_left_alon
 
 
 @pytest.mark.unit
-def test_a_file_whose_name_encodes_no_page_fails_g1(tmp_path):
+def test_a_file_whose_name_encodes_no_page_fails_the_seed_check(tmp_path):
     page = _write(tmp_path, "docs/page.md", _page(NEEDS_DOCKER))
     _seed(tmp_path, "docs/page.md", NEEDS_DOCKER)
     stray = _write(tmp_path, f"{checks().ILLUSTRATIVE_SEED_DIR}/notes.tsv", "")
@@ -307,14 +309,28 @@ def test_the_ratchets_are_armed_on_this_checkout():
     """A checkout that loses its seed would stop checking against one without a word, so
     losing it has to fail a test: removing the ratchet is a decision, not a deletion."""
     dc = checks()
-    directory = REPO_ROOT / dc.ILLUSTRATIVE_SEED_DIR
-    assert directory.is_dir(), f"{dc.ILLUSTRATIVE_SEED_DIR} is gone, and G1 with it"
-    assert any(path.suffix == ".tsv" for path in directory.iterdir()), (
-        f"{dc.ILLUSTRATIVE_SEED_DIR} holds no seed file"
+    assert (REPO_ROOT / dc.ILLUSTRATIVE_SEED_DIR).is_dir(), (
+        f"{dc.ILLUSTRATIVE_SEED_DIR} is gone, and the seed check with it. Deleting the "
+        "last seed file leaves no directory in git: keep a .gitkeep in it, so that an "
+        "empty seed still refuses every marker"
     )
     assert (REPO_ROOT / dc.UNEXECUTED_SEED_FILE).is_file(), (
-        f"{dc.UNEXECUTED_SEED_FILE} is gone, and G4 with it"
+        f"{dc.UNEXECUTED_SEED_FILE} is gone, and the check of commands in blocks "
+        "nothing runs with it. Delete its last line, not the file: an empty seed still "
+        "refuses every such command"
     )
+
+
+@pytest.mark.unit
+def test_the_ci_script_reads_the_seeds_the_checks_read():
+    """The CI script names the two seeds itself. A move of either in docs_checks fails
+    here, rather than leave the script comparing files that no longer exist and finding
+    nothing."""
+    dc, script = checks(), ratchet()
+
+    assert script.ILLUSTRATIVE_SEED_DIR == dc.ILLUSTRATIVE_SEED_DIR
+    assert script.ILLUSTRATIVE_SEED_SUFFIX == dc.ILLUSTRATIVE_SEED_SUFFIX
+    assert script.UNEXECUTED_SEED_FILE == dc.UNEXECUTED_SEED_FILE
 
 
 # ---------------------------------------------------------------------------
@@ -370,8 +386,22 @@ def test_the_seed_file_name_of_a_page_is_pinned():
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "name",
-    ["install.md", "docs%2fpage.md.tsv", "docs/page.md.tsv", "docs%2Fpage.md.tsv.bak"],
-    ids=["no suffix", "lower-case escape", "unescaped slash", "other suffix"],
+    [
+        "install.md",
+        "docs%2fpage.md.tsv",
+        "docs/page.md.tsv",
+        "docs%2Fpage.md.tsv.bak",
+        "notes.tsv",
+        "docs%2Fpage.txt.tsv",
+    ],
+    ids=[
+        "no suffix",
+        "lower-case escape",
+        "unescaped slash",
+        "other suffix",
+        "no page",
+        "not a markdown page",
+    ],
 )
 def test_a_name_that_is_not_the_one_name_of_a_page_gives_no_page(name):
     assert checks().illustrative_seed_page(name) is None
@@ -573,7 +603,7 @@ def test_the_seed_writer_names_what_it_takes():
 
 
 # ---------------------------------------------------------------------------
-# G2: the seed at the head holds no line the seed at the fork point lacks
+# The fork-point check: the seed at the head holds no line the fork point lacks
 # ---------------------------------------------------------------------------
 
 FILLER = "".join(
@@ -643,7 +673,7 @@ class _Repo:
         self.git("mv", old, new)
 
     def added(self) -> list[tuple[str, str]]:
-        """(page, text) of each line the head adds to the seeds, by G2's reading."""
+        """(page, text) of each line the head adds to the seeds, as the script reads."""
         violations, _notes = ratchet().find_added_lines(
             self.path, self.base, self.head()
         )
@@ -656,14 +686,14 @@ def repo(tmp_path):
 
 
 @pytest.mark.integration
-def test_a_range_that_leaves_the_seed_alone_passes_g2(repo):
+def test_a_range_that_leaves_the_seed_alone_passes(repo):
     repo.commit("empty")
 
     assert repo.added() == []
 
 
 @pytest.mark.integration
-def test_a_seed_line_added_against_the_base_fails_g2(repo):
+def test_a_seed_line_added_against_the_base_fails(repo):
     _write(repo.path, "docs/c.md", _long_page(NEEDS_DOCKER))
     _seed(repo.path, "docs/c.md", NEEDS_DOCKER)
     repo.commit("a new page with a new marker, and the line that covers it")
@@ -672,7 +702,7 @@ def test_a_seed_line_added_against_the_base_fails_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_line_added_to_a_page_the_base_seeded_fails_g2(repo):
+def test_a_line_added_to_a_page_the_base_seeded_fails(repo):
     _write(repo.path, "docs/b.md", _long_page(NEEDS_DOCKER, WRITES_BUCKET))
     _seed(repo.path, "docs/b.md", NEEDS_DOCKER, WRITES_BUCKET)
     repo.commit("a second marker on b, and its line")
@@ -681,7 +711,7 @@ def test_a_line_added_to_a_page_the_base_seeded_fails_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_second_identical_line_fails_g2(repo):
+def test_a_second_identical_line_fails(repo):
     _seed(repo.path, "docs/b.md", NEEDS_DOCKER, NEEDS_DOCKER)
     repo.commit("the same reason twice")
 
@@ -689,7 +719,7 @@ def test_a_second_identical_line_fails_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_converted_marker_passes_g2(repo):
+def test_a_converted_marker_passes(repo):
     _write(repo.path, "docs/a.md", _long_page(NEEDS_DOCKER))
     _seed(repo.path, "docs/a.md", NEEDS_DOCKER)
     (repo.path / _seed_file("docs/b.md")).unlink()
@@ -700,7 +730,7 @@ def test_a_converted_marker_passes_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_reworded_reason_fails_g2(repo):
+def test_a_reworded_reason_fails(repo):
     _seed(repo.path, "docs/b.md", "needs the Docker daemon")
     repo.commit("the reason of b reworded")
 
@@ -708,7 +738,7 @@ def test_a_reworded_reason_fails_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_swap_of_one_converted_page_for_a_new_one_fails_g2(repo):
+def test_a_swap_of_one_converted_page_for_a_new_one_fails(repo):
     (repo.path / _seed_file("docs/b.md")).unlink()
     _write(repo.path, "docs/b.md", _long_page())
     _write(repo.path, "docs/c.md", _long_page(NEEDS_DOCKER))
@@ -719,7 +749,7 @@ def test_a_swap_of_one_converted_page_for_a_new_one_fails_g2(repo):
 
 
 @pytest.mark.integration
-def test_an_edit_of_a_marked_blocks_body_passes_g2(repo):
+def test_an_edit_of_a_marked_blocks_body_passes(repo):
     text = _long_page(NEEDS_DOCKER, WRITES_BUCKET).replace("docker ps", "docker ps -a")
     _write(repo.path, "docs/a.md", text)
     repo.commit("the body of a marked block edited")
@@ -728,7 +758,7 @@ def test_an_edit_of_a_marked_blocks_body_passes_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_moved_page_with_its_seed_lines_moved_passes_g2(repo):
+def test_a_moved_page_with_its_seed_lines_moved_passes(repo):
     repo.move("docs/b.md", "docs/moved/b.md")
     repo.move(_seed_file("docs/b.md"), _seed_file("docs/moved/b.md"))
     _seed(repo.path, "docs/moved/b.md", NEEDS_DOCKER)
@@ -738,7 +768,7 @@ def test_a_moved_page_with_its_seed_lines_moved_passes_g2(repo):
 
 
 @pytest.mark.integration
-def test_a_moved_page_that_also_gains_a_line_fails_g2_for_that_line_only(repo):
+def test_a_moved_page_that_also_gains_a_line_fails_for_that_line_only(repo):
     repo.move("docs/b.md", "docs/moved/b.md")
     repo.move(_seed_file("docs/b.md"), _seed_file("docs/moved/b.md"))
     _seed(repo.path, "docs/moved/b.md", NEEDS_DOCKER, WRITES_BUCKET)
@@ -748,7 +778,7 @@ def test_a_moved_page_that_also_gains_a_line_fails_g2_for_that_line_only(repo):
 
 
 @pytest.mark.integration
-def test_a_seed_line_that_names_another_page_without_a_rename_fails_g2(repo):
+def test_a_seed_line_that_names_another_page_without_a_rename_fails(repo):
     """Paths are mapped through git's renames and nothing else, so a line that is simply
     pointed at another page is a new line."""
     _write(repo.path, "docs/c.md", _long_page(NEEDS_DOCKER))

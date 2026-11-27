@@ -1,19 +1,20 @@
-"""A command shown in a block nothing runs is counted, so relabeling bash as text gets nowhere.
+"""A command in a block nothing runs is counted, so relabeling bash as text gets nowhere.
 
 WHY THIS EXISTS
 ---------------
 The illustrative seed freezes the blocks marked as not running. A block can leave the
 runs another way: fence a bash block as ``text``, and the runner never sees it, the
 marker check has nothing to say (an unmarked text block is fine), and the illustrative
-seed does not move. G4 closes that. A block in a language nothing runs (text and the
-rest) that holds an ``ash`` command line or a ``$`` prompt line is a finding, unless it
-is the output of the run block above it, or it sits in a record of a past release, or
-``scripts/docs_unexecuted_commands_seed.tsv`` lists it. That seed was measured at main
-and only shrinks: a line for each such block, the page's path, a tab, and the first
-command of the block.
+seed does not move. The relabeling check closes that. A block in a language nothing
+runs (text and the rest) that holds an ``ash`` command line or a ``$`` prompt line is a
+finding, unless it is the output of the run block above it, or it sits in a record of a
+past release, or ``scripts/docs_unexecuted_commands_seed.tsv`` lists it. That seed was
+measured at main and only shrinks: a line for each such block, the page's path, a tab,
+and the first command of the block.
 
-Each case plants the defect G4 exists for and requires it to be reported, with a clean
-control beside it, so a check that reports everything, or nothing, fails one of the two.
+Each case plants the defect the check exists for and requires it to be reported, with a
+clean control beside it, so a check that reports everything, or nothing, fails one of
+the two.
 
 WHAT THIS DOES NOT CHECK
 ------------------------
@@ -73,7 +74,7 @@ def _page(*blocks: str) -> str:
 
 
 def _seed(root: Path, *lines: str) -> Path:
-    """Make root a root that has the seed, which turns G4 on for it."""
+    """Make root a root that has the seed, which turns the check on for it."""
     return _write(
         root, checks().UNEXECUTED_SEED_FILE, "".join(f"{line}\n" for line in lines)
     )
@@ -84,12 +85,12 @@ def _problems(root: Path, *pages: Path):
 
 
 # ---------------------------------------------------------------------------
-# What G4 reports
+# What the check reports
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-def test_an_unexecuted_scan_command_in_a_text_block_fails_g4(tmp_path):
+def test_a_scan_command_in_a_text_block_fails(tmp_path):
     _seed(tmp_path)
     page = _write(tmp_path, "docs/page.md", _page(_text(SCAN)))
 
@@ -101,7 +102,7 @@ def test_an_unexecuted_scan_command_in_a_text_block_fails_g4(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_prompt_line_in_a_text_block_fails_g4(tmp_path):
+def test_a_prompt_line_in_a_text_block_fails(tmp_path):
     _seed(tmp_path)
     page = _write(
         tmp_path, "docs/page.md", _page(_text("$ git status\nOn branch main"))
@@ -126,7 +127,7 @@ def test_any_language_nothing_runs_is_read_not_only_text(tmp_path, lang):
 
 
 @pytest.mark.unit
-def test_an_output_sample_after_a_run_block_passes_g4(tmp_path):
+def test_an_output_sample_after_a_run_block_passes(tmp_path):
     """The output of a block the runner runs is not a command: it is compared with what
     the block prints. A line of it that starts with ash is output."""
     _seed(tmp_path)
@@ -141,7 +142,7 @@ def test_an_output_sample_after_a_run_block_passes_g4(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_sample_marker_after_a_block_that_does_not_run_still_fails_g4(tmp_path):
+def test_a_sample_marker_after_a_block_nothing_runs_still_fails(tmp_path):
     """Nothing prints what follows an illustrative block, so it is no output sample, and
     the marker is its own finding."""
     _seed(tmp_path)
@@ -165,7 +166,7 @@ def test_a_sample_marker_after_a_block_that_does_not_run_still_fails_g4(tmp_path
     ["CHANGELOG.md", ".github/release-notes/v3.8.0.md"],
     ids=["changelog", "notes"],
 )
-def test_a_text_block_in_a_record_of_a_past_release_passes_g4(tmp_path, rel):
+def test_a_text_block_in_a_record_of_a_past_release_passes(tmp_path, rel):
     _seed(tmp_path)
     page = _write(tmp_path, rel, _page(_text(SCAN)))
 
@@ -173,19 +174,26 @@ def test_a_text_block_in_a_record_of_a_past_release_passes_g4(tmp_path, rel):
 
 
 @pytest.mark.unit
-def test_a_text_block_that_shows_no_command_passes_g4(tmp_path):
+def test_a_text_block_that_shows_no_command_passes(tmp_path):
+    """Output and prose: the word ash is a command only as the first word of a line, in
+    lower case, and a prompt is a ``$`` and a space before a command."""
     _seed(tmp_path)
     page = _write(
         tmp_path,
         "docs/page.md",
-        _page(_text("Scan complete\nASH finished in 3 seconds\n  ash is a tool")),
+        _page(
+            _text(
+                "Scan complete\nASH finished in 3 seconds\nthe ash command found 3\n"
+                "cost: $5 a month\n$HOME is set"
+            )
+        ),
     )
 
     assert _problems(tmp_path, page) == []
 
 
 @pytest.mark.unit
-def test_a_command_in_a_block_the_runner_runs_is_not_g4s_business(tmp_path):
+def test_a_command_in_a_block_the_runner_runs_is_left_to_the_cli_check(tmp_path):
     _seed(tmp_path)
     page = _write(
         tmp_path,
@@ -197,7 +205,7 @@ def test_a_command_in_a_block_the_runner_runs_is_not_g4s_business(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_config_block_is_not_g4s_business(tmp_path):
+def test_a_config_block_is_left_to_the_config_checks(tmp_path):
     _seed(tmp_path)
     page = _write(
         tmp_path,
@@ -245,7 +253,7 @@ def test_the_first_command_of_a_block_is_how_the_seed_names_it(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_block_the_seed_lists_passes_g4(tmp_path):
+def test_a_block_the_seed_lists_passes(tmp_path):
     _seed(tmp_path, f"docs/page.md\t{SCAN}")
     page = _write(tmp_path, "docs/page.md", _page(_text(SCAN)))
 
@@ -261,7 +269,7 @@ def test_a_block_the_seed_lacks_fails_while_another_is_listed(tmp_path):
 
     findings = _problems(tmp_path, page)
 
-    assert [f.line for f in findings] == [8]
+    assert [f.line for f in findings] == [7]
     assert "ash scan --offline" in findings[0].message
 
 
@@ -270,14 +278,14 @@ def test_two_blocks_with_one_command_need_two_seed_lines(tmp_path):
     _seed(tmp_path, f"docs/page.md\t{SCAN}")
     page = _write(tmp_path, "docs/page.md", _page(_text(SCAN), _text(SCAN)))
 
-    assert [f.line for f in _problems(tmp_path, page)] == [8]
+    assert [f.line for f in _problems(tmp_path, page)] == [7]
 
     _seed(tmp_path, f"docs/page.md\t{SCAN}", f"docs/page.md\t{SCAN}")
     assert _problems(tmp_path, page) == []
 
 
 @pytest.mark.unit
-def test_a_converted_block_whose_seed_line_stays_fails_g4(tmp_path):
+def test_a_converted_block_whose_seed_line_stays_fails(tmp_path):
     seed = _seed(tmp_path, f"docs/page.md\t{SCAN}")
     page = _write(tmp_path, "docs/page.md", _page(_text(SCAN, "bash")))
 
@@ -326,7 +334,7 @@ def test_relabeling_a_bash_block_as_text_is_caught_where_the_page_already_has_on
     ["docs/page.md ash scan", "docs/page.md\t", "\tash scan", ""],
     ids=["no tab", "no command", "no page", "blank line"],
 )
-def test_a_malformed_seed_line_fails_g4(tmp_path, line):
+def test_a_malformed_seed_line_fails(tmp_path, line):
     _seed(tmp_path, line)
     page = _write(tmp_path, "docs/page.md", _page(_text("Scan complete")))
 
@@ -336,7 +344,7 @@ def test_a_malformed_seed_line_fails_g4(tmp_path, line):
 
 
 @pytest.mark.unit
-def test_a_seed_line_for_a_page_that_does_not_exist_fails_g4(tmp_path):
+def test_a_seed_line_for_a_page_that_does_not_exist_fails(tmp_path):
     seed = _seed(tmp_path, f"docs/gone.md\t{SCAN}")
     page = _write(tmp_path, "docs/page.md", _page(_text("Scan complete")))
 
@@ -411,7 +419,9 @@ def test_the_committed_seed_equals_the_baseline_measured_in_the_corpus(corpus):
     measured = dc.unexecuted_seed_lines(dc.load_pages(corpus, REPO_ROOT))
 
     assert _committed_seed() == sorted(measured)
-    assert measured, "no block of the corpus shows a command nothing runs; drop G4"
+    assert measured, (
+        "no block of the corpus shows a command nothing runs; drop the check"
+    )
 
 
 @pytest.mark.integration

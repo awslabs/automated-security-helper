@@ -555,8 +555,9 @@ def test_the_runner_runs_no_fewer_examples_than_it_did(runner_pages):
         "the same commit and say which examples stopped running and why."
     )
     assert executed >= floor, (
-        f"the runner executes {executed} blocks, down from {floor}: the {EXECUTED_BLOCKS_AT_MAIN} "
-        "it ran at main, and one more for each line the illustrative seed has lost "
+        f"the runner executes {executed} blocks, down from {floor}: the "
+        f"{EXECUTED_BLOCKS_AT_MAIN} it ran at main, and one more for each line the "
+        "illustrative seed has lost "
         f"({SEED_LINES_ON_RUN_PAGES_AT_MAIN} sat on pages it runs then, "
         f"{seed_lines_on_run_pages()} do now). A marked block that is converted runs; "
         "one that was deleted instead raises SEED_LINES_RETIRED_NOT_RUN in the same "

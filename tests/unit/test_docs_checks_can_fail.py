@@ -291,11 +291,11 @@ def test_a_marker_binds_only_to_the_next_block(fixture_root):
 # The seeds: the illustrative blocks and the unexecuted commands only shrink
 # ---------------------------------------------------------------------------
 #
-# G1 and G4 hold a root that has a seed (docs/illustrative-seed/ and
+# The marker check holds a root that has a seed (docs/illustrative-seed/ and
 # scripts/docs_unexecuted_commands_seed.tsv) to it. A root with none is not held to one,
 # which is why the tests above, on pages in a temporary root, are unchanged. The cases
 # of tests/unit/docs/test_illustrative_ratchet.py and test_unexecuted_command_ratchet.py
-# go further; these two are this file's contract: each rule of the check, one planted
+# go further; these are this file's contract: each rule of the check, one planted
 # defect, and a clean page beside it.
 
 
@@ -330,7 +330,8 @@ def test_marker_check_passes_a_page_whose_markers_the_seed_lists(fixture_root):
 SEED_DEFECTS = [
     (
         "a marker the seed does not list",
-        f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\ndocker ps\n{FENCE}\n',
+        f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\n'
+        f"docker ps\n{FENCE}\n",
         [],
         [],
         "not in the illustrative seed",
