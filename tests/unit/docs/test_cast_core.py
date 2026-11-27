@@ -8,15 +8,17 @@ every rule it holds is checked here on planted input:
   three-decimal times that never go backwards, a reader that ignores codes it does not
   know, and a writer whose output reads back equal;
 * the storyboard loader: schema 1, unknown keys refused, scene ids unique, scene starts
-  as running sums, a 30 to 60 s total, caption copy rules counted by the loader's own
-  counter, a read-only command allowlist limited to paths inside the project, and the
-  YAML that PyYAML would resolve silently (anchors, aliases, merge keys and a key given
-  twice in one mapping) refused by file, line and name;
+  as running sums, a 30 to 60 s total, a typing rate that is neither zero nor so slow
+  that its arithmetic overflows, caption copy rules counted by the loader's own
+  counter, a read-only command allowlist limited to paths inside the project and to ls
+  listings that print no owner or group, and the YAML that PyYAML would resolve
+  silently (anchors, aliases, merge keys and a key given twice in one mapping) refused
+  by file, line and name;
 * the retimer: the same input gives the same events, the scene totals are the
   storyboard's whatever the machine speed, output is shortened and never stretched, and
   a scene that does not fit its duration is refused;
 * the scrub scan: a planted token is found, by its kind and never its value, including
-  one that SGR runs split;
+  one that SGR runs, a line wrap, an escape sequence or an invisible character split;
 * the run record: canonical JSON, byte for byte what ``json.dumps(sort_keys=True,
   indent=2)`` plus a newline writes;
 * no ``pty``, ``termios`` or ``fcntl`` import, so the module runs, and is tested, on
@@ -965,20 +967,29 @@ def test_a_caption_is_at_most_7_words_and_3_and_a_half_words_a_second(cast):
 
 
 @pytest.mark.parametrize(
-    "caption",
+    ("caption", "needle"),
     [
-        "",
-        " ",
-        " Scan",
-        "Scan ",
-        "Scan  files",
-        "Scan\nfiles",
-        "Scan\tfiles",
-        "A\x1b[0m B",
+        ("", "is empty"),
+        (" ", "is empty"),
+        (" Scan", "separated by single spaces"),
+        ("Scan ", "separated by single spaces"),
+        ("Scan  files", "separated by single spaces"),
+        ("Scan\nfiles", "separated by single spaces"),
+        ("Scan\tfiles", "separated by single spaces"),
+        # The next cases hold no digit and no space problem, so only the printable-text
+        # rule can refuse them: a caption with a control or invisible character in it
+        # would otherwise reach the cast as a marker that moves the cursor.
+        ("A\x1b[m B", "printable words"),
+        ("A\x07 B", "printable words"),
+        ("A\x7f B", "printable words"),
+        ("Scan\N{ZERO WIDTH SPACE}files", "printable words"),
+        # This one also holds a digit, and the printable-text rule must name it too.
+        ("A\x1b[0m B", "printable words"),
     ],
 )
-def test_a_caption_is_one_clean_line_of_single_spaced_words(cast, caption):
-    assert cast.caption_problems(caption, 10000) != []
+def test_a_caption_is_one_clean_line_of_single_spaced_words(cast, caption, needle):
+    problems = cast.caption_problems(caption, 10000)
+    assert any(needle in problem for problem in problems), problems
 
 
 def test_a_good_caption_has_no_problem(cast):
@@ -1003,6 +1014,14 @@ def test_the_loader_refuses_a_bad_caption_and_names_the_scene(cast, caption, nee
 
 # --- commands
 
+# What the refusal of an ls flag that prints owners and groups says it is for. The
+# scrub scan knows a user name only after a slash, so a name in such a column is not
+# one it can recognize.
+LISTS_OWNERS = "owner and group of each file"
+# What the refusal of a long option says. ls takes short flags only, so the check
+# refuses every long option in the same words and names the short flags it refuses.
+NOT_A_SHORT_FLAG = "other than a short flag"
+
 ADMITTED_COMMANDS = [
     "cat app.py",
     "ls",
@@ -1011,7 +1030,13 @@ ADMITTED_COMMANDS = [
     "ls -1 reports",
     "cat ./app.py",
     "cat src/app.py src/util.py",
-    "ls -la .ash",
+    "ls -a .ash",
+    "ls -1",
+    "ls -AF .ash",
+    # Only the lower-case l, g, o and n flags print owners and groups.
+    "ls -LGN .",
+    # The owner rule is about ls listings: cat takes -n to number lines.
+    "cat -n app.py",
 ]
 REFUSED_COMMANDS = [
     ("rm -rf app.py", "allowlist"),
@@ -1035,6 +1060,39 @@ REFUSED_COMMANDS = [
     ("ls  app", "single spaces"),
     (" ls", "single spaces"),
     ("ls\tapp", "single spaces"),
+    # A listing that prints the owner and group of each file, alone or in a bundle,
+    # before or after the paths.
+    ("ls -l", LISTS_OWNERS),
+    ("ls -la .ash", LISTS_OWNERS),
+    ("ls -al .ash", LISTS_OWNERS),
+    ("ls -lh reports", LISTS_OWNERS),
+    ("ls -1l", LISTS_OWNERS),
+    ("ls -g", LISTS_OWNERS),
+    ("ls -o", LISTS_OWNERS),
+    ("ls -n", LISTS_OWNERS),
+    ("ls -a -l .ash", LISTS_OWNERS),
+    ("ls .ash -l", LISTS_OWNERS),
+    # Every ls long option is refused in the same words, whatever it prints: the owners
+    # (--format=long), nothing (--author), or a spelling that GNU ls reads as ambiguous
+    # (--f, --n, --format=v), which the check does not try to place.
+    ("ls --format=long", NOT_A_SHORT_FLAG),
+    ("ls --format=verbose", NOT_A_SHORT_FLAG),
+    ("ls --form=long", NOT_A_SHORT_FLAG),
+    ("ls --numeric-uid-gid", NOT_A_SHORT_FLAG),
+    ("ls --numeric", NOT_A_SHORT_FLAG),
+    ("ls --full-time", NOT_A_SHORT_FLAG),
+    ("ls --f", NOT_A_SHORT_FLAG),
+    ("ls --n", NOT_A_SHORT_FLAG),
+    ("ls --format=v", NOT_A_SHORT_FLAG),
+    ("ls --format=across", NOT_A_SHORT_FLAG),
+    ("ls --author", NOT_A_SHORT_FLAG),
+    ("ls --no-group", NOT_A_SHORT_FLAG),
+    # Shell syntax of the kinds the path pattern has to keep out.
+    ("cat .*/secret", "relative path"),
+    ("cat {..,x}/secret", "relative path"),
+    ("ls `pwd`", "relative path"),
+    ("cat a&", "relative path"),
+    ("cat <app.py", "relative path"),
 ]
 
 
@@ -1056,6 +1114,91 @@ def test_the_loader_refuses_a_disallowed_command(cast):
     with pytest.raises(cast.StoryboardError, match="allowlist") as caught:
         _parse(cast, data)
     assert "'reports'" in str(caught.value)
+
+
+def test_the_loader_refuses_an_ls_listing_of_owners_and_names_the_scene(cast):
+    data = _good()
+    _scene(data, "reports")["command"] = "ls -la .ash/ash_output/reports"
+    with pytest.raises(cast.StoryboardError, match=LISTS_OWNERS) as caught:
+        _parse(cast, data)
+    assert "'reports'" in str(caught.value)
+
+
+def test_the_ls_refusal_names_the_argument_that_prints_owners(cast):
+    problem = cast.command_problem("ls -a -lh reports")
+    assert problem is not None
+    assert LISTS_OWNERS in problem
+    assert "'-lh'" in problem
+    assert "'-a'" not in problem
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["ls --format=across", "ls --format", "ls --author", "ls --no-group", "ls --all"],
+)
+def test_a_long_option_that_prints_no_owners_does_not_claim_to(cast, command):
+    # The refusal says what some long options print, never that this one does.
+    problem = cast.command_problem(command)
+    assert problem is not None
+    assert f"some long options print the {LISTS_OWNERS}" in problem
+    assert f"prints the {LISTS_OWNERS}" not in problem
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--f",
+        "--n",
+        "--format=v",
+        "--format=long",
+        "--format=verbose",
+        "--full-time",
+        "--numeric-uid-gid",
+        "--author",
+        "--all",
+    ],
+)
+def test_every_ls_long_option_gets_the_one_generic_refusal(cast, option):
+    # GNU ls reads --f, --n and --format=v as ambiguous, so the check does not guess
+    # which option a spelling stands for: any long option is refused in the same words.
+    generic = cast.command_problem("ls --no-such-option")
+    assert generic is not None
+    problem = cast.command_problem(f"ls {option}")
+    assert problem == generic.replace("--no-such-option", option)
+    # The words give the owner reason: what the scan cannot read in a listing.
+    assert LISTS_OWNERS in problem
+    assert "scrub scan cannot recognize" in problem
+
+
+def test_the_generic_ls_refusal_names_the_short_flags_that_print_owners(cast):
+    problem = cast.command_problem("ls --all")
+    assert problem is not None
+    assert "-l, -g, -o, -n" in problem
+    # cat has no such flags, so its refusal of an option does not name them.
+    assert "-l, -g, -o, -n" not in cast.command_problem("cat --all")
+
+
+def test_a_long_option_of_cat_gets_no_owner_reason(cast):
+    # The owner reason is about ls listings: cat prints no owner and group columns.
+    problem = cast.command_problem("cat --number")
+    assert problem == "argument '--number' is an option other than a short flag"
+
+
+@pytest.mark.parametrize(
+    "value", ["long", "verbose", "l", "lo", "lon", "verb", "verbos", "across"]
+)
+def test_ls_format_with_its_value_in_the_next_argument_gets_the_owner_reason(
+    cast, value
+):
+    # GNU ls takes the value of --format from the next argument, so `ls --format long`
+    # prints owners and groups as `ls --format=long` does. The option is refused before
+    # its value is read, with the reason every ls long option gets: some print owners
+    # and groups, which the scan cannot read.
+    problem = cast.command_problem(f"ls --format {value}")
+    assert problem is not None
+    assert problem == cast.command_problem("ls --format")
+    assert "-l, -g, -o, -n" in problem
+    assert LISTS_OWNERS in problem
 
 
 # --- ids, kinds and the other keys
@@ -1182,7 +1325,7 @@ def test_loop_playback_is_accepted(cast):
         (("scenes", 0), "hold_s", -0.5, "0 or more"),
         (("scenes", 3), "output_window_s", 0, "greater than 0"),
         (("typing",), "lead_in_s", -0.1, "0 or more"),
-        (("typing",), "chars_per_second", 0, "greater than 0"),
+        (("typing",), "chars_per_second", 0, "at least 0.1"),
         (("typing",), "chars_per_second", 5000, "at most 1000"),
         (("output",), "max_gap_s", 0, "greater than 0"),
     ],
@@ -1267,6 +1410,75 @@ def test_a_scene_that_cannot_fit_its_lead_in_command_and_hold_is_refused(cast):
 )
 def test_typing_time_is_the_character_count_over_the_rate(cast, chars, rate, ms):
     assert cast.typing_ms(chars, rate) == ms
+
+
+@pytest.mark.parametrize("rate", [1.0e-320, 5e-324, 1e-300])
+def test_a_typing_rate_too_slow_to_compute_with_is_refused_not_overflowed(cast, rate):
+    # At 1e-320 characters a second the time to type a command is infinite, and
+    # rounding it raised OverflowError instead of refusing the storyboard.
+    data = _good()
+    data["typing"]["chars_per_second"] = rate
+    with pytest.raises(cast.StoryboardError, match="at least") as caught:
+        _parse(cast, data)
+    assert "chars_per_second" in str(caught.value)
+
+
+def test_the_slowest_admitted_typing_rate_is_the_floor(cast):
+    floor = cast.MIN_CHARS_PER_SECOND
+    # No scene of this storyboard types a command, so the rate is only a bound here.
+    data = _two_scenes(15.0, 15.0)
+    data["typing"]["chars_per_second"] = floor
+    assert _parse(cast, data).typing.chars_per_second == floor
+    data["typing"]["chars_per_second"] = floor * 0.99
+    with pytest.raises(cast.StoryboardError, match="at least"):
+        _parse(cast, data)
+
+
+def test_the_fastest_admitted_typing_rate_is_the_ceiling(cast):
+    ceiling = cast.MAX_CHARS_PER_SECOND
+    data = _two_scenes(15.0, 15.0)
+    data["typing"]["chars_per_second"] = ceiling
+    assert _parse(cast, data).typing.chars_per_second == ceiling
+    data["typing"]["chars_per_second"] = ceiling * 1.01
+    with pytest.raises(cast.StoryboardError, match="at most"):
+        _parse(cast, data)
+
+
+def _refused_typing_rate(cast, rate):
+    """The refusal of a storyboard with this typing rate, without the rate it quotes."""
+    data = _good()
+    data["typing"]["chars_per_second"] = rate
+    with pytest.raises(cast.StoryboardError) as caught:
+        _parse(cast, data)
+    head, _, quoted = str(caught.value).rpartition(", not ")
+    assert quoted == repr(rate)
+    return head
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [0, -1, 0.05, 0.0999, 1000.5, 5000, "30", None, True, float("nan"), float("inf")],
+)
+def test_a_typing_rate_out_of_range_gets_one_message_naming_both_bounds(cast, rate):
+    head = _refused_typing_rate(cast, rate)
+    assert f"at least {cast.MIN_CHARS_PER_SECOND}" in head
+    assert f"at most {cast.MAX_CHARS_PER_SECOND}" in head
+    assert "greater than 0" not in head
+    # One message for every rate: only the rate it quotes differs.
+    assert head == _refused_typing_rate(cast, -1)
+
+
+@pytest.mark.parametrize(
+    "rate", [1.0e-320, 0, -1, float("nan"), float("inf"), True, "30", None]
+)
+def test_typing_time_refuses_a_rate_that_is_not_a_usable_speed(cast, rate):
+    with pytest.raises(cast.CastError, match="typing rate"):
+        cast.typing_ms(26, rate)
+
+
+def test_typing_time_at_the_floor_is_finite(cast):
+    floor = cast.MIN_CHARS_PER_SECOND
+    assert cast.typing_ms(1, floor) == round(1000 / floor)
 
 
 # ---------------------------------------------------------------------------
@@ -1518,6 +1730,18 @@ def test_a_command_too_long_to_type_in_its_scene_is_refused(cast):
         cast.retime(board, _runs(cast, typed="x" * 400))
 
 
+def test_the_retimer_refuses_a_typing_rate_too_slow_to_compute_with(cast):
+    # A storyboard built by hand skips the loader's floor on the rate. The retimer
+    # still refuses it by name, as a RetimeError, and does not overflow.
+    board = cast.parse_storyboard(_mini(), MINI_IDS)
+    slow = dataclasses.replace(
+        board, typing=cast.TypingPolicy(chars_per_second=1.0e-320, lead_in_ms=500)
+    )
+    with pytest.raises(cast.RetimeError, match="typing rate") as caught:
+        cast.retime(slow, _runs(cast))
+    assert "'one'" in str(caught.value)
+
+
 def test_output_with_no_time_left_to_show_it_is_refused(cast):
     # 6 s scene: a 0.5 s lead-in, 0.5 s typing (10 characters) and a 5 s hold leave no
     # window. A scene with nothing to show still fits.
@@ -1664,6 +1888,310 @@ def test_strip_sgr_removes_color_runs_and_nothing_else(cast):
     assert cast.strip_sgr(text) == "\x1b[2Jonetwo\x1b[Hthree"
 
 
+BAR = "\N{BOX DRAWINGS LIGHT VERTICAL}"
+
+#: Text that holds /home/builder only in pieces: how a table cell wraps a long path, and
+#: how a terminal moves the cursor around one. Neither the raw text nor the text without
+#: color runs holds the token, so only the flat view can find it.
+SPLIT_BY_A_WRAP_OR_AN_ESCAPE = {
+    "a table wrap": f"{BAR} /home/bu {BAR}\r\n{BAR} ilder/app.py {BAR}",
+    "an erase code and a wrap": f"/home/bui\x1b[K\r\n{BAR} lder/app.py",
+    "a line feed": "wrote /home/bui\nlder/app.py",
+    "a carriage return and a line feed": "wrote /home/bui\r\nlder/app.py",
+    "an erase code": "/home/bui\x1b[Klder",
+    "a cursor move": "/home/bui\x1b[1Clder",
+    "a title ended by a bell": "/home/bui\x1b]0;ash\x07lder",
+    "a link ended by a string terminator": "/home/bui\x1b]8;;u\x1b\\lder",
+    "a charset designation": "/home/bui\x1b(Blder",
+    "a saved cursor": "/home/bui\x1b7lder",
+    "a device control string": "/home/bui\x1bPq\x1b\\lder",
+    "an eight-bit control sequence": "/home/bui\x9b1Clder",
+    "a bell": "/home/bui\x07lder",
+    "an erase code in color runs": "\x1b[2m/home/bui\x1b[K\x1b[0m\x1b[1mlder\x1b[0m",
+}
+
+
+@pytest.mark.parametrize("how", sorted(SPLIT_BY_A_WRAP_OR_AN_ESCAPE))
+def test_a_token_split_by_a_wrap_or_an_escape_is_found_in_the_flat_view(cast, how):
+    text = SPLIT_BY_A_WRAP_OR_AN_ESCAPE[how]
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in text
+    assert "/home/builder" not in cast.strip_sgr(text)
+    hits = cast.scan_text(text, tokens, "event 7")
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "event 7", "flat")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "kinds"),
+    [
+        ("/home/bu\r\nilder/app.py", ["home"]),
+        ("/home/\r\nrunner/work", ["user"]),
+        ("on build-\r\nhost-7 today", ["host"]),
+        # Joined, the name runs on into more word characters, so it is not the token.
+        ("on build-\r\nhost-70", []),
+        ("the\r\nrunner started", []),
+        ("see /home/\x1b[Kother\r\nbuilder", []),
+    ],
+)
+def test_the_flat_view_keeps_each_match_modes_boundaries(cast, text, kinds):
+    hits = cast.scan_text(text, _tokens(cast), "event 3")
+    assert sorted(hit.kind for hit in hits) == kinds
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{BAR} ash {BAR} PASSED {BAR}\r\n",
+        f"{BAR} /home/other {BAR}\r\n{BAR} builder/app.py {BAR}",
+        "\x1b[2J\x1b[Hscan complete\x1b[K\r\n",
+        "wrote /home/\r\nsomebody/app.py",
+    ],
+)
+def test_text_with_wraps_and_escapes_but_no_token_stays_clean(cast, text):
+    assert cast.scan_text(text, _tokens(cast), "event 2") == []
+
+
+@pytest.mark.parametrize(
+    ("text", "flat"),
+    [
+        ("plain text", "plain text"),
+        ("two  spaces stay", "two  spaces stay"),
+        ("\x1b[2Jone\x1b[1;38;2;1;2;3mtwo\x1b[0m\x1b[Hthree\x1b[m", "onetwothree"),
+        (f"{BAR} ab {BAR}\r\n{BAR} cd {BAR}", "abcd"),
+        ("ab \r\n cd", "abcd"),
+        ("ab\x1b]0;title\x07cd", "abcd"),
+        ("ab\x1b]8;;http://x\x1b\\cd", "abcd"),
+        ("ab\x1bPdata\x1b\\cd", "abcd"),
+        ("ab\x1b(Bcd", "abcd"),
+        ("ab\x1b7cd", "abcd"),
+        ("ab\x9b1Ccd", "abcd"),
+        ("ab\x00\x07\x08\x0b\x7f\x85cd", "abcd"),
+        ("\x1b", ""),
+    ],
+)
+def test_the_flat_view_drops_escapes_controls_breaks_and_boxes(cast, text, flat):
+    assert cast.flatten_text(text) == flat
+
+
+def test_the_flat_view_drops_exactly_the_box_drawing_block(cast):
+    assert cast.flatten_text(f"a{chr(0x2500)}b{chr(0x257F)}c") == "abc"
+    kept = f"a{chr(0x24FF)}b{chr(0x2580)}c"
+    assert cast.flatten_text(kept) == kept
+
+
+#: A path that wraps inside a cell of a table of three columns, as a terminal prints
+#: it: the first line holds the cells and the start of the path, the second the rest of
+#: it. In ``last`` no cell follows the wrapped one on its row. In ``middle`` another
+#: cell does, and that cell's text lies between the two halves of the path.
+WRAPPED_IN_A_TABLE = {
+    "bordered": {
+        "last": (
+            f"{BAR} B324 {BAR} HIGH {BAR} /home/bu {BAR}\r\n"
+            f"{BAR}      {BAR}      {BAR} ilder/x  {BAR}\r\n"
+        ),
+        "middle": (
+            f"{BAR} B324 {BAR} /home/bu {BAR} HIGH {BAR}\r\n"
+            f"{BAR}      {BAR} ilder/x  {BAR}      {BAR}\r\n"
+        ),
+    },
+    "spaced": {
+        "last": " B324   HIGH   /home/bu\r\n               ilder/x\r\n",
+        "middle": " B324   /home/bu   HIGH\r\n        ilder/x\r\n",
+    },
+}
+
+
+@pytest.mark.parametrize("shape", sorted(WRAPPED_IN_A_TABLE))
+def test_a_token_wrapped_in_the_last_cell_of_a_row_is_found_in_flat_view(cast, shape):
+    text = WRAPPED_IN_A_TABLE[shape]["last"]
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in text
+    hits = cast.scan_text(text, tokens, "event 6")
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "event 6", "flat")
+    ]
+
+
+@pytest.mark.parametrize("shape", sorted(WRAPPED_IN_A_TABLE))
+def test_a_token_wrapped_inside_a_middle_column_is_not_rejoined_so_recordings_must_not_wrap(
+    cast, shape
+):
+    """A limit of the flat view, pinned as it is, not a promise: it does not rejoin a
+    path that wraps inside a cell with other cells after it on its row. The text of
+    those cells lies between the halves of the path, and the view keeps it. So a
+    recording must not wrap a table of several columns; the scan is not what keeps
+    such a path out of one. If the view comes to rejoin these cells, this test turns
+    red and becomes a must-flag case beside the last-cell one above.
+    """
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    middle = WRAPPED_IN_A_TABLE[shape]["middle"]
+    assert "/home/builder" not in cast.flatten_text(middle)
+    assert cast.scan_text(middle, tokens, "event 6") == []
+    # The same halves with no cell after the wrapped one are found, so the miss is the
+    # cell's place in its row and not the text of the path.
+    last = WRAPPED_IN_A_TABLE[shape]["last"]
+    assert "/home/builder" in cast.flatten_text(last)
+
+
+def test_a_token_wrapped_inside_a_table_drawn_with_ascii_bars_is_not_rejoined(cast):
+    """Another limit of the flat view, pinned as it is: only box-drawing characters
+    count as the borders of a table, so the bars of a table drawn with ``|`` stay
+    between the halves of a path that wraps inside it, even in a table of one column.
+    A recording must not wrap a table of this kind either.
+    """
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    ascii_table = "| /home/bu |\r\n| ilder/x |"
+    assert "/home/builder" not in cast.flatten_text(ascii_table)
+    assert cast.scan_text(ascii_table, tokens, "event 6") == []
+    # The same table drawn with box-drawing characters is found.
+    drawn = f"{BAR} /home/bu {BAR}\r\n{BAR} ilder/x {BAR}"
+    assert [hit.view for hit in cast.scan_text(drawn, tokens, "event 6")] == ["flat"]
+
+
+ZERO_WIDTH_SPACE = "\N{ZERO WIDTH SPACE}"
+
+#: Characters of Unicode category Cf, which a terminal does not show. One inside a path
+#: splits it for a scan of the text and not for the reader of the recording.
+INVISIBLE_FORMAT_CHARACTERS = {
+    "a zero-width space": ZERO_WIDTH_SPACE,
+    "a zero-width non-joiner": "\N{ZERO WIDTH NON-JOINER}",
+    "a zero-width joiner": "\N{ZERO WIDTH JOINER}",
+    "a word joiner": "\N{WORD JOINER}",
+    "a soft hyphen": "\N{SOFT HYPHEN}",
+    "a byte-order mark": "\N{ZERO WIDTH NO-BREAK SPACE}",
+    "a left-to-right mark": "\N{LEFT-TO-RIGHT MARK}",
+    "a right-to-left override": "\N{RIGHT-TO-LEFT OVERRIDE}",
+    "a tag character": "\N{TAG LATIN SMALL LETTER A}",
+}
+#: Characters that look as empty and are not of that category, so the flat view keeps
+#: them: a space, a combining mark, a symbol and a letter.
+KEPT_BLANK_LOOKING_CHARACTERS = {
+    "a no-break space": "\N{NO-BREAK SPACE}",
+    "a combining grapheme joiner": "\N{COMBINING GRAPHEME JOINER}",
+    "a braille blank": "\N{BRAILLE PATTERN BLANK}",
+    "a hangul filler": "\N{HANGUL FILLER}",
+}
+
+
+@pytest.mark.parametrize("how", sorted(INVISIBLE_FORMAT_CHARACTERS))
+def test_a_token_split_by_an_invisible_format_character_is_found_in_the_flat_view(
+    cast, how
+):
+    char = INVISIBLE_FORMAT_CHARACTERS[how]
+    text = f"wrote /home/bui{char}lder/app.py"
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in cast.strip_sgr(text)
+    hits = cast.scan_text(text, tokens, "event 8")
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "event 8", "flat")
+    ]
+
+
+@pytest.mark.parametrize("how", sorted(KEPT_BLANK_LOOKING_CHARACTERS))
+def test_the_flat_view_keeps_a_blank_looking_character_that_is_not_a_format_one(
+    cast, how
+):
+    char = KEPT_BLANK_LOOKING_CHARACTERS[how]
+    assert cast.flatten_text(f"a{char}b") == f"a{char}b"
+    # Kept, it still parts the halves of a path.
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert cast.scan_text(f"/home/bui{char}lder", tokens, "event 8") == []
+
+
+def test_the_flat_view_keeps_the_spaces_beside_a_format_character(cast):
+    # Only a control or a box-drawing character takes the spaces beside it away.
+    assert cast.flatten_text(f"a {ZERO_WIDTH_SPACE} b") == "a  b"
+
+
+#: More wrapped paths that the flat view does not rejoin, each with a twin that it does.
+#: In the twin only characters the view removes lie between the halves. In the text,
+#: something it keeps does: the text of a column to the right of the wrapped cell, the
+#: right-hand column of a log line, the bar of an ASCII table.
+NOT_REJOINED = {
+    "first column with a column to its right, bordered": (
+        f"{BAR} /home/bu {BAR} FAILED {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}\r\n",
+        f"{BAR} /home/bu {BAR}        {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}\r\n",
+    ),
+    "first column with a column to its right, spaced": (
+        " /home/bu   FAILED\r\n ilder/x\r\n",
+        " /home/bu\r\n ilder/x\r\n",
+    ),
+    "a log line with a right-hand column": (
+        "wrote /home/bu        cli.py:42\r\n                    ilder/x",
+        "wrote /home/bu\r\n                    ilder/x",
+    ),
+    "an ASCII border around two columns": (
+        "| /home/bu | FAILED |\r\n| ilder/x  |        |",
+        f"{BAR} /home/bu {BAR}        {BAR}\r\n{BAR} ilder/x  {BAR}        {BAR}",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(NOT_REJOINED))
+def test_a_token_with_something_kept_between_its_halves_is_not_rejoined(cast, shape):
+    """Limits of the flat view, pinned as they are, not promises. The view removes
+    escape sequences, control characters, box-drawing characters, invisible format
+    characters and the spaces beside the controls and the box-drawing characters, and
+    nothing else. A token with anything else between its halves is not found, so a
+    recording must not wrap a path beside other text: the scan is not what keeps such a
+    path out of one. If the view comes to rejoin one of these, its case here turns red
+    and becomes a must-flag case.
+    """
+    text, twin = NOT_REJOINED[shape]
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in cast.flatten_text(text)
+    assert cast.scan_text(text, tokens, "event 6") == []
+    # The twin has only removed characters between the halves, and is found.
+    assert "/home/builder" in cast.flatten_text(twin)
+    assert [hit.view for hit in cast.scan_text(twin, tokens, "event 6")] == ["flat"]
+
+
+#: Every wrapped path above that the view keeps apart, as the scan reads it: the first
+#: half holds the start of /home/builder, and the second half is not one the view can
+#: join to it.
+KEPT_APART = {
+    f"a middle column, {name}": cells["middle"]
+    for name, cells in WRAPPED_IN_A_TABLE.items()
+}
+KEPT_APART.update({name: pair[0] for name, pair in NOT_REJOINED.items()})
+
+
+@pytest.mark.parametrize("shape", sorted(KEPT_APART))
+def test_a_home_root_token_finds_the_first_half_of_a_path_the_view_keeps_apart(
+    cast, shape
+):
+    """The net under the flat view's limits: the first half of a wrapped home path
+    holds the root of the home directory, so a token for the root finds the path where
+    the token for the whole path cannot.
+    """
+    text = KEPT_APART[shape]
+    whole = [cast.ForbiddenToken("home", "/home/builder")]
+    root = [cast.ForbiddenToken("home-root", "/home/")]
+    assert cast.scan_text(text, whole, "event 6") == []
+    hits = cast.scan_text(text, root, "event 6")
+    assert [(hit.kind, hit.view) for hit in hits] == [("home-root", "raw")]
+
+
+def test_a_home_root_token_does_not_find_a_path_that_wraps_inside_the_root(cast):
+    # The net has a limit of its own: a wrap inside the root leaves neither half
+    # holding it, so the wrap has to fall after the root. The table has one column
+    # and ASCII bars, which the view keeps between the halves.
+    text = "| /ho |\r\n| me/builder |"
+    tokens = [
+        cast.ForbiddenToken("home", "/home/builder"),
+        cast.ForbiddenToken("home-root", "/home/"),
+    ]
+    assert cast.scan_text(text, tokens, "event 6") == []
+    # Drawn with box-drawing characters, the same wrap is rejoined and found.
+    drawn = f"{BAR} /ho {BAR}\r\n{BAR} me/builder {BAR}"
+    assert [hit.kind for hit in cast.scan_text(drawn, tokens, "event 6")] == [
+        "home",
+        "home-root",
+    ]
+
+
 def test_a_hit_names_its_kind_and_never_the_value(cast):
     hits = cast.scan_text("at /home/builder/x", _tokens(cast), "event 3")
     assert len(hits) == 1
@@ -1742,6 +2270,33 @@ def test_a_token_split_across_two_events_is_found_in_the_output_stream(cast):
     )
     hits = cast.scan_cast(recording, _tokens(cast))
     assert [(hit.kind, hit.where) for hit in hits] == [("home", "output stream")]
+
+
+def test_a_token_wrapped_across_two_events_is_found_in_the_flat_output_stream(cast):
+    recording = _small_cast(
+        cast,
+        cast.CastEvent(0.0, "o", "wrote /home/bui\x1b[K\r\n"),
+        cast.CastEvent(0.1, "o", f"{BAR} lder/app.py\r\n"),
+    )
+    hits = cast.scan_cast(recording, _tokens(cast))
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "output stream", "flat")
+    ]
+
+
+def test_a_token_wrapped_inside_one_event_is_found_in_that_event(cast):
+    wrapped = f"{BAR} /home/bu {BAR}\r\n{BAR} ilder/x {BAR}"
+    recording = _small_cast(cast, cast.CastEvent(0.0, "o", wrapped))
+    hits = cast.scan_cast(recording, _tokens(cast))
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "event 0", "flat")
+    ]
+
+
+def test_a_table_drawn_over_several_events_without_a_token_stays_clean(cast):
+    rows = [f"{BAR} bandit {BAR} FAILED {BAR}\r\n", f"{BAR} ash {BAR} PASSED {BAR}\r\n"]
+    events = [cast.CastEvent(index / 10, "o", row) for index, row in enumerate(rows)]
+    assert cast.scan_cast(_small_cast(cast, *events), _tokens(cast)) == []
 
 
 def test_a_planted_token_turns_a_clean_cast_dirty(cast):
@@ -1858,6 +2413,33 @@ def test_the_record_is_canonical_whatever_the_order_it_was_built_in(cast):
         reports=tuple(reversed(record.reports)),
     )
     assert cast.record_to_json(reordered) == cast.record_to_json(record)
+
+
+@pytest.mark.parametrize(
+    ("field", "first", "second"),
+    [
+        ("rule_id", "B324", "B602"),
+        ("scanner", "bandit", "detect-secrets"),
+        # Written as text, so "app.py:11" sorts before "app.py:7".
+        ("location", "app.py:11", "app.py:7"),
+        ("severity", "HIGH", "LOW"),
+    ],
+)
+def test_findings_that_differ_in_one_field_have_one_order(cast, field, first, second):
+    """A sort on any other field leaves a pair like this in the order it came in."""
+    same = {
+        "rule_id": "B324",
+        "severity": "HIGH",
+        "scanner": "bandit",
+        "location": "app.py:7",
+    }
+    one = cast.FindingRecord(**{**same, field: first})
+    other = cast.FindingRecord(**{**same, field: second})
+    record = _record(cast)
+    forward = dataclasses.replace(record, findings=(one, other))
+    backward = dataclasses.replace(record, findings=(other, one))
+    assert [getattr(finding, field) for finding in forward.findings] == [first, second]
+    assert cast.record_to_json(forward) == cast.record_to_json(backward)
 
 
 def test_a_record_reads_back_equal(cast, tmp_path):
