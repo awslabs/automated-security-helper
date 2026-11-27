@@ -81,11 +81,18 @@ WORKSPACE_OPTIONS = (
 #: The options that read the one directory a scan starts in, or a scan of it made
 #: before. The workspace subject takes none of them: its scan root is the directory
 #: that holds the workspace file, and each project is scanned on its own.
+#:
+#: ``--changed-files-only`` and ``--base-ref`` are not here. They scope a scan to the
+#: files a git diff names, and a workspace scan reads one diff per project, against
+#: that project's own repository (workspace/execution.py, ``changed_file_set``), so
+#: both subjects take them. The Nix run of a workspace scan forwards the pair to this
+#: subject (interactions/run_ash_scan.py, ``_nix_inner_argv``). A container run
+#: forwards neither: ``--changed-files-only`` is refused with ``--mode container`` on
+#: the host before anything is built (cli/scan.py,
+#: ``_refuse_changed_files_only_in_container_mode``).
 DIRECTORY_OPTIONS = (
     "source_dir",
     "use_existing",
-    "changed_files_only",
-    "base_ref",
     "staged",
     "baseline",
     "shard_index",
@@ -583,9 +590,11 @@ def run_ash_scan_workspace_cli_command(*args: Any, **kwargs: Any) -> Any:
     Review the result with: ash results inspect findings
 
     Each folder of the workspace is a project with its own configuration and its own
-    result, and the results are combined. Options are grouped by workflow below. The
-    options that read one directory (--changed-files-only, --baseline, --shard-index
-    and the others) belong to `ash scan fs`.
+    result, and the results are combined. With --changed-files-only, each project is
+    judged on the files changed in its own git repository against --base-ref, and a
+    project with no change is skipped. Options are grouped by workflow below. The
+    options that read one directory (--baseline, --shard-index and the others) belong
+    to `ash scan fs`.
     """
     ctx = kwargs["ctx"]
     # The engine names the workspace file `workspace`; the argument is `file`.

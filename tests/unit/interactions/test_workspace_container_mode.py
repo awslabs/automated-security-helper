@@ -190,6 +190,28 @@ class TestRunCommandAssembly:
             if arg == "--mount"
         )
 
+    @pytest.mark.parametrize(
+        "workspace_relative_file",
+        [
+            pytest.param("dev.code-workspace", id="workspace"),
+            pytest.param(None, id="directory"),
+        ],
+    )
+    def test_the_scan_inside_is_given_no_changed_files_scope(
+        self, tmp_path, workspace_relative_file
+    ):
+        """The host refuses ``--changed-files-only`` with ``--mode container`` before
+        anything is built (cli/scan.py), because this command forwards no such scope:
+        the scan inside would report every finding for a scan that asked for the
+        changed files. The command line carries neither the option nor its ref."""
+        command = _run_command(
+            tmp_path,
+            tmp_path / "out",
+            workspace_relative_file=workspace_relative_file,
+        )
+        assert "--changed-files-only" not in command
+        assert "--base-ref" not in command
+
 
 class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
     """Containment is decided before mode dispatch, asserted for container mode.

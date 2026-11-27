@@ -9,6 +9,10 @@ What is pinned here:
 * The options of a directory scan, of an image scan and of a remote repository are not
   the subject's: click refuses them as unknown options, with ASH's usage-error code.
   ``ash scan fs`` takes none of the workspace options.
+* The changed-files scope, ``--changed-files-only`` and ``--base-ref``, is the
+  subject's as much as ``fs``'s: a workspace scan applies it to each project, so the
+  three spellings of a workspace scan hand the scan the same scope. ``--mode
+  container`` refuses it on the host, whichever spelling asked for it.
 * The subject prints no deprecation line. The two forms with no subject that scan a
   workspace, ``ash --workspace FILE`` and ``ash scan --workspace FILE``, still run, exit
   as they did, and print one line naming ``ash scan workspace <file>``.
@@ -22,6 +26,7 @@ records what it was handed.
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -31,6 +36,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli import scan_group
 from automated_security_helper.cli.main import app
+from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.scan_deprecation import (
     SCAN_NOUN_META,
     WORKSPACE_WITHOUT_SUBJECT_LINE,
@@ -52,10 +58,6 @@ WORKSPACE_OPTION_NAMES = {
 #: spelling a refusal names.
 DIRECTORY_ONLY = [
     pytest.param(["--source-dir", "src"], "--source-dir", id="source-dir"),
-    pytest.param(
-        ["--changed-files-only"], "--changed-files-only", id="changed-files-only"
-    ),
-    pytest.param(["--base-ref", "main"], "--base-ref", id="base-ref"),
     pytest.param(["--staged"], "--staged", id="staged"),
     pytest.param(["--baseline", "baseline.json"], "--baseline", id="baseline"),
     pytest.param(["--use-existing"], "--use-existing", id="use-existing"),
@@ -110,14 +112,16 @@ def _one_line(text: str) -> str:
 
 @pytest.fixture(autouse=True)
 def _clear_ash_env(monkeypatch):
-    """A variable of the host would name a directory, a file or a policy for a row
-    that names none."""
+    """A variable of the host would name a directory, a file, a policy or a changed-files
+    scope for a row that names none."""
     for name in (
         "ASH_SOURCE_DIR",
         "ASH_OUTPUT_DIR",
         "ASH_CONFIG",
         "ASH_WORKSPACE",
         "ASH_WORKSPACE_CONFIG",
+        "ASH_CHANGED_FILES_ONLY",
+        "ASH_BASE_REF",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -304,8 +308,6 @@ def test_the_subject_declares_none_of_the_options_that_belong_to_another_subject
     other_subjects = {
         "source_dir",
         "use_existing",
-        "changed_files_only",
-        "base_ref",
         "staged",
         "baseline",
         "shard_index",
@@ -323,6 +325,8 @@ def test_the_subject_declares_none_of_the_options_that_belong_to_another_subject
     assert taken.isdisjoint(other_subjects), sorted(taken & other_subjects)
     assert {"file", "workspace_config", "allow_missing_projects", "dry_run"} <= taken
     assert {"output_dir", "mode", "scanners", "config", "fail_on_findings"} <= taken
+    # Not another subject's: each project is scoped by a diff of its own repository.
+    assert {"changed_files_only", "base_ref"} <= taken
 
 
 def test_fs_declares_none_of_the_workspace_options_and_every_directory_one():
@@ -366,6 +370,151 @@ def test_the_fs_skeleton_lists_no_workspace_key():
         WORKSPACE_OPTION_NAMES & set(skeleton)
     )
     assert "path" in skeleton
+
+
+# --------------------------------------------------------------------------- #
+# The changed-files scope: a workspace scan applies it to each project
+# --------------------------------------------------------------------------- #
+
+#: The three ways to ask for a workspace scan, each as the words before the options.
+WORKSPACE_SPELLINGS = [
+    pytest.param(lambda file: ["scan", "workspace", file], id="subject"),
+    pytest.param(lambda file: ["--workspace", file], id="bare-ash"),
+    pytest.param(lambda file: ["scan", "--workspace", file], id="scan-without-subject"),
+]
+
+
+def test_the_subject_hands_the_engine_the_changed_files_scope(engine):
+    result = _invoke(
+        [
+            "scan",
+            "workspace",
+            "dev.code-workspace",
+            "--changed-files-only",
+            "--base-ref",
+            "origin/trunk",
+        ]
+    )
+
+    assert result.exit_code == 0, result.output
+    (call,) = engine.calls
+    assert call["workspace"] == "dev.code-workspace"
+    assert call["changed_files_only"] is True
+    assert call["base_ref"] == "origin/trunk"
+
+
+def test_the_changed_files_scope_is_off_unless_given(engine):
+    result = _invoke(["scan", "workspace", "dev.code-workspace"])
+
+    assert result.exit_code == 0, result.output
+    (call,) = engine.calls
+    assert call["changed_files_only"] is False
+    # The engine's own default for the ref, not one the subject picks.
+    parameters = inspect.signature(run_ash_scan_cli_command).parameters
+    assert call["base_ref"] == parameters["base_ref"].default
+
+
+def test_the_changed_files_scope_may_come_from_the_environment(engine, monkeypatch):
+    monkeypatch.setenv("ASH_CHANGED_FILES_ONLY", "true")
+    monkeypatch.setenv("ASH_BASE_REF", "origin/trunk")
+
+    result = _invoke(["scan", "workspace", "dev.code-workspace"])
+
+    assert result.exit_code == 0, result.output
+    (call,) = engine.calls
+    assert call["changed_files_only"] is True
+    assert call["base_ref"] == "origin/trunk"
+
+
+def test_a_json_document_may_scope_the_scan_to_the_changed_files(engine, tmp_path):
+    document = tmp_path / "scan.json"
+    document.write_text(
+        json.dumps(
+            {
+                "file": "doc.code-workspace",
+                "changed_files_only": True,
+                "base_ref": "origin/trunk",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _invoke(["scan", "workspace", "--cli-json-input", str(document)])
+
+    assert result.exit_code == 0, result.output
+    (call,) = engine.calls
+    assert call["workspace"] == "doc.code-workspace"
+    assert call["changed_files_only"] is True
+    assert call["base_ref"] == "origin/trunk"
+
+
+def test_the_help_of_the_subject_lists_the_changed_files_scope():
+    result = _invoke(["scan", "workspace", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "--changed-files-only" in result.output
+    assert "--base-ref" in result.output
+
+
+@pytest.mark.parametrize("spelling", WORKSPACE_SPELLINGS)
+def test_every_spelling_hands_the_scan_the_same_changed_files_scope(
+    tmp_path, no_scan, spelling
+):
+    """``ash --workspace FILE --changed-files-only`` scopes each project to its own
+    diff, and the subject does what that form does."""
+    workspace = _workspace(tmp_path, ("api", "web"))
+
+    result = _invoke(
+        [
+            *spelling(str(workspace)),
+            "--changed-files-only",
+            "--base-ref",
+            "origin/trunk",
+        ]
+    )
+
+    assert result.exit_code == WorkspaceExitCode.SUCCESS, result.output
+    (call,) = no_scan
+    assert call["changed_files_only"] is True
+    assert call["base_ref"] == "origin/trunk"
+    assert [project.key for project in call["workspace_plan"].projects] == [
+        "api",
+        "web",
+    ]
+
+
+@pytest.mark.parametrize("spelling", WORKSPACE_SPELLINGS)
+def test_container_mode_refuses_the_changed_files_scope_on_the_host(
+    tmp_path, no_scan, spelling
+):
+    """The scan inside the container is not given the scope, so the host refuses it
+    with the usage-error code before the scan is asked for, whichever way the
+    workspace scan is spelled."""
+    workspace = _workspace(tmp_path)
+
+    result = _invoke(
+        [*spelling(str(workspace)), "--changed-files-only", "--mode", "container"]
+    )
+
+    refusal = "--changed-files-only is not supported with --mode container"
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert refusal in _one_line(result.stderr), result.stderr
+    assert no_scan == []
+
+
+def test_container_mode_refuses_the_changed_files_variable_for_the_subject(
+    tmp_path, no_scan, monkeypatch
+):
+    """The variable asks for the same scope as the option, so the subject reads it and
+    container mode refuses it, naming the variable."""
+    monkeypatch.setenv("ASH_CHANGED_FILES_ONLY", "true")
+    workspace = _workspace(tmp_path)
+
+    result = _invoke(["scan", "workspace", str(workspace), "--mode", "container"])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "ASH_CHANGED_FILES_ONLY is set" in _one_line(result.stderr), result.stderr
+    assert no_scan == []
 
 
 # --------------------------------------------------------------------------- #

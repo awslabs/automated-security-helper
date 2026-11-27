@@ -696,9 +696,10 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
 ):
     """The test above spells the command line out; this one hands it to the command
     that runs inside the shell, so a flag the subject does not take is an error here
-    and not a Nix run that fails inside the shell. The options of a directory scan
-    (the changed-files scope, a shard, saved results) are not given to a workspace
-    scan, so none is set."""
+    and not a Nix run that fails inside the shell. The options of a directory scan that
+    a workspace scan does not take (a shard, saved results) are not given to it, so
+    none is set. The changed-files scope is given: the subject takes it and applies it
+    to each project."""
     import typer
 
     from automated_security_helper.cli.main import app
@@ -712,7 +713,6 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
         update={
             "workspace_plan": plan,
             "allow_missing_projects": True,
-            "changed_files_only": False,
             "existing_results": None,
             "shard_index": None,
             "shard_count": None,
@@ -739,6 +739,40 @@ def test_the_workspace_subject_reads_every_option_the_inner_scan_is_given(
     assert read("strategy") == ExecutionStrategy.SEQUENTIAL.value
     assert read("quiet") is True
     assert read("fail_on_incomplete_scanners") is True
+    assert read("changed_files_only") is True
+    assert read("base_ref") == "origin/trunk"
+
+
+def test_a_workspace_scan_in_nix_mode_gives_the_inner_scan_its_changed_files_scope(
+    tmp_path,
+):
+    """``ash --workspace FILE --changed-files-only --mode nix`` scopes each project to
+    the files its own repository changed, and the inner scan, the ``workspace``
+    subject, is given the scope and reads it as the options ``fs`` reads: the command
+    line carries the pair once, and the subject parses it to the same values."""
+    import typer
+
+    from automated_security_helper.cli.main import app
+
+    plan = SimpleNamespace(
+        workspace_file="/ws/dev.code-workspace", workspace_config_source=None
+    )
+    opts = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        mode=RunMode.nix,
+        changed_files_only=True,
+        base_ref="origin/trunk",
+    )
+    argv = ras._nix_inner_argv(opts.model_copy(update={"workspace_plan": plan}))
+
+    assert argv[:3] == ["scan", "workspace", "/ws/dev.code-workspace"]
+    assert argv.count("--changed-files-only") == 1
+    assert _after_flag(argv, "--base-ref") == ["origin/trunk"]
+    subject = typer.main.get_command(app).commands["scan"].commands["workspace"]
+    parsed = subject.make_context("workspace", argv[2:], resilient_parsing=False).params
+    assert parsed["changed_files_only"] is True
+    assert parsed["base_ref"] == "origin/trunk"
 
 
 @pytest.fixture

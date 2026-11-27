@@ -5028,7 +5028,11 @@ def _assemble_run_command(
     # Core ASH path arguments. In workspace mode there is no source directory: the
     # workspace root is already the mount point, and the workspace file is the
     # argument of the `workspace` subject, `scan workspace /src/<file>`. A directory
-    # scan is `scan fs /src`.
+    # scan is `scan fs /src`. Neither is given --changed-files-only or --base-ref: this
+    # function forwards no such scope, so the host refuses it with --mode container
+    # before anything is built (cli/scan.py,
+    # _refuse_changed_files_only_in_container_mode) instead of reporting every finding
+    # for a scan that asked for the changed files.
     if workspace_relative_file is not None:
         cmd.extend(
             [
