@@ -63,7 +63,9 @@ would and records every other call:
    step fails with status 70 and runs no report.
 5. The probes run with colour off, name the config their step's command names, run
    without ``--reinstall``, do not print the help they read, and do not run at all
-   for an ``ash-args`` the step refuses.
+   for an ``ash-args`` the step refuses. They start in RUNNER_TEMP with
+   ``--no-config``, so the scanned repository's uv settings do not reach the install
+   they make, while the scan and the report start in the checkout.
 6. Each step says on stderr which spelling it chose and why, and what a failed probe
    printed goes through ``one_line`` a line at a time, so no line of it is read as a
    workflow command.
@@ -101,10 +103,13 @@ posix_only = pytest.mark.skipif(
 )
 
 #: A stand-in for uvx. A call that ends in --help is a probe: it is logged to
-#: $PROBE_LOG and answered as $UVX_RELEASE would answer `ash scan fs --help` and
-#: `ash results report --help`. Every other call is recorded to $CALLS_LOG, one
-#: argument per line with an END line after each call. A probe that reinstalled
-#: would not start `--from ash-source ash`, so it gets the broken answer.
+#: $PROBE_LOG, with the directory it started in logged to $PROBE_CWD_LOG, and answered
+#: as $UVX_RELEASE would answer `ash scan fs --help` and `ash results report --help`.
+#: A leading --no-config is logged with the rest of the call and then set aside, so the
+#: answers below read the same words whether or not a probe passes it. Every other call
+#: is recorded to $CALLS_LOG, one argument per line with an END line after each call,
+#: and the directory it started in to $CALL_CWD_LOG. A probe that reinstalled would not
+#: start `--from ash-source ash`, so it gets the broken answer.
 STAND_IN_UVX = r"""#!/bin/sh
 pad() {
   i=0
@@ -116,6 +121,8 @@ pad() {
 for last in "$@"; do :; done
 if [ "${last:-}" = "--help" ]; then
   printf '%s NO_COLOR=%s\n' "$*" "${NO_COLOR:-}" >> "$PROBE_LOG"
+  pwd >> "$PROBE_CWD_LOG"
+  if [ "${1:-}" = "--no-config" ]; then shift; fi
   case "$UVX_RELEASE:$1 $2 $3 $4 $5" in
     "3.9:--from ash-source ash scan fs") cat "$FS_HELP"; pad; exit 0 ;;
     "3.9:--from ash-source ash results report") cat "$REPORT_HELP"; pad; exit 0 ;;
@@ -153,6 +160,7 @@ if [ "${last:-}" = "--help" ]; then
   exit 1
 fi
 printf '%s\n' "$@" END >> "$CALLS_LOG"
+pwd >> "$CALL_CWD_LOG"
 exit "${UVX_EXIT:-0}"
 """
 
@@ -220,6 +228,9 @@ class Ran:
     calls: list[list[str]]
     #: The probes it answered, each `<argv> NO_COLOR=<value>`.
     probes: list[str]
+    #: The directory each probe started in, and each of the other calls.
+    probe_dirs: list[str]
+    call_dirs: list[str]
 
 
 def _run(
@@ -235,6 +246,7 @@ def _run(
     runner_temp = where / "runner_temp"
     write_helper(_steps(), runner_temp)
     calls_log, probe_log = where / "calls", where / "probes"
+    call_cwd_log, probe_cwd_log = where / "call-dirs", where / "probe-dirs"
     result = subprocess.run(
         [shutil.which("bash") or "bash", "-e", "-o", "pipefail", "-c", _script(step)],
         cwd=where,
@@ -249,6 +261,8 @@ def _run(
             "REPORT_HELP": str(helps["report"]),
             "CALLS_LOG": str(calls_log),
             "PROBE_LOG": str(probe_log),
+            "CALL_CWD_LOG": str(call_cwd_log),
+            "PROBE_CWD_LOG": str(probe_cwd_log),
             **env,
         },
         capture_output=True,
@@ -271,7 +285,17 @@ def _run(
     probes = (
         probe_log.read_text(encoding="utf-8").splitlines() if probe_log.exists() else []
     )
-    return Ran(result, calls, probes)
+    probe_dirs = (
+        probe_cwd_log.read_text(encoding="utf-8").splitlines()
+        if probe_cwd_log.exists()
+        else []
+    )
+    call_dirs = (
+        call_cwd_log.read_text(encoding="utf-8").splitlines()
+        if call_cwd_log.exists()
+        else []
+    )
+    return Ran(result, calls, probes, probe_dirs, call_dirs)
 
 
 def _output(ran: Ran) -> str:
@@ -621,17 +645,44 @@ def test_the_probes_run_with_colour_off_and_never_reinstall(
     tmp_path, helps, config, config_words
 ):
     # Each names the config its step's command does, so no ASH this job runs is
-    # left to find the checkout's config, though --help reads none.
+    # left to find the checkout's config, though --help reads none, and each skips
+    # uv's config discovery.
     env = {"ASH_CONFIG": config}
     scan = _run(tmp_path / "scan", helps, RUN_ASH, "3.9", {**SCAN_ENV, **env})
     report = _run(tmp_path / "report", helps, REPORT, "3.9", env)
 
     assert scan.probes == [
-        f"--from ash-source ash scan fs{config_words} --help NO_COLOR=1"
+        f"--no-config --from ash-source ash scan fs{config_words} --help NO_COLOR=1"
     ]
     assert report.probes == [
-        f"--from ash-source ash results report{config_words} --help NO_COLOR=1"
+        (
+            "--no-config --from ash-source ash results report"
+            f"{config_words} --help NO_COLOR=1"
+        )
     ]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("release", ["3.9", "3.8"])
+@pytest.mark.parametrize(
+    "step, env",
+    [(RUN_ASH, SCAN_ENV), (REPORT, {"ASH_CONFIG": ""})],
+    ids=["scan", "report"],
+)
+def test_the_help_is_asked_from_runner_temp_and_the_scan_runs_in_the_checkout(
+    tmp_path, helps, step, env, release
+):
+    """`uvx --from X` installs X, so the scanned repository's uv settings must not reach
+    it: each step asks its question from RUNNER_TEMP, with --no-config, as the job runs
+    its other installs. The `cd` stays inside the probe: the scan and the report start
+    in the checkout, where they have to run."""
+    ran = _run(tmp_path, helps, step, release, env)
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.probe_dirs == [str(tmp_path / "runner_temp")], ran.probe_dirs
+    assert [probe.split()[0] for probe in ran.probes] == ["--no-config"], ran.probes
+    assert ran.call_dirs == [str(tmp_path)], ran.call_dirs
 
 
 @pytest.mark.integration

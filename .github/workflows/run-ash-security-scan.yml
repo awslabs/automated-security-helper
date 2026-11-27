@@ -2303,11 +2303,17 @@ jobs:
           # fetch the source, ASH crashes) says nothing about the ASH's commands, so
           # the step fails with status 70, which ASH never gives, and the end of what
           # the probe printed, and neither spelling runs. The probe names the scan's
-          # config as the scan does, though --help reads none. The help is read whole
-          # into a variable, with color off, so no pipe is closed early and no style
-          # code falls between the words. It is printed only when the probe fails,
-          # and then through one_line, a line at a time. The step says which spelling
-          # it chose and why, on stderr.
+          # config as the scan does, though --help reads none. It starts in
+          # RUNNER_TEMP and skips uv's config discovery (--no-config), as the job's
+          # other calls of uv do: uvx installs the ASH it is given, so what the
+          # scanned repository says in its uv settings, such as a package index or
+          # an override, must not reach that install, and an ASH started in the
+          # checkout would look for a config there. The cd is inside the
+          # substitution, so the scan below still starts in the checkout. The help
+          # is read whole into a variable, with color off, so no pipe is closed
+          # early and no style code falls between the words. It is printed only when
+          # the probe fails, and then through one_line, a line at a time. The step
+          # says which spelling it chose and why, on stderr.
           #
           # This step used to pass --source-dir . ahead of ash-args, so a
           # --source-dir in ash-args came later and named the directory scanned,
@@ -2317,7 +2323,7 @@ jobs:
           # spellings. On the new one a name that starts with a dash is given as
           # ./NAME, the same directory, so it is not read as an option.
           fs_help_status=0
-          fs_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || fs_help_status=$?
+          fs_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || fs_help_status=$?
           case "${fs_help_status}:${fs_help}" in
             0:*"scan fs"*)
               scan_has_subject=yes
@@ -2429,9 +2435,14 @@ jobs:
           # commands, so the step fails with status 70, which ASH never gives, and
           # the end of what the probe printed, and neither spelling runs. The probe
           # names the report's config as the report does, though --help reads none.
-          # The step says which spelling it chose and why, on stderr.
+          # It starts in RUNNER_TEMP and skips uv's config discovery (--no-config)
+          # for the reason the scan step's probe does: uvx installs the ASH it is
+          # given, and the scanned repository's uv settings must not reach that
+          # install. The cd is inside the substitution, so the report below still
+          # starts in the checkout. The step says which spelling it chose and why,
+          # on stderr.
           report_help_status=0
-          report_help="$(NO_COLOR=1 uvx --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || report_help_status=$?
+          report_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || report_help_status=$?
           case "${report_help_status}:${report_help}" in
             0:*"results report"*)
               report_has_results=yes
