@@ -462,3 +462,33 @@ def test_the_orchestrator_passes_on_whose_overrides_they_are(
     orchestrator.initialize()
     recorded = orchestrator.config._operator_paths.overrides
     assert (recorded == []) is client
+
+
+# ---------------------------------------------------------------------------
+# What an upload that leaves a section out keeps of the bound profile's
+# ---------------------------------------------------------------------------
+#
+# An upload replaces the bound profile's config instead of adding to it, so a
+# section it leaves out reads as the scanner's default. For a scanner that sends
+# source off the host that default is on.
+
+SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
+
+
+def test_an_upload_that_leaves_out_an_off_host_scanner_the_profile_turns_off_does_not_run_it(
+    _server,
+) -> None:
+    from automated_security_helper.base.plugin_config import section_enabled
+
+    _bind_profile(
+        _server["tmp"],
+        f"ash_plugin_modules:\n  - {SNYK}\nscanners:\n  snyk-code:\n    enabled: false\n",
+    )
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    # The profile's package is carried into the scan whatever the upload's own
+    # list says, so the scanner is loaded and only its section can stop it.
+    assert SNYK in config.ash_plugin_modules
+    assert section_enabled(config.get_plugin_config("scanner", "snyk-code")) is False

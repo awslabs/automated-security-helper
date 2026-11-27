@@ -24,7 +24,10 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from automated_security_helper.base.plugin_config import section_enabled
+from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.runtime_patch import SECTION_FLOOR_ENTRIES
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import checkout_env, importing_this_checkout
 
@@ -955,3 +958,271 @@ def test_no_reporter_outside_those_packages_connects_or_starts_a_process(tmp_pat
         for k, v in local.items()
         if v["network"] or v["processes"]
     } == {}
+
+
+# ---------------------------------------------------------------------------
+# An off-host scanner the operator turns off stays off under a config that is not
+# the operator's
+# ---------------------------------------------------------------------------
+#
+# A config in the scanned tree, or one an MCP client delivered, replaces the
+# operator's config instead of adding to it. A scanner section it leaves out reads
+# as the scanner's default, which is on, so the operator's ``enabled: false`` was
+# lost for a scanner that sends data off the host, whose package the operator's own
+# list still loads (``plugin_module_trust`` carries it whatever the config says).
+
+#: The scanners whose whole section is an always-denied path
+#: (``ALWAYS_DENIED_PATHS``): the ones that send source, dependency lists,
+#: candidate secrets or usage data off the host.
+OFF_HOST_SCANNERS = sorted(entry.split("/")[2] for entry in SECTION_FLOOR_ENTRIES)
+
+
+def _operator_file(tmp_path: Path, document: Dict[str, object]) -> Path:
+    path = tmp_path / "operator.yaml"
+    path.write_text(yaml.safe_dump(document))
+    return path
+
+
+def _tree_config(tmp_path: Path, document: Dict[str, object]) -> Path:
+    source = tmp_path / "repo"
+    source.mkdir(parents=True, exist_ok=True)
+    path = source / ".ash.yaml"
+    path.write_text(yaml.safe_dump(document))
+    return path
+
+
+def _upload_config(tmp_path: Path, document: Dict[str, object]) -> Path:
+    path = tmp_path / "upload" / "ash.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(document))
+    return path
+
+
+def _enabled(config: AshConfig, scanner: str) -> bool:
+    return section_enabled(config.get_plugin_config("scanner", scanner))
+
+
+def _named(records: List[logging.LogRecord], scanner: str) -> List[str]:
+    return [w for w in _warnings(records) if f"scanners.{scanner}.enabled" in w]
+
+
+@pytest.mark.unit
+def test_the_off_host_scanner_sections_are_the_eight():
+    assert OFF_HOST_SCANNERS == [
+        "detect-secrets",
+        "npm-audit",
+        "opengrep",
+        "semgrep",
+        "snyk-code",
+        "trivy",
+        "trivy-repo",
+        "zizmor",
+    ]
+
+
+@pytest.mark.unit
+def test_an_in_tree_config_that_leaves_out_an_off_host_scanner_the_operator_turns_off_does_not_run_it(
+    tmp_path, ash_log
+):
+    operator = _operator_file(
+        tmp_path,
+        {"ash_plugin_modules": [SNYK], "scanners": {"snyk-code": {"enabled": False}}},
+    )
+    tree = _tree_config(tmp_path, {"project_name": "scanned"})
+
+    config = resolve_config(
+        config_path=tree, source_dir=tree.parent, trusted_config_path=operator
+    )
+
+    # The control: the operator's package is carried into the scan whatever the
+    # tree's own list says, so the scanner is loaded and only its section can
+    # keep it from running.
+    assert SNYK in config.ash_plugin_modules, _warnings(ash_log)
+    assert _enabled(config, "snyk-code") is False
+
+
+@pytest.mark.parametrize("route", ["in-tree", "delivered"])
+@pytest.mark.integration
+def test_the_scan_engine_refuses_an_off_host_scanner_the_operator_turns_off(
+    tmp_path, route
+):
+    operator = _operator_file(
+        tmp_path,
+        {"ash_plugin_modules": [SNYK], "scanners": {"snyk-code": {"enabled": False}}},
+    )
+    source = tmp_path / "repo"
+    source.mkdir()
+    if route == "in-tree":
+        config_path = _tree_config(tmp_path, {"project_name": "scanned"})
+    else:
+        config_path = _upload_config(tmp_path, {"project_name": "uploaded"})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            importing_this_checkout(_ENGINE_REFUSES),
+            str(source),
+            str(config_path),
+            str(operator),
+            route,
+            SNYK,
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    outcome = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert outcome["raised"] is True, outcome
+    assert "its configuration disables it" in outcome["message"], outcome
+
+
+# Run in a subprocess, because loading a plugin package registers its plugins for
+# the rest of the process: the scan engine built over a config resolved the way a
+# scan resolves it (argv[2] is the config, argv[3] the operator's, argv[4] whether a
+# client delivered it) and handed the snyk package (argv[5]) as the command line
+# hands it, asked for the scanner the operator turned off.
+_ENGINE_REFUSES = """
+import json, sys
+from pathlib import Path
+from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.core.execution_engine import ScanExecutionEngine
+
+source = Path(sys.argv[1])
+config = resolve_config(
+    config_path=Path(sys.argv[2]),
+    source_dir=source,
+    trusted_config_path=Path(sys.argv[3]),
+    untrusted_config=sys.argv[4] == "delivered",
+)
+engine = ScanExecutionEngine(
+    context=PluginContext(source_dir=source, output_dir=source.parent / "out",
+                          work_dir=source.parent / "work", config=config),
+    show_progress=False,
+    ash_plugin_modules=[sys.argv[5]],
+)
+try:
+    engine.get_scanner("snyk-code")
+    print(json.dumps({"raised": False, "message": ""}))
+except ValueError as error:
+    print(json.dumps({"raised": True, "message": str(error)}))
+"""
+
+
+@pytest.mark.parametrize("scanner", OFF_HOST_SCANNERS)
+@pytest.mark.unit
+def test_an_in_tree_config_cannot_turn_back_on_an_off_host_scanner_the_operator_turns_off(
+    tmp_path, ash_log, scanner
+):
+    operator = _operator_file(tmp_path, {"scanners": {scanner: {"enabled": False}}})
+    tree = _tree_config(
+        tmp_path,
+        {"project_name": "scanned", "scanners": {scanner: {"enabled": True}}},
+    )
+
+    config = resolve_config(
+        config_path=tree, source_dir=tree.parent, trusted_config_path=operator
+    )
+
+    assert _enabled(config, scanner) is False
+    assert len(_named(ash_log, scanner)) == 1, _warnings(ash_log)
+
+
+@pytest.mark.parametrize("scanner", OFF_HOST_SCANNERS)
+@pytest.mark.unit
+def test_an_in_tree_config_that_leaves_the_section_out_keeps_the_operator_s_off(
+    tmp_path, ash_log, scanner
+):
+    operator = _operator_file(tmp_path, {"scanners": {scanner: {"enabled": False}}})
+    tree = _tree_config(tmp_path, {"project_name": "scanned"})
+
+    config = resolve_config(
+        config_path=tree, source_dir=tree.parent, trusted_config_path=operator
+    )
+
+    assert _enabled(config, scanner) is False
+    # An omission is not the config's choice, so no warning names it.
+    assert not _named(ash_log, scanner), _warnings(ash_log)
+
+
+@pytest.mark.parametrize("scanner", OFF_HOST_SCANNERS)
+@pytest.mark.unit
+def test_control_an_in_tree_config_may_turn_off_an_off_host_scanner(
+    tmp_path, ash_log, scanner
+):
+    operator = _operator_file(tmp_path, {"project_name": "operator"})
+    tree = _tree_config(
+        tmp_path,
+        {"project_name": "scanned", "scanners": {scanner: {"enabled": False}}},
+    )
+
+    config = resolve_config(
+        config_path=tree, source_dir=tree.parent, trusted_config_path=operator
+    )
+
+    assert _enabled(config, scanner) is False
+
+
+@pytest.mark.parametrize("scanner", OFF_HOST_SCANNERS)
+@pytest.mark.unit
+def test_control_an_off_host_scanner_neither_config_turns_off_keeps_its_default(
+    tmp_path, ash_log, scanner
+):
+    operator = _operator_file(tmp_path, {"project_name": "operator"})
+    tree = _tree_config(tmp_path, {"project_name": "scanned"})
+
+    config = resolve_config(
+        config_path=tree, source_dir=tree.parent, trusted_config_path=operator
+    )
+
+    assert _enabled(config, scanner) == section_enabled(
+        AshConfig().get_plugin_config("scanner", scanner)
+    )
+
+
+@pytest.mark.parametrize("scanner", OFF_HOST_SCANNERS)
+@pytest.mark.unit
+def test_a_delivered_config_that_leaves_the_section_out_keeps_the_operator_s_off(
+    tmp_path, ash_log, scanner
+):
+    operator = _operator_file(tmp_path, {"scanners": {scanner: {"enabled": False}}})
+    upload = _upload_config(tmp_path, {"project_name": "uploaded"})
+    source = tmp_path / "repo"
+    source.mkdir()
+
+    config = resolve_config(
+        config_path=upload,
+        source_dir=source,
+        untrusted_config=True,
+        trusted_config_path=operator,
+    )
+
+    assert _enabled(config, scanner) is False
+
+
+@pytest.mark.parametrize("scanner", OFF_HOST_SCANNERS)
+@pytest.mark.unit
+def test_control_a_delivered_config_still_cannot_write_the_section(
+    tmp_path, ash_log, scanner
+):
+    operator = _operator_file(tmp_path, {"scanners": {scanner: {"enabled": False}}})
+    upload = _upload_config(
+        tmp_path,
+        {"project_name": "uploaded", "scanners": {scanner: {"enabled": True}}},
+    )
+    source = tmp_path / "repo"
+    source.mkdir()
+
+    from automated_security_helper.core.exceptions import ASHConfigFieldDeniedError
+
+    with pytest.raises(ASHConfigFieldDeniedError):
+        resolve_config(
+            config_path=upload,
+            source_dir=source,
+            untrusted_config=True,
+            trusted_config_path=operator,
+        )
