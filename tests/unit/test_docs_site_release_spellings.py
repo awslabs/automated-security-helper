@@ -28,12 +28,13 @@ page's ``ash_version``, as the snippet builder's pins do.
 from __future__ import annotations
 
 import importlib.util
-import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from tests.utils.release_spellings import NEWER_SPELLING
 
 jinja2 = pytest.importorskip("jinja2")
 pytest.importorskip("mkdocs")
@@ -44,16 +45,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 OVERRIDES = REPO_ROOT / "docs" / "overrides"
 HOOK = REPO_ROOT / "docs" / "hooks" / "install_refs.py"
 REPO_URL = "https://github.com/awslabs/automated-security-" + "helper"
-
-#: A spelling that ASH 3.8 does not read (as in
-#: tests/unit/test_version_template_release_spellings.py).
-NEWER_SPELLING = re.compile(
-    r"(?<![\w./-])ash(?:v3)?[ \t]+(?:"
-    r"scan[ \t]+(?:fs|workspace|image|git)(?![\w-])"
-    r"|results[ \t]+(?:report|diff|trend|merge|inspect)(?![\w-])"
-    r"|container[ \t]+build(?![\w-])"
-    r")"
-)
 
 #: The theme's own base page, which home.html extends; only its blocks matter here.
 _MAIN_STUB = (

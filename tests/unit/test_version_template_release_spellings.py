@@ -25,7 +25,10 @@ What is asserted
 The rewrite, row by row, on the shapes the templates use; that every template rendered
 for 3.8.0 holds none of the newer spellings and renders for 3.9.0 with nothing but its
 placeholders replaced; and that each committed page, which pins the current release,
-names no spelling that release lacks.
+names no spelling that release lacks. The patterns that say what 3.8 lacks, the release
+that introduced it and the results verbs are shared with every other test of the
+spellings (tests/utils/release_spellings.py); this file holds the threshold and the
+verbs to the manager's own.
 
 A page that says what a pre-commit hook runs quotes the hook's ``entry:``. For a
 release before 3.9 the render writes the entry that release's manifest holds, whole
@@ -44,6 +47,14 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.utils.release_spellings import (
+    NEWER_SCANNER_FLAG,
+    NEWER_SPELLING,
+    RESULTS_VERBS,
+    SUBJECTS_RELEASE,
+    release_tuple,
+)
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - exercised only on 3.10
@@ -56,11 +67,6 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
 HOOK_MANIFEST = REPO_ROOT / ".pre-commit-hooks.yaml"
 PRE_COMMIT_PAGE = REPO_ROOT / "docs" / "content" / "how-to" / "pre-commit.md"
 
-#: The first release whose CLI reads the spellings below. Written here as well as in
-#: the manager, so a change to the manager's threshold fails
-#: test_the_threshold_is_the_release_that_introduced_the_spellings.
-SUBJECTS_RELEASE = (3, 9, 0)
-
 #: The ``entry:`` of each hook of ``.pre-commit-hooks.yaml`` at the v3.8.0 tag, the
 #: release the committed pages pin: lines 38, 48 and 60 of ``git show
 #: v3.8.0:.pre-commit-hooks.yaml``. Written out here, so the manager's table of the
@@ -70,24 +76,6 @@ V3_8_0_HOOK_ENTRIES = {
     "ash-simple-scan": "ashv3 --mode=precommit",
     "ash-full-scan": "ashv3 --mode=container --simple",
 }
-
-#: A spelling that ASH 3.8 does not read. ``ash scan workspace``, ``image`` and
-#: ``git`` are listed too: they have no 3.8 form, so a page pinned to 3.8 must not
-#: name them at all.
-NEWER_SPELLING = re.compile(
-    r"(?<![\w./-])ash(?:v3)?[ \t]+(?:"
-    r"scan[ \t]+(?:fs|workspace|image|git)(?![\w-])"
-    r"|results[ \t]+(?:report|diff|trend|merge|inspect)(?![\w-])"
-    r"|container[ \t]+build(?![\w-])"
-    r")"
-)
-
-#: The flags 3.9 added to name the scanners to run, inside an ``ash scan`` command.
-#: 3.8 has ``--scanners`` and refuses these two.
-NEWER_SCANNER_FLAG = re.compile(
-    r"(?<![\w./-])ash(?:v3)?[ \t]+scan(?![\w-])(?:\\\n|[^\n;&|`)\]])*?"
-    r"(?<![\w-])--(?:only|add)-scanners(?![\w-])"
-)
 
 
 def _load_module():
@@ -108,11 +96,6 @@ MANAGER = MODULE.VersionTemplateManager(REPO_ROOT)
 def _packaged_release() -> str:
     with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
         return tomllib.load(handle)["tool"]["commitizen"]["version"]
-
-
-def _release_tuple(version: str) -> tuple[int, int, int]:
-    major, minor, patch = (int(part) for part in version.split(".")[:3])
-    return major, minor, patch
 
 
 def _templated_targets() -> list[str]:
@@ -297,12 +280,30 @@ def test_the_placeholders_still_render_beside_the_rewrite():
 
 
 def test_the_threshold_is_the_release_that_introduced_the_spellings():
+    # SUBJECTS_RELEASE is the one every test of the spellings imports from
+    # tests/utils/release_spellings.py, so this is the test that holds it to the
+    # manager's own.
     assert MODULE.SUBJECTS_RELEASE == SUBJECTS_RELEASE
     assert MODULE.spellings_for_release("ash scan fs", "3.8.99") == "ash scan"
     assert MODULE.spellings_for_release("ash scan fs", "3.9.0") == "ash scan fs"
     # A version that is not a release number names no release to write for.
     assert MODULE.spellings_for_release("ash scan fs", "main") == "ash scan fs"
     assert MODULE.spellings_for_release("ash scan fs", "{{VERSION}}") == "ash scan fs"
+
+
+def test_the_results_verbs_are_the_ones_the_manager_moves():
+    """The detectors list the commands 3.9 moved under ``ash results``; the manager lists
+    the ones it writes back, in its own pattern. A verb in one and not the other is a
+    page the detectors flag and the render cannot fix, or the reverse."""
+    listed = re.search(r"\(\?P<verb>([^)]*)\)", MODULE._RESULTS_VERB.pattern)
+    assert listed is not None, (
+        "the manager no longer names its verbs as `(?P<verb>...)`"
+    )
+    assert set(listed[1].split("|")) == set(RESULTS_VERBS)
+    for verb in RESULTS_VERBS:
+        assert MODULE.spellings_for_release(f"ash results {verb}", "3.8.0") == (
+            f"ash {verb}"
+        )
 
 
 @pytest.mark.parametrize("target", _templated_targets())
@@ -337,7 +338,7 @@ def test_a_committed_page_names_only_the_spellings_of_the_release_it_pins(target
     reader who copies its install command and then its other commands runs them on
     that release."""
     release = _packaged_release()
-    if _release_tuple(release) >= SUBJECTS_RELEASE:
+    if release_tuple(release) >= SUBJECTS_RELEASE:
         pytest.skip(f"the current release, {release}, reads every newer spelling")
     found = _newer_spellings((REPO_ROOT / target).read_text(encoding="utf-8"))
     assert not found, (
@@ -384,7 +385,7 @@ def test_the_committed_pre_commit_page_says_the_entries_its_pinned_release_ships
     release = _packaged_release()
     entries = (
         V3_8_0_HOOK_ENTRIES
-        if _release_tuple(release) < SUBJECTS_RELEASE
+        if release_tuple(release) < SUBJECTS_RELEASE
         else _manifest_entries()
     )
     text = " ".join(PRE_COMMIT_PAGE.read_text(encoding="utf-8").split())

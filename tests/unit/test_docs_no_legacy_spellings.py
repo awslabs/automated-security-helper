@@ -77,6 +77,8 @@ from typing import NamedTuple
 
 import pytest
 
+from tests.utils.release_spellings import RESULTS_VERBS, SCAN_SUBJECTS
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -85,7 +87,7 @@ JOURNEYS = REPO_ROOT / "docs" / "journeys"
 PINNED_TEST = REPO_ROOT / "tests" / "unit" / "test_docs_pinned_pages_spelling.py"
 
 #: What `ash scan` can be told to scan after the subjects.
-SUBJECTS = ("fs", "workspace", "image", "git")
+SUBJECTS = SCAN_SUBJECTS
 
 #: The scan options that choose something other than a directory. Their subject is not
 #: a command yet, so a page spells those scans without one (see the docstring).
@@ -94,7 +96,7 @@ SUBJECT_OPTIONS = frozenset(
 )
 
 #: The top-level commands that moved: ``ash results <verb>`` and ``ash container build``.
-LEGACY_VERBS = ("build-image", "report", "diff", "trend", "merge", "inspect")
+LEGACY_VERBS = ("build-image", *RESULTS_VERBS)
 
 #: What follows ``ash inspect``: a word that is a subcommand, not a word of prose.
 INSPECT_VERBS = ("findings", "sarif-fields")

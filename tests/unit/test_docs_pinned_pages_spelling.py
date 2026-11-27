@@ -43,28 +43,18 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.release_spellings import (
+    NEWER_OPTION,
+    NEWER_SPELLING,
+    SUBJECTS_RELEASE,
+    release_tuple,
+)
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTENT = REPO_ROOT / "docs" / "content"
 SCRIPT_PATH = REPO_ROOT / "scripts" / "version_template_manager.py"
-
-#: The first release whose CLI reads the spellings below.
-SUBJECTS_RELEASE = (3, 9, 0)
-
-#: A spelling that ASH 3.8 does not read. ``ash scan workspace``, ``image`` and ``git``
-#: have no 3.8 form, so a page pinned to 3.8 must not name them at all.
-NEWER_SPELLING = re.compile(
-    r"(?<![\w./-])ash(?:v3)?[ \t]+(?:"
-    r"scan[ \t]+(?:fs|workspace|image|git)(?![\w-])"
-    r"|results[ \t]+(?:report|diff|trend|merge|inspect)(?![\w-])"
-    r"|container[ \t]+build(?![\w-])"
-    r")"
-)
-
-#: The scanner-selection options ASH 3.8 does not read. It has ``--scanners``, which 3.9
-#: deprecates in favor of these two.
-NEWER_OPTION = re.compile(r"(?<![\w-])--(?:only|add)-scanners(?![\w-])")
 
 #: The pages that pin a release in two CI jobs and give every other command as what
 #: the reader runs with the ASH they have. For these the pin binds the fenced block it
@@ -112,18 +102,13 @@ def _load_manager():
 MANAGER = _load_manager()
 
 
-def _release_tuple(version: str) -> tuple[int, int, int]:
-    major, minor, patch = (int(part) for part in version.split(".")[:3])
-    return major, minor, patch
-
-
 def _pins_before_the_subjects(text: str) -> set[str]:
     """The ASH release pins in ``text`` that name a release before 3.9, the way
     ``convert`` and the docs checks read a pin (``ASH_PIN_PATTERNS``)."""
     return {
         pin
         for pin in MANAGER.release_pins(text)
-        if _release_tuple(pin) < SUBJECTS_RELEASE
+        if release_tuple(pin) < SUBJECTS_RELEASE
     }
 
 

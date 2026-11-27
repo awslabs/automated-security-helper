@@ -30,7 +30,9 @@ generates (``plugins/`` and the repository's ``skills/``), the container-scan co
 spelled for the pinned release, and while that release is before 3.9 no text names the
 scanner options ``--only-scanners`` and ``--add-scanners``, which only 3.9 reads. The
 ``tool-reference.md`` copies are left out: the MCP tool generator writes them. The
-control is that the sources name the command at all.
+control is that the sources name the command at all. The patterns, the release they
+test against and the verbs they list are the ones in tests/utils/release_spellings.py,
+which every test of the command spellings shares.
 """
 
 from __future__ import annotations
@@ -41,6 +43,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.release_spellings import (
+    NEWER_OPTION,
+    NEWER_SPELLING,
+    SUBJECTLESS_SCAN,
+    SUBJECTS_RELEASE,
+    release_tuple,
+)
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,40 +59,12 @@ TRANSPILER = PLUGINS / "transpiler"
 SOURCE_ROOTS = [TRANSPILER / "_base", TRANSPILER / "templates"]
 OUTPUT_ROOTS = [PLUGINS / "plugins", REPO_ROOT / "skills"]
 
-#: The first release whose CLI reads the subject spellings.
-SUBJECTS_RELEASE = (3, 9, 0)
-
-#: A spelling that ASH 3.8 does not read.
-NEWER_SPELLING = re.compile(
-    r"(?<![\w./-])ash(?:v3)?[ \t]+(?:"
-    r"scan[ \t]+(?:fs|workspace|image|git)(?![\w-])"
-    r"|results[ \t]+(?:report|diff|trend|merge|inspect)(?![\w-])"
-    r"|container[ \t]+build(?![\w-])"
-    r")"
-)
-
-#: The scanner-selection options ASH 3.8 does not read. It has ``--scanners``, which 3.9
-#: deprecates in favor of these two.
-NEWER_OPTION = re.compile(r"(?<![\w-])--(?:only|add)-scanners(?![\w-])")
-
-#: ``ash scan`` with no subject after it: the spelling 3.9 deprecates. The workspace and
-#: image forms keep their option spellings until their subjects exist, so a command that
-#: names one of those options is not this.
-SUBJECTLESS_SCAN = re.compile(
-    r"(?<![\w./-])ash(?:v3)?[ \t]+scan(?![\w-])"
-    r"(?![ \t]+(?:fs|workspace|image|git)(?![\w-]))"
-    r"(?![^\n`]*--(?:workspace|image|source-git))"
-)
-
 SUFFIXES = {".md", ".mdc", ".j2"}
 
 
 def _pinned_release() -> tuple[int, int, int]:
     manifest = json.loads((TRANSPILER / "_base" / "manifest.json").read_text("utf-8"))
-    major, minor, patch = (
-        int(part) for part in manifest["ash_version"].lstrip("v").split(".")[:3]
-    )
-    return major, minor, patch
+    return release_tuple(manifest["ash_version"])
 
 
 RELEASE = _pinned_release()
