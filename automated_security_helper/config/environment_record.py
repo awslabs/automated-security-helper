@@ -748,20 +748,57 @@ class _Index:
             )
         ]
 
+    def _references_at(
+        self,
+        table: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]],
+        path: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...],
+    ) -> Sequence[EnvironmentReference]:
+        """The references of ``table`` at ``path``, narrowed by ``pinned``: the
+        (depth, key) pairs of the mappings the walk went through that hold two
+        keys with one normal form (``AWS_Region`` and ``aws_region``). A
+        reference is read into one of those keys' values only when its own path
+        names that key, ``-`` and ``_`` folded and the case kept; with no such
+        pair the lookup is the case-insensitive one."""
+        found = table.get(path, ())
+        if not pinned or not found:
+            return found
+
+        def names(reference: EnvironmentReference, depth: int, key: str) -> bool:
+            segment = reference.path[depth] if len(reference.path) > depth else None
+            return isinstance(segment, str) and segment.replace("-", "_") == key
+
+        return [
+            reference
+            for reference in found
+            if all(names(reference, depth, key) for depth, key in pinned)
+        ]
+
     def record(
         self,
         item: Any,
         path: Tuple[PathSegment, ...],
         exact: Optional[Tuple[PathSegment, ...]] = None,
+        pinned: Tuple[Tuple[int, str], ...] = (),
     ) -> Any:
         exact = path if exact is None else exact
         if isinstance(item, dict):
-            renamed = _renamed_keys(item, self.keys.get(path, ()))
+            renamed = _renamed_keys(item, self._references_at(self.keys, path, pinned))
+            normals: Dict[Any, int] = {}
+            for key in item:
+                normal = _normal(key if isinstance(key, str) else str(key))
+                normals[normal] = normals.get(normal, 0) + 1
             result: Dict[Any, Any] = {}
             for key, value in item.items():
                 spelled = key if isinstance(key, str) else str(key)
+                below = pinned
+                if normals[_normal(spelled)] > 1:
+                    below = (*pinned, (len(path), spelled.replace("-", "_")))
                 recorded = self.record(
-                    value, (*path, _normal(spelled)), (*exact, _normal(spelled))
+                    value,
+                    (*path, _normal(spelled)),
+                    (*exact, _normal(spelled)),
+                    below,
                 )
                 if key in renamed:
                     key = self._whole(renamed[key])
@@ -775,6 +812,7 @@ class _Index:
                     value,
                     (*path, index if self.exact_indices else _ANY_INDEX),
                     (*exact, index),
+                    pinned,
                 )
                 for index, value in enumerate(item)
             )
@@ -782,35 +820,57 @@ class _Index:
             # A set has no positions: each member is read as an entry whose
             # position is unknown (``EnvironmentReference.position_unknown``),
             # by the shape the reference resolved to, and the set keeps its type.
-            return type(item)(self._member(value, path, exact) for value in item)
+            return type(item)(
+                self._member(value, path, exact, pinned) for value in item
+            )
         if isinstance(item, str):
-            here = self.values.get(path)
-            if here:
-                # A whole string is read against the same references as a longer
-                # one: a plain entry equal to the value, beside the reference's
-                # own entry, is the file's own text and stays as written.
-                candidates = self.pending(exact, here, item)
-                return self._unreplaced(self._string(item, candidates, exact))
-            return self._unreplaced(item)
+            return self._read_string(item, path, exact, pinned)
         return item
+
+    def _read_string(
+        self,
+        text: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...],
+    ) -> Any:
+        """The string ``text`` at ``path``, read against the references there.
+
+        A whole string is read against the same references as a longer one: a
+        plain entry equal to the value, beside the reference's own entry, is the
+        file's own text and stays as written. With ``mark`` (a view, not
+        ``whole_only``) a string that carries the loader's mark and that no
+        candidate resolved to as a whole is shown as the reference its own mark
+        carries, with no part replaced: a part replacement makes a plain string
+        of it, and the rest of the value it read would be shown."""
+        here = self._references_at(self.values, path, pinned)
+        if not here:
+            return self._unreplaced(text)
+        candidates = self.pending(exact, list(here), text)
+        if (
+            self.mark is not None
+            and not self.whole_only
+            and getattr(text, "from_environment", False)
+            and not any(text == reference.resolved for reference in candidates)
+        ):
+            return self.mark(text.shown)
+        return self._unreplaced(self._string(text, candidates, exact))
 
     def _member(
         self,
         member: Any,
         path: Tuple[PathSegment, ...],
         exact: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...] = (),
     ) -> Any:
         """One member of a set at ``path``: read against the references at an
         unknown position there (the entry's own shape), and shown as the
         reference its mark carries when none replaced it."""
         if not isinstance(member, str):
             return member
-        here = self.values.get((*path, _ANY_INDEX))
-        where = (*exact, _ANY_INDEX)
-        if here:
-            candidates = self.pending(where, here, member)
-            return self._unreplaced(self._string(member, candidates, where))
-        return self._unreplaced(member)
+        return self._read_string(
+            member, (*path, _ANY_INDEX), (*exact, _ANY_INDEX), pinned
+        )
 
     def _unreplaced(self, text: Any) -> Any:
         """``text``, a string or a mapping key the walk left as it was, shown as
@@ -939,9 +999,11 @@ def record_environment_references(
 
     A set or frozenset is walked too, and keeps its type: a set has no
     positions, so each member is an entry whose position is unknown and is read
-    against the references at the set's place by the shape they resolved to
-    (``references_to_marked_values`` makes one for each member the loader
-    marked).
+    against the references at the set's place by the shape they resolved to.
+    A file's own record holds no reference for a set member (the loader pairs
+    mappings and lists only); ``references_to_marked_values`` makes one for each
+    member the loader marked, under the built-in reporters' destination options
+    and, with ``sets_only``, in the whole dump of a configuration.
 
     With ``mark`` (a view; not ``whole_only``), a string, a mapping key or a set member that still
     carries the loader's mark after the walk (``EnvResolvedScalar``: no
@@ -966,6 +1028,8 @@ def references_to_marked_values(
     data: Any,
     at: Sequence[PathSegment],
     described: Iterable[EnvironmentReference] = (),
+    *,
+    sets_only: bool = False,
 ) -> List[EnvironmentReference]:
     """A reference for each string and mapping key of ``data`` that carries the
     loader's mark (``EnvResolvedScalar.from_environment``) and that none of
@@ -978,6 +1042,12 @@ def references_to_marked_values(
     while the reference the file wrote stays at the place it wrote it: the copy
     is described from the value's own mark instead. Mapping keys and values, list
     and tuple entries, and set and frozenset members are walked.
+
+    With ``sets_only``, only the set and frozenset members are described, and
+    the walk goes through every mapping, list and tuple to reach them: for the
+    whole dump of a configuration (``at`` empty). The loader's own record pairs
+    mappings and lists only (``environment_references``), so a set member any
+    file read has no reference of its own, whichever option holds it.
 
     Each reference is shaped as ``environment_references`` shapes the one the
     loader makes for the same text at that place: ``written`` is the text the
@@ -1024,7 +1094,7 @@ def references_to_marked_values(
     ) -> None:
         if isinstance(node, dict):
             for name, value in node.items():
-                if _marked(name):
+                if _marked(name) and not sets_only:
                     make(path, name, True, innermost)
                 walk(value, (*path, str(name)), innermost)
         elif isinstance(node, (list, tuple)):
@@ -1034,7 +1104,7 @@ def references_to_marked_values(
             for member in node:
                 if _marked(member):
                     make((*path, _ANY_INDEX), member, False, None)
-        elif _marked(node):
+        elif _marked(node) and not sets_only:
             make(path, node, False, innermost)
 
     walk(data, tuple(at), None)

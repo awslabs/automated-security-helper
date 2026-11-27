@@ -3246,8 +3246,10 @@ def _take_confined_references(
     does not, so one is dropped there when only such a reference matches it.
 
     The trusted base's references are taken at the sandbox settings and the
-    settled options only: those are the places the confinement gives its own
-    value, under the section spelling the trusted base's file wrote.
+    settled options only, where they were written. The settle writes the
+    trusted value under the configuration's own spelling of the section, which
+    can differ from the one the trusted base's file wrote; the values the
+    confinement copies are described by their own marks (below).
 
     The destination options of the built-in off-host reporters
     (``reporter_trust.REPORTER_DESTINATION_OPTIONS``: ``aws_region``,
@@ -3263,10 +3265,14 @@ def _take_confined_references(
       resolved to there (a value reference: the string there is not its
       ``resolved`` as a whole; a key reference: the mapping has no such key).
       The place is the one the confinement writes: ``reporters``, a section key
-      of the reporter, ``options``, and one of its destination names, the
-      section and option segments compared with ``-`` and ``_`` folded and the
-      case kept, as ``reporter_trust._spellings`` matches an option. A
-      reference whose value the confinement left in place stays.
+      of the reporter, ``options``, and one of its destination names. The
+      section is matched by the names the plugin lookup reads a section by
+      (``ash_config.plugin_key_lookup_names``, so ``AwsSecurityHub`` and
+      ``aws-security-hub`` are one section), against the sections
+      ``reporter_trust._sections_of`` gives; the option by its spelling, ``-``
+      and ``_`` folded and the case kept, as ``reporter_trust._spellings``
+      matches an option. A reference whose value the confinement left in place
+      stays.
     - Each marked string, mapping key and set member under such an option of
       ``config`` that no displayed reference describes at its exact place gets
       a reference made from its own mark
@@ -3275,13 +3281,22 @@ def _take_confined_references(
       member by shape at any position. This is what describes a copy under
       another spelling of the section key, an option the operator's chain file
       gave, and a set.
+    - The whole dump of ``config`` is walked once more for set and frozenset
+      members only (``sets_only``), whichever option holds them: the loader's
+      own walk (``environment_record.environment_references``) pairs mappings
+      and lists, so a set member any file read has no reference. Each member
+      found gets the same treatment as a destination value.
 
     The record half (``_written_references``) follows the same rule: a rewrite
     of ``config``'s own at a destination place is dropped when a reference
     dropped above matches it (same place, written and resolved) and no kept
     reference does, and each marked value found above with no rewrite at its
-    exact place gets one made from its mark. A set member has no rewrite; the
-    record writes it by its mark (``record_of_config``).
+    exact place gets one made from its mark, a set member's at the unknown
+    index (``record_of_config`` applies it to the members that are the value).
+    The mark-made rewrites come before the kept ones, so a whole match is
+    applied before a kept rewrite that matches only part of a string. The
+    values of every mark-made reference join the configuration's values to
+    redact (``_environment_values``), set members included.
     """
     from automated_security_helper.config import reporter_trust
     from automated_security_helper.config.config_validator import (
@@ -3354,17 +3369,20 @@ def _take_confined_references(
 
     def destination_keys(where: Tuple[Any, ...]) -> List[str]:
         # The section keys of config whose option at *where* the reporter
-        # confinement writes: reporters.<section>.options.<destination name>,
-        # the section and the name compared as _spellings does.
+        # confinement writes: reporters.<section>.options.<destination name>.
+        # The section is the one the plugin lookup reads under the same names
+        # (a file may spell it another way than the key the merge kept); the
+        # name is compared as _spellings does.
         if len(where) < 4 or where[0] != "reporters" or where[2] != "options":
             return []
         if not isinstance(where[1], str) or not isinstance(where[3], str):
             return []
-        section, name = fold((where[1], where[3]))
+        (name,) = fold((where[3],))
+        read_as = plugin_key_lookup_names(where[1])
         return [
             key
             for _plugin, key, names in destinations
-            if fold((key,))[0] == section and name in fold(names)
+            if read_as & plugin_key_lookup_names(key) and name in fold(names)
         ]
 
     def options_of(key: str) -> Any:
@@ -3475,6 +3493,12 @@ def _take_confined_references(
                 marked_values += references_to_marked_values(
                     options[spelled], ("reporters", key, "options", spelled), shown
                 )
+    # A set member of any other option: the loader's own record has no reference
+    # for one, so the whole dump is walked for them once, after the destination
+    # values above are described.
+    marked_values += references_to_marked_values(
+        config_dump, (), (*shown, *marked_values), sets_only=True
+    )
     marked_values = list(dict.fromkeys(marked_values))
     if own_places or their_places or marked_values:
         config._environment_references = tuple(
@@ -3548,16 +3572,34 @@ def _take_confined_references(
     def left_out_where_replaced(rewrite: Any) -> bool:
         # A rewrite at a destination option the confinement replaced that a
         # reference dropped there matches (same place under the confinement's
-        # spelling, same text and value), and no kept reference does.
-        where = fold(
+        # spelling, the section by the names the plugin lookup reads it under;
+        # same text and value), and no kept reference does.
+        place_of_rewrite = (
             rewrite.path
             if rewrite.kind == "value"
             else (*rewrite.path, rewrite.resolved)
         )
+        where = fold(place_of_rewrite)
+
+        def same_place(reference: Any) -> bool:
+            there = written_place(reference)
+            if fold(there) == where:
+                return True
+            return (
+                len(there) == len(place_of_rewrite) >= 2
+                and there[0] == place_of_rewrite[0] == "reporters"
+                and isinstance(there[1], str)
+                and isinstance(place_of_rewrite[1], str)
+                and fold(there)[2:] == where[2:]
+                and bool(
+                    plugin_key_lookup_names(there[1])
+                    & plugin_key_lookup_names(place_of_rewrite[1])
+                )
+            )
 
         def matches(reference: Any) -> bool:
             return (
-                fold(written_place(reference)) == where
+                same_place(reference)
                 and reference.written == rewrite.written
                 and reference.resolved == rewrite.resolved
             )
@@ -3581,8 +3623,8 @@ def _take_confined_references(
         and not left_out_where_replaced(rewrite)
     ] + taken
     # Each marked value no rewrite is at the exact place of gets one made from
-    # its mark. A set member has no place a rewrite can name: the record writes
-    # it by its mark (config_validator.record_of_config).
+    # its mark. A set member's is at the unknown index: the record applies it to
+    # the members that are the value (config_validator.record_of_config).
     described = {
         (
             rewrite.kind,
@@ -3602,16 +3644,32 @@ def _take_confined_references(
             reference.resolved,
         )
         for reference in marked_values
-        if all(isinstance(segment, (str, int)) for segment in reference.path)
-        and ("key" if reference.key else "value", fold(written_place(reference)))
+        if ("key" if reference.key else "value", fold(written_place(reference)))
         not in described
     ]
-    if own or theirs or added:
-        config._written_references = written + added
+    if own or theirs or added or marked_values:
+        # The mark-made rewrites first: a whole match is applied before a kept
+        # rewrite that matches only part of the string.
+        config._written_references = added + written
+        # Every value a mark describes, one a rewrite was already at the place
+        # of included, is redacted: the values of the rewrites taken from the
+        # trusted base, and those of every mark-made reference.
         config._environment_values = list(config._environment_values or []) + [
             value
-            for rewrite in (*taken, *added)
-            for value in dict.fromkeys((rewrite.resolved, rewrite.environment_part))
+            for value in dict.fromkeys(
+                (
+                    *(
+                        part
+                        for rewrite in taken
+                        for part in (rewrite.resolved, rewrite.environment_part)
+                    ),
+                    *(
+                        part
+                        for reference in marked_values
+                        for part in (reference.resolved, reference.value)
+                    ),
+                )
+            )
             if value
         ]
 

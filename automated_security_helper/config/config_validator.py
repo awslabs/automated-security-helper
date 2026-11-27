@@ -48,6 +48,7 @@ from automated_security_helper.config.ash_config import (
 )
 from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
+    UNKNOWN_INDEX,
     EnvironmentReference,
     environment_references,
     with_environment_values_shown,
@@ -3169,6 +3170,40 @@ def _unused_key(container: Dict[Any, Any], base: str) -> str:
     return f"{base}#{number}"
 
 
+def _record_unknown_position(
+    config: Any,
+    record: Any,
+    rewrite: EnvironmentRewrite,
+    marked: Callable[[str], Any],
+) -> None:
+    """Apply ``rewrite``, a value rewrite whose last path segment is the unknown
+    index (``environment_record.UNKNOWN_INDEX``), to ``record``, a copy of a
+    dump.
+
+    The part of ``record`` at the rest of the path is a list, a tuple, a set or
+    a frozenset (a JSON-mode dump holds a set as a list). Each entry or member
+    that equals ``rewrite.resolved`` as a whole is written as
+    ``marked(rewrite.written)``, and the container keeps its type. A part of an
+    entry is never replaced: nothing says which entry the rewrite names, so only
+    one that is the value itself is the reference.
+    """
+    if len(rewrite.path) < 2:
+        return
+    parent, model = _record_container(config, record, rewrite.path[:-2])
+    if parent is _MISSING_IN_RECORD:
+        return
+    key, _ = _record_child(model, parent, rewrite.path[-2])
+    if key is _MISSING_IN_RECORD:
+        return
+    members = parent[key]
+    if not isinstance(members, (list, tuple, set, frozenset)):
+        return
+    parent[key] = type(members)(
+        marked(rewrite.written) if member == rewrite.resolved else member
+        for member in members
+    )
+
+
 def record_of_config(
     config: Any, dumped: Any, mark: Optional[Callable[[str], Any]] = None
 ) -> Any:
@@ -3185,13 +3220,19 @@ def record_of_config(
     whole, only the part the variable gave is replaced. Without ``mark``, a
     number there that a model typed from the value ("067" read as 67) is
     replaced as the value is: a scanner's dump of its own config
-    (ScannerPluginBase._config_as_written). A config loaded any
-    other way (AshConfig.from_file, a results file) has no rewrites, and its
-    dump is returned as it is.
+    (ScannerPluginBase._config_as_written). A rewrite whose last path segment
+    is the unknown index (``environment_record.UNKNOWN_INDEX``) names a set's
+    members, or the entries of a list at an unknown position
+    (``_record_unknown_position``): each one that is the resolved value as a
+    whole is written as the reference, and no part of one is replaced. A config
+    loaded any other way (AshConfig.from_file, a results file) has no rewrites,
+    so only the paragraph below changes its dump, and one that holds no marked
+    string is returned as it is.
 
     ``mark``, for a file written to be loaded again (config_writer), is applied
-    to each string a rewrite puts in the record, value or key, and to nothing
-    else, so a string that only looks like a reference stays text. With it, a
+    to each string a rewrite puts in the record, value or key, and to each
+    string the paragraph below writes as a reference, and to nothing else, so a
+    string that only looks like a reference stays text. With it, a
     string that holds the value with other text (one the model changed) is
     written as the reference only when the loader resolves that back to the
     same string (resolve_env_references), and then with an explicit ``!ENV``
@@ -3204,9 +3245,12 @@ def record_of_config(
     After the rewrites, every string, mapping key and set member of the record
     that still carries the loader's mark (``EnvResolvedScalar.from_environment``)
     is written as ``marked(x.shown)``, the reference its own mark carries, sets
-    walked too, with or without rewrites. A value no rewrite describes (one a
-    load copied from another place, or a set member, which no rewrite can
-    name) is never recorded in clear.
+    walked too, with or without rewrites. That reads a python-mode dump only: a
+    JSON-mode dump (a results file, ``ash config get``) holds every string as a
+    plain ``str`` and a set as a list, so there only a rewrite describes a value.
+    That is why the load gives every value it copies from another place, and
+    every set member it read, a rewrite (``resolve_config._take_confined_references``).
+    A value neither a rewrite nor a mark describes is a literal the file wrote.
     """
     rewrites = list(getattr(config, "_written_references", None) or [])
     if not isinstance(dumped, dict):
@@ -3217,6 +3261,9 @@ def record_of_config(
     record = copy.deepcopy(dumped)
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
+            continue
+        if rewrite.path[-1] is UNKNOWN_INDEX:
+            _record_unknown_position(config, record, rewrite, marked)
             continue
         container, model = _record_container(config, record, rewrite.path[:-1])
         if container is _MISSING_IN_RECORD:

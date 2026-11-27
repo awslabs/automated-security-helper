@@ -930,6 +930,13 @@ def _confine_options(
                     k: trusted_options[k] for k in _spellings(trusted_options, name)
                 }
                 if {k: options[k] for k in written} == wanted:
+                    # Equal in text, and nothing to name as ignored. The base's
+                    # own objects still take the place, so a value it read from
+                    # the environment carries the loader's mark into this
+                    # section whatever the file wrote there.
+                    if any(options[k] is not wanted[k] for k in wanted):
+                        options.update(wanted)
+                        changed = True
                     continue
                 for spelling in written:
                     if not _holds_base_value(options[spelling], spelling, wanted):
@@ -977,6 +984,10 @@ def _confine_whole_sections(
         wanted = _as_dict(trusted_config.get_plugin_config("reporter", plugin)) or {}
         for key in _sections_of(config, plugin, loaded):
             if _as_section(extras[key]) == wanted:
+                # Equal in text: nothing is named as ignored, and the base's
+                # own section takes the place, so a value it read from the
+                # environment keeps the loader's mark here.
+                extras[key] = copy.deepcopy(wanted)
                 continue
             ignored.append(f"reporters.{_quoted(key, plugin, tree_keys)}")
             extras[key] = copy.deepcopy(wanted)
