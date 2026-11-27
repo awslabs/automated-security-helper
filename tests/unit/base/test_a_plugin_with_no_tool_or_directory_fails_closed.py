@@ -13,11 +13,13 @@ import pytest
 from automated_security_helper.base import scanner_plugin
 from automated_security_helper.base.plugin_base import PluginBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
-from automated_security_helper.base.uv_tool_mixin import UVToolMixin, _tool_name
+from automated_security_helper.base.uv_tool_mixin import UVToolMixin, tool_name
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
     _shown_tool_text,
 )
+
+pytestmark = pytest.mark.unit
 
 
 class _NoToolPlugin(UVToolMixin):
@@ -93,8 +95,8 @@ def test_a_stand_in_that_carries_only_a_command_is_looked_up_by_it(monkeypatch):
 
 def test_the_tool_name_has_one_spelling():
     assert not hasattr(UVToolMixin, "_tool_command")
-    assert _tool_name(SimpleNamespace(command="bandit")) == "bandit"
-    assert _tool_name(SimpleNamespace(command=None)) == ""
+    assert tool_name(SimpleNamespace(command="bandit")) == "bandit"
+    assert tool_name(SimpleNamespace(command=None)) == ""
 
 
 def test_a_scanner_with_no_results_directory_raises_a_named_error():

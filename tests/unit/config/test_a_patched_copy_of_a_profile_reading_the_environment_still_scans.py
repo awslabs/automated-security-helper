@@ -7,13 +7,16 @@
 config read from the environment, and (since the list case was closed) from a
 list holding such an entry. A session's client-patched profile copy is checked
 with ``repeats_trusted`` against the registered profile, so the question this
-pins: does an operator's profile whose default-denied ``ignore_paths`` entry is
-written as ``${VAR}`` still scan after a client patches an allowed key? The copy
-the server writes holds the reference as the file wrote it, not the value, and
-the scan fills the value from the operator's copy; what reaches the policy check
-is never the value, so the withholding changes no outcome here. Measured, not
-read: the scan resolves an AshConfig with the client's change and the
-operator's environment value.
+pins: does an operator's profile whose default-denied entry (an ``ignore_paths``
+entry, a reporter option) is written as ``${VAR}`` still scan after a client
+patches an allowed key? The copy the server writes holds the reference as the
+file wrote it, not the value, and the scan fills the value from the operator's
+copy. The check judges the filled copy, and a leaf that holds a value the fill
+read for the operator's own reference at that place is the operator's, not the
+client's, so the withholding does not apply to it. The checks made before the
+scan read the copy unfilled and fill it the same way. Measured, not read: the
+scan resolves an AshConfig with the client's change and the operator's
+environment value.
 
 The route is ``mcp_select_profile`` with ``patch_ops`` and then the real
 ``_run_scan_async`` up to config resolution, as tests/unit/cli/mcp/
@@ -232,3 +235,253 @@ def test_a_config_refusal_is_the_outcome_and_not_a_fault(
     _resolution_raising(monkeypatch, refusal)
 
     assert _scan_outcome(server["target"]) is refusal
+
+
+def _reporter_profile(region: str) -> str:
+    """An operator profile whose AWS reporter section sets ``aws_region`` to ``region``."""
+    return (
+        "project_name: operator\n"
+        "reporters:\n"
+        "  aws-security-hub:\n"
+        "    enabled: false\n"
+        "    options:\n"
+        f"      aws_region: {region}\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths:\n"
+        "        - /project_name\n"
+    )
+
+
+def _reporter_region(outcome: AshConfig) -> Any:
+    """The ``aws_region`` option of the AWS reporter's section. The AWS reporter's
+    plugin module is not loaded, so the dump holds the section as an extra one."""
+    reporters = outcome.model_dump(by_alias=True)["reporters"]
+    sections = {str(key).replace("-", "_"): value for key, value in reporters.items()}
+    return sections["aws_security_hub"]["options"]["aws_region"]
+
+
+def test_the_patched_copy_scans_with_a_denied_reporter_option_from_the_environment(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The profile reads a reporter option that the default policy denies from the
+    environment, and the client patches only an allowed key. The scan resolves with
+    the client's change and the operator's value."""
+    monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
+    _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    outcome = _scan_outcome(server["target"])
+
+    assert isinstance(outcome, AshConfig), outcome
+    assert outcome.project_name == "patched"
+    assert _reporter_region(outcome) == "us-west-2"
+
+
+def test_the_patched_copy_scans_with_a_denied_reporter_option_written_out(
+    server,
+) -> None:
+    """The control: the same profile with the region written out in the file
+    resolves with the client's change and the operator's value."""
+    _register(server["operator"], _reporter_profile("us-west-2"))
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    outcome = _scan_outcome(server["target"])
+
+    assert isinstance(outcome, AshConfig), outcome
+    assert outcome.project_name == "patched"
+    assert _reporter_region(outcome) == "us-west-2"
+
+
+def _fixed_choice_profile(choice: str) -> str:
+    """An operator profile that sets ``severity_threshold``, a fixed-choice field, to
+    ``choice``, holds one suppression and denies a client any change to the
+    suppressions."""
+    return (
+        "project_name: operator\n"
+        "global_settings:\n"
+        f"  severity_threshold: {choice}\n"
+        "  suppressions:\n"
+        "    - rule_id: B101\n"
+        "      path: src/vendored.py\n"
+        "      reason: vendored\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths:\n"
+        "        - /project_name\n"
+        "      denied_paths:\n"
+        "        - /global_settings/suppressions\n"
+    )
+
+
+def test_the_patched_copy_scans_with_a_fixed_choice_field_from_the_environment(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The profile reads a fixed-choice field from the environment (the loader
+    refuses a reference at a boolean field), and its own policy denies
+    suppressions. The client patches only ``project_name``, and the scan resolves
+    with that change, the environment's value and the operator's suppression."""
+    monkeypatch.setenv("ASH_X35_SEV", "HIGH")
+    _register(server["operator"], _fixed_choice_profile("${ASH_X35_SEV}"))
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    outcome = _scan_outcome(server["target"])
+
+    assert isinstance(outcome, AshConfig), outcome
+    assert outcome.project_name == "patched"
+    assert outcome.global_settings.severity_threshold == "HIGH"
+    assert [entry.rule_id for entry in outcome.global_settings.suppressions] == ["B101"]
+
+
+def test_the_patched_copy_scans_with_a_fixed_choice_field_written_out(server) -> None:
+    """The control: the same profile with the choice written out in the file
+    resolves with the client's change, the operator's value and the suppression."""
+    _register(server["operator"], _fixed_choice_profile("HIGH"))
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    outcome = _scan_outcome(server["target"])
+
+    assert isinstance(outcome, AshConfig), outcome
+    assert outcome.project_name == "patched"
+    assert outcome.global_settings.severity_threshold == "HIGH"
+    assert [entry.rule_id for entry in outcome.global_settings.suppressions] == ["B101"]
+
+
+_REGION_KEY = "reporters.aws-security-hub.options.aws_region"
+
+
+def _denials_before_the_scan(target: Path, *, references: bool = True) -> List[Any]:
+    """What ``client_file_denials`` finds in the session's bound copy, with the
+    document and the rules the check made before a scan starts reads
+    (``mcp_tools._client_config_denial``): the chain read as a scan reads it, and
+    the rules of the profile the session bound. ``references=False`` gives the
+    rules a base that holds none of the profile's environment reads."""
+    from automated_security_helper.cli import mcp_tools
+    from automated_security_helper.config.client_config_policy import (
+        client_file_denials,
+    )
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+        env_refused_for,
+        resolve_config_document,
+    )
+    from automated_security_helper.config.mcp_sandbox import (
+        caller_is_remote,
+        client_named_config_is_untrusted,
+        config_base_gate,
+    )
+
+    path = Path(resolve_session_config_path(SESSION) or "")
+    rules = mcp_tools._session_client_rules(SESSION)
+    if not references:
+        bare = rules.base.model_copy(deep=True)
+        bare._environment_references = ()
+        rules = rules.model_copy(update={"base": bare})
+    document = resolve_config_document(
+        path,
+        confine_to=default_confinement_root(path, target),
+        permit_base=config_base_gate(SESSION),
+        refuse_env=env_refused_for(caller_is_remote(SESSION), SESSION),
+    )
+    return client_file_denials(
+        document.documents,
+        rules,
+        all_delivered=client_named_config_is_untrusted(path, session_id=SESSION),
+        names=document.names,
+        moved_exclusions=True,
+    )
+
+
+def test_the_check_before_the_scan_accepts_a_denied_reporter_option_from_the_environment(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check a scan's start makes before the scan resolves the config reads the
+    bound copy still holding the reference text. It fills the copy from the
+    profile the session bound, as the scan's resolution does, so the operator's
+    own value at a place the policy denies is not refused there either."""
+    from automated_security_helper.cli import mcp_tools
+
+    monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
+    _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
+    bound = _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+    assert "${ASH_X35_REGION}" in Path(bound).read_text(encoding="utf-8"), bound
+
+    assert _denials_before_the_scan(server["target"]) == []
+    assert (
+        mcp_tools._client_config_denial(
+            bound, server["target"], SESSION, "scan_directory"
+        )
+        is None
+    )
+
+
+def test_the_check_before_the_scan_refuses_the_copy_where_it_holds_no_reference_of_the_profile(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: with rules whose base holds none of the profile's environment
+    reads there is nothing to fill from, so the copy is judged as it stands and
+    the denied option is refused. The check does judge this copy, and the fill is
+    what accepts it."""
+    monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
+    _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
+    _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    found = _denials_before_the_scan(server["target"], references=False)
+
+    keys = [denial.key for _file, denials in found for denial in denials]
+    assert _REGION_KEY in keys, keys
+
+
+def _policy_errors_of_validate_config(bound: str, monkeypatch, *, references: bool):
+    """The ``denied_by_runtime_policy`` errors ``validate_config`` reports for the
+    bound copy. ``references=False`` gives the check rules whose base holds none
+    of the profile's environment reads."""
+    from automated_security_helper.cli import mcp_tools
+
+    if not references:
+        real = mcp_tools._session_client_rules
+
+        def without_references(*args: Any, **kwargs: Any) -> Any:
+            rules = real(*args, **kwargs)
+            bare = rules.base.model_copy(deep=True)
+            bare._environment_references = ()
+            return rules.model_copy(update={"base": bare})
+
+        monkeypatch.setattr(mcp_tools, "_session_client_rules", without_references)
+    result = mcp_tools.mcp_validate_config(config_path=bound, session_id=SESSION)
+    return [
+        error
+        for error in result["errors"]
+        if error["type"] == "denied_by_runtime_policy"
+    ]
+
+
+def test_validate_config_accepts_a_denied_reporter_option_from_the_environment(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``validate_config`` judges the bound copy as the scan does, from its own read
+    of the chain, so the operator's own value at a place the policy denies draws no
+    refusal there either."""
+    monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
+    _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
+    bound = _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    assert _policy_errors_of_validate_config(bound, monkeypatch, references=True) == []
+
+
+def test_validate_config_refuses_the_copy_where_it_holds_no_reference_of_the_profile(
+    server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control: with rules whose base holds none of the profile's environment
+    reads, ``validate_config`` judges the copy as it stands and refuses the denied
+    option, so the check does reach this copy and the fill is what accepts it."""
+    monkeypatch.setenv("ASH_X35_REGION", "us-west-2")
+    _register(server["operator"], _reporter_profile("${ASH_X35_REGION}"))
+    bound = _bind([{"op": "replace", "path": "/project_name", "value": "patched"}])
+
+    errors = _policy_errors_of_validate_config(bound, monkeypatch, references=False)
+
+    assert [error["field"] for error in errors] == [_REGION_KEY], errors

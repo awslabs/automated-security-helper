@@ -33,7 +33,7 @@ global_settings:
 | `symbol` | no | Only findings inside this function, class, or method; see [Scope a suppression to a symbol](#symbol) |
 | `package_name`, `package_version`, `package_path` | no | Only findings about this dependency, for dependency scanners such as grype and npm-audit |
 | `image` | no | Only findings inside a container image whose submitted reference or resolved digest matches this case-insensitive glob; see [Scan container images](scan-container-images.md#findings-identity-and-suppressions). A finding that is not inside an image never matches |
-| `resource_id` | no | Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation and Kubernetes; the name checkov gives it, such as `aws_db_instance.this`, `module.db.aws_db_instance.this` or `AWS::S3::Bucket.Bucket`). A finding with no resource never matches |
+| `resource_id` | no | Only findings about this resource, for the scanners that name one: cdk-nag (the construct path) and checkov (for Terraform, a Terraform plan, CloudFormation, Kubernetes and Bicep; the name checkov gives it, such as `aws_db_instance.this`, `module.db.aws_db_instance.this` or `AWS::S3::Bucket.Bucket`, unless checkov gives that name to two resources of one file). A finding with no resource never matches |
 
 - Paths match case-sensitively: `tests/**` does not match `Tests/`. In a pattern without `**`, `*` also matches across directory separators, so `src/*.py` matches `src/sub/app.py`; `**` matches any depth. A path that starts with `./` matches nothing, and neither does an empty path, `.` or `./`. A path with no glob character names a file and the directory of that name: `tests` and `tests/` both match every finding below `tests/`, and the bare `tests` also matches a file named `tests`. Both are anchored at the top of the scanned directory, so neither matches anything in `pkg/tests/`; write `**/tests/**` for a `tests` directory at any depth. `ash config validate` and `ash config lint` warn, saying what to write instead, about a path that starts with `./` (`./src/app.py` is `src/app.py`) and about an empty path or `.`, and exit 0. A path whose leading names match the tree only in another case (`tests/**` against `Tests/`) gets a warning that names the tree's spelling and says that patterns match case-sensitively.
 - Upgrading changes what an existing entry matches. Before the bare-directory rule (issue #894), a glob-free `tests` matched only a file of exactly that name, `tests/` matched no finding at all, and `ash config validate` flagged both as matching nothing; both now cover every finding below `tests/`, and that warning is gone. A bare-name entry kept from an earlier release therefore widens, silently, into a whole-directory suppression. When you upgrade, check each suppression and ignore path whose `path` has no glob character, once, and name a file or add a glob where the directory was not meant.
@@ -134,6 +134,7 @@ The whole file is hashed, not the definition, so reformatting a definition and e
 
 Create the suppression and its lock entry together with `ash suppress add`:
 
+<!-- doctest: illustrative reason="names src/deploy.py and its Deployer.run_hook method, which the docs runner's sample project does not have" -->
 ```bash
 ash suppress add B602 --symbol Deployer.run_hook --file src/deploy.py \
   --reason "run_hook only runs commands from the deploy manifest"
@@ -143,6 +144,7 @@ This writes the suppression to the config a scan of the current directory uses (
 
 After you change a locked file, read the change, confirm the suppressions still hold, and record the review:
 
+<!-- doctest: illustrative reason="re-hashes src/deploy.py, a locked file the docs runner's sample project does not have" -->
 ```bash
 ash suppress refresh src/deploy.py   # or --all, after reviewing every change
 ```

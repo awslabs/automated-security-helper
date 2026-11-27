@@ -851,8 +851,9 @@ def _sarif_misconfig_message(result: Any) -> Optional[str]:
 
 
 #: The trivy result types whose ``CauseMetadata.Resource`` is an infrastructure
-#: address. A type is listed only after its records were read (trivy 0.76.2, the
-#: captured and desk runs in tests/test_data/scanners/trivy/captured/):
+#: address. A type is listed only after its records were read (trivy 0.76.2: the
+#: terraform capture committed in tests/test_data/scanners/trivy/captured/, and
+#: uncommitted runs over cloudformation, kubernetes and dockerfile inputs):
 #:
 #: - ``terraform``: ``aws_s3_bucket.m0_fixture_bucket``, the resource address.
 #:

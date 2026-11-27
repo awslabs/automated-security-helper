@@ -135,6 +135,7 @@ from automated_security_helper.base.options import (
 )
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base import scanner_operational_facets as opsf
+from automated_security_helper.base.uv_tool_mixin import _restore_uv_route
 from automated_security_helper.base.scanner_facets import (
     FacetDecl,
     FacetState,
@@ -1090,7 +1091,11 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
         # The uv route is the one being asked about. An earlier check's PATH
         # success left use_uv_tool False, and resolve_deferred_tool_version drops
         # the owed probe unasked for a scanner that is off uv, which read the
-        # earlier check's stale version as the probe's answer.
+        # earlier check's stale version as the probe's answer. That check's PATH
+        # success also recorded that binary's version, and the binary was just
+        # rejected, so the version goes with the route and a probe that answers
+        # nothing leaves no stale number.
+        _restore_uv_route(self)
         self.use_uv_tool = True
         self.resolve_deferred_tool_version()
         # The constrained probe (uv tool run --from <requirement> zizmor

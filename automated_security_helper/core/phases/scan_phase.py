@@ -49,6 +49,7 @@ from automated_security_helper.base.scanner_plugin import (
     plugin_missing_dependency_reason,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
+from automated_security_helper.models.vocab import TargetType
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.core.cancellation import raise_if_cancelled
 from automated_security_helper.utils.get_shortest_name import home_as_tilde
@@ -1021,12 +1022,13 @@ class ScanPhase(EnginePhase):
         which scanners did not look; this is the one line that says the IMAGE
         was not looked at, on the report itself.
 
-        ``kind=informational`` with ``level=note``, which SARIF 3.27.9 defines
-        as information only: every reporter reads it as not-a-finding
-        (utils/sarif_utils.NON_FINDING_KINDS), so it can never grade, never
-        fail a threshold and never put a vulnerability row in a SIEM -- the
-        green-by-contract half -- while it stays in ash.sarif and the
-        aggregated results for any reader -- the visibly-incomplete half.
+        ``kind=informational`` with ``level=none``: SARIF 3.27.9 defines the
+        kind as information only, and 3.27.10 requires a present ``level`` to
+        be ``none`` for any kind but ``fail``. Every reporter reads it as
+        not-a-finding (utils/sarif_utils.NON_FINDING_KINDS), so it can never
+        grade, never fail a threshold and never put a vulnerability row in a
+        SIEM -- the green-by-contract half -- while it stays in ash.sarif and
+        the aggregated results for any reader -- the visibly-incomplete half.
 
         Appended to the model's own ASH run (the default ``sarif`` skeleton's
         one run); when a caller supplied a model with no SARIF or no runs,
@@ -1065,8 +1067,8 @@ class ScanPhase(EnginePhase):
                 return
             reason = (
                 "every image-capable scanner declined it cleanly (typically "
-                "no container engine was detected and network fetching is "
-                "unavailable, or the locator shape is one the tool cannot read)"
+                "offline mode with a reference, whose fetch cannot be ruled "
+                "out, or a locator shape the tool cannot read)"
             )
         text = (
             f"container image {shown} was not scanned: {reason}. This scan "
@@ -1074,7 +1076,12 @@ class ScanPhase(EnginePhase):
         )
         sarif = aggregated_results.sarif
         if sarif is None or not sarif.runs:
-            ASH_LOGGER.warning(text, extra=NO_MARKUP)
+            # With no run to carry the note, the log line is the whole record,
+            # and the per-scan dedup below cannot run: an instance flag keeps
+            # the second call site (after the executor) from logging it again.
+            if not getattr(self, "_unscanned_image_noted", False):
+                self._unscanned_image_noted = True
+                ASH_LOGGER.warning(text, extra=NO_MARKUP)
             return
         for run in sarif.runs:
             for result in run.results or []:
@@ -1100,7 +1107,11 @@ class ScanPhase(EnginePhase):
             Result(
                 ruleId=self.IMAGE_NOT_SCANNED_RULE_ID,
                 kind=Kind.informational,
-                level=Level.note,
+                # SARIF 2.1.0 3.27.10: with any kind but "fail", a present
+                # level SHALL be "none". A note-level result would show as an
+                # alert in viewers that grade on level alone, which is exactly
+                # what this record must never do.
+                level=Level.none,
                 message=Message(root=Message1(text=text)),
                 properties=PropertyBag.model_validate({"image": shown}),
             )
@@ -1212,6 +1223,9 @@ class ScanPhase(EnginePhase):
         ):
             self.validation_manager = ScannerValidationManager(self.plugin_context)
         self._has_executed = True
+        # Per execute, like the shard assignment above: the no-run warning's
+        # once-per-SCAN dedup must not swallow a later run's own warning.
+        self._unscanned_image_noted = False
         # Any regular file, whatever its name: see _holds_a_regular_file.
         self._include_work_dir = _holds_a_regular_file(self.plugin_context.work_dir)
 
@@ -1234,13 +1248,38 @@ class ScanPhase(EnginePhase):
             # A tag-only reference gets the digest the registry says it points
             # at, so its finding ids key on that digest (utils/image_digest_resolver).
             # Once per scan, before any scanner is built; a failure or offline
-            # mode leaves the locator as submitted and logs one notice.
+            # mode leaves the locator as submitted and logs one notice. The
+            # ladder keys FINDING ids, so it runs only when a selected scanner
+            # that declares the registry read (Fetched.IMAGE_DIGEST) will:
+            # deselecting the consumers deselects the network use with them,
+            # as their operational-facets declarations promise.
             from automated_security_helper.core.constants import is_offline_mode
             from automated_security_helper.utils.image_digest_resolver import (
                 resolve_image_locator,
             )
+            from automated_security_helper.utils.scanner_tool_types import (
+                an_image_digest_consumer_is_selected,
+            )
 
-            resolved = resolve_image_locator(subject.image, offline=is_offline_mode())
+            # A direct payload's rung reads the payload's own record file --
+            # no engine ask, no network -- so it is not behind the consumer
+            # gate, which exists to keep the REGISTRY request off a scan
+            # whose operator deselected the scanners that key on it.
+            if subject.image.ref is None or an_image_digest_consumer_is_selected(
+                enabled_scanners,
+                excluded_scanners,
+                python_based_plugins_only=python_based_plugins_only,
+            ):
+                resolved = resolve_image_locator(
+                    subject.image, offline=is_offline_mode()
+                )
+            else:
+                ASH_LOGGER.info(
+                    "No selected scanner declares the image-digest registry "
+                    "read, so no digest is resolved; what runs keys nothing "
+                    "on it and the ids stay on the reference as submitted."
+                )
+                resolved = subject.image
             if resolved is not subject.image:
                 self.plugin_context.asset = Asset.for_image(resolved)
                 # The scope a reporter that archives resolved findings compares
@@ -1300,8 +1339,10 @@ class ScanPhase(EnginePhase):
             # did not select whose constructor raised is counted with the others.
             excluded_scanner_names: List[str] = []
             # Scanners whose tool is absent and that have nothing to scan, or that
-            # do not scan this asset's kind; SKIPPED. Started here, as the list
-            # above is, because the construction loop records the second kind.
+            # do not scan this asset's kind; SKIPPED. Started here, before any of
+            # the loops below, because several of them append to it (the
+            # construction loop, and the filter loop that records the
+            # asset-kind skips).
             nothing_to_scan_names: List[str] = []
             # The operator's names, compared as everywhere in this phase.
             operator_allowlist = {name.lower().strip() for name in enabled_scanners}
@@ -2455,21 +2496,21 @@ class ScanPhase(EnginePhase):
                             task_list = [
                                 {
                                     "path": self.plugin_context.source_dir,
-                                    "type": "image",
+                                    "type": TargetType.IMAGE.value,
                                 },
                             ]
                         else:
                             task_list = [
                                 {
                                     "path": self.plugin_context.source_dir,
-                                    "type": "source",
+                                    "type": TargetType.SOURCE.value,
                                 },
                             ]
                             if self._include_work_dir:
                                 task_list.append(
                                     {
                                         "path": self.plugin_context.work_dir,
-                                        "type": "converted",
+                                        "type": TargetType.CONVERTED.value,
                                     }
                                 )
                         self._scanner_tasks.append(

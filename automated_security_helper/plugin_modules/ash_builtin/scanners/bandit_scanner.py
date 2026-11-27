@@ -46,7 +46,10 @@ from automated_security_helper.base.scanner_facets import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
-from automated_security_helper.base.uv_tool_mixin import _tool_name
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    tool_name,
+)
 from automated_security_helper.core.exceptions import (
     FailureReason,
     ReasonCode,
@@ -1212,7 +1215,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             # scanner held offline on its own, and its memo keyed that answer
             # under the mode the probe ran in, not the one this scanner is in.
             command = get_uv_tool_command(
-                _tool_name(self),
+                tool_name(self),
                 from_spec=self._uv_probe_from_spec(),
                 offline=self._is_offline_mode(),
             )
@@ -1266,7 +1269,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # the scan went back through the uv route that had just failed. The
         # scanner's own offline reading reaches the resolver here as above.
         command = get_uv_tool_command(
-            _tool_name(self),
+            tool_name(self),
             from_spec=self._uv_probe_from_spec(),
             offline=self._is_offline_mode(),
         )
@@ -1334,7 +1337,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=_tool_name(self),
+                tool_name=tool_name(self),
                 limit=None,
             )
 
@@ -1366,12 +1369,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
                 ),
                 level=logging.WARNING,
             )
-        version = getattr(checked, "version", None)
-        if version:
-            # The copy that runs is this one, so the version the reports name
-            # (the SARIF scanner_version) is its own: the deferred probe read
-            # the version of uv's environment, which is not what runs now.
-            self.tool_version = version
+        # The copy that runs is this one, so the version the reports name
+        # (the SARIF scanner_version) is its own: the deferred probe read
+        # the version of uv's environment, which is not what runs now.
+        _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True

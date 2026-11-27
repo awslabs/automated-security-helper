@@ -32,9 +32,9 @@ from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.uv_tool_mixin import (
     UVToolMixin,
-    _tool_name,
     guarded_values,
     guarded_values_read,
+    tool_name,
 )
 from automated_security_helper.core.enums import PackageManager
 from automated_security_helper.models.vocab import TargetType
@@ -1641,7 +1641,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stderr_text,
                         values,
                         plugin_inputs=plugin_inputs,
-                        tool_name=_tool_name(self),
+                        tool_name=tool_name(self),
                         limit=None,
                     )
                 else:

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 import json
 import re
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
+from typing import Dict, List, Any, Optional, Sequence, TYPE_CHECKING
 
 import polars as pl
 
@@ -202,23 +202,6 @@ def _severity_level(severity: Any) -> str:
     lists give it, not an empty name.
     """
     return str(severity or "UNKNOWN").lower()
-
-
-def _count_severity(counts: Dict[str, int], severity: Any) -> None:
-    """Count one finding under its severity's bucket.
-
-    The buckets are ASH's five levels, and every flattened finding carries one
-    of them: a SARIF result's level is read by the gate's ladder, and an
-    additional report's own text (``moderate``, ``UNRATED``) is read the same
-    way by ``FlatVulnerability.from_additional_report`` and lands on MEDIUM, as
-    a result with no level does. So the count never meets a sixth name from the
-    model; a stand-in row that carries one gets a bucket of its own rather than
-    being dropped, which once read more actionable findings than active ones.
-    A row with no severity counts under ``unknown``, the name the grading and
-    the finding lists give it, not under an empty name.
-    """
-    level = _severity_level(severity)
-    counts[level] = counts.get(level, 0) + 1
 
 
 def _add_level_counts(counts: Dict[str, int], graded: pl.DataFrame) -> None:
@@ -692,7 +675,24 @@ class ReportContentEmitter:
         rows_failed = any(
             result["status"] == ScannerStatus.FAILED for result in results
         )
-        if is_workspace_scan(self.model):
+        workspace = is_workspace_scan(self.model)
+        # Every finding is graded once, into one frame the counts below read.
+        # Whether a row's actionable grading is read depends on the branch: a
+        # workspace scan recounts every finding, a scan with no scanner rows
+        # counts every finding, and otherwise only the findings an additional
+        # report lists are counted beside the scanner rows. A row nobody reads
+        # is left ungraded (null), so no hook runs for it.
+        in_extras = [False] * len(self.flat_vulns)
+        if results:
+            extra_ids = {id(vuln) for vuln in self._additional_report_findings()}
+            in_extras = [id(vuln) in extra_ids for vuln in self.flat_vulns]
+        every = self._graded_frame(
+            self.flat_vulns,
+            grade_actionable=(
+                [True] * len(self.flat_vulns) if workspace or not results else in_extras
+            ),
+        )
+        if workspace:
             # The scanner rows grade each finding by the scanner resolver's
             # answer, which with the merged file's missing ash_config is ASH's
             # default for every project. The cards, the hotspots and the
@@ -700,9 +700,7 @@ class ReportContentEmitter:
             # (is_finding_actionable), so a headline summed from the rows could
             # name one count while the cards below it showed another. The
             # headline counts the findings as the cards do.
-            actionable = sum(
-                self.is_finding_actionable(vuln) for vuln in self.flat_vulns
-            )
+            actionable = flag_total(every, "actionable")
             # The rows' FAILED status is that same resolver grading, so it
             # cannot decide the title here either: a project whose recorded
             # gate is stricter than ASH's default (HIGH, with one MEDIUM
@@ -715,7 +713,6 @@ class ReportContentEmitter:
             # Imported SARIF can contain findings without execution metadata.
             # Count those findings while making no completion claim.
             counts = dict.fromkeys(counts, 0)
-            every = self._graded_frame(self.flat_vulns, actionable=True)
             _add_level_counts(counts, every)
             actionable = flag_total(every, "actionable")
             suppressed = flag_total(every, "is_suppressed")
@@ -724,13 +721,10 @@ class ReportContentEmitter:
             # report lists (a plugin's own list of finding dicts) reach the
             # cards and the hotspots, and a headline that left them out read
             # "No actionable findings" above cards marked Actionable.
-            extras = self._graded_frame(
-                self._additional_report_findings(),
-                actionable=not is_workspace_scan(self.model),
-            )
+            extras = every.filter(pl.Series(in_extras, dtype=pl.Boolean))
             _add_level_counts(counts, extras)
             suppressed += flag_total(extras, "is_suppressed")
-            if not is_workspace_scan(self.model):
+            if not workspace:
                 # A workspace scan counted every finding above, these included.
                 actionable += flag_total(extras, "actionable")
         completed = sum(ran(result) for result in results)
@@ -763,7 +757,7 @@ class ReportContentEmitter:
         active = sum(counts.values())
         # Policy-scanner findings the project's outcome left out are counted
         # apart: they are active, not actionable, and not below any threshold.
-        policy_not_gating = flag_total(self._graded_frame(self.flat_vulns), "left_out")
+        policy_not_gating = flag_total(every, "left_out")
         # A tool ASH could not stop fails the run whatever the gate says, and it
         # may still be writing into the output directory after this report is
         # rendered, so the report is not final. The exit code reads it from the
@@ -866,23 +860,33 @@ class ReportContentEmitter:
         return summary
 
     def _graded_frame(
-        self, vulns: List[FlatVulnerability], *, actionable: bool = False
+        self,
+        vulns: List[FlatVulnerability],
+        *,
+        grade_actionable: Sequence[bool] | None = None,
     ) -> pl.DataFrame:
         """The findings as a frame of severity bucket and yes/no gradings.
 
         Each finding's grading is one lookup against the model's recorded
         gates (:meth:`is_finding_actionable`, :meth:`is_policy_not_gating`),
         made here row by row; the counting over the result is the frame's.
-        ``actionable`` is asked for only by the callers that read it.
+        ``grade_actionable`` names, one flag per finding, the rows whose
+        actionable grading the caller reads: the others are left null, since
+        the threshold lookup costs a call per finding. Every grading enters the
+        frame through ``bool``, as the suppression flag does, because a hook
+        that answers 1 or 0 is not a Boolean cell to the frame.
         """
         return graded_frame(
             levels=[_severity_level(vuln.severity) for vuln in vulns],
             is_suppressed=[bool(vuln.is_suppressed) for vuln in vulns],
-            left_out=[self.is_policy_not_gating(vuln) for vuln in vulns],
+            left_out=[bool(self.is_policy_not_gating(vuln)) for vuln in vulns],
             actionable=(
-                [self.is_finding_actionable(vuln) for vuln in vulns]
-                if actionable
-                else None
+                None
+                if grade_actionable is None
+                else [
+                    bool(self.is_finding_actionable(vuln)) if grade else None
+                    for vuln, grade in zip(vulns, grade_actionable, strict=True)
+                ]
             ),
         )
 
@@ -1067,11 +1071,24 @@ class ReportContentEmitter:
         )
 
     @classmethod
-    def _by_severity(cls, vulns: List[FlatVulnerability]) -> List[FlatVulnerability]:
-        """*vulns* most severe first; findings equal on every key keep their order."""
+    def by_severity(
+        cls,
+        vulns: List[FlatVulnerability],
+        *,
+        suppressed: Sequence[bool] | None = None,
+    ) -> List[FlatVulnerability]:
+        """*vulns* most severe first; findings equal on every key keep their order.
+
+        With *suppressed*, one flag per finding, the unsuppressed ones come
+        first (the HTML cards' order); each group is ordered as above. The line
+        in each key is ``line_start or 0``, always an int, which the frame
+        ordering needs.
+        """
         return [
             vulns[position]
-            for position in severity_order([cls._severity_sort_key(v) for v in vulns])
+            for position in severity_order(
+                [cls._severity_sort_key(v) for v in vulns], suppressed
+            )
         ]
 
     def get_findings_overview(self) -> List[Dict[str, Any]]:
@@ -1107,7 +1124,7 @@ class ReportContentEmitter:
         actionable_findings, notes = self.fold_findings(actionable_findings)
 
         # Limit the number of detailed findings
-        actionable_findings = self._by_severity(actionable_findings)
+        actionable_findings = self.by_severity(actionable_findings)
         # A negative limit would slice from the end and drop the last findings
         # instead of none; the reporters refuse one, and a caller that passes
         # one anyway gets none.
@@ -1131,7 +1148,7 @@ class ReportContentEmitter:
         """
         left_out = [vuln for vuln in self.flat_vulns if self.is_policy_not_gating(vuln)]
         left_out, notes = self.fold_findings(left_out)
-        left_out = self._by_severity(left_out)
+        left_out = self.by_severity(left_out)
         return [
             self._with_note(self._overview_row(vuln), vuln, notes)
             for vuln in left_out[: max(max_findings, 0)]

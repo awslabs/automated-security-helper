@@ -16,6 +16,7 @@ a way forward, and a working run is unchanged by the hint.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,6 +28,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
     CfnNagScannerConfig,
 )
+from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 
 pytestmark = pytest.mark.unit
 
@@ -113,6 +115,31 @@ def test_the_psych_fatal_is_a_failed_unevaluated_target_with_a_way_forward(
     assert "--output-format json" in reason
     assert "Psych::Parser" in reason
     assert "portable-ruby" in reason
+    assert f"cfn-nag {CFN_NAG_GEM_VERSION} " in reason
+    assert "--mode container" in reason
+
+
+@pytest.mark.parametrize(
+    "stem",
+    [
+        "cfn_nag-0.8.10-fatal-psych-portable-ruby-3.3.8",
+        "cfn_nag-0.8.10-fatal-psych-portable-ruby-3.4.5",
+    ],
+)
+def test_the_hint_quotes_text_each_rubys_fatal_message_carries(scanner, run_with, stem):
+    """Ruby 3.3 writes the method as `parse' and Ruby 3.4 as 'parse', so the hint
+    has to quote text both FATAL messages share for its condition to hold on
+    either."""
+    message = json.loads((CAPTURED / f"{stem}.json").read_text())[0]["file_results"][
+        "violations"
+    ][0]["message"]
+    run_with((CAPTURED / f"{FATAL_STEM}.sarif").read_text(), "", 1)
+    quoted = re.findall(r"`([^`]+)`", " ".join(scanner.errors))
+
+    assert any("Psych::Parser" in text and text in message for text in quoted), (
+        message,
+        quoted,
+    )
 
 
 def test_a_working_run_is_unchanged_and_the_logical_id_is_a_sarif_field(
@@ -147,6 +174,9 @@ def test_two_resources_give_one_sarif_result_per_id():
     violations = json.loads((CAPTURED / "cfn_nag-0.8.10-two-buckets.json").read_text())[
         0
     ]["file_results"]["violations"]
+    # One violation per rule (W51, W35, W41): the count keeps the all() below
+    # from passing over an empty list.
+    assert len(violations) == 3
     assert all(
         v["logical_resource_ids"] == ["M0FixtureBucketA", "M0FixtureBucketB"]
         for v in violations
