@@ -685,14 +685,18 @@ def test_a_yaml_merge_key_is_refused_by_file_line_and_key(cast, tmp_path):
 
 
 # Besides a plain ``<<``, PyYAML's resolver reads each of these keys as a merge key and
-# merges the mapping after it into the mapping that holds the key. A key it reads as a
-# string is an ordinary key, however much it looks like ``<<``.
+# merges the mapping after it into the mapping that holds the key. It tests only the
+# key's tag, so a flow sequence or mapping with the merge tag merges as well. A key it
+# reads as a string is an ordinary key, however much it looks like ``<<``.
 MERGE_SPELLINGS = {
     "the non-specific tag": "! <<",
     "the non-specific tag on a quoted key": '! "<<"',
     "the verbatim non-specific tag": "!<!> <<",
     "the merge tag": "!!merge <<",
     "the merge tag on another word": "!!merge extra",
+    "the verbatim merge tag": "!<tag:yaml.org,2002:merge> <<",
+    "the merge tag on a flow sequence": "!!merge [extra]",
+    "the merge tag on a flow mapping": "!!merge {extra: 1}",
 }
 NOT_MERGE_SPELLINGS = {
     "a quoted key": '"<<"',
