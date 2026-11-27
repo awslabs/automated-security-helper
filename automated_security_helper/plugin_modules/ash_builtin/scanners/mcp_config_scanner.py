@@ -99,7 +99,6 @@ from typing import (
     Optional,
     Tuple,
 )
-from urllib.parse import urlsplit
 
 from pydantic import Field
 
@@ -144,6 +143,12 @@ from automated_security_helper.utils.mcp_config import (
     Span,
     detect_format,
     parse_mcp_config_text,
+)
+from automated_security_helper.utils.mcp_config.model import (
+    command_prefix_matches as _path_prefix_matches,
+    normalized_command_path as _normalized_command_path,
+    split_url as _split_url,
+    url_prefix_matches as _prefix_matches,
 )
 from automated_security_helper.utils.mcp_config.readers import MAX_CONFIG_BYTES
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -527,31 +532,6 @@ def host_is_loopback(host: Optional[str]) -> bool:
     return address.is_loopback or bool(mapped is not None and mapped.is_loopback)
 
 
-def _split_url(url: str) -> Optional[Tuple[str, Optional[str], str]]:
-    """(scheme, hostname, normalized url) of an absolute URL, or None."""
-    try:
-        parts = urlsplit(url.strip())
-        host = parts.hostname
-        # Read so that a malformed port raises ValueError here.
-        _ = parts.port
-    except ValueError:
-        return None
-    if not parts.scheme or not parts.netloc:
-        return None
-    netloc = parts.netloc.lower()
-    rest = url.strip()[len(parts.scheme) + 3 + len(parts.netloc) :]
-    return parts.scheme.lower(), host, f"{parts.scheme.lower()}://{netloc}{rest}"
-
-
-def _prefix_matches(url: str, prefix: str) -> bool:
-    """Whether ``url`` starts with ``prefix``, on a URL boundary."""
-    if not url.startswith(prefix):
-        return False
-    if prefix.endswith(("/", "?", "#")) or len(url) == len(prefix):
-        return True
-    return url[len(prefix)] in "/?#"
-
-
 def check_remote(
     entry: McpServerEntry,
     require_local: bool,
@@ -595,25 +575,6 @@ def check_remote(
                 )
             )
     return found
-
-
-def _normalized_command_path(command: str) -> str:
-    text = command.replace("\\", "/")
-    return posixpath.normpath(text) if "/" in text else text
-
-
-def _path_prefix_matches(path: str, prefix: str) -> bool:
-    normalized_prefix = posixpath.normpath(prefix.replace("\\", "/"))
-    if normalized_prefix == ".":
-        return False
-    if path == normalized_prefix:
-        return True
-    root = (
-        normalized_prefix
-        if normalized_prefix.endswith("/")
-        else normalized_prefix + "/"
-    )
-    return path.startswith(root)
 
 
 def check_command_prefix(
