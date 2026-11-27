@@ -53,6 +53,19 @@ operator's prefixes, compared with the scanner's own URL and command-path
 matching. An empty list, or one with nothing left, keeps the operator's list, and
 an operator who sets no list accepts any.
 
+trivy-repo's ``module_dir``, actionlint's ``shellcheck`` and ``pyflakes``, and
+cfn-guard's ``rules_paths`` name what the operator chose for a scanner to run with:
+a directory of modules, two programs, a set of rules. Where the operator sets one,
+the operator's value stands. A config that leaves it out, sets it empty, or sets
+another value is given a copy of the operator's, which the scanner then takes as
+the operator's (``set_by_operator``). Without it the scanner runs without the
+operator's modules or rules, or, for the two programs, accepts the flag's own name
+and looks it up on PATH in place of the operator's. Where the operator sets none,
+the config's value is left to the scanner, which holds it to its own checks
+(``utils/config_trust.operator_path``). trivy-repo's ``secret_config_file`` is not
+among them, because ``confine_scanner_config_files`` already gives it the trusted
+base's value.
+
 What is not done here
 ---------------------
 A file an MCP client delivered keeps nothing here: its base is the defaults, so
@@ -98,6 +111,7 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    Union,
 )
 
 from automated_security_helper.config.tool_config_trust import (
@@ -191,12 +205,13 @@ def keep_operator_floors(
     """Hold a config that is not the operator's to the operator's floors, in place.
 
     A floor is a setting such a config may narrow but not loosen past the
-    operator's value, or past the plugin's default where the operator sets none.
+    operator's value, or past the plugin's default where the operator sets none. A
+    path or program the operator sets (``OPERATOR_SET``) may not be changed at all.
     The config replaces the operator's config rather than adding to it, so a
     section or option it leaves out takes the operator's value, and a value it
-    writes that loosens a floor is replaced by the operator's. One warning names
-    each value the config wrote and this step replaced; an omission is not the
-    config's choice and is not named.
+    writes that loosens a floor, or changes one of those, is replaced by the
+    operator's. One warning names each value the config wrote and this step
+    replaced; an omission is not the config's choice and is not named.
 
     Args:
         config: The resolved AshConfig, changed in place.
@@ -305,9 +320,13 @@ def _keep_switches_off(
 #: How a floor narrows. ``TRUE_NARROWS``: the check is on when either side has it
 #: on. ``URL_PREFIXES`` and ``COMMAND_PREFIXES``: a list keeps only the entries
 #: under one of the operator's prefixes, compared the way mcp-config compares them.
+#: ``OPERATOR_SET``: where the operator sets a value, that value stands over any other
+#: the config holds, a default or an empty one included; where the operator sets
+#: none, the config's value is left to the scanner.
 TRUE_NARROWS = "true-narrows"
 URL_PREFIXES = "url-prefixes"
 COMMAND_PREFIXES = "command-prefixes"
+OPERATOR_SET = "operator-set"
 
 
 class Floor(NamedTuple):
@@ -334,6 +353,10 @@ OPERATOR_FLOORS: Dict[Tuple[str, str], Floor] = {
     ("mcp-config", "require_local"): Floor(TRUE_NARROWS, False, bool),
     ("mcp-config", "remote_url_prefixes"): Floor(URL_PREFIXES, [], List[str]),
     ("mcp-config", "allowed_command_prefixes"): Floor(COMMAND_PREFIXES, [], List[str]),
+    ("trivy-repo", "module_dir"): Floor(OPERATOR_SET, None, Optional[Union[Path, str]]),
+    ("actionlint", "shellcheck"): Floor(OPERATOR_SET, None, Optional[str]),
+    ("actionlint", "pyflakes"): Floor(OPERATOR_SET, None, Optional[str]),
+    ("cfn-guard", "rules_paths"): Floor(OPERATOR_SET, [], List[str]),
 }
 
 #: What ``_floored`` answers when the config's value already meets the floor.
@@ -493,9 +516,16 @@ def _floored(floor: Floor, operator: Any, current: Any) -> Any:
         new = _narrowed(list(current), list(operator), _url_under)
     elif floor.rule == COMMAND_PREFIXES:
         new = _narrowed(list(current), list(operator), _command_under)
+    elif floor.rule == OPERATOR_SET:
+        new = current if _empty(operator) else copy.deepcopy(operator)
     else:
         raise ValueError(f"unknown floor rule {floor.rule!r}")
     return _UNCHANGED if _same_option_value(new, current) else new
+
+
+def _empty(value: Any) -> bool:
+    """Whether ``value`` is no value: None, empty text or an empty list."""
+    return value is None or (isinstance(value, (str, list)) and len(value) == 0)
 
 
 def _narrowed(

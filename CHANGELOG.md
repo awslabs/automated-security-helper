@@ -127,6 +127,14 @@
   It no longer turns a check off or widens a list past the operator's config, or past
   the defaults when the operator sets none. A value that would is ignored with a
   warning.
+- **The operator's trivy-repo `module_dir`, actionlint `shellcheck` and `pyflakes`,
+  and cfn-guard `rules_paths` stay in force** under a config file inside the scanned
+  tree or a git checkout, or one an MCP client delivered, that leaves the option out,
+  sets it empty, or sets another value. Before, such a config ran trivy-repo with an
+  empty modules directory, actionlint without the integration or with a program of
+  its own name, and cfn-guard without the operator's rules. A value it writes is
+  ignored with a warning. Where the operator sets none, the config's value is left
+  to the scanner as before.
 
 ### Maintenance
 
