@@ -1297,10 +1297,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
             "SECRET-BASE64-HIGH-ENTROPY-STRING",
             "tests/unit/plugin_modules/ash_builtin/scanners/test_opengrep_safe_directory_scope.py",
         ),
-        (
-            "SECRET-HEX-HIGH-ENTROPY-STRING",
-            "tests/unit/test_ci_ferret_self_scan_pins.py",
-        ),
         ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_json_spans.py"),
         ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_readers.py"),
         ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_toml_spans.py"),
@@ -1348,7 +1344,6 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("B603", "ash-agent-plugins/agentic-coding/transpiler/transpiler/core.py"),
         ("B110", "automated_security_helper/**/*.py"),
         ("B311", "automated_security_helper/**/*.py"),
-        ("API_KEY_OR_SECRET", "automated_security_helper/cli/mcp/sessions.py"),
         (
             "API_KEY_OR_SECRET",
             "automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py",
@@ -1407,11 +1402,9 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("AWS-0066", "deploy/terraform/modules/codecommit-gate/main.tf"),
         ("AWS-0017", "deploy/terraform/modules/codepipeline-executor/main.tf"),
         ("AWS-0089", "deploy/terraform/modules/codepipeline-executor/main.tf"),
-        ("API_KEY_OR_SECRET", "deploy/terraform/modules/fargate/main.tf"),
         ("AWS-0054", "deploy/terraform/modules/fargate/main.tf"),
         ("AWS-0104", "deploy/terraform/modules/fargate/main.tf"),
         ("B110", "hatch_build.py"),
-        ("API_KEY_OR_SECRET", "pyproject.toml"),
         ("B404", "scripts/*.py"),
         ("B603", "scripts/*.py"),
         ("B101", "tests/**/*.py"),
@@ -1438,9 +1431,7 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         # main's own whole-file entries, carried in by the merge of origin/main
         # (617e17c3629) into v4-capabilities; same provenance and ordering as the block
         # at the end of the ``.ash.yaml`` list above.
-        ("API_KEY_OR_SECRET", ".github/release-notes/*.md"),
         ("API_KEY_OR_SECRET", "CHANGELOG.md"),
-        ("API_KEY_OR_SECRET", "automated_security_helper/config/operator_paths.py"),
         (
             "API_KEY_OR_SECRET",
             "automated_security_helper/plugin_modules/ash_ferret_plugins/spec/2026-09-13-ferret-scan-plugin-v2-update-analysis.md",

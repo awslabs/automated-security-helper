@@ -89,7 +89,9 @@ FROZEN_SIZES = {
     # 454 and 201: the merge of origin/main c15148192f4 dropped the keys main pinned or
     # removed (1 and 28) and added the whole-file and glob entries main wrote since
     # ae28f8411ce (29 and 2), keyed by main's new config paths (#1112, #1044).
-    "main": {".ash.yaml": 454, ".ash/.ash_alpha_plugins.yaml": 201},
+    # 453 and 196: the self-scan hygiene pass removed the pin test's hex entry and
+    # pinned or removed five whole-file and glob ferret-scan entries.
+    "main": {".ash.yaml": 453, ".ash/.ash_alpha_plugins.yaml": 196},
     "pre_guard": {".ash.yaml": 27, ".ash/.ash_alpha_plugins.yaml": 8},
 }
 

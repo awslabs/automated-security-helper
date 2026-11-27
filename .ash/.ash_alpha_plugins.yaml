@@ -112,7 +112,9 @@ global_settings:
         False positive. A changelog sentence about a Security Hub credentials check; it
         holds words, not a credential.
     - rule_id: API_KEY_OR_SECRET
-      path: ".github/release-notes/*.md"
+      path: ".github/release-notes/v3.8.0-details.md"
+      line_start: 2508
+      line_end: 2508
       reason: >-
         False positive. The release notes carry the same Security Hub credentials-check
         sentence as the CHANGELOG entry above, quoted in prose beside option names. They
@@ -154,59 +156,59 @@ global_settings:
     # quote the line, because a quoted line would make this file trip the same rule.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp/session_identity.py
-      line_start: 137
-      line_end: 137
+      line_start: 134
+      line_end: 134
       reason: >-
         False positive. The line keeps the value that a context variable's set call
         returns, so the variable can be reset afterwards. It holds no credential; the
         detector reads the word in the name.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp/workspace.py
-      line_start: 3263
-      line_end: 3263
+      line_start: 3259
+      line_end: 3259
       reason: >-
         False positive. The line keeps the pair returned by opening a run-log scope, the
         second item being the handle used to reset that scope. No credential is held;
         the detector reads the word in the name.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp/workspace.py
-      line_start: 3380
-      line_end: 3380
+      line_start: 3376
+      line_end: 3376
       reason: >-
         False positive. The line looks up the registry entry for a client id. It holds a
         registry object, not a credential; the detector reads the word in the name.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp_server.py
-      line_start: 544
-      line_end: 544
+      line_start: 548
+      line_end: 548
       reason: >-
         False positive. The line holds a count of other registry entries that were
         delivered; the detector reads the word in the name.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp_server.py
-      line_start: 818
-      line_end: 818
+      line_start: 907
+      line_end: 907
       reason: >-
         False positive. The line is a code comment that says nothing is invented for a
         client that has no bound profile. It holds prose, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp_tools.py
-      line_start: 2155
-      line_end: 2155
+      line_start: 2108
+      line_end: 2108
       reason: >-
         False positive. The line looks up the registry entry a scan claims. It holds a
         registry object, not a credential; the detector reads the word in the name.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp_tools.py
-      line_start: 2278
-      line_end: 2278
+      line_start: 2231
+      line_end: 2231
       reason: >-
         False positive. The line keeps the pair returned by opening a run-log scope, the
         second item being the handle used to reset that scope. No credential is held.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/cli/mcp_tools.py
-      line_start: 3682
-      line_end: 3682
+      line_start: 3644
+      line_end: 3644
       reason: >-
         False positive. The line keeps the pair returned by beginning a run-log scope,
         the second item being the handle used to reset that scope. No credential is held.
@@ -217,13 +219,6 @@ global_settings:
       reason: >-
         False positive. The line keeps the value that a context variable's set call
         returns, so the cancel event can be reset afterwards. It holds no credential.
-    - rule_id: API_KEY_OR_SECRET
-      path: automated_security_helper/plugin_modules/ash_builtin/scanners/trivy_scanner.py
-      line_start: 529
-      line_end: 529
-      reason: >-
-        False positive. The line holds a scan target path written in forward-slash form,
-        and the word flagged is part of the local's name. It is a path, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/plugins/plugin_manager.py
       line_start: 171
@@ -248,8 +243,8 @@ global_settings:
         the detector reads the word in the names.
     - rule_id: API_KEY_OR_SECRET
       path: automated_security_helper/utils/uv_tool_runner.py
-      line_start: 125
-      line_end: 125
+      line_start: 126
+      line_end: 126
       reason: >-
         False positive. The line keeps the value that a context variable's set call
         returns, so the variable can be reset afterwards. It holds no credential.
@@ -264,52 +259,52 @@ global_settings:
         reports; the inline pragma is detect-secrets', which ferret-scan does not read.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 347
-      line_end: 347
+      line_start: 353
+      line_end: 353
       reason: >-
         False positive. The line holds a public SHA-256 archive digest used as a lookup
         key in the pinned-install test. A published digest, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 387
-      line_end: 387
+      line_start: 393
+      line_end: 393
       reason: >-
         False positive. The line holds a public SHA-256 archive digest used as a lookup
         key in the pinned-install test. A published digest, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 414
-      line_end: 414
+      line_start: 420
+      line_end: 420
       reason: >-
         False positive. The line holds the public SHA-256 of a vendored linter binary
         that the pinned-install test compares against. A published digest, not a
         credential.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 473
-      line_end: 473
+      line_start: 479
+      line_end: 479
       reason: >-
         False positive. The line holds a public SHA-256 archive digest used as a lookup
         key in the pinned-install test. A published digest, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 527
-      line_end: 527
+      line_start: 533
+      line_end: 533
       reason: >-
         False positive. The line holds a public SHA-256 archive digest used as a lookup
         key in the pinned-install test. A published digest, not a credential.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 765
-      line_end: 767
+      line_start: 771
+      line_end: 773
       reason: >-
         False positive. The three lines hold public SHA-256 digests of release archives
         and a vendored executable that the pinned-install test compares against.
         Published digests, not credentials.
     - rule_id: API_KEY_OR_SECRET
       path: tests/unit/assets/test_install_pinned_tool.py
-      line_start: 1418
-      line_end: 1419
+      line_start: 1424
+      line_end: 1425
       reason: >-
         False positive. The two lines hold public SHA-256 digests of a bundle and its
         contents that the pinned-install test compares against. Published digests, not
@@ -523,9 +518,6 @@ global_settings:
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
-    - path: pyproject.toml
-      rule_id: API_KEY_OR_SECRET
-      reason: "False positive — hatch build config paths contain strings that match secret patterns"
     # === GuardDog false positives, continued: the docs-CI and MCP waves ===
     #
     # The same dispositions as the GuardDog block below: heuristics matching
@@ -561,12 +553,24 @@ global_settings:
         source JSON schema, not this generated file.
     - path: automated_security_helper/cli/mcp/sessions.py
       rule_id: API_KEY_OR_SECRET
+      line_start: 1237
+      line_end: 1237
+      reason: >-
+        False positive. The flagged line assigns a local variable named for an MCP
+        session object; the detector matches the variable name, and the assigned
+        value is a constructed object rather than a credential.
+    - path: automated_security_helper/cli/mcp/sessions.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 2566
+      line_end: 2566
       reason: >-
         False positive. The flagged line assigns a local variable named for an MCP
         session object; the detector matches the variable name, and the assigned
         value is a constructed object rather than a credential.
     - path: deploy/terraform/modules/fargate/main.tf
       rule_id: API_KEY_OR_SECRET
+      line_start: 20
+      line_end: 20
       reason: >-
         False positive. The flagged local's name contains the word "secret"
         (manage-auth-secret), but its value is a boolean computed from whether an
@@ -695,6 +699,8 @@ global_settings:
     # scoped to one file; nothing here is a glob.
     - path: automated_security_helper/config/operator_paths.py
       rule_id: API_KEY_OR_SECRET
+      line_start: 113
+      line_end: 113
       reason: >-
         False positive. The flagged line is a row in the table of scanner options
         that name a file. It pairs the detect-secrets scanner with its
@@ -743,8 +749,8 @@ global_settings:
         False positive. A module constant named for a fake MCP session, the same
         shape as the entries for the other MCP tests above.
     # === ferret-scan API_KEY_OR_SECRET: new detections in ferret-scan 2.6.0 ===
-    # The supported window admits ferret-scan 2.6.0, whose detectors report these
-    # nine sites at 95-100% confidence. Each was read at the reported line and is
+    # The supported window admits ferret-scan 2.6.0, whose detectors report the
+    # sites below at 95-100% confidence. Each was read at the reported line and is
     # pinned to it by line or, where a named definition holds it, by that
     # definition (symbol); none is a stored credential. The ferret-scan 2.5.x scans of
     # the same files did not report them.
@@ -780,20 +786,6 @@ global_settings:
       reason: >-
         False positive. This is ferret-scan's own detector regular expression
         for the trade_secret keywords, pattern text and not a value.
-    - path: .ash.yaml
-      rule_id: API_KEY_OR_SECRET
-      line_start: 857
-      line_end: 857
-      reason: >-
-        False positive. A suppression reason that quotes a placeholder fixture
-        literal; the text explains why another finding is a false positive.
-    - path: .ash.yaml
-      rule_id: API_KEY_OR_SECRET
-      line_start: 1102
-      line_end: 1102
-      reason: >-
-        False positive. A suppression reason that quotes a placeholder fixture
-        literal; the text explains why another finding is a false positive.
     - path: .github/workflows/ash-repo-docs.yml
       rule_id: API_KEY_OR_SECRET
       line_start: 159
