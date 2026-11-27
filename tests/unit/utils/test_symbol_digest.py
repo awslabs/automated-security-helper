@@ -267,6 +267,90 @@ class TestHeaders:
         assert _same(source, changed, "outer.inner")
 
 
+# Functions that hold a symbol without being definitions: an immediately invoked
+# function, a callback (a function and an arrow), the value of
+# ``module.exports``, a method of an object literal and a generator function
+# expression. None of them is a definition, so none is among the symbol's
+# enclosing definitions, but each one's directive prologue governs the code
+# inside it as much as a named function's does.
+UNNAMED_FUNCTIONS = [
+    pytest.param(
+        b'(function () {\n  "use strict";\n  function inner() { return 1; }\n})();\n',
+        id="iife",
+    ),
+    pytest.param(
+        b'describe("x", function () {\n  "use strict";\n'
+        b"  function inner() { return 1; }\n});\n",
+        id="callback",
+    ),
+    pytest.param(
+        b'run(() => {\n  "use strict";\n  function inner() { return 1; }\n});\n',
+        id="arrow-callback",
+    ),
+    pytest.param(
+        b'module.exports = function () {\n  "use strict";\n'
+        b"  function inner() { return 1; }\n  return inner;\n};\n",
+        id="module-exports",
+    ),
+    pytest.param(
+        b'const o = {\n  m() {\n    "use strict";\n'
+        b"    function inner() { return 1; }\n    return inner;\n  },\n};\n",
+        id="object-literal-method",
+    ),
+    pytest.param(
+        b'(function* () {\n  "use strict";\n  function inner() { return 1; }\n})();\n',
+        id="generator-iife",
+    ),
+]
+
+
+class TestEnclosingFunctions:
+    @pytest.mark.parametrize("name", ["a.js", "a.ts", "a.tsx"])
+    @pytest.mark.parametrize("source", UNNAMED_FUNCTIONS)
+    def test_the_directive_prologue_of_any_function_it_sits_in_changes_it(
+        self, source, name
+    ):
+        changed = source.replace(b'"use strict";', b'"use asm";')
+        assert changed != source
+        assert not _same(source, changed, "inner", name)
+
+    def test_a_directive_of_a_function_between_two_definitions_changes_it(self):
+        # outer is a definition and its own body opens with a call, so only the
+        # callback between outer and inner holds the directive.
+        source = (
+            b'function outer() {\n  run(function () {\n    "use strict";\n'
+            b"    function inner() { return 1; }\n  });\n}\n"
+        )
+        changed = source.replace(b'"use strict";', b'"use asm";')
+        assert not _same(source, changed, "outer.inner", "a.js")
+
+    @pytest.mark.parametrize("name", ["a.js", "a.ts"])
+    def test_a_directive_after_code_in_such_a_function_does_not_change_it(self, name):
+        # A string statement after the first other statement is not a directive.
+        source = (
+            b'(function () {\n  init();\n  "use strict";\n'
+            b"  function inner() { return 1; }\n})();\n"
+        )
+        changed = source.replace(b'"use strict";', b'"use asm";')
+        assert _same(source, changed, "inner", name)
+
+    @pytest.mark.parametrize("name", ["a.js", "a.ts"])
+    def test_a_directive_in_a_function_it_is_not_in_does_not_change_it(self, name):
+        source = (
+            b"(function () {\n  function inner() { return 1; }\n})();\n"
+            b'(function () {\n  "use strict";\n})();\n'
+        )
+        changed = source.replace(b'"use strict";', b'"use asm";')
+        assert _same(source, changed, "inner", name)
+
+    def test_a_comment_in_such_a_function_does_not_change_it(self):
+        source = (
+            b"(function () {\n  // a note\n  function inner() { return 1; }\n})();\n"
+        )
+        changed = source.replace(b"// a note", b"// another note")
+        assert _same(source, changed, "inner", "a.js")
+
+
 LIMITS = b"""\
 import os
 

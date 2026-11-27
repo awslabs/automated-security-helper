@@ -451,7 +451,7 @@ class TestPolicy:
 
     def test_the_tables_are_the_ones_the_algorithm_id_names(self):
         grammars = symbol_spans.digest_grammars()
-        assert ALGORITHM == "ash-ast-1"
+        assert ALGORITHM == "ash-ast-2"
         assert ast_digest.policy_sha256(grammars) == POLICY_SHA256
         ast_digest.check_policy_pin(grammars)
         edited = [
