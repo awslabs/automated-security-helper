@@ -133,10 +133,11 @@ JOURNEY_BANNER = _banner("generate_journey_pages.py")
 #: generator prints, which the check leaves out (is_usage_line), and 3 are examples that
 #: a person wrote in the help text of ``ash config lint``, ``ash config validate`` and
 #: ``ash suppress add``, which it counts. So main carries 7 lines. Conversions lower
-#: the number of lines on a page; this table never changes. It is the backstop that
-#: needs no git: the ratchet job compares the seed with the fork point's, and this holds
-#: each page to its own line count, so a change that converts two lines on one page and
-#: adds two on another is as much a failure as a seed that grows.
+#: the number of lines on a page; this table moves only if main's own blocks change
+#: before the seed lands. It is the backstop that needs no git: the ratchet job
+#: compares the seed with the fork point's, and this holds each page to its own line
+#: count, so a change that converts two lines on one page and adds two on another is as
+#: much a failure as a seed that grows.
 SEED_PAGES_AT_MAIN = {
     "automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md": 1,
     "deploy/terraform/modules/codepipeline-executor/README.md": 1,

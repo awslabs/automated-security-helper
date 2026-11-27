@@ -50,12 +50,15 @@ WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 CONTRACT_PAGE = "docs/content/contributing/documentation.md"
 FENCE = "```"
 
-#: The markers the parser binds at main (f6cc3c03ac86) that keep a block out of the
-#: runs, as the seed counts them: 611 ``illustrative`` markers, 25 ``runner=none``
-#: markers and 4 bare ``save-as=`` markers. The seed was first written at c15148192f4
-#: with 599 of the first, and main's own pages gained 12 since. Conversions lower the
-#: number of lines in the seed; this one changes only when main's pages gain markers
-#: before the seed lands, since the seed is written once, from main.
+#: The lines the seed holds as the writer writes them from main's pages at f6cc3c03ac86:
+#: 611 for ``illustrative`` markers, 25 for ``runner=none`` markers and 4 for bare
+#: ``save-as=`` markers, 640 in all. The number has moved twice and is not a fact of
+#: the design: the seed was first written at c15148192f4 with 599 lines, all
+#: ``illustrative``. Counting every marker that keeps a block out of the runs added 25
+#: ``runner=none`` and 4 ``save-as=`` lines on the same pages (628), and main's own
+#: pages gained 12 ``illustrative`` markers by f6cc3c03ac86 (640). It moves only when
+#: main's pages gain or lose such a marker, or the kinds the seed counts change, before
+#: the seed lands. After that, conversions lower the seed and this number stays.
 SEED_AT_MAIN = 640
 
 NEEDS_DOCKER = "needs Docker"
