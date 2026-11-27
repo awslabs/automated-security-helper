@@ -954,20 +954,25 @@ def test_a_relative_extend_path_in_any_key_spelling_is_refused(
 _BYTE_ORDER_MARK = chr(0xFEFF)
 
 
-def _with_byte_order_mark(tree, tmp_path, monkeypatch, how: str, text: str):
-    """``_extend_scanner`` with the config ``how`` names saved behind a byte order mark.
+def _with_config_text(tree, tmp_path, monkeypatch, how: str, text: str):
+    """``_extend_scanner`` with the config ``how`` names holding ``text`` as written.
 
-    For ``chain`` the mark is on the extended file, which ASH reads the same way.
-    Files are written as bytes: ``write_text`` uses the locale's encoding, which on
-    Windows cannot encode the mark.
+    For ``chain`` the text is the extended file's, which ASH reads the same way.
+    Files are written as UTF-8 bytes: ``write_text`` uses the locale's encoding,
+    which on Windows cannot encode a byte order mark.
     """
-    scanner = _extend_scanner(tree, tmp_path, monkeypatch, how, text)
+    scanner = _extend_scanner(tree, tmp_path, monkeypatch, how, "")
     if how.endswith("_TOML"):
-        monkeypatch.setenv(how, _BYTE_ORDER_MARK + text)
+        monkeypatch.setenv(how, text)
     else:
         name = "mid.toml" if how == "chain" else "betterleaks.toml"
-        (tmp_path / "op" / name).write_bytes((_BYTE_ORDER_MARK + text).encode("utf-8"))
+        (tmp_path / "op" / name).write_bytes(text.encode("utf-8"))
     return scanner
+
+
+def _with_byte_order_mark(tree, tmp_path, monkeypatch, how: str, text: str):
+    """``_with_config_text`` with ``text`` saved behind a byte order mark."""
+    return _with_config_text(tree, tmp_path, monkeypatch, how, _BYTE_ORDER_MARK + text)
 
 
 @pytest.mark.parametrize("how", _EXTEND_SOURCES)
@@ -998,6 +1003,26 @@ def test_an_absolute_extend_path_behind_a_byte_order_mark_builds_an_argv(
         assert configs == [f"--config={operator.as_posix()}"]
     else:
         assert configs == []
+
+
+@pytest.mark.parametrize("how", _EXTEND_SOURCES)
+def test_a_byte_order_mark_inside_an_extend_path_is_part_of_the_path(
+    tree, tmp_path, monkeypatch, how
+):
+    """Only a mark at the start of the text is skipped. One at the start of the path
+    value is part of the path, which then does not start at a root, so Betterleaks
+    would open it from the scanned tree. It is refused as written, although the
+    path with the mark removed names a file outside the tree."""
+    common = tmp_path / "op" / "common.toml"
+    value = _BYTE_ORDER_MARK + common.as_posix()
+    scanner = _with_config_text(
+        tree, tmp_path, monkeypatch, how, f"[extend]\npath = '{value}'\n"
+    )
+    common.write_text(_TREE_COMMON)
+    with pytest.raises(
+        ScannerError, match=re.escape(f"{value!r}, which is not an absolute path")
+    ):
+        scanner._build_arguments(tree, tmp_path / "o.sarif")
 
 
 #: Values under ``extend`` that ASH cannot read the way the tools do, with the
@@ -1162,6 +1187,17 @@ def test_a_home_relative_config_variable_extending_an_absolute_path_is_passed(
     assert _flag(args, "--config=") == (home / "betterleaks.toml").as_posix()
 
 
+def test_the_windows_rule_is_built_from_the_function_the_scanner_calls():
+    """``core.constants`` names ``utils.path_stat.is_anchored`` again for the modules
+    that import it from there, and the test below builds its patch from that name.
+    A second definition in ``core.constants`` would have the patch run a copy the
+    scanner does not call, so both names are pinned to the one function."""
+    from automated_security_helper.utils import path_stat
+
+    assert constants.is_anchored is path_stat.is_anchored
+    assert bs.is_anchored is path_stat.is_anchored
+
+
 def test_a_rooted_config_variable_with_no_drive_is_anchored_where_windows_reads_it(
     tree, tmp_path, monkeypatch
 ):
@@ -1247,3 +1283,58 @@ def test_a_linked_config_variable_extending_an_absolute_path_is_left_to_betterle
     scanner = _scanner(tree, tmp_path, output_dir=tree / ".ash" / "ash_output")
     args = scanner._build_arguments(tree, tmp_path / "o.sarif")
     assert _flag(args, "--config=") is None
+
+
+def _a_relative_value_through_a_link(tmp_path: Path, monkeypatch) -> tuple[Path, str]:
+    """The directory ASH runs in, and a config value relative to it holding ``..``
+    after a symbolic link there.
+
+    ASH anchors the value where it runs with ``..`` removed by hand, so it names
+    ``op/betterleaks.toml``, and passes that file. Opened as written, the value
+    would be ``real/betterleaks.toml``, through the link.
+    """
+    run = _run_from_a_directory_holding(tmp_path, monkeypatch)
+    (run / "real" / "sub").mkdir(parents=True)
+    (run / "op").mkdir()
+    (run / "op" / "link").symlink_to(run / "real" / "sub", target_is_directory=True)
+    return run, "op/link/../betterleaks.toml"
+
+
+@_LINKS_BEFORE_DOT_DOT
+@pytest.mark.parametrize("name", ["BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"])
+def test_a_relative_linked_config_variable_is_checked_where_ash_anchors_it(
+    tree, tmp_path, monkeypatch, name
+):
+    """ASH passes a relative value anchored where it runs, ``..`` removed, so that
+    file is the one it checks: here one that extends a relative path, refused,
+    although the file the value opens through the link extends nothing."""
+    run, value = _a_relative_value_through_a_link(tmp_path, monkeypatch)
+    (run / "op" / "betterleaks.toml").write_text(_RELATIVE_EXTEND)
+    (run / "real" / "betterleaks.toml").write_text("title = 'linked'\n")
+    (tree / "common.toml").write_text(_TREE_COMMON)
+    monkeypatch.setenv(name, value)
+    scanner = _scanner(tree, tmp_path, output_dir=tree / ".ash" / "ash_output")
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(tree, tmp_path / "o.sarif")
+
+
+@_LINKS_BEFORE_DOT_DOT
+@pytest.mark.parametrize("name", ["BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"])
+def test_a_relative_linked_config_variable_extending_an_absolute_path_is_passed(
+    tree, tmp_path, monkeypatch, name
+):
+    """The control: the file ASH anchors extends an absolute path outside the tree,
+    so it is passed as ``--config``, spelled without ``..``, although the file the
+    value opens through the link extends a relative path."""
+    run, value = _a_relative_value_through_a_link(tmp_path, monkeypatch)
+    common = tmp_path / "common.toml"
+    common.write_text("title = 'common'\n")
+    (run / "op" / "betterleaks.toml").write_text(
+        f"[extend]\npath = '{common.as_posix()}'\n"
+    )
+    (run / "real" / "betterleaks.toml").write_text(_RELATIVE_EXTEND)
+    monkeypatch.setenv(name, value)
+    scanner = _scanner(tree, tmp_path, output_dir=tree / ".ash" / "ash_output")
+    args = scanner._build_arguments(tree, tmp_path / "o.sarif")
+    anchored = Path(os.getcwd(), "op", "betterleaks.toml")
+    assert _flag(args, "--config=") == anchored.as_posix()

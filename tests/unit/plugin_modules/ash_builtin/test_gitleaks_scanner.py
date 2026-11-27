@@ -2140,20 +2140,25 @@ def test_a_relative_extend_path_in_any_key_spelling_is_refused(
 _BYTE_ORDER_MARK = chr(0xFEFF)
 
 
-def _with_byte_order_mark(tmp_path, monkeypatch, how: str, text: str):
-    """``_extend_scanner`` with the config ``how`` names saved behind a byte order mark.
+def _with_config_text(tmp_path, monkeypatch, how: str, text: str):
+    """``_extend_scanner`` with the config ``how`` names holding ``text`` as written.
 
-    For ``chain`` the mark is on the extended file, which ASH reads the same way.
-    Files are written as bytes: ``write_text`` uses the locale's encoding, which on
-    Windows cannot encode the mark.
+    For ``chain`` the text is the extended file's, which ASH reads the same way.
+    Files are written as UTF-8 bytes: ``write_text`` uses the locale's encoding,
+    which on Windows cannot encode a byte order mark.
     """
-    scanner = _extend_scanner(tmp_path, monkeypatch, how, text)
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, "")
     if how == "env_toml":
-        monkeypatch.setenv("GITLEAKS_CONFIG_TOML", _BYTE_ORDER_MARK + text)
+        monkeypatch.setenv("GITLEAKS_CONFIG_TOML", text)
     else:
         name = "mid.toml" if how == "chain" else "gitleaks.toml"
-        (tmp_path / "op" / name).write_bytes((_BYTE_ORDER_MARK + text).encode("utf-8"))
+        (tmp_path / "op" / name).write_bytes(text.encode("utf-8"))
     return scanner
+
+
+def _with_byte_order_mark(tmp_path, monkeypatch, how: str, text: str):
+    """``_with_config_text`` with ``text`` saved behind a byte order mark."""
+    return _with_config_text(tmp_path, monkeypatch, how, _BYTE_ORDER_MARK + text)
 
 
 @pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
@@ -2186,6 +2191,27 @@ def test_an_absolute_extend_path_behind_a_byte_order_mark_is_passed_as_config(
         assert passed.read_text(encoding="utf-8") == _BYTE_ORDER_MARK + absolute
     else:
         assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_byte_order_mark_inside_an_extend_path_is_part_of_the_path(
+    tmp_path, monkeypatch, how
+):
+    """Only a mark at the start of the text is skipped. One at the start of the path
+    value is part of the path, which then does not start at a root, so gitleaks
+    would open it from the scanned tree. It is refused as written, although the
+    path with the mark removed names a file outside the tree."""
+    common = tmp_path / "op" / "common.toml"
+    value = _BYTE_ORDER_MARK + common.as_posix()
+    scanner = _with_config_text(
+        tmp_path, monkeypatch, how, f"[extend]\npath = '{value}'\n"
+    )
+    common.write_text(_TREE_COMMON)
+    with pytest.raises(
+        ScannerError, match=re.escape(f"{value!r}, which is not an absolute path")
+    ):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
 
 
 #: Values under ``extend`` that ASH cannot read the way gitleaks does, with the
@@ -2379,6 +2405,22 @@ def _windows_anchoring(monkeypatch) -> None:
         lambda path, pathmod=None: real(path, ntpath),
         raising=False,
     )
+
+
+@pytest.mark.unit
+def test_the_windows_rule_is_built_from_the_function_the_checks_call():
+    """``core.constants`` names ``utils.path_stat.is_anchored`` again for the modules
+    that import it from there, and ``_windows_anchoring`` builds its patch from that
+    name. A second definition in ``core.constants`` would have the patch run a copy
+    that no check calls, so every name is pinned to the one function."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+    from automated_security_helper.utils import path_stat
+
+    assert constants.is_anchored is path_stat.is_anchored
+    assert tool_config_trust.is_anchored is path_stat.is_anchored
+    assert module.is_anchored is path_stat.is_anchored
 
 
 @pytest.mark.unit
