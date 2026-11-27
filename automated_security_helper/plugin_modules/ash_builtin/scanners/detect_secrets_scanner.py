@@ -1466,9 +1466,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         filter listed twice counts as its last entry, the one detect-secrets
         keeps. The verification filter that ``detect-secrets scan`` writes unless
         ``--no-verify`` is given is named, because ASH applies it only from the
-        operator's own settings. A baseline that lists none of these is reported
-        at INFO. Only what the baseline lists is compared: a plugin the scan runs
-        that the baseline leaves out is not named, and the text says what the
+        operator's own settings. A baseline whose plugins and filters all run as
+        listed is reported at INFO, and one that lists no plugin and no filter is
+        not reported. Only what the baseline lists is compared: a plugin the scan
+        runs that the baseline leaves out is not named, and the text says what the
         scan runs instead.
 
         Names only the plugin names and filter paths that are strings, never a
@@ -1529,8 +1530,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 "file is outside the scanned tree and any git checkout that "
                 "holds the scan root, the operator's own settings name it with "
                 "baseline_file, and scan_settings.plugins_used is empty. To keep "
-                "a baseline's exclusions without naming it, set them in "
-                "scan_settings.filters_used or ignore_paths."
+                "a baseline's exclusions without naming it, copy the entries you "
+                "rely on from its filters_used into scan_settings.filters_used; "
+                "once any filter is listed there, detect-secrets' default filters "
+                "no longer apply unless you list them too."
             )
             log = ASH_LOGGER.warning
         else:
