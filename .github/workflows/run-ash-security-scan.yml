@@ -1234,6 +1234,7 @@ jobs:
           # the checkout off sys.path and --no-config keeps uv from reading its
           # settings, as for every other helper in this job.
           uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I - <<'PY'
+          import importlib
           import json
           import os
           import re
@@ -1433,21 +1434,30 @@ jobs:
           if config_file.name.endswith(".json"):
               document = json.loads(text)
           elif config_file.name.endswith(".toml"):
-              try:
-                  import tomllib
-
-                  parse_toml = tomllib.loads
-              except ModuleNotFoundError:
-                  # tomllib is standard library from Python 3.11, the floor of
-                  # requires-python at this commit, so for this commit's ASH the
-                  # import above succeeds. The python-version input reaches
-                  # setup-python as given, so it can still name 3.10, for an
-                  # ash-version whose requires-python admits it. v3.7.0 and
-                  # v3.7.1 do, and declare the `toml` package as a dependency,
-                  # which the uv environment above installs for the fallback below.
-                  import toml
-
-                  parse_toml = toml.loads
+              # tomllib is standard library from Python 3.11, the floor of
+              # requires-python at this commit, so for this commit's ASH the first
+              # import succeeds. The python-version input reaches setup-python as
+              # given, so it can still name 3.10, for an ash-version whose
+              # requires-python admits it. There the uv environment above holds the
+              # TOML reader that release declares: `toml` in every release from
+              # v3.0.0 through v3.7.1, and `tomli` (for Python below 3.11) in
+              # v3.8.0, which keeps `toml` as a development dependency only. So the
+              # fallback tries tomli, then toml. tomli goes first because it reads
+              # TOML 1.0, as tomllib does.
+              parse_toml = None
+              for module_name in ("tomllib", "tomli", "toml"):
+                  try:
+                      parse_toml = importlib.import_module(module_name).loads
+                  except ModuleNotFoundError:
+                      continue
+                  break
+              if parse_toml is None:
+                  fail(
+                      "None of tomllib, tomli or toml can be imported, so the TOML "
+                      "config cannot be read; refusing to scan without it. tomllib "
+                      "is part of Python 3.11 and later: use a python-version of "
+                      "3.11 or later, or a YAML or JSON config."
+                  )
 
               document = parse_toml(text)
               if config_file.name == "pyproject.toml":
