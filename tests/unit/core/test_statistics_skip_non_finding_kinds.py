@@ -164,3 +164,44 @@ def test_the_sarif_count_check_holds_with_results_that_state_no_finding(kind):
     )
 
     assert ScannerStatisticsCalculator.verify_sarif_finding_counts(model) is True
+
+
+# ---------------------------------------------------------------------------
+# A scanner whose results all state no finding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_scanner_whose_only_results_state_no_finding_keeps_its_row(kind):
+    """A scanner that reported only results that state no finding still ran and
+    reported, so it keeps its row, the same as one that reported a finding."""
+    model = _model(_result(kind, "none"))
+
+    statistics = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+    assert "cdk-nag" in statistics
+    assert ScannerStatisticsCalculator.sarif_counts_by_scanner(model).names == [
+        "cdk-nag"
+    ]
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_that_row_counts_nothing(kind):
+    """The row of a scanner whose results all state no finding counts nothing."""
+    model = _model(_result(kind, "none"))
+
+    row = ScannerStatisticsCalculator.extract_scanner_statistics(model)["cdk-nag"]
+
+    assert [
+        row[field]
+        for field in (
+            "suppressed",
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info",
+            "total",
+            "actionable",
+        )
+    ] == [0, 0, 0, 0, 0, 0, 0, 0]
