@@ -2218,9 +2218,11 @@ def test_an_extend_value_ash_cannot_read_as_gitleaks_does_is_refused(
 
 #: Two keys that fold to one setting. Both values are absolute and outside the
 #: tree, and still ASH cannot tell which one gitleaks uses: viper keeps one of two
-#: keys that fold together, and a dotted key wins over the table.
+#: keys that fold together, and a dotted key wins over the table. Two tables that
+#: fold together are refused even when only one of them sets the path.
 _DUPLICATE_EXTEND = {
     "two-tables": "[extend]\npath = '<common>'\n[Extend]\nPath = '<other>'\n",
+    "two-tables-one-path": "[extend]\npath = '<common>'\n[Extend]\nuseDefault = true\n",
     "two-keys": "[extend]\npath = '<common>'\nPath = '<other>'\n",
     "dotted-key-and-table": (
         "\"extend.path\" = '<other>'\n[extend]\npath = '<common>'\n"
@@ -2522,22 +2524,38 @@ def test_a_config_file_past_the_read_bound_is_refused(tmp_path, monkeypatch):
 
 @pytest.mark.unit
 def test_a_config_file_that_is_not_utf8_is_refused(tmp_path):
+    """The refusal quotes none of the file, and not the decoder's report either,
+    which names the byte it could not read."""
     config = tmp_path / "latin1.toml"
     config.write_bytes(b"title = '\xe9t\xe9'\n")
-    with pytest.raises(ScannerError, match="not UTF-8"):
+    with pytest.raises(ScannerError, match="not UTF-8") as refused:
         _check(path=config)
+    message = str(refused.value)
+    assert "title" not in message
+    assert "0xe9" not in message.lower()
 
 
 _UNPARSED_MARKER = "ash-unparsed-7f3c"
 
+#: Configs tomllib cannot read. tomllib stops the first before the marker; its
+#: report on the second names the table, so a refusal that quoted the parser's
+#: report would quote the marker.
+_UNPARSED = {
+    "an-unclosed-table": f"[extend\npath = '{_UNPARSED_MARKER}'\n",
+    "a-table-declared-twice": f"[{_UNPARSED_MARKER}]\n[{_UNPARSED_MARKER}]\n",
+}
 
+
+@pytest.mark.parametrize("shape", sorted(_UNPARSED))
 @pytest.mark.parametrize("route", ["path", "text"])
 @pytest.mark.unit
-def test_a_config_that_does_not_parse_is_refused_quoting_none_of_it(tmp_path, route):
+def test_a_config_that_does_not_parse_is_refused_quoting_none_of_it(
+    tmp_path, route, shape
+):
     """A config tomllib cannot read is refused, not handed on unchecked: what
     gitleaks' parser makes of it is not measured here. The refusal names where the
-    config came from and quotes none of its text."""
-    text = f"[extend\npath = '{_UNPARSED_MARKER}'\n"
+    config came from and quotes none of its text, nor tomllib's report of it."""
+    text = _UNPARSED[shape]
     if route == "path":
         broken = tmp_path / "broken.toml"
         broken.write_text(text)

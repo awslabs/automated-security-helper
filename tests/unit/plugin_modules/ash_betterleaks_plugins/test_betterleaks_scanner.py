@@ -1026,9 +1026,11 @@ def test_an_extend_value_ash_cannot_read_as_the_tools_do_is_refused(
 
 #: Two keys that fold to one setting, both absolute and outside the tree. The
 #: decoder writes both into one field in document order, so which one Betterleaks
-#: uses is not ASH's to guess.
+#: uses is not ASH's to guess. Two tables that fold together are refused even when
+#: only one of them sets the path.
 _DUPLICATE_EXTEND = {
     "two-tables": "[extend]\npath = '<common>'\n[Extend]\nPath = '<other>'\n",
+    "two-tables-one-path": "[extend]\npath = '<common>'\n[Extend]\nuseDefault = true\n",
     "two-keys": "[extend]\npath = '<common>'\nPath = '<other>'\n",
 }
 
@@ -1185,3 +1187,63 @@ def test_a_rooted_config_variable_with_no_drive_is_anchored_where_windows_reads_
     scanner = _scanner(tree, tmp_path, output_dir=tree / ".ash" / "ash_output")
     args = scanner._build_arguments(tree, tmp_path / "o.sarif")
     assert _flag(args, "--config=") == Path(os.path.abspath(value)).as_posix()
+
+
+#: Windows removes ``..`` from a path before it follows a link in it, so a path
+#: there names the same file whichever way ``..`` is read.
+_LINKS_BEFORE_DOT_DOT = pytest.mark.skipif(
+    os.name == "nt", reason="Windows removes .. before it follows a link"
+)
+
+
+def _a_value_through_a_link(tmp_path: Path) -> str:
+    """An absolute config value holding ``..`` after a symbolic link.
+
+    The kernel follows ``op/link`` to ``real/sub`` before it reads ``..``, so the
+    value opens ``real/betterleaks.toml``, as Betterleaks' own open of it does. Read
+    with ``..`` removed by hand it names ``op/betterleaks.toml``.
+    """
+    (tmp_path / "real" / "sub").mkdir(parents=True)
+    (tmp_path / "op").mkdir()
+    (tmp_path / "op" / "link").symlink_to(
+        tmp_path / "real" / "sub", target_is_directory=True
+    )
+    return f"{(tmp_path / 'op' / 'link').as_posix()}/../betterleaks.toml"
+
+
+@_LINKS_BEFORE_DOT_DOT
+@pytest.mark.parametrize("name", ["BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"])
+def test_a_linked_config_variable_is_checked_where_betterleaks_opens_it(
+    tree, tmp_path, monkeypatch, name
+):
+    """ASH leaves an absolute value to Betterleaks, so the file it checks is the
+    one the value opens: here one that extends a relative path, refused, although
+    the file the value names with ``..`` removed extends nothing."""
+    value = _a_value_through_a_link(tmp_path)
+    (tmp_path / "real" / "betterleaks.toml").write_text(_RELATIVE_EXTEND)
+    (tmp_path / "op" / "betterleaks.toml").write_text("title = 'collapsed'\n")
+    (tree / "common.toml").write_text(_TREE_COMMON)
+    monkeypatch.setenv(name, value)
+    scanner = _scanner(tree, tmp_path, output_dir=tree / ".ash" / "ash_output")
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(tree, tmp_path / "o.sarif")
+
+
+@_LINKS_BEFORE_DOT_DOT
+@pytest.mark.parametrize("name", ["BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"])
+def test_a_linked_config_variable_extending_an_absolute_path_is_left_to_betterleaks(
+    tree, tmp_path, monkeypatch, name
+):
+    """The control: the file the value opens extends an absolute path outside the
+    tree, so the value is left to Betterleaks, though nothing is at the path it
+    names with ``..`` removed."""
+    value = _a_value_through_a_link(tmp_path)
+    common = tmp_path / "op" / "common.toml"
+    common.write_text("title = 'common'\n")
+    (tmp_path / "real" / "betterleaks.toml").write_text(
+        f"[extend]\npath = '{common.as_posix()}'\n"
+    )
+    monkeypatch.setenv(name, value)
+    scanner = _scanner(tree, tmp_path, output_dir=tree / ".ash" / "ash_output")
+    args = scanner._build_arguments(tree, tmp_path / "o.sarif")
+    assert _flag(args, "--config=") is None
