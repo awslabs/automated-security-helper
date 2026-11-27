@@ -26,6 +26,8 @@ from automated_security_helper.utils import host_facts
 from automated_security_helper.utils.host_facts import Sources
 from tests.unit.utils.test_host_facts import SKYLAKE_FLAGS, cpuinfo, linux_host
 
+pytestmark = pytest.mark.unit
+
 #: The reader as the suite found it, taken when this file is imported, before any
 #: fixture has pinned it.
 REAL_READ_HOST_FACTS = host_facts.read_host_facts
