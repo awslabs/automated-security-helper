@@ -49,6 +49,10 @@ class HostMatch:
     starts with it plus a dot, so ``12.12`` matches ``12`` and ``123`` does not. Empty
     ``versions`` means every version. ``arches`` is recorded for a read that covered one
     architecture and is not matched.
+
+    ``ids`` and ``versions`` are tuples of strings and nothing else. A one-element tuple
+    written without its comma is a string, and ``in`` on a string is a substring test, so
+    such a value is refused when the match is built.
     """
 
     ids: tuple[str, ...]
@@ -56,8 +60,18 @@ class HostMatch:
     arches: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        for name, values in (("ids", self.ids), ("versions", self.versions)):
+            if not isinstance(values, tuple) or not all(
+                isinstance(value, str) for value in values
+            ):
+                raise ValueError(
+                    f"a host match's {name} are a tuple of strings; got {values!r} "
+                    "(one value is written ('x',), with the comma)"
+                )
         if not self.ids or any(not value.strip() for value in self.ids):
             raise ValueError("a host match names at least one id, and no id is blank")
+        if any(not prefix.strip() for prefix in self.versions):
+            raise ValueError("a host match names no blank version prefix")
 
     def matches(self, os_id: str, version_id: str = "") -> bool:
         if os_id not in self.ids:
