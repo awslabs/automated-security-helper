@@ -130,8 +130,10 @@ def unique_findings(
     """*results*' findings, refusing a scan in which two share an ID.
 
     The duplicate check reads every row. A row whose result states no finding
-    (SARIF kind pass, notApplicable or informational) is left out of what comes
-    back, so it is never new, absent, moved or changed.
+    (a SARIF kind of pass, notApplicable or informational with a level of none and
+    nothing declared above INFO) is left out of what comes back, so it is never new,
+    absent, moved or changed. A result of such a kind that reports a problem is a
+    finding and stays.
     """
     findings = results.to_flat_vulnerabilities()
     if len({finding.id for finding in findings}) != len(findings):
@@ -362,9 +364,12 @@ SIDE_SPEC = FrameSpec(
         "registry reads on the host; the diff never joins on it",
         "requires_exact_identity_match": "a gating policy flag the pair "
         "consumer applies on the host (see match_findings' docstring)",
-        "is_finding": "a reading of result_kind, which is not a column here; "
-        "unique_findings leaves the rows that state no finding out before a side "
-        "is built",
+        "_states_no_finding": "the verdict of the whole result, read through the "
+        "is_finding property; unique_findings applies it on the host",
+        "is_finding": "the verdict of the result the row was read from (a reading "
+        "of _states_no_finding, else of result_kind and severity), which is not a "
+        "column here; unique_findings leaves the rows that state no finding out "
+        "before a side is built",
     },
 )
 

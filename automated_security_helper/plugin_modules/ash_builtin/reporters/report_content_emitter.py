@@ -152,8 +152,9 @@ SUMMARY_POLICY_NOT_GATING = Disposition.POLICY_NOT_GATING.summary_key
 #: The sentence under the heading of the Information listing, in the Markdown,
 #: text and HTML reports: what the rows are, and that no total counts them.
 INFORMATION_NOTE = (
-    "Results whose SARIF kind states no finding (pass, notApplicable or "
-    "informational). They are listed here and counted in no total."
+    "Results that state no finding: a SARIF kind of pass, notApplicable or "
+    "informational, with no level or severity that reports a problem. They are "
+    "listed here and counted in no total."
 )
 
 
@@ -363,9 +364,10 @@ class ReportContentEmitter:
     def finding_rows(self) -> List[FlatVulnerability]:
         """The rows that state a finding, in list order.
 
-        A result whose SARIF kind is pass, notApplicable or informational states
-        none: :meth:`information_rows` lists it, and no figure, card or findings
-        table counts it.
+        A result of SARIF kind pass, notApplicable or informational that reports
+        no problem by its level or declared severity states none:
+        :meth:`information_rows` lists it, and no figure, card or findings table
+        counts it. One of those kinds that does report a problem is a finding.
         """
         return [vuln for vuln in self.flat_vulns if vuln.is_finding]
 
@@ -872,7 +874,8 @@ class ReportContentEmitter:
 
     def is_finding_actionable(self, vuln: FlatVulnerability) -> bool:
         """Determine if a finding is actionable based on severity threshold."""
-        # A result that states no finding is never actionable, whatever its level
+        # A result that states no finding is never actionable: such a result has
+        # no level or severity that reports a problem
         if not vuln.is_finding:
             return False
 

@@ -182,6 +182,7 @@ class _Row:
         "identity_message",
         "source_report",
         "result_kind",
+        "is_finding",
     )
 
     def __init__(self, index: int, row: dict[str, Any]) -> None:
@@ -201,18 +202,30 @@ class _Row:
         self.identity_message = row.get("identity_message")
         self.source_report = row.get("source_report")
         self.result_kind = row.get("result_kind")
+        self.is_finding = row.get("is_finding")
+
+
+def _row_counts(row: _Row) -> bool:
+    """Whether *row* is a finding, by the verdict the record stored for it, else by
+    its kind and severity."""
+    from automated_security_helper.utils.severity_ladder import row_states_no_finding
+
+    if row.is_finding is not None:
+        return bool(row.is_finding)
+    if row.result_kind is None:
+        return True
+    return not row_states_no_finding(row.result_kind, row.severity)
 
 
 def _rows(run: TrendRun) -> list[_Row]:
-    from automated_security_helper.utils.sarif_utils import NON_FINDING_KINDS
-
     rows = [_Row(i, row) for i, row in enumerate(run.record["findings"])]
     if len({row.id for row in rows}) != len(rows):
         raise TrendRefusal(f"{run.label}: run contains duplicate finding IDs")
     # A row whose result states no finding is in no count. A record written
-    # before result_kind existed names none, so its rows read as findings. Each
-    # row keeps its ``index``, its place in the record.
-    return [row for row in rows if row.result_kind not in NON_FINDING_KINDS]
+    # before ``is_finding`` falls back to its kind and severity, and one written
+    # before ``result_kind`` names none, so its rows read as findings. Each row
+    # keeps its ``index``, its place in the record.
+    return [row for row in rows if _row_counts(row)]
 
 
 def _severity(value: str | None) -> str:

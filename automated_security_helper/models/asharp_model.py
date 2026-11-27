@@ -1765,8 +1765,9 @@ class AshAggregatedResults(RecordModel):
         never holds, and the unified metrics count them. Counted from the SARIF
         alone, the flatten lowered what a metrics pass had written for such a
         scanner. A scanner with neither has no entry. A row whose result states
-        no finding (SARIF kind pass, notApplicable or informational) is not
-        counted, suppressed or not.
+        no finding (a SARIF kind of pass, notApplicable or informational with no
+        level or severity that reports a problem) is not counted, suppressed or
+        not.
         """
         from automated_security_helper.core.scanner_statistics_calculator import (
             ScannerStatisticsCalculator,

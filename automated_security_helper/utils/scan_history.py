@@ -176,8 +176,11 @@ def _finding_row(finding: "FlatVulnerability") -> dict[str, Any]:
         "identity_message": finding.identity_message,
         "source_report": finding.source_report,
         # The trend leaves a row whose result states no finding out of its
-        # counts; a record written before this key reads as a finding.
+        # counts. ``is_finding`` is the verdict the whole result gave; a record
+        # written before it falls back to the row's kind and severity, and a record
+        # written before ``result_kind`` reads as a finding.
         "result_kind": finding.result_kind,
+        "is_finding": finding.is_finding,
     }
 
 
@@ -480,6 +483,9 @@ def _valid_row(row: Any) -> bool:
         value is None or (isinstance(value, int) and not isinstance(value, bool))
         for value in (row.get("line_start"), row.get("line_end"))
     ):
+        return False
+    # The verdict is a flag, or absent in a record from before it was written.
+    if row.get("is_finding") is not None and not isinstance(row["is_finding"], bool):
         return False
     base = row.get("identity_base")
     if base is None:
