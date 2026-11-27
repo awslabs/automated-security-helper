@@ -7,7 +7,10 @@ default:
 * ``Tier`` is the manifest's maturity tier;
 * ``Loads by default`` is the manifest's ``default_enabled``, so an alpha scanner
   reads "no" there while ``On once loaded`` still reads "yes" for it;
-* a scanner with no manifest reads "not determined" in both, never a guessed "no".
+* a scanner with no manifest is refused by name: its tier and loading are facts of
+  the manifest, so the page never prints "not determined" or a guessed "no" for them;
+* each scanner's own section states the same three facts as its summary row, and no
+  section still calls the enabled default "Enabled by default".
 
 The committed page is held to the same manifests row by row, so a page edited by
 hand, or left stale by a manifest change, fails here as well as in the freshness
@@ -16,7 +19,10 @@ test.
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import re
+from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +37,7 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 PAGE = REPO_ROOT / "docs" / "content" / "reference" / "scanners.md"
+FRESHNESS = REPO_ROOT / "tests" / "unit" / "test_generated_docs_freshness.py"
 
 
 @pytest.fixture
@@ -53,31 +60,31 @@ def _manifest_cells(generator, name: str) -> tuple[str, str]:
     return generator._manifest_cells(SimpleNamespace(name=name))
 
 
-def _cells(row: str) -> list[str]:
-    """One table row's cells; a pipe inside a code span does not split."""
-    cells, current, in_code = [], "", False
-    for char in row.strip().strip("|"):
-        if char == "`":
-            in_code = not in_code
-        if char == "|" and not in_code:
-            cells.append(current.strip())
-            current = ""
-        else:
-            current += char
-    cells.append(current.strip())
-    return cells
+@functools.lru_cache(maxsize=1)
+def _freshness_cells():
+    """``_cells`` of the freshness module, which splits on pipes outside code spans
+    and escapes. It is loaded by path: tests/unit is not a package."""
+    spec = importlib.util.spec_from_file_location("_ash_freshness_cells", FRESHNESS)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._cells
 
 
 def _summary(text: str) -> tuple[list[str], list[dict[str, str]]]:
     """The summary table's header cells, and its rows keyed by them."""
+    cells_of = _freshness_cells()
     lines = text.splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("| Scanner |"))
-    header = _cells(lines[start])
+    header = cells_of(lines[start])
     rows = []
     for line in lines[start + 2 :]:
         if not line.startswith("|"):
             break
-        rows.append(dict(zip(header, _cells(line))))
+        cells = cells_of(line)
+        assert len(cells) == len(header), (
+            f"{len(cells)} cells under {len(header)} headings: {line}"
+        )
+        rows.append(dict(zip(header, cells)))
     return header, rows
 
 
@@ -87,16 +94,17 @@ def _scanner_name(row: dict[str, str]) -> str:
     return match.group(1)
 
 
-def _enabled_lines(text: str) -> dict[str, str]:
-    """Scanner -> what its section's "Enabled by default" line says."""
-    found: dict[str, str] = {}
+def _section_lines(text: str) -> dict[str, dict[str, str]]:
+    """Scanner -> the "- Label: value" lines of its section, by label."""
+    found: dict[str, dict[str, str]] = {}
     name = None
     for line in text.splitlines():
         heading = re.match(r"^## `([^`]+)`$", line)
         if heading:
             name = heading.group(1)
-        elif name and line.startswith("- Enabled by default: "):
-            found[name] = line.removeprefix("- Enabled by default: ")
+            found[name] = {}
+        elif name and (bullet := re.match(r"^- ([^:]+): (.*)$", line)):
+            found[name][bullet.group(1)] = bullet.group(2)
     return found
 
 
@@ -136,12 +144,26 @@ class TestManifestCells:
             "yes" if loads else "no",
         )
 
-    def test_a_scanner_with_no_manifest_reads_not_determined(self, generator):
+    def test_a_scanner_with_no_manifest_is_refused_by_name(self, generator):
         assert manifest_for("no-such-scanner") is None
-        assert _manifest_cells(generator, "no-such-scanner") == (
-            "not determined",
-            "not determined",
-        )
+        with pytest.raises(SystemExit, match="no-such-scanner"):
+            _manifest_cells(generator, "no-such-scanner")
+
+
+class TestTierList:
+    @pytest.mark.parametrize(
+        "values,expected",
+        [
+            (("a",), "`a`"),
+            (("a", "b"), "`a` or `b`"),
+            (("a", "b", "c"), "`a`, `b` or `c`"),
+            (("a", "b", "c", "d"), "`a`, `b`, `c` or `d`"),
+        ],
+        ids=["one", "two", "three", "four"],
+    )
+    def test_the_list_is_built_from_the_members(self, generator, values, expected):
+        planted = Enum("Planted", {value: value for value in values})
+        assert generator._tier_list(planted) == expected
 
 
 class TestCommittedSummary:
@@ -175,11 +197,32 @@ class TestCommittedSummary:
         assert {r["Loads by default"] for r in alpha} == {"no"}
         assert {r["Loads by default"] for r in built_in} == {"yes"}
 
-    def test_on_once_loaded_is_the_enabled_default_the_sections_state(self, page):
+    def test_every_section_states_what_its_summary_row_states(self, page):
         header, rows = _summary(page)
-        assert "On once loaded" in header, header
-        stated = _enabled_lines(page)
-        assert len(stated) == len(rows) > 0
+        assert {"Tier", "Loads by default", "On once loaded"} <= set(header), header
+        sections = _section_lines(page)
+        assert len(sections) == len(rows) > 0
         for row in rows:
             name = _scanner_name(row)
-            assert row["On once loaded"] == stated[name], name
+            for label in ("Tier", "Loads by default", "On once loaded"):
+                assert sections[name].get(label) == row[label], f"{name}: {label}"
+
+    def test_an_alpha_scanners_section_reads_no_under_loads_by_default(self, page):
+        _header, rows = _summary(page)
+        sections = _section_lines(page)
+        alpha = [r for r in rows if r["Provided by"].startswith("alpha module")]
+        assert alpha, "the page has no alpha row, so this checks nothing"
+        for row in alpha:
+            name = _scanner_name(row)
+            assert sections[name].get("Loads by default") == "no", name
+
+    def test_no_section_calls_the_enabled_default_enabled_by_default(self, page):
+        sections = _section_lines(page)
+        assert sections, "the page has no scanner section, so this checks nothing"
+        said = sorted(
+            name for name, lines in sections.items() if "Enabled by default" in lines
+        )
+        assert not said, said
+
+    def test_the_paragraph_under_the_table_names_every_tier(self, page, generator):
+        assert generator._tier_list(PluginTier) in page
