@@ -98,9 +98,12 @@ that section under a retired name; where the files wrote only the current
 name, the pointer stays the retired name's own key, as for any key the
 document does not hold. An ``add`` or ``replace`` such a pointer carries to
 the serving plugin's section writes only what the fold keeps of its value:
-the section's ``name`` and an option the serving plugin does not declare
-are dropped from it, with the fold's warning, and an operation that writes
-only one of them writes nothing (``_through_the_retired_fold``).
+the section's ``name`` is dropped from it, and so is an option the serving
+plugin does not declare, with a warning that counts the options and names
+none. A value that held nothing else, a null section, a write of the
+``name`` and an ``add`` of such an option write nothing; a ``replace``,
+``remove`` or ``test`` of such an option is refused as above
+(``_through_the_retired_fold``).
 
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
@@ -3721,9 +3724,9 @@ def _normalize_pointer(
     name does, and an ``add`` or ``replace`` it carries there writes only
     what the fold keeps of its value (_through_the_retired_fold, which
     _patch_step and the reference replay apply). ``folds`` is the loader's
-    record of those folds in the
-    patching file's chain (``_resolve``): by the serving plugin's key, what
-    each fold dropped. The redirect lands only on a serving key the record
+    record of those folds in the patching file's chain (``_resolve``): by the
+    serving plugin's key, what each fold dropped. The redirect lands only on
+    a serving key the record
     holds: where the chain wrote the section only under the current name,
     the pointer stays the retired name's own key, so a ``remove``,
     ``replace`` or ``test`` of it finds nothing, and an ``add`` writes a
@@ -3932,19 +3935,26 @@ def _through_the_retired_fold(
     section once a file of the chain wrote it under that name, so the value
     an operation carries there would skip that fold. It is held to the same
     rules instead: a section value loses its ``name`` and its undeclared
-    options (a None section is an empty one), a section value that is not a
-    mapping writes nothing, an ``options`` value loses its undeclared keys,
-    and a write of the section's ``name`` writes nothing, as does an ``add``
-    of an option the serving plugin does not declare. A ``remove``,
+    options, and an ``options`` value loses its undeclared keys. A value the
+    fold would lay nothing of writes nothing: a null section, a section that
+    is not a mapping, a section or ``options`` value that held only what the
+    fold drops (the emptied value, written, would reset what the serving
+    section holds), a write of the section's ``name``, and an ``add`` of an
+    option the serving plugin does not declare. An options mapping the
+    filter empties inside a section value is left out of it. The option an
+    ``add`` names is judged as the pointer lands, so an ``add`` the pointer
+    respells onto an option the section holds (a ``-``/``_`` twin) writes
+    that option. A ``remove``,
     ``replace`` or ``test`` of such an option is left as it is: the fold
     dropped the option as its file was read, so the operation finds nothing
     there, and its refusal says why (_dropped_option_clause).
 
     ``folds``, when given (the loader's record of the chain's folds),
     receives the options dropped here under the serving plugin's key, as the
-    fold records its own, and ``log`` prints the fold's warning. The warning
-    names the serving plugin, a name from the alias table, and how many
-    options were dropped, never a key a file wrote. ``key_of`` maps a
+    fold records its own, and ``log`` prints a warning of its own. It names
+    the serving plugin, a name from the alias table, and how many options
+    were dropped, never a key a file wrote; a dropped ``name`` is not
+    logged, as the fold logs none. ``key_of`` maps a
     mapping key to the key it stands for: the reference replay
     (_placed_through_patch) passes its key tokens' keys, so a token beside a
     kept key is kept with it and a token beside a dropped key goes with it.
@@ -4011,7 +4021,9 @@ def _through_the_retired_fold(
     value = normalized["value"]
     if not rest:
         if value is None:
-            value = {}
+            # The fold reads a null section as an empty one and lays nothing
+            # of it; written as a value, it would reset the serving section.
+            return None
         if not isinstance(value, dict):
             if log:
                 ASH_LOGGER.warning(
@@ -4021,15 +4033,28 @@ def _through_the_retired_fold(
                 )
             return None
         section = {key: item for key, item in value.items() if name(key) != "name"}
-        if "options" in section:
-            section["options"] = kept(section["options"])
+        options = section.get("options")
+        if isinstance(options, dict) and options:
+            options = kept(options)
+            if options:
+                section["options"] = options
+            else:
+                del section["options"]
+        if value and not section:
+            # Nothing but what the fold drops: the operation writes nothing,
+            # where the emptied value would reset the serving section.
+            return None
         return dict(normalized, value=section)
     if rest[0] == "name":
         return None
     if rest[0] != "options":
         return normalized
     if len(rest) == 1:
-        return dict(normalized, value=kept(value))
+        if isinstance(value, dict) and value:
+            value = kept(value)
+            if not value:
+                return None
+        return dict(normalized, value=value)
     if normalized["op"] == "add" and declared is not None and rest[1] not in declared:
         dropped({rest[1]})
         return None
@@ -4251,8 +4276,10 @@ def _dropped_option_clause(
     A ``scanners`` section written under a retired scanner name is folded onto
     the serving plugin's as its file is read (fold_document_scanner_aliases),
     and an option that plugin does not declare is dropped then, before any
-    ``patch`` applies, so an operation that removes, replaces or tests it finds
-    nothing at its path. ``folds`` is the chain's record of those folds
+    ``patch`` applies, or when a ``patch`` operation under the retired name
+    writes it (_through_the_retired_fold), so an operation that removes,
+    replaces or tests it finds nothing at its path. ``folds`` is the chain's
+    record of those folds and drops
     (_resolve); with none, or when the pointer names no option a fold dropped,
     the message stays as it was. The sentence names the serving plugin, a name
     from the alias table, and nothing a file wrote: the message already quotes
@@ -4277,9 +4304,10 @@ def _dropped_option_clause(
             for name in dropped
         ):
             return (
-                ". The option it names was dropped when the file that wrote it "
-                "was read: it is written under a retired scanner name, and the "
-                f"{serving} plugin that serves that name does not declare it."
+                ". The option it names was dropped: it was written under a "
+                "retired scanner name, in a file or by an earlier patch "
+                f"operation, and the {serving} plugin that serves that name "
+                "does not declare it."
             )
     return ""
 
@@ -4917,8 +4945,8 @@ def _placed_through_patch(
     from a retired scanner name is held to the fold's rules as _patch_step
     holds it (_through_the_retired_fold), each key's token read as the key it
     stands beside, so a token is kept or dropped with its key. Where a token
-    is then is where its value
-    is: an insert in front of it or a remove before it moves it, and an append
+    is then is where its value is: an insert in front of it or a remove
+    before it moves it, and an append
     puts it at the end, whatever its index; one an operation writes over is
     gone, and so is its reference. Placing an operation's reference at the
     operation's path instead put an append at index 0, so the value the append

@@ -1034,9 +1034,9 @@ def test_an_option_bandit_does_not_declare_under_the_retired_name_leaves_no_valu
 # refused as it is in any file.
 
 _DROPPED_CLAUSE = (
-    "The option it names was dropped when the file that wrote it was read: it "
-    "is written under a retired scanner name, and the bandit plugin that serves "
-    "that name does not declare it."
+    "The option it names was dropped: it was written under a retired scanner "
+    "name, in a file or by an earlier patch operation, and the bandit plugin "
+    "that serves that name does not declare it."
 )
 
 
@@ -1284,6 +1284,155 @@ def test_a_patched_section_name_under_the_retired_name_writes_nothing(
     assert section == {"options": {"confidence_level": "high"}}, section
     assert config.scanners.bandit.name == "bandit"
     assert lines == [], lines
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+@pytest.mark.parametrize(
+    "value, drop_lines",
+    [
+        pytest.param(None, 0, id="null"),
+        pytest.param({"name": "oldname"}, 0, id="only-the-name"),
+        pytest.param(
+            {"options": {"retired_only_knob": 1}}, 1, id="only-an-undeclared-option"
+        ),
+    ],
+)
+def test_a_patched_section_under_the_retired_name_that_the_fold_empties_writes_nothing(
+    retired_oldname, tmp_path, monkeypatch, caplog, op, value, drop_lines
+):
+    """The file writes enabled: false and confidence_level: high under
+    oldname, and its patch adds or replaces the whole section under oldname
+    with a value that holds nothing the fold keeps: null, only the name, or
+    only an option bandit does not declare. The fold lays nothing of such a
+    value, so the operation writes nothing: bandit keeps enabled false and
+    confidence_level high, and only a dropped option is warned of. Written
+    emptied, the value replaced bandit's section, so bandit ran with its
+    default options."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _write(
+        tmp_path / "patched.yaml",
+        {
+            "scanners": {
+                "oldname": {"enabled": False, "options": {"confidence_level": "high"}}
+            },
+            "patch": [{"op": op, "path": "/scanners/oldname", "value": value}],
+        },
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    section = document.data["scanners"]["bandit"]
+    assert section == {"enabled": False, "options": {"confidence_level": "high"}}, (
+        section
+    )
+    assert config.scanners.bandit.enabled is False
+    assert config.scanners.bandit.options.confidence_level == "high"
+    assert len(lines) == drop_lines, lines
+
+
+@pytest.mark.parametrize("op", ["add", "replace"])
+def test_patched_options_under_the_retired_name_that_the_fold_empties_write_nothing(
+    retired_oldname, tmp_path, monkeypatch, caplog, op
+):
+    """The patch adds or replaces oldname's options with only
+    retired_only_knob, an option bandit does not declare. The fold lays
+    nothing of such a value, so the operation writes nothing: bandit keeps
+    the file's confidence_level, and one warning names the drop. Written
+    emptied, the value replaced bandit's options."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {
+            "op": op,
+            "path": "/scanners/oldname/options",
+            "value": {"retired_only_knob": 1},
+        },
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    options = document.data["scanners"]["bandit"]["options"]
+    assert options == {"confidence_level": "high"}, options
+    assert config.scanners.bandit.options.confidence_level == "high"
+    assert len(lines) == 1 and "dropped" in lines[0], lines
+
+
+def test_a_patched_section_under_the_retired_name_that_is_not_a_mapping_writes_nothing(
+    retired_oldname, tmp_path, monkeypatch, caplog
+):
+    """The patch replaces the whole section under oldname with a string. The
+    fold lays nothing of a section that is not a mapping, so the operation
+    writes nothing, and one warning says so."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {"op": "replace", "path": "/scanners/oldname", "value": "off"},
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    section = document.data["scanners"]["bandit"]
+    assert section == {"options": {"confidence_level": "high"}}, section
+    assert len(lines) == 1 and "not a mapping" in lines[0], lines
+
+
+def test_a_patched_value_under_the_retired_name_counts_every_option_it_drops(
+    retired_oldname, tmp_path, monkeypatch, caplog
+):
+    """The patch replaces oldname's options with confidence_level: low and
+    two options bandit does not declare. Both are dropped, and the one
+    warning counts them."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {
+            "op": "replace",
+            "path": "/scanners/oldname/options",
+            "value": {
+                "confidence_level": "low",
+                "retired_only_knob": 1,
+                "other_retired_knob": 2,
+            },
+        },
+    )
+
+    document, lines, config = _loaded(path, caplog)
+
+    options = document.data["scanners"]["bandit"]["options"]
+    assert options == {"confidence_level": "low"}, options
+    assert len(lines) == 1, lines
+    assert "writes 2 options" in lines[0] and "they were dropped" in lines[0], lines
+
+
+def test_an_option_an_earlier_patch_operation_dropped_is_refused_with_its_cause(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The patch adds retired_only_knob under oldname, which the fold's rule
+    drops, and then removes it. The second operation finds nothing there:
+    the load is refused, and the message says the option was dropped."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    path = _patched_file(
+        tmp_path,
+        "oldname",
+        {
+            "op": "add",
+            "path": "/scanners/oldname/options/retired_only_knob",
+            "value": 1,
+        },
+        {"op": "remove", "path": "/scanners/oldname/options/retired_only_knob"},
+    )
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        _load(monkeypatch, path)
+
+    text = " ".join(str(refused.value).split())
+    assert "'patch' entry 1 in" in text, text
+    assert _DROPPED_CLAUSE in text, text
 
 
 def test_an_undeclared_option_a_patch_writes_under_the_retired_name_leaves_no_value(
