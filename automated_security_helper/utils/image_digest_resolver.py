@@ -202,6 +202,13 @@ _READ_FLAGS = (
 #: The two member names a record is read from, once one leading ``./`` is gone.
 _RECORD_NAMES = ("manifest.json", "index.json")
 
+#: Why an archive names no digest when a member a tool reads as manifest.json is
+#: not the record read here (``reads_as_manifest_json``).
+_MISREAD_MANIFEST = (
+    "the archive holds a member that a tool reads as manifest.json but that is "
+    "not a regular file named exactly manifest.json"
+)
+
 
 class _NotRegularFile(Exception):
     """A path that names a link, a pipe, a directory or any other non-file."""
@@ -372,22 +379,35 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
       removed; a member of any other spelling is not read, and two members
       of the same record name leave no digest, because a tool may read the
       other one;
+    - an archive with a member the tools read as ``manifest.json`` leaves no
+      digest unless that member is the record: ``archive_scheme`` hands an
+      archive to them as a docker archive for any member called
+      ``manifest.json`` once a leading run of ``.`` and ``/`` is dropped,
+      whatever its type (``reads_as_manifest_json`` is that one test), and
+      they read ``manifest.json`` from it. A link, or a name such as
+      ``.manifest.json`` or ``../manifest.json``, is such a member and not the
+      record, so the archive names no digest, even beside a regular
+      ``index.json``;
     - the digest is accepted only when the blob the record names (the config
       blob of a ``manifest.json`` entry, the manifest blob ``blobs/sha256/<hex>``
       of an ``index.json``) is in the payload as a regular file, is within
       ``_MAX_PAYLOAD_BLOB_BYTES``, and hashes to it with sha256. A layout's
       index and blobs are opened without following a link or waiting on a pipe.
 
-    A member that is not a regular file is skipped, never read: the archive
-    reader would follow a link to another member, and raises on one the archive
-    lacks. A record or blob that cannot be read or parsed (JSON nested past the
-    parser's recursion limit included), is missing or does not match answers
-    nothing, with a reason that names the record. Nothing the payload holds
-    raises out of this function: a payload that names no digest is keyed on its
-    path, and a resolution failure never fails or skips the scan.
+    An ``index.json`` that is not a regular file is skipped, never read: the
+    archive reader would follow a link to another member, and raises on one the
+    archive lacks. A record or blob that cannot be read or parsed (JSON nested
+    past the parser's recursion limit included), is missing or does not match
+    answers nothing, with a reason that names the record. Nothing the payload
+    holds raises out of this function: a payload that names no digest is keyed
+    on its path, and a resolution failure never fails or skips the scan.
     """
     import tarfile
     from pathlib import Path
+
+    from automated_security_helper.utils.image_tool_targets import (
+        reads_as_manifest_json,
+    )
 
     if image.oci_layout is not None:
         layout = Path(image.oci_layout)
@@ -423,6 +443,16 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
             seen: set = set()
             for member in saved:
                 name = member.name.removeprefix("./")
+                if reads_as_manifest_json(member.name) and not (
+                    name == "manifest.json" and member.isreg()
+                ):
+                    # The tools read this archive through this member
+                    # (archive_scheme sends it to them as a docker archive for
+                    # it), and it is not the record read here: a link, or a name
+                    # that needs more than one leading ./ dropped. A digest from
+                    # any other record could name another image than the one
+                    # they scan.
+                    return None, _MISREAD_MANIFEST
                 if name not in _RECORD_NAMES:
                     continue
                 if name in seen:
@@ -447,8 +477,12 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
                 except Exception as error:  # noqa: BLE001 - a bad record is no digest
                     kind = type(error).__name__
                     return None, f"its {name} could not be read ({kind})"
-            # manifest.json decides (a recent docker save writes BOTH, and is
-            # read as a docker archive, exactly as archive_scheme routes it).
+            # manifest.json decides when there is one: a recent docker save
+            # writes BOTH records, and archive_scheme sends such an archive to
+            # the tools as a docker archive, which they read through
+            # manifest.json. No other member archive_scheme reads as
+            # manifest.json got past the loop, so the one parsed here is the
+            # one they read.
             if "manifest.json" in records:
                 record = "manifest.json"
                 digest, why = _single_config_digest(records[record])

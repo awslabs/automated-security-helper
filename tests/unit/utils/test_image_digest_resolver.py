@@ -824,16 +824,20 @@ class TestOnlyAnExactRecordNameIsARecord:
         [".manifest.json", "../manifest.json", ".//manifest.json", "/manifest.json"],
     )
     def test_a_saved_image_record_under_another_name_is_not_read(self, tmp_path, name):
-        """The name test used to strip any run of dots and slashes from the front."""
+        """The name test used to strip any run of dots and slashes from the front.
+
+        A saved image's record under such a name is not read as the record. The
+        tools still read the member as manifest.json, so the archive names no
+        digest, and the reason says why.
+        """
         from automated_security_helper.utils.image_digest_resolver import (
             payload_digest,
         )
 
         archive = _archive_holding(tmp_path, *_saved_image(record=name))
-        assert payload_digest(archive) == (
-            None,
-            "the archive holds no manifest.json or index.json",
-        )
+        digest, why = payload_digest(archive)
+        assert digest is None
+        assert "not a regular file named exactly manifest.json" in why
 
     @pytest.mark.parametrize("name", ["..index.json", "../index.json", "/index.json"])
     def test_an_index_under_another_name_is_not_read(self, tmp_path, name):
