@@ -9,6 +9,10 @@ means and exits with it unchanged. ASH releases after 3.7.1 exit 5 for a usage e
 and the command had no arm for it, so a refused command line printed only "exited 5".
 That is a wording defect, not a verdict one: the code is still propagated. These run
 the committed command against each code.
+
+Status 70 is not one of ASH's. It is what the merge action records when its check of
+which merge command the image's ASH has got no answer, so it has an arm of its own. A
+code that no arm names reaches the last arm, which prints it as "exited N".
 """
 
 from __future__ import annotations
@@ -58,7 +62,11 @@ def _verdict_command() -> str:
         (1, "shard coverage incomplete"),
         (2, "actionable findings at or above"),
         (5, "usage error"),
-        (70, "exited 70"),
+        # The check of which merge command the image's ASH has ends the action with 70
+        # when it gets no answer, and the merge does not run.
+        (70, "not run - the check of which merge command this ASH has got no answer"),
+        # A code that no arm names falls to the last arm, which prints it as it is.
+        (71, "exited 71"),
     ],
 )
 def test_each_exit_code_is_named_and_propagated(tmp_path, code, says):
