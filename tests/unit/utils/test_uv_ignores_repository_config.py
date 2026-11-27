@@ -1320,3 +1320,391 @@ def test_the_nbconvert_uv_route_is_guarded(tree, tmp_path, spawns, monkeypatch):
         assert NO_ENV_FILE in argv, argv
         assert argv.index(NO_ENV_FILE) < argv.index("--to"), argv
         assert "UV_CONFIG_FILE" not in _effective(run["env"]), run["env"]
+
+
+# ---------------------------------------------------------------------------
+# Every uv path variable the scanned tree can supply, on every route
+# ---------------------------------------------------------------------------
+#
+# uv takes a file or a directory by name through more variables than the two
+# above. ``uv help tool run`` and ``uv help tool install`` (uv 0.13.5) list them
+# as the ``[env: ...]`` of the options that take a path: requirements files
+# (constraints, build constraints, overrides, excludes), index and find-links
+# locations (each a URL or a local directory), and the project and working
+# directories. uv reads a relative value, a leading ``~`` included (uv does not
+# expand it), against the directory it starts in. Every route that starts uv for
+# a tool drops such a value, and one that lies inside the tree being scanned.
+
+#: Each added variable: a relative value, the path under the tree that its
+#: absolute form names, and the operator's value, which stays (None: the same
+#: path under a directory outside every root).
+_ADDED_VARIABLES = {
+    "UV_CONSTRAINT": ("constraints.txt", "constraints.txt", None),
+    "UV_BUILD_CONSTRAINT": ("build-constraints.txt", "build-constraints.txt", None),
+    "UV_OVERRIDE": ("overrides.txt", "overrides.txt", None),
+    "UV_EXCLUDE": ("excludes.txt", "excludes.txt", None),
+    "UV_INDEX": ("./simple", "simple", "https://mirror.invalid/simple"),
+    "UV_DEFAULT_INDEX": ("./simple", "simple", "https://mirror.invalid/simple"),
+    "UV_INDEX_URL": ("./simple", "simple", "https://mirror.invalid/simple"),
+    "UV_EXTRA_INDEX_URL": ("./simple", "simple", "https://mirror.invalid/simple"),
+    "UV_FIND_LINKS": ("./wheels", "wheels", "https://mirror.invalid/wheels/"),
+    "UV_PROJECT": (".", "sub", None),
+    "UV_WORKING_DIR": ("sub", "sub", None),
+}
+
+
+def _bandit(src: Path, tmp_path: Path):
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        bandit_scanner,
+    )
+
+    scanner = bandit_scanner.BanditScanner(
+        context=_plugin_context(src, tmp_path),
+        config=bandit_scanner.BanditScannerConfig(),
+    )
+    scanner.use_uv_tool = True
+    return scanner
+
+
+def _tool_runs_of_one_run(scanner, spawns: _Spawns, tmp_path: Path) -> List[dict]:
+    """The ``uv tool run`` of the scanner's tool that one of its runs started."""
+    before = len(spawns.runs)
+    scanner._run_subprocess(
+        [scanner.command, "--version"],
+        results_dir=tmp_path / "results",
+        stdout_preference="return",
+        stderr_preference="return",
+        timeout=30,
+    )
+    return [
+        run
+        for run in spawns.runs[before:]
+        if run["command"][1:3] == ["tool", "run"] and scanner.command in run["command"]
+    ]
+
+
+@pytest.mark.parametrize("name", sorted(_ADDED_VARIABLES))
+@pytest.mark.unit
+def test_a_scanners_run_gets_no_uv_path_variable_the_tree_supplies(
+    name, tree, tmp_path, spawns, monkeypatch
+):
+    relative, inside, operator = _ADDED_VARIABLES[name]
+    if operator is None:
+        operator = str(tmp_path / "operator" / inside)
+    scanner = _bandit(tree, tmp_path)
+    seen = {}
+    for label, value in (
+        ("relative", relative),
+        ("inside", str(tree / inside)),
+        ("operator", operator),
+    ):
+        monkeypatch.setenv(name, value)
+        runs = _tool_runs_of_one_run(scanner, spawns, tmp_path)
+        assert runs, (label, spawns.runs)
+        seen[label] = {_effective(run["env"]).get(name) for run in runs}
+    assert seen["relative"] == {None}, seen
+    assert seen["inside"] == {None}, seen
+    # Control: the operator's own value still reaches uv.
+    assert seen["operator"] == {operator}, seen
+
+
+@pytest.mark.unit
+def test_the_probes_drop_a_uv_path_inside_the_scanned_tree_by_its_absolute_path(
+    tree, spawns, monkeypatch
+):
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    monkeypatch.setenv("UV_FIND_LINKS", str(tree / "wheels"))
+    monkeypatch.setenv("UV_INDEX_URL", "https://mirror.invalid/simple")
+    runner = UVToolRunner(uv_executable="/opt/uv")
+    with subprocess_utils.scanning_tree(tree):
+        runner.get_tool_version("bandit")
+        runner.get_tool_version("bandit", "bandit>=1")
+        uv_tool_runner.get_uv_tool_command("bandit")
+    runs = spawns.tool_runs()
+    assert len(runs) == 3, spawns.runs
+    for run in runs:
+        env = _effective(run["env"])
+        assert "UV_CONFIG_FILE" not in env, run["command"]
+        assert "UV_FIND_LINKS" not in env, run["command"]
+        # Control: a URL names nothing in the tree.
+        assert env.get("UV_INDEX_URL") == "https://mirror.invalid/simple", run[
+            "command"
+        ]
+
+
+@pytest.mark.unit
+def test_the_nbconvert_route_drops_a_uv_path_inside_the_source_or_the_output_directory(
+    tree, tmp_path, spawns, monkeypatch
+):
+    from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter import (
+        JupyterConverter,
+        JupyterConverterConfig,
+    )
+
+    context = _plugin_context(tree, tmp_path)
+    converter = JupyterConverter(context=context, config=JupyterConverterConfig())
+    monkeypatch.setattr(JupyterConverter, "_uv_from_spec", lambda self: "nbconvert>=7")
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    monkeypatch.setenv(
+        "UV_CONSTRAINT", str(Path(context.output_dir) / "constraints.txt")
+    )
+    monkeypatch.setenv("UV_FIND_LINKS", "https://mirror.invalid/wheels/")
+    # No scan is active: the converter's own directories are the only roots.
+    converter._execute_nbconvert_via_uv(
+        ["jupyter", "nbconvert", "--to", "script", "x.ipynb"], timeout=30
+    )
+    runs = spawns.tool_runs()
+    assert runs, spawns.runs
+    for run in runs:
+        env = _effective(run["env"])
+        assert "UV_CONFIG_FILE" not in env, run["command"]
+        assert "UV_CONSTRAINT" not in env, run["command"]
+        # Control: a URL names nothing in either directory.
+        assert env.get("UV_FIND_LINKS") == "https://mirror.invalid/wheels/", run[
+            "command"
+        ]
+
+
+@pytest.mark.unit
+def test_uv_tool_install_and_list_started_in_the_checkout_get_no_uv_path_the_tree_supplies(
+    tree, spawns, monkeypatch
+):
+    # ASH started inside the repository it scans, the CI default: a relative
+    # value would resolve against the checkout. The tree fixture sets
+    # UV_CONFIG_FILE and UV_ENV_FILE relative.
+    monkeypatch.chdir(tree)
+    monkeypatch.setenv("UV_CONSTRAINT", "constraints.txt")
+    monkeypatch.setenv("UV_FIND_LINKS", str(tree / "wheels"))
+    monkeypatch.setenv("UV_INDEX_URL", "https://mirror.invalid/simple")
+    runner = UVToolRunner(uv_executable="/opt/uv")
+    with subprocess_utils.scanning_tree(tree):
+        assert runner.install_tool_with_version("bandit") is True
+    installs = [
+        run for run in spawns.runs if run["command"][1:3] == ["tool", "install"]
+    ]
+    listings = [run for run in spawns.runs if run["command"][1:3] == ["tool", "list"]]
+    assert installs and listings, spawns.runs
+    for run in [*installs, *listings]:
+        env = _effective(run["env"])
+        for name in ("UV_CONFIG_FILE", "UV_ENV_FILE", "UV_CONSTRAINT", "UV_FIND_LINKS"):
+            assert name not in env, (name, run["command"])
+        # Control: a URL names nothing in the tree.
+        assert env.get("UV_INDEX_URL") == "https://mirror.invalid/simple", run[
+            "command"
+        ]
+
+
+def _link(link: Path, target: Path) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"this platform cannot make a directory link here: {error}")
+
+
+@pytest.mark.unit
+def test_a_probe_drops_a_uv_config_file_spelled_through_a_link_into_the_tree(
+    tree, tmp_path, spawns, monkeypatch
+):
+    link = tmp_path / "link-to-src"
+    _link(link, tree)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(link / "uv.toml"))
+    with subprocess_utils.scanning_tree(tree):
+        uv_tool_runner.get_uv_tool_command("bandit")
+    runs = spawns.tool_runs()
+    assert len(runs) == 1, spawns.runs
+    assert "UV_CONFIG_FILE" not in _effective(runs[0]["env"]), runs[0]["command"]
+
+
+@pytest.mark.unit
+def test_a_probe_drops_a_uv_config_file_inside_a_tree_scanned_through_a_link(
+    tree, tmp_path, spawns, monkeypatch
+):
+    alias = tmp_path / "alias-of-src"
+    _link(alias, tree)
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    with subprocess_utils.scanning_tree(alias):
+        uv_tool_runner.get_uv_tool_command("bandit")
+    runs = spawns.tool_runs()
+    assert len(runs) == 1, spawns.runs
+    assert "UV_CONFIG_FILE" not in _effective(runs[0]["env"]), runs[0]["command"]
+
+
+def _guarddog(src: Path, tmp_path: Path, **options):
+    from automated_security_helper.plugin_modules.ash_guarddog_plugins import (
+        guarddog_scanner as guarddog_module,
+    )
+
+    scanner = guarddog_module.GuardDogScanner(
+        context=_plugin_context(src, tmp_path),
+        config=guarddog_module.GuardDogScannerConfig(
+            enabled=True,
+            options=guarddog_module.GuardDogScannerConfigOptions(**options),
+        ),
+    )
+    scanner.use_uv_tool = True
+    return scanner
+
+
+def _assert_guarddog_run_got_no_tree_uv_path(runs: List[dict], src: Path):
+    assert runs, "no uv tool run was recorded"
+    for run in runs:
+        # GuardDog starts in its invocation directory, outside the tree, so the
+        # run's own working directory is no root that covers the tree.
+        assert run["cwd"] is not None, run["command"]
+        assert not Path(run["cwd"]).is_relative_to(src), run["cwd"]
+        env = _effective(run["env"])
+        assert "UV_CONFIG_FILE" not in env, run["command"]
+        assert "UV_CONSTRAINT" not in env, run["command"]
+
+
+@pytest.mark.unit
+def test_the_guarddog_hit_limit_run_drops_a_uv_path_inside_the_tree_on_its_real_route(
+    tree, tmp_path, spawns, monkeypatch
+):
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    monkeypatch.setenv("UV_CONSTRAINT", str(tree / "constraints.txt"))
+    scanner = _guarddog(tree, tmp_path, max_hits=3)
+    prefix, failure = scanner._prepare_hit_limit()
+    assert failure is None, failure
+    # The real _run_subprocess: the argv starts with uv, so it takes the direct
+    # branch, where nothing else drops a variable.
+    scanner._invoke(
+        [*prefix, "pypi", "scan", str(tree)],
+        tmp_path / "results" / "invocations" / "scan-pypi",
+        30.0,
+    )
+    _assert_guarddog_run_got_no_tree_uv_path(
+        [run for run in spawns.tool_runs() if "python" in run["command"]], tree
+    )
+
+
+@pytest.mark.unit
+def test_the_guarddog_run_through_uv_drops_a_uv_path_inside_the_tree_on_its_real_route(
+    tree, tmp_path, spawns, monkeypatch
+):
+    monkeypatch.setenv("UV_CONFIG_FILE", str(tree / "uv.toml"))
+    monkeypatch.setenv("UV_CONSTRAINT", str(tree / "constraints.txt"))
+    scanner = _guarddog(tree, tmp_path)
+    # The real _run_subprocess: ``guarddog`` goes through UVToolRunner.run_tool,
+    # whose own roots are the invocation directory alone.
+    scanner._invoke(
+        ["guarddog", "pypi", "scan", str(tree)],
+        tmp_path / "results" / "invocations" / "scan-pypi",
+        30.0,
+    )
+    _assert_guarddog_run_got_no_tree_uv_path(
+        [run for run in spawns.tool_runs() if "guarddog" in run["command"]], tree
+    )
+
+
+def _judged(environment: dict, roots) -> dict:
+    """What ``without_tree_uv_files`` leaves of ``environment``."""
+    return dict(uv_tool_runner.without_tree_uv_files(dict(environment), roots))
+
+
+_SHAPES = [
+    # Each case: (a value the tree supplies, the operator's value of the same
+    # shape), as uv 0.13.5 reads them (``uv tool run --show-settings``).
+    pytest.param(
+        lambda src, out: (
+            {"UV_ENV_FILE": f"{out / 'a.env'} {src / 'b.env'}"},
+            {"UV_ENV_FILE": f"{out / 'a.env'} {out / 'b.env'}"},
+        ),
+        id="a-space-separated-list",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_FIND_LINKS": f"{out / 'wheels'},{src / 'wheels'}"},
+            {"UV_FIND_LINKS": f"{out / 'wheels'},https://mirror.invalid/wheels/"},
+        ),
+        id="a-comma-separated-list",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_FIND_LINKS": (src / "wheels").as_uri()},
+            {"UV_FIND_LINKS": (out / "wheels").as_uri()},
+        ),
+        id="a-file-url",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_INDEX": f"corp={src / 'simple'}"},
+            {"UV_INDEX": "corp=https://mirror.invalid/simple"},
+        ),
+        id="a-named-index",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_CONSTRAINT": f"https://mirror.invalid/c.txt {src / 'c.txt'}"},
+            {"UV_CONSTRAINT": f"https://mirror.invalid/c.txt {out / 'c.txt'}"},
+        ),
+        id="urls-and-paths",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_PROJECT": str(src / "a b")},
+            {"UV_CONFIG_FILE": str(out / "a b" / "uv.toml")},
+        ),
+        id="one-path-read-whole",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_CONFIG_FILE": "~/uv.toml"},
+            {"UV_CONFIG_FILE": str(out / "uv.toml")},
+        ),
+        id="a-leading-tilde-is-relative",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_FIND_LINKS": str(src)},
+            {"UV_FIND_LINKS": str(out)},
+        ),
+        id="the-tree-itself",
+    ),
+]
+
+
+@pytest.mark.parametrize("shape", _SHAPES)
+@pytest.mark.unit
+def test_each_path_in_a_uv_value_is_judged_as_uv_reads_the_value(shape, tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    supplied, operators = shape(src, tmp_path / "operator")
+    left = _judged(supplied, (src,))
+    for name, value in supplied.items():
+        assert name not in left, (name, value)
+    # Control: the operator's value of the same shape stays whole.
+    assert _judged(operators, (src,)) == operators
+
+
+@pytest.mark.unit
+def test_a_uv_path_whose_dot_dot_passes_through_a_link_is_judged_by_where_it_leads(
+    tmp_path,
+):
+    src = tmp_path / "src"
+    (src / "a" / "b").mkdir(parents=True)
+    (src / "ci").mkdir()
+    _link(src / "sub", src / "a" / "b")
+    # Spelled, the value lies outside the tree (two ``..`` from ``src/sub``), but
+    # ``sub`` leads to ``src/a/b``, so the file opened is ``src/ci/uv.toml``.
+    supplied = {"UV_CONFIG_FILE": str(src / "sub" / ".." / ".." / "ci" / "uv.toml")}
+    assert "UV_CONFIG_FILE" not in _judged(supplied, (src,))
+    # Control: the same file name outside the tree stays.
+    operators = {"UV_CONFIG_FILE": str(tmp_path / "operator" / "ci" / "uv.toml")}
+    assert _judged(operators, (src,)) == operators
+
+
+@pytest.mark.unit
+def test_the_scanned_tree_is_a_root_for_a_caller_that_names_none(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    supplied = {
+        "UV_CONFIG_FILE": str(src / "uv.toml"),
+        "UV_INDEX_URL": "https://mirror.invalid/simple",
+    }
+    with subprocess_utils.scanning_tree(src):
+        left = _judged(supplied, ())
+    assert "UV_CONFIG_FILE" not in left, left
+    assert left.get("UV_INDEX_URL") == "https://mirror.invalid/simple", left
+    # Control: outside the scan the same call has no tree to judge against.
+    assert _judged(supplied, ()) == supplied
