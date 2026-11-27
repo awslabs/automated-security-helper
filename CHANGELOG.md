@@ -76,11 +76,14 @@
   that has `.ash.yml` beside `.ash.yaml`, this reverses which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
   warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
   names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
-  (or the same with the file's own name). A TOML config, `.ashrc.toml` or `ashrc.toml`,
-  cannot be moved: `.ash.yaml` is read as YAML, so rewrite its settings as YAML in
-  `.ash.yaml` and delete the TOML file. A JSON config indented with tabs needs
-  re-indenting with spaces first, for the same reason. This repository's own config
-  moved the same way.
+  (or the same with the file's own name). A relative `extends` path in a file from
+  `.ash/` is read from the file's own directory, so rewrite it for the root first. A
+  TOML config, `.ashrc.toml` or `ashrc.toml`, cannot be moved: `.ash.yaml` is read as
+  YAML, so rewrite its settings as YAML in `.ash.yaml` and delete the TOML file, and
+  write each value that starts with `${` without quotes (or tag it `!ENV`), because a
+  quoted YAML value is not read from the environment. A JSON config that contains a
+  tab character needs each tab replaced with spaces first, because YAML refuses it.
+  This repository's own config moved the same way.
 - **A finding moved from an MCP config's generated script back to the config file has a
   new property name and a new id.** The result property that names the generated script
   is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name

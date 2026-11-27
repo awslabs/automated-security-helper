@@ -50,6 +50,8 @@ Move the file with `git mv` so its history follows it. For a config in the `.ash
 git mv .ash/.ash.yaml .ash.yaml
 ```
 
+A file in `.ash/` moves up to the root, and a relative [`extends`](#extends) path is read from the directory of the file that names it. Before you move such a file, rewrite each relative base path for the root (`base.yaml` beside the file becomes `.ash/base.yaml`), or move the base file with it. Otherwise the config is refused, and every scan exits 3.
+
 For a config under another legacy name, such as `.ashrc.yaml`, use that name as the source:
 
 <!-- doctest: illustrative reason="runs in a repository that already has a config at the old location" -->
@@ -57,7 +59,9 @@ For a config under another legacy name, such as `.ashrc.yaml`, use that name as 
 git mv .ashrc.yaml .ash.yaml
 ```
 
-A TOML file, `.ashrc.toml` or `ashrc.toml`, cannot be moved this way: `.ash.yaml` is read as YAML, so the moved file is refused and every scan exits 3 until it is fixed. Write the same settings as YAML in a new `.ash.yaml`, then remove the TOML file with `git rm`. Only the syntax changes: a `[global_settings]` table in the TOML file is a `global_settings:` mapping in YAML. A JSON file, such as `.ash.json` or `.ashrc.json`, can be moved, but `.ash.yaml` is read as YAML and refuses a tab used for indentation, so re-indent a JSON file with spaces first if it uses tabs.
+A TOML file, `.ashrc.toml` or `ashrc.toml`, cannot be moved this way: `.ash.yaml` is read as YAML, so the moved file is refused and every scan exits 3 until it is fixed. Write the same settings as YAML in a new `.ash.yaml`, then remove the TOML file with `git rm`. A `[global_settings]` table in the TOML file is a `global_settings:` mapping in YAML. Two kinds of value need care. A TOML string that starts with `${` is an [environment reference](#environment), but in YAML only a value written without quotes, or tagged `!ENV`, is one; with the quotes kept it is read as literal text. In TOML, `project_name = "${ASH_SERVICE_NAME:payments-api}"` reads the variable; in YAML that is `project_name: ${ASH_SERVICE_NAME:payments-api}`, or `project_name: !ENV '${ASH_SERVICE_NAME:payments-api}'`. And a TOML string that YAML would read as another type, such as `"yes"`, `"off"` or `"0123"`, stays quoted.
+
+A JSON file, such as `.ash.json` or `.ashrc.json`, can be moved, but `.ash.yaml` is read as YAML, which refuses a tab between tokens, not only one that indents a line. A valid JSON file has no tab inside a string, so if the file contains a tab character at all, replace each tab with spaces before you move it. The parse error gives the line and column of the tab.
 
 The deprecation warning names the file ASH loaded and the `.ash.yaml` path to move it to, or, for a TOML file, to rewrite it in. Run `ash config validate` afterward to confirm that ASH reads the new location.
 

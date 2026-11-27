@@ -705,6 +705,12 @@ def is_json_file(path: Path) -> bool:
     return Path(path).name.lower().endswith(".json")
 
 
+def is_in_ash_directory(path: Path) -> bool:
+    """Whether a config at `path` is in a ``.ash/`` directory, which the canonical
+    file is not: it belongs to the root above ``.ash/``."""
+    return Path(path).parent.name == ".ash"
+
+
 #: Windows' ERROR_CANT_RESOLVE_FILENAME: what a symbolic link that leads back to
 #: itself raises there, in place of the ELOOP a POSIX kernel gives.
 _WINERROR_CANT_RESOLVE_FILENAME = 1921
@@ -2099,8 +2105,48 @@ def canonical_path_for(source: ConfigSource) -> Path:
     was found at the root itself.
     """
     parent = source.path.parent
-    root = parent.parent if parent.name == ".ash" else parent
+    root = parent.parent if is_in_ash_directory(source.path) else parent
     return root / ASH_CANONICAL_CONFIG_FILE_NAME
+
+
+def legacy_move_caveats(path: Path, subject: str) -> List[str]:
+    """What else a config at `path` needs, beyond a new name, to be read as the
+    canonical file the way it is read now. Each is one sentence without its final
+    period; `subject` names the file in it, as "this file" or as its label.
+
+    The canonical file is read as YAML whatever the file was, and a file in
+    ``.ash/`` moves to the root above it:
+
+    * a relative ``extends`` path is read from the directory of the file that
+      names it, so one in a file that leaves ``.ash/`` must be rewritten;
+    * JSON is read as JSON only under a ``.json`` name, and the YAML loader skips
+      only spaces between tokens, so it refuses a tab anywhere in the file; a
+      tab inside a JSON string is refused by JSON itself, so every tab of a JSON
+      file that loads is between tokens;
+    * a TOML string that starts with ``${`` is a reference to the environment,
+      and a YAML value is one only when it is written without quotes or is tagged
+      ``!ENV``.
+
+    A ``pyproject.toml`` table is edited where it is and has none.
+    """
+    caveats: List[str] = []
+    if is_in_ash_directory(path):
+        caveats.append(
+            "A relative extends path is read from the file's own directory, so "
+            f"rewrite any in {subject} for the scan root before you move it"
+        )
+    if is_json_file(path):
+        caveats.append(
+            f"Replace each tab character in {subject} with spaces before you move "
+            f"it: {ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, which refuses "
+            "a tab (the parse error gives the tab's line and column)"
+        )
+    if is_toml_file(path) and not is_pyproject(path):
+        caveats.append(
+            "Write a value that starts with ${ without quotes in YAML (or tag it "
+            "!ENV), or it is read as literal text, not from the environment"
+        )
+    return caveats
 
 
 def _legacy_location_warning(source: ConfigSource) -> str:
@@ -2115,20 +2161,15 @@ def _legacy_location_warning(source: ConfigSource) -> str:
             f"{ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, so renaming the "
             "TOML file is not enough"
         )
-    elif is_json_file(source.path):
-        # A JSON file is read as JSON only under a .json name. At the canonical
-        # name it is read as YAML, which refuses a tab used for indentation.
-        remedy = (
-            f"move this file to {canonical}; {ASH_CANONICAL_CONFIG_FILE_NAME} is "
-            "read as YAML, so re-indent this file with spaces first if it is "
-            "indented with tabs"
-        )
     else:
         remedy = f"move this file to {canonical}"
+    caveats = "".join(
+        f" {caveat}." for caveat in legacy_move_caveats(source.path, "this file")
+    )
     return (
         f"ASH is reading its configuration from {source.label}, a deprecated "
         f"location that ASH 4.0 stops reading. The canonical config file is "
-        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: {remedy}."
+        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: {remedy}.{caveats}"
     )
 
 
