@@ -130,6 +130,20 @@ def _what_git_exports_to_a_hook_stays_out_of_every_test(monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
 
 
+@pytest.mark.unit
+def test_every_test_runs_with_no_git_variable_and_no_global_git_configuration():
+    """What the fixture above leaves behind is the only git state a test starts with. The
+    variables a hook exports are gone before a test reads them, so nothing else in this
+    file would notice the fixture stop running until a hook started pytest."""
+    git_variables = sorted(
+        name for name in os.environ if name.upper().startswith("GIT_")
+    )
+
+    assert git_variables == ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"]
+    assert os.environ["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert os.environ["GIT_CONFIG_NOSYSTEM"] == "1"
+
+
 def _plain_git(path: Path, *args: str) -> str:
     """git on a repository this test made, with none of the variables a hook exports."""
     proc = subprocess.run(

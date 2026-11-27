@@ -339,6 +339,10 @@ SHOWN = [
     ("uv run ash scan", "uv run ash scan"),
     ("sudo ash scan", "sudo ash scan"),
     ("sudo -E ash scan", "sudo -E ash scan"),
+    ("time ash scan", "time ash scan"),
+    ("nohup ash scan", "nohup ash scan"),
+    ("exec ash scan", "exec ash scan"),
+    ("command ash scan", "command ash scan"),
     ("env ASH_OFFLINE=true ash scan", "env ASH_OFFLINE=true ash scan"),
     (
         "ASH_OFFLINE=true ash scan --source-dir .",
@@ -358,6 +362,7 @@ SHOWN = [
     ),
     ("aws s3 ls", "aws s3 ls"),
     ("automated-security-helper scan", "automated-security-helper scan"),
+    ("agentic-security-harness scan", "agentic-security-harness scan"),
     ("ashv3 scan", "ashv3 scan"),
 ]
 #: Lines that mention a program and show no command.
