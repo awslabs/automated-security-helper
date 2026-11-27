@@ -1074,12 +1074,28 @@ def _read_archive(archive: Path) -> bytes:
     return data
 
 
+def _open_without_waiting(path: str, _flags: int) -> int:
+    """``open``'s opener: ``path`` as a read-only descriptor that waits for no writer.
+
+    A FIFO opened for reading blocks until something opens it for writing. With
+    O_NONBLOCK the open returns, and the check of the descriptor refuses what is not a
+    regular file; a regular file is read the same with or without the flag. The flags
+    ``open`` offers are not used: this is the read-only open, and ``os.open`` makes
+    the descriptor non-inheritable.
+    """
+    return os.open(
+        path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
+
+
 @contextlib.contextmanager
 def _opened_regular_file(archive: Path) -> Iterator[IO[bytes]]:
     """``archive`` opened for reading, refused unless it is a regular file.
 
     The path is checked before it is opened, so a FIFO is refused rather than waited
-    on, and the open handle again, so the file read is the file checked.
+    on, and the open handle again, so the file read is the file checked. The open does
+    not wait either (:func:`_open_without_waiting`): a FIFO put at the path after the
+    first check is opened without blocking, and the second check refuses it.
     """
     shown = os.fspath(archive)
     try:
@@ -1094,7 +1110,7 @@ def _opened_regular_file(archive: Path) -> Iterator[IO[bytes]]:
     if not stat.S_ISREG(found.st_mode):
         raise _not_a_file(shown)
     try:
-        handle = open(archive, "rb")
+        handle = open(shown, "rb", opener=_open_without_waiting)
     except OSError as error:
         raise _unreadable_path(shown, error) from error
     with handle:

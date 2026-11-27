@@ -62,6 +62,7 @@ import io
 import os
 import struct
 import tarfile
+import threading
 import warnings
 import zipfile
 import zlib
@@ -2002,6 +2003,52 @@ class TestTheLimitsAreReadWhenAnArchiveIsRead:
         rules = sa.ZipRules(max_members=3)
 
         assert rules.max_members == 3
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs POSIX named pipes")
+class TestTheFileIsOpenedWithoutWaiting:
+    """The path is checked, and then opened. A FIFO put at the path in between made a
+    blocking open wait for a writer; the open now returns, and the check of what it
+    opened refuses a file that is not a regular file. Red at the base: the open
+    waited."""
+
+    def test_a_fifo_put_at_the_path_after_the_check_is_refused_not_waited_for(
+        self, monkeypatch, tmp_path
+    ):
+        fifo = tmp_path / "swapped.zip"
+        os.mkfifo(fifo)
+        regular = tmp_path / "regular.zip"
+        regular.write_bytes(b"a regular file, which the first check saw")
+        real_stat = os.stat
+
+        def stat_before_the_swap(path, *args, **kwargs):
+            if os.fspath(path) == os.fspath(fifo):
+                return real_stat(regular)
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "stat", stat_before_the_swap)
+        outcome: Dict[str, BaseException] = {}
+
+        def extract() -> None:
+            try:
+                sa.extract_source_archive(fifo, tmp_path / "tree")
+            except BaseException as error:  # handed to the test below
+                outcome["error"] = error
+
+        worker = threading.Thread(target=extract, daemon=True)
+        worker.start()
+        worker.join(10)
+        waited = worker.is_alive()
+        if waited:
+            # What the base does: it waits for a writer. One is given, so this ends.
+            os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+            worker.join(10)
+
+        assert not waited, "the open waited for something to write to the FIFO"
+        refused = outcome["error"]
+        assert isinstance(refused, sa.SourceArchiveRefused)
+        assert refused.kind is Kind.NOT_A_FILE
+        assert not (tmp_path / "tree").exists()
 
 
 class TestWhatZipfileCannotReadIsARefusal:
