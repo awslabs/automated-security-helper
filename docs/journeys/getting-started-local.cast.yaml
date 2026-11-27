@@ -1,0 +1,33 @@
+# Storyboard of the terminal recording that plays the "Run your first scan" tutorial.
+#
+# A scene that runs an `ash` command names the block of
+# docs/journeys/getting-started-local.journey.yaml that holds it by the block's `id`
+# and repeats none of its text, so the storyboard cannot drift from the tutorial. A
+# scene types its own command only from a short read-only list (`cat` and `ls`). The
+# install scene types a line of the README, named by `comment_from`, as a shell comment
+# that is never run.
+#
+# scripts/_cast.py reads this file. It refuses unknown keys, YAML anchors, aliases and
+# merge keys, and a key given twice. It checks every caption against the copy rules and
+# checks that the scene durations, in seconds, add up to 30 to 60 s.
+schema: 1
+journey: docs/journeys/getting-started-local.journey.yaml
+terminal: {cols: 100, rows: 30, prompt: "$ "}
+typing: {chars_per_second: 30, lead_in_s: 0.3}
+output: {max_gap_s: 0.8}
+poster_scene: scan
+playback: once            # once, or loop
+scenes:
+  - {id: install, caption: "Install from a release tag", duration_s: 6.0,
+     comment_from: README.md#quick-start-install, hold_s: 2.5}
+  - {id: version, caption: "Check the install", duration_s: 4.0,
+     block: version, hold_s: 2.0, expect_screen: ["awslabs/automated-security-helper v"]}
+  - {id: project, caption: "A small Python project", duration_s: 5.0,
+     hidden_blocks: [project], command: "cat app.py", clear: true, hold_s: 2.5}
+  - {id: scan, caption: "Scan with bandit and detect-secrets", duration_s: 16.0,
+     block: scan-two, clear: true, output_window_s: 9.0, hold_s: 5.0,
+     expect_screen: ["ASH Scan Results Summary", "bandit", "detect-secrets", "Exiting due to"]}
+  - {id: report, caption: "Read the findings", duration_s: 12.0,
+     block: report, clear: true, output_window_s: 6.0, hold_s: 5.0, expect_screen: ["B324"]}
+  - {id: reports, caption: "Where the reports live", duration_s: 5.0,
+     command: "ls .ash/ash_output/reports", hold_s: 3.0}
