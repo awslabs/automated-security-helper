@@ -407,9 +407,16 @@ def matrix_entries(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
     The shared reader's expansion: the product of the list-valued keys, less each
     ``exclude`` entry it matches; an ``include`` entry is added to every original run
     whose values it keeps, never to a run an earlier ``include`` created, or else
-    becomes a run of its own. A matrix built by an expression, or holding a ``${{ }}``
-    form the reader does not evaluate, cannot be counted before the run, and is an
-    error (a ValueError).
+    becomes a run of its own. A matrix of ``include`` entries alone is one run per entry.
+    GitHub's workflow syntax reference says so under
+    ``jobs.<job_id>.strategy.matrix.include``: "If you don't specify any matrix
+    variables, all configurations under ``include`` will run." and, for an entry that
+    fits no combination, "If the object cannot be added to any of the matrix
+    combinations, a new matrix combination will be created instead."
+    https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-github-actions
+
+    A matrix built by an expression, or holding a ``${{ }}`` form the reader does not
+    evaluate, cannot be counted before the run, and is an error (a ValueError).
     """
     return _ci_matrix().cells({"strategy": {"matrix": matrix}}, _STATIC_EVENT)
 
