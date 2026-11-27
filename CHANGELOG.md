@@ -157,6 +157,11 @@
 - **The reusable scan workflow refuses an `ash-args` option that takes a value and has
   none after it**, such as a trailing `--source-dir`, with an error that names its
   position. A `--source-dir` in `ash-args` still names the directory scanned.
+- **The reusable scan workflow runs `ash scan workspace` when `ash-args` names a
+  workspace.** A `--workspace FILE` in `ash-args`, with the `--workspace-config` that
+  goes with it, becomes `ash scan workspace FILE` on an installed ASH that has the
+  subject, and stays as written on one that does not. The workflow asks the installed
+  ASH first, as it does for the other spellings.
 - **A `--source-dir DIR` in the `extraScanArguments` of the CDK `ASHScanStep` names the
   directory scanned on ASH 3.9 as well**, as `ash scan fs DIR`; the build failed with a
   usage error before. The step refuses these at synth and says what to write instead: a
@@ -182,8 +187,11 @@
   in the same words by both, the upload is removed, and the answer names no exception
   class. The MCP tool descriptions use the 3.9 spellings: `resolve_ash_workspace` and
   `run_ash_workspace_scan` are the MCP equivalents of `ash scan workspace FILE` (they
-  said `ash --workspace FILE`), and `set_source_zip_finalize` lists what it refuses. Tool
-  names and parameters do not change.
+  said `ash --workspace FILE`), and `set_source_zip_finalize` lists every kind of zip it
+  refuses, says that a refused zip leaves the previous tree in place and removes the
+  upload, and says that a checksum mismatch or a refused zip is answered with `error`
+  and no `error_type`. The MCP tool reference lists the same kinds and no longer gives
+  `BadZipFile` as an `error_type`. Tool names and parameters do not change.
 - **The AI-DLC `ash-scan` plugin reads `ash --version` before it names a scan.** Its two
   fragments give `ash scan fs ...` for ASH 3.9 and later and `ash scan ...` for an older
   ASH, and their exit-code tables list exit 5 (a command line ASH did not accept), so an
@@ -237,6 +245,11 @@
   only with one that renders back to the page it was written from; otherwise it names
   the first differing line or the releases the page pins, fails the run and leaves the
   template.
+- The help text of `ash container build` lives in `cli/help_text.py`, so
+  `cli/container.py` no longer imports the root CLI module (`cli/main.py`). The text is
+  unchanged.
+- The check of the markdown the package ships flags `--scanners` on `ash scan` and a
+  top-level `ash diff` or `ash trend`, as it flags the other deprecated spellings.
 
 ### Deprecations
 
@@ -499,6 +512,26 @@
   deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
+- **The reusable scan workflow reads the installed ASH's help from the runner's temp
+  directory with `--no-config`**, so a config file in the checkout cannot change which
+  commands the step finds.
+- **The `--changed-files-only` help describes a workspace scan.** It says a workspace
+  scan reads the changes of each project from that project's own repository and skips a
+  project where nothing changed, and it no longer sends a reader of
+  `ash scan workspace` to `--source-dir`. The warning for an empty change set says
+  "inside the scanned directory" where it said "inside --source-dir".
+- The CLI reference gives exit 5 for an unknown `--format` of `ash report` and adds the
+  same note to `ash results report`, and it lists which `--output-formats` values write
+  a report on `ash`, `ash scan fs`, `ash scan workspace`, `ash merge` and
+  `ash results merge`.
+- **`./ash results report`, `results merge`, `results diff` and `results trend` no
+  longer keep the container's stdin open**, so they leave the input of a `while read`
+  loop alone, as `./ash report` did. `results inspect` still keeps it.
+- **The `./ash` and `Invoke-ASH` refusals of `--sandbox` inside a container, and of a
+  config outside the source that extends another, name the 3.9 commands**:
+  `ash scan fs --mode local --sandbox <mode>` and `ash scan fs --mode container`.
+- The `history` description in the JSON schemas and in the configuration reference
+  names `ash results trend`, which is the command's only spelling.
 
 ## v3.8.0 (2026-11-12)
 
