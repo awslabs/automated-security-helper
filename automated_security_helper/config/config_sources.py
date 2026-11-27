@@ -4913,7 +4913,11 @@ def _placed_through_patch(
     bases; ``from_ops`` are in the operations' values. Each value is followed,
     not computed: a copy of ``document`` holds a token in place of each, the
     operations' values hold theirs, and the same operations apply to the copy
-    (a test operation changes nothing). Where a token is then is where its value
+    (a test operation changes nothing). An ``add`` or ``replace`` redirected
+    from a retired scanner name is held to the fold's rules as _patch_step
+    holds it (_through_the_retired_fold), each key's token read as the key it
+    stands beside, so a token is kept or dropped with its key. Where a token
+    is then is where its value
     is: an insert in front of it or a remove before it moves it, and an append
     puts it at the end, whatever its index; one an operation writes over is
     gone, and so is its reference. Placing an operation's reference at the
@@ -4936,6 +4940,15 @@ def _placed_through_patch(
             planted.append((reference, token))
     if not tokens:
         return list(tracked)
+    key_tokens = {
+        token: reference.resolved
+        for reference, token in planted
+        if token is not None and reference.key
+    }
+
+    def key_of(key: Any) -> Any:
+        return key_tokens.get(key, key)
+
     result: Any = shadow
     rewritten = rewritten or {}
     try:
@@ -4951,6 +4964,9 @@ def _placed_through_patch(
                 normalized = dict(
                     op, path=_normalize_pointer(result, op["path"], folds=folds)
                 )
+            normalized = _through_the_retired_fold(op, normalized, key_of=key_of)
+            if normalized is None:
+                continue
             result = jsonpatch.apply_patch(result, [normalized], in_place=False)
     except (
         jsonpatch.JsonPatchException,

@@ -1286,6 +1286,129 @@ def test_a_patched_section_name_under_the_retired_name_writes_nothing(
     assert lines == [], lines
 
 
+def test_an_undeclared_option_a_patch_writes_under_the_retired_name_leaves_no_value(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The file writes confidence_level under oldname, and its patch adds the
+    whole section under oldname with confidence_level: low and ${VAR} at
+    retired_only_knob, an option bandit does not declare. The pointer lands
+    on bandit's section and the fold's rule drops the option, in the
+    configuration and in the copy the references are followed through, so
+    the variable's value appears nowhere: not in the configuration, not among
+    the references and rewrites the load records, not in the results file's
+    ash_config, and not in MCP get_config's answer."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
+    path = tmp_path / "patched.yaml"
+    path.write_text(
+        "scanners:\n  oldname:\n    options:\n      confidence_level: high\n"
+        "patch:\n"
+        "  - op: add\n"
+        "    path: /scanners/oldname\n"
+        "    value:\n"
+        "      options:\n"
+        "        confidence_level: low\n"
+        f"        retired_only_knob: ${{{_FOLD_VAR}}}\n",
+        encoding="utf-8",
+    )
+
+    _, config = load_config_file_for_run(path)
+
+    assert config.scanners.bandit.options.confidence_level == "low"
+    assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+    assert _FOLD_VALUE not in json.dumps(config.model_dump(mode="json"))
+    references = [
+        reference
+        for reference in (
+            *config._environment_references,
+            *config._displayed_environment_references,
+        )
+        if _FOLD_VALUE in (reference.resolved, reference.value)
+    ]
+    assert references == [], references
+    rewrites = [
+        rewrite
+        for rewrite in config._written_references or []
+        if rewrite.resolved == _FOLD_VALUE
+    ]
+    assert rewrites == [], rewrites
+    record = _record(config)
+    assert _FOLD_VALUE not in json.dumps(record), record.get("scanners")
+
+    _named_by_the_operator(tmp_path, monkeypatch)
+    result = mcp_get_config(config_path=str(path))
+
+    assert _FOLD_VALUE not in json.dumps(result), result
+
+
+def test_an_option_key_a_patch_reads_under_the_retired_name_keeps_its_reference(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The patch adds the whole section with the option's key read from the
+    environment, ${KEY}, which reads confidence_level, a name bandit
+    declares. Under the retired name the pointer lands on bandit's section
+    and the fold's rule keeps the option, so the load records the key's
+    reference where it records it when the same patch adds the section under
+    bandit, the canonical control no fold touches: the two loads record the
+    same key references, and there is one."""
+    from automated_security_helper.config.ash_config import (
+        config_env_var_is_interpolatable,
+    )
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    # The premise: a config file may read the variable.
+    assert config_env_var_is_interpolatable(_FOLD_KEY_VAR)
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_KEY_VAR, "confidence_level")
+
+    def loaded(section):
+        folder = tmp_path / section
+        folder.mkdir()
+        path = folder / "patched.yaml"
+        path.write_text(
+            "scanners:\n  oldname:\n    enabled: true\n"
+            "patch:\n"
+            "  - op: add\n"
+            f"    path: /scanners/{section}\n"
+            "    value:\n"
+            "      options:\n"
+            f"        ${{{_FOLD_KEY_VAR}}}: low\n",
+            encoding="utf-8",
+        )
+        _, config = load_config_file_for_run(path)
+        return config
+
+    def key_references(config):
+        return sorted(
+            (tuple(map(str, reference.path)), reference.resolved)
+            for reference in (
+                *config._environment_references,
+                *config._displayed_environment_references,
+            )
+            if reference.key
+        )
+
+    retired, canonical = loaded("oldname"), loaded("bandit")
+
+    assert retired.scanners.bandit.options.confidence_level == "low"
+    assert canonical.scanners.bandit.options.confidence_level == "low"
+    assert key_references(canonical), key_references(canonical)
+    assert key_references(retired) == key_references(canonical), (
+        key_references(retired),
+        key_references(canonical),
+    )
+
+
 # A value read from the environment in a section a ``patch`` adds under the
 # retired name. The loader folds the added section onto bandit's once the patch
 # has applied and moves the reference with its value, so the results file's
