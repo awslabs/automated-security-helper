@@ -155,10 +155,15 @@ That file holds a line for each such block as it was when the check was added: t
 page's path, a tab, and the block's first command. It only shrinks too. Fence the block
 as `bash`, or mark it `output`, and delete its line.
 
-The check does not read a page that a generator writes. Such a page opens with the
-banner that [Add a generated reference page](#add-a-generated-reference-page) asks for,
-and the freshness test holds its text to the generator's output, so the usage line of a
-new command in the CLI reference needs no line in that list.
+The check does not read a page that a generator writes. A page is one when
+`REFERENCE_PAGES` in the freshness test lists it and the banner that opens it names the
+generator listed for it, as
+[Add a generated reference page](#add-a-generated-reference-page) describes. The
+freshness test holds the page's text to that generator's output, so the usage line of a
+new command in the CLI reference needs no line in the seed. A banner alone is not
+enough: the getting-started pages open with one, but a person writes their blocks in a
+journey file, so they are read like any other page, and so is a page that copies a
+banner.
 
 ### Output samples
 
@@ -1051,7 +1056,10 @@ tools) is generated, never written by hand. To add one:
    [`tests/unit/test_generated_docs_freshness.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/unit/test_generated_docs_freshness.py).
    That one entry runs `generate_<name>.py --check` in the unit suite, so the suite fails
    when the code changes and the page does not, and checks the banner in the page's
-   first 600 characters.
+   first 600 characters. The docs checks read the same entry: the check for commands
+   shown in blocks that nothing runs
+   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page out only when
+   this entry names it and the banner from step 2 names the script the entry gives it.
 4. Add the page to `GOLDEN` in
    [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py),
    so a commit that changes it needs a `Snapshot-Update:` trailer.
