@@ -46,12 +46,6 @@ global_settings:
         False positive. A changelog sentence about a Security Hub credentials check; it
         holds words, not a credential.
     - rule_id: API_KEY_OR_SECRET
-      path: ".github/release-notes/*.md"
-      reason: >-
-        False positive. The release notes carry the same Security Hub credentials-check
-        sentence as the CHANGELOG entry above, quoted in prose beside option names. They
-        hold words, not a credential.
-    - rule_id: API_KEY_OR_SECRET
       path: Dockerfile
       line_start: 834
       line_end: 836
@@ -285,9 +279,6 @@ global_settings:
     - path: automated_security_helper/schemas/cyclonedx_bom_1_6_schema/__init__.py
       rule_id: API_KEY_OR_SECRET
       reason: "False positive — generated CycloneDX schema definitions contain field names that match secret patterns"
-    - path: pyproject.toml
-      rule_id: API_KEY_OR_SECRET
-      reason: "False positive — hatch build config paths contain strings that match secret patterns"
     # === GuardDog false positives, continued: the docs-CI and MCP waves ===
     #
     # The same dispositions as the GuardDog block below: heuristics matching
@@ -321,18 +312,6 @@ global_settings:
         lines are typed model fields whose names match the secret-keyword heuristic
         (a login/session object field), not credentials. Any fix belongs on the
         source JSON schema, not this generated file.
-    - path: automated_security_helper/cli/mcp/sessions.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line assigns a local variable named for an MCP
-        session object; the detector matches the variable name, and the assigned
-        value is a constructed object rather than a credential.
-    - path: deploy/terraform/modules/fargate/main.tf
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged local's name contains the word "secret"
-        (manage-auth-secret), but its value is a boolean computed from whether an
-        optional input was supplied, not a credential.
     - path: tests/unit/cli/mcp/test_sessions.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
@@ -455,13 +434,6 @@ global_settings:
     # credential. Each file below was read at the reported line. Reasons are
     # paraphrased, not quoted, so this file does not flag itself. Every entry is
     # scoped to one file; nothing here is a glob.
-    - path: automated_security_helper/config/operator_paths.py
-      rule_id: API_KEY_OR_SECRET
-      reason: >-
-        False positive. The flagged line is a row in the table of scanner options
-        that name a file. It pairs the detect-secrets scanner with its
-        baseline_file option. The scanner's name carries the word "secrets"; the
-        value is an option name, not a credential.
     - path: tests/unit/cli/mcp/test_scan_directory_start_failures.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
