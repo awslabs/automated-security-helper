@@ -443,7 +443,7 @@ def _scan_args(tmp_path) -> list:
     source.mkdir()
     return [
         "scan",
-        "--source-dir",
+        "fs",
         str(source),
         "--output-dir",
         str(tmp_path / "out"),
@@ -497,7 +497,7 @@ def test_a_workspace_scan_names_a_refused_config_on_one_line(
 
     result = CliRunner().invoke(
         app,
-        ["scan", "--workspace", str(workspace), "--config", str(refused), "--dry-run"],
+        ["scan", "workspace", str(workspace), "--config", str(refused), "--dry-run"],
     )
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
@@ -524,9 +524,7 @@ def test_a_workspace_root_config_that_does_not_parse_is_refused_on_one_line(
     workspace.write_text(json.dumps({"folders": [{"path": "api"}]}), encoding="utf-8")
     (root / ".ash.yaml").write_text(UNPARSED, encoding="utf-8")
 
-    result = CliRunner().invoke(
-        app, ["scan", "--workspace", str(workspace), "--dry-run"]
-    )
+    result = CliRunner().invoke(app, ["scan", "workspace", str(workspace), "--dry-run"])
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
     assert "could not be parsed (" in result.output, result.output
@@ -691,9 +689,7 @@ def test_a_workspace_dry_run_refuses_an_ash_config_it_cannot_read_on_one_line(
     _unreadable(config)
     monkeypatch.setenv("ASH_CONFIG", str(config))
 
-    result = CliRunner().invoke(
-        app, ["scan", "--workspace", str(workspace), "--dry-run"]
-    )
+    result = CliRunner().invoke(app, ["scan", "workspace", str(workspace), "--dry-run"])
 
     assert result.exit_code == WorkspaceExitCode.INVALID_PROJECT_CONFIG, result.output
     assert "could not be read" in result.output, result.output

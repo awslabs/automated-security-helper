@@ -59,7 +59,7 @@ def test_the_scan_refuses_it_without_the_value(tmp_path, quoting_config):
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(tmp_path / "out"),
@@ -86,7 +86,7 @@ def test_the_workspace_check_refuses_it_without_the_value(tmp_path, quoting_conf
         app,
         [
             "scan",
-            "--workspace",
+            "workspace",
             str(workspace),
             "--config",
             str(quoting_config),
@@ -128,7 +128,7 @@ def test_the_scan_refuses_an_ash_config_value_error_without_the_value(
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(tmp_path / "out"),

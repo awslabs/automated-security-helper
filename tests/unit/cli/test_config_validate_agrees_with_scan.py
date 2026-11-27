@@ -562,10 +562,10 @@ def _scan(
         app,
         [
             "scan",
+            "fs",
             "--mode",
             "local",
             "--no-progress",
-            "--source-dir",
             str(root),
             "--output-dir",
             str(root.parent / "scan-output"),
@@ -1314,18 +1314,18 @@ def test_a_source_discovery_cannot_read_is_invalid_for_the_writers(
     "command, where",
     [
         pytest.param(
-            ["scan", "--mode", "local", "--no-progress"],
+            ["scan", "fs", "--mode", "local", "--no-progress"],
             "config-option",
             id="scan-config",
         ),
         pytest.param(
-            ["scan", "--mode", "local", "--no-progress"],
+            ["scan", "fs", "--mode", "local", "--no-progress"],
             "source-dir",
             id="scan-source-dir",
         ),
         pytest.param(["plugin", "list"], "config-option", id="plugin-list-config"),
         pytest.param(
-            ["scan", "--mode", "local", "--no-progress"],
+            ["scan", "fs", "--mode", "local", "--no-progress"],
             "source-dir-elsewhere",
             id="scan-source-dir-elsewhere",
         ),
@@ -1351,7 +1351,7 @@ def test_a_refusal_names_a_command_that_explains_it(
     elif where == "source-dir":
         (project / "other").mkdir(parents=True)
         (project / "other" / ".ash.yaml").write_text(bad, encoding="utf-8")
-        args = [*command, "--source-dir", "other", "--output-dir", "out"]
+        args = [*command, "other", "--output-dir", "out"]
     else:
         # A repository outside the working directory, whose config extends a
         # base elsewhere in it: linting the file without the scan's source
@@ -1369,7 +1369,6 @@ def test_a_refusal_names_a_command_that_explains_it(
         )
         args = [
             *command,
-            "--source-dir",
             str(repo),
             "--config",
             str(repo / "configs" / "ash.yaml"),

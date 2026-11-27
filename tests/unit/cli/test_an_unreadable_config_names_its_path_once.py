@@ -53,7 +53,7 @@ def test_a_scan_names_the_unreadable_file_once(tmp_path, monkeypatch, unreadable
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
