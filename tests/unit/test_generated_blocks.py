@@ -11,13 +11,25 @@ nothing; one character changed inside a block names that block and writes nothin
 bytes outside the markers never move; a second write says "unchanged"; and a template
 and its rendered page get the same block bytes, so the round trip in
 tests/unit/test_version_template_round_trip.py keeps holding.
+
+Three more guarantees are pinned the same way. A body is a string or a sequence of
+strings, read once per call: an iterator or a generator is used up by its first read,
+so it is refused instead of leaving a template and its page different. A write is
+all or nothing: one that fails or is cut off partway leaves the page as it was, with
+no temporary file beside it. And a block whose begin marker names the generator but
+that the call gives no body is drift in a check and a refusal in a write, unless the
+caller says it renders only some of its blocks.
 """
 
 from __future__ import annotations
 
+import errno
 import importlib.util
+import io
 import os
+import stat
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -47,6 +59,8 @@ GENERATOR = "scripts/generate_support_matrices.py"
 OTHER_GENERATOR = "scripts/generate_deploy_patterns.py"
 FILE = "README.md.template"
 NAME = "support/modes"
+#: A block the generator once rendered and no longer does.
+OLD = "support/old"
 ROWS = ["| Mode | Runs |", "| --- | --- |", "| local | yes |"]
 VERSION = "3.9.9"
 #: Non-ASCII text, built from code points so this file stays ASCII: an accented
@@ -104,6 +118,68 @@ def refused(call, *, reason: str, file: str = FILE, block: str | None = NAME):
     if block is not None:
         assert f"`{block}`" in str(error), str(error)
     return error
+
+
+class CountedLines(Sequence):
+    """Lines that count how many times they are iterated."""
+
+    def __init__(self, lines):
+        self.lines = list(lines)
+        self.iterations = 0
+
+    def __len__(self):
+        return len(self.lines)
+
+    def __getitem__(self, index):
+        return self.lines[index]
+
+    def __iter__(self):
+        self.iterations += 1
+        return iter(self.lines)
+
+
+class FullDisk:
+    """A file object that takes half of what it is given, then reports a full disk."""
+
+    def __init__(self, real):
+        self.real = real
+
+    def __enter__(self):
+        self.real.__enter__()
+        return self
+
+    def __exit__(self, *exc_info):
+        return self.real.__exit__(*exc_info)
+
+    def write(self, data):
+        view = bytes(data)
+        half = len(view) // 2
+        self.real.write(view[:half])
+        self.real.flush()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+def fill_the_disk_at_file(patch, number):
+    """Make the ``number``-th file opened for writing take half its bytes and fail.
+
+    ``patch`` is a ``monkeypatch.context()``. Only files opened after this call count,
+    through ``io.open``, which is what ``Path.write_bytes`` and ``os.fdopen`` use.
+    """
+    opened = []
+    real_open = io.open
+
+    def opener(file, mode="r", *args, **kwargs):
+        handle = real_open(file, mode, *args, **kwargs)
+        if "w" in mode:
+            opened.append(file)
+            if len(opened) == number:
+                return FullDisk(handle)
+        return handle
+
+    patch.setattr(io, "open", opener)
 
 
 # --- the marker text --------------------------------------------------------------
@@ -371,6 +447,54 @@ def test_a_body_that_leaves_a_code_fence_open_is_refused():
         reason="code fence",
     )
     assert "body line 2" in error.reason
+
+
+#: Bodies that are not a string and not a sequence, each as a factory (a one-shot
+#: iterator is used up by its first read) with the type name the message names.
+NOT_SEQUENCES = [
+    pytest.param(lambda: None, "NoneType", id="none"),
+    pytest.param(lambda: 5, "int", id="int"),
+    pytest.param(lambda: iter(ROWS), "list_iterator", id="iterator"),
+    pytest.param(lambda: (r.strip() for r in ROWS), "generator", id="generator"),
+    pytest.param(lambda: map(str.strip, ROWS), "map", id="map"),
+    pytest.param(lambda: set(ROWS), "set", id="set"),
+    pytest.param(lambda: {"a": "b"}, "dict", id="dict"),
+    pytest.param(lambda: {"a": "b"}.values(), "dict_values", id="dict-values"),
+]
+
+#: Sequences that hold something other than strings: the body, the number of the first
+#: bad line, and the type name the message names for it.
+BAD_MEMBERS = [
+    pytest.param([1, 2], 1, "int", id="ints"),
+    pytest.param(["a", None], 2, "NoneType", id="none-member"),
+    pytest.param([b"a"], 1, "bytes", id="bytes-member"),
+    pytest.param(("a", ["b"]), 2, "list", id="nested-list"),
+    pytest.param(b"abc", 1, "int", id="bytes"),
+    pytest.param(bytearray(b"abc"), 1, "int", id="bytearray"),
+    pytest.param(range(2), 1, "int", id="range"),
+]
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(("make", "kind"), NOT_SEQUENCES)
+def test_a_body_that_is_not_a_string_or_a_sequence_is_refused(operation, make, kind):
+    error = refused(
+        lambda: operation(page(begin(), end()), FILE, {NAME: make()}, GENERATOR),
+        reason="not a string or a sequence of strings",
+    )
+    assert f"`{kind}`" in error.reason
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(("body", "line", "kind"), BAD_MEMBERS)
+def test_a_body_with_a_member_that_is_not_a_string_is_refused(
+    operation, body, line, kind
+):
+    error = refused(
+        lambda: operation(page(begin(), end()), FILE, {NAME: body}, GENERATOR),
+        reason=f"body line {line} is not a string",
+    )
+    assert f"`{kind}`" in error.reason
 
 
 @pytest.mark.parametrize(
@@ -678,6 +802,99 @@ def test_a_second_write_reports_unchanged_and_does_not_touch_the_file(tmp_path):
     assert path.stat().st_mtime_ns == 10**9
 
 
+# --- a write is all or nothing ----------------------------------------------------
+
+
+@pytest.mark.parametrize("failure", [OSError, KeyboardInterrupt])
+def test_a_swap_that_fails_leaves_the_page_and_its_directory_as_they_were(
+    tmp_path, monkeypatch, failure
+):
+    original = page(begin(), "stale", end()).encode("utf-8")
+    path = put(tmp_path, "page.md", original)
+    listing = sorted(os.listdir(tmp_path))
+
+    def cut_off(*args, **kwargs):
+        raise failure("planted: the swap did not happen")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", cut_off)
+        with pytest.raises(failure, match="planted"):
+            gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    assert path.read_bytes() == original
+    assert sorted(os.listdir(tmp_path)) == listing
+    # The next run, with nothing in the way, writes the page.
+    results = gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+    assert [(r.status, r.blocks) for r in results] == [(gb.WRITTEN, (NAME,))]
+    assert text_of(path) == page(begin(), *ROWS, end())
+
+
+def test_a_write_that_runs_out_of_disk_partway_leaves_the_page_as_it_was(
+    tmp_path, monkeypatch
+):
+    original = page(begin(), "stale", end()).encode("utf-8")
+    path = put(tmp_path, "page.md", original)
+    listing = sorted(os.listdir(tmp_path))
+
+    with monkeypatch.context() as patch:
+        fill_the_disk_at_file(patch, 1)
+        with pytest.raises(OSError, match="No space left"):
+            gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    assert path.read_bytes() == original
+    assert sorted(os.listdir(tmp_path)) == listing
+
+
+def test_a_pair_cut_off_after_its_first_file_is_finished_by_the_next_run(
+    tmp_path, monkeypatch
+):
+    _, template, rendered = _twins(tmp_path, "README.md")
+    stale_page = rendered.read_bytes()
+
+    with monkeypatch.context() as patch:
+        fill_the_disk_at_file(patch, 2)  # the template is written first, then the page
+        with pytest.raises(OSError, match="No space left"):
+            gb.write_blocks(tmp_path, "README.md", {NAME: ROWS}, GENERATOR)
+
+    # The template was replaced whole; the page is as it was, never cut short.
+    (block,) = gb.parse_blocks(text_of(template), "template")
+    assert block.body == tuple(ROWS)
+    assert rendered.read_bytes() == stale_page
+    drifts = gb.check_blocks(tmp_path, "README.md", {NAME: ROWS}, GENERATOR)
+    assert [(d.file, d.block) for d in drifts] == [("README.md", NAME)]
+
+    results = gb.write_blocks(tmp_path, "README.md", {NAME: ROWS}, GENERATOR)
+    assert [(r.file, r.status) for r in results] == [
+        ("README.md.template", gb.UNCHANGED),
+        ("README.md", gb.WRITTEN),
+    ]
+    assert gb.check_blocks(tmp_path, "README.md", {NAME: ROWS}, GENERATOR) == []
+
+
+def test_a_written_page_leaves_no_temporary_file_beside_it(tmp_path):
+    put(tmp_path, "page.md", page(begin(), "stale", end()))
+    gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+    assert os.listdir(tmp_path) == ["page.md"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no permission bits on Windows")
+def test_a_rewritten_page_keeps_its_permission_bits(tmp_path):
+    path = put(tmp_path, "page.md", page(begin(), "stale", end()))
+    path.chmod(0o640)
+    gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="needs a privilege on Windows")
+def test_a_page_that_is_a_symlink_is_written_through_and_stays_a_link(tmp_path):
+    real = put(tmp_path, "real/page.md", page(begin(), "stale", end()))
+    link = tmp_path / "page.md"
+    link.symlink_to(real)
+    gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+    assert link.is_symlink()
+    assert text_of(real) == page(begin(), *ROWS, end())
+
+
 # --- checking a page --------------------------------------------------------------
 
 
@@ -724,6 +941,139 @@ def test_every_drifting_block_is_reported_in_file_order(tmp_path):
     bodies = {"a": ["new a"], "b": ["new b"]}
     drifts = gb.check_blocks(tmp_path, "page.md", bodies, GENERATOR)
     assert [d.block for d in drifts] == ["b", "a"]
+
+
+# --- blocks the generator no longer renders ---------------------------------------
+
+
+def test_a_block_the_generator_no_longer_renders_is_reported_as_drift(tmp_path):
+    text = page(
+        begin(OLD),
+        "stale a",
+        "stale b",
+        end(OLD),
+        "between",
+        begin(),
+        *ROWS,
+        end(),
+    )
+    put(tmp_path, "page.md", text)
+
+    drifts = gb.check_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    assert [(d.file, d.block, d.orphan) for d in drifts] == [("page.md", OLD, True)]
+    diff = drifts[0].diff.split("\n")
+    assert diff[0] == f"--- page.md ({OLD}, committed)"
+    assert diff[1] == f"+++ page.md ({OLD}, not rendered by {GENERATOR})"
+    assert "-stale a" in diff
+    assert "-stale b" in diff
+
+
+def test_an_orphan_with_no_lines_is_reported_with_a_diff_that_names_it(tmp_path):
+    put(tmp_path, "page.md", page(begin(OLD), end(OLD)))
+
+    (drift,) = gb.check_blocks(tmp_path, "page.md", {}, GENERATOR)
+
+    assert (drift.block, drift.orphan) == (OLD, True)
+    assert drift.diff.split("\n") == [
+        f"--- page.md ({OLD}, committed)",
+        f"+++ page.md ({OLD}, not rendered by {GENERATOR})",
+    ]
+
+
+def test_an_empty_set_of_bodies_checks_every_block_the_generator_owns(tmp_path):
+    text = page(
+        begin("a"),
+        "x",
+        end("a"),
+        begin("b", OTHER_GENERATOR),
+        "y",
+        end("b"),
+        begin("c"),
+        end("c"),
+    )
+    put(tmp_path, "page.md", text)
+
+    drifts = gb.check_blocks(tmp_path, "page.md", {}, GENERATOR)
+
+    assert [(d.block, d.orphan) for d in drifts] == [("a", True), ("c", True)]
+    assert gb.check_blocks(tmp_path, "page.md", {}, GENERATOR, partial=True) == []
+
+
+def test_a_block_of_another_generator_is_not_an_orphan(tmp_path):
+    text = page(
+        begin(),
+        *ROWS,
+        end(),
+        begin("b", OTHER_GENERATOR),
+        "y",
+        end("b"),
+    )
+    put(tmp_path, "page.md", text)
+    assert gb.check_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR) == []
+
+
+def test_orphans_and_drifting_blocks_are_reported_in_file_order(tmp_path):
+    text = page(
+        begin("b"),
+        "x",
+        end("b"),
+        begin(OLD),
+        end(OLD),
+        begin("a"),
+        "x",
+        end("a"),
+    )
+    put(tmp_path, "page.md", text)
+    bodies = {"a": ["new a"], "b": ["new b"]}
+
+    drifts = gb.check_blocks(tmp_path, "page.md", bodies, GENERATOR)
+
+    assert [(d.block, d.orphan) for d in drifts] == [
+        ("b", False),
+        (OLD, True),
+        ("a", False),
+    ]
+
+
+def test_a_write_is_refused_while_a_block_of_the_generator_has_no_body(tmp_path):
+    text = page(begin(), "stale", end(), begin(OLD), "kept", end(OLD))
+    original = text.encode("utf-8")
+    path = put(tmp_path, "page.md", original)
+
+    error = refused(
+        lambda: gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR),
+        file="page.md",
+        block=OLD,
+        reason="no body was given",
+    )
+
+    assert "partial=True" in error.reason
+    assert path.read_bytes() == original
+    refused(
+        lambda: gb.replace_blocks(text, "page.md", {NAME: ROWS}, GENERATOR),
+        file="page.md",
+        block=OLD,
+        reason="no body was given",
+    )
+
+
+def test_partial_writes_the_blocks_it_renders_and_leaves_the_others_alone(tmp_path):
+    text = page(begin(), "stale", end(), begin(OLD), "kept", end(OLD))
+    path = put(tmp_path, "page.md", text)
+    bodies = {NAME: ROWS}
+
+    left_alone = gb.check_blocks(tmp_path, "page.md", bodies, GENERATOR, partial=True)
+    assert [(d.block, d.orphan) for d in left_alone] == [(NAME, False)]
+
+    results = gb.write_blocks(tmp_path, "page.md", bodies, GENERATOR, partial=True)
+
+    assert [(r.status, r.blocks) for r in results] == [(gb.WRITTEN, (NAME,))]
+    expected = page(begin(), *ROWS, end(), begin(OLD), "kept", end(OLD))
+    assert text_of(path) == expected
+    assert gb.check_blocks(tmp_path, "page.md", bodies, GENERATOR, partial=True) == []
+    whole = gb.check_blocks(tmp_path, "page.md", bodies, GENERATOR)
+    assert [(d.block, d.orphan) for d in whole] == [(OLD, True)]
 
 
 # --- a template and its rendered page ---------------------------------------------
@@ -822,6 +1172,67 @@ def test_a_refusal_in_one_half_of_a_pair_writes_neither_half(tmp_path):
     )
 
     assert (template.read_bytes(), rendered.read_bytes()) == before
+
+
+@pytest.mark.parametrize(
+    "make",
+    [lambda: iter(ROWS), lambda: (r.strip() for r in ROWS)],
+    ids=["iterator", "generator"],
+)
+def test_a_one_shot_body_is_refused_before_either_half_is_written(tmp_path, make):
+    _, template, rendered = _twins(tmp_path, "README.md")
+    before = (template.read_bytes(), rendered.read_bytes())
+
+    refused(
+        lambda: gb.write_blocks(tmp_path, "README.md", {NAME: make()}, GENERATOR),
+        file="README.md",
+        reason="not a string or a sequence of strings",
+    )
+    refused(
+        lambda: gb.check_blocks(tmp_path, "README.md", {NAME: make()}, GENERATOR),
+        file="README.md",
+        reason="not a string or a sequence of strings",
+    )
+
+    assert (template.read_bytes(), rendered.read_bytes()) == before
+
+
+def test_a_body_is_read_once_per_call_for_a_whole_pair(tmp_path):
+    _twins(tmp_path, "README.md")
+
+    first = CountedLines(ROWS)
+    gb.write_blocks(tmp_path, "README.md", {NAME: first}, GENERATOR)
+    assert first.iterations == 1
+
+    again = CountedLines(ROWS)
+    gb.write_blocks(tmp_path, "README.md", {NAME: again}, GENERATOR)
+    assert again.iterations == 1
+
+    checked = CountedLines(ROWS)
+    assert gb.check_blocks(tmp_path, "README.md", {NAME: checked}, GENERATOR) == []
+    assert checked.iterations == 1
+
+
+def test_an_orphan_in_one_half_of_a_pair_refuses_the_write_of_both(tmp_path):
+    _, template, rendered = _twins(tmp_path, "README.md")
+    orphan = f"{begin(OLD)}\n{end(OLD)}\n".encode()
+    rendered.write_bytes(rendered.read_bytes() + orphan)
+    before = (template.read_bytes(), rendered.read_bytes())
+
+    refused(
+        lambda: gb.write_blocks(tmp_path, "README.md", {NAME: ROWS}, GENERATOR),
+        file="README.md",
+        block=OLD,
+        reason="no body was given",
+    )
+
+    assert (template.read_bytes(), rendered.read_bytes()) == before
+    drifts = gb.check_blocks(tmp_path, "README.md", {NAME: ROWS}, GENERATOR)
+    assert [(d.file, d.block, d.orphan) for d in drifts] == [
+        ("README.md.template", NAME, False),
+        ("README.md", NAME, False),
+        ("README.md", OLD, True),
+    ]
 
 
 def test_twin_files_pairs_a_template_with_its_page_from_either_half(tmp_path):
