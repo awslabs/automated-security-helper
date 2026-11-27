@@ -26,6 +26,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.config.resolve_config import (
     apply_config_overrides,
+    build_config,
     resolve_config,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
@@ -34,8 +35,12 @@ from automated_security_helper.core.exceptions import (
     ASHRespelledOverrideError,
 )
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-from automated_security_helper.plugin_manifests import UNTYPED_LIST_OPTION_DEFAULTS
-from tests.utils.helpers import CHILD_TIMEOUT_SECONDS, importing_this_checkout
+from automated_security_helper.utils.log import current_run_log_scope, run_log_scope
+from tests.utils.helpers import (
+    CHILD_TIMEOUT_SECONDS,
+    importing_this_checkout,
+    mark_git_checkout,
+)
 
 # Each class carries its own tier. One of them starts a child Python, which is an
 # integration test (tests/NAMING_CONVENTIONS.md, "Test tiers"), so a module-level
@@ -492,6 +497,14 @@ _UNREAD_SECTIONS = [
     pytest.param("converters", "converter", "acme-converter", id="converters"),
 ]
 
+#: The same, for the tests of which application of the overrides logs the warning,
+#: under names no other test uses.
+_SECTIONS_OF_THE_APPLICATION_TESTS = [
+    pytest.param("reporters", "reporter", "orbit-exporter", id="reporters"),
+    pytest.param("scanners", "scanner", "orbit-scanner", id="scanners"),
+    pytest.param("converters", "converter", "orbit-converter", id="converters"),
+]
+
 _BEDROCK = "bedrock-summary-reporter"
 _BEDROCK_EXCLUDED_TYPES = f"reporters.{_BEDROCK}.options.exclude_scanner_types"
 
@@ -517,11 +530,27 @@ _PROBE_ITEMS: dict[tuple[str, str], Any] = {
     ("trivy-repo", "scanners"): "secret",
 }
 
+
+def _untyped_list_option_table():
+    """``UNTYPED_LIST_OPTION_DEFAULTS``, or an empty mapping where the name does not
+    exist, so that this module still collects there: the table feeds ``parametrize``
+    at collection, and an import that failed would take every test of the file with
+    it. An empty table holds no row, so
+    ``test_the_defaults_table_the_cases_are_built_from_has_rows`` fails in its place."""
+    try:
+        from automated_security_helper.plugin_manifests import (
+            UNTYPED_LIST_OPTION_DEFAULTS,
+        )
+    except ImportError:
+        return {}
+    return UNTYPED_LIST_OPTION_DEFAULTS
+
+
 #: One case for each row of the table the append reads its defaults from, built from
 #: the table itself, so a row added to it is covered without being listed here.
 _TABLE_ROWS = [
     pytest.param(segment, plugin, path, id=f"{plugin}-{'.'.join(path[1:])}")
-    for segment, plugins in UNTYPED_LIST_OPTION_DEFAULTS.items()
+    for segment, plugins in _untyped_list_option_table().items()
     for plugin, options in plugins.items()
     for path in options
 ]
@@ -616,9 +645,15 @@ class TestAppendOntoAnUntypedPluginOption:
     replaced that default; ``=`` replaced it as intended. Where ASH has no default
     list to add to (a section no plugin ASH ships reads, such as a plugin from a
     module outside ASH, which loads after the overrides are applied) the list
-    still starts from the items and one warning names the key. The append is never
-    refused: the same overrides are applied again to other bases, which can lack a
-    key the real document holds.
+    still starts from the items. The application that builds the run's own
+    configuration names the key in one warning for each run
+    (``warn_unread_appends``). The same overrides are applied again to other
+    bases (the trusted views, the replays, the MCP gate), which can lack a key the
+    real document holds, and those applications never warn.
+
+    An append is not refused for having no default to add to. A respelling of a
+    section the file wrote is refused, since the append would land in a section
+    the plugin does not read.
     """
 
     @pytest.fixture(autouse=True)
@@ -852,26 +887,37 @@ class TestAppendOntoAnUntypedPluginOption:
             config, "reporter", _BEDROCK, "exclude_scanner_types"
         ) == ["SCA"]
 
-    def test_an_append_onto_a_whole_section_adds_no_default(self):
+    def test_an_append_onto_a_whole_section_adds_no_default(self, caplog):
         """Only an override that lands at an option inside an untyped section is
         read against the plugin's defaults. One at the section itself has no option
         to read a default for: it is refused, or it is applied as the items it was
-        given, and what it writes holds none of the plugin's default items."""
-        defaults = [
-            item
-            for row in UNTYPED_LIST_OPTION_DEFAULTS["reporters"][_BEDROCK].values()
-            for item in row
-        ]
+        given, and what it writes holds none of the plugin's default items.
+
+        Either way it logs no warning that no plugin reads the section, which would
+        be false: the section is the Bedrock reporter's, and ASH ships it. A
+        plugin's row is found through the sections the document holds, and the
+        override walk has not made this one yet, so a guard that let a two-segment
+        key through to that lookup would find no row and log that warning. It is
+        the guard's only visible effect, so the append is applied through
+        ``build_config``, the application that logs the warning."""
+        rows = _untyped_list_option_table().get("reporters", {}).get(_BEDROCK, {})
+        defaults = [item for row in rows.values() for item in row]
         assert defaults, "control: the table has default items for the plugin"
         key = f"reporters.{_BEDROCK}"
+        unread = "reporters.vesper-exporter.options.channels"
 
-        try:
-            config = apply_config_overrides(AshConfig(), [f"{key}+=[1]"])
-        except ASHConfigValidationError:
-            return
+        with caplog.at_level("WARNING", logger="ash"):
+            try:
+                config = build_config({}, [f"{key}+=[1]"])
+            except ASHConfigValidationError:
+                config = None
+            build_config({}, [f'{unread}+=["x"]'])
 
-        written = config.get_plugin_config("reporter", _BEDROCK)
-        assert [leaf for leaf in _scalars(written) if leaf in defaults] == []
+        assert _warnings_naming(caplog, key) == []
+        assert len(_warnings_naming(caplog, unread)) == 1, "control: the capture works"
+        if config is not None:
+            written = config.get_plugin_config("reporter", _BEDROCK)
+            assert [leaf for leaf in _scalars(written) if leaf in defaults] == []
 
     def test_a_typed_section_keeps_its_default_as_before(self):
         default = list(AshConfig().scanners.checkov.options.frameworks)
@@ -932,9 +978,9 @@ class TestAppendOntoAnUntypedPluginOption:
 
     def test_an_external_reporters_section_survives_the_trusted_replay(self):
         """The repository's own file holds the reporter's section and the trusted
-        base does not, so the replayed ``+=`` meets an option the base lacks. It
-        used to be refused there, which dropped the whole section, its
-        ``enabled`` included, from the view."""
+        base does not, so the replayed ``+=`` meets an option the base lacks. The
+        view keeps the whole section, its ``enabled`` included, with the appended
+        items as the list."""
         from automated_security_helper.config.resolve_config import (
             _with_reporter_overrides,
         )
@@ -991,6 +1037,147 @@ class TestAppendOntoAnUntypedPluginOption:
 
         assert len(_warnings_naming(caplog, key)) == 1
         assert len(_warnings_naming(caplog, other)) == 1, "control: a key of its own"
+
+    @pytest.mark.parametrize(
+        ("segment", "kind", "plugin"), _SECTIONS_OF_THE_APPLICATION_TESTS
+    )
+    def test_an_append_warns_only_when_the_application_asks_for_the_warning(
+        self, caplog, segment, kind, plugin
+    ):
+        """The same overrides are applied to other bases as well as to the run's own
+        configuration (the trusted views, the replays, the MCP gate), and there a
+        key the real document holds can be missing. Only the application that builds
+        the run's own configuration asks for the warning, with
+        ``warn_unread_appends``; the others leave it off and say nothing about the
+        section."""
+        key = f"{segment}.{plugin}.options.channels"
+        override = f'{key}+=["appended-value-4c1e"]'
+        written = {"options": {"channels": ["appended-value-4c1e"]}}
+
+        with caplog.at_level("WARNING", logger="ash"):
+            quiet = apply_config_overrides(AshConfig(), [override])
+            assert _warnings_naming(caplog, key) == [], "no flag: no warning"
+            asked = apply_config_overrides(
+                AshConfig(), [override], warn_unread_appends=True
+            )
+
+        assert quiet.get_plugin_config(kind, plugin) == written
+        assert asked.get_plugin_config(kind, plugin) == written
+        warnings = _warnings_naming(caplog, key)
+        assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
+
+    def test_a_key_is_warned_of_once_in_each_run(self, caplog):
+        """The warning is once for each key in each run, not once for the process:
+        the MCP server runs every scan in one process, and each scan's log has to
+        name the key its overrides append to. Inside one run the key applied again
+        is named once."""
+        key = "reporters.nimbus-exporter.options.channels"
+
+        with caplog.at_level("WARNING", logger="ash"):
+            with run_log_scope():
+                first_run = current_run_log_scope()
+                apply_config_overrides(
+                    AshConfig(), [f'{key}+=["a"]'], warn_unread_appends=True
+                )
+                apply_config_overrides(
+                    AshConfig(), [f'{key}+=["b"]'], warn_unread_appends=True
+                )
+                within_the_first_run = len(_warnings_naming(caplog, key))
+            with run_log_scope():
+                second_run = current_run_log_scope()
+                apply_config_overrides(
+                    AshConfig(), [f'{key}+=["c"]'], warn_unread_appends=True
+                )
+
+        assert first_run is not None and second_run is not None, "control: in a run"
+        assert first_run != second_run, "control: two runs are two scopes"
+        assert within_the_first_run == 1
+        assert len(_warnings_naming(caplog, key)) == 2
+
+    @pytest.mark.parametrize(
+        ("segment", "plugin", "other", "replay"),
+        [
+            pytest.param(
+                "reporters",
+                "halo-exporter",
+                "halo-other-exporter",
+                "_with_reporter_overrides",
+                id="reporters",
+            ),
+            pytest.param(
+                "scanners",
+                "halo-linter",
+                "halo-other-linter",
+                "_with_scanner_overrides",
+                id="scanners",
+            ),
+        ],
+    )
+    def test_a_replay_of_an_append_onto_a_list_the_file_wrote_says_nothing(
+        self, tmp_path, monkeypatch, caplog, segment, plugin, other, replay
+    ):
+        """The repository's own config file writes an external plugin's list and the
+        operator appends to it. The scan's own application extends the file's list
+        with no warning. The same override is then replayed onto the trusted base
+        (``_with_reporter_overrides``, ``_with_scanner_overrides``), which holds no
+        such section, so the replayed list starts from the appended items, and the
+        replay used to log that no plugin reads the section and advise ``=[...]``
+        for a list the scan had extended. Only the control key, which the file did
+        not write, is named, once.
+
+        ``resolve_config`` returns before the trusted replays when its chain holds
+        no file inside the scanned tree, so the file is the repository's, in a
+        checkout under ``source_dir``. The test records what the replay returns and
+        fails its control when none ran, or when the one that ran did not meet a
+        base without the file's list."""
+        monkeypatch.delenv("ASH_MCP_WORKSPACE_ROOT", raising=False)
+        module = _resolve_config_module()
+        replayed: list = []
+        original = getattr(module, replay)
+
+        def recording(*args, **kwargs):
+            view = original(*args, **kwargs)
+            replayed.append(view)
+            return view
+
+        monkeypatch.setattr(module, replay, recording)
+
+        def list_the_replay_started(view) -> Any:
+            section = view.model_dump(by_alias=True)[segment].get(plugin) or {}
+            return (section.get("options") or {}).get("channels")
+
+        key = f"{segment}.{plugin}.options.channels"
+        control = f"{segment}.{other}.options.channels"
+        checkout = tmp_path / "checkout"
+        mark_git_checkout(checkout)
+        (checkout / ".ash.yaml").write_text(
+            f"project_name: repo\n{segment}:\n  {plugin}:\n    options:\n"
+            '      channels: ["base-a", "base-b"]\n',
+            encoding="utf-8",
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = resolve_config(
+                source_dir=checkout,
+                config_overrides=[
+                    f'{key}+=["extra-a", "extra-b"]',
+                    f'{control}+=["control-a"]',
+                ],
+            )
+
+        written = (getattr(config, segment).model_extra or {})[plugin]
+        assert written["options"]["channels"] == [
+            "base-a",
+            "base-b",
+            "extra-a",
+            "extra-b",
+        ]
+        assert replayed, "control: the trusted replay did not run"
+        assert ["extra-a", "extra-b"] in [
+            list_the_replay_started(view) for view in replayed
+        ], "control: the replay did not meet a base without the file's list"
+        assert len(_warnings_naming(caplog, control)) == 1, "control: the capture works"
+        assert _warnings_naming(caplog, key) == []
 
     def test_the_warned_keys_stay_bounded_in_a_long_lived_process(self, caplog):
         module = _resolve_config_module()
