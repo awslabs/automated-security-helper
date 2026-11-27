@@ -126,11 +126,25 @@ def _banner(script: str) -> str:
 
 BANNER = _banner("generate_cli_docs.py")
 JOURNEY_BANNER = _banner("generate_journey_pages.py")
-#: The blocks of the pages a person writes that show a command nothing runs, as they
-#: stood at main when the seed was written. A page a generator writes is not read, so
-#: none of its blocks are among them. Conversions lower the number of lines in the
-#: seed; this one never changes.
-SEED_AT_MAIN = 4
+#: The blocks that show a command nothing runs, as the check counts them at main, and the
+#: page each is on. The first seed, written when the check was first run over main
+#: (c15148192f4), held 51 lines: one on each of four pages a person writes, and 47 on the
+#: CLI reference, which a generator writes. Of those 47, 44 are the usage lines the
+#: generator prints, which the check leaves out (is_usage_line), and 3 are examples that
+#: a person wrote in the help text of ``ash config lint``, ``ash config validate`` and
+#: ``ash suppress add``, which it counts. So main carries 7 lines. Conversions lower
+#: the number of lines on a page; this table never changes. It is the backstop that
+#: needs no git: the ratchet job compares the seed with the fork point's, and this holds
+#: each page to its own line count, so a change that converts two lines on one page and
+#: adds two on another is as much a failure as a seed that grows.
+SEED_PAGES_AT_MAIN = {
+    "automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md": 1,
+    "deploy/terraform/modules/codepipeline-executor/README.md": 1,
+    "docs/content/contributing/documentation.md": 1,
+    "docs/content/docs/plugins/alpha/index.md": 1,
+    CLI_REFERENCE: 3,
+}
+SEED_AT_MAIN = 7
 
 
 def _load(name: str, path: Path):
@@ -1195,9 +1209,16 @@ def test_the_seed_lists_no_usage_line_of_a_page_a_generator_writes(corpus):
 
 @pytest.mark.unit
 def test_the_list_names_the_reference_pages_of_this_checkout():
+    dc = checks()
     generated = _listed()
 
-    assert generated.get("generate_cli_docs.py") == CLI_REFERENCE
+    assert generated.get("generate_cli_docs.py") == CLI_REFERENCE, (
+        f"{dc.GENERATED_PAGES_LIST_NAME} in {dc.GENERATED_PAGES_LIST} names no page for "
+        "generate_cli_docs.py. scripts/docs_checks.py reads the list from that path "
+        "(GENERATED_PAGES_LIST there), and without it every generated page is read like "
+        "one a person writes and each usage line of the CLI reference is a finding: if "
+        "the freshness test moved, change GENERATED_PAGES_LIST to its new path"
+    )
     gone = [rel for rel in generated.values() if not (REPO_ROOT / rel).is_file()]
     assert gone == [], "the list names pages this checkout does not have"
 
@@ -1283,11 +1304,40 @@ def test_a_journey_page_of_this_checkout_has_a_banner_and_is_still_read(rel):
 
 
 @pytest.mark.unit
+def test_the_seed_at_main_is_the_sum_of_the_pages_it_comes_from():
+    """The total and the table it is the sum of are restated together, so a page added
+    to the table, or a total changed alone, fails here: the number stays exact."""
+    assert sum(SEED_PAGES_AT_MAIN.values()) == SEED_AT_MAIN
+
+
+@pytest.mark.unit
 def test_the_seed_holds_no_more_lines_than_main_had():
     lines = len(_committed_seed())
 
     assert lines <= SEED_AT_MAIN, (
         f"the seed holds {lines} lines; main had {SEED_AT_MAIN}, and it only shrinks"
+    )
+
+
+@pytest.mark.unit
+def test_the_seed_holds_no_more_lines_than_main_had_on_any_page():
+    """A bound on the total lets a change convert two lines and add two others. The ratchet
+    job catches that against the fork point; this catches it without git, page by page,
+    and a page main had no line for may have none."""
+    held: dict[str, int] = {}
+    for line in _committed_seed():
+        page = line.partition("\t")[0]
+        held[page] = held.get(page, 0) + 1
+
+    grown = {
+        page: (count, SEED_PAGES_AT_MAIN.get(page, 0))
+        for page, count in sorted(held.items())
+        if count > SEED_PAGES_AT_MAIN.get(page, 0)
+    }
+
+    assert grown == {}, (
+        f"pages with more seed lines than main had (held, at main): {grown}; "
+        "the seed only shrinks"
     )
 
 
