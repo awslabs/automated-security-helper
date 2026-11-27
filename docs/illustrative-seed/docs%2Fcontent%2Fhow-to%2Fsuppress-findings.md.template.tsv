@@ -1,3 +1,6 @@
+docs/content/how-to/suppress-findings.md.template	names src/deploy.py and its Deployer.run_hook method, which the docs runner's sample project does not have
+docs/content/how-to/suppress-findings.md.template	re-hashes src/deploy.py, a locked file the docs runner's sample project does not have
 docs/content/how-to/suppress-findings.md.template	shows the command the warning prints, with a placeholder for the interpreter path
 docs/content/how-to/suppress-findings.md.template	installs ASH from GitHub over the network
 docs/content/how-to/suppress-findings.md.template	shows where the comments go; running it would call make deploy
+docs/content/how-to/suppress-findings.md.template	the audit recipe needs yq and a repository with an .ash.yaml, and the docs runner's sample project has neither

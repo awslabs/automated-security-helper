@@ -50,11 +50,13 @@ WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ash-unified-ci.yml"
 CONTRACT_PAGE = "docs/content/contributing/documentation.md"
 FENCE = "```"
 
-#: The markers the parser binds at main that keep a block out of the runs, as the seed
-#: counts them: 599 ``illustrative`` markers, 25 ``runner=none`` markers and 4 bare
-#: ``save-as=`` markers. Conversions lower the number of lines in the seed; this one
-#: never changes.
-SEED_AT_MAIN = 628
+#: The markers the parser binds at main (f6cc3c03ac86) that keep a block out of the
+#: runs, as the seed counts them: 611 ``illustrative`` markers, 25 ``runner=none``
+#: markers and 4 bare ``save-as=`` markers. The seed was first written at c15148192f4
+#: with 599 of the first, and main's own pages gained 12 since. Conversions lower the
+#: number of lines in the seed; this one changes only when main's pages gain markers
+#: before the seed lands, since the seed is written once, from main.
+SEED_AT_MAIN = 640
 
 NEEDS_DOCKER = "needs Docker"
 WRITES_BUCKET = "writes to a real bucket"
