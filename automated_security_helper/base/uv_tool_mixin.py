@@ -349,8 +349,8 @@ def _record_direct_route_version(plugin: Any, version: Optional[str]) -> None:
     it wrote earlier is replaced -- with None when the copy answered nothing (an
     earlier probe resolved 3.4.5 while the copy on PATH was 3.3.15) -- and a probe
     still owed is dropped unasked. ``_select_tool_execution`` and the PATH
-    fallbacks of the bandit, checkov, cfn-lint and semgrep scanners record through
-    here, so on those routes the record follows the route.
+    fallbacks of the bandit, checkov, cfn-lint, guarddog and semgrep scanners
+    record through here, so on those routes the record follows the route.
     """
     plugin.tool_version = version or None
     plugin._deferred_tool_version_probe = None

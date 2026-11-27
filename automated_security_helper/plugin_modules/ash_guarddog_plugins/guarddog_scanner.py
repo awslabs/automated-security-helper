@@ -139,7 +139,9 @@ from automated_security_helper.base.uv_tool_mixin import (
     _restore_uv_route,
     _uv_available,
     _uv_unavailable,
+    guarded_values_read,
     is_uv_form,
+    tool_name,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -183,6 +185,7 @@ from automated_security_helper.utils.uv_tool_runner import (
     find_uv_or_none,
     get_uv_tool_command,
     get_uv_tool_runner,
+    shown_uv_output,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
 
@@ -1284,6 +1287,17 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         route is left. For a uv answer the scan keeps the uv route and the record that
         route made, as it does when nothing is on PATH, and that route runs once the
         check passes.
+
+        Every line this check writes, and the reason a MISSING row carries, go
+        through the uv layer (``shown_uv_output``) with the plugin's values, read
+        once and guarded, as semgrep's ``_direct_binary_satisfies`` reads them. The
+        verdict's detail quotes the scan's requirement in the spelling the options
+        validator stored, and an environment-read ``tool_version`` was written in
+        another spelling, which the plain value match the scan phase applies to the
+        reason does not see. The reason names the verdict's summary and a remedy,
+        never the copy's path or the detail; the ERROR line carries both. With no
+        usable values the copy is not run, and the reason names only the hook's
+        failure.
         """
         uv_answer = is_uv_form(resolved)
         # The bare-name lookup a direct run starts, which the resolver's own direct
@@ -1292,46 +1306,128 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         if executable is None:
             self.dependencies_satisfied = True
             return True
+        # Read once a copy is to be checked, and only then: a uv answer with nothing
+        # on PATH keeps the uv route, whose own run path reads the hook.
+        read = guarded_values_read(self)
+        if read.values is None:
+            failure = read.failure()
+            self._plugin_log(
+                "The guarddog on PATH was not verified: the plugin's values hook "
+                f"{failure}, so its check could not be redacted. It does not run "
+                "unverified.",
+                level=logging.WARNING,
+            )
+            self.dependency_unavailable_reason = (
+                f"guarddog cannot be used: the plugin's values hook {failure}, so the "
+                "copy on PATH could not be verified and its records could not be "
+                "redacted. Fix the plugin's values hook."
+            )
+            self.dependencies_satisfied = False
+            return False
+        values = read.values
+        extras = self._get_tool_package_extras()
+        constraint = self._get_tool_version_constraint()
+        uv = find_uv_or_none()
         checked = verify_pre_installed_tool(
             executable,
             _COMMAND,
-            self._get_tool_package_extras(),
-            self._get_tool_version_constraint(),
-            uv_executable=None,
-            values=self._values_to_redact(),
+            extras,
+            constraint,
+            uv_executable=uv,
+            values=values,
         )
+
+        def _shown(text: str) -> str:
+            return shown_uv_output(
+                text,
+                values,
+                plugin_inputs=self._uv_run_inputs_for_records(),
+                tool_name=tool_name(self),
+                limit=None,
+            )
+
         if checked.status == ToolInstallStatus.UNSATISFIED:
             if uv_answer:
                 # The verdict's summary, not its detail: the summary carries no
                 # constraint text and no excerpt of the copy's output.
                 summary = getattr(checked, "summary", "") or "it falls short"
                 self._plugin_log(
-                    f"The guarddog on PATH ({executable}) does not meet the scan's "
-                    f"requirement ({summary}), so it is not run. The scan keeps the "
-                    "uv route, which runs once uv's availability check passes.",
+                    _shown(
+                        f"The guarddog on PATH ({executable}) does not meet the scan's "
+                        f"requirement ({summary}), so it is not run. The scan keeps "
+                        "the uv route, which runs once uv's availability check passes."
+                    ),
                     level=logging.WARNING,
                 )
                 self.dependencies_satisfied = True
                 return True
-            reason = (
-                f"uv is not available and the guarddog on PATH ({executable}) "
-                f"cannot be used: {checked.detail}"
+            remedy = self._unusable_copy_remedy(
+                build_requirement(_COMMAND, extras, constraint),
+                uv_found=uv is not None,
             )
-            self.dependency_unavailable_reason = reason
-            self._plugin_log(reason, level=logging.ERROR)
+            # The log gets the copy's path and the verdict's detail. The reason gets
+            # the summary, the path-free line the verifier gives for that use; the
+            # detail stands in only for a verdict without one, as in semgrep's
+            # _direct_binary_satisfies.
+            self._plugin_log(
+                _shown(
+                    "uv's availability check did not pass, and the guarddog on PATH "
+                    f"({executable}) cannot be used: {checked.detail}. {remedy}"
+                ),
+                level=logging.ERROR,
+            )
+            summary = getattr(checked, "summary", "") or checked.detail
+            self.dependency_unavailable_reason = _shown(
+                f"guarddog cannot be used: {summary}. {remedy}"
+            )
             self.dependencies_satisfied = False
             return False
         if checked.status != ToolInstallStatus.SATISFIED:
             self._plugin_log(
-                f"uv is not available and the guarddog on PATH ({executable}) "
-                f"could not be verified against the scan's requirement "
-                f"({checked.detail}); running it anyway.",
+                _shown(
+                    "uv's availability check did not pass, and the guarddog on PATH "
+                    f"({executable}) could not be verified against the scan's "
+                    f"requirement ({checked.detail}); running it anyway."
+                ),
                 level=logging.WARNING,
             )
         _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
+
+    def _unusable_copy_remedy(self, requirement: str, *, uv_found: bool) -> str:
+        """How to provide a guarddog the scan can run, for the copy on PATH that falls
+        short while uv's availability check does not pass.
+
+        With a uv found, the check failed rather than uv being absent: a copy falls
+        short of a constraint only through uv's dry run. Running the scan again once
+        the check passes lets uv run the scan's own requirement. Without a uv, a copy
+        falls short only through a ``--version`` probe that exits non-zero, and
+        installing uv lets ASH install and run guarddog itself.
+        """
+        if uv_found:
+            return (
+                "It is the only copy ASH can run while uv's availability check does "
+                "not pass, so guarddog is missing. Install a copy that satisfies "
+                f"{requirement!r} (`{self._install_command(requirement)}`), set "
+                "scanners.guarddog.options.tool_version to a constraint this copy "
+                "meets, or run the scan again once uv's availability check passes, "
+                "so that uv runs guarddog."
+            )
+        return (
+            "It is the only copy ASH can run without uv, so guarddog is missing. "
+            f"Install a copy that satisfies {requirement!r}, or install uv, so that "
+            "ASH installs and runs guarddog itself."
+        )
+
+    def _install_command(self, requirement: str) -> str:
+        """The ``uv tool install`` command for ``requirement``, under the interpreter
+        request of the facet row (``_get_tool_python_request``, derived in
+        uv_tool_mixin)."""
+        python_request = self._get_tool_python_request()
+        python_option = f" --python '{python_request}'" if python_request else ""
+        return f"uv tool install{python_option} '{requirement}'"
 
     def _carry_pre_installed_version(self, installation_info: dict[str, Any]) -> None:
         """Carry the version of the pre-installed GuardDog the scan will run.
@@ -1375,10 +1471,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         nixpkgs). Both need the same remedy: install it before going offline.
         """
         requirement = f"guarddog{self._get_tool_version_constraint() or ''}"
-        # The interpreter request is the facet row's, derived (uv_tool_mixin).
-        python_request = self._get_tool_python_request()
-        python_option = f" --python '{python_request}'" if python_request else ""
-        install = f"uv tool install{python_option} '{requirement}'"
+        install = self._install_command(requirement)
         if self._is_offline_mode():
             reason = (
                 "guarddog is not installed, and ASH does not install tools in "
@@ -1391,6 +1484,21 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             reason = (
                 f"guarddog could not be installed or found on PATH. Install it with "
                 f"`{install}`, or see the log above for uv's error."
+            )
+        read = guarded_values_read(self)
+        if read.values is None:
+            reason = (
+                "guarddog could not be installed or found on PATH, and the plugin's "
+                f"values hook {read.failure()}, so the install command, which holds "
+                "the scan's requirement, is not shown. Fix the plugin's values hook."
+            )
+        else:
+            reason = shown_uv_output(
+                reason,
+                read.values,
+                plugin_inputs=self._uv_run_inputs_for_records(),
+                tool_name=tool_name(self),
+                limit=None,
             )
         self.dependency_unavailable_reason = reason
         self._plugin_log(reason, level=logging.ERROR)

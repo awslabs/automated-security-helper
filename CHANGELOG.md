@@ -111,6 +111,19 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **While uv's availability check does not pass, GuardDog checks the `guarddog` it
+  would run instead before running it.** The check does not pass when uv is absent or
+  its probe fails, and for 60 seconds after a probe of uv timed out or was killed. A
+  `guarddog` found then runs only if it meets the scan's requirement
+  (`guarddog==3.2.0`, or the scanner's `options.tool_version`), and the SARIF report
+  names that copy's version. A copy that cannot be checked runs with a warning. A copy
+  that falls short does not run: when uv itself can run GuardDog, the scan keeps uv for
+  it, and otherwise the scanner is reported `MISSING` with a reason that says how to
+  provide GuardDog. With `options.max_hits` set, GuardDog's command line runs in the
+  Python of the copy that was accepted, and through uv it does not run until uv's check
+  passes. Before, the scan ran whatever `guarddog` it found without checking it, and
+  within those 60 seconds it could try to start `guarddog` by name when none was on
+  `PATH`.
 
 ### Maintenance
 
