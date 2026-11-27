@@ -1921,7 +1921,7 @@ class AshDeduplicationConfig(RedactedSection):
 
 
 class AshHistoryConfig(RedactedSection):
-    """Run history: a compact record of each completed scan, for ``ash trend``."""
+    """Run history: a compact record of each completed scan, for ``ash results trend``."""
 
     model_config = ConfigDict(extra="forbid")
 

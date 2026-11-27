@@ -2712,7 +2712,7 @@
     },
     "AshHistoryConfig": {
       "additionalProperties": false,
-      "description": "Run history: a compact record of each completed scan, for ``ash trend``.",
+      "description": "Run history: a compact record of each completed scan, for ``ash results trend``.",
       "properties": {
         "enabled": {
           "default": false,
