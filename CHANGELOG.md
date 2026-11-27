@@ -252,8 +252,13 @@
   the scanned directory's path, so they skip those directories below it only. On
   Windows no such value is sent, and a file link from one of them that points
   outside the scanned directory now stops the checkov scan of that directory, as
-  such a link anywhere else in it already did. checkov's secrets framework keeps
-  its own unanchored list of these names and still skips such a project.
+  such a link anywhere else in it already did. Also on Windows,
+  `scanners.checkov.options.skip_path` values are now checked against checkov's
+  terraform module finder without ASH's values before them, so a value such as
+  `tests/*`, which stopped the scan before, now reaches checkov there, and one
+  such as `(a[b]c)` now stops it. In checkov's default mode its secrets framework
+  keeps its own unanchored list of these names and still skips such a project;
+  with `--enable-secret-scan-all-files` it reads it.
 
 ### Features
 

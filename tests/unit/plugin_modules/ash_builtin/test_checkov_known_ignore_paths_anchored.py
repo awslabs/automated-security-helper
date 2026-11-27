@@ -213,8 +213,8 @@ def test_a_root_level_directory_under_an_absolute_target_is_skipped():
 
 
 def test_the_one_uncovered_shape_is_a_relative_root_named_like_a_known_dir():
-    """A relative walked path that starts with a known directory's name is matched
-    by no value, pinned on purpose.
+    """The leading known component of a relative walked path is matched by no value,
+    pinned on purpose.
 
     Every value starts with the scanned directory's absolute path, so a walked
     path that is relative, such as a scan root directly named ``venv`` scanned by
@@ -277,8 +277,8 @@ def test_every_known_ignore_value_survives_a_cmd_exe_re_read():
     ``uv tool run`` on windows-latest, and an unquoted ``^`` is cmd.exe's
     escape character, consumed silently. ASH sends no known-directory value on
     Windows now, so none reaches that launch route; the values it writes for a
-    POSIX root are kept free of these characters all the same, as a root with one
-    brings it in escaped and ASH adds none.
+    POSIX root are kept free of these characters all the same: a root brings its
+    own characters in, and ASH adds none.
     """
     for value in _values():
         acted_on = set(value) & set("<>|&^()%\"' \t")

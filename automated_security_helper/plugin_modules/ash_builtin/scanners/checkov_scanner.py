@@ -282,10 +282,12 @@ def _known_directory_skip_values(root: str) -> List[str]:
     below the scanned directory, at any depth, and never a component of the
     scanned directory's own path or above it: a target that is itself named
     ``venv``, or sits under a directory named ``venv``, ``.venv`` or
-    ``node_modules``, is scanned. checkov's secrets framework is the exception: it
-    adds its own list of names, ``venv`` and ``node_modules`` among them, to the
-    values and matches them the same unanchored way (``checkov/secrets/utils.py``,
-    ``EXCLUDED_PATHS``), so it still reads no file of such a target. The values
+    ``node_modules``, is scanned. checkov's secrets framework is the exception in
+    checkov's default mode: it adds its own list of names, ``venv`` and
+    ``node_modules`` among them, to the values and matches them the same unanchored
+    way (``checkov/secrets/utils.py``, ``EXCLUDED_PATHS``), so it still reads no
+    file of such a target. With ``--enable-secret-scan-all-files`` it matches that
+    list by directory name only, and reads the target. The values
     this replaced, ``/venv/``, ``/[.]venv/`` and ``/node_modules/``, started at a
     ``/`` and so matched such an ancestor too: the walked paths of a target below
     ``/home/me/venv`` all hold ``/venv/``, every entry was removed, checkov read
@@ -1891,8 +1893,10 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         # The KNOWN_IGNORE_PATHS directories get their values at this point of the
         # command line, where the fixed values used to be, but per scan: each value
         # starts with the scanned directory's path. _execute_scan puts them here
-        # (_known_directory_skip_patterns), so checkov's module finder reads the
-        # operator's skip_path values below in the state it always did.
+        # (_known_directory_skip_patterns), so on POSIX checkov's module finder reads
+        # the operator's skip_path values below in the state it always did. On
+        # Windows no such value is sent, so it reads them with none of ASH's before
+        # them, and a value can compile there that did not before, or the reverse.
         self._known_directory_skip_at = len(self.args.extra_args)
 
         for item in active_ignore_paths(
