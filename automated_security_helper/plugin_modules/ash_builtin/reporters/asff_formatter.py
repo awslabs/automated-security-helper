@@ -71,6 +71,7 @@ from automated_security_helper.utils.finding_identity import (
 from automated_security_helper.utils.frame_text import wire
 from automated_security_helper.utils.sarif_utils import (
     _resolve_result_severity,
+    is_not_a_finding,
     shared_correlation_ids,
 )
 
@@ -240,6 +241,12 @@ class AsffFormatter:
                 entry["flat"].correlation_id = correlation_id
         for entry, derived in zip(prepared, _derived(prepared)):
             entry["derived"] = derived
+        # Every result is prepared, keyed and paired above, whatever its kind: the
+        # keys depend on the run's other results, and the correlation ids are read
+        # by position from the flattened findings of the whole run. Only the list
+        # returned leaves out a result whose kind states no finding (``pass``,
+        # ``notApplicable``, ``informational``), which its level ``none`` would
+        # otherwise export to Security Hub as an INFORMATIONAL finding.
         return [
             self._to_asff(
                 entry,
@@ -251,6 +258,7 @@ class AsffFormatter:
                 timestamp=timestamp,
             )
             for entry, key in zip(prepared, keys)
+            if not is_not_a_finding(entry["result"])
         ]
 
     def _prepare(
