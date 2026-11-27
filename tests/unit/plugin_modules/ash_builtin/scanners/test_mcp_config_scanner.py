@@ -793,3 +793,17 @@ def test_the_scanner_declares_its_register_rows_and_name() -> None:
     assert McpConfigScanner.facets is not None
     assert McpConfigScanner.operational_facets.scanner_name == "mcp-config"
     assert McpConfigScannerConfig().name == "mcp-config"
+
+
+def test_the_scanner_matches_prefixes_with_the_shared_matchers() -> None:
+    """The scanner's URL and command-path checks use the functions the operator's
+    floors for the two prefix lists use, so the two cannot drift apart."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        mcp_config_scanner as scanner,
+    )
+    from automated_security_helper.utils.mcp_config import model
+
+    assert scanner._split_url is model.split_url
+    assert scanner._prefix_matches is model.url_prefix_matches
+    assert scanner._normalized_command_path is model.normalized_command_path
+    assert scanner._path_prefix_matches is model.command_prefix_matches

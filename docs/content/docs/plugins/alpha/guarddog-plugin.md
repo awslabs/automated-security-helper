@@ -67,6 +67,10 @@ is bounded by `options.verify_timeout` (600 seconds by default). A finding in a
 dependency is reported on the manifest line that names the dependency, and carries
 `package_name` and `package_version`, so package-scoped suppressions apply to it.
 
+Only the operator's config turns `verify` on. A config file inside the scanned tree or
+a git checkout may turn it off but not on, and one an MCP client delivered runs with it
+off unless the operator's config turns it on.
+
 ## Severity mapping
 
 GuardDog correlates its matches into **risks**: a threat pattern, optionally paired with

@@ -12,10 +12,15 @@ network from a file that may not grant). ``honor_ignore_files: false`` is not
 among them: it widens the scan to the files the ignore files leave out. A
 file an MCP client delivered keeps nothing: its base is the defaults. A file
 outside every checkout is the operator's own and is the base as before.
+
+``keep_operator_floors``, beside ``keep_restrictions``, holds every config that is
+not the operator's to the operator's floors; those tests follow the restriction
+tests.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +29,7 @@ import pytest
 from automated_security_helper.config import client_config_policy
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.utils.log import ASH_LOGGER
 from tests.utils.helpers import mark_git_checkout
 
 pytestmark = pytest.mark.unit
@@ -315,3 +321,1017 @@ def test_nothing_else_is_carried_from_the_source() -> None:
     assert base.sandbox.env_scanners == []
     # The mode is the floor trusted_base_config carries on its own.
     assert base.sandbox.mode == defaults.sandbox.mode
+
+
+# ---------------------------------------------------------------------------
+# keep_operator_floors: a config that is not the operator's may narrow the
+# operator's floors, never loosen them
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ash_log():
+    records: List[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    handler = _Collect(level=logging.DEBUG)
+    previous_level = ASH_LOGGER.level
+    ASH_LOGGER.addHandler(handler)
+    ASH_LOGGER.setLevel(logging.DEBUG)
+    try:
+        yield records
+    finally:
+        ASH_LOGGER.removeHandler(handler)
+        ASH_LOGGER.setLevel(previous_level)
+
+
+def _warnings(records: List[logging.LogRecord]) -> List[str]:
+    return [r.getMessage() for r in records if r.levelno >= logging.WARNING]
+
+
+def _floors(config: AshConfig, trusted: AshConfig) -> None:
+    from automated_security_helper.config.restrictions_kept import keep_operator_floors
+
+    keep_operator_floors(config, trusted, [], [Path(".ash.yaml")])
+
+
+def _mcp(config: AshConfig) -> Any:
+    """mcp-config's options as the scanner reads them from *config*."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner import (
+        McpConfigScannerConfigOptions,
+    )
+
+    section = config.get_plugin_config("scanner", "mcp-config") or {}
+    return McpConfigScannerConfigOptions.model_validate(section.get("options") or {})
+
+
+def _mcp_document(options: Optional[Dict[str, Any]]) -> AshConfig:
+    """A config whose mcp-config options are *options*; None names no such section.
+
+    The section is a typed one, so a config that names none still reads as the
+    scanner's defaults.
+    """
+    if options is None:
+        return _loaded({})
+    return _loaded({"scanners": {"mcp-config": {"options": options}}})
+
+
+#: An https URL prefix that ends at a path boundary on one host, the same prefix
+#: without its trailing slash, and an absolute command directory.
+P = "https://mcp.example.test/tools/"
+P_BARE = "https://mcp.example.test/tools"
+R = "/opt/mcp/bin"
+
+#: The five checks of mcp-config.
+BOOLEANS = [
+    "forbid_privilege_escalation",
+    "forbid_unpinned_runners",
+    "forbid_auto_approval",
+    "flag_env_secrets",
+    "require_local",
+]
+#: Its two prefix lists, each with a value the operator may set and an entry that
+#: is not under it.
+LISTS = {
+    "remote_url_prefixes": ([P], "https://other.example.test/tools/v1"),
+    "allowed_command_prefixes": ([R], "/usr/local/bin/server"),
+}
+
+
+@pytest.mark.parametrize("check", BOOLEANS)
+def test_a_check_the_operator_turns_on_stays_on(check: str) -> None:
+    trusted = _mcp_document({check: True})
+    config = _mcp_document({check: False})
+
+    _floors(config, trusted)
+
+    assert getattr(_mcp(config), check) is True
+
+
+def test_a_check_written_as_text_is_read_as_the_scanner_reads_it() -> None:
+    trusted = _mcp_document({"forbid_auto_approval": True})
+    config = _mcp_document({"forbid_auto_approval": "off"})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).forbid_auto_approval is True
+
+
+def test_a_check_the_config_leaves_out_takes_the_operator_s() -> None:
+    trusted = _mcp_document({"require_local": True})
+    config = _mcp_document({"forbid_auto_approval": True})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).require_local is True
+
+
+def test_an_operator_who_sets_nothing_still_has_the_default_checks() -> None:
+    trusted = _mcp_document(None)
+    config = _mcp_document({"forbid_auto_approval": False})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).forbid_auto_approval is True
+
+
+def test_with_no_section_the_operator_s_floors_are_written() -> None:
+    trusted = _mcp_document(
+        {
+            "require_local": True,
+            "remote_url_prefixes": [P],
+            "allowed_command_prefixes": [R],
+        }
+    )
+    config = _mcp_document(None)
+
+    _floors(config, trusted)
+
+    options = _mcp(config)
+    assert options.require_local is True
+    assert options.remote_url_prefixes == [P]
+    assert options.allowed_command_prefixes == [R]
+
+
+@pytest.mark.parametrize("option", LISTS)
+def test_an_empty_list_keeps_the_operator_s(option: str) -> None:
+    operator, _outside = LISTS[option]
+    trusted = _mcp_document({option: operator})
+    config = _mcp_document({option: []})
+
+    _floors(config, trusted)
+
+    assert getattr(_mcp(config), option) == operator
+
+
+@pytest.mark.parametrize(
+    "operator, entry",
+    [
+        pytest.param([P], P, id="the-prefix-itself"),
+        pytest.param([P], P + "v1", id="one-segment-below-it"),
+        pytest.param(
+            [P_BARE], P_BARE + "/v1", id="no-trailing-slash-then-a-slash-and-a-segment"
+        ),
+        pytest.param(
+            [P], "HTTPS://MCP.EXAMPLE.TEST/tools/", id="scheme-and-host-in-other-case"
+        ),
+    ],
+)
+def test_a_url_prefix_under_the_operator_s_is_kept(
+    operator: List[str], entry: str
+) -> None:
+    trusted = _mcp_document({"remote_url_prefixes": operator})
+    config = _mcp_document({"remote_url_prefixes": [entry]})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).remote_url_prefixes == [entry]
+
+
+@pytest.mark.parametrize(
+    "operator, kept, entry",
+    [
+        pytest.param(
+            [P_BARE],
+            P_BARE + "/v1",
+            P_BARE + "evil",
+            id="its-text-continued-with-no-boundary-character",
+        ),
+        pytest.param(
+            [P],
+            P + "v1",
+            "https://other.example.test/tools/v1",
+            id="the-same-path-on-another-host",
+        ),
+        pytest.param(
+            [P], P + "v1", "https://mcp.example.test/", id="a-proper-prefix-of-it"
+        ),
+    ],
+)
+def test_a_url_prefix_not_under_the_operator_s_is_dropped(
+    operator: List[str], kept: str, entry: str
+) -> None:
+    trusted = _mcp_document({"remote_url_prefixes": operator})
+    config = _mcp_document({"remote_url_prefixes": [kept, entry]})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).remote_url_prefixes == [kept]
+
+
+@pytest.mark.parametrize("option", LISTS)
+def test_a_list_with_nothing_under_the_operator_s_keeps_the_operator_s(
+    option: str,
+) -> None:
+    operator, outside = LISTS[option]
+    trusted = _mcp_document({option: operator})
+    config = _mcp_document({option: [outside]})
+
+    _floors(config, trusted)
+
+    assert getattr(_mcp(config), option) == operator
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param(R, id="the-directory-itself"),
+        pytest.param(R + "/server", id="one-segment-below-it"),
+        pytest.param(R + "\\server", id="one-segment-below-it-with-a-backslash"),
+        pytest.param(R + "/./server", id="a-dot-segment-before-the-segment"),
+        pytest.param(".", id="a-dot"),
+    ],
+)
+def test_a_command_prefix_under_the_operator_s_is_kept(entry: str) -> None:
+    trusted = _mcp_document({"allowed_command_prefixes": [R]})
+    config = _mcp_document({"allowed_command_prefixes": [entry]})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).allowed_command_prefixes == [entry]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param(R + "evil", id="the-directory-with-letters-appended"),
+        pytest.param(R.lstrip("/"), id="the-directory-without-its-leading-slash"),
+    ],
+)
+def test_a_command_prefix_not_under_the_operator_s_is_dropped(entry: str) -> None:
+    kept = R + "/server"
+    trusted = _mcp_document({"allowed_command_prefixes": [R]})
+    config = _mcp_document({"allowed_command_prefixes": [kept, entry]})
+
+    _floors(config, trusted)
+
+    assert _mcp(config).allowed_command_prefixes == [kept]
+
+
+@pytest.mark.parametrize("check", BOOLEANS)
+def test_control_a_check_the_operator_leaves_off_may_be_turned_on(check: str) -> None:
+    trusted = _mcp_document({check: False})
+    config = _mcp_document({check: True})
+
+    _floors(config, trusted)
+
+    assert getattr(_mcp(config), check) is True
+
+
+@pytest.mark.parametrize("option", LISTS)
+def test_control_an_operator_s_empty_list_accepts_any_list(option: str) -> None:
+    _operator, outside = LISTS[option]
+    trusted = _mcp_document({option: []})
+    config = _mcp_document({option: [outside]})
+
+    _floors(config, trusted)
+
+    assert getattr(_mcp(config), option) == [outside]
+
+
+def test_control_nothing_on_either_side_writes_nothing() -> None:
+    trusted = _mcp_document(None)
+    config = _mcp_document(None)
+
+    _floors(config, trusted)
+
+    assert config.scanners.mcp_config.options.model_fields_set == set()
+    assert _mcp(config) == _mcp(_mcp_document(None))
+
+
+@pytest.mark.parametrize("option", LISTS)
+def test_control_a_value_the_scanner_would_refuse_is_left_for_it(option: str) -> None:
+    operator, _outside = LISTS[option]
+    trusted = _mcp_document({option: operator})
+    config = _mcp_document(None)
+    # An options model keeps what is assigned to it, a value its field refuses
+    # included; the scanner refuses it when it is built.
+    setattr(config.scanners.mcp_config.options, option, 5)
+
+    _floors(config, trusted)
+
+    assert getattr(config.scanners.mcp_config.options, option) == 5
+
+
+#: The floors whose default is the plugin's own: (scanner, option, the module that
+#: holds the options class, the class).
+_MCP_CONFIG_MODULE = (
+    "automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner"
+)
+_PLUGINS = "automated_security_helper.plugin_modules"
+FLOOR_MODELS = [
+    ("mcp-config", option, _MCP_CONFIG_MODULE, "McpConfigScannerConfigOptions")
+    for option in (*BOOLEANS, *LISTS)
+] + [
+    (
+        "trivy-repo",
+        "module_dir",
+        f"{_PLUGINS}.ash_trivy_plugins.trivy_repo_scanner",
+        "TrivyRepoScannerConfigOptions",
+    ),
+    (
+        "actionlint",
+        "shellcheck",
+        f"{_PLUGINS}.ash_builtin.scanners.actionlint_scanner",
+        "ActionlintScannerConfigOptions",
+    ),
+    (
+        "actionlint",
+        "pyflakes",
+        f"{_PLUGINS}.ash_builtin.scanners.actionlint_scanner",
+        "ActionlintScannerConfigOptions",
+    ),
+    (
+        "cfn-guard",
+        "rules_paths",
+        f"{_PLUGINS}.ash_builtin.scanners.cfn_guard_scanner",
+        "CfnGuardScannerConfigOptions",
+    ),
+    (
+        "guarddog",
+        "verify",
+        f"{_PLUGINS}.ash_guarddog_plugins.guarddog_scanner",
+        "GuardDogScannerConfigOptions",
+    ),
+    (
+        "trivy-repo",
+        "scanners",
+        f"{_PLUGINS}.ash_trivy_plugins.trivy_repo_scanner",
+        "TrivyRepoScannerConfigOptions",
+    ),
+    # A nested option is dotted; the class named is the nested model, which holds
+    # the last part.
+    (
+        "syft",
+        "sdist_harvest.enabled",
+        f"{_PLUGINS}.ash_builtin.scanners.syft_scanner",
+        "SdistHarvestOptions",
+    ),
+    (
+        "syft",
+        "sdist_harvest.max_sdist_mb",
+        f"{_PLUGINS}.ash_builtin.scanners.syft_scanner",
+        "SdistHarvestOptions",
+    ),
+]
+
+
+@pytest.mark.parametrize("scanner, option, module, name", FLOOR_MODELS)
+def test_each_floor_default_is_the_plugin_s_own(
+    scanner: str, option: str, module: str, name: str
+) -> None:
+    import importlib
+
+    from automated_security_helper.config import restrictions_kept
+
+    floors = getattr(restrictions_kept, "OPERATOR_FLOORS", {})
+    model = getattr(importlib.import_module(module), name)
+
+    assert (scanner, option) in floors
+    field = model.model_fields[option.split(".")[-1]]
+    assert floors[(scanner, option)].default == field.get_default()
+
+
+# The operator's file sits outside every checkout and the repository's config in
+# one, so the repository's config is the one held to the floors.
+MCP_OPERATOR = f"""\
+project_name: operator
+scanners:
+  mcp-config:
+    options:
+      forbid_auto_approval: true
+      require_local: true
+      remote_url_prefixes: ["{P}"]
+      allowed_command_prefixes: ["{R}"]
+"""
+
+MCP_LOOSER = """\
+project_name: repository
+scanners:
+  mcp-config:
+    options:
+      forbid_auto_approval: false
+      require_local: false
+      remote_url_prefixes: []
+      allowed_command_prefixes: ["/usr/local/bin"]
+"""
+
+
+def test_an_in_tree_config_cannot_lower_the_operator_s_mcp_config_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=MCP_OPERATOR,
+        repository_text=MCP_LOOSER,
+    )
+
+    options = _mcp(config)
+    assert options.forbid_auto_approval is True
+    assert options.require_local is True
+    assert options.remote_url_prefixes == [P]
+    assert options.allowed_command_prefixes == [R]
+    named = [w for w in _warnings(ash_log) if "scanners.mcp-config.options" in w]
+    assert len(named) == 1, _warnings(ash_log)
+    for option in (
+        "forbid_auto_approval",
+        "require_local",
+        "remote_url_prefixes",
+        "allowed_command_prefixes",
+    ):
+        assert f"scanners.mcp-config.options.{option}" in named[0], named[0]
+
+
+def test_an_in_tree_config_that_leaves_mcp_config_out_keeps_the_operator_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=MCP_OPERATOR,
+        repository_text="project_name: repository\n",
+    )
+
+    options = _mcp(config)
+    assert options.require_local is True
+    assert options.remote_url_prefixes == [P]
+    assert options.allowed_command_prefixes == [R]
+    # An omission is not the config's choice, so no warning names it.
+    assert not [w for w in _warnings(ash_log) if "scanners.mcp-config.options" in w]
+
+
+# ---------------------------------------------------------------------------
+# An option the operator sets keeps the operator's value under a config that is
+# not the operator's: trivy-repo's module_dir, actionlint's shellcheck and pyflakes,
+# cfn-guard's rules_paths
+# ---------------------------------------------------------------------------
+#
+# Each leaves a scanner running without the operator's modules, rules or program
+# when the config leaves it out or empties it, and a config that writes another
+# value either has it refused by the scanner (so the scanner runs without the
+# operator's) or, for the program of actionlint's own name, has it looked up on PATH
+# in place of the operator's.
+
+#: (scanner, option, the operator's value, another value a config writes, the empty
+#: value of the option). The other value for the two programs is the flag's own
+#: name, the one the scanner accepts from any config.
+OPERATOR_SET = [
+    pytest.param(
+        "trivy-repo",
+        "module_dir",
+        "/opt/ops/modules",
+        "/opt/repo/modules",
+        None,
+        id="trivy-repo.module_dir",
+    ),
+    pytest.param(
+        "actionlint",
+        "shellcheck",
+        "/opt/ops/bin/shellcheck",
+        "shellcheck",
+        "",
+        id="actionlint.shellcheck",
+    ),
+    pytest.param(
+        "actionlint",
+        "pyflakes",
+        "/opt/ops/bin/pyflakes",
+        "pyflakes",
+        "",
+        id="actionlint.pyflakes",
+    ),
+    pytest.param(
+        "cfn-guard",
+        "rules_paths",
+        ["/opt/ops/rules"],
+        ["/opt/repo/rules"],
+        [],
+        id="cfn-guard.rules_paths",
+    ),
+]
+
+
+def _option(config: AshConfig, scanner: str, option: str) -> Any:
+    """An option as the config holds it; None where it has no section or option."""
+    section = config.get_plugin_config("scanner", scanner) or {}
+    return (section.get("options") or {}).get(option)
+
+
+def _config_with(scanner: str, option: str, value: Any) -> AshConfig:
+    return _loaded({"scanners": {scanner: {"options": {option: value}}}})
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_an_operator_set_option_the_config_leaves_out_keeps_the_operator_s(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_an_operator_set_option_the_config_empties_keeps_the_operator_s(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _config_with(scanner, option, empty)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_a_value_the_config_writes_over_an_operator_set_option_gives_way_to_the_operator_s(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _config_with(scanner, option, other)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_control_an_operator_set_option_the_config_repeats_is_unchanged(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _config_with(scanner, option, operator)
+    config = _config_with(scanner, option, operator)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == operator
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_control_an_option_the_operator_leaves_unset_is_not_touched(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert not _option(config, scanner, option)
+
+
+@pytest.mark.parametrize("scanner, option, operator, other, empty", OPERATOR_SET)
+def test_control_a_value_the_config_writes_stands_when_the_operator_sets_none(
+    scanner: str, option: str, operator: Any, other: Any, empty: Any
+) -> None:
+    trusted = _loaded({})
+    config = _config_with(scanner, option, other)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, option) == other
+
+
+ACTIONLINT_OPERATOR = """\
+project_name: operator
+scanners:
+  actionlint:
+    options:
+      shellcheck: /opt/ops/bin/shellcheck
+"""
+
+ACTIONLINT_OWN_NAME = """\
+project_name: repository
+scanners:
+  actionlint:
+    options:
+      shellcheck: shellcheck
+"""
+
+
+def test_an_in_tree_config_cannot_swap_the_operator_s_shellcheck_for_its_own_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=ACTIONLINT_OPERATOR,
+        repository_text=ACTIONLINT_OWN_NAME,
+    )
+
+    assert _option(config, "actionlint", "shellcheck") == "/opt/ops/bin/shellcheck"
+    named = [
+        w for w in _warnings(ash_log) if "scanners.actionlint.options.shellcheck" in w
+    ]
+    assert len(named) == 1, _warnings(ash_log)
+
+
+# ---------------------------------------------------------------------------
+# Network fetching: a config that is not the operator's may turn it off, never on
+# ---------------------------------------------------------------------------
+#
+# A scanner the operator sets offline, guarddog's verify, trivy-repo's misconfig
+# scanner and syft's sdist harvest each fetch from the network when they run. A
+# config that is not the operator's replaces the operator's config, so an option it
+# leaves out reads as the plugin's default, which fetches, and one it writes is its
+# own. Such a config may turn fetching off, and may not turn it on past the
+# operator's value.
+
+#: The scanners whose own ``offline`` switch is held: two with a typed section
+#: and two plugin scanners, whose section is a plain mapping or missing.
+OFFLINE_SCANNERS = ["grype", "npm-audit", "guarddog", "trivy-repo"]
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_a_scanner_the_operator_sets_offline_stays_offline(scanner: str) -> None:
+    trusted = _config_with(scanner, "offline", True)
+    config = _config_with(scanner, "offline", False)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, "offline") is True
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_a_scanner_the_config_leaves_out_stays_offline(scanner: str) -> None:
+    trusted = _config_with(scanner, "offline", True)
+    # A typed section is always there and reads its default; a plugin scanner's
+    # section is missing altogether.
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, "offline") is True
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_control_a_config_may_set_a_scanner_offline(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _config_with(scanner, "offline", True)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, "offline") is True
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_control_a_scanner_neither_sets_offline_stays_online(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert not _option(config, scanner, "offline")
+
+
+def test_verify_the_operator_leaves_off_stays_off() -> None:
+    trusted = _loaded({})
+    config = _config_with("guarddog", "verify", True)
+
+    _floors(config, trusted)
+
+    assert _option(config, "guarddog", "verify") is False
+
+
+def test_control_a_config_may_turn_verify_off() -> None:
+    trusted = _config_with("guarddog", "verify", True)
+    config = _config_with("guarddog", "verify", False)
+
+    _floors(config, trusted)
+
+    assert _option(config, "guarddog", "verify") is False
+
+
+def test_control_a_config_that_leaves_verify_out_turns_it_off() -> None:
+    trusted = _config_with("guarddog", "verify", True)
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    # Fetching off is allowed: the section stays missing, which reads as the
+    # default, off.
+    assert not _option(config, "guarddog", "verify")
+
+
+def test_control_verify_both_turn_on_stays_on() -> None:
+    trusted = _config_with("guarddog", "verify", True)
+    config = _config_with("guarddog", "verify", True)
+
+    _floors(config, trusted)
+
+    assert _option(config, "guarddog", "verify") is True
+
+
+def test_misconfig_the_operator_leaves_out_stays_out() -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+    config = _config_with("trivy-repo", "scanners", ["vuln", "misconfig"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["vuln"]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param(
+            {"scanners": {"trivy-repo": {"options": {}}}}, id="section-without-a-list"
+        ),
+        pytest.param({}, id="no-section"),
+    ],
+)
+def test_misconfig_stays_out_when_the_config_leaves_the_list_out(
+    document: Dict[str, Any],
+) -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+    config = _loaded(document)
+
+    _floors(config, trusted)
+
+    # The plugin's default list, less misconfig.
+    assert _option(config, "trivy-repo", "scanners") == ["vuln", "secret", "license"]
+
+
+def test_a_scanners_list_with_nothing_left_keeps_the_operator_s() -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["vuln"])
+    config = _config_with("trivy-repo", "scanners", ["misconfig"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["vuln"]
+
+
+def test_control_a_config_may_leave_misconfig_out() -> None:
+    trusted = _loaded({})
+    config = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["vuln", "secret"]
+
+
+def _harvest(config: AshConfig) -> Dict[str, Any]:
+    """syft's ``sdist_harvest`` options as the config holds them."""
+    section = config.get_plugin_config("scanner", "syft") or {}
+    return (section.get("options") or {}).get("sdist_harvest") or {}
+
+
+def test_the_harvest_the_operator_turns_off_stays_off() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"enabled": False})
+    config = _config_with("syft", "sdist_harvest", {"enabled": True})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["enabled"] is False
+
+
+def test_the_harvest_stays_off_when_the_config_leaves_it_out() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"enabled": False})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["enabled"] is False
+
+
+def test_a_larger_harvest_bound_than_the_operator_s_is_lowered() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"max_sdist_mb": 10})
+    config = _config_with("syft", "sdist_harvest", {"max_sdist_mb": 500})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["max_sdist_mb"] == 10
+
+
+def test_the_harvest_bound_the_config_leaves_out_is_the_operator_s() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"max_sdist_mb": 10})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["max_sdist_mb"] == 10
+
+
+def test_control_a_config_may_turn_the_harvest_off_or_lower_its_bound() -> None:
+    trusted = _loaded({})
+    config = _config_with(
+        "syft", "sdist_harvest", {"enabled": False, "max_sdist_mb": 10}
+    )
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["enabled"] is False
+    assert _harvest(config)["max_sdist_mb"] == 10
+
+
+GRYPE_OFFLINE_OPERATOR = """\
+project_name: operator
+scanners:
+  grype:
+    options:
+      offline: true
+"""
+
+GRYPE_ONLINE_REPOSITORY = """\
+project_name: repository
+scanners:
+  grype:
+    options:
+      offline: false
+"""
+
+GUARDDOG_VERIFY_REPOSITORY = """\
+project_name: repository
+scanners:
+  guarddog:
+    options:
+      verify: true
+"""
+
+
+def test_an_in_tree_config_cannot_put_back_online_a_scanner_the_operator_sets_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=GRYPE_OFFLINE_OPERATOR,
+        repository_text=GRYPE_ONLINE_REPOSITORY,
+    )
+
+    assert _option(config, "grype", "offline") is True
+    named = [w for w in _warnings(ash_log) if "scanners.grype.options.offline" in w]
+    assert len(named) == 1, _warnings(ash_log)
+
+
+def test_an_in_tree_config_cannot_turn_on_guarddog_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text="project_name: operator\n",
+        repository_text=GUARDDOG_VERIFY_REPOSITORY,
+    )
+
+    assert _option(config, "guarddog", "verify") is False
+    named = [w for w in _warnings(ash_log) if "scanners.guarddog.options.verify" in w]
+    assert len(named) == 1, _warnings(ash_log)
+
+
+# ---------------------------------------------------------------------------
+# The switches of the scanners and the converter that fetch when they run
+# ---------------------------------------------------------------------------
+#
+# checkov downloads policies, grype updates its database and syft checks for
+# updates when they run online. The sdist-lock-harvester converter downloads the
+# sdists a lockfile pins, and trivy-repo's vuln scanner opens the vulnerability
+# database. A config that is not the operator's replaces the operator's config, so
+# one the operator turned off came back on. Such a config may turn each of them off,
+# and may not turn one on.
+
+#: The scanners outside the eight off-host ones that fetch when they run online.
+FETCHING_SCANNERS = ["checkov", "grype", "syft"]
+HARVESTER = "sdist-lock-harvester"
+
+
+def _enabled(config: AshConfig, kind: str, name: str) -> bool:
+    """Whether the config runs the plugin, read as the run reads its section."""
+    from automated_security_helper.base.plugin_config import section_enabled
+
+    return section_enabled(config.get_plugin_config(kind, name))
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_a_fetching_scanner_the_operator_turns_off_stays_off(scanner: str) -> None:
+    trusted = _loaded({"scanners": {scanner: {"enabled": False}}})
+    config = _loaded({"scanners": {scanner: {"enabled": True}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is False
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_a_fetching_scanner_the_config_leaves_alone_stays_off(scanner: str) -> None:
+    trusted = _loaded({"scanners": {scanner: {"enabled": False}}})
+    # The section is there and does not write enabled, so it reads the typed
+    # default, on.
+    config = _loaded({"scanners": {scanner: {"options": {}}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is False
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_control_a_config_may_turn_off_a_fetching_scanner(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _loaded({"scanners": {scanner: {"enabled": False}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is False
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_control_a_fetching_scanner_neither_turns_off_stays_on(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is True
+
+
+def test_the_sdist_harvester_the_operator_turns_off_stays_off() -> None:
+    trusted = _loaded({"converters": {HARVESTER: {"enabled": False}}})
+    config = _loaded({"converters": {HARVESTER: {"enabled": True}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is False
+
+
+def test_the_sdist_harvester_the_config_leaves_out_stays_off() -> None:
+    trusted = _loaded({"converters": {HARVESTER: {"enabled": False}}})
+    # A plugin converter's section is missing altogether, which reads as on.
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is False
+
+
+def test_control_a_config_may_turn_off_the_sdist_harvester() -> None:
+    trusted = _loaded({})
+    config = _loaded({"converters": {HARVESTER: {"enabled": False}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is False
+
+
+def test_control_the_sdist_harvester_neither_turns_off_stays_on() -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is True
+
+
+def test_vuln_the_operator_leaves_out_stays_out() -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["secret", "license"])
+    config = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["secret"]
+
+
+GRYPE_OFF_OPERATOR = """\
+project_name: operator
+scanners:
+  grype:
+    enabled: false
+"""
+
+GRYPE_ON_REPOSITORY = """\
+project_name: repository
+scanners:
+  grype:
+    enabled: true
+"""
+
+
+def test_an_in_tree_config_cannot_turn_back_on_grype(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=GRYPE_OFF_OPERATOR,
+        repository_text=GRYPE_ON_REPOSITORY,
+    )
+
+    assert _enabled(config, "scanner", "grype") is False
+    named = [w for w in _warnings(ash_log) if "scanners.grype.enabled" in w]
+    assert len(named) == 1, _warnings(ash_log)

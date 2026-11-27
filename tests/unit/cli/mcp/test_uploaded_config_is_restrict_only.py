@@ -462,3 +462,182 @@ def test_the_orchestrator_passes_on_whose_overrides_they_are(
     orchestrator.initialize()
     recorded = orchestrator.config._operator_paths.overrides
     assert (recorded == []) is client
+
+
+# ---------------------------------------------------------------------------
+# What an upload that leaves a section out keeps of the bound profile's
+# ---------------------------------------------------------------------------
+#
+# An upload replaces the bound profile's config instead of adding to it, so a
+# section it leaves out reads as the scanner's default. For a scanner that sends
+# source off the host that default is on.
+
+SNYK = "automated_security_helper.plugin_modules.ash_snyk_plugins"
+
+
+def test_an_upload_that_leaves_out_an_off_host_scanner_the_profile_turns_off_does_not_run_it(
+    _server,
+) -> None:
+    from automated_security_helper.base.plugin_config import section_enabled
+
+    _bind_profile(
+        _server["tmp"],
+        f"ash_plugin_modules:\n  - {SNYK}\nscanners:\n  snyk-code:\n    enabled: false\n",
+    )
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    # The profile's package is carried into the scan whatever the upload's own
+    # list says, so the scanner is loaded and only its section can stop it.
+    assert SNYK in config.ash_plugin_modules
+    assert section_enabled(config.get_plugin_config("scanner", "snyk-code")) is False
+
+
+# mcp-config's checks and prefix lists are on no denied list, so the judge accepts
+# an upload that writes them; they are floors the upload may not go below.
+
+MCP_PREFIX = "https://mcp.example.test/tools/"
+MCP_COMMANDS = "/opt/mcp/bin"
+
+MCP_PROFILE = (
+    "scanners:\n"
+    "  mcp-config:\n"
+    "    options:\n"
+    "      forbid_auto_approval: true\n"
+    "      require_local: true\n"
+    f"      remote_url_prefixes: ['{MCP_PREFIX}']\n"
+    f"      allowed_command_prefixes: ['{MCP_COMMANDS}']\n"
+)
+
+
+def _mcp_options(config: AshConfig) -> Dict[str, Any]:
+    return config.get_plugin_config("scanner", "mcp-config")["options"]
+
+
+def test_an_upload_cannot_lower_the_bound_profile_s_mcp_config_checks(_server) -> None:
+    _bind_profile(_server["tmp"], MCP_PROFILE)
+    within = _upload(
+        {
+            "ash.yaml": (
+                "project_name: uploaded\n"
+                "scanners:\n"
+                "  mcp-config:\n"
+                "    options:\n"
+                "      forbid_auto_approval: false\n"
+                "      require_local: false\n"
+                "      remote_url_prefixes: []\n"
+                "      allowed_command_prefixes: ['/usr/local/bin']\n"
+            )
+        }
+    )
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = _mcp_options(config)
+    assert options["forbid_auto_approval"] is True
+    assert options["require_local"] is True
+    assert options["remote_url_prefixes"] == [MCP_PREFIX]
+    assert options["allowed_command_prefixes"] == [MCP_COMMANDS]
+
+
+def test_an_upload_that_leaves_mcp_config_out_keeps_the_bound_profile_s(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], MCP_PROFILE)
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = _mcp_options(config)
+    assert options["require_local"] is True
+    assert options["remote_url_prefixes"] == [MCP_PREFIX]
+    assert options["allowed_command_prefixes"] == [MCP_COMMANDS]
+
+
+def test_control_an_upload_still_tightens_a_profile_with_no_mcp_config_values(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], "project_name: profile\n")
+    within = _upload(
+        {
+            "ash.yaml": (
+                "project_name: uploaded\n"
+                "scanners:\n"
+                "  mcp-config:\n"
+                "    options:\n"
+                "      require_local: true\n"
+                f"      remote_url_prefixes: ['{MCP_PREFIX}']\n"
+                f"      allowed_command_prefixes: ['{MCP_COMMANDS}']\n"
+            )
+        }
+    )
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = _mcp_options(config)
+    assert options["require_local"] is True
+    assert options["remote_url_prefixes"] == [MCP_PREFIX]
+    assert options["allowed_command_prefixes"] == [MCP_COMMANDS]
+
+
+# actionlint's shellcheck names the program run on every script of the scanned
+# tree. An upload that leaves it out must not turn the profile's choice into the
+# default, which runs nothing.
+
+
+def test_an_upload_that_leaves_out_the_profile_s_shellcheck_keeps_it(_server) -> None:
+    from automated_security_helper.utils.config_trust import set_by_operator
+
+    _bind_profile(
+        _server["tmp"],
+        "scanners:\n  actionlint:\n    options:\n      shellcheck: shellcheck\n",
+    )
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    shown = config.get_plugin_config("scanner", "actionlint")["options"]["shellcheck"]
+    assert shown == "shellcheck"
+    assert set_by_operator(config, "scanners.actionlint.options.shellcheck", shown)
+
+
+# A scanner the profile sets offline must stay offline under an upload that leaves
+# the option out: offline, npm audit reports no advisory; online it asks the
+# registry for them. The upload's missing option reads as the default, which is
+# online. An upload that writes offline itself is refused by the judge, which this
+# does not change.
+
+
+def test_an_upload_that_leaves_out_offline_keeps_the_profile_s(_server) -> None:
+    _bind_profile(
+        _server["tmp"],
+        "scanners:\n  npm-audit:\n    options:\n      offline: true\n",
+    )
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = config.get_plugin_config("scanner", "npm-audit")["options"]
+    assert options["offline"] is True
+
+
+def test_control_an_upload_that_sets_a_scanner_offline_is_still_refused(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], "project_name: profile\n")
+    within = _upload(
+        {
+            "ash.yaml": (
+                "project_name: uploaded\n"
+                "scanners:\n"
+                "  grype:\n"
+                "    options:\n"
+                "      offline: true\n"
+            )
+        }
+    )
+
+    refusal = _refused_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    assert "scanners.grype.options.offline" in refusal, refusal

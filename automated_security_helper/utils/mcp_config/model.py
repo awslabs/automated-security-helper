@@ -21,7 +21,9 @@ Span conventions
   parent that has one through :meth:`McpServerEntry.span`.
 """
 
-from typing import Any, Dict, List, Literal, Optional
+import posixpath
+from typing import Any, Dict, List, Literal, Optional, Tuple
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -104,3 +106,54 @@ class McpServerEntry(BaseModel):
         if found is not None:
             return found
         return self.span(relative)
+
+
+# The MCP config scanner's URL and command-path prefix checks and the operator's floors
+# for those two lists (config/restrictions_kept.py) use these four functions, so the
+# two cannot drift apart.
+
+
+def split_url(url: str) -> Optional[Tuple[str, Optional[str], str]]:
+    """(scheme, hostname, normalized url) of an absolute URL, or None."""
+    try:
+        parts = urlsplit(url.strip())
+        host = parts.hostname
+        # Read so that a malformed port raises ValueError here.
+        _ = parts.port
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    netloc = parts.netloc.lower()
+    rest = url.strip()[len(parts.scheme) + 3 + len(parts.netloc) :]
+    return parts.scheme.lower(), host, f"{parts.scheme.lower()}://{netloc}{rest}"
+
+
+def url_prefix_matches(url: str, prefix: str) -> bool:
+    """Whether ``url`` starts with ``prefix``, on a URL boundary."""
+    if not url.startswith(prefix):
+        return False
+    if prefix.endswith(("/", "?", "#")) or len(url) == len(prefix):
+        return True
+    return url[len(prefix)] in "/?#"
+
+
+def normalized_command_path(command: str) -> str:
+    """A command with its backslashes read as slashes, and a path made canonical."""
+    text = command.replace("\\", "/")
+    return posixpath.normpath(text) if "/" in text else text
+
+
+def command_prefix_matches(path: str, prefix: str) -> bool:
+    """Whether the normalized command ``path`` is, or is under, the path ``prefix``."""
+    normalized_prefix = posixpath.normpath(prefix.replace("\\", "/"))
+    if normalized_prefix == ".":
+        return False
+    if path == normalized_prefix:
+        return True
+    root = (
+        normalized_prefix
+        if normalized_prefix.endswith("/")
+        else normalized_prefix + "/"
+    )
+    return path.startswith(root)

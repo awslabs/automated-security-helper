@@ -394,7 +394,8 @@ def test_a_client_override_that_changes_the_operators_value_is_not_the_operators
     repo, tmp_path, monkeypatch
 ):
     """A client's override of a value the operator's trusted base sets is the
-    client's; the operator's own value stays the operator's."""
+    client's, so it is not the operator's, and the operator's own value stays the
+    operator's: the resolved config holds it (``config/restrictions_kept.py``)."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     operator = tmp_path / "operator.yaml"
     operator.write_text(_config_text())
@@ -407,7 +408,7 @@ def test_a_client_override_that_changes_the_operators_value_is_not_the_operators
         client_overrides=True,
     )
 
-    assert config.scanners.actionlint.options.shellcheck == "client-sh"
+    assert config.scanners.actionlint.options.shellcheck == "sh"
     assert set_by_operator(config, KEY, "client-sh") is False
     assert set_by_operator(config, KEY, "sh") is True
 

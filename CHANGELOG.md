@@ -111,6 +111,44 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **A repository's config, or one an MCP client delivers, no longer turns back on an
+  off-host scanner the operator turned off.** When the operator's config sets
+  `enabled: false` for detect-secrets, npm-audit, opengrep, semgrep, snyk-code, trivy,
+  trivy-repo or zizmor, the scanner stays off under a config file inside the scanned
+  tree or a git checkout, or one an MCP client delivered. That holds whether such a
+  config leaves the scanner's section out or sets `enabled: true`, and a config that
+  sets it is named in a warning. Such a config may still turn one of these scanners
+  off.
+- **mcp-config's checks are floors for a config that is not the operator's.** A config
+  file inside the scanned tree or a git checkout, or one an MCP client delivered, may
+  turn on `forbid_privilege_escalation`, `forbid_unpinned_runners`,
+  `forbid_auto_approval`, `flag_env_secrets` and `require_local`, and may narrow
+  `remote_url_prefixes` and `allowed_command_prefixes` to entries under the operator's.
+  It no longer turns a check off or widens a list past the operator's config, or past
+  the defaults when the operator sets none. A value that would is ignored with a
+  warning.
+- **The operator's trivy-repo `module_dir`, actionlint `shellcheck` and `pyflakes`,
+  and cfn-guard `rules_paths` stay in force** under a config file inside the scanned
+  tree or a git checkout, or one an MCP client delivered, that leaves the option out,
+  sets it empty, or sets another value. Before, such a config ran trivy-repo with an
+  empty modules directory, actionlint without the integration or with a program of
+  its own name, and cfn-guard without the operator's rules. A value it writes is
+  ignored with a warning. Where the operator sets none, the config's value is left
+  to the scanner as before.
+- **A config that is not the operator's may turn network fetching off, never on.**
+  Under a config file inside the scanned tree or a git checkout, or one an MCP client
+  delivered: a scanner the operator sets `offline: true` stays offline; guarddog's
+  `verify` runs only when the operator's config turns it on; trivy-repo's `misconfig`
+  check, whose Terraform checks fetch the module sources a `.tf` file names, runs only
+  when the operator's `scanners` list holds it; and syft's sdist harvest stays off when
+  the operator turns it off, with `max_sdist_mb` never above the operator's. A value it
+  writes that would turn fetching on is ignored with a warning.
+- **checkov, grype, syft and the sdist-lock-harvester converter stay off when the
+  operator turns them off,** and trivy-repo's `scanners` list loses `vuln` when the
+  operator's list lacks it, since each fetches from the network when it runs online.
+  This holds under a config file inside the scanned tree or a git checkout, or one an
+  MCP client delivered, whether it leaves the section out or turns the plugin on. A
+  config that is not the operator's may still turn them off.
 
 ### Maintenance
 
