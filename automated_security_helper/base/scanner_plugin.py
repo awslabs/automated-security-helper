@@ -2733,7 +2733,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 raise ScannerError(
                     f"its results file is not SARIF ASH can read, so its findings "
                     f"could not be graded: {error_text(e)}"
-                )
+                ) from e
             self._say_what_the_ingest_repaired(target_type)
             if not sarif_report.runs:
                 # Every field of a SARIF log is optional, so `{}` validates. No run

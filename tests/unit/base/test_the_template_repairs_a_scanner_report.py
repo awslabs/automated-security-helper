@@ -20,6 +20,7 @@ from typing import ClassVar, Literal
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -396,6 +397,19 @@ def test_bandit_reads_its_results_file_through_the_shared_reader(tmp_path):
     assert [e["code"] for e in scanner.output_ingest_record["elements"]] == ["bom"]
 
 
+def _the_chain(error: BaseException) -> list[BaseException]:
+    """*error* and every error it was raised from or while handling."""
+    seen: list[BaseException] = []
+    pending: list[BaseException | None] = [error]
+    while pending:
+        current = pending.pop()
+        if current is None or current in seen:
+            continue
+        seen.append(current)
+        pending.extend([current.__cause__, current.__context__])
+    return seen
+
+
 def test_the_control_without_the_ingest_step_the_report_is_lost(
     plugin_context, tmp_path
 ):
@@ -405,6 +419,18 @@ def test_the_control_without_the_ingest_step_the_report_is_lost(
     with patch(
         "automated_security_helper.base.scanner_plugin.ingest_sarif",
         side_effect=lambda raw, record: SarifReport.model_validate(copy.deepcopy(raw)),
-    ):
-        with pytest.raises(ScannerError):
+    ) as the_model_alone:
+        with pytest.raises(
+            ScannerError, match="its results file is not SARIF ASH can read"
+        ) as refused:
             _scan(scanner, tmp_path)
+
+    # The patched call was the one made, and what it refused was the report's
+    # region, not an error of the patch: the refusal was raised from pydantic's.
+    the_model_alone.assert_called_once()
+    raised_from = [
+        error.__cause__
+        for error in _the_chain(refused.value)
+        if isinstance(error.__cause__, ValidationError)
+    ]
+    assert raised_from, "a pydantic ValidationError is the cause of the refusal"
