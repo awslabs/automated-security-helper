@@ -1,0 +1,7 @@
+docs/content/getting-started/local.md	downloads and runs the uv installer from the network
+docs/content/getting-started/local.md	installs ASH from GitHub over the network
+docs/content/getting-started/local.md	downloads scanner tools from GitHub releases and PyPI
+docs/content/getting-started/local.md	the exit code depends on which scanner tools the machine has installed; the next block runs the same scan with a fixed scanner set
+docs/content/getting-started/local.md	same scan as above; needs the network
+docs/content/getting-started/local.md	the scan needs the network for its scanners; the docs job has none
+docs/content/getting-started/local.md	the scan needs the network for its scanners; the docs job has none

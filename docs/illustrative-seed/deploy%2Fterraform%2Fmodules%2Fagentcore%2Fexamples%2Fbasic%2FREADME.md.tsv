@@ -1,0 +1,2 @@
+deploy/terraform/modules/agentcore/examples/basic/README.md	needs Terraform, network access and AWS credentials
+deploy/terraform/modules/agentcore/examples/basic/README.md	needs an applied Terraform state

@@ -1,0 +1,6 @@
+docs/content/index.md	installs ASH from GitHub over the network
+docs/content/index.md	container mode needs a container runtime, and every mode runs a scan with all scanner tools
+docs/content/index.md	installs ASH from GitHub over the network
+docs/content/index.md	clones the ASH repository and installs it over the network
+docs/content/index.md	container mode needs a container runtime, and every mode runs a scan with all scanner tools
+docs/content/index.md	runs the ash hook through pre-commit, which needs a .pre-commit-config.yaml and the network to fetch the hook repository

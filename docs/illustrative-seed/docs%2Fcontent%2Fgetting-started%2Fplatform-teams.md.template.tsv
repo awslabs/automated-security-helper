@@ -1,0 +1,5 @@
+docs/content/getting-started/platform-teams.md.template	needs a container runtime, network access, and a registry
+docs/content/getting-started/platform-teams.md.template	needs a container runtime and the image from step 1
+docs/content/getting-started/platform-teams.md.template	installs ASH from GitHub over the network
+docs/content/getting-started/platform-teams.md.template	needs a container runtime, network access, and a registry
+docs/content/getting-started/platform-teams.md.template	needs AWS credentials and a bucket

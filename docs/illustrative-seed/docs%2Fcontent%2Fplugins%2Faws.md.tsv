@@ -1,0 +1,2 @@
+docs/content/plugins/aws.md	requires saved ASH scan results
+docs/content/plugins/aws.md	sends the stored findings to an S3 bucket

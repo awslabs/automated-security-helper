@@ -1,0 +1,4 @@
+docs/content/how-to/suppress-findings.md	shows the command the warning prints, with a placeholder for the interpreter path
+docs/content/how-to/suppress-findings.md	installs ASH from GitHub over the network
+docs/content/how-to/suppress-findings.md	shows where the comments go; running it would call make deploy
+docs/content/how-to/suppress-findings.md	the audit recipe needs yq and a repository with an .ash.yaml, and the docs runner's sample project has neither
