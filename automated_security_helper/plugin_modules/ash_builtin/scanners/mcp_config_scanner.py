@@ -602,10 +602,28 @@ def _normalized_command_path(command: str) -> str:
     return posixpath.normpath(text) if "/" in text else text
 
 
-def _path_prefix_matches(path: str, prefix: str) -> bool:
+def _is_bare_name(text: str) -> bool:
+    """Whether ``text`` has no directory part. A backslash separates like a slash."""
+    return "/" not in text.replace("\\", "/")
+
+
+def _path_prefix_matches(command: str, prefix: str) -> bool:
+    """Whether the listed ``prefix`` allows ``command``, as the config wrote it.
+
+    A prefix that is a bare name (``npx``) names the program a client finds on
+    PATH. It allows exactly that bare command and no command that carries a path,
+    and the two are compared as written. A command that carries a path is a file
+    the scanned repository can ship, and normalizing it first would turn ``./npx``
+    and ``x/../npx`` into ``npx``. Any other prefix is a path: the command is
+    normalized, then it must equal the prefix or lie under it, on a path boundary.
+    A prefix of ``.`` allows nothing.
+    """
     normalized_prefix = posixpath.normpath(prefix.replace("\\", "/"))
     if normalized_prefix == ".":
         return False
+    if _is_bare_name(prefix):
+        return command == prefix
+    path = _normalized_command_path(command)
     if path == normalized_prefix:
         return True
     root = (
@@ -619,11 +637,10 @@ def _path_prefix_matches(path: str, prefix: str) -> bool:
 def check_command_prefix(
     entry: McpServerEntry, prefixes: List[str]
 ) -> List[PolicyFinding]:
-    """Declared commands must live under an allowed path prefix."""
+    """A declared command must be allowed by a listed entry, a bare name or a path."""
     if not prefixes or entry.command is None:
         return []
-    path = _normalized_command_path(entry.command)
-    if any(_path_prefix_matches(path, prefix) for prefix in prefixes):
+    if any(_path_prefix_matches(entry.command, prefix) for prefix in prefixes):
         return []
     return [
         PolicyFinding(
