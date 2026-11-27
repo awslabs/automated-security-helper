@@ -249,7 +249,7 @@ _SCAN = (
     "--mode",
     "local",
     "--offline",
-    "--only-scanners",
+    "--add-scanners",
     "detect-secrets",
 )
 

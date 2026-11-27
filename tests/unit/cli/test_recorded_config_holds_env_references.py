@@ -103,7 +103,7 @@ def _scan_args(debug: bool) -> List[str]:
         "src",
         "--output-dir",
         "shard",
-        "--only-scanners",
+        "--add-scanners",
         "detect-secrets",
         "--no-fail-on-incomplete-scanners",
         "--shard-index",

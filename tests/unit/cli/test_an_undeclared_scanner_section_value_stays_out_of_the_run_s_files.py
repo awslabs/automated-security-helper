@@ -107,7 +107,7 @@ def test_the_value_read_at_an_undeclared_section_is_in_none_of_the_runs_files(
             str(source),
             "--output-dir",
             str(output),
-            "--only-scanners",
+            "--add-scanners",
             "detect-secrets",
             "--sandbox",
             "off",

@@ -177,7 +177,7 @@ def test_a_scan_under_the_bound_profile_shows_no_value(bound, tmp_path):
             str(output),
             "--config",
             str(bound),
-            "--only-scanners",
+            "--add-scanners",
             "detect-secrets",
             "--sandbox",
             "off",

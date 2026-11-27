@@ -241,7 +241,7 @@ def run(tmp_path_factory):
             str(output),
             "--config",
             str(config),
-            "--only-scanners",
+            "--add-scanners",
             "detect-secrets",
             "--output-formats",
             _formats(),

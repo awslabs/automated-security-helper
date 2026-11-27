@@ -572,7 +572,7 @@ class TestAshsOwnRefusalsOfAnInvocation:
         assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR, result.output
 
     def test_a_scanner_selection_that_names_no_scanner(self, in_tmp):
-        """``--scanners`` naming nothing that exists is a mistyped argument."""
+        """``--add-scanners`` naming nothing that exists is a mistyped argument."""
         from automated_security_helper.core.exceptions import ScannerSelectionError
 
         with patch(
@@ -589,7 +589,7 @@ class TestAshsOwnRefusalsOfAnInvocation:
                     "src",
                     "--output-dir",
                     "out",
-                    "--scanners",
+                    "--add-scanners",
                     "detect_secrets",
                 ]
             )
@@ -730,7 +730,7 @@ class TestNamesASHDoesNotKnow:
                     "src",
                     "--output-dir",
                     "out",
-                    "--scanners",
+                    "--add-scanners",
                     "bandit",
                     "--exclude-scanners",
                     "bandit",
@@ -746,12 +746,12 @@ class TestNamesASHDoesNotKnow:
         "selection, fragment",
         [
             pytest.param(
-                ["--scanners", "bandit", "--exclude-scanners", "bandit"],
+                ["--add-scanners", "bandit", "--exclude-scanners", "bandit"],
                 "cancels itself",
                 id="canceled",
             ),
             pytest.param(
-                ["--scanners", "not-a-real-scanner"],
+                ["--add-scanners", "not-a-real-scanner"],
                 "None of the requested scanners exist",
                 id="unknown",
             ),
@@ -768,7 +768,7 @@ class TestNamesASHDoesNotKnow:
         A scan runs git three ways: for the scanned directory's repository
         (scan_source), for the --changed-files-only diff, and for the files
         committed to the output directory. A refused selection reaches none of them,
-        and the previous results stay, so a mistyped --scanners keeps the last
+        and the previous results stay, so a mistyped --add-scanners keeps the last
         scan's results. The phases are stubbed to fail the test if they run, so the
         refusal has to come before them.
         """
@@ -841,14 +841,14 @@ class TestWorkspaceScannerSelection:
         return result
 
     def test_a_name_no_scanner_has(self, workspace):
-        result = self._scan(workspace, "--scanners", "not-a-scanner")
+        result = self._scan(workspace, "--add-scanners", "not-a-scanner")
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert "not-a-scanner" in _plain(result.output)
 
     def test_a_selection_that_cancels_itself(self, workspace):
         result = self._scan(
-            workspace, "--scanners", "bandit", "--exclude-scanners", "bandit"
+            workspace, "--add-scanners", "bandit", "--exclude-scanners", "bandit"
         )
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
@@ -857,13 +857,13 @@ class TestWorkspaceScannerSelection:
     @pytest.mark.parametrize(
         "selection",
         [
-            ("--scanners", "bandit,semgrep"),
-            ("--scanners", "bandit, semgrep"),
-            ("--scanners", "bandit", "--scanners", "semgrep"),
-            ("--scanners", "BANDIT"),
-            ("--scanners", "Bandit,SEMGREP"),
-            ("--scanners", "bandit,not-a-scanner"),
-            ("--scanners", "bandit,semgrep", "--exclude-scanners", "semgrep"),
+            ("--add-scanners", "bandit,semgrep"),
+            ("--add-scanners", "bandit, semgrep"),
+            ("--add-scanners", "bandit", "--add-scanners", "semgrep"),
+            ("--add-scanners", "BANDIT"),
+            ("--add-scanners", "Bandit,SEMGREP"),
+            ("--add-scanners", "bandit,not-a-scanner"),
+            ("--add-scanners", "bandit,semgrep", "--exclude-scanners", "semgrep"),
         ],
         ids=[
             "comma-list",
@@ -909,12 +909,12 @@ class TestWorkspaceScannerSelection:
         "selection, fragment",
         [
             (
-                ("--scanners", "bandit", "--exclude-scanners", "bandit,semgrep"),
+                ("--add-scanners", "bandit", "--exclude-scanners", "bandit,semgrep"),
                 "cancels itself",
             ),
             (
                 (
-                    "--scanners",
+                    "--add-scanners",
                     "bandit,semgrep",
                     "--exclude-scanners",
                     "semgrep, bandit",
@@ -922,15 +922,15 @@ class TestWorkspaceScannerSelection:
                 "cancels itself",
             ),
             (
-                ("--scanners", "BANDIT", "--exclude-scanners", "bandit"),
+                ("--add-scanners", "BANDIT", "--exclude-scanners", "bandit"),
                 "cancels itself",
             ),
             (
-                ("--scanners", "bandit", "--exclude-scanners", "BANDIT"),
+                ("--add-scanners", "bandit", "--exclude-scanners", "BANDIT"),
                 "cancels itself",
             ),
             (
-                ("--scanners", "not-a-scanner,also-not-one"),
+                ("--add-scanners", "not-a-scanner,also-not-one"),
                 "None of the requested scanners exist: also-not-one, not-a-scanner",
             ),
         ],
@@ -1118,7 +1118,7 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
         """The refusal's list of registered scanners reaches the operator, and
         over MCP the client: names loaded by someone else in the process are
         another session's business, not part of this workspace's answer."""
-        result, _ = self._scan(workspace, "--scanners", "not-a-scanner")
+        result, _ = self._scan(workspace, "--add-scanners", "not-a-scanner")
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         assert foreign_scanner not in _plain(result.output), result.output
@@ -1129,7 +1129,9 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
         """No project of this workspace loads the foreign module, so a selection
         naming only its scanner selects nothing in every project: the same
         refusal as a name nothing registers, not a scan of everything."""
-        result, scan_one_project = self._scan(workspace, "--scanners", foreign_scanner)
+        result, scan_one_project = self._scan(
+            workspace, "--add-scanners", foreign_scanner
+        )
 
         assert result.exit_code == USAGE_ERROR_EXIT, result.output
         scan_one_project.assert_not_called()
@@ -1137,7 +1139,7 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
     def test_the_refusal_wording_is_the_single_scans(self, workspace):
         """One builder makes the no-match refusal everywhere, so the workspace's
         wording cannot drift from the one a single scan prints."""
-        result, _ = self._scan(workspace, "--scanners", "not-a-scanner")
+        result, _ = self._scan(workspace, "--add-scanners", "not-a-scanner")
 
         output = _plain(result.output)
         assert result.exit_code == USAGE_ERROR_EXIT, output
@@ -1149,7 +1151,7 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
         """The self-cancelling selection's refusal shares the engine's wording,
         reasoning sentence included."""
         result, _ = self._scan(
-            workspace, "--scanners", "bandit", "--exclude-scanners", "bandit"
+            workspace, "--add-scanners", "bandit", "--exclude-scanners", "bandit"
         )
 
         output = _plain(result.output)
@@ -1197,7 +1199,7 @@ class TestTheSelectionPreCheckJudgesOnlyThisWorkspacesPlugins:
                         "out",
                         "--ash-plugin-modules",
                         "mystery_ash_plugins",
-                        "--scanners",
+                        "--add-scanners",
                         "shape-shifter",
                     ]
                 )
@@ -1272,7 +1274,7 @@ class TestWorkspaceDryRunRefusesTheSameSelections:
         return result
 
     def test_a_name_no_scanner_has_is_refused(self, workspace):
-        result = self._dry_run(workspace, "--scanners", "not-a-scanner")
+        result = self._dry_run(workspace, "--add-scanners", "not-a-scanner")
 
         output = _plain(result.output)
         assert result.exit_code == USAGE_ERROR_EXIT, output
@@ -1280,7 +1282,7 @@ class TestWorkspaceDryRunRefusesTheSameSelections:
 
     def test_a_selection_that_cancels_itself_is_refused(self, workspace):
         result = self._dry_run(
-            workspace, "--scanners", "bandit", "--exclude-scanners", "bandit"
+            workspace, "--add-scanners", "bandit", "--exclude-scanners", "bandit"
         )
 
         output = _plain(result.output)
@@ -1288,7 +1290,7 @@ class TestWorkspaceDryRunRefusesTheSameSelections:
         assert "cancels itself" in output, output
 
     def test_control_a_runnable_selection_still_prints_the_plan(self, workspace):
-        result = self._dry_run(workspace, "--scanners", "bandit")
+        result = self._dry_run(workspace, "--add-scanners", "bandit")
 
         output = _plain(result.output)
         assert result.exit_code == 0, output

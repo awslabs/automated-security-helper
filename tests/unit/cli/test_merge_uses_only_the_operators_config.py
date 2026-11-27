@@ -486,7 +486,7 @@ def _scan(child: _Child, config: Path, extra_env: Optional[Dict[str, str]] = Non
             str(child.root / "scanned"),
             "--mode",
             "local",
-            "--only-scanners",
+            "--add-scanners",
             "detect-secrets",
             "--phases",
             "scan",

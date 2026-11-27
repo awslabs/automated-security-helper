@@ -90,7 +90,7 @@ def _scan_args(tmp_path: Path) -> tuple[list[str], Path]:
         str(source),
         "--output-dir",
         str(output),
-        "--only-scanners",
+        "--add-scanners",
         "detect-secrets",
     ]
     return args, output

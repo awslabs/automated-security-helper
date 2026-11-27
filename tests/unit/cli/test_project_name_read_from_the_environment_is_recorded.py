@@ -201,7 +201,7 @@ def runs(tmp_path_factory):
                 "src",
                 "--output-dir",
                 f"shard{index}",
-                "--only-scanners",
+                "--add-scanners",
                 "detect-secrets",
                 "--no-fail-on-incomplete-scanners",
                 "--no-fail-on-findings",

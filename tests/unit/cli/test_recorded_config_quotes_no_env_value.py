@@ -123,7 +123,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
                 "src",
                 "--output-dir",
                 "shard",
-                "--only-scanners",
+                "--add-scanners",
                 "detect-secrets",
                 "--no-fail-on-incomplete-scanners",
                 "--no-fail-on-findings",

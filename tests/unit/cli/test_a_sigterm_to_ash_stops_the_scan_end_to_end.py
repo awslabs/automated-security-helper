@@ -140,7 +140,7 @@ def test_a_sigterm_to_ash_stops_the_scanner_tool_and_exits_terminated(tmp_path):
         str(output),
         "--ash-plugin-modules",
         "sigterm_ash_plugins",
-        "--only-scanners",
+        "--add-scanners",
         "sigterm-stop",
         "--sandbox",
         "off",

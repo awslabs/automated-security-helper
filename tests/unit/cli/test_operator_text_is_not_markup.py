@@ -97,7 +97,14 @@ def test_merge_writes_its_reports_to_a_bracketed_output_dir(in_tmp):
 
     shard_paths = write_shards(in_tmp / "artifacts", build_shards(3))
     output_dir = in_tmp / "merged[/x]"
-    args = ["merge", "--output-dir", str(output_dir), "--output-formats", "sarif,csv"]
+    args = [
+        "results",
+        "merge",
+        "--output-dir",
+        str(output_dir),
+        "--output-formats",
+        "sarif,csv",
+    ]
     for path in shard_paths:
         args += ["--results", path]
     manager = MagicMock()
@@ -128,7 +135,7 @@ def test_scan_refuses_a_bracketed_scanner_name_as_a_usage_error(in_tmp):
                 "src",
                 "--output-dir",
                 "out",
-                "--only-scanners",
+                "--add-scanners",
                 "x[/y]",
                 "--phases",
                 "scan",
@@ -347,7 +354,13 @@ def test_an_exempted_orphan_under_a_bracketed_directory_is_named_as_given(in_tmp
         None, build_shards(3), "ERROR"
     )
     shard_paths = write_shards(in_tmp / "art[" / "x]", shards)
-    args = ["merge", "--output-dir", "merged", "--no-fail-on-incomplete-scanners"]
+    args = [
+        "results",
+        "merge",
+        "--output-dir",
+        "merged",
+        "--no-fail-on-incomplete-scanners",
+    ]
     for path in shard_paths:
         args += ["--results", path]
     manager = MagicMock()
@@ -452,7 +465,9 @@ class TestAshReportPrintsWhatItWasGiven:
         return out
 
     def _report(self, *args):
-        return CliRunner().invoke(app, ["report", *args], env={"FORCE_COLOR": "1"})
+        return CliRunner().invoke(
+            app, ["results", "report", *args], env={"FORCE_COLOR": "1"}
+        )
 
     def test_an_invalid_config_whose_path_reads_as_markup_exits_3(
         self, in_tmp, results
@@ -707,6 +722,7 @@ class TestRepositoryTextIsShownNotObeyed:
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "report",
                 "--config",
                 "cfg.yaml",
