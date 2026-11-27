@@ -439,6 +439,22 @@ def _with_end_record_counts(payload: bytes, on_this_disk: int, in_all: int) -> b
     )
 
 
+def _zip64_locator_at(payload: bytes) -> int:
+    """Where the zip64 end record locator of ``payload`` starts: the 20 bytes before its
+    end record. The zip64 end record it places is the 56 bytes before it."""
+    locator = _end_record_at(payload) - 20
+    assert payload[locator : locator + 4] == b"PK\x06\x07"
+    return locator
+
+
+def _with_zip64_record_at(payload: bytes, record_at: int) -> bytes:
+    """``payload``, a zip written with zip64 end records, whose locator places the zip64
+    end record at ``record_at`` (an eight-byte offset, at 8 of the locator)."""
+    return _patched(
+        payload, _zip64_locator_at(payload) + 8, struct.pack("<Q", record_at)
+    )
+
+
 def _with_compressed_size(payload: bytes, size: int) -> bytes:
     """``payload``, a zip of one member, whose local header (at 18) and central entry
     (at 20) both give ``size`` for its compressed size."""
@@ -821,6 +837,11 @@ _AFTER_THE_END = b"not part of the zip\n"
 #: A member a row writes into the file and leaves out of the central directory.
 _HIDDEN = _Raw(b"evil.py", b"EVIL = True\n")
 _STORED = b"print('stored as it is')\n"
+#: A zip written with zip64 end records, where its locator starts, and where the
+#: locator places the zip64 end record: the 56 bytes before itself, where it lies.
+_ZIP64_ARCHIVE = _raw_zip([_Raw(b"app.py", b"x")], zip64_end=True)
+_ZIP64_LOCATOR_AT = _zip64_locator_at(_ZIP64_ARCHIVE)
+_ZIP64_RECORD_AT = _ZIP64_LOCATOR_AT - 56
 
 
 def _stored(content: bytes = _STORED) -> bytes:
@@ -1036,6 +1057,37 @@ REFUSED = [
         Kind.NOT_A_ZIP,
         "4 bytes come before the archive",
         id="bytes-before-a-zip64-archive",
+    ),
+    # The zip64 end record is the 56 bytes before its locator, and the locator says so.
+    # zipfile before the releases that validate the locator reads the record there and
+    # takes no notice of the offset the locator holds; later ones read at that offset
+    # first, and refuse one past where the record lies. Red at the base: each was
+    # admitted, the record found just before the locator as zipfile before those
+    # releases finds it.
+    pytest.param(
+        _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT + 1),
+        Kind.NOT_A_ZIP,
+        "Corrupt zip64 end of central directory locator",
+        id="a-zip64-locator-that-places-its-record-one-byte-late",
+    ),
+    pytest.param(
+        _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_LOCATOR_AT),
+        Kind.NOT_A_ZIP,
+        "Corrupt zip64 end of central directory locator",
+        id="a-zip64-locator-that-places-its-record-at-itself",
+    ),
+    pytest.param(
+        # No seek takes 2**63: the offset is the archive's to choose, and never read.
+        _with_zip64_record_at(_ZIP64_ARCHIVE, 2**63),
+        Kind.NOT_A_ZIP,
+        "Corrupt zip64 end of central directory locator",
+        id="a-zip64-locator-with-an-offset-no-seek-takes",
+    ),
+    pytest.param(
+        _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT - 4),
+        Kind.NOT_A_ZIP,
+        "4 bytes come before the archive",
+        id="a-zip64-locator-that-places-its-record-before-where-it-lies",
     ),
     pytest.param(
         _raw_zip([], before=b"junk"),
@@ -2602,6 +2654,18 @@ def _a_file_with_a_zip64_locator(record_at: int, before: int) -> Tuple[io.BytesI
     return io.BytesIO(bytes(before) + locator + end_record), before + len(locator)
 
 
+class _SeekLog(io.BytesIO):
+    """A file that notes every offset it is asked to seek to."""
+
+    def __init__(self, data: bytes) -> None:
+        super().__init__(data)
+        self.seeks: List[int] = []
+
+    def seek(self, offset, whence=0):
+        self.seeks.append(offset)
+        return super().seek(offset, whence)
+
+
 class TestARecordTheArchiveGivesIsNotTrusted:
     """An offset or a length from the archive's own records can be larger than any seek
     takes, or point at nothing. Admission refuses what it cannot find, as not a zip: it
@@ -2665,6 +2729,47 @@ class TestARecordTheArchiveGivesIsNotTrusted:
         assert record is not None
         assert record[0] == b"PK\x06\x06"
         assert record[6:8] == (1, 1)
+
+    @pytest.mark.parametrize(
+        "record_at",
+        [
+            pytest.param(_ZIP64_RECORD_AT + 1, id="one-byte-late"),
+            pytest.param(_ZIP64_LOCATOR_AT, id="at-the-locator-itself"),
+            pytest.param(_ZIP64_LOCATOR_AT + 30, id="inside-the-end-record"),
+            pytest.param(2**40, id="far-past-the-end-of-the-file"),
+        ],
+    )
+    def test_an_offset_at_or_past_the_locator_is_refused_without_a_seek_to_it(
+        self, record_at
+    ):
+        """The locator's offset is the archive's to choose, so nothing seeks to one at
+        or past the locator: the only seek there is the read of the locator itself. Red
+        at the base: the record was read at the offset the locator gave."""
+        payload = _with_zip64_record_at(_ZIP64_ARCHIVE, record_at)
+        handle = _SeekLog(payload)
+        end = sa._end_record_position(handle, len(payload))
+        handle.seeks.clear()
+
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa._zip64_end_record(handle, end)
+
+        assert refused.value.kind is Kind.NOT_A_ZIP
+        assert str(refused.value) == "Corrupt zip64 end of central directory locator"
+        assert [at for at in handle.seeks if at >= _ZIP64_LOCATOR_AT] == [
+            _ZIP64_LOCATOR_AT
+        ]
+
+    def test_a_locator_that_places_its_record_before_where_it_lies_is_refused(self):
+        """Where the locator's offset is short of the record by the bytes written before
+        the archive, the record is where it has to be and the locator is not."""
+        payload = _with_zip64_record_at(_ZIP64_ARCHIVE, _ZIP64_RECORD_AT - 4)
+        handle = io.BytesIO(payload)
+
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa._zip64_end_record(handle, sa._end_record_position(handle, len(payload)))
+
+        assert refused.value.kind is Kind.NOT_A_ZIP
+        assert str(refused.value) == "4 bytes come before the archive"
 
 
 class TestTheRefusal:

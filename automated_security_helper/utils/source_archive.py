@@ -81,7 +81,9 @@ destination as it was.
    byte 0, each its header, name, extra field, data and, when its flags say so, a data
    descriptor that restates its CRC-32 and sizes; then the central directory, holding
    as many entries as the end record counts and none that runs past it; then, for a
-   zip64 archive, its end record and locator; then the end record and its comment.
+   zip64 archive, its end record and the locator that places that record where it
+   lies, since readers differ in where they look for it; then the end record and its
+   comment.
    A local header that gives another compression method, data descriptor flag, CRC-32
    or size than its central directory entry is refused too, since a reader of the
    local headers would find that member's data, and the next member, elsewhere. Each
@@ -587,14 +589,21 @@ def _end_record_position(handle: IO[bytes], size: int) -> int:
 
 
 def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
-    """The zip64 end record zipfile read, when a locator sits just before the end record.
+    """The zip64 end record, when a locator sits just before the end record.
 
-    zipfile reads the record where the locator places it, and when no record is there,
-    just before the locator, taking the difference for bytes the zip was appended to.
-    A locator with no whole record in either place is refused as not a zip, in the
-    words zipfile uses for it. Current zipfile releases refuse such an archive as they
-    open it; one without that check opens it and takes the end record's own counts, so
-    the refusal here gives every Python one verdict, whatever offset the locator holds.
+    The record has to be the 56 bytes just before the locator, and the locator has to
+    place it there. Readers differ in where they look: zipfile before the releases that
+    validate the locator reads the record just before it and takes no notice of the
+    offset it holds, and later ones read at that offset first. Where the two are one
+    place every reader finds the same record, which is where every writer puts it
+    (bytes before the archive and zip64 extensible data are refused by rule 6 in any
+    case), so a locator that places the record anywhere else is refused as not a zip,
+    whatever else the archive says. The record is read where it has to be, never at
+    the offset the locator gives, which the archive chooses.
+
+    A locator with no whole record before it is refused in the words zipfile uses for
+    it; one that places the record past where it lies, in the words of the releases
+    that validate it; one that places it before, as bytes that come before the archive.
     """
     locator_at = end - _ZIP64_LOCATOR.size
     if locator_at < 0:
@@ -604,13 +613,14 @@ def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
     )
     if signature != _ZIP64_LOCATOR_SIGNATURE:
         return None
-    record = _read_at(handle, record_at, _ZIP64_END_RECORD.size)
-    if not _is_zip64_end_record(record):
-        record = _read_at(
-            handle, locator_at - _ZIP64_END_RECORD.size, _ZIP64_END_RECORD.size
-        )
+    lies = locator_at - _ZIP64_END_RECORD.size
+    record = _read_at(handle, lies, _ZIP64_END_RECORD.size)
     if not _is_zip64_end_record(record):
         raise _not_a_zip("Zip64 end of central directory record not found")
+    if record_at > lies:
+        raise _not_a_zip("Corrupt zip64 end of central directory locator")
+    if record_at < lies:
+        raise _not_a_zip(f"{lies - record_at} bytes come before the archive")
     return _ZIP64_END_RECORD.unpack(record)
 
 
