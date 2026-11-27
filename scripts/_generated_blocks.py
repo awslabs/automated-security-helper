@@ -47,6 +47,11 @@ A page that is rendered from a template (README.md from README.md.template, by
 manager renders the two placeholders and nothing else, so a body free of them keeps
 ``render(template) == page`` true. Both files are checked before either is written.
 
+A file is replaced in one step, written to a temporary file beside it and swapped over
+it, so a write that fails or is cut off leaves the page as it was, never cut short. The
+two files of a pair are written one after the other: if the second write fails, the
+first stays, ``check_blocks`` reports the second, and the next run finishes the pair.
+
 ``check_blocks`` returns one ``Drift`` per block that differs from its body, with a
 unified diff that names the block, and writes nothing. A second ``write_blocks`` reports
 ``unchanged`` and does not touch the file.
@@ -54,8 +59,12 @@ unified diff that names the block, and writes nothing. A second ``write_blocks``
 
 from __future__ import annotations
 
+import contextlib
 import difflib
+import os
 import re
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -563,6 +572,33 @@ def _read(root: Path, file: str, names: Sequence[str]) -> str:
         ) from None
 
 
+def _replace_file(path: Path, data: bytes) -> None:
+    """Make ``path`` hold ``data`` in one step, through a temporary file beside it.
+
+    A write that fails or is cut off partway leaves ``path`` as it was, never cut short,
+    and removes the temporary file. The new file keeps the permission bits of the old
+    one, and a symlink is written through: the file it points at is replaced and the
+    link stays. The directory must be writable, and a process killed outright can leave
+    its temporary file (a dot file ending in ``.tmp``) behind.
+    """
+    target = Path(os.path.realpath(path))
+    descriptor, name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        shutil.copymode(target, temporary)
+        os.replace(temporary, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporary.unlink()
+        raise
+
+
 def write_blocks(
     root: Path, file: str, bodies: Mapping[str, Body], generator: str
 ) -> list[WriteResult]:
@@ -571,9 +607,11 @@ def write_blocks(
     Returns one ``WriteResult`` per file, the template first. Each body is read once,
     before any file is, so both files get the same lines. Every file is read and
     checked before the first is written, so a refusal leaves both as they were, and a
-    file whose blocks are already current is not touched. The two writes are not one
-    atomic step: if the second fails (a full disk, a permission error), the first stays
-    written and the next run finishes the pair.
+    file whose blocks are already current is not touched. Each file is replaced in one
+    step (see ``_replace_file``), so a write that fails or is cut off leaves that file
+    as it was. The two writes are not one atomic step: if the second fails (a full
+    disk, a permission error), the first stays written, ``check_blocks`` reports the
+    second, and the next run finishes the pair.
     """
     wanted = _wanted(file, bodies, generator)
     names = tuple(wanted)
@@ -587,7 +625,7 @@ def write_blocks(
             results.append(WriteResult(member, UNCHANGED, ()))
             continue
         changed = [d.block for d in diff_blocks(text, member, wanted, generator)]
-        (root / member).write_bytes(new.encode("utf-8"))
+        _replace_file(root / member, new.encode("utf-8"))
         results.append(WriteResult(member, WRITTEN, tuple(changed)))
     return results
 
