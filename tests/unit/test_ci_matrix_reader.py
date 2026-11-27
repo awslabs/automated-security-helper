@@ -1475,19 +1475,56 @@ PLANTED_LOADERS = {
         "            'x', 'scripts/_ci_matrix.py'\n"
         "        )\n"
     ),
+    "the_helpers_constants_in_the_call": (
+        "import importlib.util\n"
+        "import sys\n"
+        "from tests.utils.ci_matrix_loader import CI_MATRIX_NAME, CI_MATRIX_PATH\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    CI_MATRIX_NAME, CI_MATRIX_PATH\n"
+        ")\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules[CI_MATRIX_NAME] = module\n"
+        "spec.loader.exec_module(module)\n"
+    ),
+    "the_helpers_constant_imported_under_another_name": (
+        "import importlib.util\n"
+        "from tests.utils.ci_matrix_loader import CI_MATRIX_PATH as WHERE\n"
+        "spec = importlib.util.spec_from_file_location('reader', WHERE)\n"
+    ),
+    "the_helpers_constant_read_from_its_module": (
+        "import importlib.util\n"
+        "from tests.utils import ci_matrix_loader\n"
+        "spec = importlib.util.spec_from_file_location(\n"
+        "    'reader', ci_matrix_loader.CI_MATRIX_PATH\n"
+        ")\n"
+    ),
+    "the_function_imported_under_another_name": (
+        "from importlib.util import spec_from_file_location as find_spec\n"
+        "spec = find_spec('_ash_ci_matrix', where)\n"
+    ),
 }
 
-#: Test modules that do not load the reader by themselves: one that loads another
-#: script, one that uses the helper, and two that only name the reader in prose.
+#: Test modules that do not load the reader by themselves: two that load another
+#: script (one calls the function by another name), two that use the helper (one reads
+#: its constant), and two that only name the reader in prose.
 PLANTED_FINE = {
     "loads_another_script": (
         "import importlib.util\n"
         "spec = importlib.util.spec_from_file_location('other', where)\n"
     ),
+    "loads_another_script_under_another_name": (
+        "from importlib.util import spec_from_file_location as find_spec\n"
+        "spec = find_spec('other', where)\n"
+    ),
     "uses_the_helper": (
         '"""Reads scripts/_ci_matrix.py through the helper."""\n'
         "from tests.utils.ci_matrix_loader import load_ci_matrix\n"
         "ci = load_ci_matrix()\n"
+    ),
+    "uses_the_helper_and_reads_its_constant": (
+        "from tests.utils.ci_matrix_loader import CI_MATRIX_NAME, load_ci_matrix\n"
+        "ci = load_ci_matrix()\n"
+        "assert ci.__name__ == CI_MATRIX_NAME\n"
     ),
     "names_the_reader_in_a_docstring_and_a_comment": (
         '"""Compares scripts/_ci_matrix.py (_ash_ci_matrix) with other.py."""\n'
@@ -1627,6 +1664,32 @@ class TestTheByPathLoader:
         self, source
     ):
         assert _own_loader_lines(source, "planted.py") == []
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_LOADERS.values()), ids=list(PLANTED_LOADERS)
+    )
+    def test_the_scan_of_a_tree_finds_a_loader_whatever_its_shape(
+        self, source, tmp_path
+    ):
+        """The scan reads the bytes of a module before it parses it, so each shape is
+        tried through the scan of a tree too, which starts there."""
+        paths = _plant(tmp_path, {"tests/unit/test_planted.py": source})
+        assert list(_own_loaders(tmp_path, paths)) == ["tests/unit/test_planted.py"]
+
+    @pytest.mark.parametrize(
+        "source", list(PLANTED_FINE.values()), ids=list(PLANTED_FINE)
+    )
+    def test_the_scan_of_a_tree_leaves_a_module_that_loads_no_reader_alone(
+        self, source, tmp_path
+    ):
+        paths = _plant(tmp_path, {"tests/unit/test_planted.py": source})
+        assert _own_loaders(tmp_path, paths) == {}
+
+    def test_the_helper_and_every_consumer_are_not_found(self):
+        """The shared loader is the one module the scan does not read, and no consumer
+        has a loader of its own."""
+        modules = [REPO_ROOT / name for name in (LOADER_HELPER, *CONSUMERS)]
+        assert _own_loaders(REPO_ROOT, modules) == {}
 
     def test_the_scan_finds_a_loader_in_any_directory_and_skips_the_exempt_files(
         self, tmp_path
