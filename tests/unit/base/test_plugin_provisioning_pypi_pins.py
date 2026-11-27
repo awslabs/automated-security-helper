@@ -5,7 +5,7 @@ It now also records the PyPI distribution an alpha scanner installs (``PypiPin``
 reason a distribution is held out of the alpha extra (``Exclusion``), and, for a content
 database, the environment variable that moves its cache (``ContentDatabase.cache_env``).
 
-The registry refuses four contradictions in pins, and each refusal here has a planted
+The registry refuses six contradictions in pins, and each refusal here has a planted
 input that must be refused and a sibling input, differing only in the flagged property,
 that must be accepted. Without the sibling a pass could mean the check refuses
 everything.
@@ -39,10 +39,13 @@ _PACKAGE = _ROOT / "automated_security_helper"
 
 
 def _pin(**changes):
+    """A pin that is a member of the alpha extra. A case that excludes the pin says
+    ``extra=""`` as well, because a pin is a member or excluded and never both."""
     fields = {
         "distribution": "alpha-tool",
         "specifier": "==1.0.0",
         "runtime": "uv-tool",
+        "extra": "alpha",
     }
     fields.update(changes)
     return prov.PypiPin(**fields)
@@ -126,7 +129,7 @@ def test_a_distribution_name_is_compared_the_way_pep_503_normalizes_it(
 
 
 # ---------------------------------------------------------------------------
-# The four refusals, each with a planted input and an accepted sibling
+# The six refusals, each with a planted input and an accepted sibling
 # ---------------------------------------------------------------------------
 
 
@@ -162,11 +165,21 @@ def _a_blank_specifier():
 
 
 def _a_cooldown_with_no_date():
-    return {"a": _block(_pin(excluded=_exclusion("COOLDOWN")))}
+    return {"a": _block(_pin(extra="", excluded=_exclusion("COOLDOWN")))}
+
+
+def _a_pin_that_is_neither_a_member_nor_excluded():
+    return {"a": _block(_pin(extra=""))}
+
+
+def _a_member_of_an_extra_nothing_names():
+    return {"a": _block(_pin(extra="alhpa"))}
 
 
 _DUPLICATE = "is pinned twice"
 _BOTH = "as a member of the 'alpha' extra and also excludes it"
+_NEITHER = "as neither a member of an extra nor excluded from one"
+_UNKNOWN_EXTRA = "as a member of the unknown extra 'alhpa'"
 _SPECIFIER = "must be non-empty and hold no ';'"
 _COOLDOWN = "cooldown exclusion of 'alpha-tool' carries no 'until' date"
 
@@ -184,6 +197,14 @@ _REFUSED = {
         _DUPLICATE,
     ),
     "a member that is also excluded": (_a_member_that_is_also_excluded, _BOTH),
+    "a pin that is neither a member nor excluded": (
+        _a_pin_that_is_neither_a_member_nor_excluded,
+        _NEITHER,
+    ),
+    "a member of an extra nothing names": (
+        _a_member_of_an_extra_nothing_names,
+        _UNKNOWN_EXTRA,
+    ),
     "a specifier holding a marker": (_a_specifier_with_a_marker_in_it, _SPECIFIER),
     "an empty specifier": (_an_empty_specifier, _SPECIFIER),
     "a blank specifier": (_a_blank_specifier, _SPECIFIER),
@@ -207,7 +228,7 @@ def _a_member_that_is_not_excluded():
 
 
 def _an_exclusion_that_is_not_a_member():
-    return {"a": _block(_pin(excluded=_exclusion()))}
+    return {"a": _block(_pin(extra="", excluded=_exclusion()))}
 
 
 def _a_range_and_the_markers_in_their_own_fields():
@@ -224,14 +245,16 @@ def _a_range_and_the_markers_in_their_own_fields():
 
 
 def _a_cooldown_with_a_date():
-    return {"a": _block(_pin(excluded=_exclusion("COOLDOWN", until="2026-12-01")))}
+    return {
+        "a": _block(_pin(extra="", excluded=_exclusion("COOLDOWN", until="2026-12-01")))
+    }
 
 
 def _an_exclusion_that_needs_no_date():
     return {
         "a": _block(
-            _pin(excluded=_exclusion("NEEDS_BUILD")),
-            _pin(distribution="b", excluded=_exclusion("NO_WHEELS")),
+            _pin(extra="", excluded=_exclusion("NEEDS_BUILD")),
+            _pin(distribution="b", extra="", excluded=_exclusion("NO_WHEELS")),
         )
     }
 
