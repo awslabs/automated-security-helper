@@ -963,9 +963,12 @@ class SymbolResolver:
             key = lock_key(resolved.relative_to(self._source_dir).as_posix())
             if key is None:
                 return False
-            locked = self._locked_file(key)
-            if not self._scope_is_current(self._lock, key, symbol, rule_id, locked):
+            # The lock is asked first. A file it does not hold and a scope it
+            # does not record are decided from the lock alone, so such a file is
+            # never opened: a FIFO or a device a finding names is not waited on.
+            if not self._scope_is_current(self._lock, key, symbol, rule_id):
                 return False
+            locked = self._locked_file(key)
             if locked.raw is None:
                 return False
             indexed = locked.analysis().indexed()
@@ -1002,15 +1005,16 @@ class SymbolResolver:
         key: str,
         symbol: str,
         rule_id: Optional[str],
-        locked: Any,
     ) -> bool:
         """Whether the lock records the suppression's scope and it is current.
 
         Decided once per scope for the life of the resolver, from the one read
-        of the file. Each notice is printed once per scan (``noticed``): per
-        file for a file-scope or version 1 entry and for a file that cannot be
-        read or checked, per symbol for a symbol-scope one, and per scope for a
-        scope the lock never recorded.
+        of the file. The read is made only when the lock records the scope: a
+        file with no entry, and a scope the entry does not record, are answered
+        from the lock alone and the file is not opened. Each notice is printed
+        once per scan (``noticed``): per file for a file-scope or version 1
+        entry and for a file that cannot be read or checked, per symbol for a
+        symbol-scope one, and per scope for a scope the lock never recorded.
         """
         wanted = (rule_id or "").casefold()
         memo = (key, wanted, symbol)
@@ -1041,7 +1045,7 @@ class SymbolResolver:
                     f"`{_ash_lock.add_command_for(rule_id, symbol, key)}`.",
                 )
             else:
-                checked = lock.scope_state(key, scope, locked)
+                checked = lock.scope_state(key, scope, self._locked_file(key))
                 state = checked.state
                 if state != "ok":
                     per_symbol = checked.per_symbol

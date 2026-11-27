@@ -420,19 +420,38 @@ def source_sha256(raw: bytes) -> str:
     return hashlib.sha256(normalize_line_endings(raw)).hexdigest()
 
 
+#: How a locked file is opened. ``O_NONBLOCK`` (absent on Windows, which has no
+#: FIFO to wait on) keeps the open of a FIFO from waiting for a writer, so what
+#: the name holds is judged on the descriptor before any byte is read.
+#: ``O_BINARY`` is Windows' mode without newline translation, and 0 elsewhere.
+_OPEN_FLAGS = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+
+
 def read_bounded(path: Path) -> bytes:
     """The bytes of the regular file ``path``, at most ``MAX_LOCKED_FILE_BYTES``.
 
     The one read every lock check and every analysis makes: the file is
-    opened once, checked as a regular file on the open descriptor, and read
-    with a bound, so a file that grows during the read is refused rather than
-    read past the bound. Raises OSError, or ValueError naming why the file is
-    refused.
+    opened once without waiting (``_OPEN_FLAGS``), checked as a regular file on
+    the open descriptor before a byte is read, and read with a bound, so a file
+    that grows during the read is refused rather than read past the bound. A
+    FIFO, a device or a directory at the name is refused at once, where an open
+    that waited for a writer held the command until one came. Raises OSError, or
+    ValueError naming why the file is refused.
     """
-    with open(path, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat_module.S_ISREG(info.st_mode):
+    descriptor = os.open(path, _OPEN_FLAGS)
+    try:
+        if not stat_module.S_ISREG(os.fstat(descriptor).st_mode):
             raise ValueError("not a regular file")
+        if hasattr(os, "O_NONBLOCK"):
+            # O_NONBLOCK was for the open. A regular file is then read
+            # normally: on some file systems a non-blocking read of one can
+            # return early.
+            os.set_blocking(descriptor, True)
+        handle = os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+    with handle:
         data = handle.read(MAX_LOCKED_FILE_BYTES + 1)
     if len(data) > MAX_LOCKED_FILE_BYTES:
         raise ValueError(f"larger than {MAX_LOCKED_FILE_BYTES // (1024 * 1024)} MiB")
