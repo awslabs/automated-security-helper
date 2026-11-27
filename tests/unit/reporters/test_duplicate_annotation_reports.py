@@ -12,6 +12,7 @@ severities, suppressions and per-scanner counts are the same either way.
 
 import csv
 import json
+import logging
 from io import StringIO
 
 import pytest
@@ -19,6 +20,7 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.enums import AshExitCode
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
     CsvReporter,
@@ -273,9 +275,206 @@ def test_a_config_file_naming_false_still_turns_the_recorded_setting_off_with_an
     assert not set(ANNOTATION_COLUMNS) & set(header)
 
 
-def test_a_request_the_results_cannot_record_is_said_not_swallowed(tmp_path, caplog):
-    import logging
+@pytest.mark.parametrize(
+    ("override", "keeps_columns"),
+    [
+        pytest.param(
+            'global_settings.deduplication={"annotate": false}',
+            False,
+            id="object-value-at-the-section",
+        ),
+        pytest.param(
+            'global_settings={"deduplication": {"annotate": false}}',
+            False,
+            id="object-value-at-the-parent",
+        ),
+        pytest.param(
+            "global-settings.deduplication.annotate=false",
+            False,
+            id="hyphen-for-the-underscore",
+        ),
+        pytest.param(
+            "global_settings.deduplication.annotate+=false",
+            False,
+            id="trailing-plus-on-a-scalar",
+        ),
+        pytest.param(
+            "global_settings.deduplication.annotate=false",
+            False,
+            id="control-the-leaf-key",
+        ),
+        pytest.param(
+            "global_settings.severity_threshold=HIGH",
+            True,
+            id="control-an-unrelated-key",
+        ),
+    ],
+)
+def test_every_spelling_that_writes_annotate_false_turns_the_recorded_setting_off(
+    tmp_path, override, keeps_columns
+):
+    # Every spelling the override parser lands on
+    # global_settings.deduplication.annotate is the operator's explicit false,
+    # however the override writes it. An unrelated key leaves the recorded
+    # setting alone.
+    _write(tmp_path, _model(annotate=True))
+    header = _cli_csv(tmp_path, "--config-overrides", override)
+    if keeps_columns:
+        assert tuple(header[-3:]) == ANNOTATION_COLUMNS
+    else:
+        assert not set(ANNOTATION_COLUMNS) & set(header)
 
+
+def test_a_config_file_naming_false_turns_the_recorded_setting_off(tmp_path):
+    _write(tmp_path, _model(annotate=True))
+    # Without the file the recorded setting stands.
+    assert tuple(_cli_csv(tmp_path)[-3:]) == ANNOTATION_COLUMNS
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        "project_name: p\nglobal_settings:\n  deduplication:\n    annotate: false\n",
+        encoding="utf-8",
+    )
+    header = _cli_csv(tmp_path, "--config", str(config))
+    assert not set(ANNOTATION_COLUMNS) & set(header)
+
+
+def _config_naming_annotate_false(*, unknown_key):
+    """A config file that names ``annotate: false``.
+
+    With ``unknown_key`` its suppression carries a key the schema does not
+    know, which ``fail_on_unknown_keys: true`` refuses; the override
+    ``fail_on_unknown_keys=false`` relaxes that gate, so the file loads only
+    with the override.
+    """
+    lines = [
+        "project_name: p",
+        "fail_on_unknown_keys: true",
+        "global_settings:",
+        "  deduplication:",
+        "    annotate: false",
+        "  suppressions:",
+        '    - path: "src/app.py"',
+        '      reason: "legacy entry"',
+    ]
+    if unknown_key:
+        lines.append("      bogus_key: 1")
+    return "\n".join(lines) + "\n"
+
+
+RELAX_THE_UNKNOWN_KEY_GATE = ("--config-overrides", "fail_on_unknown_keys=false")
+
+
+def _invoke_report_csv(output_dir, *extra, log_level):
+    return CliRunner().invoke(
+        app,
+        [
+            "report",
+            "--format",
+            "csv",
+            "--output-dir",
+            str(output_dir),
+            "--log-level",
+            log_level,
+            *extra,
+        ],
+    )
+
+
+def _validation_failures_logged(caplog):
+    return [
+        record
+        for record in caplog.records
+        if record.name == "ash"
+        and record.levelno == logging.ERROR
+        and "Configuration validation failed" in record.getMessage()
+    ]
+
+
+@pytest.mark.parametrize(
+    "unknown_key",
+    [
+        pytest.param(True, id="a-file-that-loads-only-under-the-override"),
+        pytest.param(False, id="control-the-same-file-without-the-unknown-key"),
+    ],
+)
+def test_a_file_that_loads_only_under_an_override_keeps_its_own_false(
+    tmp_path, unknown_key
+):
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(
+        _config_naming_annotate_false(unknown_key=unknown_key), encoding="utf-8"
+    )
+    header = _cli_csv(tmp_path, "--config", str(config), *RELAX_THE_UNKNOWN_KEY_GATE)
+    assert not set(ANNOTATION_COLUMNS) & set(header)
+
+
+def test_a_run_that_loads_under_an_override_logs_no_validation_failure(
+    tmp_path, caplog
+):
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(_config_naming_annotate_false(unknown_key=True), encoding="utf-8")
+    with caplog.at_level(logging.ERROR, logger="ash"):
+        _cli_csv(tmp_path, "--config", str(config), *RELAX_THE_UNKNOWN_KEY_GATE)
+    assert _validation_failures_logged(caplog) == []
+
+
+def test_the_same_file_without_the_override_is_refused_and_logs_the_failure(
+    tmp_path, caplog
+):
+    # The control for the test above: a refusal does log the failure that test
+    # looks for, so an empty list there means nothing was refused.
+    _write(tmp_path, _model(annotate=True))
+    config = tmp_path / "ash.yaml"
+    config.write_text(_config_naming_annotate_false(unknown_key=True), encoding="utf-8")
+    with caplog.at_level(logging.ERROR, logger="ash"):
+        result = _invoke_report_csv(
+            tmp_path, "--config", str(config), log_level="ERROR"
+        )
+    assert result.exit_code == AshExitCode.INVALID_CONFIG, result.output
+    assert len(_validation_failures_logged(caplog)) == 1
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param(
+            ("--config-overrides", "global_settings.severity_threshold=HIGH"),
+            id="with-an-unrelated-override",
+        ),
+        pytest.param((), id="control-without-an-override"),
+    ],
+)
+def test_a_resolution_warning_is_printed_once_with_or_without_an_override(
+    tmp_path, monkeypatch, caplog, override
+):
+    # A config file inside the working directory may not choose
+    # honor_ignore_files, and resolving the configuration says so in one
+    # warning. The command resolves it once, whatever overrides it is given.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "ash.yaml").write_text(
+        "project_name: p\nhonor_ignore_files: false\n", encoding="utf-8"
+    )
+    results = tmp_path / "out"
+    results.mkdir()
+    _write(results, _model())
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        result = _invoke_report_csv(
+            results, "--config", "ash.yaml", *override, log_level="INFO"
+        )
+    assert result.exit_code == 0, result.output
+    warned = [
+        record
+        for record in caplog.records
+        if record.name == "ash"
+        and record.levelno == logging.WARNING
+        and "Ignoring honor_ignore_files" in record.getMessage()
+    ]
+    assert len(warned) == 1
+
+
+def test_a_request_the_results_cannot_record_is_said_not_swallowed(tmp_path, caplog):
     # A workspace's merged results record no ash_config, so the request has
     # nowhere to land; the reporters then render without it, which must be
     # said, never a silent no-op.

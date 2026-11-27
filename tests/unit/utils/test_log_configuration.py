@@ -776,6 +776,7 @@ def test_get_logger_lets_rich_detect_the_color_system_on_windows(
     # A CI runner sets a CI variable, which takes configure_windows_safe_logging's
     # Windows branch here: the module docstring's second hazard.
     windows_logging_kept_in_the_test(monkeypatch)
+    monkeypatch.delenv("ASH_DEBUG_SHOW_LOCALS", raising=False)
 
     get_logger(name=closed_logger("win_color"), show_progress=False, use_color=True)
 

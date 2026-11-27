@@ -239,6 +239,9 @@ global_settings:
       path: tests/unit/base/test_a_failure_after_the_tool_ran_keeps_its_exit_code.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
+      path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
+      reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
+    - rule_id: generic-api-key
       path: tests/unit/cli/inspect/test_each_value_is_shown_once.py
       reason: "False positive. A made-up value assigned to a name that contains key, token or secret, to check that ASH hides it. The provider-specific gitleaks rules still apply to this file."
     - rule_id: generic-api-key
@@ -545,15 +548,15 @@ global_settings:
         for the trade_secret keywords, pattern text and not a value.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 715
-      line_end: 715
+      line_start: 654
+      line_end: 654
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
     - path: .ash.yaml
       rule_id: API_KEY_OR_SECRET
-      line_start: 962
-      line_end: 962
+      line_start: 901
+      line_end: 901
       reason: >-
         False positive. A suppression reason that quotes a placeholder fixture
         literal; the text explains why another finding is a false positive.
@@ -600,8 +603,8 @@ global_settings:
     # look like high-entropy secrets because a SHA256 is high-entropy.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 388
-      line_end: 528
+      line_start: 397
+      line_end: 549
       reason: >-
         False positive — every string in this range is a published SHA256 release
         checksum or the SHA256 of what one of those verified archives extracts to.
@@ -626,8 +629,8 @@ global_settings:
         would silently swallow a real secret added here later.
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 1002
-      line_end: 1047
+      line_start: 1028
+      line_end: 1074
       reason: >-
         False positive, the same shape as the entry above, over _THIRD_PARTY_HASHES:
         the commit SHA each bundled tool's release tag points to, and the SHA256 of

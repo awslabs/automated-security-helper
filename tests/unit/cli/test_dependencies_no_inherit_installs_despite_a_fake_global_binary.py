@@ -23,19 +23,34 @@ from tests.unit.cli.dependencies_install_support import (
     build_scene,
     run_install,
 )
+from tests.utils.stand_ins import write_stand_in
 
 pytestmark = pytest.mark.unit
 
 
 def _plant_global_checkov(tmp_path, monkeypatch):
+    """Put a fake global ``checkov`` first on PATH; return the path the lookup
+    gives for it, and the marker it creates if it is ever executed.
+
+    The fake is in the form the host starts (``tests/utils/stand_ins.py``): a script
+    on POSIX, a ``checkov.bat`` launcher on Windows, where the PATH lookup tries
+    only the names PATHEXT lists and passes over an extensionless file. The path is
+    returned as the lookup spells it (on Windows the extension's case comes from
+    PATHEXT, so ``checkov.bat`` is found as ``checkov.BAT``), because that string is
+    what the run prints.
+    """
     global_bin = tmp_path / "global-bin"
     global_bin.mkdir()
-    fake = global_bin / "checkov"
     marker = tmp_path / "GLOBAL-CHECKOV-WAS-RUN"
-    fake.write_text(f"#!/bin/sh\ntouch {marker}\n")
-    fake.chmod(0o755)
+    planted = write_stand_in(
+        global_bin, "checkov", f"open({str(marker)!r}, 'w').close()\n"
+    ).files[-1]
     monkeypatch.setenv("PATH", f"{global_bin}{os.pathsep}{os.environ['PATH']}")
-    return fake, marker
+    found = _path_lookup("checkov")
+    assert found is not None and os.path.samefile(found, planted), (
+        f"the PATH lookup finds {found}, not the planted global copy {planted}"
+    )
+    return found, marker
 
 
 def _path_lookup(command):

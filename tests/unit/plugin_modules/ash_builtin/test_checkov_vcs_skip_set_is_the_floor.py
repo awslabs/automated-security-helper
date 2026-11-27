@@ -17,25 +17,36 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - fixed argv, runs this interpreter
 import sys
-from pathlib import Path
 
 import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_vcs_frameworks import (
     KNOWN_VCS_CONFIGURATION_FRAMEWORKS,
 )
+from tests.utils.helpers import importing_this_checkout
 
 pytestmark = pytest.mark.unit
-
-_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # Run in a child interpreter: the scanner module computes its constants when it
 # is imported, so the mirror is extended before that import and nothing in this
 # process is reloaded. get_args is wrapped to add a fictional VCS framework to
 # the CheckFrameworks mirror (the one tuple that holds "terraform" and "all").
+#
+# The child runs through importing_this_checkout, so it imports this checkout's
+# ASH and no other copy. That helper imports the package before the probe runs,
+# so the probe first checks that the package import loaded neither checkov
+# module: in a module loaded before get_args is wrapped, a skip set that
+# followed the mirror would hold only today's names, and the tests below could
+# not tell it from the floor.
 _PROBE = """
 import json, sys, typing
-sys.path.insert(0, sys.argv[1])
+_SCANNERS = "automated_security_helper.plugin_modules.ash_builtin.scanners."
+_EARLY = [
+    name
+    for name in ("checkov_scanner", "checkov_vcs_frameworks")
+    if _SCANNERS + name in sys.modules
+]
+assert not _EARLY, "loaded before the mirror was extended: " + ", ".join(_EARLY)
 _get_args = typing.get_args
 def get_args(tp):
     args = _get_args(tp)
@@ -56,7 +67,7 @@ print(json.dumps({
 @pytest.fixture(scope="module")
 def probed():
     done = subprocess.run(  # nosec B603 - fixed argv, this interpreter
-        [sys.executable, "-c", _PROBE, str(_REPO_ROOT)],
+        [sys.executable, "-c", importing_this_checkout(_PROBE)],
         capture_output=True,
         text=True,
         check=False,

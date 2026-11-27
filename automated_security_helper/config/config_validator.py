@@ -264,8 +264,11 @@ def path_pattern_advice(
       without it, with a directory spelled as ``directory_path_advice`` spells it;
     - a pattern whose leading names the tree holds only in another case is named
       with the tree's spelling;
-    - a path that names an existing directory and no file in it gets
-      ``directory_path_advice``.
+    - a ``**`` pattern whose glob-free last component names a directory the tree
+      holds somewhere below the root gets ``directory_path_advice``. A pattern
+      ending in ``/`` never does: under the bare-directory rule (issue #894) it
+      already names the directory and matches the files below it, and it is the
+      spelling the advice itself recommends.
 
     The message names the pattern as ``shown_pattern``, with any part read from
     the environment shown as such, and then quotes neither the pattern nor the
@@ -337,6 +340,14 @@ def path_pattern_advice(
                 f"{CASE_ONLY_PROBLEM}."
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
+
+    # Under the bare-directory rule (issue #894) a trailing '/' names the
+    # directory and matches the files below it, in ignore paths and
+    # suppressions alike, so a pattern already spelled that way is the very
+    # spelling directory_path_advice recommends: '**/node_modules/' must not
+    # be advised to become '**/node_modules/'.
+    if form.endswith("/"):
+        return None
 
     clean_path = form.rstrip("/")
     # A glob in the last component matches files.
@@ -3038,6 +3049,40 @@ def recorded_value_at(config: Any, record: Any, path: Tuple[Any, ...]) -> Any:
     return None if key is _MISSING_IN_RECORD else container[key]
 
 
+def validated_with(
+    config: Any,
+    dumped: Any,
+    keys: Tuple[Any, ...],
+    value: Any,
+    *,
+    strict: bool = False,
+) -> Optional[Tuple[Any, Any]]:
+    """``dumped``, a dump of ``config``, with ``value`` at ``keys`` (keys of
+    ``dumped``, as ``dumped_path`` gives them), validated by ``config``'s model:
+    the model it validates to and that model dumped as JSON, or None where the
+    model refuses it (a validation error, or a value its dump cannot hold).
+
+    ``strict`` validates as a config file is loaded (``build_config``); left
+    off, the model's own settings apply. A copy of ``dumped`` is validated, and
+    a copy of ``value`` is what is placed, so a validator that edits its input
+    changes neither argument.
+    """
+    from pydantic import ValidationError
+
+    trial = copy.deepcopy(dumped)
+    node = trial
+    for key in keys[:-1]:
+        node = node[key]
+    node[keys[-1]] = copy.deepcopy(value)
+    try:
+        # ``None`` is the parameter's own default: with ``strict`` off the call
+        # reads as it always did, and a model that sets strictness itself keeps it.
+        model = type(config).model_validate(trial, strict=True if strict else None)
+        return model, model.model_dump(mode="json", by_alias=True)
+    except (ValidationError, ValueError, TypeError):
+        return None
+
+
 def reads_back_as(
     config: Any, dumped: Any, path: Tuple[Any, ...], text: str, current: Any
 ) -> bool:
@@ -3047,22 +3092,13 @@ def reads_back_as(
     something other than a string of (a list of formats from one string), so the
     reference that read ``text`` is written only where it loads back as what the
     configuration holds. A copy of ``dumped`` is validated."""
-    from pydantic import ValidationError
-
     keys = dumped_path(config, dumped, path)
     if not keys:
         return False
-    trial = copy.deepcopy(dumped)
-    node = trial
-    for key in keys[:-1]:
-        node = node[key]
-    node[keys[-1]] = text
-    try:
-        rebuilt: Any = (
-            type(config).model_validate(trial).model_dump(mode="json", by_alias=True)
-        )
-    except (ValidationError, ValueError, TypeError):
+    validated = validated_with(config, dumped, keys, text)
+    if validated is None:
         return False
+    rebuilt: Any = validated[1]
     for key in keys:
         try:
             rebuilt = rebuilt[key]
@@ -4340,10 +4376,14 @@ class ConfigValidator:
             if module_check_failure is not None:
                 result.warnings.append(module_check_failure)
 
-        # A symbol-scoped suppression needs a file entry in .ash.lock, as a
+        # A symbol-scoped suppression needs a recorded entry in .ash.lock, as a
         # scan requires (core/orchestrator.resolve_scan_config). Judged on the
         # config the model built, relative to the directory a scan would scan.
-        if refused is None and built is not None and source_dir is not None:
+        # Without a source_dir (MCP validate_config, validate_and_raise) the
+        # lock root falls back to the root the config's location implies, as
+        # _structure_warnings resolves paths: skipping the check answered
+        # ``valid: True`` for a config a scan refuses.
+        if refused is None and built is not None:
             from automated_security_helper.core.exceptions import (
                 ASHConfigValidationError as _LockRefusal,
             )
@@ -4351,13 +4391,22 @@ class ConfigValidator:
                 refuse_unlocked_symbol_suppressions,
             )
 
+            if source_dir is not None:
+                lock_root = Path(source_dir)
+            else:
+                config_parent = Path(config_path).resolve().parent
+                lock_root = (
+                    config_parent.parent
+                    if config_parent.name == ".ash"
+                    else config_parent
+                )
             try:
                 refuse_unlocked_symbol_suppressions(
                     getattr(
                         getattr(built, "global_settings", None), "suppressions", None
                     )
                     or [],
-                    source_dir,
+                    lock_root,
                 )
             except _LockRefusal as e:
                 result.errors.append(result.redact(str(e)))
@@ -5532,12 +5581,15 @@ class ConfigValidator:
         environment_paths: Collection[Path] = frozenset(),
         path_patterns: Optional[List[Tuple[str, str]]] = None,
     ) -> List[str]:
-        """Check ignore_paths and suppression paths for directory-without-glob issues.
+        """Check ignore_paths and suppression paths against the tree
+        (``path_pattern_advice``).
 
-        Returns a list of warning messages for paths that point to existing
-        directories and so match no file inside them, each with the spelling that
-        does (``directory_path_advice``). Only warns when the path actually exists
-        as a directory in the repo.
+        Returns a list of warning messages for paths that match nothing as
+        written -- a ``./`` prefix, a case-only mismatch with the tree, a ``**``
+        pattern whose glob-free last component names a directory the tree holds
+        (``directory_path_advice``) -- each with the spelling to write instead.
+        A glob-free path, with or without a trailing ``/``, names a file and the
+        directory of that name (issue #894) and gets no directory advice.
 
         ``config_data`` is the merged config. ``layers`` are the files of its
         ``extends`` chain with what each holds itself, in merge order; a warning
@@ -5667,9 +5719,9 @@ class ConfigValidator:
         path is fine (``path_pattern_advice``, shared with ``ash config lint``),
         after ``absolute_path_warning`` for an absolute one.
 
-        An ignore path ending in ``/`` names the directory and matches what is in
-        it, so it is fine; a suppression path ending in ``/`` is literal and is
-        not. The message names the path as ``shown_pattern``, with any part read
+        A path ending in ``/`` names the directory and matches what is in it
+        (issue #894), in ignore paths and suppressions alike, so it is fine.
+        The message names the path as ``shown_pattern``, with any part read
         from the environment shown as ``<value>``; None names it as it is.
         """
         # A path that is not a string is a model error, reported as one.
