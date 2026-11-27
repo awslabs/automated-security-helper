@@ -416,6 +416,10 @@ READ_ONLY_COMMANDS = ("cat", "ls")
 #: recognize, because it finds a user name only after a slash.
 LS_OWNER_FLAGS = "lgon"
 _LS_OWNER_FLAG_LIST = ", ".join("-" + flag for flag in LS_OWNER_FLAGS)
+#: What an ls listing holds that the scan cannot read, in the words of both refusals.
+_LS_OWNER_COLUMNS = (
+    "the owner and group of each file, which the scrub scan cannot recognize"
+)
 PLAYBACK_MODES = ("once", "loop")
 MIN_COLS, MAX_COLS = 20, 300
 MIN_ROWS, MAX_ROWS = 5, 100
@@ -515,9 +519,9 @@ def caption_problems(caption: str, duration_ms: int) -> list[str]:
 
 def _ls_owner_problem(argument: str) -> str:
     return (
-        f"argument {argument!r} prints the owner and group of each file, which the "
-        "scrub scan cannot recognize; ls is admitted without a long listing (the "
-        f"{_LS_OWNER_FLAG_LIST} flags and the options that do the same)"
+        f"argument {argument!r} prints {_LS_OWNER_COLUMNS}; ls is admitted without a "
+        f"long listing (the {_LS_OWNER_FLAG_LIST} flags and the options that do the "
+        "same)"
     )
 
 
@@ -529,10 +533,11 @@ def command_problem(command: str) -> str | None:
     ``ls`` flag that prints the owner and group of each file (``-l``, ``-g``, ``-o``
     and ``-n``, alone or in a bundle such as ``-la``) is refused: the scrub scan
     cannot recognize a user or group name in that column. A long option is refused as
-    an option, whatever it prints, and for ``ls`` the refusal names those four flags
-    too. ``ls`` has long options that print the same columns and accepts abbreviations
-    of them, so the check does not try to tell the options apart. The check reads the
-    text only; the recorder runs the command in the project directory.
+    an option, whatever it prints. ``ls`` has long options that print the same columns
+    and accepts abbreviations of them, so the check does not try to tell the options
+    apart, and for ``ls`` the refusal gives that reason and names the four flags too.
+    The check reads the text only; the recorder runs the command in the project
+    directory.
     """
     if not isinstance(command, str) or not command.strip():
         return "the command is empty"
@@ -553,8 +558,10 @@ def command_problem(command: str) -> str | None:
             problem = f"argument {argument!r} is an option other than a short flag"
             if program == "ls":
                 problem += (
-                    "; ls is admitted with short flags only, and without "
-                    f"{_LS_OWNER_FLAG_LIST}, which print owners and groups"
+                    "; ls is admitted with short flags only, because some long "
+                    f"options print {_LS_OWNER_COLUMNS}, and the check does not try "
+                    f"to tell which (the {_LS_OWNER_FLAG_LIST} flags print them too "
+                    "and are refused)"
                 )
             return problem
         if _COMMAND_PATH.fullmatch(argument) is None:
