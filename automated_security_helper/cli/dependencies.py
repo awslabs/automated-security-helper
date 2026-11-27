@@ -512,6 +512,11 @@ class PluginInstallOutcome:
     # Pinned installs not run because a byte-identical copy of the pinned binary was
     # already present; see download_utils.find_verified_pinned_executable.
     commands_satisfied: int = 0
+    # Commands not run because the run-once realization they route to (nix) already
+    # ran and exited 0 for an earlier plugin in this run; see _routed_commands. No
+    # digest is checked for them, so they are not commands_satisfied: the row reads
+    # INSTALLED and the summary names them on a line of their own.
+    commands_realized_earlier: int = 0
     # Commands no permitted ``--providers`` entry could serve; each is also in
     # ``errors`` with the refusal text, so the run fails and says why.
     commands_refused: int = 0
@@ -582,6 +587,7 @@ class PluginInstallOutcome:
         return (
             self.commands_attempted == 0
             and self.commands_satisfied == 0
+            and self.commands_realized_earlier == 0
             and self.commands_forced == 0
             and not self.errors
         )
@@ -635,7 +641,9 @@ class PluginInstallOutcome:
                     return "FORCED (recorded --binary-path)"
                 return "FORCED (--binary-path)"
             return "FORCED (binary not usable)"
-        if self.commands_succeeded:
+        # A command a realization served (commands_realized_earlier) was installed by
+        # this run too, by the command an earlier plugin ran, which exited 0.
+        if self.commands_succeeded or self.commands_realized_earlier:
             if not self.needs_external_tool:
                 # Nothing to look for on PATH: the install put a Python package
                 # in place, and "not on PATH" said something was missing.
@@ -2773,10 +2781,15 @@ def _routed_commands(
 
     Each command comes back as ``(argv, shell, run_once_key)``. A provider that
     realizes everything with one command (nix) gives its commands a key, and a key
-    is built once for the plugin. ``realized`` holds the keys whose command already
-    ran and succeeded earlier in the run, and is only read here: the caller adds a
-    key once the commands built for it have exited 0, so a realization that failed
-    is built again for the next plugin that routes to it.
+    is built once for the plugin: a later command of the plugin on a key it already
+    routed is left out, unannounced and uncounted, since nothing has run while
+    commands are routed, and the one command built for the key stands for both.
+    ``realized`` holds the keys whose command already ran and succeeded earlier in
+    the run, and is only read here: the caller adds a key once the commands built
+    for it have exited 0, so a realization that failed is built again for the next
+    plugin that routes to it. A plugin whose key is in ``realized`` is told so once
+    and counted in ``outcome.commands_realized_earlier``, apart from the pinned
+    binaries a digest check found in place (``commands_satisfied``).
     """
     routed: List[Tuple[List[str], bool, Optional[str]]] = []
     built_keys: set = set()
@@ -2824,14 +2837,21 @@ def _routed_commands(
         for caveat in route.caveats:
             print(f"[yellow]Note ({escape(route.provider)}):[/yellow] {escape(caveat)}")
         if route.run_once_key is not None:
-            if route.run_once_key in realized or route.run_once_key in built_keys:
+            if route.run_once_key in built_keys:
+                # An earlier command of this plugin routes to the same key: the one
+                # command built for it serves this one, and its result is the
+                # plugin's. Nothing has run yet, so nothing is said or counted.
+                continue
+            built_keys.add(route.run_once_key)
+            if route.run_once_key in realized:
+                # Said and counted once for the plugin: its later commands on this
+                # key take the branch above.
                 print(
                     f"Already realized by {escape(route.provider)} earlier in this "
                     f"run: {escape(plugin_name)}"
                 )
-                outcome.commands_satisfied += 1
+                outcome.commands_realized_earlier += 1
                 continue
-            built_keys.add(route.run_once_key)
         for built in route.commands:
             built_argv = list(built)
             routed.append(
@@ -3284,9 +3304,12 @@ def _report_and_exit(
         if o.needs_external_tool
         and not o.executable
         and not o.runnable_by_scan
-        and (o.commands_attempted or o.commands_satisfied)
+        and (
+            o.commands_attempted or o.commands_satisfied or o.commands_realized_earlier
+        )
     )
     already_verified = sorted(o.name for o in outcomes if o.commands_satisfied)
+    realized_earlier = sorted(o.name for o in outcomes if o.commands_realized_earlier)
     # Informational, never a failure: off PATH, and started by the resolution a
     # scan uses.
     runnable_off_path = sorted(
@@ -3375,6 +3398,14 @@ def _report_and_exit(
         summary.append(
             f"[cyan]Already present, verified against the pinned digest:[/cyan] "
             f"{len(already_verified)} -- {escape(', '.join(already_verified))}"
+        )
+    # Plugins a run-once realization served, run for an earlier plugin (nix): this
+    # run installed them, and no digest was checked, so they are not on the line
+    # above.
+    if realized_earlier:
+        summary.append(
+            f"[cyan]Served by a realization earlier in this run:[/cyan] "
+            f"{len(realized_earlier)} -- {escape(', '.join(realized_earlier))}"
         )
     if unprovisionable:
         summary.append(
