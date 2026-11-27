@@ -127,10 +127,10 @@ directory.
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory
-uv run ash scan fs --scanners snyk-code --output-dir ../ash_output
+uv run ash scan fs --only-scanners snyk-code --output-dir ../ash_output
 
 # Scan specific directory
-uv run ash scan fs /path/to/project --scanners snyk-code --output-dir /path/to/ash_output
+uv run ash scan fs /path/to/project --only-scanners snyk-code --output-dir /path/to/ash_output
 ```
 
 ### Run Snyk Code Scan without an ASH configuration file
@@ -141,7 +141,7 @@ command to enable the plugin
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Scan current directory only with snyk-code
-uv run ash scan fs --scanners snyk-code --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ash scan fs --only-scanners snyk-code --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 
 # SCan current directory with all available scanners (including snyk-code)
 uv run ash scan fs --output-dir ../ash_output --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
@@ -179,7 +179,7 @@ To accept a repository's exclusions, set `honor_tree_exclusions` with
 
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
-uv run ash scan fs --scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
+uv run ash scan fs --only-scanners snyk-code --config-overrides 'scanners.snyk-code.options.honor_tree_exclusions=true'
 ```
 
 or in a config file outside the scanned tree, passed with `--config`:
@@ -233,7 +233,7 @@ scanners:
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # Use Snyk Code alongside other ASH scanners
-uv run ash scan fs --scanners snyk-code,bandit,semgrep --output-dir ../ash_output
+uv run ash scan fs --only-scanners snyk-code,bandit,semgrep --output-dir ../ash_output
 ```
 
 ### CI/CD Integration
@@ -241,7 +241,7 @@ uv run ash scan fs --scanners snyk-code,bandit,semgrep --output-dir ../ash_outpu
 <!-- doctest: illustrative reason="needs a container runtime" -->
 ```bash
 # Run in container mode for CI/CD
-uv run ash scan fs --mode container --scanners snyk-code --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+uv run ash scan fs --mode container --only-scanners snyk-code --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
 ```
 
 ## Output Integration
@@ -324,7 +324,7 @@ Enable verbose logging to troubleshoot issues:
 
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
-uv run ash scan fs --scanners snyk-code --output-dir ../ash_output --log-level DEBUG
+uv run ash scan fs --only-scanners snyk-code --output-dir ../ash_output --log-level DEBUG
 ```
 
 ### Offline Mode
@@ -338,7 +338,7 @@ configuration, as shown above:
 <!-- doctest: illustrative reason="runs a scan that needs the Snyk CLI and a Snyk account" -->
 ```bash
 # snyk-code is MISSING here, and the scan exits 1
-uv run ash scan fs --offline --scanners snyk-code
+uv run ash scan fs --offline --only-scanners snyk-code
 
 # An offline scan that does not ask for snyk-code
 uv run ash scan fs --offline --exclude-scanners snyk-code
@@ -356,7 +356,7 @@ repos:
     hooks:
       - id: ash-snyk-code
         name: ASH Snyk Code Security Scan
-        entry: uv run ash scan fs --scanners snyk-code --mode precommit --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
+        entry: uv run ash scan fs --add-scanners snyk-code --mode precommit --output-dir ../ash_output --ash-plugin-modules automated_security_helper.plugin_modules.ash_snyk_plugins
         language: system
         pass_filenames: false
 ```
@@ -392,7 +392,7 @@ jobs:
           fi
           printf '::stop-commands::%s\n' "${token}"
           status=0
-          uv run ash scan fs --scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output" \
+          uv run ash scan fs --only-scanners snyk-code --output-format sarif --output-dir "${{ runner.temp }}/ash_output" \
             --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db 2>&1 || status=$?
           printf '\n::%s::\n' "${token}"
           exit "${status}"
@@ -418,7 +418,7 @@ snyk-security-scan:
   script:
     # ASH's output outside the checkout, so snyk-code scans the source; the
     # report is copied back in afterwards, since artifacts come from the checkout.
-    - uv run ash scan fs --scanners snyk-code --output-dir /tmp/ash_output --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
+    - uv run ash scan fs --only-scanners snyk-code --output-dir /tmp/ash_output --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db
   after_script:
     - cp /tmp/ash_output/reports/ash.sarif ash.sarif
   variables:

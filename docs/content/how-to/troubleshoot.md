@@ -197,7 +197,7 @@ Cause: the scan is incomplete, or it stopped before running. The last lines say 
   [A content database is stale](#a-content-database-is-stale).
 - `Exiting because no scanner ran`: every scanner was SKIPPED, so the scan shows
   nothing about the code. Each scanner's `skipped_reason` in
-  `ash_aggregated_results.json` says why. Check `--scanners`, `--exclude-scanners`, and
+  `ash_aggregated_results.json` says why. Check `--only-scanners`, `--exclude-scanners`, and
   the `enabled` settings in your configuration.
 - A message that no selected scanner had a file to scan: see
   [No selected scanner had a file to scan](#no-selected-scanner-had-a-file-to-scan).
@@ -226,7 +226,7 @@ patterns, with a count of any others, and suggests narrowing them:
 No selected scanner had a file to scan: detect-secrets was SKIPPED with nothing to scan, so this run has shown the target to be neither clean nor dirty. The config's global_settings.ignore_paths ('**') leaves every path it matches out of what the scanners read, which can leave them nothing to scan; narrow it to have those files scanned. To accept a run that scanned nothing, set fail_on_incomplete_scanners: false or pass --no-fail-on-incomplete-scanners.
 ```
 
-A run whose scanners were all SKIPPED for another reason, such as a `--scanners` name
+A run whose scanners were all SKIPPED for another reason, such as an `--only-scanners` name
 that matches no scanner on this platform, or every selected scanner turned off in the
 configuration, reports `Scan ran no scanners:` instead, with each scanner and its status;
 see [The scan exits 1 with no findings](#the-scan-exits-1-with-no-findings).
@@ -308,7 +308,7 @@ Try 'ash scan fs --help' for help.
 Cause: a usage error. Every `ash` command exits 5 when its command line is wrong: an
 option or argument the command does not take, a value an option does not accept (such
 as an invalid `--output-formats`, `--mode`, `--strategy`, or `--min-severity`), a
-`--scanners` list that names no scanner, a directory to scan that does not exist or
+`--only-scanners` list that names no scanner, a directory to scan that does not exist or
 cannot be entered, an `--output-dir` that ASH cannot create, enter, or write in,
 `--use-existing` with no results to use, or an `ash results report --format` that no reporter
 answers to. The code is not 2, so a CI gate does not read a mistyped flag as a scan
@@ -340,7 +340,7 @@ Available reporter formats:
 
 Fix: correct the command line; `ash <command> --help` lists each command's options.
 Scanner and reporter names use hyphens, as `ash plugin list` shows them. A single
-misspelled name among valid ones in `--scanners` is not a usage error: ASH logs
+misspelled name among valid ones in `--only-scanners` is not a usage error: ASH logs
 `No registered scanner matches ...` and runs the others.
 
 ### The scan exits 3
@@ -412,7 +412,7 @@ global_settings:
       reason: Generated file, scanned upstream
       expiration: "2026-01-31"
 EOF
-ash scan fs --scanners detect-secrets --no-progress
+ash scan fs --only-scanners detect-secrets --no-progress
 ```
 
 ```text

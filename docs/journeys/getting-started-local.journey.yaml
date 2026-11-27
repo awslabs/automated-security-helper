@@ -12,7 +12,7 @@ schema: 1
 template: docs/content/getting-started/local.md.template
 page: docs/content/getting-started/local.md
 twin:
-  scan: ash scan fs --scanners bandit --offline
+  scan: ash scan fs --only-scanners bandit --offline
   timeout: 300
 body:
   - prose: |
@@ -163,7 +163,7 @@ body:
       lang: bash
       marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}
       body: |
-        ash scan fs --scanners bandit,detect-secrets
+        ash scan fs --only-scanners bandit,detect-secrets
   - sample: |
       │ bandit         │ 0 │ 0 │ 2 │ 0 │ 1 │ 0 │ 637ms │ 2      │ FAILED  │ MED (g) │
       ...
@@ -171,7 +171,7 @@ body:
       ...
       ERROR (2) Exiting due to 2 actionable findings found in ASH scan
   - prose: |
-      The rows of the other scanners show SKIPPED, because `--scanners` leaves them out.
+      The rows of the other scanners show SKIPPED, because the command names only those two.
 
       A default scan runs the built-in scanners. Six more ship as alpha plugin modules
       that a scan runs once `ash_plugin_modules` names them; the

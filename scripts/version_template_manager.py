@@ -230,6 +230,15 @@ _RESULTS_VERB = re.compile(
 _CONTAINER_BUILD = re.compile(
     rf"{_ASH_COMMAND}(?P<blank>{_BLANKS})container{_BLANKS}build(?![\w-])"
 )
+# One `ash scan` command: up to a newline that is not escaped, or a separator that starts
+# another command, as _SAME_COMMAND reads a command. The flags below are rewritten only
+# inside it: a page that names a flag in a sentence says the flag, whatever release the
+# page pins.
+_SCAN_COMMAND = re.compile(rf"{_ASH_COMMAND}{_BLANKS}scan(?![\w-]){_SAME_COMMAND}")
+# The flags of 3.9 that name the scanners to run: `--only-scanners` for the whole
+# selection and `--add-scanners` for the scanners added to it. 3.8 has `--scanners` for
+# both, which 3.9 still reads and warns about.
+_SCANNER_SELECTION_FLAG = re.compile(r"(?<![\w-])--(?:only|add)-scanners(?![\w-])")
 _RELEASE_NUMBER = re.compile(r"(\d+)\.(\d+)\.(\d+)(?!\d)")
 
 # What the `entry:` of a hook in `.pre-commit-hooks.yaml` runs, as that file ships it
@@ -266,11 +275,12 @@ def spellings_for_release(text: str, version: str) -> str:
     For a release before SUBJECTS_RELEASE, ``ash scan fs PATH`` becomes
     ``ash scan --source-dir PATH`` and ``ash scan fs`` with no path ``ash scan``,
     ``ash results <verb>`` becomes ``ash <verb>``, and ``ash container build`` becomes
-    ``ash build-image``; ``ashv3`` is read as ``ash``. The entries of the hooks in
-    ``.pre-commit-hooks.yaml`` (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that
-    release ships, whole. Text for SUBJECTS_RELEASE or a later release comes back
-    unchanged, as does text for a version that does not start with a release number (a
-    branch name, a placeholder).
+    ``ash build-image``; ``ashv3`` is read as ``ash``. Inside an ``ash scan`` command,
+    ``--only-scanners`` and ``--add-scanners`` become ``--scanners``, the one flag that
+    release has for both. The entries of the hooks in ``.pre-commit-hooks.yaml``
+    (HOOK_ENTRIES_BEFORE_THE_SUBJECTS) become the entries that release ships, whole. Text
+    for SUBJECTS_RELEASE or a later release comes back unchanged, as does text for a
+    version that does not start with a release number (a branch name, a placeholder).
     """
     found = _RELEASE_NUMBER.match(version.strip())
     if found is None:
@@ -281,6 +291,9 @@ def spellings_for_release(text: str, version: str) -> str:
         lambda entry: HOOK_ENTRIES_BEFORE_THE_SUBJECTS[entry[1]], text
     )
     text = _SCAN_FS.sub(_scan_before_the_subjects, text)
+    text = _SCAN_COMMAND.sub(
+        lambda command: _SCANNER_SELECTION_FLAG.sub("--scanners", command[0]), text
+    )
     text = _RESULTS_VERB.sub(
         lambda verb: f"{verb['ash']}{verb['blank']}{verb['verb']}", text
     )

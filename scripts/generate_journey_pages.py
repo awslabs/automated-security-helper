@@ -41,7 +41,7 @@ A journey is a mapping with exactly these keys::
     template: docs/content/.../page.md.template   # the file this journey renders
     page: docs/content/.../page.md                # what the template renders to
     twin:                                         # optional; the offline twin's scan
-      scan: ash scan fs --scanners bandit --offline
+      scan: ash scan fs --only-scanners bandit --offline
       timeout: 300
     body:                                         # ordered segments
       - prose: |            # Markdown, verbatim

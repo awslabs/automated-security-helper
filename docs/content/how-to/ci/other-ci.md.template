@@ -92,7 +92,7 @@ installed. In a repository with no npm lockfile, npm-audit is SKIPPED, and this 
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --mode local --no-progress --offline --scanners detect-secrets --scanners npm-audit
+ash scan fs --mode local --no-progress --offline --only-scanners detect-secrets --only-scanners npm-audit
 ```
 
 To run without a scanner, name it in `--exclude-scanners`, for example
@@ -176,7 +176,7 @@ finding or as a clean scan:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan fs --mode local --no-progress --offline --scanners detect-secrets --min-severity hihg
+ash scan fs --mode local --no-progress --offline --only-scanners detect-secrets --min-severity hihg
 ```
 
 Fail the build on any non-zero code, and keep the reports when it fails: the build tools
@@ -442,7 +442,7 @@ and the step exits 2:
 <!-- doctest: run expect-exit=2 -->
 ```bash
 ash_exit=0
-ash scan fs --mode local --no-progress --offline --scanners detect-secrets \
+ash scan fs --mode local --no-progress --offline --only-scanners detect-secrets \
   --fail-on-findings --fail-on-incomplete-scanners --no-allow-stale-content-db \
   || ash_exit=$?
 tar -czf ash-output.tar.gz .ash/ash_output

@@ -112,7 +112,7 @@ report:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --mode local --no-progress --offline --scanners detect-secrets \
+ash scan fs --mode local --no-progress --offline --only-scanners detect-secrets \
   --output-formats gitlab-sast,junitxml
 ```
 
@@ -219,7 +219,7 @@ git switch -q -c add-version
 echo 'VERSION = "1.0"' > version.py
 git add version.py
 git commit -q -m "Add version.py"
-ash scan fs --mode local --no-progress --offline --scanners detect-secrets \
+ash scan fs --mode local --no-progress --offline --only-scanners detect-secrets \
   --changed-files-only --base-ref main
 ```
 

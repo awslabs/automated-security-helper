@@ -11,7 +11,7 @@ that is `.ash/ash_output` in the current directory:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --scanners detect-secrets --no-progress
+ash scan fs --only-scanners detect-secrets --no-progress
 ```
 
 ```bash
@@ -37,7 +37,7 @@ writes to `.ash/ash_output` inside it instead.
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --scanners detect-secrets --no-progress --output-dir build/ash-results
+ash scan fs --only-scanners detect-secrets --no-progress --output-dir build/ash-results
 ```
 
 Things to know about the output directory:
@@ -62,7 +62,7 @@ Things to know about the output directory:
 ## Read the summary table
 
 After the scan, ASH prints one row per scanner. This scan of a small project ran with
-`--scanners bandit,cdk-nag,detect-secrets,grype` on a machine without grype: bandit
+`--only-scanners bandit,cdk-nag,detect-secrets,grype` on a machine without grype: bandit
 found an actionable finding, grype's tool was missing, cdk-nag had no CloudFormation
 template to read, and semgrep was not selected (trimmed to four rows):
 
@@ -103,7 +103,7 @@ is not supported; `MISSING`; `SKIPPED` because it had nothing to read; `PASSED`.
 |---|---|---|
 | `ERROR` | The scanner produced no usable result for a target: its tool failed, or never started as asked, recorded with the start-failure code 127 (a sandbox the configuration asks for that ASH cannot provide, for example). One good target does not outweigh another, so the row is `ERROR` when any target failed or was never evaluated. On Linux and macOS, a tool ended by a signal ASH did not send, such as an out-of-memory kill, is `ERROR` whatever exit codes the scanner accepts, with an error that names the signal and an exit code of 128 plus the signal's number. How a sandbox backend's own exit code is read back is the note under the table. | Read the error in the scan output or in `ash.log`; the full record is in `scanners/<name>/source/ASH.ScanResults.json`. |
 | `FAILED` | The scanner ran and reported at least one actionable finding. It says nothing about the tool crashing. | Fix or suppress the findings. |
-| `SKIPPED` (not selected) | The scanner was not selected (`--scanners`, `--exclude-scanners`, `enabled: false`, or `--python-only`), or its platform is not supported. | Nothing, unless you expected it to run. |
+| `SKIPPED` (not selected) | The scanner was not selected (`--only-scanners`, `--exclude-scanners`, `enabled: false`, or `--python-only`), or its platform is not supported. | Nothing, unless you expected it to run. |
 | `MISSING` | The scanner never ran: its tool was not found, or was found only inside the scanned directory. | Install the tool (`ash dependencies install`), or see [Troubleshoot](troubleshoot.md). |
 | `SKIPPED` (nothing to read) | The scanner had nothing to read, such as cdk-nag with no CloudFormation template, npm-audit with no lockfile beside a `package.json`, or actionlint with no workflows. These are `SKIPPED` whether or not their tools are installed. | Nothing, unless you expected it to find files. |
 | `PASSED` | The scanner ran and nothing reached its threshold. Findings below the threshold still show in the severity columns. | Nothing. |

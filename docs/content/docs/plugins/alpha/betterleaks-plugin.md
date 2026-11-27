@@ -18,7 +18,7 @@ ash_plugin_modules:
 ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_betterleaks_plugins
 ```
 
-With the module listed, `betterleaks` runs by default, like every other scanner. `scanners.betterleaks.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners betterleaks` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+With the module listed, `betterleaks` runs by default, like every other scanner. `scanners.betterleaks.enabled: false` turns it off again, and `--only-scanners` and `--exclude-scanners` select it as they select any scanner. `--only-scanners betterleaks` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
 
 Betterleaks runs beside the builtin `gitleaks` scanner, not instead of it, so a secret both find is reported once by each.
 

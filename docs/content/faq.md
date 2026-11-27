@@ -24,7 +24,7 @@ with or without Node.js, so the exit code is detect-secrets' verdict alone:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --scanners cdk-nag,detect-secrets --no-progress
+ash scan fs --only-scanners cdk-nag,detect-secrets --no-progress
 ```
 
 ## How do I install ASH, and which version should I pin?
@@ -72,7 +72,7 @@ read:
 mkdir -p cdk.out
 echo '{"Resources": {"Bucket": {"Type": "AWS::S3::Bucket"}}}' > cdk.out/App.template.json
 echo cdk.out >> .gitignore
-ash scan fs --scanners detect-secrets --offline --no-progress
+ash scan fs --only-scanners detect-secrets --offline --no-progress
 ```
 
 ```bash
@@ -190,7 +190,7 @@ add `--exclude-scanners npm-audit`:
 ```bash
 echo '{"name": "demo", "version": "1.0.0"}' > package.json
 echo '{"name": "demo", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}' > package-lock.json
-ash scan fs --offline --scanners npm-audit,detect-secrets --no-progress
+ash scan fs --offline --only-scanners npm-audit,detect-secrets --no-progress
 ```
 
 ## What does a scan send over the network?

@@ -18,7 +18,7 @@ no other tools and answers in seconds:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 `ash results inspect findings` opens the last scan's findings in the terminal, and
@@ -91,7 +91,7 @@ Actions, and [the other CI pages](../how-to/ci/other-ci.md) for the rest.
 
 ## Tune what runs
 
-- `--scanners` narrows a run to the scanners you name; `--exclude-scanners`
+- `--only-scanners` narrows a run to the scanners you name; `--exclude-scanners`
   removes a scanner you cannot run, and the reports record it as SKIPPED
   rather than silently absent ([Choose scanners](../how-to/choose-scanners.md)).
 - A scan honors your `.gitignore`, and an

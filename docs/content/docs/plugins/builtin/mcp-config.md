@@ -27,7 +27,7 @@ Each entry is read into one normalized form: the server name, whether it starts 
 
 ## Enabling it
 
-The scanner is `mcp-config` and is enabled by default. `scanners.mcp-config.enabled: false` turns it off, and `--scanners` and `--exclude-scanners` select it like any other scanner. A repository with none of the files above gives the scanner nothing to check.
+The scanner is `mcp-config` and is enabled by default. `scanners.mcp-config.enabled: false` turns it off, and `--only-scanners` and `--exclude-scanners` select it like any other scanner. A repository with none of the files above gives the scanner nothing to check.
 
 The converter is `mcp_config` and is enabled by default. `converters.mcp_config.enabled: false` turns it off. It has no options of its own.
 
@@ -111,7 +111,7 @@ Some limits to know:
 ## Running it
 
 ```sh
-ash scan fs . --scanners mcp-config,semgrep --output-dir ash_output
+ash scan fs . --only-scanners mcp-config,semgrep --output-dir ash_output
 ```
 
 The policy findings come from `mcp-config` alone. To have the generated scripts scanned as well, run semgrep or opengrep in the same scan, as above.

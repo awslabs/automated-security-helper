@@ -407,7 +407,7 @@ whether every registered scanner is in the results:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress --verbose
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --verbose
 ```
 
 In a checkout whose environment is not activated, put `uv run` in front. The command
@@ -419,9 +419,9 @@ queues it again: the log line `Found <n> enabled scanners with no task: <names>`
 it, and the completeness check reports it with the reason "Scanner was expected to be
 queued but was not found in task queue". A scanner the scan leaves out is SKIPPED in the
 results, and the check records it as excluded with the reason it was left out: "Scanner
-excluded during filtering: not in enabled scanners list" when `--scanners` does not name
-it, or "Scanner excluded during filtering: excluded from this run (--exclude-scanners)"
-when `--exclude-scanners` does. The tracking is `ScannerValidationManager` in
+excluded during filtering: not named by --scanners" when `--only-scanners` (or the
+deprecated `--scanners`) does not name it, or "Scanner excluded during filtering: excluded
+from this run (--exclude-scanners)" when `--exclude-scanners` does. The tracking is `ScannerValidationManager` in
 `automated_security_helper/models/scanner_validation.py`, called from
 `automated_security_helper/core/phases/scan_phase.py`; its tests are
 `tests/unit/models/test_scanner_validation*.py` and

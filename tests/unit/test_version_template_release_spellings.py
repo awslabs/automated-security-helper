@@ -82,6 +82,13 @@ NEWER_SPELLING = re.compile(
     r")"
 )
 
+#: The flags 3.9 added to name the scanners to run, inside an ``ash scan`` command.
+#: 3.8 has ``--scanners`` and refuses these two.
+NEWER_SCANNER_FLAG = re.compile(
+    r"(?<![\w./-])ash(?:v3)?[ \t]+scan(?![\w-])(?:\\\n|[^\n;&|`)\]])*?"
+    r"(?<![\w-])--(?:only|add)-scanners(?![\w-])"
+)
+
 
 def _load_module():
     spec = importlib.util.spec_from_file_location(
@@ -119,9 +126,10 @@ def _templated_targets() -> list[str]:
 def _newer_spellings(text: str) -> list[str]:
     lines = text.splitlines()
     found = []
-    for match in NEWER_SPELLING.finditer(text):
-        number = text.count("\n", 0, match.start())
-        found.append(f"line {number + 1}: {lines[number].strip()}")
+    for pattern in (NEWER_SPELLING, NEWER_SCANNER_FLAG):
+        for match in pattern.finditer(text):
+            number = text.count("\n", 0, match.start())
+            found.append(f"line {number + 1}: {lines[number].strip()}")
     return found
 
 
@@ -181,6 +189,38 @@ ROWS = [
         'data-ash-copy="ash scan fs --mode container"',
         'data-ash-copy="ash scan --mode container"',
     ),
+    # The flags 3.9 added for the scanners to run, inside an `ash scan` command: 3.8 has
+    # `--scanners` for both.
+    (
+        "ash scan fs . --only-scanners bandit --offline",
+        "ash scan --source-dir . --scanners bandit --offline",
+    ),
+    (
+        "ash scan fs --only-scanners bandit,detect-secrets",
+        "ash scan --scanners bandit,detect-secrets",
+    ),
+    (
+        "ash scan fs . --only-scanners detect-secrets --only-scanners npm-audit",
+        "ash scan --source-dir . --scanners detect-secrets --scanners npm-audit",
+    ),
+    (
+        "ash scan fs . --only-scanners=bandit",
+        "ash scan --source-dir . --scanners=bandit",
+    ),
+    ("ash scan fs --add-scanners bandit", "ash scan --scanners bandit"),
+    ("ash scan --only-scanners bandit", "ash scan --scanners bandit"),
+    (
+        "ash scan fs --mode local \\\n  --only-scanners bandit",
+        "ash scan --mode local \\\n  --scanners bandit",
+    ),
+    (
+        "`ash scan fs --only-scanners bandit` runs",
+        "`ash scan --scanners bandit` runs",
+    ),
+    (
+        "uv run ash scan fs --only-scanners ferret-scan",
+        "uv run ash scan --scanners ferret-scan",
+    ),
     ("ash results inspect findings", "ash inspect findings"),
     ("ash results report --format markdown", "ash report --format markdown"),
     ("ash results merge --fail-on-findings", "ash merge --fail-on-findings"),
@@ -202,6 +242,19 @@ ROWS = [
     ("ash scan fs.py", "ash scan fs.py"),
     ("ash results", "ash results"),
     ("ash container builder", "ash container builder"),
+    # A sentence that names a flag says the flag, and so does a command outside `ash scan`.
+    ("`--only-scanners` replaces the set", "`--only-scanners` replaces the set"),
+    (
+        "use `ash scan fs`, or `--only-scanners`",
+        "use `ash scan`, or `--only-scanners`",
+    ),
+    (
+        "ash scan fs . ; echo --only-scanners",
+        "ash scan --source-dir . ; echo --only-scanners",
+    ),
+    ("ash --only-scanners bandit", "ash --only-scanners bandit"),
+    ("dash scan --only-scanners bandit", "dash scan --only-scanners bandit"),
+    ("ash scan --exclude-scanners bandit", "ash scan --exclude-scanners bandit"),
 ]
 
 

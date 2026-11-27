@@ -36,7 +36,7 @@ no subject still run that scan, with a deprecation warning, until ASH 4.0 remove
 |---|---|
 | --source-dir | the directory argument of `ash scan fs`, as in `ash scan fs ../app`. `--source-dir` still works, with a deprecation warning, until ASH 4.0. |
 | --output-dir | `--output-dir`. The default is now `.ash/ash_output` inside the source directory, instead of `ash_output`. |
-| --ext, -extension | removed. Choose scanners with `--scanners` and `--exclude-scanners`, or turn them on and off in the configuration. |
+| --ext, -extension | removed. Choose scanners with `--only-scanners` and `--exclude-scanners`, or turn them on and off in the configuration. |
 | --format text, --format json | changed. `--format` is now an alias of `--output-formats`, which takes reporter names such as `sarif` or `html`. `json` is not one of them, so a v2 `--format json` exits 5, a usage error, with `'json' is not a valid format`. `text` is the text reporter, so a v2 `--format text` keeps only `ash.summary.txt` in `reports/`. v3 always writes its JSON results file. |
 | --offline | `--offline`. In local mode the scanners then need their databases and rules already on the machine; see [Run ASH offline](run-offline.md). |
 | --offline-semgrep-rulesets | `--offline-semgrep-rulesets`, changed. In v2 it also turned on offline mode. In v3 it only chooses the rulesets an offline container image is built with, and does nothing in local mode; pass `--offline` as well. |

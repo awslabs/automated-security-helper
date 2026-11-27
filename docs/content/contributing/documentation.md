@@ -104,7 +104,7 @@ This block runs in CI. The default fixture has one finding, so the scan exits wi
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 ### Output samples

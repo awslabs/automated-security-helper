@@ -45,7 +45,7 @@ global_settings:
 To try a suppression before you write it into the file, pass it for one run. In a repository where detect-secrets reports `SECRET-SECRET-KEYWORD` in `app.py`, this run passes:
 
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
@@ -82,7 +82,7 @@ same GHSA id, each with the evidence in its reason.
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "ruleId": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 
@@ -94,7 +94,7 @@ An expired suppression no longer applies, so this run fails on the finding and n
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password", "expires": "2020-01-01"}]'
 ```
 
@@ -267,7 +267,7 @@ An ignore path can also have an `expires` date, which works the way a suppressio
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.ignore_paths+=[{"path": "app.py", "reason": "Fixture value, not a real password", "expires": "2020-01-01"}]'
 ```
 
@@ -275,7 +275,7 @@ A trailing slash names the files under a directory. With a copy of `app.py` in `
 
 ```bash
 mkdir -p vendor && cp app.py vendor/app.py
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides 'global_settings.ignore_paths+=[{"path": "vendor/", "reason": "Third-party code"}]' \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 rm -r vendor
@@ -314,7 +314,7 @@ After a scan, `ash config lint --fix-unused` comments out the entries that the r
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress --ignore-suppressions \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 

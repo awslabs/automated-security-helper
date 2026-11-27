@@ -26,7 +26,7 @@ To write fewer files, pass `--output-formats` (or `-f`) with a comma-separated l
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --scanners detect-secrets --output-formats sarif,junitxml
+ash scan fs --only-scanners detect-secrets --output-formats sarif,junitxml
 ```
 
 When detect-secrets finds a secret, the scan exits 2, and `reports/` holds only the two
@@ -71,7 +71,7 @@ cat > .ash.yaml <<'EOF'
 output_formats:
   - sarif
 EOF
-ash scan fs --scanners detect-secrets
+ash scan fs --only-scanners detect-secrets
 ```
 
 ```bash
@@ -197,7 +197,7 @@ a CI test view shows the same verdict as the scan. Actionable findings are writt
 ## CycloneDX and SPDX {#sbom}
 
 `ash.cdx.json` is the software bill of materials that syft produces. When no SBOM
-scanner ran, for example because syft is not installed or `--scanners` left it out, the
+scanner ran, for example because syft is not installed or `--only-scanners` left it out, the
 file is still a valid CycloneDX document. Its `components` list is empty, and a
 `compositions` entry with `aggregate` set to `unknown` tells a consumer that the
 inventory's completeness is not known, rather than that the project has no

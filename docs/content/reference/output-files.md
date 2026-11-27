@@ -86,14 +86,14 @@ rewritten. For example, after a scan of the sample project:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --scanners detect-secrets
+ash scan fs --only-scanners detect-secrets
 ```
 
 a scan that names a scanner ASH does not have is refused:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan fs --scanners not-a-scanner
+ash scan fs --only-scanners not-a-scanner
 ```
 
 and the first scan's results are still there:
@@ -228,7 +228,7 @@ Each `scanner_results` row has:
 | `severity_counts`, `finding_count`, `actionable_finding_count`, `suppressed_finding_count` | The counts the summary table shows. |
 | `duration` | How long the scanner ran, in seconds. |
 | `dependencies_satisfied` | `false` on a `MISSING` row. |
-| `excluded` | `true` when the run left the scanner out: `--scanners`, `--exclude-scanners`, `enabled: false`, `--python-only`, the shard split, or a platform it does not support. |
+| `excluded` | `true` when the run left the scanner out: `--only-scanners`, `--exclude-scanners`, `enabled: false`, `--python-only`, the shard split, or a platform it does not support. |
 | `exit_code` | The tool's exit code, the highest over the targets it ran on, or `null` when no tool ran: a `MISSING` or excluded scanner, one that had nothing to scan, or one that started no tool for its targets. |
 | `missing_reason` | On a `MISSING` row, why: the tool that was not found and where ASH looked, what the scanner's own dependency check reported, that the tool was found only inside the scanned directory, which ASH does not run unless you allow it (see [Tools inside the scanned directory](../docs/advanced-usage.md#tools-inside-the-scanned-directory)), or that the scanner could not be sandboxed. `null` otherwise. |
 | `skipped_reason` | On a `SKIPPED` row, why: the option that left it out, such as `not named by --scanners`, or what it had nothing to scan, such as `no CloudFormation template in the scanned files`. `null` otherwise. |
@@ -310,7 +310,7 @@ scan of the sample project:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --scanners detect-secrets --no-progress
+ash scan fs --only-scanners detect-secrets --no-progress
 ```
 
 ```python

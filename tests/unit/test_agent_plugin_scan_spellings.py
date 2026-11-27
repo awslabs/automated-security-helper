@@ -27,8 +27,10 @@ What is asserted
 ----------------
 In the transpiler's sources (``_base/`` and ``templates/``) and in every output it
 generates (``plugins/`` and the repository's ``skills/``), the container-scan command is
-spelled for the pinned release. The ``tool-reference.md`` copies are left out: the MCP
-tool generator writes them. The control is that the sources name the command at all.
+spelled for the pinned release, and while that release is before 3.9 no text names the
+scanner options ``--only-scanners`` and ``--add-scanners``, which only 3.9 reads. The
+``tool-reference.md`` copies are left out: the MCP tool generator writes them. The
+control is that the sources name the command at all.
 """
 
 from __future__ import annotations
@@ -58,6 +60,10 @@ NEWER_SPELLING = re.compile(
     r"|container[ \t]+build(?![\w-])"
     r")"
 )
+
+#: The scanner-selection options ASH 3.8 does not read. It has ``--scanners``, which 3.9
+#: deprecates in favor of these two.
+NEWER_OPTION = re.compile(r"(?<![\w-])--(?:only|add)-scanners(?![\w-])")
 
 #: ``ash scan`` with no subject after it: the spelling 3.9 deprecates. The workspace and
 #: image forms keep their option spellings until their subjects exist, so a command that
@@ -122,12 +128,12 @@ def test_the_sources_name_the_container_scan_command():
 )
 @pytest.mark.parametrize("rel", sorted(TEXTS))
 def test_a_plugin_pinned_before_3_9_names_no_spelling_that_release_refuses(rel):
-    found = _lines(TEXTS[rel], NEWER_SPELLING)
+    found = _lines(TEXTS[rel], NEWER_SPELLING) + _lines(TEXTS[rel], NEWER_OPTION)
     assert not found, (
         f"{rel} belongs to a plugin that pins ASH {'.'.join(map(str, RELEASE))}, which "
-        "refuses these spellings; write `ash scan --mode container`, which that "
-        "release reads, until the bump that moves the pin to 3.9 changes the "
-        "sources:\n  " + "\n  ".join(found)
+        "refuses these spellings; write `ash scan --mode container`, and `--scanners` "
+        "for a scanner selection, which that release reads, until the bump that moves "
+        "the pin to 3.9 changes the sources:\n  " + "\n  ".join(found)
     )
 
 
@@ -152,6 +158,10 @@ ROWS = [
     ("the user runs `ash scan --mode container`", NEWER_SPELLING, 0),
     ("the user runs `ash report`", NEWER_SPELLING, 0),
     ("the user runs `dash scan fs`", NEWER_SPELLING, 0),
+    ("the user runs `ash scan --only-scanners bandit`", NEWER_OPTION, 1),
+    ("the user runs `ash scan --add-scanners bandit`", NEWER_OPTION, 1),
+    ("the user runs `ash scan --scanners bandit`", NEWER_OPTION, 0),
+    ("the user runs `ash scan --exclude-scanners bandit`", NEWER_OPTION, 0),
     ("the user runs `ash scan --mode container`", SUBJECTLESS_SCAN, 1),
     ("the user runs `ash scan`", SUBJECTLESS_SCAN, 1),
     ("the user runs `ash scan fs --mode container`", SUBJECTLESS_SCAN, 0),

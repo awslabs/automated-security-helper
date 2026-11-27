@@ -1540,13 +1540,13 @@ ash scan fs . --no-progress
 `ash scan` with no subject still run the same scan, with a deprecation warning, until ASH
 4.0. The scan runs on this machine and writes its output to `.ash/ash_output` under the
 scanned directory unless you pass `--output-dir`.
-`--scanners` runs only the named scanners and `--exclude-scanners` skips them; use them only
+`--only-scanners` runs only the named scanners and `--exclude-scanners` skips them; use them only
 when the user asks for a narrower scan. This scan runs detect-secrets alone, without network
 access:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 | Exit code | Meaning |
@@ -1562,7 +1562,7 @@ A value ASH does not accept is a usage error, and no scanner runs:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan fs . --scanners detect-secrets --min-severity urgent --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --min-severity urgent --offline --no-progress
 ```
 
 To print a summary of the last scan:

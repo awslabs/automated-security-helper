@@ -15,7 +15,7 @@ Pass `--offline` to a scan:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --offline --scanners detect-secrets
+ash scan fs --offline --only-scanners detect-secrets
 ```
 
 This scan runs offline as usual; in a repository with a hardcoded password it exits 2.
@@ -59,7 +59,7 @@ An offline scan of a project with a lockfile reports npm-audit MISSING and exits
 mkdir -p js-app
 printf '{"name": "js-app", "version": "1.0.0"}\n' > js-app/package.json
 printf '{"name": "js-app", "version": "1.0.0", "lockfileVersion": 3, "packages": {}}\n' > js-app/package-lock.json
-ash scan fs js-app --offline --scanners npm-audit --output-dir js-app-results
+ash scan fs js-app --offline --only-scanners npm-audit --output-dir js-app-results
 ```
 
 To scan such a project offline, leave npm-audit out with `--exclude-scanners npm-audit`.

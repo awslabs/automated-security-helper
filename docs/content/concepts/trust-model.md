@@ -113,14 +113,14 @@ The CLI refuses the config with exit code 3:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ASH_MCP_WORKSPACE_ROOT="$(dirname "$PWD")" ash scan fs . --scanners detect-secrets --offline --no-progress
+ASH_MCP_WORKSPACE_ROOT="$(dirname "$PWD")" ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 Outside the workspace root the same file is a repository file, which may turn the gate off, so the same scan exits 0 although detect-secrets reports a finding:
 
 <!-- doctest: run expect-exit=0 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress
+ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 The default list also names `sandbox`, `ash_plugin_modules`, `global_settings.mcp`, suppressions, and ignore paths, and delivered files are checked differently for those. Sandbox settings and plugin modules may restrict the server's own but not widen them: a delivered file whose own `sandbox` section gives a scanner a network or an `extra_read_paths` entry the server's config does not, or sets a sandbox mode other than the server's when the server's mode is not `off`, or whose own `ash_plugin_modules` list loads a module the table above keeps out, is refused the same way. Any other sandbox grant or module a delivered file asks for is dropped, as for a repository file. A delivered file's `global_settings.mcp` section has no effect, and suppressions and ignore paths are honored and marked, as described next. Under the default policy a delivered config can still disable scanners, turn the reporters that write only local files on or off and set their options, apart from `gitlab-sast`'s `exclude_suppressed`, and raise severity thresholds. It cannot turn a reporter that sends findings off the host on or off: its `enabled: false` for one of them is not refused, but it has no effect, and each runs as the server's config says, or by the reporter's own default where that config sets nothing. [Run the MCP server](../how-to/mcp-server.md) covers running the server.
@@ -159,21 +159,21 @@ The tiers decide who may change the settings above. They do not make every setti
 
     <!-- doctest: run expect-exit=0 -->
     ```bash
-    ash scan fs . --scanners detect-secrets --offline --no-progress
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress
     ```
 
     `--ignore-suppressions` brings the finding back, and the scan fails:
 
     <!-- doctest: run expect-exit=2 -->
     ```bash
-    ash scan fs . --scanners detect-secrets --offline --no-progress --ignore-suppressions
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions
     ```
 
     To drop only the repository's ignore paths and keep its suppressions, replace the ignore paths with `--config-overrides`, and the finding fails the scan too:
 
     <!-- doctest: run expect-exit=2 -->
     ```bash
-    ash scan fs . --scanners detect-secrets --offline --no-progress \
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress \
       --config-overrides 'global_settings.ignore_paths=[]'
     ```
 
@@ -190,7 +190,7 @@ The tiers decide who may change the settings above. They do not make every setti
 
     <!-- doctest: run expect-exit=2 -->
     ```bash
-    ash scan fs . --scanners detect-secrets --offline --no-progress --ignore-suppressions
+    ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions
     ```
 
 - Some scanners read configuration files from the scanned directory by name. For actionlint, bandit, cfn-lint, checkov, ferret-scan, gitleaks, grype, opengrep, semgrep, syft, trivy, trivy-repo, and zizmor, ASH gives the tool its own configuration instead, or keeps the repository's file from being read, a `.semgrepignore` included. detect-secrets reads a `.secrets.baseline` or `.ash/.secrets.baseline` in the source directory and uses the plugins and filters it lists, unless your config sets `plugins_used` in detect-secrets' `scan_settings`. The table above says which of the baseline's settings ASH drops. Apart from those settings, ASH does not limit or mark these files, or any other file a tool reads from the scanned directory on its own.

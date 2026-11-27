@@ -24,7 +24,7 @@ ash_plugin_modules:
 ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_hadolint_plugins
 ```
 
-With the module listed, `hadolint` runs by default, like every other scanner. `scanners.hadolint.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners hadolint` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+With the module listed, `hadolint` runs by default, like every other scanner. `scanners.hadolint.enabled: false` turns it off again, and `--only-scanners` and `--exclude-scanners` select it as they select any scanner. `--only-scanners hadolint` without the module listed is refused, with a message naming the module to add. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
 
 ## Installing hadolint
 

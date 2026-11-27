@@ -95,10 +95,10 @@ Scan it with the operator config:
 
 <!-- doctest: run fixture=empty expect-exit=2 -->
 ```bash
-ash scan fs --config "$OPERATOR_CONFIG" --scanners detect-secrets
+ash scan fs --config "$OPERATOR_CONFIG" --only-scanners detect-secrets
 ```
 
-`--scanners detect-secrets` keeps the check fast: detect-secrets ships with ASH, so it
+Naming only detect-secrets keeps the check fast: detect-secrets ships with ASH, so it
 needs no other tools. The scan ends with
 `ERROR (2) Exiting due to 1 actionable findings found in ASH scan`. Once the scan has
 loaded a config file, `.ash/ash_output/ash.log` names it in a `Using ASH configuration from`
@@ -115,7 +115,7 @@ config:
 <!-- doctest: run fixture=empty expect-exit=0 -->
 ```bash
 printf 'fail_on_findings: false\n' > .ash.yaml
-ash scan fs --scanners detect-secrets
+ash scan fs --only-scanners detect-secrets
 ```
 
 `ash.log` now names the repository's file. A file ASH finds on its own appears by its resolved
@@ -130,7 +130,7 @@ The scan exits 0 although the finding is still there. Scan again with your confi
 
 <!-- doctest: run fixture=empty expect-exit=2 -->
 ```bash
-ash scan fs --config "$OPERATOR_CONFIG" --scanners detect-secrets
+ash scan fs --config "$OPERATOR_CONFIG" --only-scanners detect-secrets
 ```
 
 The scan exits 2 again, because ASH read only your file.

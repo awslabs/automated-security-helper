@@ -167,7 +167,7 @@ ash scan --scanners bandit,detect-secrets
 ERROR (2) Exiting due to 2 actionable findings found in ASH scan
 ```
 
-The rows of the other scanners show SKIPPED, because `--scanners` leaves them out.
+The rows of the other scanners show SKIPPED, because the command names only those two.
 
 A default scan runs the built-in scanners. Six more ship as alpha plugin modules
 that a scan runs once `ash_plugin_modules` names them; the

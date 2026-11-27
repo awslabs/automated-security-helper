@@ -20,7 +20,7 @@ Pass a flag to `ash scan fs` or to `ash results report`:
 
 <!-- doctest: illustrative reason="needs two scanners that report the same finding, such as grype and trivy" -->
 ```bash
-ash scan fs --scanners grype,trivy --annotate-duplicates --fold-duplicates
+ash scan fs --only-scanners grype,trivy --annotate-duplicates --fold-duplicates
 ```
 
 `ash results report` applies the same flags to the results of an earlier scan. It only ever turns

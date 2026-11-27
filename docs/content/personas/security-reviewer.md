@@ -65,7 +65,7 @@ an audit of what the current set hides:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress --ignore-suppressions \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --ignore-suppressions \
   --config-overrides 'global_settings.suppressions+=[{"path": "app.py", "rule_id": "SECRET-SECRET-KEYWORD", "reason": "Fixture value, not a real password"}]'
 ```
 

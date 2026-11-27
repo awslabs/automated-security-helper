@@ -129,7 +129,7 @@ Run a scan with the module loaded:
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners detect-secrets --offline
 ```
 
 The scan exits with code 2 for the hardcoded password in `app.py`. List what the converter wrote:

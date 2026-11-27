@@ -87,14 +87,14 @@ A scan that names a file that does not exist is refused:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress --config no-such-config.yaml
+ash scan fs . --only-scanners detect-secrets --offline --no-progress --config no-such-config.yaml
 ```
 
 So is one whose `ASH_CONFIG` names such a file, also when `--config` names a file that loads:
 
 <!-- doctest: run expect-exit=3 -->
 ```bash
-ASH_CONFIG=no-such-config.yaml ash scan fs . --scanners detect-secrets --offline --no-progress
+ASH_CONFIG=no-such-config.yaml ash scan fs . --only-scanners detect-secrets --offline --no-progress
 ```
 
 ## Choose which scanners run by default {#default-scanners}
@@ -152,7 +152,7 @@ A base must be inside the scanned directory. For a config file outside the scann
 `--config-overrides` sets one key for one run, on top of the config file. Repeat it to set several; when two set the same key, the later one wins.
 
 ```bash
-ash scan fs . --scanners detect-secrets --offline --no-progress \
+ash scan fs . --only-scanners detect-secrets --offline --no-progress \
   --config-overrides fail_on_findings=false \
   --config-overrides global_settings.severity_threshold=HIGH
 ```

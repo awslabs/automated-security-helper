@@ -34,7 +34,7 @@ def run_finished(**kwargs):
 <!-- doctest: run expect-exit=2 -->
 ```bash
 export PYTHONPATH="$PWD/ash-plugins"
-ash scan fs --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners detect-secrets --offline
 ```
 
 Among the scan's output are the two lines the subscribers print:

@@ -6214,7 +6214,7 @@ def test_scanner_rows_say_whether_the_tool_was_found_was_left_out_and_how_it_exi
     for sentence in (
         "| `dependencies_satisfied` | `false` on a `MISSING` row. |",
         (
-            "| `excluded` | `true` when the run left the scanner out: `--scanners`, "
+            "| `excluded` | `true` when the run left the scanner out: `--only-scanners`, "
             "`--exclude-scanners`, `enabled: false`, `--python-only`, the shard split, "
             "or a platform it does not support. |"
         ),
@@ -7286,8 +7286,8 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
 ) -> None:
     """run-offline.md (Turn on offline mode).
 
-    A repository with a hardcoded password is scanned with the page's ``ash scan
-    --offline --scanners detect-secrets``, and with ``ASH_OFFLINE`` set to ``TRUE`` or
+    A repository with a hardcoded password is scanned with the page's ``ash scan fs
+    --offline --only-scanners detect-secrets``, and with ``ASH_OFFLINE`` set to ``TRUE`` or
     ``1`` instead of the flag, with no grype cache configured: ``GRYPE_DB_CACHE_DIR``
     is unset and the run's private home (``_ash_environment``; ``LOCALAPPDATA`` is
     pointed under it too, the Windows default) holds no grype database, so the cache
@@ -7302,7 +7302,9 @@ def test_an_offline_scan_logs_a_warning_for_a_scanner_whose_cache_is_not_set_up(
         "exist`, naming the cache grype would read (`GRYPE_DB_CACHE_DIR`, else grype's "
         "default cache directory).",
     )
-    assert_on_page(_OFFLINE_PAGE, "ash scan fs --offline --scanners detect-secrets")
+    assert_on_page(
+        _OFFLINE_PAGE, "ash scan fs --offline --only-scanners detect-secrets"
+    )
     monkeypatch.delenv("GRYPE_DB_CACHE_DIR", raising=False)
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
     tree = _config_scan_tree(tmp_path, {"app.py": _CONFIG_SECRET})
@@ -18117,7 +18119,7 @@ def test_the_coverage_table_columns_match_each_scanner(
     assert_on_page(
         COVERAGE_PAGE,
         "`--mode precommit` runs the five scanners marked yes, plus any you name with "
-        "`--scanners`.",
+        "`--add-scanners`.",
     )
     assert_on_page(
         SCANNERS_PAGE,

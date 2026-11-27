@@ -4,7 +4,7 @@
 
 ## Enabling it
 
-The `trivy` scanner is a builtin scanner, enabled by default: a default scan runs it. `scanners.trivy.enabled: false` in the ASH config turns it off, and `--scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
+The `trivy` scanner is a builtin scanner, enabled by default: a default scan runs it. `scanners.trivy.enabled: false` in the ASH config turns it off, and `--only-scanners` and `--exclude-scanners` select it as they select any scanner. If the tool is not installed, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate), as for every builtin scanner; `ash dependencies install` and the container image provide it.
 
 trivy is a native binary, so `--python-only` does not run it.
 

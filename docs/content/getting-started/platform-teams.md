@@ -98,7 +98,7 @@ Scan it with the operator config:
 ash scan --config "$OPERATOR_CONFIG" --scanners detect-secrets
 ```
 
-`--scanners detect-secrets` keeps the check fast: detect-secrets ships with ASH, so it
+Naming only detect-secrets keeps the check fast: detect-secrets ships with ASH, so it
 needs no other tools. The scan ends with
 `ERROR (2) Exiting due to 1 actionable findings found in ASH scan`. Once the scan has
 loaded a config file, `.ash/ash_output/ash.log` names it in a `Using ASH configuration from`

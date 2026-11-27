@@ -24,7 +24,7 @@ ash_plugin_modules:
 ash scan fs --ash-plugin-modules automated_security_helper.plugin_modules.ash_guarddog_plugins
 ```
 
-With the module listed, `guarddog` runs by default, like every other scanner. `scanners.guarddog.enabled: false` turns it off again, and `--scanners` and `--exclude-scanners` select it as they select any scanner. `--scanners guarddog` without the module listed is refused, with a message naming the module to add. If GuardDog is not installed, an online scan installs it with `uv tool install` before running it; offline, in nix mode, or when that install fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
+With the module listed, `guarddog` runs by default, like every other scanner. `scanners.guarddog.enabled: false` turns it off again, and `--only-scanners` and `--exclude-scanners` select it as they select any scanner. `--only-scanners guarddog` without the module listed is refused, with a message naming the module to add. If GuardDog is not installed, an online scan installs it with `uv tool install` before running it; offline, in nix mode, or when that install fails, the scanner is reported `MISSING` and the scan exits 1 (the incomplete-scan gate).
 
 ## What ASH runs
 

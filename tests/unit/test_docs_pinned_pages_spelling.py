@@ -27,7 +27,9 @@ there, so the page cannot ship the old commands with a new pin.
 What is asserted
 ----------------
 Every hand-written page under ``docs/content/`` that pins a release before 3.9 holds no
-spelling only 3.9 reads. The scope is the page, except for the pages in ``BY_BLOCK``,
+spelling only 3.9 reads: a scan subject, a results verb, ``container build``, or one of
+the scanner options ``--only-scanners`` and ``--add-scanners`` (3.8 has ``--scanners``,
+which 3.9 deprecates). The scope is the page, except for the pages in ``BY_BLOCK``,
 where it is each fenced block that holds a pin. The rows check the detector on planted
 text, and the control checks that the two pages this was written for are still found.
 """
@@ -59,6 +61,10 @@ NEWER_SPELLING = re.compile(
     r"|container[ \t]+build(?![\w-])"
     r")"
 )
+
+#: The scanner-selection options ASH 3.8 does not read. It has ``--scanners``, which 3.9
+#: deprecates in favor of these two.
+NEWER_OPTION = re.compile(r"(?<![\w-])--(?:only|add)-scanners(?![\w-])")
 
 #: The pages that pin a release in two CI jobs and give every other command as what
 #: the reader runs with the ASH they have. For these the pin binds the fenced block it
@@ -158,12 +164,13 @@ def pairing_problems(text: str, *, by_block: bool = False) -> list[str]:
         pins = _pins_before_the_subjects(scope)
         if not pins:
             continue
-        for found in NEWER_SPELLING.finditer(scope):
-            line = first + scope.count("\n", 0, found.start())
-            problems.append(
-                f"line {line}: `{found.group(0)}` beside a pin of "
-                f"{', '.join(sorted(pins))}"
-            )
+        for pattern in (NEWER_SPELLING, NEWER_OPTION):
+            for found in pattern.finditer(scope):
+                line = first + scope.count("\n", 0, found.start())
+                problems.append(
+                    f"line {line}: `{found.group(0)}` beside a pin of "
+                    f"{', '.join(sorted(pins))}"
+                )
     return problems
 
 
@@ -193,9 +200,9 @@ def test_a_page_pinned_before_the_subjects_names_no_spelling_that_release_refuse
         f"{rel} pins an ASH release before 3.9 and names a command only 3.9 reads, so "
         "a reader who copies the install command and then the next one runs the second "
         "on a release that refuses it. Spell it the way that release reads it (`ash "
-        "scan`, with `--source-dir` for a path; `ash <verb>` for the results commands; "
-        "`ash build-image`), or move the page to a template so its render does:\n  "
-        + "\n  ".join(problems)
+        "scan`, with `--source-dir` for a path and `--scanners` for the scanner "
+        "selection; `ash <verb>` for the results commands; `ash build-image`), or move "
+        "the page to a template so its render does:\n  " + "\n  ".join(problems)
     )
 
 
@@ -216,6 +223,13 @@ def test_every_by_block_page_is_pinned_and_reads_by_block():
 
 
 INSTALL = "pip install git+https://github.com/awslabs/automated-security-helper.git@v{}"
+
+
+def _page(pin: str | None, command: str) -> str:
+    """A fenced block of ``command``, after an install of ``pin`` when one is given."""
+    install = f"{INSTALL.format(pin)}\n" if pin else ""
+    return f"```bash\n{install}{command}\n```\n"
+
 
 ROWS = [
     # (text, by_block, how many problems)
@@ -241,6 +255,18 @@ ROWS = [
         f"````bash\n{INSTALL.format('3.8.0')}\n```\nash scan fs\n````\n",
         True,
         1,
+    ),
+    # The scanner options 3.8 has not got: only a pinned scope is held to them, and
+    # ``--scanners``, the option 3.8 has, is never a problem.
+    (_page("3.8.0", "ash scan --only-scanners bandit"), False, 1),
+    (_page("3.8.0", "ash scan --add-scanners bandit"), True, 1),
+    (_page("3.8.0", "ash scan --scanners bandit"), False, 0),
+    (_page(None, "ash scan --only-scanners bandit"), False, 0),
+    (_page("3.9.0", "ash scan --only-scanners bandit"), False, 0),
+    (
+        _page("3.8.0", "echo ok") + "\n" + _page(None, "ash scan --only-scanners x"),
+        True,
+        0,
     ),
 ]
 

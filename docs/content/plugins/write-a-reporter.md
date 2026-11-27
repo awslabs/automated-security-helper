@@ -80,7 +80,7 @@ A loaded reporter runs in every scan, beside the built-in ones. This scan uses o
 
 <!-- doctest: run expect-exit=2 -->
 ```bash
-ash scan fs --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners detect-secrets --offline
 ```
 
 In a repository with one hardcoded password, the scan exits with code 2. Read the report:
@@ -107,7 +107,7 @@ ash results report --format findings-list --config-overrides 'ash_plugin_modules
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash scan fs --ash-plugin-modules acme_ash_plugins --scanners detect-secrets --offline \
+ash scan fs --ash-plugin-modules acme_ash_plugins --only-scanners detect-secrets --offline \
   --output-formats findings-list
 ```
 
