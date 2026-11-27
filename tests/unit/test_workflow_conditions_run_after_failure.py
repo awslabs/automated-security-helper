@@ -219,7 +219,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - run: ash --mode local
+      - run: ash scan fs . --mode local
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
@@ -230,7 +230,7 @@ The steps to add to your job:
 
 ```yaml
 - name: Run ASH
-  run: uvx --from automated-security-helper ash --mode local
+  run: uvx --from automated-security-helper ash scan fs . --mode local
 - name: Upload SARIF
   uses: github/codeql-action/upload-sarif@v3
   with:
@@ -400,7 +400,7 @@ def test_the_checker_accepts_a_condition_that_can_hold(condition):
 
 def test_the_upload_checker_flags_an_upload_skipped_after_a_failed_scan():
     steps = [
-        {"name": "Run ASH", "run": "ash --mode local"},
+        {"name": "Run ASH", "run": "ash scan fs . --mode local"},
         {"name": "Upload", "uses": "actions/upload-artifact@v4"},
         {"name": "SARIF", "uses": "github/codeql-action/upload-sarif@v3", "if": "true"},
         {"name": "Kept", "uses": "actions/upload-artifact@v4", "if": "!cancelled()"},
@@ -417,7 +417,7 @@ def test_the_upload_checker_flags_an_upload_skipped_after_a_failed_scan():
     assert (
         uploads_after_ash_without_status(
             [
-                {"run": "ash scan --no-fail-on-findings"},
+                {"run": "ash scan fs . --no-fail-on-findings"},
                 {"uses": "actions/upload-artifact@v4"},
             ]
         )

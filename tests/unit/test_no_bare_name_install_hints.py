@@ -220,7 +220,7 @@ BARE_NAME_INSTALLS = {
     "pip": "pip install automated-security-helper",
     "pip-extra-quoted": 'pip install "automated-security-helper[symbols]"',
     "uv-tool-install-extra": 'uv tool install "automated-security-helper[symbols]"',
-    "uvx-distribution-name": "uvx automated-security-helper --mode local --source-dir .",
+    "uvx-distribution-name": "uvx automated-security-helper scan fs . --mode local",
     "uvx-with-dot-runs-pypi-ash": "uvx --with=. ash mcp",
     "uvx-force-directory-with-dot": "uvx --force --directory=/path/to/ash --with=. ash mcp",
     "prose-extra-hint": "Until it is, they match nothing. Install automated-security-helper[{}]",
@@ -241,9 +241,9 @@ BARE_NAME_INSTALLS = {
     "uvx-ash": "uvx ash",
     "uvx-ash-at-version": "uvx ash@latest scan",
     "uv-tool-run-ash": "uv tool run ash --help",
-    "pipx-run-ash": "pipx run ash scan",
+    "pipx-run-ash": "pipx run ash scan fs .",
     "uv-tool-install-ash-pinned": "uv tool install ash==0.1.3",
-    "uv-run-with-ash": "uv run --with ash ash scan",
+    "uv-run-with-ash": "uv run --with ash ash scan fs .",
     "uvx-with-bare-extra": "uvx --with automated-security-helper[cdk] cdk synth",
     "uvx-from-bare-name": "uvx --from automated-security-helper ash",
     "pipx-run-spec-bare-name": "pipx run --spec automated-security-helper ash",
@@ -369,9 +369,9 @@ RESOLVING_OR_UNRELATED = {
     "cdk-dependencies-hint": "Install them with: ash dependencies install",
     "extra-packages-by-name": "pip install tree-sitter tree-sitter-python",
     "pipx-upgrade-reuses-recorded-spec": "pipx upgrade automated-security-helper",
-    "ash-runs-after-install": f"uv tool install git+{GIT_URL}@v3.8.0 && ash --mode local",
+    "ash-runs-after-install": f"uv tool install git+{GIT_URL}@v3.8.0 && ash scan fs . --mode local",
     "separate-code-spans": "Run `pip install -e .` and then `ash --help`.",
-    "uv-run-project-script": "uv run ash scan",
+    "uv-run-project-script": "uv run ash scan fs .",
     "editable-local-extra": "pip install -e '.[symbols]'",
     "local-directory": "pip install ./automated-security-helper",
     "cloned-directory": "pip install automated-security-helper/",
@@ -405,7 +405,7 @@ RESOLVING_OR_UNRELATED = {
         '{"command": "uvx", "env": {}, "args": '
         '["--from=git+https://github.com/awslabs/automated-security-helper@v3.8.0", "ash", "mcp"]}'
     ),
-    "pipenv-run-project-script": "pipenv run ash scan",
+    "pipenv-run-project-script": "pipenv run ash scan fs .",
     "pipenv-install-editable-git": f"pipenv install -e git+{GIT_URL}@v3.8.0#egg=automated-security-helper",
     "pipenv-install-direct-reference": f'pipenv install "automated-security-helper[symbols] @ git+{GIT_URL}@v3.8.0"',
     "pipenv-install-local-checkout": "pipenv install -e .",
@@ -417,7 +417,7 @@ RESOLVING_OR_UNRELATED = {
     "rye-add-git-equals": f"rye add automated-security-helper --git={GIT_URL}",
     "rye-add-path": "rye add automated-security-helper --path ../automated-security-helper",
     "rye-install-url": "rye install ash --url https://example.invalid/ash-3.8.0.tar.gz",
-    "rye-run-script": "rye run ash scan",
+    "rye-run-script": "rye run ash scan fs .",
     "conda-install-other": "conda install -c conda-forge python=3.12 nodejs",
     "pip-download-git": f"pip download git+{GIT_URL}@v3.8.0",
     "alias-uvx-git": f'alias ash="uvx git+{GIT_URL}@v3.8.0"',
@@ -682,7 +682,7 @@ def test_planted_lines_for_other_installers_are_reported(tmp_path):
             f"""\
             ```bash
             pipenv install ash
-            pipenv run ash scan
+            pipenv run ash scan fs .
             pipenv install -e git+{GIT_URL}@v3.8.0#egg=automated-security-helper
             rye add automated-security-helper
             rye add automated-security-helper --git {GIT_URL} --tag v3.8.0
