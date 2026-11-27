@@ -18,7 +18,9 @@ on PATH, so no case can reach a real container runtime.
 from __future__ import annotations
 
 import contextlib
+import faulthandler
 import itertools
+import json
 import os
 import signal
 import stat
@@ -34,7 +36,7 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
-from tests.utils.helpers import module_from_this_checkout
+from tests.utils.helpers import importing_this_checkout, module_from_this_checkout
 
 #: What a finished scan prints, none of which an interrupted one may print.
 _COMPLETION_TEXT = (
@@ -108,6 +110,20 @@ if "build" in sys.argv[1:]:
         [mask] = [line.split()[1] for line in handle if line.startswith("SigIgn:")]
     with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as handle:
         handle.write(mask + "\\n")
+sys.exit(0)
+"""
+
+#: A scanner's tool that appends one JSON line to FAKE_LOG each time it is started,
+#: whatever it is asked to do, and exits 0. The line holds its name, the signals it
+#: was started ignoring (the SigIgn mask of /proc/self/status, as hex) and its
+#: arguments, which tell the run that scans from a probe for its version.
+_A_TOOL_THAT_REPORTS_ITS_IGNORED_SIGNALS = """#!{python} -I
+import json, os, sys
+with open("/proc/self/status", encoding="utf-8") as handle:
+    [mask] = [line.split()[1] for line in handle if line.startswith("SigIgn:")]
+start = dict(tool=os.path.basename(sys.argv[0]), mask=mask, argv=sys.argv[1:])
+with open(os.environ["FAKE_LOG"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(start) + "\\n")
 sys.exit(0)
 """
 
@@ -469,7 +485,10 @@ def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
     """A script run as `cmd &` starts ASH with SIGINT ignored, and the runtime
     inherits that. The hold around the runtime's start put a handler in its place,
     which exec resets, so the runtime was started with SIGINT at its default and a
-    Ctrl-C meant for the foreground job reached it. The control: started with
+    Ctrl-C meant for the foreground job reached it. Loading polars, which
+    build-image does when it discovers the reporter plugins, put one there from
+    native code (test_a_child_ignores_sigint_where_a_native_handler_replaced_it),
+    with the same result. The control: started with
     SIGINT at its default, the runtime is not started ignoring SIGINT either. This
     test sees only the runtime's mask; that ASH holds its own Python handler there
     is checked in-process, by test_a_ctrl_c_while_the_runtime_is_started_stops_it.
@@ -512,6 +531,161 @@ def test_the_runtime_keeps_the_sigint_disposition_ash_was_started_with(
     assert masks, result.stdout + result.stderr
     sigint = 1 << (signal.SIGINT - 1)
     assert [bool(int(mask, 16) & sigint) for mask in masks] == [ignored] * len(masks)
+
+
+#: The argument that marks a stand-in tool's scan. gitleaks scans with its ``dir``
+#: subcommand (``subcommands = ["dir"]`` in gitleaks_scanner.py) and syft is told
+#: where to write its report with ``--output`` (the ToolArgs in syft_scanner.py). A
+#: probe for the version, ``<tool> --version`` or ``<tool> version`` (the forms
+#: core/scanner_inventory.py tries), starts the stand-in just as the scan does and
+#: carries neither.
+_ARGUMENT_OF_A_SCAN_RUN = {"gitleaks": "dir", "syft": "--output"}
+
+
+def _is_the_scan_run(start: dict) -> bool:
+    """Whether a start a stand-in tool logged is its scan, and not a probe."""
+    return _ARGUMENT_OF_A_SCAN_RUN.get(start["tool"]) in start["argv"]
+
+
+def _starts_logged_by_the_tools(log: Path) -> list[dict]:
+    """One dict per start of a stand-in tool, in the order logged: its ``tool``, its
+    SigIgn ``mask`` (hex) and its ``argv``."""
+    logged = log.read_text(encoding="utf-8") if log.exists() else ""
+    return [json.loads(line) for line in logged.splitlines() if line]
+
+
+def _assert_every_scanner_scanned(starts: list[dict], names, output: str) -> None:
+    """Each scanner in ``names`` has its scan among ``starts``, not only a probe.
+
+    The disposition check reads every start, probes included, so a log that held
+    probes alone would pass it without the scan's own start ever being read. The
+    message names every start, with its arguments, and the scan's own output.
+    """
+    scanned = {start["tool"] for start in starts if _is_the_scan_run(start)}
+    assert scanned == set(names), (
+        f"the scan was seen for {sorted(scanned)}, not for {sorted(names)}: "
+        f"{[(start['tool'], start['argv']) for start in starts]}\n{output}"
+    )
+
+
+@pytest.mark.unit
+def test_a_log_of_version_probes_does_not_show_a_scan_ran():
+    """Control for the scanners' disposition check: it asks for each scanner's own
+    scan, so a log of version probes alone fails it, as does a log in which only
+    one of two scanners scanned (the pool's case) or each tool carries the other's
+    marker. A log with both scans passes."""
+    probes = [
+        {"tool": "gitleaks", "mask": "0", "argv": ["--version"]},
+        {"tool": "syft", "mask": "0", "argv": ["version"]},
+    ]
+    scans = [
+        {"tool": "gitleaks", "mask": "0", "argv": ["dir", "--no-banner", "--", "."]},
+        {
+            "tool": "syft",
+            "mask": "0",
+            "argv": ["--output", "cyclonedx-json@1.6=/out/syft.cdx.json", "/src"],
+        },
+    ]
+    swapped = [
+        {"tool": "gitleaks", "mask": "0", "argv": scans[1]["argv"]},
+        {"tool": "syft", "mask": "0", "argv": scans[0]["argv"]},
+    ]
+    names = ["gitleaks", "syft"]
+
+    for log in ([], probes, [*probes, scans[0]], [*probes, scans[1]], swapped):
+        with pytest.raises(AssertionError):
+            _assert_every_scanner_scanned(log, names, "")
+    _assert_every_scanner_scanned([*probes, *scans], names, "")
+    _assert_every_scanner_scanned(scans, names, "")
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads the tools' /proc status"
+)
+@pytest.mark.parametrize(
+    "scanners, ignored",
+    [
+        pytest.param("gitleaks", True, id="one-scanner-sigint-ignored"),
+        pytest.param("gitleaks,syft", True, id="two-scanners-sigint-ignored"),
+        pytest.param("gitleaks,syft", False, id="two-scanners-sigint-default"),
+    ],
+)
+@pytest.mark.integration
+def test_the_scanners_keep_the_sigint_disposition_ash_was_started_with(
+    tmp_path, isolated, scanners, ignored
+):
+    """The scan's tools start with the SIGINT disposition ASH was started with.
+
+    Loading polars, which the scan does when it discovers the reporter plugins,
+    puts a SIGINT handler in place from native code. The hold around each start
+    sets an ignored SIGINT again, but only on the main thread, and with two or
+    more scanners every tool is started on a pool worker: in a scan run as
+    `ash scan &`, each began with SIGINT at its default, exec having reset polars'
+    handler, where it was meant to inherit SIGINT ignored. One scanner runs on the
+    main thread, where the hold sets it; the control, started with SIGINT at its
+    default, has its tools start with it at its default too. The tools here stand
+    in for the scanners' own and record their mask and their arguments. A probe for
+    a version starts a stand-in as the scan does, so every start they log is
+    checked, and the scan's own start of each scanner has to be among them: a log
+    of probes alone, which a scan that never started its tool leaves too, would
+    otherwise pass.
+    """
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    names = scanners.split(",")
+    for name in names:
+        _executable(
+            tools / name,
+            _A_TOOL_THAT_REPORTS_ITS_IGNORED_SIGNALS.format(python=sys.executable),
+        )
+    (tmp_path / "src" / "app.py").write_text('print("hello")\n', encoding="utf-8")
+    log = tmp_path / "tools.log"
+    env = {
+        **isolated["env"],
+        "FAKE_LOG": str(log),
+        # The stand-ins come first; the scanned tree, src, does not hold them.
+        "PATH": f"{tools}{os.pathsep}{isolated['env']['PATH']}",
+    }
+    previous = signal.signal(
+        signal.SIGINT, signal.SIG_IGN if ignored else signal.SIG_DFL
+    )
+    try:
+        # ASH inherits this process's SIGINT disposition across fork and exec.
+        result = subprocess.run(  # nosec B603 - fixed interpreter and arguments
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                module_from_this_checkout("automated_security_helper.cli.main"),
+                "scan",
+                "--mode",
+                "local",
+                "--source-dir",
+                "src",
+                "--output-dir",
+                "out",
+                "--only-scanners",
+                scanners,
+                # The stand-ins write no results, so each scanner ends in ERROR.
+                "--no-fail-on-incomplete-scanners",
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    started = _starts_logged_by_the_tools(log)
+    _assert_every_scanner_scanned(started, names, result.stdout + result.stderr)
+    sigint = 1 << (signal.SIGINT - 1)
+    assert [
+        (start["tool"], bool(int(start["mask"], 16) & sigint)) for start in started
+    ] == [(start["tool"], ignored) for start in started]
 
 
 #: Stand-in pids above 2**30 sit past the kernel's pid space, so a signal or
@@ -1126,6 +1300,395 @@ def test_a_sigint_disposition_that_raises_nothing_is_left_alone(disposition):
     ]
     sigint_ignored = bool(ignored & (1 << (signal.SIGINT - 1)))
     assert sigint_ignored is (disposition is signal.SIG_IGN)
+
+
+def _a_child_says_if_sigint_is_ignored(*, held: bool = True) -> tuple[str, bool]:
+    """Start a child inside the hold, as the subprocess layer starts each one.
+
+    Returns what the child says, and whether it was started on the main thread.
+    """
+    from automated_security_helper.utils.subprocess_utils import HeldInterrupt
+
+    with HeldInterrupt() if held else contextlib.nullcontext():
+        child = subprocess.run(  # nosec B603 - fixed interpreter and arguments
+            [sys.executable, "-I", "-c", _SAYS_IF_SIGINT_IS_IGNORED],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+    return child.stdout.strip(), threading.current_thread() is threading.main_thread()
+
+
+def _started_in_the_hold(tmp_path: Path, monkeypatch) -> list:
+    return [_a_child_says_if_sigint_is_ignored()]
+
+
+def _started_outside_the_hold(tmp_path: Path, monkeypatch) -> list:
+    return [_a_child_says_if_sigint_is_ignored(held=False)]
+
+
+def _started_on_a_thread_of_its_own(tmp_path: Path, monkeypatch) -> list:
+    started: list = []
+    worker = threading.Thread(
+        target=lambda: started.append(_a_child_says_if_sigint_is_ignored())
+    )
+    worker.start()
+    worker.join(timeout=120)
+    return started
+
+
+def _started_by_the_scanner_pool(tmp_path: Path, monkeypatch) -> list:
+    """Two scanners, so the executor runs them on its pool's workers."""
+    from unittest.mock import MagicMock
+
+    from automated_security_helper.core.phases.scanner_executor import (
+        ScannerExecutor,
+    )
+
+    started: list = []
+
+    def starts_its_tool(scanner_name, scanner_plugin, scan_targets):
+        started.append(_a_child_says_if_sigint_is_ignored())
+        return []
+
+    executor = ScannerExecutor(
+        plugin_context=MagicMock(),
+        progress_display=MagicMock(),
+        scanner_tasks=[
+            (name, MagicMock(), [{"path": str(tmp_path), "type": "source"}])
+            for name in ("s0", "s1")
+        ],
+        max_workers=2,
+    )
+    monkeypatch.setattr(executor, "_execute_scanner", starts_its_tool)
+    executor.run_parallel(MagicMock())
+    return started
+
+
+def _started_by_the_workspace_pool(tmp_path: Path, monkeypatch) -> list:
+    """Two projects, each scanned on a worker of the workspace's project pool."""
+    import json
+
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        execute_workspace,
+    )
+    from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+
+    root = tmp_path / "workspace"
+    keys = ("api", "web")
+    projects = []
+    for key in keys:
+        (root / key / "src").mkdir(parents=True)
+        projects.append(
+            ProjectPlan(
+                key=key,
+                relative_path=key,
+                path=(root / key).as_posix(),
+                label=key,
+                display_label=key,
+                severity_threshold="MEDIUM",
+            )
+        )
+    workspace_file = root / "fixture.code-workspace"
+    workspace_file.write_text(
+        json.dumps({"folders": [{"path": key} for key in keys]}), encoding="utf-8"
+    )
+    plan = WorkspacePlan(
+        workspace_file=workspace_file.as_posix(),
+        workspace_root=root.as_posix(),
+        projects=projects,
+    )
+    started: list = []
+
+    class _StartsItsTool:
+        """The project's scan, which starts one tool and finds nothing."""
+
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def execute_scan(self, phases=None):
+            started.append(_a_child_says_if_sigint_is_ignored())
+            model = AshAggregatedResults()
+            model.sarif = SarifReport.model_validate(
+                {
+                    "version": "2.1.0",
+                    "runs": [
+                        {
+                            "tool": {"driver": {"name": "ASH"}},
+                            "results": [],
+                            "invocations": [],
+                        }
+                    ],
+                }
+            )
+            return model
+
+    execute_workspace(
+        plan,
+        ProjectScanSettings(
+            output_dir=tmp_path / "out", phases=("scan",), max_parallel_projects=2
+        ),
+        orchestrator_factory=_StartsItsTool,
+    )
+    return started
+
+
+@pytest.mark.skipif(
+    not hasattr(faulthandler, "register"), reason="faulthandler.register is POSIX"
+)
+@pytest.mark.parametrize(
+    "start, count, on_the_main_thread, ignored",
+    [
+        pytest.param(_started_in_the_hold, 1, True, True, id="in-the-hold"),
+        pytest.param(
+            _started_by_the_scanner_pool, 2, False, True, id="by-the-scanner-pool"
+        ),
+        pytest.param(
+            _started_by_the_workspace_pool, 2, False, True, id="by-the-workspace-pool"
+        ),
+        pytest.param(_started_outside_the_hold, 1, True, False, id="control"),
+        pytest.param(
+            _started_on_a_thread_of_its_own,
+            1,
+            False,
+            False,
+            id="control-off-the-main-thread",
+        ),
+    ],
+)
+@pytest.mark.integration
+def test_a_child_ignores_sigint_where_a_native_handler_replaced_it(
+    tmp_path, monkeypatch, start, count, on_the_main_thread, ignored
+):
+    """Importing polars installs a SIGINT handler behind Python's back. In ASH
+    started with SIGINT ignored, signal.getsignal then still read SIG_IGN, so the
+    hold left the disposition as it found it, and a child started once polars was
+    loaded began with SIGINT at its default, exec having reset the handler. The hold
+    sets SIG_IGN again, but only on the main thread, and the scanner pool's workers
+    start every tool of a scan with two or more scanners, the workspace's project
+    workers every tool of a workspace scan. Each pool sets it again on the main
+    thread before its workers start. faulthandler.register stands in for the
+    library: it installs a handler from C and leaves Python's record as it was. The
+    controls show the stand-in has the library's effect, on the main thread without
+    the hold and off it with one: the child does not start ignoring SIGINT.
+    """
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        with open(tmp_path / "traceback.txt", "w", encoding="utf-8") as dump:
+            faulthandler.register(signal.SIGINT, file=dump, chain=False)
+            try:
+                recorded = signal.getsignal(signal.SIGINT)
+                started = start(tmp_path, monkeypatch)
+            finally:
+                faulthandler.unregister(signal.SIGINT)
+        still_ignored = signal.getsignal(signal.SIGINT) == signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    assert recorded == signal.SIG_IGN, "the stand-in changed Python's record"
+    assert started == [(str(ignored), on_the_main_thread)] * count, started
+    assert still_ignored, "SIGINT was not left ignored"
+
+
+#: A process that has not loaded polars. With CALL set, the main thread first does
+#: what a pool does before it starts; then a worker imports polars, for the first
+#: time in the process, and starts a child inside the hold, and the line printed is
+#: what the child says.
+_A_FIRST_POLARS_IMPORT_ON_A_WORKER = """
+import os, subprocess, sys, threading
+assert "polars" not in sys.modules, "polars was loaded at startup"
+from automated_security_helper.utils.subprocess_utils import (
+    HeldInterrupt,
+    keep_an_ignored_sigint_ignored,
+)
+assert "polars" not in sys.modules, "the subprocess layer loaded polars"
+if os.environ["CALL"] == "1":
+    keep_an_ignored_sigint_ignored()
+said = []
+def start():
+    import polars
+    with HeldInterrupt():
+        child = subprocess.run(
+            [sys.executable, "-I", "-c", {says!r}],
+            capture_output=True, text=True, timeout=60, check=True,
+        )
+    said.append(child.stdout.strip())
+worker = threading.Thread(target=start)
+worker.start()
+worker.join(timeout=120)
+print(said)
+"""
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="polars' SIGINT handler was measured on Linux",
+)
+@pytest.mark.parametrize(
+    "called, ignored",
+    [
+        pytest.param(True, True, id="set-again-before-the-pool"),
+        pytest.param(False, False, id="control"),
+    ],
+)
+@pytest.mark.integration
+def test_a_first_polars_import_on_a_worker_keeps_sigint_ignored(called, ignored):
+    """polars puts its SIGINT handler in place when it is first imported, and a
+    scan can import it first on a pool worker, after the main thread set the
+    ignored SIGINT again. So the main thread imports polars before it sets it.
+    It runs in a fresh interpreter, where polars is not loaded yet. The control
+    shows what a first import on the worker does without that step: the child
+    does not start ignoring SIGINT.
+    """
+    code = importing_this_checkout(
+        _A_FIRST_POLARS_IMPORT_ON_A_WORKER.format(says=_SAYS_IF_SIGINT_IS_IGNORED)
+    )
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        # The interpreter inherits SIGINT ignored, as `ash scan &` starts.
+        result = subprocess.run(  # nosec B603 - fixed interpreter and arguments
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env={**os.environ, "CALL": "1" if called else "0"},
+            check=False,
+        )
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == str([str(ignored)]), result.stdout + result.stderr
+
+
+#: A process started with SIGINT ignored, in which importing polars fails with the
+#: error RAISES names. A loader that raises it answers the import, as polars' own
+#: startup does when a native library will not load, so polars is never loaded.
+#: faulthandler.register stands in for the handler a successful import puts in
+#: place from native code and leaves Python's record as it was. The line printed
+#: says how keep_an_ignored_sigint_ignored ended, whether the kernel counted SIGINT
+#: as ignored before the call and after it (the SigIgn mask of /proc/self/status),
+#: and what ASH logged at debug.
+_A_POLARS_IMPORT_THAT_FAILS = """
+import builtins, faulthandler, importlib.abc, importlib.machinery, json, logging
+import os, signal, sys
+from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.subprocess_utils import (
+    keep_an_ignored_sigint_ignored,
+)
+assert "polars" not in sys.modules, "polars was loaded at startup"
+logged = []
+
+
+class Collects(logging.Handler):
+    def emit(self, record):
+        logged.append(record.getMessage())
+
+
+class Fails(importlib.abc.Loader):
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        raise getattr(builtins, os.environ["RAISES"])("polars would not load")
+
+
+class Answers(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name == "polars":
+            return importlib.machinery.ModuleSpec(name, Fails())
+        return None
+
+
+def ignored_by_the_kernel():
+    with open("/proc/self/status", encoding="utf-8") as handle:
+        [mask] = [line.split()[1] for line in handle if line.startswith("SigIgn:")]
+    return bool(int(mask, 16) & (1 << (signal.SIGINT - 1)))
+
+
+ASH_LOGGER.addHandler(Collects(level=logging.DEBUG))
+ASH_LOGGER.setLevel(logging.DEBUG)
+sys.meta_path.insert(0, Answers())
+faulthandler.register(signal.SIGINT, chain=False)
+assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN, "the record changed"
+before = ignored_by_the_kernel()
+try:
+    keep_an_ignored_sigint_ignored()
+except BaseException as error:
+    outcome = "raised " + type(error).__name__
+else:
+    outcome = "returned"
+print(
+    json.dumps(
+        dict(
+            outcome=outcome,
+            before=before,
+            after=ignored_by_the_kernel(),
+            logged=logged,
+        )
+    )
+)
+"""
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="reads the process's /proc status"
+)
+@pytest.mark.parametrize(
+    "raises, outcome",
+    [
+        pytest.param("OSError", "returned", id="os-error"),
+        pytest.param("AttributeError", "returned", id="attribute-error"),
+        pytest.param("ImportError", "returned", id="import-error"),
+        pytest.param(
+            "KeyboardInterrupt",
+            "raised KeyboardInterrupt",
+            id="keyboard-interrupt-propagates",
+        ),
+        pytest.param("SystemExit", "raised SystemExit", id="system-exit-propagates"),
+    ],
+)
+@pytest.mark.integration
+def test_a_failing_polars_import_does_not_stop_the_sigint_set(raises, outcome):
+    """The import that keep_an_ignored_sigint_ignored makes for its side effect
+    caught only ImportError, so a polars that failed another way (a native library
+    that would not load, an AttributeError, a warning raised as an error) ended
+    run_parallel or _run_projects before the first scanner started. Any Exception
+    is now logged at debug, and SIGINT is set to ignored all the same. A
+    KeyboardInterrupt or SystemExit is no Exception and propagates. It runs in a
+    fresh interpreter, where polars is not loaded, started with SIGINT ignored as
+    `ash scan &` is. The kernel counts SIGINT as not ignored before the call, so
+    the stand-in has the library's effect, and as ignored after it.
+    """
+    code = importing_this_checkout(_A_POLARS_IMPORT_THAT_FAILS)
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        # The interpreter inherits SIGINT ignored, as `ash scan &` starts.
+        result = subprocess.run(  # nosec B603 - fixed interpreter and arguments
+            [sys.executable, "-I", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env={**os.environ, "RAISES": raises},
+            check=False,
+        )
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    said = json.loads(result.stdout.strip().splitlines()[-1])
+    assert said["before"] is False, f"the stand-in has no effect: {said}"
+    assert said["outcome"] == outcome, said
+    if outcome == "returned":
+        assert said["after"] is True, said
+        assert any(
+            "Importing polars failed" in line and "SIGINT stays ignored" in line
+            for line in said["logged"]
+        ), said
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a SIGINT sent to a process is POSIX")
