@@ -305,12 +305,13 @@ class TestFlatJsonAndCsv:
         # the reporter's exclude_none dump.
         assert "correlation_id" not in document["findings"][3]
 
-    def test_the_csv_column_is_last_and_empty_for_non_carrying_rows(
+    def test_the_csv_column_follows_every_older_column_and_is_empty_for_non_carrying_rows(
         self, test_plugin_context, model, secret_id, dep_id
     ):
         text = CsvReporter(context=test_plugin_context).report(model)
         rows = list(csv.reader(io.StringIO(text)))
         header, data = rows[0], rows[1:]
-        assert header[-1] == "correlation_id"
+        # result_kind, the kind of each row's result, is the one column after it.
+        assert header[-2:] == ["correlation_id", "result_kind"]
         column = [row[header.index("correlation_id")] for row in data]
         assert column == [secret_id, secret_id, dep_id, ""]

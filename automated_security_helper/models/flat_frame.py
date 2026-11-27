@@ -144,6 +144,8 @@ FLAT_SPEC = FrameSpec(
         "registry reads on the host; the frame carries no column for it",
         "requires_exact_identity_match": "a baseline-gate policy flag, not a "
         "column of the flat frame",
+        "is_finding": "a reading of result_kind, which is not a frame column; a "
+        "consumer that counts filters the host list before it builds a frame",
     },
 )
 

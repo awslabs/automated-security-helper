@@ -646,6 +646,7 @@ def test_records_are_named_for_their_report_id_and_hold_only_what_the_page_lists
         "identity_base",
         "identity_message",
         "source_report",
+        "result_kind",
     }
 
 

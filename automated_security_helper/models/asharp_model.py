@@ -1763,7 +1763,9 @@ class AshAggregatedResults(RecordModel):
         scanner that returned a dict instead of SARIF has findings the merged SARIF
         never holds, and the unified metrics count them. Counted from the SARIF
         alone, the flatten lowered what a metrics pass had written for such a
-        scanner. A scanner with neither has no entry.
+        scanner. A scanner with neither has no entry. A row whose result states
+        no finding (SARIF kind pass, notApplicable or informational) is not
+        counted, suppressed or not.
         """
         from automated_security_helper.core.scanner_statistics_calculator import (
             ScannerStatisticsCalculator,
@@ -1777,7 +1779,9 @@ class AshAggregatedResults(RecordModel):
             suppressed_by_scanner,
         )
 
-        counts: Dict[str, int] = suppressed_by_scanner(flat_frame(flat_vulns))
+        counts: Dict[str, int] = suppressed_by_scanner(
+            flat_frame([vuln for vuln in flat_vulns if vuln.is_finding])
+        )
 
         seen: set[str] = set()
         for name in [*self.scanner_results, *self.additional_reports]:

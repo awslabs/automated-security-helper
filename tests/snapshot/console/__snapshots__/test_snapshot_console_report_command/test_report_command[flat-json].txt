@@ -243,7 +243,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 12,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"bandit\", \"issue_severity\": \"HIGH\"}",
-      "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"subprocess call with shell=True\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/app.py\",\"index\":-1},\"region\":{\"startLine\":12,\"endLine\":12,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"HIGH\"}}"
+      "raw_data": "{\"ruleId\":\"B602\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"subprocess call with shell=True\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/app.py\",\"index\":-1},\"region\":{\"startLine\":12,\"endLine\":12,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"HIGH\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "bandit-B105-a18f605d85a5",
@@ -258,7 +259,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 3,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"bandit\", \"issue_severity\": \"MEDIUM\"}",
-      "raw_data": "{\"ruleId\":\"B105\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Possible hardcoded password\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/config.py\",\"index\":-1},\"region\":{\"startLine\":3,\"endLine\":3,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"MEDIUM\"}}"
+      "raw_data": "{\"ruleId\":\"B105\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Possible hardcoded password\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/config.py\",\"index\":-1},\"region\":{\"startLine\":3,\"endLine\":3,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"MEDIUM\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "bandit-B108-af50bbc0e37e",
@@ -273,7 +275,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 40,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"bandit\", \"issue_severity\": \"MEDIUM\"}",
-      "raw_data": "{\"ruleId\":\"B108\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Probable insecure usage of temp file\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/app.py\",\"index\":-1},\"region\":{\"startLine\":40,\"endLine\":40,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"MEDIUM\"}}"
+      "raw_data": "{\"ruleId\":\"B108\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Probable insecure usage of temp file\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/app.py\",\"index\":-1},\"region\":{\"startLine\":40,\"endLine\":40,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"MEDIUM\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "bandit-B101-dada88ac0563",
@@ -288,7 +291,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 8,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"bandit\", \"issue_severity\": \"LOW\"}",
-      "raw_data": "{\"ruleId\":\"B101\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Use of assert detected\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"tests/test_app.py\",\"index\":-1},\"region\":{\"startLine\":8,\"endLine\":8,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"LOW\"}}"
+      "raw_data": "{\"ruleId\":\"B101\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Use of assert detected\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"tests/test_app.py\",\"index\":-1},\"region\":{\"startLine\":8,\"endLine\":8,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"LOW\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "bandit-B311-0075ad4767ca",
@@ -305,7 +309,8 @@ $ ash results report --format flat-json --log-level ERROR
       "suppression_kind": "external",
       "suppression_justification": "Accepted risk: test fixture",
       "properties": "{\"tags\": [], \"scanner_name\": \"bandit\", \"issue_severity\": \"LOW\"}",
-      "raw_data": "{\"ruleId\":\"B311\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Standard pseudo-random generator\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/util.py\",\"index\":-1},\"region\":{\"startLine\":5,\"endLine\":5,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"suppressions\":[{\"kind\":\"external\",\"justification\":\"Accepted risk: test fixture\"}],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"LOW\"}}"
+      "raw_data": "{\"ruleId\":\"B311\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Standard pseudo-random generator\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/util.py\",\"index\":-1},\"region\":{\"startLine\":5,\"endLine\":5,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"suppressions\":[{\"kind\":\"external\",\"justification\":\"Accepted risk: test fixture\"}],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"bandit\",\"issue_severity\":\"LOW\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "semgrep-python.lang.security.eval-844ebc805fba",
@@ -320,7 +325,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 77,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"semgrep\", \"issue_severity\": \"CRITICAL\"}",
-      "raw_data": "{\"ruleId\":\"python.lang.security.eval\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Detected use of eval()\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/app.py\",\"index\":-1},\"region\":{\"startLine\":77,\"endLine\":77,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"CRITICAL\"}}"
+      "raw_data": "{\"ruleId\":\"python.lang.security.eval\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Detected use of eval()\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/app.py\",\"index\":-1},\"region\":{\"startLine\":77,\"endLine\":77,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"CRITICAL\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "semgrep-generic.secrets.gitleaks-ba52923e6c0e",
@@ -336,7 +342,8 @@ $ ash results report --format flat-json --log-level ERROR
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"semgrep\", \"issue_severity\": \"INFO\"}",
       "raw_data": "{\"ruleId\":\"generic.secrets.gitleaks\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Example key in docs\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"README.md\",\"index\":-1},\"region\":{\"startLine\":1,\"endLine\":1,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"INFO\"}}",
-      "correlation_id": "secret/6a02ac4612b8b531b7f32f65af467ba48a7064f553419e13ff9dff90bc08990d"
+      "correlation_id": "secret/6a02ac4612b8b531b7f32f65af467ba48a7064f553419e13ff9dff90bc08990d",
+      "result_kind": "fail"
     },
     {
       "id": "semgrep-python.lang.best-practice.open-e8ccdc5f7c4d",
@@ -351,7 +358,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 9,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"semgrep\", \"issue_severity\": \"INFO\"}",
-      "raw_data": "{\"ruleId\":\"python.lang.best-practice.open\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"open() without encoding\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/util.py\",\"index\":-1},\"region\":{\"startLine\":9,\"endLine\":9,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"INFO\"}}"
+      "raw_data": "{\"ruleId\":\"python.lang.best-practice.open\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"open() without encoding\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/util.py\",\"index\":-1},\"region\":{\"startLine\":9,\"endLine\":9,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"INFO\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "semgrep-python.flask.debug-9250253bf2f2",
@@ -368,7 +376,8 @@ $ ash results report --format flat-json --log-level ERROR
       "suppression_kind": "external",
       "suppression_justification": "Accepted risk: test fixture",
       "properties": "{\"tags\": [], \"scanner_name\": \"semgrep\", \"issue_severity\": \"HIGH\"}",
-      "raw_data": "{\"ruleId\":\"python.flask.debug\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Flask debug mode\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/web.py\",\"index\":-1},\"region\":{\"startLine\":4,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"suppressions\":[{\"kind\":\"external\",\"justification\":\"Accepted risk: test fixture\"}],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"HIGH\"}}"
+      "raw_data": "{\"ruleId\":\"python.flask.debug\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Flask debug mode\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/web.py\",\"index\":-1},\"region\":{\"startLine\":4,\"endLine\":4,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"suppressions\":[{\"kind\":\"external\",\"justification\":\"Accepted risk: test fixture\"}],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"HIGH\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "semgrep-python.requests.no-timeout-4a5751dfff89",
@@ -385,7 +394,8 @@ $ ash results report --format flat-json --log-level ERROR
       "suppression_kind": "external",
       "suppression_justification": "Accepted risk: test fixture",
       "properties": "{\"tags\": [], \"scanner_name\": \"semgrep\", \"issue_severity\": \"MEDIUM\"}",
-      "raw_data": "{\"ruleId\":\"python.requests.no-timeout\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Request without timeout\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/web.py\",\"index\":-1},\"region\":{\"startLine\":20,\"endLine\":20,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"suppressions\":[{\"kind\":\"external\",\"justification\":\"Accepted risk: test fixture\"}],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"MEDIUM\"}}"
+      "raw_data": "{\"ruleId\":\"python.requests.no-timeout\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Request without timeout\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"src/web.py\",\"index\":-1},\"region\":{\"startLine\":20,\"endLine\":20,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"suppressions\":[{\"kind\":\"external\",\"justification\":\"Accepted risk: test fixture\"}],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"semgrep\",\"issue_severity\":\"MEDIUM\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "checkov-CKV_AWS_18-38c00fccd752",
@@ -400,7 +410,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 6,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"checkov\", \"issue_severity\": \"LOW\"}",
-      "raw_data": "{\"ruleId\":\"CKV_AWS_18\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"S3 access logging disabled\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"infra/bucket.yaml\",\"index\":-1},\"region\":{\"startLine\":6,\"endLine\":6,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"checkov\",\"issue_severity\":\"LOW\"}}"
+      "raw_data": "{\"ruleId\":\"CKV_AWS_18\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"S3 access logging disabled\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"infra/bucket.yaml\",\"index\":-1},\"region\":{\"startLine\":6,\"endLine\":6,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"checkov\",\"issue_severity\":\"LOW\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "checkov-CKV_AWS_21-1e0bf3d6dda3",
@@ -415,7 +426,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 6,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"checkov\", \"issue_severity\": \"LOW\"}",
-      "raw_data": "{\"ruleId\":\"CKV_AWS_21\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"S3 versioning disabled\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"infra/bucket.yaml\",\"index\":-1},\"region\":{\"startLine\":6,\"endLine\":6,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"checkov\",\"issue_severity\":\"LOW\"}}"
+      "raw_data": "{\"ruleId\":\"CKV_AWS_21\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"S3 versioning disabled\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"infra/bucket.yaml\",\"index\":-1},\"region\":{\"startLine\":6,\"endLine\":6,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"checkov\",\"issue_severity\":\"LOW\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "checkov-CKV_AWS_144-ebde1de466cb",
@@ -430,7 +442,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 6,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"checkov\", \"issue_severity\": \"INFO\"}",
-      "raw_data": "{\"ruleId\":\"CKV_AWS_144\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Cross-region replication off\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"infra/bucket.yaml\",\"index\":-1},\"region\":{\"startLine\":6,\"endLine\":6,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"checkov\",\"issue_severity\":\"INFO\"}}"
+      "raw_data": "{\"ruleId\":\"CKV_AWS_144\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Cross-region replication off\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"infra/bucket.yaml\",\"index\":-1},\"region\":{\"startLine\":6,\"endLine\":6,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"checkov\",\"issue_severity\":\"INFO\"}}",
+      "result_kind": "fail"
     },
     {
       "id": "opengrep-javascript.express.xss-7210a43e874d",
@@ -445,7 +458,8 @@ $ ash results report --format flat-json --log-level ERROR
       "line_end": 31,
       "is_suppressed": false,
       "properties": "{\"tags\": [], \"scanner_name\": \"opengrep\", \"issue_severity\": \"HIGH\"}",
-      "raw_data": "{\"ruleId\":\"javascript.express.xss\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Unescaped user input\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"web/server.js\",\"index\":-1},\"region\":{\"startLine\":31,\"endLine\":31,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"opengrep\",\"issue_severity\":\"HIGH\"}}"
+      "raw_data": "{\"ruleId\":\"javascript.express.xss\",\"ruleIndex\":-1,\"kind\":\"fail\",\"level\":\"warning\",\"message\":{\"text\":\"Unescaped user input\",\"arguments\":[]},\"locations\":[{\"id\":-1,\"physicalLocation\":{\"artifactLocation\":{\"uri\":\"web/server.js\",\"index\":-1},\"region\":{\"startLine\":31,\"endLine\":31,\"charOffset\":-1,\"byteOffset\":-1}},\"logicalLocations\":[],\"annotations\":[],\"relationships\":[]}],\"stacks\":[],\"codeFlows\":[],\"graphs\":[],\"graphTraversals\":[],\"relatedLocations\":[],\"rank\":-1.0,\"attachments\":[],\"fixes\":[],\"taxa\":[],\"properties\":{\"tags\":[],\"scanner_name\":\"opengrep\",\"issue_severity\":\"HIGH\"}}",
+      "result_kind": "fail"
     }
   ]
 }

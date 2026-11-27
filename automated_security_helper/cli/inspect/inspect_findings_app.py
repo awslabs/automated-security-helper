@@ -630,14 +630,23 @@ def _one_line(value: object) -> str:
 
 def _named_finding(finding: dict, *, status: bool) -> Content:
     """The finding named on two layout lines: the rule id (with the scanner and
-    suppression state when *status*), then its location.
+    state when *status*), then its location.
 
     Each value goes through _one_line, so the one newline here is the layout's
     own. For the selected-finding strip and the suppress dialog, which show one
-    line per field row whatever a value holds."""
+    line per field row whatever a value holds. The state is Suppressed when a
+    suppression is in effect, whatever the result's kind; otherwise Information
+    for a result whose kind states no finding, and Active for the rest."""
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
     first = _one_line(_display_value(finding.get("rule_id")))
     if status:
-        state = "Suppressed" if finding.get("suppressed") else "Active"
+        if finding.get("suppressed"):
+            state = "Suppressed"
+        elif is_not_a_finding(finding):
+            state = "Information"
+        else:
+            state = "Active"
         first += f"  ·  {_one_line(finding.get('scanner', 'N/A'))}  ·  {state}"
     return Content(
         f"{first}\n"
@@ -938,19 +947,27 @@ def _summary_line(findings: list) -> Text:
 
     Built from counts and this module's own words alone - no finding text
     reaches it - and listed with the vetted text builders so the markup guard
-    can hold every widget to them.
+    can hold every widget to them. A result whose kind states no finding is
+    counted as information alone: never active, in no severity and never
+    suppressed.
     """
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
     summary = Text()
-    active = [finding for finding in findings if not finding.get("suppressed")]
+    information = sum(1 for finding in findings if is_not_a_finding(finding))
+    counted = [finding for finding in findings if not is_not_a_finding(finding)]
+    active = [finding for finding in counted if not finding.get("suppressed")]
     summary.append(f"{len(active)} active", style=f"bold {COLORS['foreground']}")
     for level in SEVERITY_BUCKETS:
         count = sum(finding.get("severity", "").lower() == level for finding in active)
         if count:
             summary.append("  ·  ", style=COLORS["muted"])
             summary.append(f"{count} {level}", style=severity_color(level))
-    suppressed_count = len(findings) - len(active)
+    suppressed_count = len(counted) - len(active)
     if suppressed_count:
         summary.append(f"  ·  {suppressed_count} suppressed", style=COLORS["muted"])
+    if information:
+        summary.append(f"  ·  {information} information", style=COLORS["muted"])
     return summary
 
 
@@ -963,8 +980,23 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
     between the title's rows and before "line" is the layout's own, added
     after the values are escaped, and a value cannot add a row of its own.
     """
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
     is_suppressed = finding.get("suppressed", False)
-    color = COLORS["muted"] if is_suppressed else severity_color(finding["severity"])
+    # A result whose kind states no finding reads INFORMATION, in the muted colour
+    # of a suppressed one: its severity rates no finding.
+    is_information = is_not_a_finding(finding)
+    color = (
+        COLORS["muted"]
+        if is_suppressed or is_information
+        else severity_color(finding["severity"])
+    )
+    if is_information:
+        severity_text = "INFORMATION"
+    elif is_suppressed:
+        severity_text = "SUPPRESSED"
+    else:
+        severity_text = _one_line(finding["severity"].upper())
     title = Text(
         _one_line(_display_value(finding.get("rule_id"))),
         style=COLORS["foreground"],
@@ -980,12 +1012,9 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
         location += "\nline " + _one_line(finding["line"])
     cells = {
         # The severity is a results file's value like the others, so it goes
-        # through _one_line too; only the SUPPRESSED marker is this module's
-        # own word.
-        "severity": Text(
-            "SUPPRESSED" if is_suppressed else _one_line(finding["severity"].upper()),
-            style=color,
-        ),
+        # through _one_line too; only the SUPPRESSED and INFORMATION markers are
+        # this module's own words.
+        "severity": Text(severity_text, style=color),
         "finding": title,
         "scanner": Text(
             _one_line(finding.get("scanner", "N/A")),
@@ -1024,6 +1053,8 @@ class FindingDetailScreen(Screen):
         self.finding = finding
 
     def compose(self) -> ComposeResult:
+        from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
         # A result without a location has no "file" or "line" key at all.
         file_value = self.finding.get("file")
         snippet_path = Path(file_value) if file_value else None
@@ -1047,11 +1078,15 @@ class FindingDetailScreen(Screen):
         # _shown, _metadata_table or _snippet, with its terminal controls
         # shown as escapes; the section layout and theming are the redesign's.
         with ScrollableContainer(id="finding_details"):
+            # A result whose kind states no finding opens with INFORMATION in the
+            # muted color the findings table gives it: its severity rates no finding.
+            if is_not_a_finding(self.finding):
+                first_line, first_line_color = "INFORMATION", COLORS["muted"]
+            else:
+                first_line = self.finding["severity"].upper()
+                first_line_color = severity_color(self.finding["severity"])
             yield Static(
-                _cell(
-                    self.finding["severity"].upper(),
-                    style=f"bold {severity_color(self.finding['severity'])}",
-                ),
+                _cell(first_line, style=f"bold {first_line_color}"),
                 classes="detail-severity",
             )
             # One line: a rule id's own newline would draw a second title line.

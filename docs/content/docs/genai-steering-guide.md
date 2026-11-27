@@ -1584,9 +1584,12 @@ The output directory, `.ash/ash_output` by default, contains:
 
 `reports/ash.flat.json` is an object. Its `findings` list holds one record per finding with
 these fields: `id`, `title`, `description`, `severity`, `scanner`, `rule_id`, `file_path`,
-`line_start`, `line_end`, `is_suppressed`, `code_snippet`, and, for suppressed findings,
-`suppression_kind` and `suppression_justification`. Fields with no value are left out, so
-read them with a default. `tags`, `properties`, and `raw_data` hold JSON encoded as strings.
+`line_start`, `line_end`, `is_suppressed`, `result_kind`, `code_snippet`, and, for
+suppressed findings, `suppression_kind` and `suppression_justification`. Fields with no
+value are left out, so read them with a default. `tags`, `properties`, and `raw_data` hold
+JSON encoded as strings. A record whose `result_kind` is `pass`, `notApplicable` or
+`informational` states no finding (the `ASH-container-image-not-scanned` note is one):
+read it as information.
 
 ```python
 import json
@@ -1595,6 +1598,8 @@ from pathlib import Path
 report = json.loads(Path(".ash/ash_output/reports/ash.flat.json").read_text())
 for finding in report["findings"]:
     if finding.get("is_suppressed"):
+        continue
+    if finding.get("result_kind") in ("pass", "notApplicable", "informational"):
         continue
     print(
         finding["severity"],

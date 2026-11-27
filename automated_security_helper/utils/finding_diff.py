@@ -127,11 +127,16 @@ def check_same_project(
 def unique_findings(
     results: AshAggregatedResults, label: str
 ) -> list[FlatVulnerability]:
-    """*results*' findings, refusing a scan in which two share an ID."""
+    """*results*' findings, refusing a scan in which two share an ID.
+
+    The duplicate check reads every row. A row whose result states no finding
+    (SARIF kind pass, notApplicable or informational) is left out of what comes
+    back, so it is never new, absent, moved or changed.
+    """
     findings = results.to_flat_vulnerabilities()
     if len({finding.id for finding in findings}) != len(findings):
         raise ComparabilityRefusal(f"{label} scan contains duplicate finding IDs")
-    return findings
+    return [finding for finding in findings if finding.is_finding]
 
 
 def comparable_findings(
@@ -357,6 +362,9 @@ SIDE_SPEC = FrameSpec(
         "registry reads on the host; the diff never joins on it",
         "requires_exact_identity_match": "a gating policy flag the pair "
         "consumer applies on the host (see match_findings' docstring)",
+        "is_finding": "a reading of result_kind, which is not a column here; "
+        "unique_findings leaves the rows that state no finding out before a side "
+        "is built",
     },
 )
 

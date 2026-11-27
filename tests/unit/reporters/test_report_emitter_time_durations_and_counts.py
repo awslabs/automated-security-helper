@@ -527,6 +527,7 @@ class TestFindingsAnAdditionalReportListsAreCounted:
                 scanner="custom-plugin",
                 severity=severity,
                 is_suppressed=False,
+                is_finding=True,
                 workspace_project=None,
                 source_report=source_report,
             )
@@ -665,6 +666,7 @@ class TestFindingsAnAdditionalReportListsAreCounted:
                 scanner="custom-plugin",
                 severity=None,
                 is_suppressed=False,
+                is_finding=True,
                 workspace_project=None,
                 source_report="custom-plugin",
             )
@@ -703,6 +705,7 @@ class TestFindingsAnAdditionalReportListsAreCounted:
                 scanner="custom-plugin",
                 severity="MODERATE",
                 is_suppressed=False,
+                is_finding=True,
                 workspace_project=None,
                 source_report="custom-plugin",
             )

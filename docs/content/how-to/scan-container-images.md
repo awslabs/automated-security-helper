@@ -119,7 +119,9 @@ informational SARIF result (`kind=informational`, `level=none`, rule
 `ASH-container-image-not-scanned`) naming the image. It is information, not a finding:
 it never grades, never fails a threshold and never lands in a SIEM as a vulnerability,
 so an offline CI run stays green by contract and visibly incomplete rather than
-silently clean.
+silently clean. The CSV, flat JSON and MCP findings keep it with `result_kind`
+`informational`; the HTML, Markdown and text reports list it under Information and
+count it in no total.
 
 ## Engine delegation
 

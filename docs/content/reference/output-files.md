@@ -473,7 +473,9 @@ code.
 `ash.flat.json` holds `metadata` (the project name, the scan and report times, and ASH's
 version), `scanner_metrics` (one row per scanner with its counts, `status`, `excluded`,
 `dependencies_missing`, `missing_reason`, and `skipped_reason`), `content_databases`,
-`top_hotspots`, and `findings`, one record per finding. A finding's `id` is
+`top_hotspots`, and `findings`, one record per finding. Each record carries
+`result_kind`; one of kind `pass`, `notApplicable` or `informational` states no finding
+and is counted in no total. A finding's `id` is
 `<scanner>-<rule>-<12 hex digits>`, such as `bandit-B602-426afbe0ae52`, and no two
 findings in a scan share one. The digits are a hash of what identifies the finding: the
 SARIF fingerprints its scanner gives, when they tell findings apart, or else its file

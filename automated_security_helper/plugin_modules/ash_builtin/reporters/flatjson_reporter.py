@@ -227,7 +227,12 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         The field is the one value every finding has an answer for, so it is
         written for every finding, with *is_suppressed* (the flat frame's value
         for it) where nothing set it.
+
+        ``result_kind`` is written for every finding for the same reason:
+        ``exclude_unset`` drops the default from a row whose constructor never
+        set it.
         """
         data = vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
         data.setdefault("is_suppressed", is_suppressed)
+        data.setdefault("result_kind", vuln.result_kind)
         return data

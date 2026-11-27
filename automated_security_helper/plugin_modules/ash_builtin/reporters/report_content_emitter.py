@@ -149,6 +149,13 @@ SUMMARY_SUPPRESSED = Disposition.SUPPRESSED.summary_key
 SUMMARY_BELOW_THRESHOLD = Disposition.BELOW_THRESHOLD.summary_key
 SUMMARY_POLICY_NOT_GATING = Disposition.POLICY_NOT_GATING.summary_key
 
+#: The sentence under the heading of the Information listing, in the Markdown,
+#: text and HTML reports: what the rows are, and that no total counts them.
+INFORMATION_NOTE = (
+    "Results whose SARIF kind states no finding (pass, notApplicable or "
+    "informational). They are listed here and counted in no total."
+)
+
 
 class OutcomeTone(str, Enum):
     """How serious the scan outcome reads, and how each report draws it.
@@ -353,6 +360,20 @@ class ReportContentEmitter:
                 notes[id(self.flat_vulns[position])] = note
         return [self.flat_vulns[position] for position, _ in kept], notes
 
+    def finding_rows(self) -> List[FlatVulnerability]:
+        """The rows that state a finding, in list order.
+
+        A result whose SARIF kind is pass, notApplicable or informational states
+        none: :meth:`information_rows` lists it, and no figure, card or findings
+        table counts it.
+        """
+        return [vuln for vuln in self.flat_vulns if vuln.is_finding]
+
+    def information_rows(self) -> List[FlatVulnerability]:
+        """The rows that state no finding, in list order: what
+        :meth:`finding_rows` leaves out."""
+        return [vuln for vuln in self.flat_vulns if not vuln.is_finding]
+
     def actionable_finding_count(self) -> int:
         """How many actionable rows the findings lists draw from.
 
@@ -384,7 +405,7 @@ class ReportContentEmitter:
         rendered the one this used to carry, and a dict nothing reads is a
         schema to keep for nobody.
         """
-        live = [v for v in self.flat_vulns if not v.is_suppressed]
+        live = [v for v in self.finding_rows() if not v.is_suppressed]
         active_rows, _ = self.fold_findings(live)
         actionable_rows, _ = self.fold_findings(
             [v for v in live if self.is_finding_actionable(v)]
@@ -597,20 +618,22 @@ class ReportContentEmitter:
             result["status"] == ScannerStatus.FAILED for result in results
         )
         workspace = is_workspace_scan(self.model)
-        # Every finding is graded once, into one frame the counts below read.
-        # Whether a row's actionable grading is read depends on the branch: a
-        # workspace scan recounts every finding, a scan with no scanner rows
-        # counts every finding, and otherwise only the findings an additional
-        # report lists are counted beside the scanner rows. A row nobody reads
-        # is left ungraded (null), so no hook runs for it.
-        in_extras = [False] * len(self.flat_vulns)
+        # Every finding is graded once, into one frame the counts below read. A
+        # result that states no finding is not a finding row, so it is in no
+        # count. Whether a row's actionable grading is read depends on the
+        # branch: a workspace scan recounts every finding, a scan with no
+        # scanner rows counts every finding, and otherwise only the findings an
+        # additional report lists are counted beside the scanner rows. A row
+        # nobody reads is left ungraded (null), so no hook runs for it.
+        rows = self.finding_rows()
+        in_extras = [False] * len(rows)
         if results:
             extra_ids = {id(vuln) for vuln in self._additional_report_findings()}
-            in_extras = [id(vuln) in extra_ids for vuln in self.flat_vulns]
+            in_extras = [id(vuln) in extra_ids for vuln in rows]
         every = self._graded_frame(
-            self.flat_vulns,
+            rows,
             grade_actionable=(
-                [True] * len(self.flat_vulns) if workspace or not results else in_extras
+                [True] * len(rows) if workspace or not results else in_extras
             ),
         )
         if workspace:
@@ -849,6 +872,10 @@ class ReportContentEmitter:
 
     def is_finding_actionable(self, vuln: FlatVulnerability) -> bool:
         """Determine if a finding is actionable based on severity threshold."""
+        # A result that states no finding is never actionable, whatever its level
+        if not vuln.is_finding:
+            return False
+
         # If finding is suppressed, it's not actionable
         if vuln.is_suppressed:
             return False
@@ -881,9 +908,10 @@ class ReportContentEmitter:
         A report that filed it under "Below threshold" hid it from the default
         view and counted it with the low-severity findings the threshold exists
         to set aside, where the merged JUnit report gives it its own skip type.
-        The reports show it under its own status and count it apart.
+        The reports show it under its own status and count it apart. A result
+        that states no finding is not left out of the outcome: it was never in it.
         """
-        if vuln.is_suppressed:
+        if vuln.is_suppressed or not vuln.is_finding:
             return False
         return (
             vuln.workspace_project in self._policy_not_gating
@@ -893,10 +921,12 @@ class ReportContentEmitter:
     def disposition(self, vuln: FlatVulnerability) -> Disposition:
         """What the report does with *vuln*: the one answer the cards show.
 
-        In the order the gates are asked: suppressed first, then left out of
-        the project's outcome by where it came from, then actionable, and
-        what remains is below the threshold.
+        In the order the gates are asked: a result that states no finding
+        first, then suppressed, then left out of the project's outcome by where
+        it came from, then actionable, and what remains is below the threshold.
         """
+        if not vuln.is_finding:
+            return Disposition.INFORMATION
         if vuln.is_suppressed:
             return Disposition.SUPPRESSED
         if self.is_policy_not_gating(vuln):
@@ -1013,11 +1043,22 @@ class ReportContentEmitter:
         ]
 
     def get_findings_overview(self) -> List[Dict[str, Any]]:
-        """Get overview of all findings."""
-        shown, notes = self.fold_findings(self.flat_vulns)
+        """Get overview of all findings.
+
+        The rows that state a finding; the ones that state none are
+        :meth:`get_information_overview`'s.
+        """
+        shown, notes = self.fold_findings(self.finding_rows())
         return [
             self._with_note(self._overview_row(vuln), vuln, notes) for vuln in shown
         ]
+
+    def get_information_overview(self) -> List[Dict[str, Any]]:
+        """The overview row of each result that states no finding, in list order.
+
+        Never folded: the duplicate fold groups findings.
+        """
+        return [self._overview_row(vuln) for vuln in self.information_rows()]
 
     @staticmethod
     def _with_note(

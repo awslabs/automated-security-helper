@@ -216,6 +216,7 @@ when you enable the `spdx` reporter.
 ## CSV, HTML, and the summaries {#other}
 
 - `ash.csv` has one row per finding, with suppression status and justification columns.
+  A `result_kind` column holds the SARIF kind of each row's result.
 - `ash.html` is a single page with inline styles, suitable for an artifact viewer.
 - `ash.summary.md` is a Markdown summary for pull request comments. `--compact-report`
   shortens it.

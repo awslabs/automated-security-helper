@@ -181,6 +181,7 @@ class _Row:
         "identity_base",
         "identity_message",
         "source_report",
+        "result_kind",
     )
 
     def __init__(self, index: int, row: dict[str, Any]) -> None:
@@ -199,13 +200,19 @@ class _Row:
         self.identity_base = json.loads(base) if isinstance(base, str) else None
         self.identity_message = row.get("identity_message")
         self.source_report = row.get("source_report")
+        self.result_kind = row.get("result_kind")
 
 
 def _rows(run: TrendRun) -> list[_Row]:
+    from automated_security_helper.utils.sarif_utils import NON_FINDING_KINDS
+
     rows = [_Row(i, row) for i, row in enumerate(run.record["findings"])]
     if len({row.id for row in rows}) != len(rows):
         raise TrendRefusal(f"{run.label}: run contains duplicate finding IDs")
-    return rows
+    # A row whose result states no finding is in no count. A record written
+    # before result_kind existed names none, so its rows read as findings. Each
+    # row keeps its ``index``, its place in the record.
+    return [row for row in rows if row.result_kind not in NON_FINDING_KINDS]
 
 
 def _severity(value: str | None) -> str:

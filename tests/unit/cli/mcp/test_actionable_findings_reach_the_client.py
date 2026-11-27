@@ -153,6 +153,7 @@ class TestActionableOnlyListsTheFindings:
             "scanner": "bandit",
             "file_path": "src/app.py",
             "line_start": 12,
+            "result_kind": "fail",
         }
 
     async def test_severities_narrow_the_list(self, output_dir):
