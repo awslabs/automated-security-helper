@@ -72,11 +72,29 @@ def _options(command, name: str = "") -> set[str]:
     return found
 
 
+def _group_only_commands(root) -> dict:
+    """The commands of ``results`` that have no top-level spelling, by their own names.
+
+    ``results diff`` and ``results trend`` are listed in the tables as ``diff`` and
+    ``trend``: a command that takes an option the wrapper adds is named there by its
+    own leaf, as ``results report`` is named ``report``.
+    """
+    return {
+        leaf: command
+        for leaf, command in root.commands["results"].commands.items()
+        if leaf not in root.commands
+    }
+
+
 def test_the_subcommand_table_matches_the_real_commands():
     """The wrapper's lists of subcommands, and of which take each option it adds,
     checked against the real commands so they cannot drift from them."""
     root = typer.main.get_command(app)
     assert set(_ps1_list("ashSubcommands")) == set(root.commands)
+    # Held to a literal, so an empty read of the group cannot pass: the two commands
+    # no release had at the top level.
+    assert set(_group_only_commands(root)) == {"diff", "trend"}
+    takers_of = {**root.commands, **_group_only_commands(root)}
     table = _ps1_table("ashOptionSubcommands")
     for option, takers in sorted(table.items()):
         assert option in _options(root), f"ash itself does not take {option}"
@@ -84,7 +102,7 @@ def test_the_subcommand_table_matches_the_real_commands():
         # options are handed to (AshTyperGroup._options_for_subcommand).
         assert takers == {
             name
-            for name, command in root.commands.items()
+            for name, command in takers_of.items()
             if option
             in _options(
                 command.commands["build"] if name == "container" else command, name
@@ -223,6 +241,16 @@ def test_the_group_tables_are_the_contracts():
     assert set(spec.option_groups) == {"results", "container"}
     assert "container:build=container" in spec.group_leaf_takers
     assert "results:merge=merge" in spec.group_leaf_takers
+    # Every command the group has, read from the real group and not from the
+    # contract, is keyed by its own leaf: `results diff` and `results trend` have no
+    # top-level spelling and are not left out for it, which would have the wrapper
+    # name the group ("ash results does not take --offline") in its warning.
+    root = typer.main.get_command(app)
+    leaves = set(root.commands["results"].commands)
+    assert leaves == {"report", "diff", "trend", "merge", "inspect"}
+    assert {
+        pair for pair in _ps1_list("ashGroupLeafTakers") if pair.startswith("results:")
+    } == {f"results:{leaf}={leaf}" for leaf in leaves}
     text = _text()
     # The loop reads the tables, and names no group of its own.
     assert "$subcommand -cin $ashOptionGroups" in text

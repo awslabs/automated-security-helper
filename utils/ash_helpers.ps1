@@ -881,7 +881,7 @@ function Invoke-ASH {
         # as group:command=name. The command is the word right after the group.
         # BEGIN generated: ps1-option-groups (scripts/generate_wrapper_tables.py)
         $ashOptionGroups = @('results', 'container')
-        $ashGroupLeafTakers = @('results:report=report', 'results:merge=merge', 'results:inspect=inspect', 'container:build=container')
+        $ashGroupLeafTakers = @('results:report=report', 'results:diff=diff', 'results:trend=trend', 'results:merge=merge', 'results:inspect=inspect', 'container:build=container')
         # END generated: ps1-option-groups
         # The subjects `scan` takes. Invoke-ASH names the directory to scan with
         # -SourceDir, mounted for the scan inside, so a directory written after the

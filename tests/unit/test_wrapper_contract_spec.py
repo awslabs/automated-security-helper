@@ -17,6 +17,7 @@ PowerShell tables against the typer app.
 from __future__ import annotations
 
 import inspect
+import types
 
 import pytest
 
@@ -204,6 +205,79 @@ def test_the_forwarded_option_list_is_in_the_table_order():
 
 def test_the_subcommands_whose_own_dash_o_is_forwarded():
     assert contract().dash_o_subcommands == ("get-genai-guide", "config")
+
+
+def test_every_command_of_a_group_has_a_taker_named_for_its_own_leaf():
+    """`results diff` and `results trend` have no top-level spelling. Left out for want
+    of a same-named top-level command, they took no pair, and the wrapper's warning
+    named the group ("ash results does not take --offline") instead of the command.
+    Each command of the group is keyed by its own leaf, as `results report` is."""
+    spec = contract()
+
+    assert spec.group_leaf_takers == (
+        "results:report=report",
+        "results:diff=diff",
+        "results:trend=trend",
+        "results:merge=merge",
+        "results:inspect=inspect",
+        "container:build=container",
+    )
+    assert spec.option_groups == ("results", "container")
+
+
+def _command(**commands):
+    """A stand-in for a click command, or for a group when given commands."""
+    return types.SimpleNamespace(commands=commands)
+
+
+def test_a_group_has_takers_for_all_its_commands_only_when_one_is_also_top_level():
+    from automated_security_helper.interactions.wrapper_contract import (
+        _group_leaf_takers,
+        _own_leaf_commands,
+    )
+
+    diff = _command()
+    commands = {
+        "report": _command(),
+        # A spelling group: `report` stands at the top level too, `diff` does not.
+        "results": _command(report=_command(), diff=diff),
+        # No command of it is also top-level: left out, and so are its leaves.
+        "config": _command(get=_command(), init=_command()),
+        # Groups the table reads by their own rules.
+        "scan": _command(fs=_command(), workspace=_command()),
+        "container": _command(build=_command(), other=_command()),
+    }
+
+    assert _group_leaf_takers(commands) == (
+        "results:report=report",
+        "results:diff=diff",
+        "container:build=container",
+    )
+    own = _own_leaf_commands(commands)
+    assert list(own) == ["diff"]
+    assert own["diff"] is diff, "the command itself, so its options are the ones read"
+
+
+def test_two_groups_cannot_each_have_a_command_the_tables_would_read_as_one():
+    from automated_security_helper.interactions.wrapper_contract import (
+        _own_leaf_commands,
+    )
+
+    commands = {
+        "report": _command(),
+        "results": _command(report=_command(), diff=_command()),
+        "history": _command(report=_command(), diff=_command()),
+    }
+
+    with pytest.raises(ValueError, match="diff"):
+        _own_leaf_commands(commands)
+    # One command registered under two groups is one command, not a clash.
+    shared = _command()
+    commands["results"] = _command(report=_command(), diff=shared)
+    commands["history"] = _command(report=_command(), diff=shared)
+    own = _own_leaf_commands(commands)
+    assert list(own) == ["diff"]
+    assert own["diff"] is shared
 
 
 def test_runner_order_image_pattern_and_build_targets():

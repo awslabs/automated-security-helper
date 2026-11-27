@@ -389,7 +389,7 @@ ASH_SUBCOMMANDS="scan build-image report merge results mcp get-genai-guide conta
 # it.
 # BEGIN generated: sh-option-groups (scripts/generate_wrapper_tables.py)
 ASH_OPTION_GROUPS="results container"
-ASH_GROUP_LEAF_TAKERS="results:report=report results:merge=merge results:inspect=inspect container:build=container"
+ASH_GROUP_LEAF_TAKERS="results:report=report results:diff=diff results:trend=trend results:merge=merge results:inspect=inspect container:build=container"
 # END generated: sh-option-groups
 # The subjects `scan` takes (`./ash scan fs [PATH]`). The first word after scan that
 # is not an option or an option's value names one, and the word after that is the

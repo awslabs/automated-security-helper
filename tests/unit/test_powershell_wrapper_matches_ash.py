@@ -2961,6 +2961,35 @@ def test_an_option_a_subcommand_does_not_take_is_named_in_a_warning(tmp_path):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    ("words", "verb"),
+    [
+        pytest.param("results report", "report", id="report"),
+        pytest.param("results merge", "merge", id="merge"),
+        pytest.param("results inspect", "inspect", id="inspect"),
+        pytest.param("results diff a.json b.json", "diff", id="diff"),
+        pytest.param("results trend a.json b.json", "trend", id="trend"),
+    ],
+)
+def test_a_command_under_results_is_named_in_the_warning_not_the_group(
+    tmp_path, words, verb
+):
+    """The group takes no options, so what Invoke-ASH adds goes after the command and
+    the command decides which apply. The warning names the command. `diff` and `trend`
+    have no top-level spelling, and were named "ash results" for want of a taker."""
+    result, calls = _invoke(
+        tmp_path,
+        "Invoke-ASH -NoBuild -SourceDir src -OutputDir out -Offline "
+        f"-AshArgs '{words}'",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    shown = result.stdout + result.stderr
+    assert f"ash {verb} does not take --offline" in shown, shown
+    assert "ash results does not take" not in shown, shown
+    assert _inner_ash_args(_run_call(result, calls)) == words.split()
+
+
+@pytest.mark.integration
 def test_quiet_and_no_color_are_dropped_without_a_warning(tmp_path):
     # As the help says: they have already quieted the build and kept the container off
     # a terminal, so a subcommand that does not take them loses nothing worth a warning.
