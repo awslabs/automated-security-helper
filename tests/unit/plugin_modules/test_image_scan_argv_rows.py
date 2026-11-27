@@ -41,6 +41,7 @@ from automated_security_helper.utils.image_tool_targets import (
     archive_scheme,
     stereoscope_target,
 )
+from tests.utils.env_assertions import environ_value
 
 pytestmark = pytest.mark.unit
 
@@ -217,7 +218,7 @@ class TestTheNoEngineHelper:
 
         _no_engine(monkeypatch, tmp_path)
 
-        assert "ASH_OFFLINE" not in os.environ
+        assert environ_value("ASH_OFFLINE") is None
         assert is_offline_mode() is False
 
 
