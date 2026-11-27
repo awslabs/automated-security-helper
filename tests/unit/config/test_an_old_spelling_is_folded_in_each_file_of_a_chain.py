@@ -12,13 +12,18 @@ the canonical key before it layers the file over another. So:
   holds, so a child and its base can each be written in either spelling, and a
   pointer or an op's value in the old spelling is said like any other key;
 * a key that is canonical in another model (a content database staleness
-  override's ``expiration``) is left as written.
+  override's ``expiration``) is left as written;
+* the line names the file as it is, and the sink that shows a resolution
+  warning writes a control in the name as its escape, once;
+* a value an old-spelling key reads from the environment is recorded at the
+  canonical key, where the configuration holds it.
 
 Red at the base: three entries gave three unnamed lines, and
 ``fail_on_unknown_keys: true`` gave none; a disagreement in a base was refused
 naming the extending file; a pointer in the other spelling than the base's
 failed to apply; an op's value was read by the entry model alone, with an
-unnamed line, and refused without naming the op.
+unnamed line, and refused without naming the op; and an environment read was
+recorded under the old spelling.
 """
 
 from pathlib import Path
@@ -29,6 +34,7 @@ import yaml
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 pytestmark = [
     pytest.mark.unit,
@@ -374,3 +380,59 @@ def test_a_staleness_overrides_expiration_is_its_own_canonical_key(
 
     assert loaded.content_db_staleness_overrides[0].expiration == "2099-01-01"
     assert _deprecation_lines(loaded) == []
+
+
+def test_a_files_name_with_a_control_in_it_is_shown_once_in_its_line(
+    tmp_path: Path,
+) -> None:
+    """The line names the file as it is, and the sink that shows a resolution
+    warning (core/orchestrator.py, through utils/terminal_text.py's
+    shown_on_one_line) writes the name's override as its escape. Escaped before
+    that, the name would be shown twice, its backslash doubled. A right-to-left
+    override is a character every platform's file names may hold."""
+    name = "cfg" + chr(0x202E) + "lmay.yaml"
+    config = _write(
+        tmp_path / name,
+        {"global_settings": {"suppressions": [_suppression(expiration="2099-01-01")]}},
+    )
+
+    loaded = AshConfig.from_file(config)
+
+    lines = _deprecation_lines(loaded)
+    assert len(lines) == 1, lines
+    shown = shown_on_one_line(lines[0])
+    assert "cfg" + chr(92) + "u202elmay.yaml" in shown, shown
+    assert chr(92) * 2 not in shown, shown
+
+
+def test_an_environment_read_under_the_old_spelling_is_recorded_at_the_canonical_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file as written, with its environment references, is folded as its
+    data is, so the two views pair up: a value the old-spelling key read from
+    the environment is recorded where the configuration holds it, and a rewrite
+    of the file keeps its reference there."""
+    from automated_security_helper.config.config_sources import (
+        resolve_config_document,
+    )
+
+    monkeypatch.setenv("ASH_TEST_EXPIRY", "2099-01-01")
+    config = tmp_path / "cfg" / "only.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - rule_id: B101\n"
+        "      path: src/app.py\n"
+        "      reason: reviewed\n"
+        "      expiration: ${ASH_TEST_EXPIRY}\n",
+        encoding="utf-8",
+    )
+
+    document = resolve_config_document(config)
+
+    values = [r for r in document.environment_references if not r.key]
+    assert [tuple(str(part) for part in r.path) for r in values] == [
+        ("global_settings", "suppressions", "0", "expires")
+    ]
+    assert "ASH_TEST_EXPIRY" in values[0].written

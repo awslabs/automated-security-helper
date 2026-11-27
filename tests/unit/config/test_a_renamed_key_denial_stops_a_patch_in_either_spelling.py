@@ -7,10 +7,12 @@ under ``replace_default_denied_paths``, must see a runtime patch of the expiry
 refused in either spelling, by that denial. A runtime patch is applied to the
 configuration as dumped by field name, so it always meets ``expires``.
 
-Red at the base: a denial written ``.../expiration`` let ``replace``, ``add``
-and ``remove`` at ``.../0/expires`` through, and a denial written
-``.../expires`` met an op at ``.../0/expiration`` only by accident (a failed
-apply or a failed validation), never as the denial.
+Red at the base: a denial was matched in the spelling it was written in. A
+denial written ``.../expiration`` did not meet ``replace``, ``add`` and
+``remove`` at ``.../0/expires``; a denial written ``.../expires`` met an op at
+``.../0/expiration`` only by accident (a failed apply or a failed validation),
+never as the denial; and a glob that names no model,
+``/global_settings/*/0/expiration``, did not meet ``.../0/expires``.
 """
 
 from typing import Any, Dict, List
@@ -172,15 +174,23 @@ def test_a_denial_of_the_expiry_leaves_the_entrys_other_keys_open(denial: str) -
     assert patched.global_settings.suppressions[0].expires == "2099-01-01"
 
 
-GLOB_DENIAL = "/**/expiration"
+#: A glob over the top-level lists: it names a staleness override's own
+#: ``expiration``, the canonical key of that model.
+OVERRIDE_GLOB_DENIAL = "/*/0/expiration"
+#: A glob over the lists of the global settings: no model is known under it.
+SECTION_GLOB_DENIAL = "/global_settings/*/0/expiration"
 
 
-def _glob_profile() -> AshConfig:
-    """A profile whose one denial, replacing the defaults, is ``/**/expiration``.
+def _glob_profile(denial: str) -> AshConfig:
+    """A profile whose one denial, replacing the defaults, is the glob ``denial``.
 
     It holds a suppression and a content-database staleness override. The
     override's ``expiration`` is that model's own key, not an old spelling: the
     spelling table names a model for each row, and a glob names none.
+
+    Neither glob starts with ``**``: a pattern is read as the subtree it names,
+    so one that starts with ``**`` covers every write, in either spelling, and
+    could tell no spellings apart.
     """
     return AshConfig.model_validate(
         {
@@ -210,7 +220,7 @@ def _glob_profile() -> AshConfig:
                             "/global_settings/**",
                             "/content_db_staleness_overrides/**",
                         ],
-                        "denied_paths": [GLOB_DENIAL],
+                        "denied_paths": [denial],
                     }
                 },
             },
@@ -223,8 +233,9 @@ def test_a_glob_denial_keeps_denying_a_model_whose_own_key_is_the_old_spelling()
 ):
     """The guard: the spellings a denial is matched under are added to the ones
     it had, never put in their place, so a glob that named a staleness
-    override's ``expiration`` still names it."""
-    base = _glob_profile()
+    override's ``expiration`` still names it. Read in the table's canonical
+    spelling alone, the glob would be ``/*/0/expires`` and miss this write."""
+    base = _glob_profile(OVERRIDE_GLOB_DENIAL)
     op = {
         "op": "replace",
         "path": "/content_db_staleness_overrides/0/expiration",
@@ -234,13 +245,13 @@ def test_a_glob_denial_keeps_denying_a_model_whose_own_key_is_the_old_spelling()
     with pytest.raises(RuntimePatchDeniedError) as refused:
         _patch(base, [op])
 
-    assert f"denied_paths entry {GLOB_DENIAL!r}" in refused.value.rule
+    assert f"denied_paths entry {OVERRIDE_GLOB_DENIAL!r}" in refused.value.rule
 
 
 def test_a_glob_denial_in_the_old_spelling_also_stops_the_canonical_one() -> None:
     """Under a glob no model is known, so every row's spellings apply: the
     denial can refuse more than before, never less."""
-    base = _glob_profile()
+    base = _glob_profile(SECTION_GLOB_DENIAL)
     op = {
         "op": "replace",
         "path": "/global_settings/suppressions/0/expires",
@@ -250,4 +261,4 @@ def test_a_glob_denial_in_the_old_spelling_also_stops_the_canonical_one() -> Non
     with pytest.raises(RuntimePatchDeniedError) as refused:
         _patch(base, [op])
 
-    assert f"denied_paths entry {GLOB_DENIAL!r}" in refused.value.rule
+    assert f"denied_paths entry {SECTION_GLOB_DENIAL!r}" in refused.value.rule

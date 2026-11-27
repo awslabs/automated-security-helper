@@ -9,8 +9,8 @@ both-spellings rule through ``check_spellings`` when they are built without the
 loader; lint, patch pointers and the runtime-patch denials read the same rows.
 
 These tests pin the table's contract, and they pin it on a row a test adds as
-well as on the shipped one, because a shipped mapping-valued or top-level row
-is the next unit's: a row added to the table must reach every reader with no
+well as on the shipped one: a mapping-valued, top-level or section row is
+added later, and a row added to the table must reach every reader with no
 other edit.
 """
 
@@ -35,6 +35,7 @@ from automated_security_helper.models.core import (
     AshSuppression,
     IgnorePathWithReason,
 )
+from automated_security_helper.utils.terminal_text import shown_on_one_line
 from automated_security_helper.utils.unknown_keys import TOLERATE_STORED_CONFIG
 
 pytestmark = [
@@ -45,6 +46,11 @@ pytestmark = [
 ROOT = "automated_security_helper.config.ash_config.AshConfig"
 ENTRY_MODEL = "automated_security_helper.models.core.IgnorePathWithReason"
 SOURCE = "cfg.yaml"
+
+#: Built from code points, so no file holds the characters themselves.
+BACKSLASH = chr(92)
+ESCAPE = chr(0x1B)
+RIGHT_TO_LEFT_OVERRIDE = chr(0x202E)
 
 
 def _expires_row() -> spellings.SpellingRow:
@@ -131,6 +137,17 @@ def test_renamed_field_puts_the_canonical_spelling_first() -> None:
     assert info.alias is None
     assert info.default is None
     assert info.description == "When it ends."
+
+
+def test_renamed_field_keeps_a_removed_rows_old_spelling(monkeypatch) -> None:
+    """At the removal release the model still reads a row's old spelling, so a
+    stored record keeps loading; the removal is enforced where documents are read."""
+    monkeypatch.setattr(automated_security_helper, "__version__", "4.0.0")
+    assert _expires_row().status() == "removed"
+
+    info = spellings.renamed_field("expires", model=ENTRY_MODEL, default=None)
+
+    assert list(info.validation_alias.choices) == ["expires", "expiration"]
 
 
 def test_rows_for_a_model_include_its_base_classes_rows() -> None:
@@ -284,15 +301,19 @@ def test_a_row_with_no_removal_release_stays_live(monkeypatch) -> None:
     assert row.status("99.0.0") == "live"
 
 
-def test_at_the_running_version_the_old_spelling_loads_until_its_removal() -> None:
-    """Fails the day the version reaches a row's release while the model still
-    reads its old spelling, or before that day if the model stops early."""
+def test_at_the_running_version_a_documents_old_spelling_loads_until_removal() -> None:
+    """Fails the day the version reaches a row's release while a document the
+    loader reads still loads its old spelling; the model reads it at every release."""
     entry = _entry(expiration="2099-01-01")
     if spellings.is_removed(_expires_row()):
-        with pytest.raises(ValidationError):
-            AshSuppression.model_validate(entry)
+        with pytest.raises(spellings.SpellingRefused):
+            spellings.fold_spellings(_suppressions(entry), SOURCE)
     else:
-        assert AshSuppression.model_validate(entry).expires == "2099-01-01"
+        folded = spellings.fold_spellings(_suppressions(entry), SOURCE)
+        (folded_entry,) = folded.document["global_settings"]["suppressions"]
+        assert folded_entry["expires"] == "2099-01-01"
+        assert "expiration" not in folded_entry
+    assert AshSuppression.model_validate(entry).expires == "2099-01-01"
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +433,34 @@ def test_the_fold_leaves_a_staleness_overrides_own_expiration_key() -> None:
 
     assert folded.document == document
     assert folded.warnings == ()
+
+
+def test_the_folds_line_names_the_file_as_given_for_its_sink_to_show_once() -> None:
+    """A resolution warning's sink (core/orchestrator.py) shows the whole line,
+    as config_sources.describe_config_path says every message is shown: a name
+    the fold had escaped first would be shown twice, its backslash doubled."""
+    source = "cfg" + ESCAPE + "[31m.yaml"
+
+    folded = spellings.fold_spellings(
+        _suppressions(_entry(expiration="2099-01-01")), source
+    )
+
+    assert folded.warnings == (f"Config {source}: {EXPIRATION_SPELLING_DEPRECATION}",)
+    (shown,) = [shown_on_one_line(line) for line in folded.warnings]
+    assert "cfg" + BACKSLASH + "x1b[31m.yaml" in shown
+    assert BACKSLASH * 2 not in shown
+
+
+def test_the_folds_refusal_names_the_file_as_given() -> None:
+    source = "cfg" + RIGHT_TO_LEFT_OVERRIDE + "lmay.yaml"
+
+    with pytest.raises(spellings.SpellingRefused) as refused:
+        spellings.fold_spellings(
+            _suppressions(_entry(expires="2099-01-01", expiration="2098-12-31")),
+            source,
+        )
+
+    assert str(refused.value).startswith(f"Config {source}: ")
 
 
 def _patching(*ops: Dict[str, Any]) -> Dict[str, Any]:
@@ -586,7 +635,8 @@ def test_a_stored_entry_keeps_a_disagreement_as_a_note_at_any_release(
 
 
 def test_the_root_model_applies_the_rule_for_a_row_of_its_own(monkeypatch) -> None:
-    """The next unit's top-level row: refused when the spellings disagree."""
+    """A top-level row, as a later change adds one: refused when the spellings
+    disagree."""
     _with_row(
         monkeypatch,
         model=ROOT,
@@ -691,7 +741,8 @@ def test_a_patch_pointer_in_the_old_spelling_reaches_the_merged_setting(
 
 @pytest.fixture
 def renamed_root_key(monkeypatch) -> spellings.SpellingRow:
-    """The next unit's row, ahead of its field change."""
+    """A top-level row, ahead of the field change that declares it through the
+    table."""
     return _with_row(
         monkeypatch,
         model=ROOT,
@@ -769,3 +820,355 @@ def test_a_written_config_does_not_keep_a_rows_old_spelling_as_an_unknown_key(
     written = yaml.safe_load(text)
     assert "projectname" not in written
     assert written["$schema"] == "kept"
+
+
+# ---------------------------------------------------------------------------
+# A row added to the table reaches the places that find a denial, and not the
+# places that skip a check or grant an exemption
+# ---------------------------------------------------------------------------
+
+
+GLOBAL_SETTINGS = (
+    "automated_security_helper.config.ash_config.AshConfigGlobalSettingsSection"
+)
+OPENGREP_OPTIONS = (
+    "automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner"
+    ".OpengrepScannerConfigOptions"
+)
+PACKS_MODEL = (
+    "automated_security_helper.plugin_modules.ash_builtin.scanners."
+    "cdk_nag_scanner.CdkNagPacks"
+)
+
+
+def _profile_with_policy(**runtime_overrides: Any) -> AshConfig:
+    """A profile whose runtime-override policy is ``runtime_overrides``."""
+    return AshConfig.model_validate(
+        {"global_settings": {"mcp": {"runtime_overrides": runtime_overrides}}}
+    )
+
+
+@pytest.fixture
+def renamed_severity_threshold(monkeypatch) -> spellings.SpellingRow:
+    """A field of a section renamed to a spelling that is no '-'/'_' twin."""
+    return _with_row(
+        monkeypatch,
+        model=GLOBAL_SETTINGS,
+        canonical="severity_threshold",
+        old=("severity_floor",),
+    )
+
+
+def test_a_value_pattern_refuses_a_mapping_key_in_a_rows_old_spelling(
+    monkeypatch,
+) -> None:
+    """A value pattern applies to a mapping key a document writes when the
+    pattern's subtree holds the key's pointer (``_key_pattern_reason``). A
+    pattern bound to the canonical pointer holds the field under every spelling
+    the table gives it, so a key written in the old spelling is refused by it.
+    Without the row the key names no field the pattern holds, and nothing is
+    refused.
+
+    What turns this red: ``_key_pattern_reason``'s ``_covered`` call without
+    ``denying=True``, which never meets ``severity_floor``.
+    """
+    from automated_security_helper.config.client_config_policy import policy_of
+    from automated_security_helper.config.runtime_patch import (
+        config_document_denials,
+    )
+
+    trusted = _profile_with_policy(
+        denied_value_patterns={
+            "/global_settings/severity_threshold": "^severity_floor$"
+        }
+    )
+    document = {"global_settings": {"severity_floor": "HIGH"}}
+
+    def reasons() -> List[str]:
+        return [
+            denial.reason
+            for denial in config_document_denials(
+                document, allowlist=policy_of(trusted), config=trusted
+            )
+        ]
+
+    assert reasons() == []
+
+    _with_row(
+        monkeypatch,
+        model=GLOBAL_SETTINGS,
+        canonical="severity_threshold",
+        old=("severity_floor",),
+    )
+
+    # The key's write only: the leaf's value does not match the regex.
+    assert reasons() == [
+        (
+            "key 'severity_floor' at '/global_settings/severity_floor' matches "
+            "denied_value_patterns regex '^severity_floor$' bound to "
+            "'/global_settings/severity_threshold'"
+        )
+    ]
+
+
+def test_an_old_spelling_denial_takes_its_field_out_of_the_exempt_set(
+    monkeypatch,
+) -> None:
+    """A delivered file is not checked against ``denied_paths`` for the
+    restrict-only and suppression fields unless the operator's own list names
+    one; then it is checked against that list for the whole field
+    (``client_config_policy.exempt_paths``). Whether an entry names a field is
+    decided through ``runtime_patch._denied_path_reason``, a place that finds a
+    denial, so an entry written in a row's old spelling takes its field out of
+    the exempt set. Without the row the entry names nothing, and every field
+    stays exempt.
+
+    What turns this red: ``_denied_path_reason`` matching over
+    ``_denial_spellings`` alone, which leaves ``/sandbox`` exempt.
+    """
+    from automated_security_helper.config.client_config_policy import (
+        exempt_paths,
+        policy_of,
+    )
+
+    policy = policy_of(_profile_with_policy(denied_paths=["/scan_sandbox"]))
+
+    assert "/sandbox" in exempt_paths(policy)
+
+    _with_row(monkeypatch, model=ROOT, canonical="sandbox", old=("scan_sandbox",))
+
+    exempt = exempt_paths(policy)
+    assert "/sandbox" not in exempt
+    assert "/sandbox/**" not in exempt
+    # Only the field the entry names leaves the set.
+    assert "/ash_plugin_modules" in exempt
+    assert "/global_settings/suppressions" in exempt
+
+
+def test_a_moved_exclusion_does_not_lift_the_floor_for_a_rows_old_spelling(
+    monkeypatch,
+) -> None:
+    """Resolution moves a delivered scanner exclusion out of the scanner's
+    options, so ``config_document_denials`` does not let the always-denied entry
+    that covers the scanner's whole section (``SECTION_FLOOR_ENTRIES``) refuse a
+    leaf at or under a moved pointer. That lifts a refusal, so it matches a
+    pointer as written and with '-' read as '_'. ``moved_exclusion_pointers``
+    names an option under its own name, so the same file's list under the
+    option's old spelling is not moved, and the floor still refuses it. Without
+    the row the outcome is the same: the row is what a widened match would read.
+
+    What turns this red: the moved check's ``_covered`` call matched with the
+    table's spellings, which reads ``skip_globs`` as the moved ``exclude`` and
+    lifts the floor for it, so nothing refuses it.
+    """
+    from automated_security_helper.config.ash_config import RuntimeOverridesConfig
+    from automated_security_helper.config.client_scanner_exclusions import (
+        moved_exclusion_pointers,
+    )
+    from automated_security_helper.config.runtime_patch import (
+        SECTION_FLOOR_ENTRIES,
+        config_document_denials,
+    )
+
+    _with_row(
+        monkeypatch, model=OPENGREP_OPTIONS, canonical="exclude", old=("skip_globs",)
+    )
+    document = {
+        "scanners": {
+            "opengrep": {
+                "options": {"exclude": ["build/**"], "skip_globs": ["vendor/**"]}
+            }
+        }
+    }
+    moved = moved_exclusion_pointers(document)
+    # The premises: the move names the option under its own spelling only, and
+    # the entry that refuses the old one is a section floor.
+    assert moved == ["/scanners/opengrep/options/exclude"]
+    assert "/scanners/opengrep/**" in SECTION_FLOOR_ENTRIES
+
+    denials = config_document_denials(
+        document, allowlist=RuntimeOverridesConfig(), config=AshConfig(), moved=moved
+    )
+
+    assert [(d.pointer, d.from_patch) for d in denials] == [
+        ("/scanners/opengrep/options/skip_globs", False)
+    ]
+    assert "denied_paths entry '/scanners/opengrep/**'" in denials[0].reason
+
+
+@pytest.mark.parametrize(
+    "recorded,own",
+    [
+        pytest.param(
+            "/global_settings/severity_threshold",
+            "/global_settings/severity_floor",
+            id="recorded-canonical-own-old",
+        ),
+        pytest.param(
+            "/global_settings/severity_floor",
+            "/global_settings/severity_threshold",
+            id="recorded-old-own-canonical",
+        ),
+    ],
+)
+def test_a_recorded_reference_and_the_copys_own_are_two_places_across_a_rename(
+    recorded: str, own: str, renamed_severity_threshold
+) -> None:
+    """``_holds_the_operators_reference`` lets a client-patched copy of the
+    profile repeat a leaf the trusted config read from the environment only
+    where the copy holds the operator's own reference, at the one place the
+    trusted config's files wrote it. That grants an exemption, so places are
+    compared as written and with '-' read as '_' (``_same_place``): a text
+    recorded under one spelling of a renamed field and the copy's reference
+    under the other are two places, and the leaf is not the operator's
+    reference.
+
+    What turns this red: ``_same_place`` matching with the table's spellings,
+    which makes the two spellings one place. Respelling only the copy's pointer
+    turns the first case red, only the recorded one the second.
+    """
+    from automated_security_helper.config.runtime_patch import (
+        _holds_the_operators_reference,
+        known_plugin_keys,
+    )
+
+    text = "${ASH_TEST_SEVERITY}"
+    keys = known_plugin_keys(None)
+
+    # The control: one place, one text, held as the operator's own.
+    assert _holds_the_operators_reference(
+        recorded, {recorded: (text,)}, {recorded: {text}}, keys
+    )
+
+    assert not _holds_the_operators_reference(
+        own, {recorded: (text,)}, {own: {text}}, keys
+    )
+
+
+# ---------------------------------------------------------------------------
+# A row on a section's model, or on a plugin's options, reaches lint
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def renamed_pack_key(monkeypatch) -> spellings.SpellingRow:
+    """A field of a plugin's options model, as a pack's rename declares one."""
+    return _with_row(
+        monkeypatch,
+        model=PACKS_MODEL,
+        canonical="AwsSolutionsChecks",
+        old=("aws_solutions_checks",),
+    )
+
+
+def _data_of(fixed_content: str) -> Dict[str, Any]:
+    return yaml.safe_load(
+        "\n".join(
+            line for line in fixed_content.split("\n") if not line.startswith("#")
+        )
+    )
+
+
+def _of(issues: List[Any], category: LintCategory) -> List[Any]:
+    return [i for i in issues if i.category == category]
+
+
+def test_lint_reports_a_rows_old_spelling_in_a_section_where_the_file_writes_it(
+    tmp_path: Path, renamed_severity_threshold
+) -> None:
+    config = _lint_file(
+        tmp_path,
+        {"global_settings": {"severity_floor": "HIGH", "ignore_paths": [_IGNORED]}},
+    )
+
+    issues = ConfigLinter.lint(config, source_dir=tmp_path).issues
+
+    (variant,) = _of(issues, LintCategory.LEGACY_NAME_VARIANT)
+    assert variant.path == "global_settings.severity_floor"
+    assert variant.fixable is True
+    assert variant.fix_description
+    assert "severity_floor" in variant.message
+    assert "severity_threshold" in variant.message
+
+
+def test_lint_fix_renames_a_rows_old_spelling_in_a_section_in_place(
+    tmp_path: Path, renamed_severity_threshold
+) -> None:
+    config = _lint_file(
+        tmp_path,
+        {"global_settings": {"severity_floor": "HIGH", "ignore_paths": [_IGNORED]}},
+    )
+
+    fixed_content, fixed_issues = ConfigLinter.fix(config)
+
+    settings = _data_of(fixed_content)["global_settings"]
+    assert list(settings) == ["severity_threshold", "ignore_paths"]
+    assert settings["severity_threshold"] == "HIGH"
+    assert [i.path for i in _of(fixed_issues, LintCategory.LEGACY_NAME_VARIANT)] == [
+        "global_settings.severity_floor"
+    ]
+
+
+def test_lint_reports_both_spellings_in_a_section_as_a_conflict_it_leaves(
+    tmp_path: Path, renamed_severity_threshold
+) -> None:
+    """A rename here would drop one of the two values, so --fix leaves both."""
+    both = {"severity_floor": "HIGH", "severity_threshold": "LOW"}
+    config = _lint_file(tmp_path, {"global_settings": dict(both)})
+
+    issues = ConfigLinter.lint(config, source_dir=tmp_path).issues
+    fixed_content, _ = ConfigLinter.fix(config)
+
+    (conflict,) = _of(issues, LintCategory.LEGACY_NAME_CONFLICT)
+    assert conflict.path == "global_settings.severity_floor"
+    assert conflict.fixable is False
+    assert _of(issues, LintCategory.LEGACY_NAME_VARIANT) == []
+    assert _data_of(fixed_content)["global_settings"] == both
+
+
+def test_lint_leaves_a_rows_canonical_spelling_in_a_section_alone(
+    tmp_path: Path, renamed_severity_threshold
+) -> None:
+    config = _lint_file(tmp_path, {"global_settings": {"severity_threshold": "HIGH"}})
+
+    issues = ConfigLinter.lint(config, source_dir=tmp_path).issues
+
+    assert _of(issues, LintCategory.LEGACY_NAME_VARIANT) == []
+    assert _of(issues, LintCategory.LEGACY_NAME_CONFLICT) == []
+
+
+def test_lint_reports_and_fixes_a_rows_old_spelling_inside_a_plugins_options(
+    tmp_path: Path, renamed_pack_key
+) -> None:
+    """A row on a model a plugin's options hold is reported, and renamed, where
+    the file writes it, under the plugin's name as the file spells it."""
+    config = _lint_file(
+        tmp_path,
+        {
+            "scanners": {
+                "cdk-nag": {"options": {"nag_packs": {"aws_solutions_checks": True}}}
+            }
+        },
+    )
+
+    issues = ConfigLinter.lint(config, source_dir=tmp_path).issues
+    fixed_content, _ = ConfigLinter.fix(config)
+
+    (variant,) = _of(issues, LintCategory.LEGACY_NAME_VARIANT)
+    assert variant.path == "scanners.cdk-nag.options.nag_packs.aws_solutions_checks"
+    assert variant.fixable is True
+    packs = _data_of(fixed_content)["scanners"]["cdk-nag"]["options"]["nag_packs"]
+    assert packs == {"AwsSolutionsChecks": True}
+
+
+def test_an_entry_rows_old_spelling_stays_a_deprecated_spelling(
+    tmp_path: Path,
+) -> None:
+    """The entry model's rows have their own issue, which says why it is no fix
+    lint makes; the section rows' check leaves them to it."""
+    config = _lint_file(tmp_path, _suppressions(_entry(expiration="2099-01-01")))
+
+    issues = ConfigLinter.lint(config, source_dir=tmp_path).issues
+
+    assert len(_of(issues, LintCategory.DEPRECATED_SPELLING)) == 1
+    assert _of(issues, LintCategory.LEGACY_NAME_VARIANT) == []
