@@ -44,6 +44,14 @@ would and records every other call:
 * ``numbered-failure`` prints 25 numbered lines and exits 1;
 * ``hostile`` exits non-zero and prints lines that would be workflow commands.
 
+It answers ``ash scan <subject> --help`` for the subjects ash-args can name
+(``workspace``, ``image`` and ``git``) from files each test writes, so a row says what
+the ASH it plays has. With nothing said it answers as this tree does: the real help of
+the ``workspace`` subject, and the usage error this tree gives for a subject it does
+not have. The rows that need another ASH give it: one that also has ``image`` and
+``git``, one that refuses a subject in each of the three ways the step reads as a
+refusal, or one whose probe fails.
+
 1. The scan runs ``ash scan fs .`` on 3.9 and ``ash --source-dir .`` on the releases
    that answer without the subject, with the same options after the directory on
    both, for each value the step's env selects a flag from; its exit status is the
@@ -69,15 +77,44 @@ would and records every other call:
 6. Each step says on stderr which spelling it chose and why, and what a failed probe
    printed goes through ``one_line`` a line at a time, so no line of it is read as a
    workflow command.
+7. An option of ash-args that names what to scan goes to the subject that scans it
+   when, and only when, the installed ASH's own answer to ``ash scan <subject> --help``
+   names the subject: ``--workspace FILE`` and ``--workspace-config`` to ``ash scan
+   workspace FILE``; ``--image``, ``--image-archive`` and ``--image-layout`` to ``ash
+   scan image``, as REF, ``--archive`` and ``--layout``; ``--source-git``,
+   ``--git-ref`` and ``--git-depth`` to ``ash scan git``, as URL and the two options.
+   The subject's operand comes first, then the step's own options, then the rest of
+   ash-args in the order it was written. The same options stay on ``ash scan fs`` as
+   they were written, for it to refuse by name, when the ASH answers with a usage error
+   or with a help that does not name the subject, when ash-args names things of two
+   subjects or a directory as well, when a value is empty or, for an image reference
+   or a clone, starts with a dash, and in the older spelling, which asks nothing more.
+   An answer of any other kind ends the step with status 70 and what the probe printed,
+   as the first probe does. The probe is asked as the first one is: colour off, no
+   ``--reinstall``, the scan's config named, from RUNNER_TEMP with ``--no-config``.
+8. The routed command line is accepted by this tree's own CLI: the ``workspace`` forms
+   are run through it with the scan engine stubbed, and the options left on ``fs`` are
+   refused by name or handed on as they were typed, never dropped.
 
 What it does not cover
 ----------------------
 No real ASH 3.8 is installed: its answers are the stand-in's, in the shape the deploy
 targets' tests use for the same probe (deploy/cdk-constructs/test/subject-probe.test.ts).
+
+This tree has the ``workspace`` subject and no ``image`` or ``git`` subject. The rows
+that send an image or a clone option to its subject run against a stand-in ASH that has
+them, whose help is a usage line in this tree's style, so they measure the step's
+routing and not the options of a subject that does not exist yet. The rows that parse
+that command line with this tree's CLI are skipped until the subject exists. Once it
+does, they measure the spellings the routing assumes for it: REF and URL as the
+operand, ``--archive`` and ``--layout`` for the image subject, and ``--git-ref`` and
+``--git-depth`` unchanged. The rows that keep those options on ``fs`` for this tree's
+own answer run only while the tree lacks the subject.
 """
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 import subprocess
@@ -85,11 +122,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+import typer
 import yaml
 from typer.testing import CliRunner
 
 from automated_security_helper.cli import scan_group
 from automated_security_helper.cli.main import app
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from tests.utils.workflow_one_line import command_lines, write_helper
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -109,7 +148,10 @@ posix_only = pytest.mark.skipif(
 #: answers below read the same words whether or not a probe passes it. Every other call
 #: is recorded to $CALLS_LOG, one argument per line with an END line after each call,
 #: and the directory it started in to $CALL_CWD_LOG. A probe that reinstalled would not
-#: start `--from ash-source ash`, so it gets the broken answer.
+#: start `--from ash-source ash`, so it gets the broken answer. A probe of `ash scan
+#: <subject>` is answered from $SUBJECT_ANSWERS when that directory has the subject:
+#: the file named for it holds what it prints and `<subject>.status` the status it
+#: exits with, so each test says what the ASH it plays has.
 STAND_IN_UVX = r"""#!/bin/sh
 pad() {
   i=0
@@ -156,6 +198,10 @@ if [ "${last:-}" = "--help" ]; then
       printf '%s\n' "::warning::planted by the probe" "##[warning]planted too" >&2
       exit 1 ;;
   esac
+  if [ "${4:-}" = "scan" ] && [ -f "$SUBJECT_ANSWERS/${5:-}.status" ]; then
+    cat "$SUBJECT_ANSWERS/$5"
+    exit "$(cat "$SUBJECT_ANSWERS/$5.status")"
+  fi
   echo "error: Failed to fetch the source" >&2
   exit 1
 fi
@@ -189,6 +235,14 @@ OWN_OPTIONS = [
 ]
 
 
+#: The first probe the Run ASH step makes, which asks for `fs`, as the stand-in logs it.
+FS_PROBE = "--no-config --from ash-source ash scan fs --help NO_COLOR=1"
+#: The subjects of `ash scan` this tree has.
+SCAN_SUBJECTS = frozenset(typer.main.get_command(app).commands["scan"].commands)
+#: Thousands of lines to follow a help, so the step has to read the whole of one.
+HELP_PADDING = "".join(f"  --option-{i} TEXT  A line of help.\n" for i in range(4000))
+
+
 def _steps() -> list[dict]:
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]["ash"]["steps"]
 
@@ -209,6 +263,86 @@ def _help(*command: str) -> str:
     )
     assert result.exit_code == 0, result.output
     return result.output
+
+
+@functools.cache
+def _this_trees_subject_answers() -> dict[str, tuple[int, str]]:
+    """What this tree answers to ``ash scan <subject> --help``, for each subject
+    ash-args can name: the status it exits with, and what it prints.
+
+    A subject it has prints its help, which names it. One it does not have is refused
+    with a usage error, which is what the step reads as a refusal.
+    """
+    answers = {}
+    for subject in ("workspace", "image", "git"):
+        result = CliRunner().invoke(
+            app,
+            ["scan", subject, "--help"],
+            prog_name="ash",
+            env={"NO_COLOR": "1", "COLUMNS": "140"},
+        )
+        answers[subject] = (result.exit_code, result.output)
+    return answers
+
+
+def _wave_2_subjects() -> dict[str, tuple[int, str]]:
+    """An ASH that has the ``image`` and ``git`` subjects as well as ``workspace``.
+
+    This tree has neither yet, so the two helps are a usage line and a sentence in the
+    style of this tree's own, which is all the step reads: that the help names the
+    subject.
+    """
+    return {
+        "workspace": _this_trees_subject_answers()["workspace"],
+        "image": (
+            0,
+            "\n Usage: ash scan image [OPTIONS] REF\n\n Scan a container image.\n",
+        ),
+        "git": (
+            0,
+            "\n Usage: ash scan git [OPTIONS] URL\n\n Scan a remote git repository.\n",
+        ),
+    }
+
+
+#: The three ways an ASH that lacks a subject refuses `ash scan <subject> --help` so
+#: that the step reads it as a refusal: this tree's own usage error, a group that reads
+#: the word as an extra argument, and one that has no such command.
+REFUSALS = ["not-a-subject", "extra-argument", "no-such-command"]
+
+
+def _refusal(shape: str, subject: str) -> tuple[int, str]:
+    if shape == "not-a-subject":
+        return ASH_EXIT_USAGE_ERROR, (
+            "Usage: ash scan [OPTIONS] COMMAND [ARGS]...\n"
+            "Try 'ash scan --help' for help.\n\n"
+            f"Error: '{subject}' is not a scan subject (subjects: fs). "
+            f"To scan a directory, run 'ash scan fs {subject}'.\n"
+        )
+    if shape == "extra-argument":
+        return 2, (
+            "Usage: ash scan [OPTIONS]\n"
+            f"Error: Got unexpected extra argument ({subject})\n"
+        )
+    return 2, f"Error: No such command '{subject}'.\n"
+
+
+def _refusing(shape: str) -> dict[str, tuple[int, str]]:
+    """An ASH that has `fs` and none of the subjects ash-args can name."""
+    return {
+        subject: _refusal(shape, subject) for subject in ("workspace", "image", "git")
+    }
+
+
+def _args(ash_args: str, **inputs: str) -> dict[str, str]:
+    """The Run ASH step's env, with *ash_args* and any other inputs given on top."""
+    return {**SCAN_ENV, "ASH_ARGS": ash_args, **inputs}
+
+
+def _probe(subject: str, config: str = "") -> str:
+    """The line the stand-in logs for ``ash scan <subject> --help``."""
+    named = f" --config {config}" if config else ""
+    return f"--no-config --from ash-source ash scan {subject}{named} --help NO_COLOR=1"
 
 
 @pytest.fixture(scope="module")
@@ -234,14 +368,35 @@ class Ran:
 
 
 def _run(
-    where: Path, helps: dict[str, Path], step: str, release: str, env: dict[str, str]
+    where: Path,
+    helps: dict[str, Path],
+    step: str,
+    release: str,
+    env: dict[str, str],
+    subjects: dict[str, tuple[int, str]] | None = None,
 ) -> Ran:
+    """Run the script of *step* in *where* with the stand-in uvx.
+
+    *release* is how the stand-in answers the probes for ``fs`` and ``results``.
+    *subjects* is what it answers to ``ash scan <subject> --help``, subject by subject,
+    as the status it exits with and what it prints; left out, it answers as this tree
+    does.
+    """
     where.mkdir(parents=True, exist_ok=True)
     bin_dir = where / "bin"
     bin_dir.mkdir()
     uvx = bin_dir / "uvx"
     uvx.write_text(STAND_IN_UVX, encoding="utf-8")
     uvx.chmod(0o755)
+    answers = where / "subject-answers"
+    answers.mkdir()
+    answered = _this_trees_subject_answers() if subjects is None else subjects
+    for subject, (status, text) in answered.items():
+        # A help is followed by thousands of lines, as a real one is long: the step
+        # has to read the whole of it, not the first lines.
+        padding = HELP_PADDING if status == 0 else ""
+        (answers / subject).write_text(text + padding, encoding="utf-8")
+        (answers / f"{subject}.status").write_text(str(status), encoding="utf-8")
     # The job's definer runs before either step does, into the same RUNNER_TEMP.
     runner_temp = where / "runner_temp"
     write_helper(_steps(), runner_temp)
@@ -263,6 +418,7 @@ def _run(
             "PROBE_LOG": str(probe_log),
             "CALL_CWD_LOG": str(call_cwd_log),
             "PROBE_CWD_LOG": str(probe_cwd_log),
+            "SUBJECT_ANSWERS": str(answers),
             **env,
         },
         capture_output=True,
@@ -440,7 +596,8 @@ def test_a_source_dir_in_ash_args_names_the_directory(
 
 
 class _Engine:
-    """Stands in for the engine behind ``ash scan fs``: records what it is handed."""
+    """Stands in for the engine behind ``ash scan fs`` and ``ash scan workspace``:
+    records what it is handed."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -457,13 +614,17 @@ def engine(monkeypatch) -> _Engine:
 
 
 def _cli(argv: list[str]):
-    """This tree's CLI run with *argv*, where only ``fs``'s engine is stubbed.
+    """This tree's CLI run with *argv*, where the engine of ``fs`` and ``workspace`` is
+    stubbed.
 
-    Only an ``ash scan fs`` command line is run. Any other reaches the scan engine
-    through the root command, which the ``engine`` fixture does not stub, and would
-    scan for real; a step that has not chosen ``scan fs`` fails the test here instead.
+    Only an ``ash scan fs`` or ``ash scan workspace`` command line is run. Any other
+    reaches the scan engine through the root command, which the ``engine`` fixture does
+    not stub, and would scan for real; a step that has chosen another command fails the
+    test here instead.
     """
-    assert argv[:2] == ["scan", "fs"], f"not an `ash scan fs` command line: {argv}"
+    assert argv[:2] in (["scan", "fs"], ["scan", "workspace"]), (
+        f"not a command line the stub covers: {argv}"
+    )
     return CliRunner().invoke(app, argv, prog_name="ash")
 
 
@@ -773,3 +934,597 @@ def test_the_steps_say_which_spelling_they_chose_and_why(
     ran = _run(tmp_path, helps, step, release, env)
 
     assert f"ash: {said}" in ran.result.stderr, _output(ran)
+
+
+WORKSPACE_FILE = "services.code-workspace"
+CLONE_URL = "https://example.invalid/repo.git"
+#: What use-betterleaks adds, after the rest of ash-args.
+BETTERLEAKS_OPTIONS = [
+    "--config-overrides",
+    "ash_plugin_modules+=[automated_security_helper.plugin_modules.ash_betterleaks_plugins]",
+    "--config-overrides",
+    "scanners.betterleaks.enabled=true",
+    "--config-overrides",
+    "scanners.gitleaks.enabled=false",
+]
+
+
+def _routed(subject: str) -> str:
+    """What the step says when it scans with the subject its ash-args name."""
+    return f"ash: scanning with 'ash scan {subject}': its help names 'scan {subject}'"
+
+
+def _kept(subject: str) -> str:
+    """What the step says when its ASH has no such subject: it scans with `fs`."""
+    return (
+        "ash: scanning with 'ash scan fs' and ash-args as written: "
+        f"this ASH has no 'ash scan {subject}'"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("subject", ["workspace", "image", "git"])
+def test_this_trees_answer_for_a_subject_is_one_the_step_reads(subject):
+    """Control for the rows that play this tree. A subject it has prints a help that
+    names it, which the step reads as the subject being there; one it lacks is refused
+    with a usage error, which the step reads as a refusal. Which of the two holds is
+    this tree's: once it has the image and git subjects, those read the first way."""
+    status, text = _this_trees_subject_answers()[subject]
+
+    if subject in SCAN_SUBJECTS:
+        assert status == 0, text
+        assert f"scan {subject}" in text, text
+    else:
+        assert status != 0, text
+        assert "is not a scan subject" in text, text
+
+
+#: The forms in which ash-args names a workspace, with the operands the workspace
+#: subject is given right after its name and the words it is given after the step's own
+#: options, which keep the order ash-args had them in.
+WORKSPACE_FORMS = [
+    pytest.param(
+        f"--workspace {WORKSPACE_FILE}",
+        [WORKSPACE_FILE],
+        [],
+        id="workspace",
+    ),
+    pytest.param(
+        f"--workspace={WORKSPACE_FILE}",
+        [WORKSPACE_FILE],
+        [],
+        id="workspace-equals",
+    ),
+    pytest.param(
+        f"--workspace {WORKSPACE_FILE} --workspace-config policy.yaml",
+        [WORKSPACE_FILE],
+        ["--workspace-config", "policy.yaml"],
+        id="with-policy",
+    ),
+    pytest.param(
+        f"--workspace-config policy.yaml --workspace {WORKSPACE_FILE}",
+        [WORKSPACE_FILE],
+        ["--workspace-config", "policy.yaml"],
+        id="policy-first",
+    ),
+    pytest.param(
+        f"--workspace-config=policy.yaml --workspace={WORKSPACE_FILE}",
+        [WORKSPACE_FILE],
+        ["--workspace-config", "policy.yaml"],
+        id="both-with-equals",
+    ),
+    pytest.param(
+        f"--verbose --workspace {WORKSPACE_FILE} --exclude-scanners grype -c config",
+        [WORKSPACE_FILE],
+        ["--verbose", "--exclude-scanners", "grype", "-c", "config"],
+        id="among-other-options",
+    ),
+    pytest.param(
+        "--workspace auto",
+        ["auto"],
+        [],
+        id="auto",
+    ),
+    # A name that starts with a dash: the same file, never read as an option.
+    pytest.param(
+        "--workspace -x.code-workspace",
+        ["./-x.code-workspace"],
+        [],
+        id="a-name-that-starts-with-a-dash",
+    ),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("ash_args, operands, rest", WORKSPACE_FORMS)
+def test_a_workspace_in_ash_args_goes_to_the_workspace_subject(
+    tmp_path, helps, ash_args, operands, rest
+):
+    ran = _run(tmp_path, helps, RUN_ASH, "3.9", _args(ash_args))
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", "workspace", *operands, *OWN_OPTIONS, *rest]
+    ], _output(ran)
+    # The ASH was asked about the subject as it was asked about `fs`, from RUNNER_TEMP,
+    # and the scan starts in the checkout.
+    assert ran.probes == [FS_PROBE, _probe("workspace")], ran.probes
+    assert ran.probe_dirs == [str(tmp_path / "runner_temp")] * 2, ran.probe_dirs
+    assert ran.call_dirs == [str(tmp_path)], ran.call_dirs
+    assert _routed("workspace") in ran.result.stderr, _output(ran)
+    # The help the probe read is not printed into the step's log.
+    assert "Usage:" not in _output(ran)
+
+
+@pytest.mark.integration
+@posix_only
+def test_the_options_the_step_adds_stay_ahead_of_the_rest_of_ash_args(tmp_path, helps):
+    env = _args(
+        f"--workspace {WORKSPACE_FILE} --exclude-scanners grype",
+        ASH_CONFIG="ops/ash.yaml",
+        VERBOSE="--verbose",
+        CHANGED_FILES_ONLY="--changed-files-only",
+        BASE_REF="0123abc",
+        USE_BETTERLEAKS="true",
+    )
+
+    ran = _run(tmp_path, helps, RUN_ASH, "3.9", env)
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [
+            *UVX_SCAN,
+            "scan",
+            "workspace",
+            WORKSPACE_FILE,
+            *OWN_OPTIONS,
+            "--config",
+            "ops/ash.yaml",
+            "--verbose",
+            "--changed-files-only",
+            "--base-ref",
+            "0123abc",
+            "--exclude-scanners",
+            "grype",
+            *BETTERLEAKS_OPTIONS,
+        ]
+    ], _output(ran)
+    # Each probe names the config the scan names, as the first one always did.
+    assert ran.probes == [
+        _probe("fs", "ops/ash.yaml"),
+        _probe("workspace", "ops/ash.yaml"),
+    ], ran.probes
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "ash_args, file, policy",
+    [
+        pytest.param(
+            f"--workspace {WORKSPACE_FILE}",
+            WORKSPACE_FILE,
+            None,
+            id="file",
+        ),
+        pytest.param(
+            f"--workspace={WORKSPACE_FILE} --workspace-config policy.yaml",
+            WORKSPACE_FILE,
+            "policy.yaml",
+            id="file-and-policy",
+        ),
+        pytest.param(
+            "--workspace -x.code-workspace",
+            "./-x.code-workspace",
+            None,
+            id="a-name-that-starts-with-a-dash",
+        ),
+    ],
+)
+def test_the_workspace_command_line_is_one_this_trees_cli_accepts(
+    tmp_path, helps, engine, monkeypatch, ash_args, file, policy
+):
+    """The workspace scan the step runs is read by this tree's own ``ash scan
+    workspace``, with the scan engine stubbed: the FILE is the workspace, the policy
+    file is the workspace config, no option is refused, and no deprecation line is
+    printed."""
+    (call,) = _run(tmp_path, helps, RUN_ASH, "3.9", _args(ash_args)).calls
+    monkeypatch.chdir(tmp_path)
+
+    result = _cli(call[len(UVX_SCAN) :])
+
+    assert result.exit_code == 0, result.output
+    (kwargs,) = engine.calls
+    assert kwargs["workspace"] == file, kwargs
+    assert kwargs.get("workspace_config") == policy, kwargs
+    assert kwargs["fail_on_findings"] is True, kwargs
+    assert "Deprecated" not in result.output, result.output
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("shape", REFUSALS)
+def test_a_workspace_stays_on_fs_when_its_ash_refuses_the_subject(
+    tmp_path, helps, shape
+):
+    """The three answers the step reads as a refusal each leave ash-args as it was
+    written, on `ash scan fs`, where the option is refused by name: it is not left out
+    of the scan, and the step does not fail for it."""
+    ash_args = f"--workspace {WORKSPACE_FILE} --workspace-config policy.yaml"
+
+    ran = _run(
+        tmp_path, helps, RUN_ASH, "3.9", _args(ash_args), subjects=_refusing(shape)
+    )
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", "fs", ".", *OWN_OPTIONS, *ash_args.split()]
+    ], _output(ran)
+    assert ran.probes == [FS_PROBE, _probe("workspace")], ran.probes
+    assert _kept("workspace") in ran.result.stderr, _output(ran)
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "release", ["3.8", "refusing", "refusing-otherwise", "no-name"]
+)
+def test_an_ash_without_fs_gets_ash_args_as_written_and_is_asked_no_more(
+    tmp_path, helps, release
+):
+    """An ASH that has no `fs` has none of the subjects either: the older spelling
+    takes every option of ash-args, and nothing but the first probe is asked."""
+    ash_args = f"--workspace {WORKSPACE_FILE} --workspace-config policy.yaml"
+
+    ran = _run(tmp_path, helps, RUN_ASH, release, _args(ash_args))
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "--source-dir", ".", *OWN_OPTIONS, *ash_args.split()]
+    ], _output(ran)
+    assert ran.probes == [FS_PROBE], ran.probes
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "ash_args, path, words",
+    [
+        pytest.param(
+            f"--workspace {WORKSPACE_FILE} --image alpine:3.20",
+            ".",
+            ["--workspace", WORKSPACE_FILE, "--image", "alpine:3.20"],
+            id="a-workspace-and-an-image",
+        ),
+        pytest.param(
+            f"--image alpine:3.20 --source-git {CLONE_URL}",
+            ".",
+            ["--image", "alpine:3.20", "--source-git", CLONE_URL],
+            id="an-image-and-a-clone",
+        ),
+        pytest.param(
+            f"--source-dir services/api --workspace {WORKSPACE_FILE}",
+            "services/api",
+            ["--workspace", WORKSPACE_FILE],
+            id="a-directory-and-a-workspace",
+        ),
+        pytest.param(
+            f"--source-dir=services/api --source-git {CLONE_URL}",
+            "services/api",
+            ["--source-git", CLONE_URL],
+            id="a-directory-and-a-clone",
+        ),
+    ],
+)
+def test_what_names_two_subjects_or_a_directory_as_well_is_not_routed(
+    tmp_path, helps, ash_args, path, words
+):
+    """No scan has two subjects, and a directory named with --source-dir is a scan of
+    that directory: the options stay on `fs` as written, for it to refuse by name, and
+    the ASH is not asked about a subject. The ASH here has all three, so only the
+    step's own rule keeps them there."""
+    ran = _run(
+        tmp_path, helps, RUN_ASH, "3.9", _args(ash_args), subjects=_wave_2_subjects()
+    )
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [[*UVX_SCAN, "scan", "fs", path, *OWN_OPTIONS, *words]], (
+        _output(ran)
+    )
+    assert ran.probes == [FS_PROBE], ran.probes
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "ash_args",
+    ["--image -x", "--image=", "--source-git -x", "--source-git=", "--workspace="],
+)
+def test_a_value_the_subject_would_read_as_an_option_stays_where_it_is(
+    tmp_path, helps, ash_args
+):
+    """As an operand of the subject, a value that starts with a dash would be an option
+    and an empty one names nothing. As the value of the option on `fs` each is the word
+    it is, which ASH refuses by name. So the step does not route it, and asks nothing."""
+    ran = _run(
+        tmp_path, helps, RUN_ASH, "3.9", _args(ash_args), subjects=_wave_2_subjects()
+    )
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", "fs", ".", *OWN_OPTIONS, *ash_args.split()]
+    ], _output(ran)
+    assert ran.probes == [FS_PROBE], ran.probes
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_subject_probe_that_gets_no_answer_stops_the_step(tmp_path, helps):
+    """The probe failed in a way that is not a refusal of the subject: here uvx could
+    not fetch the source, after two lines that would be workflow commands. Nothing says
+    whether the ASH has the subject, so the step ends with status 70 and the end of what
+    the probe printed, and scans with neither command."""
+    printed = (
+        "::warning::planted by the probe\n"
+        "##[warning]planted too\n"
+        "error: Failed to fetch the source\n"
+    )
+
+    ran = _run(
+        tmp_path,
+        helps,
+        RUN_ASH,
+        "3.9",
+        _args(f"--workspace {WORKSPACE_FILE}"),
+        subjects={"workspace": (1, printed)},
+    )
+
+    assert ran.result.returncode == 70, _output(ran)
+    assert ran.calls == [], ran.calls
+    output = _output(ran)
+    could_not_tell = "Could not tell whether the ASH this workflow installs has"
+    assert f"{could_not_tell} 'ash scan workspace'" in output
+    assert "'ash scan workspace --help' exited 1" in output
+    assert "error: Failed to fetch the source" in output
+    # What the probe printed is shown, and is not read as a workflow command.
+    assert "planted by the probe" in output and "planted too" in output
+    (own,) = command_lines(output)
+    assert own.startswith("::error::Could not tell whether the ASH"), own
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_failed_subject_probe_shows_its_last_twenty_lines_and_no_others(
+    tmp_path, helps
+):
+    printed = "".join(f"probe line {number:02d}\n" for number in range(1, 26))
+
+    ran = _run(
+        tmp_path,
+        helps,
+        RUN_ASH,
+        "3.9",
+        _args(f"--workspace {WORKSPACE_FILE}"),
+        subjects={"workspace": (1, printed)},
+    )
+
+    assert ran.result.returncode == 70, _output(ran)
+    assert ran.calls == [], ran.calls
+    output = _output(ran)
+    for number in range(6, 26):
+        assert f"probe line {number:02d}" in output, (number, output)
+    for number in range(1, 6):
+        assert f"probe line {number:02d}" not in output, (number, output)
+
+
+#: The forms in which ash-args names an image or a clone, with the subject that scans
+#: it, the operands that subject is given right after its name, and the words it is
+#: given after the step's own options. `--oci` is the runner every subject takes, not an
+#: option of the image: it stays where it was written.
+IMAGE_AND_CLONE_FORMS = [
+    pytest.param(
+        "--image alpine:3.20",
+        "image",
+        ["alpine:3.20"],
+        [],
+        id="image",
+    ),
+    pytest.param(
+        "--image=alpine:3.20",
+        "image",
+        ["alpine:3.20"],
+        [],
+        id="image-equals",
+    ),
+    pytest.param(
+        "--image-archive images/app.tar",
+        "image",
+        [],
+        ["--archive", "images/app.tar"],
+        id="image-archive",
+    ),
+    pytest.param(
+        "--image-layout=images/app-layout",
+        "image",
+        [],
+        ["--layout", "images/app-layout"],
+        id="image-layout-equals",
+    ),
+    pytest.param(
+        "--image alpine:3.20 --image-layout images/app-layout",
+        "image",
+        ["alpine:3.20"],
+        ["--layout", "images/app-layout"],
+        id="image-and-layout",
+    ),
+    pytest.param(
+        "--oci podman --image alpine:3.20",
+        "image",
+        ["alpine:3.20"],
+        ["--oci", "podman"],
+        id="the-runner-stays",
+    ),
+    pytest.param(
+        f"--source-git {CLONE_URL}",
+        "git",
+        [CLONE_URL],
+        [],
+        id="clone",
+    ),
+    pytest.param(
+        f"--source-git={CLONE_URL} --git-ref main --git-depth 1",
+        "git",
+        [CLONE_URL],
+        ["--git-ref", "main", "--git-depth", "1"],
+        id="clone-ref-and-depth",
+    ),
+    pytest.param(
+        f"--git-depth 1 --source-git {CLONE_URL}",
+        "git",
+        [CLONE_URL],
+        ["--git-depth", "1"],
+        id="depth-first",
+    ),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("ash_args, subject, operands, rest", IMAGE_AND_CLONE_FORMS)
+def test_an_image_or_a_clone_goes_to_the_subject_of_an_ash_that_has_it(
+    tmp_path, helps, ash_args, subject, operands, rest
+):
+    """Measured against a stand-in ASH that has the subjects, since this tree does not
+    yet: the step's routing is what these rows read, not the options of a subject that
+    does not exist here."""
+    ran = _run(
+        tmp_path, helps, RUN_ASH, "3.9", _args(ash_args), subjects=_wave_2_subjects()
+    )
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", subject, *operands, *OWN_OPTIONS, *rest]
+    ], _output(ran)
+    assert ran.probes == [FS_PROBE, _probe(subject)], ran.probes
+    assert _routed(subject) in ran.result.stderr, _output(ran)
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("ash_args, subject, operands, rest", IMAGE_AND_CLONE_FORMS)
+def test_the_image_or_clone_command_line_is_one_the_subject_of_this_tree_accepts(
+    tmp_path, helps, ash_args, subject, operands, rest
+):
+    """Measurable once this tree has the subject, and skipped until then: its own
+    ``ash scan image`` or ``ash scan git`` reads every option the step routed to it.
+    ``--help`` after them has the CLI parse the options and print the help without
+    reaching the engine, so nothing is scanned, and an option the subject lacks is a
+    usage error."""
+    if subject not in SCAN_SUBJECTS:
+        pytest.skip(f"this tree has no `ash scan {subject}` yet")
+    (call,) = _run(
+        tmp_path, helps, RUN_ASH, "3.9", _args(ash_args), subjects=_wave_2_subjects()
+    ).calls
+    argv = call[len(UVX_SCAN) :]
+
+    result = CliRunner().invoke(app, [*argv, "--help"], prog_name="ash")
+
+    assert argv[2 : 2 + len(operands)] == operands, argv
+    assert result.exit_code == 0, result.output
+
+
+#: What this tree's own answer, a usage error, keeps on `fs`: the subjects it lacks.
+IMAGE_AND_CLONE_ON_FS = [
+    pytest.param("--image alpine:3.20", "image", id="image"),
+    pytest.param("--image-archive images/app.tar", "image", id="image-archive"),
+    pytest.param("--image-layout images/app-layout", "image", id="image-layout"),
+    pytest.param(
+        f"--source-git {CLONE_URL} --git-ref main --git-depth 1",
+        "git",
+        id="clone",
+    ),
+    pytest.param("--git-ref main", "git", id="clone-ref-alone"),
+    pytest.param("--git-depth 1", "git", id="clone-depth-alone"),
+]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("ash_args, subject", IMAGE_AND_CLONE_ON_FS)
+def test_an_image_or_a_clone_stays_on_fs_when_this_tree_has_no_such_subject(
+    tmp_path, helps, ash_args, subject
+):
+    """The ASH here answers as this tree does, with the usage error it gives for a
+    subject it lacks, and the step reads that as a refusal. Skipped once this tree has
+    the subject: the rows above then measure the routing."""
+    if subject in SCAN_SUBJECTS:
+        pytest.skip(f"this tree has `ash scan {subject}`")
+
+    ran = _run(tmp_path, helps, RUN_ASH, "3.9", _args(ash_args))
+
+    assert ran.result.returncode == 0, _output(ran)
+    assert ran.calls == [
+        [*UVX_SCAN, "scan", "fs", ".", *OWN_OPTIONS, *ash_args.split()]
+    ], _output(ran)
+    assert ran.probes == [FS_PROBE, _probe(subject)], ran.probes
+    assert _kept(subject) in ran.result.stderr, _output(ran)
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    "ash_args, option",
+    [
+        pytest.param(f"--workspace {WORKSPACE_FILE}", "--workspace", id="workspace"),
+        pytest.param(f"--source-git {CLONE_URL}", "--source-git", id="clone"),
+    ],
+)
+def test_an_option_left_on_fs_is_refused_by_name_and_never_dropped(
+    tmp_path, helps, engine, monkeypatch, ash_args, option
+):
+    """The command line the step makes when its ASH has no subject for the option, run
+    through this tree's `ash scan fs`: it refuses the option, naming it, before the
+    engine runs. A step that dropped the option would scan the checkout instead."""
+    (call,) = _run(
+        tmp_path,
+        helps,
+        RUN_ASH,
+        "3.9",
+        _args(ash_args),
+        subjects=_refusing("not-a-subject"),
+    ).calls
+    monkeypatch.chdir(tmp_path)
+
+    result = _cli(call[len(UVX_SCAN) :])
+
+    assert result.exit_code != 0, result.output
+    assert option in result.output, result.output
+    assert engine.calls == [], engine.calls
+
+
+@pytest.mark.integration
+@posix_only
+def test_an_image_left_on_fs_is_refused_or_handed_to_the_engine_as_typed(
+    tmp_path, helps, engine, monkeypatch
+):
+    """`fs` of this tree takes `--image` and leaves it to the engine to refuse beside
+    the directory; once the image subject has taken it from `fs`, `fs` refuses it by
+    name. Either way it is not dropped."""
+    (call,) = _run(
+        tmp_path,
+        helps,
+        RUN_ASH,
+        "3.9",
+        _args("--image alpine:3.20"),
+        subjects=_refusing("not-a-subject"),
+    ).calls
+    monkeypatch.chdir(tmp_path)
+
+    result = _cli(call[len(UVX_SCAN) :])
+
+    if result.exit_code != 0:
+        assert "--image" in result.output, result.output
+    else:
+        (kwargs,) = engine.calls
+        assert kwargs.get("image"), kwargs

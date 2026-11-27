@@ -2224,9 +2224,88 @@ jobs:
           takes_value=""
           position=0
           # The directory to scan, and ash-args without the --source-dir that names
-          # it: see "The directory" below.
+          # it: see "The directory" below. source_dir_named is set when the caller
+          # named one.
           scan_dir="."
+          source_dir_named=""
           passed_args=()
+          # The same words as passed_args holds, for the ASH that has the subject of
+          # what ash-args names to scan: see "The subject" below. The options that
+          # name it are taken out or spelled as that subject spells them, what they
+          # name is in routed_operands in the order it was written, and
+          # routed_subject is that subject. routed_mixed is set when the caller names
+          # things of two subjects, which no scan has.
+          routed_args=()
+          routed_operands=()
+          routed_subject=""
+          routed_mixed=""
+          # Notes that an option names a subject, and whether it is the one an earlier
+          # option named.
+          note_subject() {
+            if [ -z "${routed_subject}" ]; then
+              routed_subject="$1"
+            elif [ "${routed_subject}" != "$1" ]; then
+              routed_mixed=yes
+            fi
+          }
+          # Files an option that names what to scan, or qualifies it, for the subject
+          # that scans it. $1 is the option and $2 its value. What names the thing
+          # becomes an operand of the subject, and what qualifies it follows, spelled
+          # as that subject spells it. The status is 1 for any other option, which the
+          # loop files as it was written. It is 1 as well for an empty value
+          # (--image=), and for an image reference or a clone URL that starts with a
+          # dash: as an operand of the subject it would be read as an option, where
+          # as the value of the option it is a word, so the option stays as written
+          # and ASH refuses the value. A workspace file that starts with a dash is
+          # given as ./NAME, as a directory is, so it is not read as an option.
+          route_option() {
+            [ -n "$2" ] || return 1
+            case "$1" in
+              --workspace)
+                note_subject workspace
+                case "$2" in
+                  -*) routed_operands+=("./$2") ;;
+                  *) routed_operands+=("$2") ;;
+                esac
+                ;;
+              --workspace-config)
+                note_subject workspace
+                routed_args+=("$1" "$2")
+                ;;
+              --image)
+                case "$2" in -*) return 1 ;; esac
+                note_subject image
+                routed_operands+=("$2")
+                ;;
+              --image-archive)
+                note_subject image
+                routed_args+=(--archive "$2")
+                ;;
+              --image-layout)
+                note_subject image
+                routed_args+=(--layout "$2")
+                ;;
+              --source-git)
+                case "$2" in -*) return 1 ;; esac
+                note_subject git
+                routed_operands+=("$2")
+                ;;
+              --git-ref | --git-depth)
+                note_subject git
+                routed_args+=("$1" "$2")
+                ;;
+              *) return 1 ;;
+            esac
+          }
+          # The end of what a failed probe printed: its last 20 lines, a line at a
+          # time through one_line, so no line of it is read as a workflow command.
+          show_probe_tail() {
+            local probe_tail probe_line
+            probe_tail="$(printf '%s\n' "$1" | tail -n 20)"
+            while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
+              printf '%s\n' "$(one_line "${probe_line}")" >&2
+            done <<<"${probe_tail}"
+          }
           for word in "${ASH_ARGS_LIST[@]}"; do
             position=$((position + 1))
             if [ -n "${takes_value}" ]; then
@@ -2234,6 +2313,11 @@ jobs:
                 scan_dir="${word}"
               else
                 passed_args+=("${word}")
+                if [ "${takes_value}" = "yes" ]; then
+                  routed_args+=("${word}")
+                else
+                  route_option "${takes_value}" "${word}" || routed_args+=("${takes_value}" "${word}")
+                fi
               fi
               takes_value=""
               continue
@@ -2245,15 +2329,21 @@ jobs:
                 ;;
               --source-dir=*)
                 scan_dir="${word#--source-dir=}"
+                source_dir_named=yes
                 continue
                 ;;
-              --*=*) ;;
+              --*=*)
+                route_option "${word%%=*}" "${word#*=}" || routed_args+=("${word}")
+                ;;
               --*)
                 if [[ " ${ASH_VALUE_OPTIONS} " == *" ${word} "* ]]; then
                   takes_value="${word}"
                   if [ "${word}" = "--source-dir" ]; then
+                    source_dir_named=yes
                     continue
                   fi
+                else
+                  routed_args+=("${word}")
                 fi
                 ;;
               -?*)
@@ -2265,6 +2355,7 @@ jobs:
                     break
                   fi
                 done
+                routed_args+=("${word}")
                 ;;
               *)
                 echo "::error::ash-args word $(one_line "${position}") is neither an option nor an option's value: an ASH older than 3.9 would read it as an ash subcommand and run that, or fail on it, without this workflow's options, and ASH 3.9 refuses it as a second directory. ash-args takes options of ash scan only."
@@ -2322,40 +2413,77 @@ jobs:
           # caller's --source-dir out of ash-args, and it is the directory on both
           # spellings. On the new one a name that starts with a dash is given as
           # ./NAME, the same directory, so it is not read as an option.
+          #
+          # The subject. `ash scan fs` scans the directory it is given, so it
+          # refuses what ash-args names to scan instead: --workspace, --image,
+          # --source-git, and the options that qualify them. An ASH that has the
+          # subject of that thing takes them on a command line of its own, with the
+          # workflow's options and the rest of ash-args: `ash scan workspace FILE`,
+          # `ash scan image REF` and `ash scan git URL`. So when ash-args names
+          # things of one subject, and no directory with --source-dir, this ASH is
+          # asked about that subject as it was asked about `fs`, and only an answer
+          # sends the options there: a help that names the subject does, and one that
+          # does not, or the usage error that refuses the subject, leaves ash-args
+          # on `ash scan fs` as it was written, where `fs` refuses what it has no
+          # option for and names it. A probe that fails any other way ends the step
+          # with status 70, as the first one does. An ASH that has no `fs` has none of
+          # these subjects either and is not asked. Things of two subjects are not
+          # routed: no scan has two, and the options stay as written for ASH to
+          # refuse. route_option above holds the words each subject reads. An ASH
+          # may have `fs` and `workspace` and not `image` or `git`; the probe says
+          # so, and --image stays on `ash scan fs` as written.
           fs_help_status=0
           fs_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || fs_help_status=$?
           case "${fs_help_status}:${fs_help}" in
             0:*"scan fs"*)
-              scan_has_subject=yes
+              scan_form=fs
               echo "ash: scanning with 'ash scan fs': its help names 'scan fs'" >&2
               ;;
             0:*)
-              scan_has_subject=no
+              scan_form=older
               echo "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name 'scan fs', as an ASH older than 3.9 answers" >&2
               ;;
             *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*)
-              scan_has_subject=no
+              scan_form=older
               echo "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does" >&2
               ;;
             *)
               echo "::error::Could not tell whether the ASH this workflow installs has 'ash scan fs': 'ash scan fs --help' exited $(one_line "${fs_help_status}") without saying it refused 'fs', so no spelling is chosen by guess. The end of its output follows." >&2
-              probe_tail="$(printf '%s\n' "${fs_help}" | tail -n 20)"
-              while IFS= read -r probe_line || [ -n "${probe_line}" ]; do
-                printf '%s\n' "$(one_line "${probe_line}")" >&2
-              done <<<"${probe_tail}"
+              show_probe_tail "${fs_help}"
               exit 70
               ;;
           esac
-          if [ "${scan_has_subject}" = yes ]; then
+          if [ "${scan_form}" = fs ] && [ -n "${routed_subject}" ] && [ -z "${routed_mixed}" ] && [ -z "${source_dir_named}" ]; then
+            subject_help_status=0
+            subject_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || subject_help_status=$?
+            case "${subject_help_status}:${subject_help}" in
+              0:*"scan ${routed_subject}"*)
+                scan_form=routed
+                echo "ash: scanning with 'ash scan $(one_line "${routed_subject}")': its help names 'scan $(one_line "${routed_subject}")'" >&2
+                ;;
+              0:*|*:*"is not a scan subject"*|*:*"unexpected extra argument"*"${routed_subject}"*|*:*"No such command"*"${routed_subject}"*)
+                echo "ash: scanning with 'ash scan fs' and ash-args as written: this ASH has no 'ash scan $(one_line "${routed_subject}")', as its answer to 'ash scan $(one_line "${routed_subject}") --help' shows" >&2
+                ;;
+              *)
+                echo "::error::Could not tell whether the ASH this workflow installs has 'ash scan $(one_line "${routed_subject}")': 'ash scan $(one_line "${routed_subject}") --help' exited $(one_line "${subject_help_status}") without saying it refused '$(one_line "${routed_subject}")', so no command is chosen by guess. The end of its output follows." >&2
+                show_probe_tail "${subject_help}"
+                exit 70
+                ;;
+            esac
+          fi
+          if [ "${scan_form}" = fs ]; then
             case "${scan_dir}" in
               -*) scan_path="./${scan_dir}" ;;
               *) scan_path="${scan_dir}" ;;
             esac
             uvx --reinstall --from "${ASH_UVX_SOURCE}" ash scan fs "${scan_path}" \
               --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${passed_args[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
-          else
+          elif [ "${scan_form}" = older ]; then
             uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
               --source-dir "${scan_dir}" --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} "${passed_args[@]}" ${betterleaks_args[@]+"${betterleaks_args[@]}"}
+          else
+            uvx --reinstall --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${routed_operands[@]+"${routed_operands[@]}"} \
+              --output-dir "${ASH_OUTPUT_DIR}" --no-progress "${FAIL_ON_FINDINGS_PARAM}" --build-target ci --mode "${ASH_MODE}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} ${VERBOSE:+"${VERBOSE}"} ${CHANGED_FILES_ONLY:+"${CHANGED_FILES_ONLY}" --base-ref "${BASE_REF}"} ${routed_args[@]+"${routed_args[@]}"} ${betterleaks_args[@]+"${betterleaks_args[@]}"}
           fi
 
       # Default branch only, after the scan, so what is saved is the database grype
