@@ -930,9 +930,12 @@ class TestEachJobGetsItsOwnProgram:
         assert ("buildx" in commands[0]) is caches
         assert ("--cache-from" in commands[0]) is caches
 
+    @pytest.mark.parametrize("build", [False, True])
     def test_the_leftover_record_names_the_run_engine(
-        self, distinct, commands, monkeypatch
+        self, build, distinct, commands, packaged, monkeypatch
     ):
+        # A call that builds and runs holds both programs; a record that took the build
+        # engine's would name the wrong one.
         distinct("nerdctl", "podman")
         recorded: List[List[str]] = []
         monkeypatch.setattr(
@@ -942,7 +945,13 @@ class TestEachJobGetsItsOwnProgram:
         )
         monkeypatch.setattr(rac, "discard_record", lambda record: None)
 
-        rac.run_ash_container(source_dir="src", output_dir="out", build=False, run=True)
+        rac.run_ash_container(
+            source_dir="src",
+            output_dir="out",
+            build=build,
+            run=True,
+            ash_revision_to_install="v3.7.0",
+        )
 
         assert recorded == [[f"{PROGRAMS}/podman"]]
 
