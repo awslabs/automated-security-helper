@@ -196,12 +196,12 @@ def runs(tmp_path_factory):
         for index in (0, 1):
             scan_argv = [
                 "scan",
+                "fs",
                 "--no-progress",
-                "--source-dir",
                 "src",
                 "--output-dir",
                 f"shard{index}",
-                "--scanners",
+                "--only-scanners",
                 "detect-secrets",
                 "--no-fail-on-incomplete-scanners",
                 "--no-fail-on-findings",

@@ -12,7 +12,7 @@ line for the reporters that contact AWS: with each one disabled in the
 configuration, naming it through either list must not reach its dependency check
 (which calls AWS), its ``report()`` or the disk.
 
-Driven end to end through ``ash scan --use-existing --phases report`` with the AWS
+Driven end to end through ``ash scan fs --use-existing --phases report`` with the AWS
 plugin module loaded, so the CLI parsing, the config resolution and the real
 report phase are all on the path. Every AWS reporter's dependency check and
 ``report`` are replaced by tripwires, and ``boto3`` session and client creation
@@ -116,7 +116,7 @@ def _scan_report_phase(tmp_path: Path, extra: List[str]):
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(output),

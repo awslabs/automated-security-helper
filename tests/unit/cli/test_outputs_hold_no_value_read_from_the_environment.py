@@ -235,13 +235,13 @@ def run(tmp_path_factory):
     def scan(output: Path, *more: str) -> subprocess.CompletedProcess:
         return ash(
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(output),
             "--config",
             str(config),
-            "--scanners",
+            "--only-scanners",
             "detect-secrets",
             "--output-formats",
             _formats(),

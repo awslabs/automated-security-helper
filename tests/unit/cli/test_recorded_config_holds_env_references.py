@@ -98,12 +98,12 @@ def _log_files(directory: Path) -> List[Path]:
 def _scan_args(debug: bool) -> List[str]:
     return [
         "scan",
+        "fs",
         "--no-progress",
-        "--source-dir",
         "src",
         "--output-dir",
         "shard",
-        "--scanners",
+        "--only-scanners",
         "detect-secrets",
         "--no-fail-on-incomplete-scanners",
         "--shard-index",
