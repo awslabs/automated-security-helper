@@ -10,7 +10,8 @@ The cases below drive one path each through the real executor with a scripted
 scanner, and the scan phase through its own recorders:
 
 - the failure handler, in the order its headline reads the run's recorded facts: a
-  timeout, a tool that never started, an output ASH could not record, the reason a
+  timeout, a tool that never started, an output ASH could not record (when the run
+  kept no flag: a kept flag leads it), the reason a
   raise site recorded (on the error or on what it was raised from), the flag of a
   run that did not finish, an exit code the scanner does not accept, a plugin that
   called ``sys.exit``; and nothing, when nothing says;
@@ -37,7 +38,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from automated_security_helper.base.plugin_base import PluginBase
+from automated_security_helper.base.plugin_base import PluginBase, _folded_exit_code
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -61,6 +62,7 @@ from automated_security_helper.core.phases.scanner_executor import (
     ResultsProcessingFailed,
     ScannerExecutor,
 )
+from automated_security_helper.core.unified_metrics import tool_exit_code
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import (
     ScannerValidationManager,
@@ -141,6 +143,39 @@ class _Wrapping(_Scripted):
             )
         except ScannerError:
             raise ScannerError("the wrapper's own text, which has no reason")
+
+
+class _Chained(_Scripted):
+    """A scanner that re-raises what its tool step raised, chained as ``mode`` says:
+    ``implicit`` (raised inside the handler, so the first error is the context),
+    ``explicit`` (``raise ... from`` the first error) or ``suppressed``
+    (``raise ... from None``)."""
+
+    mode = "implicit"
+
+    def scan(
+        self,
+        target,
+        target_type=None,
+        global_ignore_paths=None,
+        config=None,
+        *args,
+        **kwargs,
+    ):
+        try:
+            raise ScannerError(
+                "the tool step failed",
+                reason=FailureReason(
+                    ReasonCode.RESULTS_UNREADABLE,
+                    "its results file is not SARIF ASH can read",
+                ),
+            )
+        except ScannerError as caught:
+            if self.mode == "explicit":
+                raise ScannerError("the wrapper's own text") from caught
+            if self.mode == "suppressed":
+                raise ScannerError("the wrapper's own text") from None
+            raise ScannerError("the wrapper's own text")
 
 
 def _context(tmp_path) -> PluginContext:
@@ -283,6 +318,21 @@ def _refuse_sandbox(monkeypatch, refusal, grades_missing):
     )
 
 
+_UNFINISHED_RUNS = [
+    ("cancelled", ReasonCode.CANCELLED, DEFAULT_SENTENCES[ReasonCode.CANCELLED]),
+    (
+        "result_rejected",
+        ReasonCode.RESULT_REJECTED,
+        DEFAULT_SENTENCES[ReasonCode.RESULT_REJECTED],
+    ),
+    (
+        "signaled",
+        ReasonCode.DID_NOT_FINISH,
+        "its tool was ended by a signal ASH did not send",
+    ),
+]
+
+
 class TestAFailureTheHandlerCatches:
     def test_a_recorded_timeout_is_the_reason(self, tmp_path):
         context = _context(tmp_path)
@@ -380,34 +430,18 @@ class TestAFailureTheHandlerCatches:
             DEFAULT_SENTENCES[ReasonCode.OUTPUT_NOT_RECORDED],
         )
 
-    @pytest.mark.parametrize(
-        "flag, code, sentence",
-        [
-            (
-                "cancelled",
-                ReasonCode.CANCELLED,
-                DEFAULT_SENTENCES[ReasonCode.CANCELLED],
-            ),
-            (
-                "result_rejected",
-                ReasonCode.RESULT_REJECTED,
-                DEFAULT_SENTENCES[ReasonCode.RESULT_REJECTED],
-            ),
-            (
-                "signaled",
-                ReasonCode.DID_NOT_FINISH,
-                "its tool was ended by a signal ASH did not send",
-            ),
-        ],
-    )
-    def test_a_run_that_did_not_finish_says_how_it_ended(
+    @pytest.mark.parametrize("flag, code, sentence", _UNFINISHED_RUNS)
+    def test_a_scan_that_raised_after_its_run_did_not_finish_says_how_it_ended(
         self, tmp_path, flag, code, sentence
     ):
-        """A flag is led over the record failure a killed tool commonly adds."""
+        """The raising variant of the case in ``TestWhatTheRowRecordsAfterTheScan``:
+        a kept flag and a post-run record failure are both set and ``scan()`` raises
+        an error that carries no reason. The flag leads, so the row says what the
+        returning variant says."""
         context = _context(tmp_path)
         scanner = _scanner(
             context,
-            _sarif(),
+            ScannerError("the results file does not exist"),
             after_scan=_records(
                 _scan_kept_flag=(flag, "the run was ended"),
                 _scan_post_run_error="the output file could not be written",
@@ -447,6 +481,37 @@ class TestAFailureTheHandlerCatches:
             ReasonCode.RESULTS_UNREADABLE,
             "its results file is not SARIF ASH can read",
         )
+
+    @pytest.mark.parametrize("mode", ["implicit", "explicit"])
+    def test_a_reason_on_a_chained_error_is_found_whatever_the_chaining(
+        self, tmp_path, mode
+    ):
+        context = _context(tmp_path)
+        scanner = _scanner(context, cls=_Chained)
+        scanner.mode = mode
+
+        row = _one_row(context, scanner)
+
+        _assert_reason(
+            row,
+            ReasonCode.RESULTS_UNREADABLE,
+            "its results file is not SARIF ASH can read",
+        )
+
+    def test_a_reason_on_a_context_that_from_none_suppressed_is_not_found(
+        self, tmp_path
+    ):
+        """``reason_of`` does not follow a context the raise suppressed
+        (``core/exceptions.py``), so the row has no reason and the report reads the
+        error's first sentence, as for an error recorded before reasons existed."""
+        context = _context(tmp_path)
+        scanner = _scanner(context, cls=_Chained)
+        scanner.mode = "suppressed"
+
+        row = _one_row(context, scanner)
+
+        assert row.status == ScannerStatus.ERROR, (row.status, row.errors)
+        assert _why(row) == (None, None), _why(row)
 
     def test_a_recorded_sentence_is_redacted_with_the_runs_values(
         self, tmp_path, monkeypatch
@@ -791,6 +856,55 @@ class TestAGradingStepThatRecordedItsOwnReason:
 
 
 class TestWhatTheRowRecordsAfterTheScan:
+    @pytest.mark.parametrize("flag, code, sentence", _UNFINISHED_RUNS)
+    def test_a_run_that_did_not_finish_says_how_it_ended(
+        self, tmp_path, flag, code, sentence
+    ):
+        """``scan()`` returns, and the run kept a flag and recorded a post-run
+        failure: the flag is led over the record failure a killed tool commonly adds
+        (``_failure_reason`` reads the kept flag before the record failure only when a
+        flag is kept)."""
+        context = _context(tmp_path)
+        scanner = _scanner(
+            context,
+            _sarif(),
+            after_scan=_records(
+                _scan_kept_flag=(flag, "the run was ended"),
+                _scan_post_run_error="the output file could not be written",
+            ),
+        )
+
+        row = _one_row(context, scanner)
+
+        _assert_reason(row, code, sentence)
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            pytest.param({"status": "failed"}, id="a failed result"),
+            pytest.param(
+                {"status": "an odd status the plugin made up"},
+                id="an ungradable result",
+            ),
+        ],
+    )
+    def test_a_timeout_is_the_cause_of_a_result_that_failed_or_cannot_be_graded(
+        self, tmp_path, result
+    ):
+        """The returned path: the scan returned a result the executor would refuse
+        to grade, and the run also recorded that its tool timed out. The timeout is
+        the cause, so the row says so, not that the result was bad."""
+        context = _context(tmp_path)
+        scanner = _scanner(
+            context, result, after_scan=_records(_scan_timed_out_after=7.0)
+        )
+
+        row = _one_row(context, scanner)
+
+        _assert_reason(
+            row, ReasonCode.TIMED_OUT, "it timed out after '7' s and was killed"
+        )
+
     def test_an_absent_content_database_is_the_reason(self, tmp_path, monkeypatch):
         record = SimpleNamespace(
             absent=True, enforced=False, name="vuln-db", message=lambda: "db absent"
@@ -1082,6 +1196,18 @@ class TestAScannersWholeRunFailing:
             executor.run_sequential(AshAggregatedResults())
 
         assert len(seen) >= 6, [(row.scanner_name, row.target_type) for row in seen]
+        # Both scanners, and each of their targets, filed their own rows: the count
+        # is per (scanner, target), so one scanner's rows cannot stand for the other's.
+        per_target: dict = {}
+        for row in seen:
+            key = (row.scanner_name, getattr(row.target_type, "value", row.target_type))
+            per_target[key] = per_target.get(key, 0) + 1
+        assert set(per_target) == {
+            ("scripted", "source"),
+            ("scripted", "converted"),
+            ("other", "source"),
+        }, per_target
+        assert all(count >= 2 for count in per_target.values()), per_target
         for row in seen:
             assert row.status == ScannerStatus.ERROR, (row.scanner_name, row.status)
             assert _why(row) == (
@@ -1494,6 +1620,160 @@ class TestAPreviousTargetsExitCodeIsNotThisTargets:
             [_the_tool_exits_with(2, _sarif()), _fails_before_its_tool_starts],
         )
 
+        assert second.error_reason_code == ReasonCode.EXIT_CODE_REJECTED, _why(second)
+
+
+def _the_tool_runs_and_exits_with(*codes, then):
+    """A step: the tool runs once per code, each folded into the plugin's
+    ``exit_code`` as ``_process_command_response`` folds a run's code (the largest
+    wins), and then *then* returns or raises."""
+
+    def step(plugin):
+        for code in codes:
+            plugin.exit_code = _folded_exit_code(plugin, plugin.exit_code, code)
+        if isinstance(then, BaseException):
+            raise then
+        return then
+
+    return step
+
+
+def _scanner_level_code(rows):
+    """The exit code the scanner's consolidated row takes from these target rows:
+    what ``tool_exit_code`` reads from the per-target reports the rows become."""
+    model = AshAggregatedResults()
+    model.additional_reports = {
+        "scripted": {
+            f"target-{index}": {
+                "scanner_name": "scripted",
+                "status": row.status,
+                "targets_attempted": 1,
+                "exit_code": row.exit_code,
+            }
+            for index, row in enumerate(rows)
+        }
+    }
+    return tool_exit_code(model, "scripted")
+
+
+class TestTheScannerLevelDecisionKeepsItsAnswerAfterTheReset:
+    """The readers of ``exit_code`` after the per-target loop.
+
+    The plugin's code is read per target, into that target's row (the failure
+    reason, ``container.exit_code``); the scanner's consolidated row then takes the
+    largest code of its ERROR targets, else of all targets (``tool_exit_code``), from
+    those rows. No reader takes the plugin's own code after the loop, so the reset
+    changes the scanner-level answer only where a target would have carried another
+    target's code: the cases below pin that it does not move it otherwise.
+    """
+
+    def _rows(self, context, steps):
+        scanner = _scanner(context, cls=_TargetByTarget)
+        scanner.steps = list(steps)
+        rows = _executor(context)._execute_scanner(
+            "scripted", scanner, _two_targets(context)
+        )
+        assert len(rows) == 2, rows
+        return rows
+
+    def test_target_one_rejected_and_target_two_clean_the_scanner_still_reads_the_reject(
+        self, tmp_path
+    ):
+        context = _context(tmp_path)
+
+        rows = self._rows(
+            context,
+            [
+                _the_tool_runs_and_exits_with(
+                    2, then=ScannerError("the results file is missing")
+                ),
+                _the_tool_runs_and_exits_with(0, then=_sarif()),
+            ],
+        )
+
+        first, second = rows
+        assert first.error_reason_code == ReasonCode.EXIT_CODE_REJECTED, _why(first)
+        # The second target's own tool exited 0: not the first target's 2, which
+        # folding against it would have kept (the largest code wins).
+        assert second.status != ScannerStatus.ERROR, (second.status, _why(second))
+        assert second.exit_code == 0, second.exit_code
+        assert _scanner_level_code(rows) == 2
+
+    def test_control_without_the_reset_the_second_target_carries_the_first_ones_code(
+        self, tmp_path, monkeypatch
+    ):
+        context = _context(tmp_path)
+        monkeypatch.setattr(PluginBase, "clear_scan_exit_code", lambda self: None)
+
+        _, second = self._rows(
+            context,
+            [
+                _the_tool_runs_and_exits_with(
+                    2, then=ScannerError("the results file is missing")
+                ),
+                _the_tool_runs_and_exits_with(0, then=_sarif()),
+            ],
+        )
+
+        assert second.exit_code == 2, second.exit_code
+
+    def test_both_targets_rejecting_the_scanner_reads_the_larger_code(self, tmp_path):
+        context = _context(tmp_path)
+
+        rows = self._rows(
+            context,
+            [
+                _the_tool_runs_and_exits_with(
+                    2, then=ScannerError("the results file is missing")
+                ),
+                _the_tool_runs_and_exits_with(
+                    3, then=ScannerError("the results file is missing")
+                ),
+            ],
+        )
+
+        assert [row.exit_code for row in rows] == [2, 3]
+        assert _scanner_level_code(rows) == 3
+
+    def test_a_target_that_never_started_its_tool_adds_no_code_of_its_own(
+        self, tmp_path
+    ):
+        context = _context(tmp_path)
+
+        rows = self._rows(
+            context,
+            [
+                _the_tool_runs_and_exits_with(
+                    2, then=ScannerError("the results file is missing")
+                ),
+                _fails_before_its_tool_starts,
+            ],
+        )
+
+        # The scanner-level code is the first target's, as it was before the reset;
+        # the second target's own row is not charged with it.
+        assert _scanner_level_code(rows) == 2
+        assert rows[1].exit_code != 2, rows[1].exit_code
+
+    def test_the_largest_code_of_one_targets_runs_is_kept_inside_that_target(
+        self, tmp_path
+    ):
+        """The fold inside one target is not reset: it starts from the reset value
+        and keeps the largest of the target's own runs, as for a scanner whose
+        ``scan()`` runs its tool several times for one target."""
+        context = _context(tmp_path)
+
+        _, second = self._rows(
+            context,
+            [
+                _the_tool_runs_and_exits_with(0, then=_sarif()),
+                _the_tool_runs_and_exits_with(
+                    3, 0, then=ScannerError("the results file is missing")
+                ),
+            ],
+        )
+
+        assert second.exit_code == 3, second.exit_code
         assert second.error_reason_code == ReasonCode.EXIT_CODE_REJECTED, _why(second)
 
 
