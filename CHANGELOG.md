@@ -252,12 +252,16 @@
   guarddog's `ecosystems` and trivy-repo's `scanners` behave the same way. `=` still
   replaces the list. For a plugin from a module outside ASH, whose default ASH cannot
   read when it applies the overrides, `+=` still starts the list from the appended
-  items, and ASH logs one warning that names the key, once in each run: when it
-  applies the overrides to the configuration a command runs with (in `ash merge`, the
-  lowest-indexed shard's record), and when it builds a reporter that sends findings off
-  the host from such a list, since that reporter takes its section from the operator's
-  configuration and the overrides. A list that the config file already sets is
-  extended with no warning.
+  items, and ASH logs one warning that names the key, once in each run. It is logged
+  when ASH applies the overrides to the configuration a command runs with (in
+  `ash merge`, the lowest-indexed shard's record), where a list that the config file
+  already sets is extended with no warning, and when it builds a reporter that sends
+  findings off the host from such a list, even one the config file sets: a scan builds
+  that reporter from the operator's configuration and the overrides, not from a
+  config file the scanned repository could write, and `ash report` and `ash merge`
+  build it from ASH's defaults and the overrides, and a config file they read sets
+  none of its section (for a reporter that declares destination options, none of
+  those options and not its `enabled`).
 - **`./ash` keeps the container's stdin open for the commands that read it, not for
   whole command groups.** `./ash results inspect findings` now gets its keyboard
   input, as `./ash inspect findings` does. `config wizard`, `inspect findings`,

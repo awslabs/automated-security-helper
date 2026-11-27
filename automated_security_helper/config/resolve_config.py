@@ -542,15 +542,17 @@ def _row_of_the_shipped_plugin_reading(
 #: same process (the MCP server runs every scan in one) names it again, as the path
 #: refusals do (``path_trust._WARNED``); None is the scope outside every run. Only
 #: the application that builds a command's own configuration asks for the warning
-#: (``apply_config_overrides(..., warn_unread_appends=True)``): a scan's,
-#: ``ash report``'s, and the record of the lowest-indexed shard in ``ash merge``.
+#: (``apply_config_overrides(..., warn_unread_appends=True)``): the one
+#: ``build_config`` makes when a command resolves its configuration (a scan's,
+#: ``ash report``'s), the record of the lowest-indexed shard in ``ash merge``, and
+#: the one ``ash config update --set`` makes for the file it writes.
 #: The same overrides are applied again to other bases (the trusted reporter view,
 #: the scanner views, the other shards' records, the configuration the off-host
 #: reporters of ``ash merge`` and ``ash report`` run with, the MCP workspace gate),
 #: where a key the real document holds can be missing, and those applications never
-#: warn. A reporter that sends findings off the host runs with such a base's section,
-#: so ``reporter_section`` names a list that started from the appended items there,
-#: through this set (``warn_of_appends_an_off_host_reporter_runs_with``).
+#: warn. A reporter that sends findings off the host is built from such a base's
+#: section, so ``reporter_section`` names a list that started from the appended
+#: items there, through this set (``warn_of_appends_an_off_host_reporter_runs_with``).
 _APPEND_TO_UNREAD_SECTION_WARNED: Set[Tuple[Optional[str], str]] = set()
 _APPEND_TO_UNREAD_SECTION_LOCK = threading.Lock()
 #: Past this many (run, key) entries the set starts over, so a long-lived process
@@ -621,18 +623,36 @@ def _value_at(section: Any, path: Sequence[str]) -> Any:
     return value
 
 
+#: Where the section of a reporter that sends findings off the host came from, as
+#: the warning below says it; ``warn_of_appends_an_off_host_reporter_runs_with``
+#: chooses one from what the configuration records.
+_BUILT_FROM_THE_OPERATOR_VIEW = (
+    "it is built from the operator's configuration and the overrides, not from a "
+    "config file the scanned repository could write"
+)
+_BUILT_FROM_ASH_DEFAULTS = (
+    "ash report and ash merge take its section from ASH's defaults and the "
+    "overrides (when it declares destination options, only those options and "
+    "enabled), not from the config file they read"
+)
+_BUILT_FROM_ITS_OWN_CONFIGURATION = (
+    "it is built from the operator's configuration and the overrides (in ash "
+    "merge, from ASH's defaults and the overrides)"
+)
+
+
 def _warn_that_an_off_host_reporter_runs_with_the_appended_items(
-    section: str, logged_path: str
+    section: str, logged_path: str, built_from: str
 ) -> None:
     """Say, once per key in each run, that a reporter that sends findings off the
-    host runs with a list a ``+=`` started from its appended items, with no default
-    added. *section* and *logged_path* are redacted, and the text never names a
-    value."""
+    host is built from a list a ``+=`` started from its appended items, with no
+    default added. *built_from* says where its section came from (one of the
+    ``_BUILT_FROM_*`` clauses). *section* and *logged_path* are redacted, and the
+    text never names a value."""
     if not _first_naming_in_this_run(logged_path):
         return
     ASH_LOGGER.warning(
-        f"{section} sends findings off the host, so it runs with its section from "
-        "the operator's configuration and the overrides, and there "
+        f"{section} sends findings off the host, so {built_from}, and there "
         f"'{logged_path}+=' starts the list from the appended items: the plugin's "
         "default for that option is not added. Set the whole list with "
         f"'{logged_path}=[...]'.",
@@ -652,9 +672,23 @@ def warn_of_appends_an_off_host_reporter_runs_with(
     reporter's settings from the defaults and the overrides (``ash report``,
     ``ash merge``), the confinement copied sections from the trusted base
     (``config._trusted_reporter_base``), so that base's record counts too, for a
-    list the reporter's section holds as the base does."""
+    list the reporter's section holds as the base does.
+
+    The warning says where the section came from: ASH's defaults and the overrides
+    when the command took such a reporter's settings from them
+    (``_reporters_from_overrides``: ``ash report`` and ``ash merge`` given a config
+    file), the operator's configuration and the overrides when *operator* is the
+    view, and otherwise the configuration's own, which ``ash merge`` given no
+    ``--config`` builds from ASH's defaults and the overrides."""
+    from_overrides = getattr(config, "_reporters_from_overrides", False) is True
+    if from_overrides:
+        built_from = _BUILT_FROM_ASH_DEFAULTS
+    elif operator is not None:
+        built_from = _BUILT_FROM_THE_OPERATOR_VIEW
+    else:
+        built_from = _BUILT_FROM_ITS_OWN_CONFIGURATION
     sources = [config if operator is None else operator]
-    if getattr(config, "_reporters_from_overrides", False) is True:
+    if from_overrides:
         sources.append(getattr(config, "_trusted_reporter_base", None))
     for index, source in enumerate(sources):
         if not isinstance(source, AshConfig):
@@ -676,7 +710,7 @@ def warn_of_appends_an_off_host_reporter_runs_with(
             started = _value_at(held, path[2:])
             if isinstance(started, list) and started == _value_at(section, path[2:]):
                 _warn_that_an_off_host_reporter_runs_with_the_appended_items(
-                    logged_section, logged_path
+                    logged_section, logged_path, built_from
                 )
 
 
@@ -801,7 +835,7 @@ def _apply_config_override(
         # the operator's own application extends a list the file wrote with no
         # word, and the replay onto a base without the section would say that the
         # list starts from the items, which the command's own configuration does
-        # not do. A reporter that sends findings off the host does run with such a
+        # not do. A reporter that sends findings off the host is built from such a
         # base's section, so ``reporter_section`` names the list when it gives that
         # reporter its section. A typed section holds every default already, and an
         # override of a section as a whole has no option to read one for, so both
@@ -1031,8 +1065,8 @@ def apply_config_overrides(
             would name a list the command's own configuration extends. With the
             flag or without it, the application records on the model it returns the
             lists it started that way (``_lists_started_from_appended_items``), and
-            ``reporter_section`` names one when a reporter that sends findings off
-            the host runs with it.
+            ``reporter_section`` names one when the section it gives a reporter that
+            sends findings off the host holds it.
 
     Returns:
         The modified AshConfig object
@@ -1442,7 +1476,7 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
         # overrides onto other bases (resolve_config's trusted views, the off-host
         # reporters' configuration of ``ash merge`` and ``ash report``) do not, and
         # reporter_section names such a list where a reporter that sends findings
-        # off the host runs with one.
+        # off the host is built from one.
         config = apply_config_overrides(
             config, config_overrides, warn_unread_appends=True
         )

@@ -2735,10 +2735,13 @@ class AshConfig(RedactedSection):
     # The list options a ``+=`` override started from its appended items in a
     # section no plugin ASH ships reads, so with no default added, set by
     # resolve_config.apply_config_overrides: each as (the keys the append landed
-    # on, the key as logged, the section as logged), redacted. A model rebuilt
-    # from this one, a copy of it and a later application of overrides to it keep
-    # them. reporter_section reads them to name such a list when a reporter that
-    # sends findings off the host runs with it. Nothing records or serializes it.
+    # on, the key as logged, the section as logged), redacted. The model
+    # apply_config_overrides rebuilds from this one and a copy of it keep them; a
+    # model validated from a dump does not. A later application of overrides keeps
+    # them too, except an entry that one of its replacing overrides lands on or
+    # above. reporter_section reads them to name such a list when it gives a
+    # reporter that sends findings off the host its section. Nothing records or
+    # serializes it.
     _lists_started_from_appended_items: Tuple[Tuple[Tuple[str, ...], str, str], ...] = (
         PrivateAttr(default=())
     )
