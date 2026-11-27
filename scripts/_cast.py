@@ -418,10 +418,10 @@ PLAYBACK_MODES = ("once", "loop")
 MIN_COLS, MAX_COLS = 20, 300
 MIN_ROWS, MAX_ROWS = 5, 100
 MAX_CHARS_PER_SECOND = 1000
-#: The slowest typing a storyboard may ask for. A scene lasts a minute at most, so no
-#: command is typed this slowly; the floor keeps the time to type one a number the
-#: arithmetic can hold (at 1e-320 characters a second it is infinite, and rounding it
-#: raised OverflowError).
+#: The slowest typing a storyboard may ask for. The floor keeps the time to type a
+#: command a number the arithmetic can hold: at 1e-320 characters a second it is
+#: infinite, and rounding it raised OverflowError. It is not a claim about realistic
+#: typing; at this rate a two-character command takes 20 s.
 MIN_CHARS_PER_SECOND = 0.1
 #: A time in a storyboard is refused above this many seconds, before any arithmetic.
 MAX_SECONDS = 3600
@@ -723,16 +723,12 @@ def _parse_typing(raw: object, source: str) -> TypingPolicy:
     where = f"{source}: typing"
     data = _mapping(raw, where, _TYPING_KEYS, _TYPING_KEYS)
     rate = data["chars_per_second"]
-    if not _is_number(rate) or not 0 < rate <= MAX_CHARS_PER_SECOND:
+    in_range = _is_number(rate) and MIN_CHARS_PER_SECOND <= rate <= MAX_CHARS_PER_SECOND
+    if not in_range:
         _fail(
             where,
-            "chars_per_second must be greater than 0 and at most "
+            f"chars_per_second must be at least {MIN_CHARS_PER_SECOND} and at most "
             f"{MAX_CHARS_PER_SECOND}, not {rate!r}",
-        )
-    if rate < MIN_CHARS_PER_SECOND:
-        _fail(
-            where,
-            f"chars_per_second must be at least {MIN_CHARS_PER_SECOND}, not {rate!r}",
         )
     lead_in = _seconds(data["lead_in_s"], where, "lead_in_s", positive=False)
     return TypingPolicy(chars_per_second=rate, lead_in_ms=lead_in)
