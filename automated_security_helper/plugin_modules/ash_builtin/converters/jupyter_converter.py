@@ -763,6 +763,10 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                 # without --quiet a uv failure behind an "Installed 1 package"
                 # line reads as nbconvert's.
                 quiet=True,
+                # With no scan active, the converter's own directories are the
+                # roots a uv path variable is judged against, since the cwd it
+                # passes is a temporary directory.
+                tree_roots=(self.context.source_dir, self.context.output_dir),
             )
 
             from automated_security_helper.utils.subprocess_utils import (

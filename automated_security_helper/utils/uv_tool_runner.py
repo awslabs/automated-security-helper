@@ -105,10 +105,48 @@ UV_NO_CONFIG = "--no-config"
 # setting) loads no ``.env`` from the scanned tree into the tool's environment.
 UV_NO_ENV_FILE = "--no-env-file"
 
-# The variables through which uv is sent to a file by name. A value that is relative,
-# or that lies inside the scanned or the output directory, makes the scanned tree
-# supply the file; uv reads ``UV_CONFIG_FILE`` even ahead of ``--no-config``.
-_UV_FILE_VARIABLES = ("UV_CONFIG_FILE", "UV_ENV_FILE")
+# Every uv variable that takes a path, and how uv reads its value. uv resolves a
+# relative path against the directory it starts in, which for a scanner is the scanned
+# tree, and it does not expand a leading ``~``. So the tree can send uv to a file or a
+# directory by name through any of these, and ``without_tree_uv_files`` drops one whose
+# value names such a path. uv reads ``UV_CONFIG_FILE`` even ahead of ``--no-config``.
+#
+# The names are the ``[env: ...]`` ones that ``uv help tool run`` and ``uv help tool
+# install`` show for the options that take a file or a directory (uv 0.13.5). How uv
+# splits each value was measured with ``uv tool run --show-settings``. Each name maps to
+# how its value is split (one entry, or a list split at whitespace or at commas) and to
+# whether an entry may start with an index name, as in ``corp=https://host/simple``.
+#
+# Four directory variables are left out: ``UV_CACHE_DIR``, ``UV_TOOL_DIR``,
+# ``UV_TOOL_BIN_DIR`` and ``UV_PYTHON_INSTALL_DIR``. ASH resolves them itself, in the
+# sandbox's mounts and in ``_uv_tools_dir``, so dropping one from the child alone would
+# split ASH from uv. ``UV_PYTHON`` is left out too: it names an interpreter or a version
+# request, and ``plugin_base`` judges it on the scan route.
+_ONE_ENTRY = "one entry"
+_AT_WHITESPACE = "at whitespace"
+_AT_COMMAS = "at commas"
+
+_UV_PATH_VARIABLES: Dict[str, Tuple[str, bool]] = {
+    "UV_CONFIG_FILE": (_ONE_ENTRY, False),
+    "UV_PROJECT": (_ONE_ENTRY, False),
+    "UV_WORKING_DIR": (_ONE_ENTRY, False),
+    "UV_ENV_FILE": (_AT_WHITESPACE, False),
+    "UV_CONSTRAINT": (_AT_WHITESPACE, False),
+    "UV_BUILD_CONSTRAINT": (_AT_WHITESPACE, False),
+    "UV_OVERRIDE": (_AT_WHITESPACE, False),
+    "UV_EXCLUDE": (_AT_WHITESPACE, False),
+    "UV_INDEX": (_AT_WHITESPACE, True),
+    "UV_EXTRA_INDEX_URL": (_AT_WHITESPACE, False),
+    "UV_DEFAULT_INDEX": (_ONE_ENTRY, True),
+    "UV_INDEX_URL": (_ONE_ENTRY, False),
+    "UV_FIND_LINKS": (_AT_COMMAS, False),
+}
+
+# An entry that starts with a URL scheme of two characters or more followed by ``://``
+# is a URL; a drive letter such as ``C:`` is one character, so it is no scheme. An
+# entry of an index variable may start with an index name followed by ``=``.
+_URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]+://")
+_INDEX_NAME = re.compile(r"^[A-Za-z0-9._-]+=")
 
 
 def with_no_env_file(command: List[str]) -> List[str]:
@@ -127,51 +165,126 @@ def with_no_env_file(command: List[str]) -> List[str]:
     return [*words[:3], UV_NO_ENV_FILE, *words[3:]]
 
 
-def _names_a_tree_file(value: str, roots: Tuple[os.PathLike, ...]) -> bool:
+def _file_url_path(url: str) -> Optional[str]:
+    """The local path a URL names: a ``file`` URL's, and none for any other URL.
+
+    A ``file`` URL with a host other than empty or ``localhost`` names a path on that
+    host, which comes back as ``//host/path``. A URL that cannot be read comes back as
+    written, which reads as a relative path, so it is judged the tree's.
+    """
+    # Imported here, not at module scope: urllib.request pulls in the HTTP client,
+    # and a run with no URL in a uv path variable never needs it.
+    import urllib.parse
+    import urllib.request
+
+    try:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "file":
+            return None
+        path = urllib.request.url2pathname(parts.path)
+    except (ValueError, OSError):
+        return url
+    if parts.netloc.lower() not in ("", "localhost"):
+        return f"//{parts.netloc}{path}"
+    return path
+
+
+def _uv_value_paths(name: str, value: str) -> List[str]:
+    """The local paths ``value`` names, read as uv reads the value of ``name``.
+
+    The value is split as ``_UV_PATH_VARIABLES`` says. An entry is not stripped, as uv
+    does not strip it: a leading space is part of the path. An empty entry names
+    nothing. An entry of an index variable loses a leading ``name=``. An entry that
+    starts with a URL scheme is a URL (``_file_url_path``); every other entry is a
+    path, as written.
+    """
+    splitting, carries_name = _UV_PATH_VARIABLES[name]
+    if splitting == _AT_WHITESPACE:
+        entries = value.split()
+    elif splitting == _AT_COMMAS:
+        entries = value.split(",")
+    else:
+        entries = [value]
+    paths: List[str] = []
+    for entry in entries:
+        location = entry
+        if carries_name:
+            index_name = _INDEX_NAME.match(entry)
+            if index_name is not None:
+                location = entry[index_name.end() :]
+        if _URL_SCHEME.match(location):
+            location = _file_url_path(location) or ""
+        if location:
+            paths.append(location)
+    return paths
+
+
+def _names_a_tree_path(
+    value: str, roots: Iterable[Union[str, "os.PathLike[str]"]]
+) -> bool:
+    """Whether the one path ``value`` is the scanned tree's.
+
+    It is when it is not absolute as written, a leading ``~`` included (uv does not
+    expand it, so it reads the path against the directory it starts in), or when it is
+    one of ``roots`` or lies inside one, by its spelling or by its real path, which
+    also settles a ``..`` that passes through a link. Each root is compared spelled and
+    resolved. A path that cannot be resolved is judged the tree's.
+    """
     if not value:
         return False
-    expanded = os.path.expanduser(value)
-    if not os.path.isabs(expanded):
+    if not os.path.isabs(value):
         return True
-    spelled = [
-        os.path.abspath(expanded),
-        os.path.join(
-            os.path.realpath(os.path.dirname(os.path.abspath(expanded))),
-            os.path.basename(expanded),
-        ),
-    ]
-    resolved = set()
-    for root in roots:
-        resolved.add(os.path.abspath(os.fspath(root)))
-        resolved.add(os.path.realpath(os.fspath(root)))
-    return any(
-        os.path.normcase(path).startswith(
-            os.path.normcase(root).rstrip(os.sep) + os.sep
+    try:
+        spelled = (os.path.abspath(value), os.path.realpath(value))
+    except (ValueError, OSError):
+        return True
+    bases = {
+        os.path.normcase(form).rstrip(os.sep)
+        for root in roots
+        for form in (
+            os.path.abspath(os.fspath(root)),
+            os.path.realpath(os.fspath(root)),
         )
-        for path in spelled
-        for root in resolved
+    }
+    return any(
+        shown == base or shown.startswith(base + os.sep)
+        for shown in map(os.path.normcase, spelled)
+        for base in bases
     )
 
 
 def without_tree_uv_files(
     environment: Optional[Dict[str, str]],
-    roots: Tuple[os.PathLike, ...] = (),
+    roots: Iterable[Union[str, "os.PathLike[str]"]] = (),
 ) -> Optional[Dict[str, str]]:
-    """``environment`` without a ``UV_CONFIG_FILE`` or ``UV_ENV_FILE`` the tree supplies.
+    """``environment`` without a uv path variable whose value names a path of the tree.
 
-    A value is the tree's when it is relative (uv resolves it against its working
-    directory, the scanned tree) or names a file inside one of ``roots`` (the scanned
-    and the output directory). An absolute value outside them is the operator's and
-    stays. ``environment`` is what the child gets (this process's when None); the
-    same object comes back when nothing is dropped, so a run that passed no
-    environment still passes none.
+    The variables are those of ``_UV_PATH_VARIABLES``. Each value is read as uv reads
+    it (``_uv_value_paths``): split into entries, with an index name and any URL that
+    names no local path set aside, and each remaining path judged on its own. The
+    variable is dropped when any of its paths is the tree's: relative (uv resolves it
+    against its working directory, the scanned tree, and does not expand a leading
+    ``~``), or equal to or inside one of ``roots`` or of the active scan's trees
+    (``subprocess_utils.scanned_trees``), by its spelling or by where its links lead.
+    ``roots`` are directories that are the scanned tree's or derived from it, such as
+    a caller's working, results, source and output directories. A variable whose paths
+    are all absolute and outside every one of them is the operator's and stays whole,
+    and so does one that holds only URLs that name no local path. ``environment`` is
+    what the child gets (this process's when None); the same object comes back when
+    nothing is dropped, so a run that passed no environment still passes none.
     """
+    from automated_security_helper.utils.subprocess_utils import scanned_trees
+
     current = snapshot_environ() if environment is None else environment
+    trees = [*roots, *scanned_trees()]
     dropped = [
         name
-        for name in _UV_FILE_VARIABLES
+        for name in _UV_PATH_VARIABLES
         if isinstance(current.get(name), str)
-        and _names_a_tree_file(current[name], roots)
+        and any(
+            _names_a_tree_path(path, trees)
+            for path in _uv_value_paths(name, current[name])
+        )
     ]
     if not dropped:
         return environment
@@ -1680,7 +1793,9 @@ class UVToolRunner:
                     text=True,
                     timeout=30,
                     check=True,
-                    env=environ_for_parsed_output(),
+                    # A uv path setting the scanned tree supplies is dropped, as
+                    # for the run and the install.
+                    env=environ_for_parsed_output(without_tree_uv_files(None)),
                     encoding="utf-8",
                     errors="replace",
                 )
@@ -2367,7 +2482,13 @@ class UVToolRunner:
                     # wrapping, NO_COLOR=1), as the module's other parsed uv
                     # calls do. The install's behavior does not depend on
                     # display.
-                    env=environ_for_parsed_output(),
+                    #
+                    # A uv path setting the scanned tree supplies is dropped, as for
+                    # the run. The working directory stays ASH's own: an empty one
+                    # would re-base a relative UV_TOOL_DIR or UV_TOOL_BIN_DIR, and
+                    # the tool would be installed into a directory that is deleted
+                    # afterwards.
+                    env=environ_for_parsed_output(without_tree_uv_files(None)),
                     encoding="utf-8",
                     errors="replace",
                 )
@@ -2581,6 +2702,7 @@ class UVToolRunner:
         python_request: Optional[str] = None,
         offline: Optional[bool] = None,
         with_dependencies: Optional[List[str]] = None,
+        tree_roots: Iterable[Union[str, "os.PathLike[str]"]] = (),
     ) -> subprocess.CompletedProcess:
         """Run a UV tool with specified arguments and output handling support.
 
@@ -2632,6 +2754,11 @@ class UVToolRunner:
                 installed, or installed under another spec) lacked them, and a
                 tool whose plugin needs one (``jupyter`` beside nbconvert) ran
                 without it. Each is checked as the install checks its own.
+            tree_roots: Directories that are the scanned tree's or derived from it
+                (a converter passes its source and output directories), judged as
+                ``cwd`` and ``results_dir`` are: a uv path variable that lies inside
+                one is not passed on to the child. The trees of the active scan are
+                always judged too.
 
         Returns:
             CompletedProcess result with enhanced output handling
@@ -2667,10 +2794,14 @@ class UVToolRunner:
             command.extend(["--python", python_request])
 
         # No env file: the one UV_ENV_FILE names is read relative to cwd, the
-        # scanned tree, and a UV_CONFIG_FILE the tree supplies is dropped.
+        # scanned tree. A uv path variable the tree supplies is dropped too: one
+        # with a relative path, or with a path inside cwd, the results directory, a
+        # directory the caller names in tree_roots, or a tree of the active scan
+        # (without_tree_uv_files adds those).
         command.append(UV_NO_ENV_FILE)
         env = without_tree_uv_files(
-            env, tuple(path for path in (cwd, results_dir) if path is not None)
+            env,
+            tuple(path for path in (cwd, results_dir, *tree_roots) if path is not None),
         )
 
         # Build command with --from parameter if extras or version constraint specified

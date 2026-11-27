@@ -2405,12 +2405,14 @@ class PluginBase(UVToolMixin, BaseModel):
                     ).items()
                     if key != "UV_PYTHON"
                 }
-            # uv is sent to a file by name through UV_CONFIG_FILE and UV_ENV_FILE,
-            # and resolves a relative name against the directory it starts in:
-            # the scanned tree. One the tree supplies (relative, or inside the
-            # source or the output directory) is not passed on, and a
-            # ``uv tool run`` gets ``--no-env-file``. An absolute file outside both
-            # directories is the operator's and stays.
+            # uv is sent to a file or a directory by name through every uv variable
+            # that takes a path (``uv_tool_runner`` lists them), and resolves a
+            # relative name against the directory it starts in: the scanned tree.
+            # A value is not passed on when a path in it is relative (a leading
+            # ``~`` included, which uv does not expand) or lies inside the source
+            # directory, the output directory or a scanned tree, by its spelling or
+            # by its real path; and a ``uv tool run`` gets ``--no-env-file``. An
+            # absolute path outside those directories is the operator's and stays.
             from automated_security_helper.utils.uv_tool_runner import (
                 with_no_env_file,
                 without_tree_uv_files,
