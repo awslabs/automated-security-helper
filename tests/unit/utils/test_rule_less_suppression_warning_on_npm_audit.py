@@ -350,24 +350,24 @@ def test_a_second_run_warns_again(test_source_dir, test_output_dir, capture):
     assert len(rule_less_warnings(capture)) == 2
 
 
-def test_the_plugin_context_owns_a_fresh_warn_once_set_per_run(tmp_path):
+def test_the_plugin_context_owns_a_fresh_warn_once_mapping_per_run(tmp_path):
     first = PluginContext(source_dir=tmp_path, output_dir=tmp_path / "out")
     second = PluginContext(source_dir=tmp_path, output_dir=tmp_path / "out")
 
-    assert first.warned_rule_less_suppressions == set()
+    assert first.warned_rule_less_suppressions == {}
     assert first.warned_rule_less_suppressions is first.warned_rule_less_suppressions
     assert (
         first.warned_rule_less_suppressions is not second.warned_rule_less_suppressions
     )
 
 
-@pytest.mark.parametrize("stand_in", [None, object()], ids=["none", "not-a-set"])
-def test_a_context_with_no_warn_once_set_warns_once_per_pass(
+@pytest.mark.parametrize("stand_in", [None, object()], ids=["none", "not-a-mapping"])
+def test_a_context_with_no_warn_once_mapping_warns_once_per_pass(
     stand_in, monkeypatch, test_source_dir, test_output_dir, capture
 ):
-    """A context double that has no set (or one that is not a set) gets a set of
-    its own for the pass: the warning still fires, once per pass as it did while
-    the pass owned the set, and nothing raises."""
+    """A context double that has no mapping (or one that is not a mapping) gets a
+    mapping of its own for the pass: the warning still fires, once per pass as it
+    did while the pass owned the receipts, and nothing raises."""
     monkeypatch.setattr(PluginContext, "warned_rule_less_suppressions", stand_in)
     context = context_for(
         config_with(AshSuppression(path=LOCKFILE, reason="written before the move")),
@@ -382,6 +382,45 @@ def test_a_context_with_no_warn_once_set_warns_once_per_pass(
         assert out.runs[0].results[0].suppressions
 
     assert len(rule_less_warnings(capture)) == 2
+
+
+def seed_receipt(receipts, entry, other) -> None:
+    """Put a receipt at ``id(entry)`` that is not the entry's own.
+
+    This stands in for an address CPython reused: an entry of a replaced config
+    was freed, and a new entry was allocated where it had been. The store is a
+    set of ids when the receipts hold only ids, and a mapping of id to entry when
+    they keep the entry; each gets the id, bound to ``other`` in the mapping.
+    """
+    if isinstance(receipts, set):
+        receipts.add(id(entry))
+    else:
+        receipts[id(entry)] = other
+
+
+def test_a_receipt_for_another_object_at_the_entrys_address_does_not_silence_it(
+    test_source_dir, test_output_dir, capture
+):
+    """A receipt is the entry's only when it names the entry. One bound to another
+    object at the same address (the entry of a replaced config, freed) must not
+    read as the new entry already warned: the new entry's warning is given once."""
+    context = context_for(
+        config_with(AshSuppression(path=LOCKFILE, reason="written before the move")),
+        test_source_dir,
+        test_output_dir,
+    )
+    (entry,) = context.config.global_settings.suppressions
+    seed_receipt(context.warned_rule_less_suppressions, entry, object())
+
+    for _ in range(2):
+        out = apply_suppressions_to_sarif(
+            npm_audit_report(npm_audit_result(ADVISORY)), context
+        )
+        assert out.runs[0].results[0].suppressions
+
+    warnings = rule_less_warnings(capture)
+    assert len(warnings) == 1, warnings
+    assert LOCKFILE in warnings[0], warnings
 
 
 # --- The entry is named by what its file wrote -------------------------------
@@ -457,7 +496,7 @@ UNRECORDED_FINDING = "unrecorded-7d1e/package-lock.json"
 def _warning_for(entry, recorded_fields, capture) -> str:
     """The warning ``_apply_config_suppression`` logs for ``entry`` over the npm-audit
     finding at ``UNRECORDED_FINDING``, given ``recorded_fields``; a fresh warn-once
-    set each call, so each call has its occasion."""
+    mapping each call, so each call has its occasion."""
     capture.clear()
     applied = _apply_config_suppression(
         npm_audit_result(ADVISORY, uri=UNRECORDED_FINDING),
@@ -465,7 +504,7 @@ def _warning_for(entry, recorded_fields, capture) -> str:
         npm_audit_finding(UNRECORDED_FINDING),
         None,
         recorded_fields=recorded_fields,
-        warned_rule_less=set(),
+        warned_rule_less={},
     )
     assert applied
     (message,) = rule_less_warnings(capture)

@@ -257,8 +257,12 @@ def test_an_entry_the_record_holds_nothing_of_is_quoted_by_its_own_value(
 ):
     """With no record of an entry (a stand-in config, a direct caller) there is no
     written form to quote, so the line keeps naming what the entry holds instead
-    of going blank. A literal reason keeps this cell from asserting a value."""
+    of going blank. The loaded entry's reason is then set to text the file never
+    wrote: a line that consulted the record the loader made would still say
+    "written by hand", so only the entry's own value can put the new text there."""
     config = load(_config_text(section, "written by hand"))
+    (entry,) = getattr(config.global_settings, section)
+    entry.reason = "model-only-text"
     monkeypatch.setattr(sarif_utils, "recorded_ignore_paths", lambda *a, **k: {})
     context = _context(config, test_source_dir, test_output_dir)
     _verbose(capture)
@@ -267,7 +271,8 @@ def test_an_entry_the_record_holds_nothing_of_is_quoted_by_its_own_value(
 
     lines = _lines(capture, marker)
     assert len(lines) == 1, [r.getMessage() for r in capture.records]
-    assert "written by hand" in lines[0], lines
+    assert "model-only-text" in lines[0], lines
+    assert "written by hand" not in lines[0], lines
 
 
 # --- The two client-supplied justifications, over an entry and a record by hand --

@@ -12,8 +12,9 @@ the install-location URI and a warning says so. Two things are pinned here.
   ``_lock_context``, whose answer the conversion reuses; a yarn or pnpm lockfile
   is asked about by the conversion alone. Neither path asks twice.
 * The warning tells its two causes apart. ``ValueError`` means the lockfile is
-  outside the directory. ``OSError`` (a link loop, a directory the process cannot
-  search) means a place could not be resolved at all, which says nothing about
+  outside the directory. ``OSError`` (a directory the process cannot search) or,
+  for a link loop before Python 3.13, ``RuntimeError`` means a place could not be
+  resolved at all, which says nothing about
   where the lockfile is: it is worded as a place that could not be read, with the
   error's reason and not its full text (which repeats the path), and never as
   "not under the scanned directory". Both end with the same sentence about what
@@ -26,6 +27,7 @@ directory a cell names and for no other.
 import errno
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -120,11 +122,13 @@ def _warnings(capture, *needles: str) -> list[str]:
 
 
 def _resolve_fails_for(monkeypatch, directory: Path, error: OSError) -> None:
-    """Make ``Path.resolve`` raise ``error`` for ``directory`` and no other path."""
+    """Make ``Path.resolve`` raise ``error`` for ``directory`` and any path under
+    it, and for no other path: a path under a looped directory fails to resolve
+    too, so a change that resolves the lockfile itself still meets the failure."""
     real_resolve = Path.resolve
 
     def resolve(self, *args, **kwargs):
-        if self == directory:
+        if self == directory or directory in self.parents:
             raise error
         return real_resolve(self, *args, **kwargs)
 
@@ -226,3 +230,50 @@ def test_a_conversion_whose_lockfile_directory_cannot_be_resolved_warns_once(
     assert len(warnings) == 1, [r.getMessage() for r in capture.records]
     assert UNREADABLE in warnings[0] and f"({reason})" in warnings[0], warnings
     assert NOT_UNDER not in warnings[0], warnings
+
+
+def test_a_lockfile_inside_the_target_is_placed_without_resolving_it(
+    tmp_path, monkeypatch, capture
+):
+    """The lexical compare places a lockfile that sits under the scanned directory
+    before anything is resolved, so a directory that cannot be resolved changes
+    nothing for it: the result keeps its relative path and no warning is given."""
+    target = tmp_path / "repo"
+    target.mkdir()
+    app = target / "app"
+    lockfile = _lockfile(app, "package-lock.json")
+    _resolve_fails_for(monkeypatch, app, OSError(errno.ELOOP, os.strerror(errno.ELOOP)))
+
+    shown = npm_audit_scanner._shown_lockfile(lockfile, target)
+
+    assert shown == "app/package-lock.json"
+    assert _warnings(capture) == [], [r.getMessage() for r in capture.records]
+
+
+def test_a_scanned_target_that_is_a_link_loop_warns_once_and_raises_nothing(
+    tmp_path, capture
+):
+    """Before Python 3.13 ``Path.resolve`` raises ``RuntimeError`` for a link loop
+    where it raises no ``OSError``; from 3.13 it raises nothing. Either way the
+    conversion completes and warns once. Before 3.13 the warning is the
+    could-not-be-read one, with the reason the system gives for a loop and never
+    the ``RuntimeError``'s text, which names the looped path."""
+    loop = tmp_path / "loop"
+    try:
+        loop.symlink_to(loop)
+    except OSError as error:
+        pytest.skip(f"cannot make a link here: {error}")
+    lockfile = _lockfile(tmp_path / "elsewhere", "package-lock.json")
+
+    NpmAuditScanner.convert_results(_npm_report(), loop, lock_file=lockfile)
+
+    warnings = _warnings(capture)
+    assert len(warnings) == 1, [r.getMessage() for r in capture.records]
+    assert "Symlink loop" not in warnings[0], warnings
+    assert CONSEQUENCE in warnings[0], warnings
+    if sys.version_info < (3, 13):
+        assert UNREADABLE in warnings[0], warnings
+        assert f"({os.strerror(errno.ELOOP)})" in warnings[0], warnings
+        assert NOT_UNDER not in warnings[0], warnings
+    else:
+        assert UNREADABLE in warnings[0] or NOT_UNDER in warnings[0], warnings
