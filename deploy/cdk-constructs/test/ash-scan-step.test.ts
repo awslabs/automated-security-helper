@@ -228,12 +228,44 @@ describe('extraScanArguments', () => {
     expect(commands.match(/--source-dir/g)).toHaveLength(1);
   });
 
+  test.each<[string[], string]>([
+    // A name that starts with a dash is the same directory as ./NAME, which `ash scan
+    // fs` does not read as an option. The reusable workflow rewrites it the same way.
+    [['--source-dir', '-x'], './-x'],
+    [['--source-dir=-x'], './-x'],
+    // The space and quote forms: the word the shell makes is the one that is read.
+    [['--source-dir', ' -x'], './-x'],
+    [['--source-dir', '"-x"'], './"-x"'],
+    [['--source-dir', "'-x'"], "./'-x'"],
+    // One element, `--source-dir` and a single plain word.
+    [['--source-dir services/api'], 'services/api'],
+  ])('names the directory of %j as %s', (extraScanArguments, directory) => {
+    const { actions } = synthesizeWithStep({ extraScanArguments });
+    const commands = ashActions(actions)[0].commands.join('\n');
+
+    expect(commands).toContain(`ash scan fs ${directory} --output-dir`);
+    expect(commands).toContain(`ash scan --source-dir ${directory} --output-dir`);
+    expect(commands.match(/--source-dir/g)).toHaveLength(1);
+  });
+
   test.each<[string[], RegExp]>([
     [['--source-dir'], /needs a directory after it/],
     [['--source-dir='], /needs a directory after it/],
     [['--source-dir', ' '], /needs a directory after it/],
+    [['--source-dir', '""'], /needs a directory after it/],
     [['--source-dir', '--verbose'], /reads as an option/],
+    [['--source-dir', '"--verbose"'], /reads as an option/],
+    [['--source-dir', '--'], /reads as an option/],
+    // The directory's own text holds a second --source-dir, which ASH 3.9 refuses
+    // beside the PATH.
+    [['--source-dir', 'x --source-dir=y'], /holds another --source-dir/],
+    [['--source-dir=x --source-dir y'], /holds another --source-dir/],
     [['--offline --source-dir=services/api'], /an element of its own/],
+    // One element that is more than `--source-dir` and one plain word.
+    [['--source-dir services/api extra'], /an element of its own/],
+    [['--source-dir "services/api"'], /an element of its own/],
+    [['--source-dir $DIR'], /an element of its own/],
+    [['--source-dir -x'], /an element of its own/],
   ])('refuses the --source-dir of %j', (extraScanArguments, message) => {
     expect(() => buildStep({ extraScanArguments })).toThrow(message);
     expect(() => buildStep({ extraScanArguments })).toThrow(/^ASHScanStep 'SecurityScan': /);

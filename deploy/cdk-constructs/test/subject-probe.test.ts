@@ -250,6 +250,16 @@ describe('a --source-dir among the extra arguments names the directory scanned',
     [['--source-dir=services/api'], 'services/api', ''],
     // The last one wins, as click resolves a repeated option.
     [['--log-level', 'INFO', '--source-dir', 'a', '--source-dir=b'], 'b', ' --log-level INFO'],
+    // A name that starts with a dash is the same directory as ./NAME, on both spellings.
+    // The stand-in records the words the shell made, so the quoted forms read the same.
+    [['--source-dir', '-x'], './-x', ''],
+    [['--source-dir=-x'], './-x', ''],
+    [['--source-dir', ' -x'], './-x', ''],
+    [['--source-dir', '"-x"'], './-x', ''],
+    [['--source-dir', "'-x'"], './-x', ''],
+    // One element: `--source-dir` and a single plain word.
+    [['--source-dir services/api'], 'services/api', ''],
+    [['--source-dir services/api', '--log-level', 'INFO'], 'services/api', ' --log-level INFO'],
   ])('%j', (extraScanArguments, directory, rest) => {
     const options = `--output-dir .ash/ash_output --min-severity low --fail-on-findings${rest}`;
     const command = unsharded(extraScanArguments);
@@ -277,6 +287,25 @@ describe('a --source-dir among the extra arguments names the directory scanned',
     expect(run(shard, '3.9').calls).toEqual([`scan fs services/api ${options}`]);
     expect(run(shard, '3.8').calls).toEqual([`scan --source-dir services/api ${options}`]);
   });
+
+  test.each<[string[]]>([[[]], [['--source-dir', 'services/api']]])(
+    'an unsafe sourceDirectory is refused whether or not extraScanArguments %j replaces it',
+    (extraScanArguments) => {
+      // The directory a `--source-dir` names replaces `sourceDirectory`, which must still
+      // be a value the shell cannot read as code.
+      expect(() =>
+        scanCommands(
+          {
+            sourceDirectory: '$(id)',
+            outputDirectory: '.ash/ash_output',
+            severityThreshold: ASHSeverityThreshold.LOW,
+            extraScanArguments,
+          },
+          PIP,
+        ),
+      ).toThrow(/Refusing to build a shell command/);
+    },
+  );
 });
 
 describe('a shard names its subject on an ASH that has one', () => {
