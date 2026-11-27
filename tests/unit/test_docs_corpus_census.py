@@ -71,15 +71,18 @@ EXECUTED_BLOCKS_AT_MAIN = 151
 SEED_LINES_ON_RUN_PAGES_AT_MAIN = 527
 #: Seed lines that left the seed by deleting their block (or turning it into something
 #: nothing runs) rather than by making it run. Each such commit raises this by the
-#: number of lines it removed and says in its message why the examples are not run.
+#: number of lines it removed and says in its message why the examples are not run. A
+#: block that ran with no marker has no line, so deleting one moves the counter below.
 SEED_LINES_RETIRED_NOT_RUN = 0
 #: Blocks the runner executes beyond what main had and the seed accounts for: a block
-#: added that runs. Each commit that adds one raises this by the number it adds, so the
-#: count of executed blocks equals its floor, and no slack from an earlier addition
-#: lets a block deleted instead of converted go unseen. It was 50 when the count was made
-#: exact: the runner then executed 201 blocks, against the 151 it ran at main. Main's own
-#: pages have changed since (f6cc3c03ac86): the runner executes 196, five fewer, because
-#: main marked or dropped more blocks than it added, so the counter is 45.
+#: added that runs. Each commit that adds one raises this by the number it adds, and each
+#: commit that deletes a block that ran with no marker, which has no seed line to say so,
+#: lowers it by the number it deletes. So the count of executed blocks equals its floor,
+#: and no slack from an earlier addition lets a block deleted instead of converted go
+#: unseen. It was 50 when the count was made exact: the runner then executed 201 blocks,
+#: against the 151 it ran at main. Main's own pages have changed since (f6cc3c03ac86):
+#: the runner executes 196, five fewer, because main marked or dropped more blocks than
+#: it added, so the counter is 45.
 EXECUTED_BLOCKS_ADDED_SINCE_MAIN = 45
 SEED_DIR = REPO_ROOT / "docs" / "illustrative-seed"
 #: How a seed line of a pipeline kept from its CI runner (``runner=none``) begins, which
@@ -562,7 +565,8 @@ def executed_blocks_floor(seed_lines_on_run_pages_now: int) -> int:
     runner executes. The floor rises by one for each, with no number to edit in the
     commit that converts. A line deleted with its block, not converted, is the one thing
     the seed cannot tell, so that commit says so in SEED_LINES_RETIRED_NOT_RUN. Blocks
-    added that run are the other, and EXECUTED_BLOCKS_ADDED_SINCE_MAIN counts them.
+    added that run are the other, and EXECUTED_BLOCKS_ADDED_SINCE_MAIN counts them, less
+    the blocks with no marker that ran and were deleted, which have no seed line.
     """
     converted = SEED_LINES_ON_RUN_PAGES_AT_MAIN - seed_lines_on_run_pages_now
     return (
@@ -602,8 +606,12 @@ def executed_blocks_problems(
             "illustrative seed has lost "
             f"({SEED_LINES_ON_RUN_PAGES_AT_MAIN} sat on pages it runs then, "
             f"{seed_lines_on_run_pages_now} do now). A marked block that is converted "
-            "runs; one that was deleted instead raises SEED_LINES_RETIRED_NOT_RUN in "
-            "the same commit, with the reason in its message."
+            "runs. One that was deleted instead lost its seed line and stopped "
+            "running: raise SEED_LINES_RETIRED_NOT_RUN by one for each, in the same "
+            "commit, with the reason in its message. A block with no marker that ran "
+            "and was deleted lost no seed line, so that counter is not its own: lower "
+            "EXECUTED_BLOCKS_ADDED_SINCE_MAIN by one for each, in the same commit, "
+            "with the reason in its message."
         )
     ]
 
