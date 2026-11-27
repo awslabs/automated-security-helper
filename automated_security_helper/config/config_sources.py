@@ -83,6 +83,21 @@ section) keep the older rule: keys that differ only in ``-`` versus ``_`` are
 one key. Workspace mode merges the operator's ``--config`` over a project's
 config by the same rules (``resolve_config``'s ``overlay_config_path``).
 
+Retired scanner names: a ``scanners`` section written under a retired
+scanner's name (``utils/scanner_names.SCANNER_NAME_ALIASES``, empty today)
+is read as the section of the plugin that serves it. Each file's sections
+are folded as the file is read, and a section a file's ``patch`` adds under
+such a name once the patch has applied, so every document is folded before
+it is layered, and the layering above is the ordinary one whichever name
+each file uses. The fold drops an option the serving plugin does not
+declare, with a warning, and an operation that removes, replaces or tests
+such an option then finds nothing at its path: the load is refused, and the
+message says the option was dropped. A pointer that spells the retired name
+reaches the serving plugin's section only where a file of the chain wrote
+that section under a retired name; where the files wrote only the current
+name, the pointer stays the retired name's own key, as for any key the
+document does not hold.
+
 ``move`` and ``copy`` are refused, as in ``runtime_patch.py``; #289 asks for
 ``add``, ``remove`` and ``replace``, and ``test`` is allowed because it reads
 only. A file an MCP client chose (one the "Environment variables" rule refuses
@@ -3647,7 +3662,10 @@ def _plugin_section_key(
 
 
 def _normalize_pointer(
-    document: Any, pointer: str, owned: Optional[Dict[str, Set[str]]] = None
+    document: Any,
+    pointer: str,
+    owned: Optional[Dict[str, Set[str]]] = None,
+    folds: Optional[Dict[str, Set[str]]] = None,
 ) -> str:
     """Respell a JSON pointer's keys the way `document` spells them.
 
@@ -3687,23 +3705,33 @@ def _normalize_pointer(
     A segment directly under the top-level ``scanners`` key that lands on
     no key the document holds, by the rules above, and that is a retired
     scanner's name (``canonical_scanner_name``) lands on the key the
-    serving plugin's name lands on by the same rules. The loader folds each
-    base's retired sections onto the serving plugin before the extending
-    file is layered over it (``fold_document_scanner_aliases``), so a
-    file's patch naming the section its base wrote, in the spelling the
-    base wrote, found no such key: an operation inside that section, or a
-    ``remove`` of it, refused the whole load, and an ``add`` of the whole
-    section made a second key, which the model merged key by key over the
-    folded one, so settings the add meant to drop stayed. Ownership applies
-    to the serving name as to any other spelling, over the owned keys as
-    their files wrote them: where the patching file's own chain wrote a
-    spelling of the serving plugin, the serving name lands only on a key
-    one of those writes made; where the chain wrote the section only under
-    its retired name, no owned key spells the serving plugin, so the
-    serving name resolves as it does without ownership, onto the one key of
-    that plugin the document holds. A key the typed segment lands on itself
-    still wins (the file's own sections are left unfolded), and a name the
-    table does not retire stays as typed.
+    serving plugin's name lands on by the same rules, where a file of the
+    chain wrote that plugin's section under a retired name. The loader
+    folds each file's retired sections onto the serving plugin's as it
+    reads the file (``fold_document_scanner_aliases``), before any
+    ``patch`` applies, so the document holds such a section only under the
+    serving plugin's key, and a patch naming it in the retired spelling
+    reaches it, inside the section or as a whole, as the serving plugin's
+    name does. ``folds`` is the loader's record of those folds in the
+    patching file's chain (``_resolve``): by the serving plugin's key, what
+    each fold dropped. The redirect lands only on a serving key the record
+    holds: where the chain wrote the section only under the current name,
+    the pointer stays the retired name's own key, so a ``remove``,
+    ``replace`` or ``test`` of it finds nothing, and an ``add`` writes a
+    section the loader then folds over the current one key by key. None (a
+    caller that holds no record, such as the restrict-only walk over a
+    delivered file, client_config_policy._with_own_patch) redirects onto
+    any serving key the document holds. Ownership applies to the serving
+    name as to any other spelling, over the owned keys as their files wrote
+    them once folded: a section an owned file wrote under the retired name
+    is owned under the serving plugin's key, and the serving name lands
+    only on a key one of the owned writes made; where the patching file's
+    own chain wrote no spelling of the serving plugin, the serving name
+    resolves as it does without ownership, onto the one key of that plugin
+    the document holds. A key the typed segment lands on itself still wins
+    (a section an earlier operation of the same patch added under the
+    retired name, which the loader folds once the patch has applied), and
+    a name the table does not retire stays as typed.
     """
     if not isinstance(pointer, str) or not pointer.startswith("/"):
         return pointer
@@ -3718,11 +3746,15 @@ def _normalize_pointer(
                 typed = segment
                 segment = _plugin_section_key(current, typed, held)
                 if segment not in current and parent == PluginKind.SCANNER.section:
-                    # The base the section came from was folded before this
-                    # file was layered over it, so its retired spelling is
-                    # now the serving plugin's key.
+                    # Each file's sections were folded as it was read, so a
+                    # retired spelling is the serving plugin's key by now,
+                    # where a file wrote the section under a retired name.
                     serving = canonical_scanner_name(typed)
-                    if serving and serving != typed:
+                    if (
+                        serving
+                        and serving != typed
+                        and (folds is None or serving in folds)
+                    ):
                         landed = _plugin_section_key(current, serving, held)
                         if landed in current:
                             segment = landed
@@ -3873,6 +3905,7 @@ def _patch_step(
     unconfined: Any,
     op: Dict[str, Any],
     owned: Optional[Dict[str, Set[str]]] = None,
+    folds: Optional[Dict[str, Set[str]]] = None,
 ) -> Tuple[Any, Any, Any]:
     """One ``patch`` operation applied to ``document`` and to ``unconfined``.
 
@@ -3904,9 +3937,10 @@ def _patch_step(
     repository twin, so the twin's value decided whether the operator's
     guarded write applied. A test still reports ``_AS_WRITTEN``: it writes
     nothing, so the reference replay, which skips tests, has nothing to
-    reapply for it.
+    reapply for it. ``folds`` is the chain's record of its retired-name folds,
+    which the same fold reads (_normalize_pointer).
     """
-    normalized = dict(op, path=_normalize_pointer(document, op["path"], owned))
+    normalized = dict(op, path=_normalize_pointer(document, op["path"], owned, folds))
     taken = (
         _AS_WRITTEN
         if owned is None or op["op"] == "test"
@@ -3918,7 +3952,7 @@ def _patch_step(
             None,
             taken,
         )
-    whole = dict(op, path=_normalize_pointer(unconfined, op["path"], owned))
+    whole = dict(op, path=_normalize_pointer(unconfined, op["path"], owned, folds))
     if op["op"] == "test":
         jsonpatch.apply_patch(unconfined, [whole], in_place=False)
         return document, unconfined, _AS_WRITTEN
@@ -3972,6 +4006,7 @@ def _tested_path_shown(
     shown_path: Any,
     owned: Optional[Dict[str, Set[str]]],
     hidden: Collection[str],
+    folds: Optional[Dict[str, Set[str]]] = None,
 ) -> str:
     """How a failed ``test`` op's refusal names the pointer it checked.
 
@@ -3997,7 +4032,7 @@ def _tested_path_shown(
     typed_shown = f"'{shown_path}'"
     if owned is None or not isinstance(path, str) or not path.startswith("/"):
         return typed_shown
-    respelled = _normalize_pointer(document, path, owned)
+    respelled = _normalize_pointer(document, path, owned, folds)
     if respelled == path or not isinstance(respelled, str):
         return typed_shown
     typed = path[1:].split("/")
@@ -4048,6 +4083,51 @@ def _refuse_a_clients_test_op(ops: Any, where: str) -> None:
             )
 
 
+def _dropped_option_clause(
+    document: Any,
+    pointer: Any,
+    owned: Optional[Dict[str, Set[str]]],
+    folds: Optional[Dict[str, Set[str]]],
+) -> str:
+    """The sentence a refused ``patch`` operation's message ends with when its
+    pointer names an option a retired-name fold dropped, or "".
+
+    A ``scanners`` section written under a retired scanner name is folded onto
+    the serving plugin's as its file is read (fold_document_scanner_aliases),
+    and an option that plugin does not declare is dropped then, before any
+    ``patch`` applies, so an operation that removes, replaces or tests it finds
+    nothing at its path. ``folds`` is the chain's record of those folds
+    (_resolve); with none, or when the pointer names no option a fold dropped,
+    the message stays as it was. The sentence names the serving plugin, a name
+    from the alias table, and nothing a file wrote: the message already quotes
+    the pointer as shown."""
+    if not folds or not isinstance(pointer, str) or not pointer.startswith("/"):
+        return ""
+    normalized = _normalize_pointer(document, pointer, owned, folds)
+    parts = [_unescape(part) for part in normalized[1:].split("/")]
+    if (
+        len(parts) < 4
+        or parts[0] != PluginKind.SCANNER.section
+        or parts[2] != "options"
+    ):
+        return ""
+    section = parts[1].replace("-", "_").lower()
+    option = parts[3].replace("-", "_")
+    for serving, dropped in folds.items():
+        if serving.replace("-", "_").lower() != section:
+            continue
+        if any(
+            isinstance(name, str) and name.replace("-", "_") == option
+            for name in dropped
+        ):
+            return (
+                ". The option it names was dropped when the file that wrote it "
+                "was read: it is written under a retired scanner name, and the "
+                f"{serving} plugin that serves that name does not declare it."
+            )
+    return ""
+
+
 def _apply_patch(
     document: Dict[str, Any],
     ops: Any,
@@ -4057,6 +4137,7 @@ def _apply_patch(
     unconfined: Any = None,
     owned: Optional[Dict[str, Set[str]]] = None,
     hidden: Collection[str] = (),
+    folds: Optional[Dict[str, Set[str]]] = None,
 ) -> _Patched:
     """``document`` with the JSON-Patch ``ops`` of the file at ``path`` applied.
 
@@ -4070,7 +4151,11 @@ def _apply_patch(
     ownership each operation's pointer fold resolves against
     (_normalize_pointer); a section key an operation itself writes joins it
     (_owned_patched_key), so a later operation of the same file folds onto
-    that key as the view walk's settle does.
+    that key as the view walk's settle does. ``folds`` is the chain's record
+    of its retired-name folds (_resolve): each operation's pointer redirects a
+    retired name only onto a section a fold moved (_normalize_pointer), and
+    the refusal of an operation at an option a fold dropped says so
+    (_dropped_option_clause).
     """
     where = describe_config_path(path) if where is None else where
     if not isinstance(ops, list):
@@ -4108,7 +4193,7 @@ def _apply_patch(
         shown_op = shown_ops[index] if isinstance(shown_ops[index], dict) else op
         shown_path = shown_op.get("path", op["path"])
         try:
-            result, unconfined, how = _patch_step(result, unconfined, op, owned)
+            result, unconfined, how = _patch_step(result, unconfined, op, owned, folds)
         except jsonpatch.JsonPatchTestFailed:
             # jsonpatch's own message quotes the value it found, which may come
             # from a base the author of this file did not write. The path is
@@ -4120,10 +4205,17 @@ def _apply_patch(
                 shown_path,
                 owned,
                 hidden,
+                folds,
             )
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where}: the value at "
                 f"{tested} does not equal the value the test op gives"
+                + _dropped_option_clause(
+                    result if unconfined is None else unconfined,
+                    op["path"],
+                    owned,
+                    folds,
+                )
             ) from None
         except (
             jsonpatch.JsonPatchException,
@@ -4140,6 +4232,7 @@ def _apply_patch(
                 f"'{PATCH_KEY}' entry {index} in {where} ({op_name} at "
                 f"'{shown_path}') failed: {kind}the path does not "
                 "fit the document it patches"
+                + _dropped_option_clause(result, op["path"], owned, folds)
             ) from None
         if how is not _AS_WRITTEN:
             rewritten[index] = how
@@ -4651,12 +4744,14 @@ def _placed_through_patch(
     from_ops: List[_OpReference],
     where: str,
     rewritten: Optional[Dict[int, _Rewritten]] = None,
+    folds: Optional[Dict[str, Set[str]]] = None,
 ) -> List[EnvironmentReference]:
     """The references of a file and of its bases, each at the place its value
     has once the file's ``patch`` (``ops``, which applied to ``document``) has.
     ``rewritten`` is how ``document`` took the operations that did not fit it
     as written (``_Patched.rewritten``); the copy takes each of those the same
-    way.
+    way. ``folds`` is the record the patch's own pointers were resolved with
+    (_apply_patch), so the copy's pointers land where the document's did.
 
     ``tracked`` are at their places in ``document``, the file merged over its
     bases; ``from_ops`` are in the operations' values. Each value is followed,
@@ -4697,7 +4792,9 @@ def _placed_through_patch(
                     continue
                 normalized = dict(op, op=how[0], path=how[1])
             else:
-                normalized = dict(op, path=_normalize_pointer(result, op["path"]))
+                normalized = dict(
+                    op, path=_normalize_pointer(result, op["path"], folds=folds)
+                )
             result = jsonpatch.apply_patch(result, [normalized], in_place=False)
     except (
         jsonpatch.JsonPatchException,
@@ -4741,6 +4838,131 @@ def _placed_through_patch(
                 reference.moved_to_unknown_list(path) for path in found.get(token, ())
             )
     return placed
+
+
+def served_scanner_place(path: Sequence[Any]) -> Tuple[Any, ...]:
+    """``path``, a place in a config document, with a ``scanners`` section
+    written under a retired scanner's name (``canonical_scanner_name``) at the
+    key of the plugin that serves it, the key the loader's fold puts that
+    section under (``fold_document_scanner_aliases``); any other place as it
+    is, and every place while ``SCANNER_NAME_ALIASES`` has no row."""
+    place = tuple(path)
+    if (
+        len(place) >= 2
+        and place[0] == PluginKind.SCANNER.section
+        and isinstance(place[1], str)
+    ):
+        serving = canonical_scanner_name(place[1])
+        if serving and serving != place[1]:
+            return (place[0], serving, *place[2:])
+    return place
+
+
+def _placed_through_alias_fold(
+    document: Any, folded: Any, references: List[EnvironmentReference]
+) -> List[EnvironmentReference]:
+    """``references``, values read from the environment at their places in
+    ``document`` (one file's own settings as it read them, or the document a
+    file's ``patch`` made, which holds its bases' too), each at the place it
+    has in ``folded``, the same settings with each retired scanner's section
+    folded onto the serving plugin's (``fold_document_scanner_aliases``), and
+    without the ones whose value or key the fold leaves out.
+
+    Each value is followed, not computed, as _placed_through_patch follows
+    one: a copy of the ``scanners`` mapping holds a token in place of each,
+    the same fold folds the copy, and where a token is then is where its
+    value is. A token the fold leaves out (the section's ``name``, an option
+    the serving plugin does not declare, a section that is not a mapping, a
+    value the fold lays another section of the same plugin over) takes its
+    reference with it. A key read from the environment is placed by the fold's
+    rules (_key_through_alias_fold). A reference outside ``scanners`` is kept
+    as it is.
+    """
+    segment_key = PluginKind.SCANNER.section
+    scanners = document.get(segment_key) if isinstance(document, dict) else None
+    if folded is document or not isinstance(scanners, dict):
+        return list(references)
+    shadow: Dict[str, Any] = {segment_key: copy.deepcopy(scanners)}
+    tokens: Set[str] = set()
+    planted: List[Tuple[EnvironmentReference, Optional[str]]] = []
+    for reference in references:
+        token = None
+        if not reference.key and reference.path[:1] == (segment_key,):
+            token = _plant(shadow, tuple(reference.path), reference, tokens)
+        planted.append((reference, token))
+    found: Dict[str, Tuple[Any, ...]] = {}
+
+    def walk(node: Any, path: Tuple[Any, ...]) -> None:
+        if isinstance(node, str):
+            if node in tokens:
+                found.setdefault(node, path)
+        elif isinstance(node, dict):
+            for name, value in node.items():
+                walk(value, (*path, name))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, (*path, index))
+
+    if tokens:
+        moved = fold_document_scanner_aliases(shadow, log=False)
+        walk(moved.get(segment_key), (segment_key,))
+    placed: List[EnvironmentReference] = []
+    for reference, token in planted:
+        if token is not None:
+            at = found.get(token)
+            if at is not None:
+                # The fold moves a section to another key and leaves what the
+                # section holds where it was in it.
+                placed.append(
+                    reference
+                    if at == tuple(reference.path)
+                    else reference.rebase(2, at[:2])
+                )
+        elif reference.key and reference.path[:1] == (segment_key,):
+            kept = _key_through_alias_fold(reference, folded)
+            if kept is not None:
+                placed.append(kept)
+        else:
+            placed.append(reference)
+    return placed
+
+
+def _key_through_alias_fold(
+    reference: EnvironmentReference, folded: Any
+) -> Optional[EnvironmentReference]:
+    """``reference``, a key a file read from the environment in a mapping under
+    ``scanners``, at the place that mapping has in ``folded``
+    (_placed_through_alias_fold), or None where the fold leaves the key out.
+
+    A key in a section written under a retired scanner name moves with the
+    section to the serving plugin's key (``served_scanner_place``), but for
+    the ones the fold drops from the section, its ``name`` and an option the
+    serving plugin does not declare (``ash_config._declared_option_names``),
+    and one ``folded`` does not hold there (the fold lays another section of
+    the same plugin over the mapping that held it). A key of any other mapping
+    is kept as it is, a key of the ``scanners`` mapping itself included: that
+    mapping is where it was, and the section the key named is the serving
+    plugin's now.
+    """
+    from automated_security_helper.config.ash_config import (
+        ScannerConfigSegment,
+        _declared_option_names,
+    )
+
+    path = tuple(reference.path)
+    moved = served_scanner_place(path)
+    if moved == path:
+        return reference
+    if len(path) == 2 and reference.resolved == "name":
+        return None
+    if path[2:] == ("options",):
+        declared = _declared_option_names(ScannerConfigSegment, moved[1])
+        if declared is not None and reference.resolved not in declared:
+            return None
+    holder = _node_at(folded, moved)
+    if not isinstance(holder, dict) or reference.resolved not in holder:
+        return None
+    return reference.rebase(2, moved[:2])
 
 
 def _placed_references(
@@ -4836,14 +5058,19 @@ def _resolve(
     above: Tuple[Path, ...] = (),
     expect: Optional[FileIdentity] = None,
     operator_context: bool = True,
-) -> Tuple[Any, Any, Optional[Dict[str, Set[str]]]]:
+) -> Tuple[Any, Any, Optional[Dict[str, Set[str]]], Dict[str, Set[str]]]:
     """The document ``path`` resolves to, the same document as its files
     wrote it, without the chain's confine hook (what a patch operation of an
-    extending file is followed through, _patch_step), and the plugin-section
+    extending file is followed through, _patch_step), the plugin-section
     keys the operator's own files among them wrote (the ownership an owned
     file's patch pointers resolve against, _normalize_pointer; None when the
-    chain tracks none). ``named`` is the name that reached it, for a base
-    (``_base_named``); the root config's is ``path`` itself.
+    chain tracks none), and the record of the chain's retired-name folds
+    (``fold_scanner_name_aliases``'s ``folds``: by the serving plugin's key,
+    the option keys a fold dropped), this file's own and its bases', a
+    section a ``patch`` among them added included, which the patch pointers
+    and refusals of this file and the files above it read
+    (_normalize_pointer, _apply_patch). ``named`` is the name that reached
+    it, for a base (``_base_named``); the root config's is ``path`` itself.
 
     Ownership follows the rule the operator view reads the chain by
     (resolve_config's _with_operator_chain_reporters): a file is the
@@ -5069,16 +5296,39 @@ def _resolve(
     except ValueError as exc:
         raise ASHConfigSourceError(f"Config {state.shown(real)}: {exc}") from None
 
+    # Each retired scanner's section (utils/scanner_names) on the serving
+    # plugin's, by the fold the model applies to a mapping built directly
+    # (fold_document_scanner_aliases), before anything of this file is
+    # recorded and before the merge below: references and rewrites, anchoring,
+    # ownership, the confinement and this file's own `patch` all see one key
+    # for each scanner's section. The fold is logged here, once for each
+    # document it changes, and the model finds none of it left to fold. What
+    # the fold did is kept (folds): this file's patch pointers, and those of
+    # the files above it, redirect a retired name only onto a section a fold
+    # moved, and a refusal of an operation at an option a fold dropped says so
+    # (_normalize_pointer, _apply_patch).
+    as_named = data
+    folds: Dict[str, Set[str]] = {}
+    data = fold_document_scanner_aliases(data, folds=folds)
+
     state.documents.setdefault(real, copy.deepcopy(data))
     # In read order, so a file's own come before those of the bases it extends,
     # which are read below. The order decides only which of two references at
     # one position that resolved to the same text is recorded: the extending
-    # file's, whose value the merge keeps.
+    # file's, whose value the merge keeps. The two views are paired with the
+    # sections as the file named them, so a section key it read from the
+    # environment pairs with the name it resolved to, and each reference then
+    # moves to the place the fold gave its value (_placed_through_alias_fold).
+    # Its origin stays the place the file wrote it, where the record of the
+    # configuration finds it when it reads the file again
+    # (config_validator.environment_record_read).
     read = _file_references(
-        real, data, state.reader, state.texts.get(real), parsed_as=parsed_as
+        real, as_named, state.reader, state.texts.get(real), parsed_as=parsed_as
     )
     state.read.extend(read)
-    own_references, from_ops = _split_references(read, data)
+    own_references, from_ops = _split_references(
+        _placed_through_alias_fold(as_named, data, read), data
+    )
     # This file's references and, after the loop below, its bases': the ones
     # its patch can move.
     first = len(state.references)
@@ -5116,7 +5366,7 @@ def _resolve(
         state.named.append(named)
         if owned is not None and operator_file:
             _owned_plugin_keys(data, owned)
-        return state.confined(real, named, data), data, owned
+        return state.confined(real, named, data), data, owned, folds
 
     # The `extends` entries this file read from the environment, as resolved.
     read_bases = {
@@ -5167,7 +5417,7 @@ def _resolve(
             # The base as its entry spells it, before any symlink is followed:
             # relative to the resolved file that extends it, as base_path is.
             base_named = _base_named(base_ref, real)
-            base_document, base_unconfined, base_owned = _resolve(
+            base_document, base_unconfined, base_owned, base_folds = _resolve(
                 base_path,
                 stack + (real,),
                 state,
@@ -5188,22 +5438,16 @@ def _resolve(
                     f"{state.shown(real)}, must be a mapping once its own "
                     f"'{PATCH_KEY}' is applied, got {type(base_document).__name__}"
                 )
-            # A retired scanner's section is the overlay inside one document,
-            # but across documents the extending file has to win. Each base is
-            # folded before it is layered, so the layering is the ordinary
-            # later-over-earlier one whichever spelling either file uses. The
-            # file's own sections are left for the model to fold, so its patch
-            # still names them in the spelling it wrote. The unconfined view
-            # mirrors a document that was folded and logged just above.
-            merged = deep_merge(
-                merged, fold_document_scanner_aliases(base_document), AshConfig
-            )
+            # Each document _resolve returns is folded already: a base's own
+            # sections as it was read, and a section its `patch` added once
+            # the patch had applied. So the layering is the ordinary
+            # later-over-earlier one whichever spelling either file uses, and
+            # the base's record of its folds joins this file's (folds).
+            merged = deep_merge(merged, base_document, AshConfig)
             if unconfined is not None:
-                unconfined = deep_merge(
-                    unconfined,
-                    fold_document_scanner_aliases(base_unconfined, log=False),
-                    AshConfig,
-                )
+                unconfined = deep_merge(unconfined, base_unconfined, AshConfig)
+            for serving, dropped in base_folds.items():
+                folds.setdefault(serving, set()).update(dropped)
             if owned is not None and base_owned:
                 for segment_key, keys in base_owned.items():
                     owned.setdefault(segment_key, set()).update(keys)
@@ -5242,6 +5486,7 @@ def _resolve(
                 hidden=_values_of(
                     state.references + [reference for _, _, reference in from_ops]
                 ),
+                folds=folds,
             )
             # Each reference at the place its value has once the patch has
             # applied, which only the patch says. Followed through the
@@ -5254,9 +5499,24 @@ def _resolve(
                 from_ops,
                 where=state.shown(real),
                 rewritten=patched.rewritten,
+                folds=folds,
             )
             merged = patched.document
             unconfined = patched.unconfined
+            # A section this patch added under a retired scanner name, where
+            # no file of the chain wrote the serving plugin's section under one
+            # (_normalize_pointer), is folded onto the serving plugin's now, as
+            # each file's own sections were as it was read, and each reference
+            # moves with its value. So every document this returns is folded,
+            # and what this fold did joins the record for the files above.
+            folded = fold_document_scanner_aliases(merged, folds=folds)
+            if folded is not merged:
+                state.references[first:] = _placed_through_alias_fold(
+                    merged, folded, state.references[first:]
+                )
+                merged = folded
+                if unconfined is not None:
+                    unconfined = fold_document_scanner_aliases(unconfined, log=False)
     except ASHConfigSourceError:
         raise
     except Exception as exc:  # noqa: BLE001 -- see below
@@ -5282,6 +5542,7 @@ def _resolve(
         state.confined(real, named, merged),
         merged if unconfined is None else unconfined,
         owned,
+        folds,
     )
 
 
@@ -5411,7 +5672,7 @@ def resolve_config_document(
     # swapped between the two resolutions is refused there too.
     root_identity = expect if expect is not None else identity_to_hold(config_path)
     try:
-        data, _unconfined, _owned = _resolve(
+        data, _unconfined, _owned, _folds = _resolve(
             config_path, (), state, expect=root_identity
         )
     except ASHConfigSourceError as error:

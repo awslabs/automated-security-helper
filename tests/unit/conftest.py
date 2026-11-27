@@ -559,6 +559,31 @@ def no_checkout_above_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.fixture
+def plant_scanner_alias(monkeypatch: pytest.MonkeyPatch):
+    """A function that plants one retired scanner name for the test.
+
+    ``plant(retired, serving)`` adds the row ``SCANNER_NAME_ALIASES`` holds a
+    retirement as, under the reduced name the table is keyed by
+    (``scanner_names._reduced_name``), and checks the premise every test of a
+    retired name rests on before the test relies on it:
+    ``canonical_scanner_name(retired)`` answers ``serving``. A change to the
+    table's key format then fails here, once, instead of in each test that
+    plants a row. Returns ``retired``."""
+    from automated_security_helper.utils import scanner_names
+
+    def plant(retired: str, serving: str) -> str:
+        monkeypatch.setitem(
+            scanner_names.SCANNER_NAME_ALIASES,
+            scanner_names._reduced_name(retired),
+            serving,
+        )
+        assert scanner_names.canonical_scanner_name(retired) == serving
+        return retired
+
+    return plant
+
+
+@pytest.fixture
 def model_with_one_high_finding():
     """A factory for a results model carrying one HIGH SARIF result for one scanner.
 

@@ -1193,7 +1193,7 @@ def test_the_default_tree_read_takes_the_variant_patch_beside_no_owned_twin(
 
 
 def test_a_retired_name_patch_lands_on_the_section_a_later_repository_variant_joins(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, plant_scanner_alias
 ):
     """The operator's own base writes the section under a retired name, the
     repository's file, extended after it, writes the serving plugin's
@@ -1204,14 +1204,14 @@ def test_a_retired_name_patch_lands_on_the_section_a_later_repository_variant_jo
     section is respelled to its declared key in each file as the file is
     read (``fold_known_plugin_sections``), so the repository's ``Bandit`` is
     ``bandit`` before the merge, and the base's retired section is folded
-    onto ``bandit`` before it is layered. The operator's files spelled the
-    section only as ``oldname``, so no owned key spells the serving plugin,
-    and the serving name resolves as it does without ownership, onto that
-    key. Both files write ``false``, so only the patch can make it true."""
-    from automated_security_helper.utils import scanner_names
-
+    onto ``bandit`` as the base is read. A file of the chain wrote that
+    section under a retired name, so the pointer's retired spelling is
+    redirected to the serving plugin's name, and the operator's file that
+    wrote it is owned under ``bandit`` once folded, so the serving name lands
+    on that key. Both files write ``false``, so only the patch can make it
+    true."""
     monkeypatch.delenv("ASH_CONFIG", raising=False)
-    monkeypatch.setitem(scanner_names.SCANNER_NAME_ALIASES, "oldname", "bandit")
+    plant_scanner_alias("oldname", "bandit")
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
     repository = checkout / ".ash.yaml"

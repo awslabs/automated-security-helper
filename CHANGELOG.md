@@ -183,8 +183,16 @@
   workspace overlay over a project's file), the later file now wins whichever spelling
   each file uses for a scanner's section. Before, a base file's section under a retired
   name overrode the extending file's section under the current name. Inside one file, a
-  section under the retired name still overlays the current one. No shipped scanner
-  name is retired today, so no current configuration reads differently.
+  section under the retired name still overlays the current one. A `patch` pointer that
+  spells the retired name reaches the current section where a file wrote that section
+  under the retired name; where the files wrote only the current name, the pointer stays
+  the retired name's own key, as before. An option the serving scanner does not declare
+  is dropped when a file that writes it under the retired name is read, so a `patch`
+  operation that removes, replaces or tests that option refuses the load, and the
+  refusal says the option was dropped. A value read from the environment under the
+  retired name, in a file's section or in one a `patch` adds, is recorded and shown by
+  its reference, as under the current name. No shipped scanner name is retired today, so
+  no current configuration reads differently.
 
 - **A session's patched profile that reads a value from the environment is no longer
   refused for that value.** When the registered profile sets an option a client may

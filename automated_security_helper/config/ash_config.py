@@ -665,6 +665,10 @@ def _declared_option_names(segment_cls: type[BaseModel], plugin_key: str) -> set
     """The option names (field names and aliases) a declared plugin's options
     model accepts, or None when they cannot be read.
 
+    ``plugin_key`` is the plugin's field name or the field's alias: a plugin
+    whose section key is its field's alias (``detect-secrets``, field
+    ``detect_secrets``) is found under either.
+
     Read for the alias fold: an alias section's option keys outside this set
     name settings the canonical plugin would never consult, so the fold drops
     them with a warning instead of carrying them as silent extras. None (an
@@ -673,6 +677,15 @@ def _declared_option_names(segment_cls: type[BaseModel], plugin_key: str) -> set
     must not cost the operator's settings.
     """
     field = segment_cls.model_fields.get(plugin_key)
+    if field is None:
+        field = next(
+            (
+                info
+                for info in segment_cls.model_fields.values()
+                if info.alias == plugin_key
+            ),
+            None,
+        )
     if field is None:
         return None
     config_model = field.annotation
@@ -693,7 +706,11 @@ def _declared_option_names(segment_cls: type[BaseModel], plugin_key: str) -> set
 
 
 def fold_scanner_name_aliases(
-    data: Any, segment_cls: Optional[type[BaseModel]] = None, *, log: bool = True
+    data: Any,
+    segment_cls: Optional[type[BaseModel]] = None,
+    *,
+    log: bool = True,
+    folds: Optional[Dict[str, Set[str]]] = None,
 ) -> Any:
     """``data``, a ``scanners`` mapping, with each retired scanner's section
     folded onto the plugin that serves it.
@@ -708,6 +725,13 @@ def fold_scanner_name_aliases(
     ``ScannerConfigSegment`` when it is not given, looked up when the function
     runs. ``log=False`` suppresses every log line, for a view that mirrors a
     document already folded with logging on, so no line prints twice.
+
+    ``folds``, when given, receives what the fold did: for each plugin key it
+    laid a retired name's section onto (the name ``canonical_scanner_name``
+    answers), the option keys it dropped from those sections, an empty set
+    when it dropped none. A section that is not a mapping lays nothing and is
+    not recorded. The document loader keeps the record for the ``patch`` of
+    each file above (config_sources._resolve).
 
     Answers ``data`` itself when nothing folds and a new mapping otherwise. It
     never changes what it is given.
@@ -744,6 +768,7 @@ def fold_scanner_name_aliases(
         section.pop("name", None)
         declared = _declared_option_names(segment_cls, canonical)
         options = section.get("options")
+        dropped: List[Any] = []
         if declared is not None and isinstance(options, dict):
             dropped = sorted(k for k in options if k not in declared)
             if dropped:
@@ -753,6 +778,8 @@ def fold_scanner_name_aliases(
                         f"scanners.{key}.options.{{{', '.join(dropped)}}} have no "
                         f"{canonical} counterpart and were dropped"
                     )
+        if folds is not None:
+            folds.setdefault(canonical, set()).update(dropped)
         if canonical in data:
             canonical_section = data[canonical]
             if isinstance(canonical_section, BaseModel):
@@ -763,17 +790,20 @@ def fold_scanner_name_aliases(
     return data
 
 
-def fold_document_scanner_aliases(document: Any, *, log: bool = True) -> Any:
+def fold_document_scanner_aliases(
+    document: Any, *, log: bool = True, folds: Optional[Dict[str, Set[str]]] = None
+) -> Any:
     """``document``, a config document's mapping, with its ``scanners`` section
     folded (``fold_scanner_name_aliases``).
 
-    What the document loader runs on a document before it layers another over
-    it (config_sources._resolve for each base of an ``extends`` chain,
-    resolve_config.load_config_file for the project document under an operator
-    overlay). Inside one document a retired spelling is the overlay over the
-    plugin's own section; once the document is folded, the layering that follows
-    is the ordinary rule, the later document wins whichever spelling either
-    uses.
+    What the document loader runs on each file's own document as it reads the
+    file, before anything of the file is recorded, and on the document a
+    file's ``patch`` made, once the patch has applied (config_sources._resolve),
+    so every document the loader returns is folded. Inside one document a
+    retired spelling is the overlay over the plugin's own section; once each
+    document is folded, the layering that follows is the ordinary rule, the
+    later document wins whichever spelling either uses. ``folds`` is
+    fold_scanner_name_aliases's.
 
     A shallow copy of the document only when its section changed, the same
     object otherwise. A document that is not a mapping, or whose scanners value
@@ -785,7 +815,7 @@ def fold_document_scanner_aliases(document: Any, *, log: bool = True) -> Any:
     scanners = document.get(segment_key)
     if not isinstance(scanners, dict):
         return document
-    folded = fold_scanner_name_aliases(scanners, log=log)
+    folded = fold_scanner_name_aliases(scanners, log=log, folds=folds)
     if folded is scanners:
         return document
     return {**document, segment_key: folded}
@@ -991,10 +1021,12 @@ class _ScannerConfigSegmentBase(_PluginConfigSegment):
 
         Across documents (an ``extends`` chain, a workspace overlay) the later
         document wins whatever spelling either one uses: the document loader
-        folds each base, and the project document under an overlay, with
-        ``fold_document_scanner_aliases`` before it layers the next document
-        over it. This validator folds the topmost document and any
-        configuration built from a dict.
+        folds each file's own document with ``fold_document_scanner_aliases``
+        as it reads the file, and the document a file's ``patch`` made once
+        the patch has applied, before it layers the next document over it,
+        and logs the line there. This validator folds what is still under a
+        retired name when the model validates: an override written under one,
+        and any configuration built from a dict.
         """
         return fold_scanner_name_aliases(data, cls)
 

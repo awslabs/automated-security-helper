@@ -21,7 +21,6 @@ from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigValidationError,
 )
-from automated_security_helper.utils import scanner_names
 
 pytestmark = pytest.mark.unit
 
@@ -461,9 +460,9 @@ def test_a_single_directory_scan_reads_only_the_config_it_was_given(tmp_path):
 
 
 @pytest.fixture
-def retired_oldname(monkeypatch):
+def retired_oldname(plant_scanner_alias):
     """One synthetic retirement: ``oldname`` is served by the bandit plugin."""
-    monkeypatch.setitem(scanner_names.SCANNER_NAME_ALIASES, "oldname", "bandit")
+    return plant_scanner_alias("oldname", "bandit")
 
 
 def test_a_projects_retired_section_does_not_beat_the_operators_canonical_one(

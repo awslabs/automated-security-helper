@@ -18,7 +18,6 @@ import logging
 import pytest
 import yaml
 
-from automated_security_helper.utils import scanner_names
 from automated_security_helper.utils.scanner_names import (
     SCANNER_NAME_ALIASES,
     canonical_scanner_name,
@@ -46,10 +45,9 @@ def test_the_key_strips_and_lowers_with_an_empty_table(typed, key):
 
 
 @pytest.fixture
-def retired_oldname(monkeypatch):
+def retired_oldname(plant_scanner_alias):
     """One synthetic retirement: ``oldname`` is served by the bandit plugin."""
-    monkeypatch.setitem(scanner_names.SCANNER_NAME_ALIASES, "oldname", "bandit")
-    return "oldname"
+    return plant_scanner_alias("oldname", "bandit")
 
 
 @pytest.mark.parametrize("spelling", ["oldname", "Old-Name", " old_name ", "OLDNAME"])
@@ -146,8 +144,10 @@ def test_without_a_table_row_the_fold_changes_nothing():
 
 
 # Across files the extending file wins, whichever spelling either one uses.
-# Inside one file the retired spelling is the overlay (the tests above); a
-# file's own ``patch`` is read against the file as it wrote it.
+# Inside one file the retired spelling is the overlay (the tests above). Each
+# file's own sections are folded as the loader reads the file, before its
+# ``patch`` applies, so a pointer in the retired spelling lands on the serving
+# plugin's section.
 
 
 def _write(path, document):
@@ -248,7 +248,8 @@ def test_a_file_with_only_the_retired_section_still_applies_it(
 def test_a_files_own_patch_still_names_the_retired_section_it_wrote(
     retired_oldname, tmp_path, monkeypatch
 ):
-    """The extending file is not folded before its own ``patch`` runs."""
+    """The file's section is folded onto bandit's as the file is read, and its
+    own ``patch``'s pointer in the retired spelling lands there."""
     path = _write(
         tmp_path / "one.yaml",
         {
@@ -409,6 +410,193 @@ def test_a_childs_patch_of_the_canonical_section_its_base_wrote_still_lands(
     assert _load(monkeypatch, child).scanners.bandit.enabled is False
 
 
+# A child's ``patch`` in the retired spelling where no file of the chain wrote
+# the section under the retired name: the base wrote bandit. The pointer then
+# stays the retired name's own key, so a patch written while the name was a
+# real scanner's never takes the serving plugin's section on the day the name
+# is retired.
+
+
+@pytest.mark.parametrize(
+    "operation, refusal",
+    [
+        pytest.param(
+            {"op": "remove", "path": "/scanners/oldname"},
+            "the path does not fit the document it patches",
+            id="remove",
+        ),
+        pytest.param(
+            {"op": "replace", "path": "/scanners/oldname/enabled", "value": True},
+            "the path does not fit the document it patches",
+            id="replace",
+        ),
+        pytest.param(
+            {"op": "test", "path": "/scanners/oldname/enabled", "value": False},
+            "does not equal the value the test op gives",
+            id="test",
+        ),
+    ],
+)
+def test_a_childs_op_under_the_retired_name_leaves_a_section_written_as_bandit(
+    retired_oldname, tmp_path, monkeypatch, operation, refusal
+):
+    """The base writes bandit's section under bandit, enabled: false, and the
+    child's patch removes, replaces or tests /scanners/oldname or a path under
+    it. No file wrote oldname, so the pointer is oldname's own key, which the
+    document does not hold, and the load is refused."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    child = _child_patching_its_base(
+        tmp_path, {"bandit": {"enabled": False}}, operation
+    )
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        _load(monkeypatch, child)
+
+    text = " ".join(str(refused.value).split())
+    assert "'patch' entry 0 in" in text, text
+    assert refusal in text, text
+
+
+def test_a_childs_add_under_the_retired_name_lays_over_a_section_written_as_bandit(
+    retired_oldname, tmp_path, monkeypatch
+):
+    """The base writes bandit's section under bandit, enabled: false and
+    confidence_level: high, and the child's patch adds /scanners/oldname with
+    confidence_level: low. No file wrote oldname, so the add writes oldname's
+    own section, which the loader folds over bandit's key by key:
+    confidence_level is the add's low, and the base's enabled: false stays."""
+    child = _child_patching_its_base(
+        tmp_path,
+        {"bandit": {"enabled": False, "options": {"confidence_level": "high"}}},
+        {
+            "op": "add",
+            "path": "/scanners/oldname",
+            "value": {"options": {"confidence_level": "low"}},
+        },
+    )
+
+    config = _load(monkeypatch, child)
+
+    assert config.scanners.bandit.enabled is False
+    assert config.scanners.bandit.options.confidence_level == "low"
+
+
+# A child's ``patch`` naming a section that it and its base both write. Each
+# file's own section is folded onto bandit's as the file is read, so the merged
+# document holds one bandit section with what both files wrote, and a pointer
+# in the retired spelling reaches every part of it. The canonical-control rows
+# write bandit in both files, with the same row planted.
+
+_SECTION_IDS = ["retired-name", "canonical-control"]
+
+
+def _child_writing_and_patching(tmp_path, base_scanners, child_scanners, *ops):
+    _write(tmp_path / "base.yaml", {"scanners": base_scanners})
+    return _write(
+        tmp_path / "child.yaml",
+        {"extends": "base.yaml", "scanners": child_scanners, "patch": list(ops)},
+    )
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+@pytest.mark.parametrize("op, expected", [("remove", "all"), ("replace", "low")])
+def test_a_childs_op_inside_a_section_both_files_write_reaches_the_bases_option(
+    retired_oldname, tmp_path, monkeypatch, section, op, expected
+):
+    """The base writes enabled and confidence_level, the child writes enabled,
+    both under *section*, and the child's patch removes or replaces
+    /scanners/<section>/options/confidence_level, which only the base wrote.
+    The load succeeds and the op applies to bandit's section: confidence_level
+    is bandit's default or the op's value, and enabled is the child's."""
+    operation: dict = {
+        "op": op,
+        "path": f"/scanners/{section}/options/confidence_level",
+    }
+    if op == "replace":
+        operation["value"] = "low"
+    child = _child_writing_and_patching(
+        tmp_path,
+        {section: {"enabled": False, "options": {"confidence_level": "high"}}},
+        {section: {"enabled": True}},
+        operation,
+    )
+
+    config = _load(monkeypatch, child)
+
+    assert config.scanners.bandit.enabled is True
+    assert config.scanners.bandit.options.confidence_level == expected
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+@pytest.mark.parametrize("op", ["remove", "replace"])
+@pytest.mark.parametrize("written_by", ["base", "child"])
+def test_a_childs_op_at_a_sub_path_one_file_writes_reaches_it(
+    retired_oldname, tmp_path, monkeypatch, section, op, written_by
+):
+    """The base writes enabled: false and the child confidence_level: high,
+    both under *section*, and the child's patch removes or replaces the one
+    the row names. The load succeeds and the op applies to bandit's section:
+    enabled is bandit's default or the op's true, or confidence_level is
+    bandit's default or the op's low, and the other setting is the one its
+    file wrote. The ``child`` rows are controls: the child's own section holds
+    the sub-path, so the op reaches it whether or not that section is folded
+    before the patch applies."""
+    if written_by == "base":
+        path, value = f"/scanners/{section}/enabled", True
+    else:
+        path, value = f"/scanners/{section}/options/confidence_level", "low"
+    operation: dict = {"op": op, "path": path}
+    if op == "replace":
+        operation["value"] = value
+    child = _child_writing_and_patching(
+        tmp_path,
+        {section: {"enabled": False}},
+        {section: {"options": {"confidence_level": "high"}}},
+        operation,
+    )
+
+    config = _load(monkeypatch, child)
+
+    bandit = config.scanners.bandit
+    if written_by == "base":
+        assert bandit.enabled is True
+        assert bandit.options.confidence_level == "high"
+    else:
+        assert bandit.enabled is False
+        assert bandit.options.confidence_level == ("all" if op == "remove" else "low")
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+@pytest.mark.parametrize("op", ["add", "replace", "remove"])
+def test_a_childs_op_on_a_whole_section_both_files_write_takes_all_of_it(
+    retired_oldname, tmp_path, monkeypatch, section, op
+):
+    """The base writes enabled: false and confidence_level: high, the child
+    writes enabled: true, both under *section*, and the child's patch adds,
+    replaces or removes /scanners/<section>. The op takes bandit's whole
+    section, and nothing the base wrote is merged back under it: after an add
+    or a replace bandit holds only the op's value (enabled is bandit's
+    default, true, and confidence_level the op's low), and after a remove it
+    holds bandit's defaults."""
+    operation: dict = {"op": op, "path": f"/scanners/{section}"}
+    if op != "remove":
+        operation["value"] = {"options": {"confidence_level": "low"}}
+    child = _child_writing_and_patching(
+        tmp_path,
+        {section: {"enabled": False, "options": {"confidence_level": "high"}}},
+        {section: {"enabled": True}},
+        operation,
+    )
+
+    config = _load(monkeypatch, child)
+
+    assert config.scanners.bandit.enabled is True
+    assert config.scanners.bandit.options.confidence_level == (
+        "all" if op == "remove" else "low"
+    )
+
+
 def test_one_file_holding_both_spellings_reads_the_retired_one_last(
     retired_oldname, tmp_path, monkeypatch
 ):
@@ -535,3 +723,457 @@ def test_the_document_fold_logs_only_when_asked_to(retired_oldname, caplog):
     with caplog.at_level(logging.INFO, logger="ash"):
         fold_document_scanner_aliases(document, log=False)
     assert about_the_retired_name() == []
+
+
+# Where the fold is logged. The loader folds each file's own retired sections
+# as it reads the file, so the line comes from the loader, once for each
+# document it folds, and the model finds nothing left to fold.
+
+_FOLD_LINE = (
+    "scanners.oldname is an alias of the bandit plugin; "
+    "applying its section to scanners.bandit"
+)
+
+
+def _fold_lines(caplog):
+    return [r.getMessage() for r in caplog.records if _FOLD_LINE in r.getMessage()]
+
+
+@pytest.mark.parametrize("chain", ["one-file", "base-and-child"])
+def test_the_loader_folds_and_logs_each_files_retired_section_once(
+    retired_oldname, tmp_path, monkeypatch, caplog, chain
+):
+    """The loader alone (resolve_config_document, no model) folds each file's
+    own section under the retired name onto bandit's, and logs the fold once
+    for each document it folds: one line for one file, two for a child and a
+    base that both write the retired name. The model, given the folded
+    document, logs no fold."""
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.config_sources import (
+        resolve_config_document,
+    )
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    if chain == "one-file":
+        path = _write(
+            tmp_path / "one.yaml", {"scanners": {"oldname": {"enabled": False}}}
+        )
+        folded_documents = 1
+    else:
+        _write(tmp_path / "base.yaml", {"scanners": {"oldname": {"enabled": True}}})
+        path = _write(
+            tmp_path / "child.yaml",
+            {"extends": "base.yaml", "scanners": {"oldname": {"enabled": False}}},
+        )
+        folded_documents = 2
+
+    with caplog.at_level(logging.INFO, logger="ash"):
+        document = resolve_config_document(path)
+
+    assert document.data["scanners"] == {"bandit": {"enabled": False}}
+    assert len(_fold_lines(caplog)) == folded_documents, _fold_lines(caplog)
+
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="ash"):
+        config = AshConfig.model_validate(document.data)
+
+    assert config.scanners.bandit.enabled is False
+    assert _fold_lines(caplog) == []
+
+
+def test_a_load_through_the_model_logs_a_files_fold_once(
+    retired_oldname, tmp_path, monkeypatch, caplog
+):
+    """The control: AshConfig.from_file reads the file and validates it, and
+    the fold of its section under the retired name is logged once for the
+    load."""
+    path = _write(tmp_path / "one.yaml", {"scanners": {"oldname": {"enabled": False}}})
+
+    with caplog.at_level(logging.INFO, logger="ash"):
+        config = _load(monkeypatch, path)
+
+    assert config.scanners.bandit.enabled is False
+    assert len(_fold_lines(caplog)) == 1, _fold_lines(caplog)
+
+
+# A value a file reads from the environment under the retired name. The loader
+# pairs the file's two readings before the fold, so every read is found, and
+# then moves each reference to the place the fold gives its value: the
+# results file's record and MCP get_config find it at bandit's section, where
+# the configuration holds the value. The canonical-control rows write bandit,
+# with the same row planted.
+
+_FOLD_VAR = "ASH_TEST_RETIRED_FOLD_VALUE"
+_FOLD_VALUE = "retired-fold-format-7c3e"
+_FOLD_KEY_VAR = "ASH_TEST_RETIRED_FOLD_KEY"
+
+
+def _child_reading_the_environment(tmp_path, section):
+    """A child that extends a base writing the retired name, and writes the
+    variable as the one entry of bandit's additional_formats under
+    *section*."""
+    _write(tmp_path / "base.yaml", {"scanners": {"oldname": {"enabled": False}}})
+    child = tmp_path / "child.yaml"
+    child.write_text(
+        "extends: base.yaml\n"
+        f"scanners:\n  {section}:\n    options:\n"
+        f"      additional_formats:\n        - ${{{_FOLD_VAR}}}\n",
+        encoding="utf-8",
+    )
+    return child
+
+
+def _named_by_the_operator(tmp_path, monkeypatch):
+    """Set the test's directory aside as the operator's, so MCP get_config
+    reads a file there as the operator's own (ASH_MCP_ALLOWED_CONFIG_ROOTS),
+    from a working directory in no checkout."""
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+
+def _record(config):
+    """The results file's ash_config for *config*."""
+    import json
+
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    return json.loads(
+        AshAggregatedResults(ash_config=config).model_dump_json(by_alias=True)
+    )["ash_config"]
+
+
+def _bandit_section(scanners, key_shown):
+    """bandit's section in *scanners*, a dump's or a record's: under bandit, or
+    under *key_shown* where the file read the key ``bandit`` from the
+    environment and the dump shows that key by its reference."""
+    return scanners["bandit"] if "bandit" in scanners else scanners[key_shown]
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+def test_get_config_shows_a_value_read_under_the_retired_name_by_its_reference(
+    retired_oldname, tmp_path, monkeypatch, section
+):
+    """The child writes ${VAR} as bandit's additional_formats under *section*.
+    MCP get_config shows the entry at bandit's section as `<from ${VAR}>`,
+    beside the base's enabled, and the variable's value appears nowhere in
+    the answer."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
+    child = _child_reading_the_environment(tmp_path, section)
+    _named_by_the_operator(tmp_path, monkeypatch)
+
+    result = mcp_get_config(config_path=str(child))
+
+    assert _FOLD_VALUE not in json.dumps(result), result
+    bandit = result["scanners"]["bandit"]
+    assert bandit["enabled"] is False, bandit
+    assert bandit["options"]["additional_formats"] == [f"<from ${{{_FOLD_VAR}}}>"]
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+def test_the_results_record_keeps_a_retired_name_s_value_as_its_reference(
+    retired_oldname, tmp_path, monkeypatch, section
+):
+    """The same chain, loaded as a scan loads it: the configuration holds the
+    value, and the results file's ash_config holds the entry at bandit's
+    section as the reference the child wrote, ${VAR}, and no resolved value
+    of it."""
+    import json
+
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
+
+    _, config = load_config_file_for_run(
+        _child_reading_the_environment(tmp_path, section)
+    )
+
+    assert config.scanners.bandit.options.additional_formats == [_FOLD_VALUE]
+    record = _record(config)
+    assert _FOLD_VALUE not in json.dumps(record), record.get("scanners")
+    options = record["scanners"]["bandit"]["options"]
+    assert options["additional_formats"] == [f"${{{_FOLD_VAR}}}"], options
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+def test_a_section_key_read_from_the_environment_keeps_its_references(
+    retired_oldname, tmp_path, monkeypatch, section
+):
+    """The file writes the section's key as ${KEY}, which reads *section*,
+    and ${VAR} as additional_formats under it. The loader pairs the key with
+    the name it resolved to before the fold, so the entry's reference is
+    found, and moves it to bandit's section: the results file's ash_config
+    holds the entry as ${VAR}, MCP get_config shows it as `<from ${VAR}>`,
+    and neither holds the variable's value. Where the key reads bandit (the
+    canonical-control row), the record and the answer show the key by its
+    reference too."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
+    monkeypatch.setenv(_FOLD_KEY_VAR, section)
+    path = tmp_path / "keyed.yaml"
+    path.write_text(
+        f"scanners:\n  ${{{_FOLD_KEY_VAR}}}:\n    enabled: false\n"
+        f"    options:\n      additional_formats:\n        - ${{{_FOLD_VAR}}}\n",
+        encoding="utf-8",
+    )
+
+    _, config = load_config_file_for_run(path)
+
+    assert config.scanners.bandit.enabled is False
+    record = _record(config)
+    assert _FOLD_VALUE not in json.dumps(record), record.get("scanners")
+    recorded = _bandit_section(record["scanners"], f"${{{_FOLD_KEY_VAR}}}")
+    assert recorded["options"]["additional_formats"] == [f"${{{_FOLD_VAR}}}"]
+
+    _named_by_the_operator(tmp_path, monkeypatch)
+    result = mcp_get_config(config_path=str(path))
+
+    assert _FOLD_VALUE not in json.dumps(result), result
+    shown = _bandit_section(result["scanners"], f"<from ${{{_FOLD_KEY_VAR}}}>")
+    assert shown["enabled"] is False, shown
+    assert shown["options"]["additional_formats"] == [f"<from ${{{_FOLD_VAR}}}>"]
+
+
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+def test_an_option_bandit_does_not_declare_under_the_retired_name_leaves_no_value(
+    retired_oldname, tmp_path, monkeypatch, section
+):
+    """The file writes ${VAR} at retired_only_knob, an option bandit's options
+    do not declare, under *section*. Under the retired name the fold drops the
+    option before anything is recorded, so its value appears nowhere: not in
+    the configuration, not among the references and rewrites the load
+    records, not in the results file's ash_config, and not in MCP
+    get_config's answer. The canonical-control row writes the option under
+    bandit, which keeps it as an extra option, and the record and the answer
+    hold its reference in place of the value."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
+    path = tmp_path / "knob.yaml"
+    path.write_text(
+        f"scanners:\n  {section}:\n    options:\n"
+        f"      retired_only_knob: ${{{_FOLD_VAR}}}\n",
+        encoding="utf-8",
+    )
+
+    _, config = load_config_file_for_run(path)
+
+    record = _record(config)
+    assert _FOLD_VALUE not in json.dumps(record), record.get("scanners")
+    if section == "oldname":
+        assert not hasattr(config.scanners.bandit.options, "retired_only_knob")
+        assert _FOLD_VALUE not in json.dumps(config.model_dump(mode="json"))
+        references = [
+            reference
+            for reference in (
+                *config._environment_references,
+                *config._displayed_environment_references,
+            )
+            if _FOLD_VALUE in (reference.resolved, reference.value)
+        ]
+        assert references == [], references
+        rewrites = [
+            rewrite
+            for rewrite in config._written_references or []
+            if rewrite.resolved == _FOLD_VALUE
+        ]
+        assert rewrites == [], rewrites
+
+    _named_by_the_operator(tmp_path, monkeypatch)
+    result = mcp_get_config(config_path=str(path))
+
+    assert _FOLD_VALUE not in json.dumps(result), result
+
+
+# An option bandit does not declare, written under the retired name, is dropped
+# as the file is read, before the file's own patch applies. An operation that
+# removes, replaces or tests it then finds nothing there: the load is refused,
+# and the refusal says the option was dropped. Under bandit the option is kept
+# as an extra, and the same operation applies.
+
+_DROPPED_CLAUSE = (
+    "The option it names was dropped when the file that wrote it was read: it "
+    "is written under a retired scanner name, and the bandit plugin that serves "
+    "that name does not declare it."
+)
+
+
+def _file_patching_its_own_knob(tmp_path, section, op):
+    """A file that writes retired_only_knob under *section* and whose own patch
+    applies *op* (remove, replace or test) to it."""
+    operation: dict = {
+        "op": op,
+        "path": f"/scanners/{section}/options/retired_only_knob",
+    }
+    if op != "remove":
+        operation["value"] = 1
+    return _write(
+        tmp_path / "knob.yaml",
+        {
+            "scanners": {section: {"options": {"retired_only_knob": 1}}},
+            "patch": [operation],
+        },
+    )
+
+
+@pytest.mark.parametrize("op", ["remove", "replace", "test"])
+def test_an_op_on_an_option_the_retired_name_fold_dropped_is_refused_with_its_cause(
+    retired_oldname, tmp_path, monkeypatch, op
+):
+    """The file writes retired_only_knob, an option bandit's options do not
+    declare, under oldname, and its own patch removes, replaces or tests it.
+    The fold dropped the option as the file was read, so the operation finds
+    nothing: the load is refused, and the message names the cause."""
+    from automated_security_helper.core.exceptions import ASHConfigSourceError
+
+    path = _file_patching_its_own_knob(tmp_path, "oldname", op)
+
+    with pytest.raises(ASHConfigSourceError) as refused:
+        _load(monkeypatch, path)
+
+    text = " ".join(str(refused.value).split())
+    assert "'patch' entry 0 in" in text, text
+    assert _DROPPED_CLAUSE in text, text
+
+
+@pytest.mark.parametrize("op", ["remove", "replace", "test"])
+def test_an_op_on_an_option_bandit_does_not_declare_under_bandit_applies(
+    retired_oldname, tmp_path, monkeypatch, op
+):
+    """The control: under bandit the option is kept as an extra one, and the
+    same operation applies, so the load succeeds."""
+    path = _file_patching_its_own_knob(tmp_path, "bandit", op)
+
+    config = _load(monkeypatch, path)
+
+    assert config.scanners.bandit is not None
+
+
+# A value read from the environment in a section a ``patch`` adds under the
+# retired name. The loader folds the added section onto bandit's once the patch
+# has applied and moves the reference with its value, so the results file's
+# record and MCP get_config show the value by its reference, as under bandit.
+# The canonical-control rows add the section under bandit.
+
+
+def _patch_adding_a_value_read_from_the_environment(tmp_path, section, *, from_base):
+    """A file whose patch adds bandit's section under *section*, with the
+    variable as the one entry of additional_formats; with *from_base*, that
+    file is a base, and the file returned extends it."""
+    patched = tmp_path / ("base.yaml" if from_base else "patched.yaml")
+    patched.write_text(
+        "scanners: {}\n"
+        "patch:\n"
+        "  - op: add\n"
+        f"    path: /scanners/{section}\n"
+        "    value:\n"
+        "      options:\n"
+        "        additional_formats:\n"
+        f"          - ${{{_FOLD_VAR}}}\n",
+        encoding="utf-8",
+    )
+    if not from_base:
+        return patched
+    return _write(tmp_path / "child.yaml", {"extends": "base.yaml"})
+
+
+@pytest.mark.parametrize("from_base", [False, True], ids=["the-file", "its-base"])
+@pytest.mark.parametrize("section", ["oldname", "bandit"], ids=_SECTION_IDS)
+def test_a_value_a_patch_adds_under_the_retired_name_is_shown_by_its_reference(
+    retired_oldname, tmp_path, monkeypatch, section, from_base
+):
+    """The patch adds ${VAR} under *section*, in the file loaded or in its
+    base. The configuration holds the value at bandit's section, the results
+    file's ash_config holds the reference there, MCP get_config shows it as
+    `<from ${VAR}>`, and neither holds the value."""
+    import json
+
+    from automated_security_helper.cli.mcp_tools import mcp_get_config
+    from automated_security_helper.config.resolve_config import (
+        load_config_file_for_run,
+    )
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    monkeypatch.setenv(_FOLD_VAR, _FOLD_VALUE)
+    path = _patch_adding_a_value_read_from_the_environment(
+        tmp_path, section, from_base=from_base
+    )
+
+    _, config = load_config_file_for_run(path)
+
+    assert config.scanners.bandit.options.additional_formats == [_FOLD_VALUE]
+    record = _record(config)
+    assert _FOLD_VALUE not in json.dumps(record), record.get("scanners")
+    options = record["scanners"]["bandit"]["options"]
+    assert options["additional_formats"] == [f"${{{_FOLD_VAR}}}"], options
+
+    _named_by_the_operator(tmp_path, monkeypatch)
+    result = mcp_get_config(config_path=str(path))
+
+    assert _FOLD_VALUE not in json.dumps(result), result
+    shown = result["scanners"]["bandit"]["options"]["additional_formats"]
+    assert shown == [f"<from ${{{_FOLD_VAR}}}>"], shown
+
+
+def test_the_fold_records_the_sections_it_moved_and_the_options_it_dropped(
+    retired_oldname,
+):
+    """``folds`` gets, for each plugin a retired name's section was laid onto,
+    the option keys the fold dropped: what the loader reads to redirect a
+    patch pointer and to say why an operation found nothing. A mapping with
+    no retired name records nothing."""
+    from automated_security_helper.config.ash_config import (
+        fold_scanner_name_aliases,
+    )
+
+    record: dict = {}
+    folded = fold_scanner_name_aliases(
+        {"oldname": {"options": {"confidence_level": "high", "retired_only_knob": 1}}},
+        folds=record,
+        log=False,
+    )
+
+    assert folded == {"bandit": {"options": {"confidence_level": "high"}}}
+    assert record == {"bandit": {"retired_only_knob"}}
+
+    untouched: dict = {}
+    fold_scanner_name_aliases({"bandit": {"enabled": True}}, folds=untouched, log=False)
+    assert untouched == {}
+
+
+def test_the_fold_reads_the_options_a_plugin_declares_under_its_alias():
+    """detect-secrets' section key is its field's alias (the field is
+    detect_secrets). The fold reads that plugin's declared options too, so an
+    option it does not declare is dropped from a section written under a
+    retired name it serves, as for bandit."""
+    from automated_security_helper.config.ash_config import (
+        ScannerConfigSegment,
+        _declared_option_names,
+    )
+
+    declared = _declared_option_names(ScannerConfigSegment, "detect-secrets")
+
+    assert declared is not None
+    assert "max_worker_output_mib" in declared
