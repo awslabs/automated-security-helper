@@ -297,6 +297,20 @@ def _covered(run: Run, features) -> frozenset:
     return _evaluate(run, features).covered
 
 
+def _assert_absent(absent, result, features, *context) -> None:
+    """None of ``absent`` is in ``result``, and each of them is the id of one of the
+    ``features`` the test evaluated. A negative check alone holds for an id that names
+    no feature (a misspelling, a renamed or hidden feature), which nothing can cover,
+    so it would pass whatever the code does."""
+    absent = set(absent)
+    known = {feature.id for feature in features}
+    assert absent <= known, (
+        f"ids that name no feature evaluated here: {sorted(absent - known)}",
+        *context,
+    )
+    assert not absent & result, (sorted(absent & result), *context)
+
+
 def _join(*blocks: str) -> str:
     return "\n\n".join(blocks) + "\n"
 
@@ -1655,7 +1669,7 @@ def test_a_block_that_reaches_a_branch_of_the_callback_covers_only_options_it_gi
     result = _covered(run, features)
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, features)
 
 
 # --------------------------------------------------------------------------- #
@@ -1751,7 +1765,11 @@ ASH_CONVERTERS = [SyntheticConverter]
 @pytest.fixture
 def synthetic_package(tmp_path):
     """A plugin package under a directory named ``automated_security_helper``,
-    importable under a name of its own, for plugin_features to walk."""
+    importable under a name of its own, for plugin_features to walk.
+
+    ``files`` maps a module's path under the package, without ``.py``, to its text:
+    ``__init__`` is the package's own ``__init__.py`` (empty when not given), and a
+    path such as ``builtin/__init__`` makes a sub-package."""
     names: list[str] = []
 
     def make(files: dict[str, str]):
@@ -1759,9 +1777,15 @@ def synthetic_package(tmp_path):
             tmp_path / "checkout" / "automated_security_helper" / "synthetic_plugins"
         )
         directory.mkdir(parents=True)
-        (directory / "__init__.py").write_text("", encoding="utf-8")
+        (directory / "__init__.py").write_text(
+            files.get("__init__", ""), encoding="utf-8"
+        )
         for stem, text in files.items():
-            (directory / f"{stem}.py").write_text(text, encoding="utf-8")
+            if stem == "__init__":
+                continue
+            module = directory / f"{stem}.py"
+            module.parent.mkdir(parents=True, exist_ok=True)
+            module.write_text(text, encoding="utf-8")
         name = f"_synthetic_plugins_{uuid.uuid4().hex}"
         spec = importlib.util.spec_from_file_location(
             name, directory / "__init__.py", submodule_search_locations=[str(directory)]
@@ -1987,18 +2011,29 @@ def test_a_plugin_module_that_does_not_import_is_an_inventory_error(synthetic_pa
         cov.plugin_features(package)
 
 
+@pytest.mark.parametrize(
+    "holder",
+    [
+        pytest.param("loader", id="in-a-module-of-the-package"),
+        pytest.param("builtin/__init__", id="in-a-sub-packages-own-init"),
+        pytest.param("__init__", id="in-the-init-of-the-package-it-is-given"),
+    ],
+)
 def test_a_plugin_group_its_package_recorded_as_not_loaded_is_an_inventory_error(
-    synthetic_package,
+    synthetic_package, holder
 ):
     """ASH's builtin plugin package catches an ImportError per plugin group, leaves
     that group's list empty and records it in ASH_PLUGIN_LOAD_ERRORS, and the package
     still imports (plugin_modules/ash_builtin/__init__.py). The inventory refuses a
-    module whose record is not empty, rather than come out short."""
+    module whose record is not empty, rather than come out short, wherever the record
+    is held: in a module of the package; in a sub-package's own ``__init__.py``, the
+    builtin package's layout under plugin_modules; and in the ``__init__.py`` of the
+    package the inventory is handed, which walking that package never yields."""
     cov = _cov()
     package = synthetic_package(
         {
             "scanners": SYNTHETIC_SCANNERS,
-            "loader": "ASH_PLUGIN_LOAD_ERRORS = {\n"
+            holder: "ASH_PLUGIN_LOAD_ERRORS = {\n"
             '    "synthetic_plugins.reporters": "ImportError: a dependency is missing",\n'
             "}\n",
         }
@@ -2296,12 +2331,28 @@ def _scanner_classes() -> dict:
     return found
 
 
+def _scan_owner(plugin):
+    """The class whose scan() a scanner runs: the first class in its MRO that defines
+    one, or None when no class before ScannerPluginBase does (the scanner runs the
+    framework's template)."""
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
+    for klass in plugin.__mro__:
+        if klass is ScannerPluginBase:
+            return None
+        if "scan" in klass.__dict__:
+            return klass
+    return None
+
+
 def _replaces_the_scan_template(plugin) -> bool:
-    """Whether a scanner's own scan() does its work instead of calling
+    """Whether the scan() a scanner runs, its own or one it inherits from a class
+    between it and ScannerPluginBase, does its work instead of calling
     super().scan(...), the framework's template, which calls _execute_scan."""
-    if "scan" not in plugin.__dict__:
+    owner = _scan_owner(plugin)
+    if owner is None:
         return False
-    node = _function_node(_source_path(plugin), "scan", cls=plugin.__name__)
+    node = _function_node(_source_path(owner), "scan", cls=owner.__name__)
     return not _calls_super_scan(node)
 
 
@@ -2350,15 +2401,18 @@ def test_a_scanner_that_replaces_the_scan_template_is_measured_in_its_own_scan(n
     stub = _function_node(path, "_execute_scan", cls=plugin.__name__)
     assert _is_not_implemented_stub(stub), f"{name}'s _execute_scan is not a stub now"
 
+    owner = _scan_owner(plugin)
     (region,) = _by_id()[f"scanner:{name}"].regions
 
-    assert region.path == path
+    assert region.path == _source_path(owner)
     _assert_region(
         region,
-        _function_node(path, "scan", cls=plugin.__name__),
+        _function_node(region.path, "scan", cls=owner.__name__),
         past_the_last_exit=True,
     )
-    assert not any(stub.lineno <= line <= stub.end_lineno for line in region.lines)
+    assert region.path != path or not any(
+        stub.lineno <= line <= stub.end_lineno for line in region.lines
+    )
 
 
 def test_bandit_is_measured_in_its_own_execute_scan():
@@ -2442,7 +2496,13 @@ def test_opengrep_and_semgrep_each_need_a_method_of_their_own_beside_the_shared_
     """semgrep runs in the docs job and opengrep does not, so the shared method alone
     would cover opengrep whenever semgrep ran. Each needs a method it defines itself
     that the shared method calls; every plugin with a work method of its own, and
-    every other feature, needs nothing more."""
+    every other feature, needs nothing more.
+
+    The methods a plugin needs take the region rule, not the scanners' named
+    exception. opengrep's extra_subprocess_env shows the difference: past its
+    docstring it opens with a statement that is not an early exit (it reads the scan
+    target) and its early exits come after it, so its region is its whole body from
+    that first statement, and not the last statement alone."""
     classes = _scanner_classes()
     by_id = _by_id()
 
@@ -2457,6 +2517,21 @@ def test_opengrep_and_semgrep_each_need_a_method_of_their_own_beside_the_shared_
     for feature in _inventory():
         if feature.id not in ("scanner:opengrep", "scanner:semgrep"):
             assert feature.requires == (), feature.id
+
+    opengrep = classes["opengrep"]
+    path = _source_path(opengrep)
+    node = _function_node(path, "extra_subprocess_env", cls=opengrep.__name__)
+    body = _without_docstring(node.body)
+    assert not _is_guard(body[0]) and any(_is_guard(s) for s in body[1:])
+    (region,) = [
+        region
+        for region in by_id["scanner:opengrep"].requires
+        if region.path == path and node.lineno <= min(region.lines) <= node.end_lineno
+    ]
+    assert (min(region.lines), max(region.lines)) == (
+        body[0].lineno,
+        body[-1].end_lineno,
+    )
 
 
 @pytest.mark.parametrize(
@@ -2495,10 +2570,11 @@ def test_reaching_the_grep_bases_work_method_covers_the_grep_scanner_whose_own_c
         for region in _own_regions_the_shared_method_calls(_scanner_classes()[own]):
             run.hit(f"page.md::{line}", region.path, {min(region.lines)})
 
-    result = _covered(run, [by_id["scanner:opengrep"], by_id["scanner:semgrep"]])
+    features = [by_id["scanner:opengrep"], by_id["scanner:semgrep"]]
+    result = _covered(run, features)
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, features)
 
 
 def test_no_plugin_is_measured_in_a_stub_that_only_raises_not_implemented():
@@ -2592,7 +2668,13 @@ def test_ash_results_report_is_measured_over_the_reporter_it_builds_and_runs():
     the reporter's dependency check refuses, and then runs the reporter. Building the
     reporter is the command's own work, so the statement that builds it is in the
     region with the one that runs it; the refusal's exit 1 is kept from counting by
-    the exit filter, not by the region."""
+    the exit filter, not by the region.
+
+    Only the first needle tells the region rule from a region measured past the
+    command's last early exit: the statement that runs the reporter comes after the
+    dependency check, inside both, while the one that builds it comes before the
+    check, outside the second. Against that measure, of the two needles only the first
+    fails (and with it the whole-region check after the loop); the second holds."""
     feature = _by_id()["command:ash results report"]
     path, node = _feature_node(feature)
     (region,) = feature.regions
@@ -2918,6 +3000,19 @@ EXPECTED_EXITS = [
 RESULTS_WRITES = ["no-results-write", "an-early-exit-of-the-write", "wrote-its-results"]
 
 
+def test_the_exits_that_count_are_named_by_members_of_the_exit_codes():
+    """COUNTING_EXITS and COUNTING_ONCE_A_SCAN_WROTE_ITS_RESULTS are AshExitCode member
+    names. The exit test below reads every member and classes it by these names, so a
+    name no member has (a member renamed, a misspelling) would move that member's
+    cases to "never evidence" without a failure."""
+    members = {member.name for member in AshExitCode}
+
+    assert set(COUNTING_EXITS) <= members, sorted(set(COUNTING_EXITS) - members)
+    assert set(COUNTING_ONCE_A_SCAN_WROTE_ITS_RESULTS) <= members, sorted(
+        set(COUNTING_ONCE_A_SCAN_WROTE_ITS_RESULTS) - members
+    )
+
+
 def _results_write():
     """ASHScanOrchestrator._write_results_file, which a scan runs once its phases
     have run, to write the results it found."""
@@ -3101,7 +3196,7 @@ def test_an_exit_1_example_on_these_pages_counts_only_when_its_scan_wrote_its_re
     result = _covered(run, _cli_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _cli_features())
 
 
 def test_check_exits_2_when_the_results_write_it_reads_exit_1_by_is_gone(
@@ -3324,7 +3419,7 @@ def test_a_passing_block_covers_the_command_it_invokes_and_the_options_it_gives(
     result = _covered(run, _cli_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _cli_features())
 
 
 @pytest.mark.parametrize(
@@ -3377,7 +3472,7 @@ def test_only_the_scan_callbacks_code_past_its_early_exits_shows_the_scan(
     result = _covered(run, _cli_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _cli_features())
 
 
 @pytest.mark.parametrize(
@@ -3405,7 +3500,7 @@ def test_ash_version_on_these_pages_covers_the_version_option_and_not_the_scan(
     result = _covered(run, _cli_features())
 
     assert "option:ash scan --version" in result
-    assert "command:ash scan" not in result
+    _assert_absent({"command:ash scan"}, result, _cli_features())
 
 
 def test_a_python_block_that_reaches_a_commands_code_covers_it_and_none_of_its_options(
@@ -3427,7 +3522,7 @@ def test_a_python_block_that_reaches_a_commands_code_covers_it_and_none_of_its_o
     result = _covered(run, _cli_features())
 
     assert "command:ash scan" in result
-    assert "option:ash scan --scanners" not in result
+    _assert_absent({"option:ash scan --scanners"}, result, _cli_features())
 
 
 def test_a_block_that_shows_a_refusal_covers_nothing_it_names(tmp_path):
@@ -3451,15 +3546,21 @@ def test_a_block_that_shows_a_refusal_covers_nothing_it_names(tmp_path):
     run.record("other.md", _block("other.md", 3))
     run.hit("other.md::3", OTHER_PATH, {5})
 
-    result = _covered(run, _cli_features() + _config_features())
+    features = _cli_features() + _config_features()
+    result = _covered(run, features)
 
-    assert not result & {
-        "command:ash scan",
-        "option:ash scan --scanners",
-        "option:ash scan --config-overrides",
-        "config:global_settings",
-        "config:global_settings.severity_threshold",
-    }, sorted(result)
+    _assert_absent(
+        {
+            "command:ash scan",
+            "option:ash scan --scanners",
+            "option:ash scan --config-overrides",
+            "config:global_settings",
+            "config:global_settings.severity_threshold",
+        },
+        result,
+        features,
+        sorted(result),
+    )
 
 
 @pytest.mark.parametrize(
@@ -3483,7 +3584,9 @@ def test_an_option_is_not_covered_by_a_block_that_did_not_pass_and_reach(
 
     result = _covered(run, _cli_features())
 
-    assert not result & {"command:ash scan", "option:ash scan --scanners"}
+    _assert_absent(
+        {"command:ash scan", "option:ash scan --scanners"}, result, _cli_features()
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -3658,7 +3761,7 @@ def test_a_saved_config_covers_the_rows_it_sets_when_a_later_block_loads_it(
     result = _covered(run, _config_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _config_features())
 
 
 @pytest.mark.parametrize(
@@ -3732,8 +3835,10 @@ def test_a_config_key_is_not_covered_unless_a_passing_block_loaded_a_saved_ash_c
 ):
     run = _config_run(tmp_path, **variant)
 
-    assert "config:global_settings.severity_threshold" not in _covered(
-        run, _config_features()
+    _assert_absent(
+        {"config:global_settings.severity_threshold"},
+        _covered(run, _config_features()),
+        _config_features(),
     )
 
 
@@ -4024,7 +4129,7 @@ def test_a_saved_config_counts_only_where_the_loading_block_can_have_loaded_it(
     result = _covered(run, _config_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _config_features())
 
 
 #: A workflow a page saves for another program: its step changes directory in the
@@ -4227,7 +4332,7 @@ def test_after_a_shell_block_of_the_session_changes_directory_no_saved_config_co
 
     result = _covered(run, _config_features())
 
-    assert not SEVERITY_ROWS & result, sorted(SEVERITY_ROWS & result)
+    _assert_absent(SEVERITY_ROWS, result, _config_features())
 
 
 def test_a_shell_block_that_changed_directory_stops_the_credit_though_it_failed(
@@ -4256,7 +4361,7 @@ def test_a_shell_block_that_changed_directory_stops_the_credit_though_it_failed(
 
     result = _covered(run, _config_features())
 
-    assert not SEVERITY_ROWS & result, sorted(SEVERITY_ROWS & result)
+    _assert_absent(SEVERITY_ROWS, result, _config_features())
 
 
 @pytest.mark.parametrize(
@@ -4464,7 +4569,9 @@ def test_of_two_saved_configs_discovery_could_read_only_the_one_it_picks_counts(
     result = _covered(run, _config_features())
 
     assert "config:project_name" in result, (picked, outranked)
-    assert "config:fail_on_findings" not in result, (picked, outranked)
+    _assert_absent(
+        {"config:fail_on_findings"}, result, _config_features(), picked, outranked
+    )
 
 
 @pytest.mark.parametrize(
@@ -4518,7 +4625,7 @@ def test_the_config_discovery_picks_counts_by_its_latest_save_before_the_load(
     result = _covered(run, _config_features())
 
     assert covered <= result, (sorted(covered - result), picked, outranked)
-    assert not uncovered & result, (sorted(uncovered & result), picked, outranked)
+    _assert_absent(uncovered, result, _config_features(), picked, outranked)
 
 
 def test_a_file_discovery_picks_hides_the_ones_it_outranks_even_when_it_never_counts(
@@ -4540,8 +4647,13 @@ def test_a_file_discovery_picks_hides_the_ones_it_outranks_even_when_it_never_co
 
     result = _covered(run, _config_features())
 
-    shown = (SEVERITY_ROWS | {"config:project_name"}) & result
-    assert not shown, (sorted(shown), picked, outranked)
+    _assert_absent(
+        SEVERITY_ROWS | {"config:project_name"},
+        result,
+        _config_features(),
+        picked,
+        outranked,
+    )
 
 
 @pytest.mark.parametrize("picked_first", PICKED_FIRST)
@@ -4561,13 +4673,17 @@ def test_of_two_saved_configs_in_the_directory_source_dir_names_only_the_one_dis
     result = _covered(run, _config_features())
 
     assert "config:project_name" in result, (picked, outranked)
-    assert "config:fail_on_findings" not in result, (picked, outranked)
+    _assert_absent(
+        {"config:fail_on_findings"}, result, _config_features(), picked, outranked
+    )
 
 
 #: A configuration saved under the name discovery reads first, and one only a command
 #: can name; each sets rows of its own.
 DISCOVERED = _saved_config(SEVERITY, save_as=".ash.yaml")
 NAMED = _saved_config("project_name: demo", save_as=TEAM)
+#: A second file a command can name, beside TEAM.
+OTHER_NAMED = "configs/other.yaml"
 
 
 @pytest.mark.parametrize(
@@ -4773,6 +4889,113 @@ NAMED = _saved_config("project_name: demo", save_as=TEAM)
             set(),
             id="ash-config-set-after-the-loading-block",
         ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, _scan_block("ASH_SOURCE_DIR=sub ash scan --offline")
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-source-dir-on-the-loading-scan",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    _saved_config(SEVERITY, save_as="sub/.ash.yaml"),
+                    _scan_block("export ASH_SOURCE_DIR=sub"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="a-save-in-the-directory-ash-source-dir-names",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    NAMED,
+                    _scan_block(
+                        f"ash scan --config {TEAM} --offline\nash scan --offline"
+                    ),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="a-loading-block-with-a-scan-that-names-a-config-and-one-that-does-not",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, NAMED, _scan_block(f"ash scan -c{TEAM} --offline")
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS,
+            id="the-scan-names-its-config-with-c-glued-to-it",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block(f"read -r ASH_CONFIG <<< {TEAM}"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-read-by-an-earlier-block",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    _scan_block(f"printf -v ASH_CONFIG '%s' {TEAM}"),
+                    _scan_block(),
+                )
+            },
+            set(),
+            SEVERITY_ROWS,
+            id="ash-config-printed-into-by-an-earlier-block",
+        ),
+        pytest.param(
+            {"text": _join(DISCOVERED, _scan_block("ash config update"))},
+            SEVERITY_ROWS,
+            set(),
+            id="config-update-discovers-as-the-scan-does",
+        ),
+        pytest.param(
+            {"text": _join(DISCOVERED, _scan_block("ash config lint"))},
+            SEVERITY_ROWS,
+            set(),
+            id="config-lint-discovers-as-the-scan-does",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED, _scan_block("ash config validate-plugin-dependencies")
+                )
+            },
+            SEVERITY_ROWS,
+            set(),
+            id="config-validate-plugin-dependencies-discovers-as-the-scan-does",
+        ),
+        pytest.param(
+            {
+                "text": _join(
+                    DISCOVERED,
+                    NAMED,
+                    _saved_config("fail_on_findings: false", save_as=OTHER_NAMED),
+                    _scan_block(
+                        f"ASH_CONFIG={OTHER_NAMED} ash scan --config {TEAM} --offline"
+                    ),
+                )
+            },
+            {"config:project_name"},
+            SEVERITY_ROWS | {"config:fail_on_findings"},
+            id="config-and-ash-config-naming-another-file",
+        ),
     ],
 )
 def test_a_discovered_config_counts_only_through_a_command_that_ran_discovery(
@@ -4791,13 +5014,24 @@ def test_a_discovered_config_counts_only_through_a_command_that_ran_discovery(
     commands whose code shows discovery are the scan and the config commands (get and
     validate here); ash report resolves with no directory and so discovers nothing.
     An assignment in an earlier session, or after the loading block, changes nothing,
-    and --config-overrides names no config."""
+    and --config-overrides names no config.
+
+    Where those rules leave a reading open, the cases take the side that cannot
+    over-count. ASH_SOURCE_DIR given on the loading scan itself stops the discovered
+    credit as an earlier assignment does, and so it does for a save in the directory
+    it names: its value is read as unknown. A loading block with two scans, one
+    naming a config and one not, credits no discovered file, since the record shows
+    the block reached the loader, not which scan did. ``-c`` glued to its value names
+    a config. ``read`` and ``printf -v`` assign ASH_CONFIG though no ``ASH_CONFIG=``
+    is written. ``update``, ``lint`` and ``validate-plugin-dependencies`` discover as
+    the scan does. ``--config`` with an ASH_CONFIG naming another file credits the
+    ``--config`` file only."""
     run = _loading_run(tmp_path, **variant)
 
     result = _covered(run, _config_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _config_features())
 
 
 @pytest.mark.parametrize(
@@ -4938,7 +5172,7 @@ def test_a_config_override_covers_its_key_when_the_overrides_code_ran(
     result = _covered(run, _config_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _config_features())
 
 
 SUPPRESS_FINDINGS = "docs/content/how-to/suppress-findings.md"
@@ -5005,7 +5239,7 @@ def test_the_keys_suppress_findings_gives_inside_an_override_value_are_covered(
     result = _covered(run, _config_features())
 
     assert covered <= result, sorted(covered - result)
-    assert not uncovered & result, sorted(uncovered & result)
+    _assert_absent(uncovered, result, _config_features())
 
 
 # --------------------------------------------------------------------------- #
@@ -5043,7 +5277,11 @@ def test_a_feature_any_block_shows_is_presented_whether_or_not_it_ran(tmp_path):
         "config:scanners.semgrep",
     }
     assert shown <= evaluation.presented, sorted(shown - evaluation.presented)
-    assert not {"reporter:sarif", "option:ash scan --source-dir"} & evaluation.presented
+    _assert_absent(
+        {"reporter:sarif", "option:ash scan --source-dir"},
+        evaluation.presented,
+        _inventory(),
+    )
     assert not shown & evaluation.covered
 
 
@@ -5250,6 +5488,44 @@ def _a_recorded_block_without_its_expected_exit(run: Run, line: int) -> None:
     run.hit(f"page.md::{line}", PLANTED_PATH, {11})
 
 
+def _a_recorded_block_without_its_verdict(run: Run, line: int) -> None:
+    block = _block("page.md", line)
+    del block["ok"]
+    run.record("page.md", block)
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+
+
+def _a_recorded_block_without_whether_it_ran(run: Run, line: int) -> None:
+    block = _block("page.md", line)
+    del block["runs"]
+    run.record("page.md", block)
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+
+
+def _a_recorded_block_without_its_session(run: Run, line: int) -> None:
+    block = _block("page.md", line)
+    del block["session"]
+    run.record("page.md", block)
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+
+
+def _a_record_of_another_schema(run: Run, line: int) -> None:
+    run.record("page.md", _block("page.md", line))
+    (record,) = (run.data / "blocks").glob("*.json")
+    content = json.loads(record.read_text(encoding="utf-8"))
+    content["schema"] = content["schema"] + 1
+    record.write_text(json.dumps(content), encoding="utf-8")
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+
+
+def _a_record_that_is_not_json(run: Run, line: int) -> None:
+    """The record a runner killed while writing it would leave: cut short."""
+    run.record("page.md", _block("page.md", line))
+    (record,) = (run.data / "blocks").glob("*.json")
+    record.write_text(record.read_text(encoding="utf-8")[:-1], encoding="utf-8")
+    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+
+
 @pytest.mark.parametrize(
     "breaks",
     [
@@ -5260,6 +5536,11 @@ def _a_recorded_block_without_its_expected_exit(run: Run, line: int) -> None:
         _a_recorded_page_the_docs_tree_lacks,
         _a_recorded_block_the_page_lacks,
         _a_recorded_block_without_its_expected_exit,
+        _a_recorded_block_without_its_verdict,
+        _a_recorded_block_without_whether_it_ran,
+        _a_recorded_block_without_its_session,
+        _a_record_of_another_schema,
+        _a_record_that_is_not_json,
     ],
     ids=lambda breaks: breaks.__name__.strip("_").replace("_", "-"),
 )
@@ -5268,7 +5549,10 @@ def test_a_measurement_that_measured_nothing_or_came_from_another_tree_exits_2(
 ):
     """A zero must never read as a result: each of these is an error, not a pass and
     not a list of uncovered features. A record that does not say what its block
-    expected cannot be judged, so it is not read as expecting success."""
+    expected, whether it ran, its verdict or its session cannot be judged, so it is
+    not read with a default. A record of another schema, or one that is not JSON (cut
+    short when its runner was killed, or written by another runner), is not read at
+    all."""
     run = Run(tmp_path)
     (line,) = run.page("page.md", ONE_BLOCK)
     breaks(run, line)
