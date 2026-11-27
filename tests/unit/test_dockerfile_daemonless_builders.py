@@ -457,6 +457,9 @@ def _is_a_fork_page(url: str) -> bool:
     return url.startswith((f"{FIRST_FORK}/", f"{SECOND_FORK}/"))
 
 
+# A digest as a builder prints it: the algorithm, then 64 hex digits.
+_DIGEST = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
 # One planted case per form, as (where, text). ``top`` is before everything and
 # ``stage`` is inside the first stage; see plant(). The first line of the text is the
 # line the form has to be reported on.
@@ -511,6 +514,11 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
         ("stage", "FROM mcr.microsoft.com/dotnet/sdk:8.0-windowsservercore-ltsc2022"),
         ("stage", "FROM mcr.microsoft.com/dotnet/sdk:8.0-servercore-ltsc2022"),
         ("stage", "FROM mcr.microsoft.com/powershell:LTS-NanoServer-ltsc2022"),
+        ("stage", "FROM python:3.15-windowsservercore-ltsc2022"),
+        ("stage", "FROM docker.io/library/python:3.15-windowsservercore-ltsc2022"),
+        ("stage", "FROM golang:1.27-nanoserver-ltsc2022"),
+        ("stage", f"FROM python:3.15-windowsservercore-ltsc2022@{_DIGEST}"),
+        ("stage", "FROM localhost:5000/team/app:1.0-nanoserver-ltsc2022"),
     ],
 }
 
@@ -570,6 +578,19 @@ NEGATIVE = {
     ),
     "a Linux tag of an image that also has Windows tags": (
         "FROM mcr.microsoft.com/powershell:lts-ubuntu-22.04 AS x"
+    ),
+    "a plain Linux tag on Docker Hub": "FROM python:3.15-slim AS x",
+    "an image whose repository name holds servercore, not its tag": (
+        "FROM registry.example.com/team/servercore-notes:1.0 AS x"
+    ),
+    "an image whose repository name holds nanoserver, not its tag": (
+        "FROM registry.example.com/team/nanoserver-docs:2.1 AS x"
+    ),
+    "a registry with a port and no tag, whose path holds servercore": (
+        "FROM localhost:5000/team/servercore-notes AS x"
+    ),
+    "a digest with no tag, on a repository whose name holds nanoserver": (
+        f"FROM registry.example.com/team/nanoserver-docs@{_DIGEST} AS x"
     ),
 }
 
