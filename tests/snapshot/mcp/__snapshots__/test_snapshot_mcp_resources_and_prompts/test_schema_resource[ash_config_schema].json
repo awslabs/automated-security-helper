@@ -3830,7 +3830,7 @@
             }
           ],
           "default": null,
-          "description": "Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+          "description": "Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` and `.ash/.secrets.baseline` in the source directory. A baseline found there only marks the candidates it lists as known; its plugins_used and filters_used are not applied. Name the baseline file with this option, from outside the scanned tree and any git checkout holding it, to also apply its plugins and filters. The settings from the baseline will be overwritten if scan_settings is provided.",
           "title": "Baseline File"
         },
         "max_worker_output_mib": {

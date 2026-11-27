@@ -48,6 +48,15 @@
 
 ### Behavior changes
 
+- **A detect-secrets baseline found in the scanned tree no longer sets which
+  plugins run or which filters apply.** A `.secrets.baseline` or
+  `.ash/.secrets.baseline` in the scanned tree still marks the candidates it
+  lists as known, as before, but its `plugins_used` and `filters_used` are not
+  applied: the scan runs the default plugins plus the operator's own
+  `scan_settings` filters, and logs one warning naming the baseline file and the
+  plugins and filters it did not apply. To keep applying a baseline's plugins and
+  filters, set `scanners.detect-secrets.options.baseline_file` to a baseline
+  outside the scanned tree and any git checkout that holds it.
 - **`ash merge` records the merged run in the scan history.** With
   `global_settings.history.enabled` in the merged configuration (the shards'
   recorded config, with `--config-overrides` applied), the merge appends one run

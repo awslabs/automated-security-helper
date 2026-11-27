@@ -284,7 +284,7 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
     baseline_file: Annotated[
         Path | str | None,
         Field(
-            description="Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` in the root of the source directory. The settings from the baseline will be overwritten if scan_settings is provided.",
+            description="Path to detect-secrets baseline file. A relative path is taken from the directory of the config file that sets it, or from the working directory for --config-overrides, not from the source directory. Defaults to searching for `.secrets.baseline` and `.ash/.secrets.baseline` in the source directory. A baseline found there only marks the candidates it lists as known; its plugins_used and filters_used are not applied. Name the baseline file with this option, from outside the scanned tree and any git checkout holding it, to also apply its plugins and filters. The settings from the baseline will be overwritten if scan_settings is provided.",
         ),
     ] = None
     scan_settings: Annotated[
@@ -1268,7 +1268,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # choice of settings; it used to gate this too, so naming a
                 # version alone silently dropped the baseline's plugins and
                 # its filters (the exclusions among them).
-                if len(self.config.options.scan_settings.plugins_used) == 0:
+                #
+                # Only a baseline the operator named from outside the scanned
+                # tree and every checkout sets them (_baseline_entries_trusted).
+                # A baseline the scan found in the tree is the repository's: its
+                # ``results`` still mark known candidates, but its plugin list
+                # and filters would let the repository choose what the scan
+                # detects and what it leaves out, so the scan runs with the
+                # default plugins and the operator's own filters.
+                settings_trusted = self._baseline_entries_trusted()
+                if not settings_trusted:
+                    self._warn_baseline_settings_not_applied(baseline_data, values)
+                if (
+                    settings_trusted
+                    and len(self.config.options.scan_settings.plugins_used) == 0
+                ):
                     # Load plugins from baseline
                     if "plugins_used" in baseline_data:
                         self.config.options.scan_settings.plugins_used = [
@@ -1395,6 +1409,42 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
 
         return super()._process_config_options()
+
+    def _warn_baseline_settings_not_applied(
+        self, baseline_data: Any, values: Collection[str]
+    ) -> None:
+        """Say once that the baseline in use set no plugins or filters, and which.
+
+        Names only the plugin names and filter paths, never a pattern or a limit
+        the baseline holds.
+        """
+        if not isinstance(baseline_data, dict):
+            return
+        plugins = [
+            str(item["name"])
+            for item in baseline_data.get("plugins_used") or []
+            if isinstance(item, dict) and item.get("name")
+        ]
+        filters = [
+            str(item["path"])
+            for item in baseline_data.get("filters_used") or []
+            if isinstance(item, dict) and item.get("path")
+        ]
+        if not plugins and not filters:
+            return
+        ASH_LOGGER.warning(
+            text_without_values(
+                f"The detect-secrets baseline {Path(self._baseline_file_path()).as_posix()} "
+                "was not taken as the operator's, so its plugins and filters were "
+                "not applied; the scan uses the default plugins and the operator's "
+                "own filters, and the baseline still marks the candidates it lists. "
+                f"Plugins not applied: {', '.join(plugins) or 'none'}. "
+                f"Filters not applied: {', '.join(filters) or 'none'}. "
+                "To use its settings, name the baseline file with baseline_file "
+                "from outside the scanned tree.",
+                values,
+            )
+        )
 
     def _drop_in_tree_settings_paths(
         self,
