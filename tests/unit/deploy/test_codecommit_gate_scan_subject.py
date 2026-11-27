@@ -19,6 +19,14 @@ The clone is the subject's PATH argument, right after ``fs`` and ahead of the
 operator's extra arguments, so a bare word among those cannot become the scanned
 directory: ASH refuses it as an extra argument, which the gate reports as an error.
 
+Only an answer picks the older spelling: ``ash scan fs --help`` exiting 0 with a help
+that does not name ``scan fs``, or a usage error that names ``fs``. A probe that fails
+any other way (a crash, an import error, an out-of-memory kill) says nothing about the
+ASH's commands. It is not read as an older ASH, it refuses the scan, nothing about it
+is remembered for the warm execution environment, and the next scan asks again. The
+spelling chosen and the reason, or what a failed probe printed, go to the function's
+log.
+
 The gate's subprocess runner is replaced with a recorder that answers the help probes
 (tests/unit/deploy/gate_probe_answers.py); argv is resolved through this tree's real
 CLI where what matters is what ASH would do with it.
@@ -27,6 +35,7 @@ CLI where what matters is what ASH would do with it.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import pathlib
 import sys
 from types import ModuleType, SimpleNamespace
@@ -134,10 +143,29 @@ def test_an_ash_with_the_subject_scans_the_clone_as_its_path(
     [
         # An older ASH: click shows the subject-less scan's help for `scan fs --help`.
         None,
-        # An ASH that refuses the probe outright, with nothing on stdout.
-        SimpleNamespace(returncode=5, stdout="", stderr="Error: no such command"),
+        # An ASH that refuses the word `fs` as a usage error, with nothing on stdout.
+        # 5 is the code ASH releases after 3.7.1 give a usage error; 3.7.1 and earlier
+        # give click's 2.
+        SimpleNamespace(
+            returncode=5,
+            stdout="",
+            stderr=(
+                "Usage: ash scan [OPTIONS]\n"
+                "Try 'ash scan --help' for help.\n"
+                "Error: Got unexpected extra argument (fs)\n"
+            ),
+        ),
+        SimpleNamespace(
+            returncode=2,
+            stdout="",
+            stderr="Error: No such command 'fs'.\n",
+        ),
     ],
-    ids=["shows-the-subjectless-help", "refuses-the-probe"],
+    ids=[
+        "shows-the-subjectless-help",
+        "refuses-fs-as-an-extra-argument",
+        "refuses-fs-as-a-command",
+    ],
 )
 def test_an_ash_without_the_subject_scans_with_source_dir(
     gate, monkeypatch, tmp_path, fs_probe_reply
@@ -241,3 +269,166 @@ def test_a_subject_whose_help_lacks_the_completeness_flag_is_refused(
     with pytest.raises(RuntimeError, match=FLAG):
         gate.run_scan(tmp_path / "src", "low", True)
     assert scans == [], scans
+
+
+#: A probe that dies instead of answering: the interpreter's traceback and a non-zero
+#: status, as an import error or an out-of-memory kill leaves them.
+CRASH = SimpleNamespace(
+    returncode=1,
+    stdout="",
+    stderr=(
+        "Traceback (most recent call last):\n"
+        '  File "/usr/local/bin/ash", line 3, in <module>\n'
+        "MemoryError\n"
+    ),
+)
+
+
+def test_a_subject_probe_that_crashes_is_not_read_as_an_older_ash(
+    gate, monkeypatch, tmp_path
+):
+    """The failed probe refuses the scan; the second probe would have chosen --source-dir."""
+
+    def answers(argv):
+        if argv == FS_PROBE:
+            return CRASH
+        return answer(argv, RELEASE_WITHOUT_SUBJECT)
+
+    scans, probes = _record(gate, monkeypatch, tmp_path, answers)
+
+    with pytest.raises(RuntimeError, match="could not be checked"):
+        gate.run_scan(tmp_path / "src", "low", True)
+    assert probes == [FS_PROBE], probes
+    assert scans == [], scans
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        SimpleNamespace(returncode=5, stdout="", stderr="Error: no such command"),
+        SimpleNamespace(
+            returncode=5,
+            stdout="",
+            stderr="Error: Invalid value for --config: File 'x' does not exist.\n",
+        ),
+        # Names the word, but is not a usage error about it.
+        SimpleNamespace(returncode=1, stdout="", stderr="OSError: /mnt/fs is full\n"),
+    ],
+    ids=["names-no-word", "an-unrelated-usage-error", "names-fs-in-a-path"],
+)
+def test_a_refusal_that_does_not_say_fs_is_unknown_is_not_an_older_ash(
+    gate, monkeypatch, tmp_path, refusal
+):
+    def answers(argv):
+        if argv == FS_PROBE:
+            return refusal
+        return answer(argv, RELEASE_WITHOUT_SUBJECT)
+
+    scans, probes = _record(gate, monkeypatch, tmp_path, answers)
+
+    with pytest.raises(RuntimeError, match="could not be checked"):
+        gate.run_scan(tmp_path / "src", "low", True)
+    assert probes == [FS_PROBE], probes
+    assert scans == [], scans
+
+
+def test_a_probe_that_crashed_is_asked_again_and_the_answer_then_stands(
+    gate, monkeypatch, tmp_path
+):
+    """Nothing of a failed probe is kept for the warm execution environment.
+
+    The first ``ash scan fs --help`` crashes and the next ones answer as an ASH with
+    the subject. Read as an older ASH, the first would have been remembered, and every
+    later pull request in the environment would have scanned with ``--source-dir``.
+    """
+    asked = {"fs_probes": 0}
+
+    def answers(argv):
+        if argv == FS_PROBE:
+            asked["fs_probes"] += 1
+            if asked["fs_probes"] == 1:
+                return CRASH
+        return answer(argv, RELEASE_WITH_SUBJECT)
+
+    scans, probes = _record(gate, monkeypatch, tmp_path, answers)
+    source = tmp_path / "src"
+
+    with pytest.raises(RuntimeError, match="could not be checked"):
+        gate.run_scan(source, "low", True)
+    assert scans == [], scans
+
+    gate.run_scan(source, "low", True)
+    assert [argv[:4] for argv in scans] == [["ash", "scan", "fs", str(source)]], scans
+
+    # The answer that followed the crash is the one remembered.
+    gate.run_scan(source, "low", True)
+    assert probes == [FS_PROBE, FS_PROBE], probes
+    assert len(scans) == 2, scans
+
+
+@pytest.mark.parametrize(
+    "fs_probe_reply, spelling, reason",
+    [
+        (None, "'ash scan fs PATH'", "its help names 'scan fs'"),
+        (
+            SimpleNamespace(
+                returncode=0,
+                stdout="Usage: ash scan [OPTIONS]\n" + FLAG + "\n",
+                stderr="",
+            ),
+            "'ash scan --source-dir PATH'",
+            "its help does not name 'scan fs'",
+        ),
+        (
+            SimpleNamespace(
+                returncode=5,
+                stdout="",
+                stderr="Error: Got unexpected extra argument (fs)\n",
+            ),
+            "'ash scan --source-dir PATH'",
+            "refusing the word 'fs' (unexpected extra argument (fs))",
+        ),
+    ],
+    ids=["with-the-subject", "answers-without-it", "refuses-the-word"],
+)
+def test_the_spelling_chosen_and_the_reason_are_logged(
+    gate, monkeypatch, tmp_path, caplog, fs_probe_reply, spelling, reason
+):
+    def answers(argv):
+        if argv == FS_PROBE and fs_probe_reply is not None:
+            return fs_probe_reply
+        return answer(
+            argv,
+            RELEASE_WITH_SUBJECT if fs_probe_reply is None else RELEASE_WITHOUT_SUBJECT,
+        )
+
+    _record(gate, monkeypatch, tmp_path, answers)
+
+    with caplog.at_level(logging.INFO):
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    chosen = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("scanning with")
+    ]
+    assert len(chosen) == 1, chosen
+    assert spelling in chosen[0] and reason in chosen[0], chosen[0]
+
+
+def test_what_a_failed_probe_printed_is_logged(gate, monkeypatch, tmp_path, caplog):
+    _record(
+        gate,
+        monkeypatch,
+        tmp_path,
+        lambda argv: CRASH if argv == FS_PROBE else None,
+    )
+
+    with caplog.at_level(logging.ERROR), pytest.raises(RuntimeError):
+        gate.run_scan(tmp_path / "src", "low", True)
+
+    failures = [record.getMessage() for record in caplog.records]
+    assert any(
+        "ash scan fs --help exited 1" in message and "MemoryError" in message
+        for message in failures
+    ), failures

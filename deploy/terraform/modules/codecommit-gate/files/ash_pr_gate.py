@@ -636,13 +636,80 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 #: What only the help of an ASH with the subject prints: its own command path.
 SUBJECT_COMMAND = "scan fs"
 
+#: What an ASH without the subject says when it refuses the word ``fs`` instead of
+#: showing help: the usage error click prints for an extra argument ("Got unexpected
+#: extra argument (fs)") or an unknown command ("No such command 'fs'").
+SUBJECT_REFUSED = re.compile(
+    r"(unexpected extra arguments?|no such command)[^\n]*\bfs\b", re.IGNORECASE
+)
 
-def _help_text(argv: list[str], env: dict[str, str]) -> tuple[int, str]:
-    """``argv``'s exit status and its help, plain: colour off, a wide terminal, no ANSI."""
+
+def _help_text(argv: list[str], env: dict[str, str]) -> tuple[int, str, str]:
+    """``argv``'s exit status, its help and its stderr, plain: colour off, a wide
+    terminal, no ANSI."""
     probe_env = dict(env, COLUMNS="200", NO_COLOR="1")
     probe_env.pop("FORCE_COLOR", None)
     probe = _run(argv, env=probe_env)
-    return probe.returncode, _ANSI_ESCAPE.sub("", probe.stdout or "")
+    return (
+        probe.returncode,
+        _ANSI_ESCAPE.sub("", probe.stdout or ""),
+        _ANSI_ESCAPE.sub("", probe.stderr or ""),
+    )
+
+
+def _probe_failed(argv: list[str], status: int, output: str) -> None:
+    """Put what a probe that did not answer printed in the function's log."""
+    LOGGER.error(
+        "%s exited %d; the end of its output: %s",
+        " ".join(argv),
+        status,
+        output.strip()[-2000:],
+    )
+
+
+def _ask_subject(env: dict[str, str]) -> tuple[bool, str, str]:
+    """Whether this image's ASH has ``ash scan fs``: ``(answer, its help, why)``.
+
+    Only an answer settles it. The subject is there when ``ash scan fs --help`` exits
+    0 and its help names SUBJECT_COMMAND, and it is not when that exits 0 with a help
+    that does not (an older ASH shows the subject-less scan's help, as click reads
+    ``--help`` before it refuses the extra argument) or exits non-zero with the usage
+    error an older ASH gives for the word ``fs``. Any other failure (a crash, an import
+    error, an out-of-memory kill) says nothing about the ASH's commands, so it refuses
+    to choose: the output goes to the function's log and the next scan asks again.
+    """
+    argv = ["ash", "scan", "fs", "--help"]
+    asked = " ".join(argv)
+    status, help_text, errors = _help_text(argv, env)
+    if status == 0 and SUBJECT_COMMAND in help_text:
+        return (
+            True,
+            help_text,
+            f"{asked} exited 0 and its help names '{SUBJECT_COMMAND}'",
+        )
+    if status == 0:
+        return (
+            False,
+            help_text,
+            (
+                f"{asked} exited 0 and its help does not name '{SUBJECT_COMMAND}', "
+                "as an ASH older than 3.9 answers"
+            ),
+        )
+    refusal = SUBJECT_REFUSED.search(errors) or SUBJECT_REFUSED.search(help_text)
+    if refusal:
+        return (
+            False,
+            help_text,
+            f"{asked} exited {status} refusing the word 'fs' ({refusal.group(0)})",
+        )
+    _probe_failed(argv, status, errors or help_text)
+    raise RuntimeError(
+        f"'ash scan fs --help' exited {status} without saying it has no 'fs' "
+        "subject, so this image's ASH could not be checked for how it names a "
+        f"directory or for {COMPLETENESS_FLAG}. Refusing to scan; the next scan asks "
+        "again."
+    )
 
 
 def check_completeness_flag(env: dict[str, str]) -> bool:
@@ -661,29 +728,35 @@ def check_completeness_flag(env: dict[str, str]) -> bool:
     exists. ASH 3.9 and later scan a directory with ``ash scan fs PATH`` and print a
     deprecation line for the subject-less ``ash scan --source-dir PATH``, which goes in
     ASH v4.0; ``ash_version`` can name an older release, which has no ``fs`` subject.
-    ``ash scan fs --help`` is asked first, and only an ASH with the subject prints
-    SUBJECT_COMMAND in it: an older ASH shows the subject-less scan's help there, as
-    click reads ``--help`` before it refuses the extra argument. Without the subject,
+    ``ash scan fs --help`` is asked first (see ``_ask_subject`` for what settles it),
+    and the spelling it chose and why go to the function's log. Without the subject,
     ``ash scan --help`` is asked, as it always was.
 
     Each probe runs with colour off and a wide terminal, and ANSI codes are stripped
     before the match, because rich styles each dash of an option name apart when
     colour is forced and the plain name would then not appear. A probe that fails
-    refuses too and is asked again next time, rather than being read as either answer.
+    refuses too, and nothing is remembered of it: it is asked again next time, rather
+    than being read as either answer for the life of the execution environment.
     """
     global _completeness_flag_found, _scan_has_subject
     if _completeness_flag_found is None:
-        status, help_text = _help_text(["ash", "scan", "fs", "--help"], env)
-        has_subject = status == 0 and SUBJECT_COMMAND in help_text
+        has_subject, help_text, why = _ask_subject(env)
         if not has_subject:
-            status, help_text = _help_text(["ash", "scan", "--help"], env)
+            argv = ["ash", "scan", "--help"]
+            status, help_text, errors = _help_text(argv, env)
             if status != 0:
+                _probe_failed(argv, status, errors or help_text)
                 raise RuntimeError(
                     f"'ash scan --help' exited {status}, so this image's ASH could "
                     f"not be checked for {COMPLETENESS_FLAG}. Refusing to scan."
                 )
         _completeness_flag_found = COMPLETENESS_FLAG in help_text
         _scan_has_subject = has_subject
+        LOGGER.info(
+            "scanning with %s: %s",
+            "'ash scan fs PATH'" if has_subject else "'ash scan --source-dir PATH'",
+            why,
+        )
     if not _completeness_flag_found:
         raise RuntimeError(
             f"The ASH in this image has no {COMPLETENESS_FLAG} option, so a scan whose "
