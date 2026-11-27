@@ -532,6 +532,21 @@ class TestDriftIsCaughtAndRepaired:
 
         assert box.snapshot() == synced
 
+    def test_the_report_is_a_diff_of_what_would_be_written(self, sandbox, capsys):
+        box = sandbox.synced()
+        box.edit(box.pyproject, "guarddog==3.2.0", "guarddog==3.3.0")
+        capsys.readouterr()
+        committed = _GUARDDOG_LINE.replace("3.2.0", "3.3.0").rstrip("\n")
+        rendered = _GUARDDOG_LINE.rstrip("\n")
+
+        assert box.run("--check") == 1
+
+        err = capsys.readouterr().err
+        assert "--- pyproject.toml (committed)" in err
+        assert "+++ pyproject.toml (rendered from the register)" in err
+        assert f"-{committed}" in err
+        assert f"+{rendered}" in err
+
     def test_a_pyproject_drift_asks_for_a_relock_and_a_group_drift_does_not(
         self, sandbox, capsys
     ):
@@ -809,6 +824,20 @@ class TestItRefusesRatherThanGuessing:
         box.edit(box.pyproject, "guarddog==3.2.0", "guarddog==3.3.0")
         box.edit(box.pyproject, _FERRET_LINE, "    # kept by hand\n" + _FERRET_LINE)
         box.edit(box.dependabot, '          - "guarddog*"\n', "")
+        before = box.snapshot()
+
+        assert box.run("--fix") == 2
+
+        assert box.snapshot() == before
+
+    def test_a_refusal_in_the_dependabot_file_leaves_pyproject_unrepaired(
+        self, sandbox
+    ):
+        """The other direction: pyproject.toml could be repaired, but a marker is
+        gone, so nothing is written to either file."""
+        box = sandbox.synced()
+        box.edit(box.pyproject, "guarddog==3.2.0", "guarddog==3.3.0")
+        box.edit(box.dependabot, f"      {END}\n", "")
         before = box.snapshot()
 
         assert box.run("--fix") == 2
