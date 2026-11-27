@@ -116,6 +116,7 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.scanner_names import canonical_scanner_name
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -133,8 +134,9 @@ OPERATOR_ONLY_OPTIONS: Dict[str, Tuple[str, ...]] = {
 }
 
 #: Scanner section name -> the options in it only the operator may set. Each
-#: section is a declared scanner's (``ScannerConfigSegment``), whose spellings
-#: are folded into it at load, so the scanner reads that one section.
+#: section is a declared scanner's (``ScannerConfigSegment``), whose spellings,
+#: and the sections of the retired names that resolve to it, are folded into it
+#: at load, so the scanner reads that one section (``_scanner_sections_in``).
 OPERATOR_ONLY_SCANNER_OPTIONS: Dict[str, Tuple[str, ...]] = {
     "detect-secrets": ("max_worker_output_mib",),
 }
@@ -352,17 +354,40 @@ def _scanner_sections_in(
     scanners: Dict[str, Any], scanner: str
 ) -> List[Tuple[str, Dict[str, Any]]]:
     """The sections of *scanners*, a document's ``scanners`` mapping, the model
-    reads as the declared scanner section *scanner*: that key, or a spelling
-    that folds to it (``plugin_section_names``). A spelling that does not fold
-    is a section of its own, which the scanner never reads."""
+    reads as the declared scanner section *scanner*: that key, a spelling that
+    folds to it (``plugin_section_names``), or a retired scanner's name that
+    the alias table resolves to that key or such a spelling
+    (``utils/scanner_names.canonical_scanner_name``), whose section the model
+    folds onto the serving plugin's (``ash_config.fold_scanner_name_aliases``).
+    Any other spelling is a section of its own, which the scanner never reads.
+
+    A retired name's sections come after the others, in document order: the
+    fold lays each over the serving plugin's own section, the later one over
+    the earlier, so where two set an option the last of them is what the
+    scanner reads. A caller that keeps the last value it meets (the found
+    record's ``written``, ``RepositorySettings.elsewhere_value``) keeps that
+    one."""
     declared = declared_section_names("scanners")
-    return [
-        (key, section)
-        for key, section in scanners.items()
-        if isinstance(key, str)
-        and isinstance(section, dict)
-        and (key == scanner or declared.get(folded_section_name(key)) == scanner)
-    ]
+
+    def reads_as_the_scanner(key: str) -> bool:
+        return key == scanner or declared.get(folded_section_name(key)) == scanner
+
+    spelled: List[Tuple[str, Dict[str, Any]]] = []
+    retired: List[Tuple[str, Dict[str, Any]]] = []
+    for key, section in scanners.items():
+        if not isinstance(key, str) or not isinstance(section, dict):
+            continue
+        if reads_as_the_scanner(key):
+            spelled.append((key, section))
+            continue
+        # A retired name is no spelling of the section: unmatched here, the
+        # option a repository file writes under it is not left out, and the
+        # model's alias fold then moves it onto the section the scan reads.
+        # The test is the fold's own: a name the table resolves to another.
+        canonical = canonical_scanner_name(key)
+        if canonical not in (None, "", key) and reads_as_the_scanner(canonical):
+            retired.append((key, section))
+    return spelled + retired
 
 
 #: Each kind of plugin section with options only the operator may set: the

@@ -114,6 +114,73 @@ def test_a_file_in_the_tree_does_not_set_the_limit(tmp_path, key):
     assert "--config-overrides" in warning, warning
 
 
+#: A retired scanner name the test below plants in the alias table, served by
+#: detect-secrets. It is no spelling of any declared scanner section, so only
+#: the model's alias fold (ash_config.fold_scanner_name_aliases) reads its
+#: section as detect-secrets'.
+_RETIRED_NAME = "legacy-secrets"
+
+
+@pytest.mark.parametrize(
+    "key", [_RETIRED_NAME, "detect-secrets"], ids=["retired-name", "canonical-control"]
+)
+@pytest.mark.parametrize(
+    "operator_extends_it", [False, True], ids=["alone", "under-an-operator-file"]
+)
+def test_a_retired_scanner_name_in_the_tree_does_not_set_the_limit(
+    tmp_path, monkeypatch, key, operator_extends_it
+):
+    """The repository's own .ash.yaml writes the limit under a retired scanner
+    name that the alias table resolves to detect-secrets. The model folds that
+    name's section onto detect-secrets', so the limit written there is the
+    scanner's, like any spelling of it: the scan keeps the operator's, 256 by
+    default, and one warning names the option, the file and where the operator
+    sets it. Alone, the repository's file is the configuration. Under an
+    operator file outside the tree that extends it and writes no limit, the
+    loader folds the repository's base before it layers the operator's file
+    over it, so a limit the confinement had not left out reached the scanner
+    as one a file outside the tree set. The canonical-control rows write the
+    section's own name with the same row planted, and hold with or without the
+    retired-name match (test_a_file_in_the_tree_does_not_set_the_limit is the
+    alone control without the row)."""
+    from automated_security_helper.config.plugin_section_names import (
+        declared_section_names,
+        declared_target,
+    )
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.utils import scanner_names
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    # The table is keyed by the reduced name (scanner_names._reduced_name:
+    # ASCII letters, digits and "+" kept, lowered), the form
+    # canonical_scanner_name looks a name up by.
+    monkeypatch.setitem(
+        scanner_names.SCANNER_NAME_ALIASES, "legacysecrets", "detect-secrets"
+    )
+    # Premises: the planted row resolves the retired name, and the loader
+    # leaves the name as written, being no spelling of a declared section
+    # (declared_target is the rule fold_known_plugin_sections folds by).
+    assert scanner_names.canonical_scanner_name(_RETIRED_NAME) == "detect-secrets"
+    assert declared_target(declared_section_names("scanners"), _RETIRED_NAME) is None
+    checkout = _checkout(tmp_path, _setting(1024, key))
+    call: dict = {"source_dir": checkout}
+    if operator_extends_it:
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(
+            f"extends: {(checkout / '.ash.yaml').as_posix()}\n", encoding="utf-8"
+        )
+        call["config_path"] = operator
+
+    with _warnings() as messages:
+        config = resolve_config(**call)
+
+    assert _limit(config) == 256
+    [warning] = _about_the_limit(messages)
+    assert f"Ignoring {OPTION}" in warning, warning
+    assert ".ash.yaml" in warning, warning
+    assert "--config-overrides" in warning, warning
+
+
 def test_the_same_setting_in_a_file_outside_the_tree_is_kept(tmp_path):
     """The control: the operator's own config file, outside the scanned tree,
     sets the limit, and nothing is ignored."""
