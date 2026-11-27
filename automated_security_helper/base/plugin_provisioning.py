@@ -133,8 +133,11 @@ class ContentDatabase:
     also_read_by: tuple[str, ...] = ()
     # The environment variable that moves the directory this database is read from,
     # for a row where ASH reads or sets it. None means no read has been recorded, not
-    # that the tool has no such variable. ``cache_path`` is the default the tool reads
-    # when the variable is not set.
+    # that the tool has no such variable. Where the tool has a default directory
+    # (grype-db, trivy-db), ``cache_path`` is that default, read when the variable is
+    # not set. For the two offline rule caches (semgrep, opengrep) it is the directory
+    # the image provisions: the scanner reads the variable alone, and an unset variable
+    # means no cache directory.
     cache_env: str | None = None
 
     @property
