@@ -17,8 +17,8 @@ share, and the one the support-matrix generators read.
 
 The file refuses what it cannot read. A matrix, a runs-on or a condition in a shape it
 does not know raises a CiMatrixError that names the shape, and so does a runs-on that
-reads a matrix key some leg lacks and an exclude entry that names a key no axis has.
-Nothing is read as true, or as a match, because it could not be read.
+reads a matrix key some leg lacks and an exclude entry that is empty or names a key no
+axis has. Nothing is read as true, or as a match, because it could not be read.
 
 scripts/ is not a package. A caller loads this file by path, and this file loads
 scripts/_ci_pipelines.py the same way for its workflow parser.
