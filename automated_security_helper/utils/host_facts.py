@@ -38,6 +38,12 @@ level is ``unknown``, because the flags a runtime needs are no longer known. The
 does not look at ``POLARS_SKIP_CPU_CHECK``: that variable silences polars' own check,
 and the host's processor is the same either way.
 
+Versions are compared here when they are plain, only digits and dots as in ``1.44.2``,
+so the version checks of a usual reading import nothing from ``packaging``. A version of
+any other shape (a pre-release, an epoch, a ``v`` prefix) and a ``Requires-Python`` that
+is not made of plain bounds go to ``packaging``, whose answer and whose errors are the
+reader's own.
+
 This module is the only reader of ``/proc/cpuinfo``, the macOS translation sysctl and
 the two Windows calls named in ``tests/unit/utils/test_host_facts_single_reader.py``,
 which holds the rest of the package to that. It imports nothing else from ASH and
@@ -48,7 +54,6 @@ imported inside the function that needs it.
 from __future__ import annotations
 
 import dataclasses
-import ntpath
 import os
 import posixpath
 import sys
@@ -59,6 +64,7 @@ from typing import (
     Iterable,
     Iterator,
     Mapping,
+    NamedTuple,
     NoReturn,
     Optional,
 )
@@ -197,8 +203,7 @@ _MACOS_EXTENDED = "machdep.cpu.extfeatures"
 _MACOS_KEYS = (_MACOS_FEATURES, _MACOS_LEAF7, _MACOS_EXTENDED)
 
 
-@dataclasses.dataclass(frozen=True)
-class FlagSpelling:
+class FlagSpelling(NamedTuple):
     """How each platform names one of polars' CPU flags.
 
     ``linux`` holds the spellings of the first ``flags`` line of ``/proc/cpuinfo``:
@@ -266,6 +271,8 @@ _KERNEL_RELEASE_LIMIT = 4096
 _TAG_SCAN_LIMIT = 16
 _FLAGS_FILE_LIMIT = 4096
 _NAME_LIMIT = 32
+#: A version text longer than this is left to ``packaging`` rather than read here.
+_PLAIN_LIMIT = 64
 
 _IMAGE_VARIABLE = "ASH_IN_CONTAINER"
 _FORCE_VARIABLE = "POLARS_FORCE_PKG"
@@ -711,7 +718,36 @@ def runtime_flags_match(token: str, flags: Optional[Iterable[str]]) -> bool:
     return set(flags) == set(declared)
 
 
+def _drop_zeros(release: Iterable[int]) -> tuple[int, ...]:
+    """The numbers of a release without the zeros at its end: ``1.33.0`` is ``1.33``."""
+    parts = list(release)
+    while parts and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts)
+
+
+def _plain_release(text: str) -> Optional[tuple[int, ...]]:
+    """The release of a text made only of ASCII digit groups and dots, else None.
+
+    PEP 440 orders two plain versions by these numbers, trailing zeros dropped. Any
+    other text (a pre-release, an epoch, a ``v`` prefix, padding, a digit that is not
+    ASCII, or more than ``_PLAIN_LIMIT`` characters) is left to ``packaging``, so what
+    it reads and what it raises stay what they were.
+    """
+    if not text or len(text) > _PLAIN_LIMIT:
+        return None
+    parts = text.split(".")
+    if not all(part.isascii() and part.isdigit() for part in parts):
+        return None
+    return _drop_zeros(int(part) for part in parts)
+
+
 def _polars_in_range(version: str) -> bool:
+    release = _plain_release(version)
+    if release is not None:
+        low = _drop_zeros(POLARS_MIN_VERSION)
+        high = _drop_zeros(POLARS_BELOW_VERSION)
+        return low <= release < high
     from packaging.specifiers import SpecifierSet
     from packaging.version import InvalidVersion, Version
 
@@ -719,14 +755,20 @@ def _polars_in_range(version: str) -> bool:
         parsed = Version(version)
     except InvalidVersion:
         return False
-    low = ".".join(str(part) for part in POLARS_MIN_VERSION)
-    high = ".".join(str(part) for part in POLARS_BELOW_VERSION)
-    return SpecifierSet(f">={low},<{high}").contains(parsed, prereleases=True)
+    lower = ".".join(str(part) for part in POLARS_MIN_VERSION)
+    upper = ".".join(str(part) for part in POLARS_BELOW_VERSION)
+    return SpecifierSet(f">={lower},<{upper}").contains(parsed, prereleases=True)
 
 
 def _same_version(first: str, second: str) -> bool:
     if first == second:
         return True
+    # Both plain, or packaging decides: ``v1.44.2`` is ``1.44.2``, and one plain side
+    # says nothing about the other.
+    plain_first = _plain_release(first)
+    plain_second = _plain_release(second)
+    if plain_first is not None and plain_second is not None:
+        return plain_first == plain_second
     from packaging.version import InvalidVersion, Version
 
     try:
@@ -834,13 +876,67 @@ _SPECIFIER_RANK = {
 }
 
 
+def _canonical_text(pairs: Iterable[tuple[str, str]]) -> str:
+    """Specifiers as ``(operator, text)``, lower bounds first: ``>=3.11,<3.15``."""
+    ordered = sorted(pairs, key=lambda pair: (_SPECIFIER_RANK.get(pair[0], 4), pair[1]))
+    return ",".join(text for _operator, text in ordered)
+
+
 def _canonical_specifiers(specifiers: Any) -> str:
-    """The specifier set with its lower bounds first: ``>=3.11,<3.15``."""
-    ordered = sorted(
-        specifiers,
-        key=lambda spec: (_SPECIFIER_RANK.get(spec.operator, 4), str(spec)),
-    )
-    return ",".join(str(spec) for spec in ordered)
+    """The ``packaging`` specifier set with its lower bounds first."""
+    return _canonical_text((spec.operator, str(spec)) for spec in specifiers)
+
+
+_PLAIN_OPERATORS = ("<=", ">=", "==", "!=", "<", ">")
+
+
+def _plain_holds(
+    comparison: str, release: tuple[int, ...], bound: tuple[int, ...]
+) -> bool:
+    if comparison == ">=":
+        return release >= bound
+    if comparison == "<=":
+        return release <= bound
+    if comparison == "==":
+        return release == bound
+    if comparison == "!=":
+        return release != bound
+    if comparison == "<":
+        return release < bound
+    return release > bound
+
+
+def _plain_requires(header: str, version_text: str) -> Optional[tuple[str, bool]]:
+    """``(canonical text, inside)`` for plain bounds against a plain version, else None.
+
+    A plain header is one or more comma-separated pieces, each ``<``, ``<=``, ``>``,
+    ``>=``, ``==`` or ``!=`` directly followed by a plain release, and ``version_text``
+    is a plain release too. None leaves the header to ``packaging``: that is what every
+    other shape gets, and so do an empty set and two pieces that name one bound, which
+    ``packaging`` folds into the first.
+    """
+    release = _plain_release(version_text)
+    if release is None:
+        return None
+    pieces: list[tuple[str, str]] = []
+    named: set[tuple[str, tuple[int, ...]]] = set()
+    inside = True
+    for raw in header.split(","):
+        piece = raw.strip()
+        if not piece:
+            continue
+        comparison = next((op for op in _PLAIN_OPERATORS if piece.startswith(op)), None)
+        if comparison is None:
+            return None
+        bound = _plain_release(piece[len(comparison) :])
+        if bound is None or (comparison, bound) in named:
+            return None
+        named.add((comparison, bound))
+        pieces.append((comparison, piece))
+        inside = inside and _plain_holds(comparison, release, bound)
+    if not pieces:
+        return None
+    return (_canonical_text(pieces), inside)
 
 
 def _is_editable(direct_url: Optional[str]) -> bool:
@@ -862,8 +958,7 @@ def _is_editable(direct_url: Optional[str]) -> bool:
 # --------------------------------------------------------------------------------------
 
 
-@dataclasses.dataclass(frozen=True)
-class _Failure:
+class _Failure(NamedTuple):
     """What is kept of a failed read: the exception's type, never its text."""
 
     kind: str
@@ -891,8 +986,7 @@ def _kind(exc: BaseException) -> str:
     return _failure_of(exc).kind
 
 
-@dataclasses.dataclass(frozen=True)
-class _Runtime:
+class _Runtime(NamedTuple):
     token: str
     distribution: Optional[Distribution]
 
@@ -929,6 +1023,11 @@ class HostFactsReader:
     def _src(self, name: str, *args: Any) -> Any:
         function = getattr(self._sources, name)
         return self._remember((name, *args), lambda: function(*args))
+
+    def _version(self, name: str, distribution: Distribution) -> str:
+        """The installed version of a distribution, read once per reader."""
+        version: str = self._remember(("version", name), lambda: distribution.version)
+        return version
 
     # ---- the platform ------------------------------------------------------------
 
@@ -1057,9 +1156,9 @@ class HostFactsReader:
                 distribution = self._src("distribution", distribution_name)
                 if distribution is not None:
                     installed[selector] = distribution
-                    versions[selector] = distribution.version
+                    versions[selector] = self._version(distribution_name, distribution)
         token, chosen = choose_runtime(
-            None if polars is None else polars.version,
+            None if polars is None else self._version("polars", polars),
             versions,
             force=force,
             prefer=prefer,
@@ -1081,7 +1180,10 @@ class HostFactsReader:
             or runtime.token not in RUNTIME_FLAGS
         ):
             return (UNKNOWN, ())
-        flags = read_runtime_flags(runtime.distribution)
+        distribution = runtime.distribution
+        flags = self._remember(
+            ("runtime_flags", runtime.token), lambda: read_runtime_flags(distribution)
+        )
         if not runtime_flags_match(runtime.token, flags):
             return (UNKNOWN, ())
         if platform == "linux":
@@ -1144,7 +1246,17 @@ class HostFactsReader:
         return f"{major}.{minor}.{micro}{_RELEASE_SUFFIX[level]}{serial}"
 
     def _requires_python(self, version_text: str) -> tuple[str, str]:
-        """``(requires text, in range)`` from ASH's own installed metadata."""
+        """``(requires text, in range)`` from ASH's own installed metadata.
+
+        Read once per reader, a failure included: ASH's metadata is parsed once.
+        """
+        result: tuple[str, str] = self._remember(
+            ("requires_python", version_text),
+            lambda: self._read_requires_python(version_text),
+        )
+        return result
+
+    def _read_requires_python(self, version_text: str) -> tuple[str, str]:
         ash = self._src("distribution", _ASH_DISTRIBUTION)
         if ash is None:
             return (UNKNOWN, UNKNOWN)
@@ -1154,12 +1266,16 @@ class HostFactsReader:
         header = metadata["Requires-Python"] if "Requires-Python" in metadata else None
         if not header or not header.strip():
             return (UNKNOWN, UNKNOWN)
+        plain = _plain_requires(header, version_text)
+        if plain is not None:
+            text, inside = plain
+            return (text, "yes" if inside else "no")
         from packaging.specifiers import SpecifierSet
         from packaging.version import Version
 
         specifiers = SpecifierSet(header)
-        inside = specifiers.contains(Version(version_text), prereleases=True)
-        return (_canonical_specifiers(specifiers), "yes" if inside else "no")
+        contained = specifiers.contains(Version(version_text), prereleases=True)
+        return (_canonical_specifiers(specifiers), "yes" if contained else "no")
 
     def _python_build(self) -> str:
         if self._src("implementation_name") != "cpython":
@@ -1173,7 +1289,11 @@ class HostFactsReader:
         flag = self._sources.getenv(_IMAGE_VARIABLE)
         if flag is not None and flag.upper() in _TRUE_VALUES:
             return "image"
-        flavor: Any = ntpath if platform == "windows" else posixpath
+        flavor: Any = posixpath
+        if platform == "windows":
+            import ntpath
+
+            flavor = ntpath
         prefix = self._src("sys_prefix")
         if prefix:
             normal = flavor.normcase(flavor.normpath(prefix))
@@ -1254,11 +1374,11 @@ class HostFactsReader:
         home = self._sources.home()
         if platform == "windows":
             if home:
-                yield ntpath.join(home, "pipx", "venvs")
-                yield ntpath.join(home, ".local", "pipx", "venvs")
+                yield flavor.join(home, "pipx", "venvs")
+                yield flavor.join(home, ".local", "pipx", "venvs")
             local = self._sources.getenv("LOCALAPPDATA")
             if local:
-                yield ntpath.join(local, "pipx", "pipx", "venvs")
+                yield flavor.join(local, "pipx", "pipx", "venvs")
         elif home:
             yield posixpath.join(home, ".local", "pipx", "venvs")
             yield posixpath.join(home, ".local", "share", "pipx", "venvs")
