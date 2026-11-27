@@ -96,18 +96,14 @@ def test_an_output_dir_outside_the_source_adds_nothing(tmp_path):
     source.mkdir()
     output = tmp_path / "out"
     output.mkdir()
-    argv, _, _ = _scanner(source, output)._execute_scan(source, "source", [])
+    scanner = _scanner(source, output)
+    argv, _, _ = scanner._execute_scan(source, "source", [])
 
-    # No value names the output directory: neither its path nor that path as
-    # re.escape writes it is in any value. (Being absolute says nothing: the values
-    # for the known directories start with the source's own path, and the output
-    # directory's value, when there is one, starts with "^".)
-    named = [
-        v
-        for v in _skip_values(argv)
-        if output.as_posix() in v or re.escape(output.as_posix()) in v
-    ]
-    assert not named, named
+    # No other value is sent: the only ones are those for the known directories, so
+    # none names the output directory. (Being absolute says nothing: those values
+    # start with the source's own path, and the output directory's value, when there
+    # is one, starts with "^".)
+    assert _skip_values(argv) == scanner._known_directory_skip_patterns(source)
 
 
 def test_the_converted_target_is_not_excluded(tree):

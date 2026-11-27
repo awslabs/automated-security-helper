@@ -250,9 +250,13 @@
   a project inside one, such as a package under a virtualenv's `site-packages`,
   every file was skipped and checkov reported nothing. The values now start with
   the scanned directory's path, so they skip those directories below it only. On
-  Windows no such value is sent, and a file link from one of them that points
-  outside the scanned directory now stops the checkov scan of that directory, as
-  such a link anywhere else in it already did. Also on Windows,
+  Windows no such value is sent, and checkov's own rules skip `node_modules` and
+  dot-named directories there. A file link from one of the three directories that
+  points outside the scanned directory stops the checkov scan of that directory
+  when checkov would read the file: always under `venv`, for any `.tf` link,
+  under `node_modules` when `CKV_IGNORED_DIRECTORIES` leaves that name out, and
+  under `.venv` when `CKV_IGNORE_HIDDEN_DIRECTORIES` is false or the secrets
+  framework scans all files. Also on Windows,
   `scanners.checkov.options.skip_path` values are now checked against checkov's
   terraform module finder without ASH's values before them, so a value such as
   `tests/*`, which stopped the scan before, now reaches checkov there, and one
