@@ -2314,22 +2314,35 @@ def current_bin_path() -> Optional[Path]:
     that import has happened, so a function that closed over the constant would
     install into the default directory while reporting the requested one.
 
+    A relative ASH_BIN_PATH is not used for installs, downloads or the rules
+    directory (``rules_bundles.rules_root``), as it is not used for lookups
+    (``subprocess_utils.usable_bin_path``): it names a directory under the working
+    directory, usually the repository being scanned. One warning names the value
+    and the bin directory is ``~/.ash/bin`` instead.
+
     Absolute, because the install commands built from it run in an empty directory
     of their own (``utils/python_child.py``), where a relative path names another
     place.
 
-    None when ASH_BIN_PATH is unset and there is no default either, because there
-    is no usable home for ``~/.ash/bin`` (``core.constants.home_bin_path``):
-    nothing can be installed then (:data:`NO_BIN_DIRECTORY`).
+    None when ASH_BIN_PATH is unset or relative and there is no default either,
+    because there is no usable home for ``~/.ash/bin``
+    (``core.constants.home_bin_path``): nothing can be installed then
+    (:data:`NO_BIN_DIRECTORY`).
     """
     from_env = ash_bin_path_from_environment()
     if from_env:
-        # Read against the working directory here, where the caller named it,
-        # not against the empty directory the install command later runs in.
-        return Path(os.path.abspath(from_env))
-    if ASH_BIN_PATH is None:
-        warn_if_home_unusable()
-    return ASH_BIN_PATH
+        path = subprocess_utils.usable_bin_path(Path(from_env))
+        if path is not None:
+            # An anchored value, normalized. A relative one is already ~/.ash/bin
+            # here: made absolute against the working directory it would name a
+            # directory in the repository being scanned.
+            return Path(os.path.abspath(path))
+    else:
+        path = subprocess_utils.usable_bin_path(ASH_BIN_PATH)
+        if path is not None:
+            return path
+    warn_if_home_unusable()
+    return None
 
 
 #: Why nothing is installed when :func:`current_bin_path` has no directory.

@@ -322,6 +322,20 @@ def _refuse_unless_a_file(candidate: Path) -> None:
         raise _refuse(f"{label} is not a regular file")
 
 
+def _unreachable_name_schema() -> dict[str, Any]:
+    """The declared column of the frame :func:`ceiling_unreachable_counts` counts."""
+    import polars as pl
+
+    return {"name": pl.String}
+
+
+def _unreachable_name_frame(names: list[str | None]) -> Any:
+    """One row per unreachable finding: its wired scanner name."""
+    import polars as pl
+
+    return pl.DataFrame({"name": names}, schema=_unreachable_name_schema())
+
+
 def ceiling_unreachable_counts(
     results: Iterable[Mapping[str, Any]],
     declared_threshold: str | None,
@@ -376,7 +390,10 @@ def ceiling_unreachable_counts(
         return {}
 
     not_gating = {normalise_scanner_name(str(name)) for name in non_gating_scanners}
-    counts: dict[str, int] = {}
+    from automated_security_helper.utils.frame_ops import ordered_counts
+    from automated_security_helper.utils.frame_text import unwire, wire
+
+    names: list[str | None] = []
     for result in results:
         if not isinstance(result, Mapping):
             continue
@@ -412,9 +429,13 @@ def ceiling_unreachable_counts(
         # "unattributed" matches the name the aggregator uses for a finding with
         # no scanner_name, so the two payloads agree on what to call it.
         name = str(scanner) if scanner else "unattributed"
-        counts[name] = counts.get(name, 0) + 1
+        names.append(wire(name))
 
-    return counts
+    if not names:
+        return {}
+
+    frame = _unreachable_name_frame(names)
+    return {unwire(name): n for name, n in ordered_counts(frame, "name").iter_rows()}
 
 
 def normalise_scanner_name(name: str) -> str:

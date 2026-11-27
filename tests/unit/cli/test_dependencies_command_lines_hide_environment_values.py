@@ -229,8 +229,10 @@ def test_the_values_are_reset_when_the_install_loop_raises(tmp_path, monkeypatch
     _one_scanner_with(monkeypatch, tmp_path, [["fetch", "x"]])
     seen_in_the_loop: list = []
 
-    def boom(cmd):
-        # Recorded before the raise: there was something set to reset.
+    def boom(cmd, inherit_system_tools=False):
+        # Recorded before the raise: there was something set to reset. The
+        # signature mirrors the install loop's call, which now also passes
+        # inherit_system_tools.
         seen_in_the_loop.append(dependencies_module._INSTALL_VALUES.get())
         raise RuntimeError("the pinned-install check failed")
 
