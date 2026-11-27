@@ -4365,8 +4365,8 @@ def _dropped_option_clause(
             return (
                 ". The option it names was dropped: it was written under a "
                 "retired scanner name, in a file or by an earlier patch "
-                f"operation, and the {serving} plugin that serves that name "
-                "does not declare it."
+                f"operation, in a spelling the {serving} plugin that serves "
+                "that name does not declare."
             )
     return ""
 

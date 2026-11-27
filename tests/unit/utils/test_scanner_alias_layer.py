@@ -1142,8 +1142,8 @@ def test_an_option_bandit_does_not_declare_under_the_retired_name_leaves_no_valu
 
 _DROPPED_CLAUSE = (
     "The option it names was dropped: it was written under a retired scanner "
-    "name, in a file or by an earlier patch operation, and the bandit plugin "
-    "that serves that name does not declare it."
+    "name, in a file or by an earlier patch operation, in a spelling the bandit "
+    "plugin that serves that name does not declare."
 )
 
 
