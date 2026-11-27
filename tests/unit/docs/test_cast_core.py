@@ -820,6 +820,9 @@ def test_the_loader_refuses_a_bad_caption_and_names_the_scene(cast, caption, nee
 # scrub scan knows a user name only after a slash, so a name in such a column is not
 # one it can recognize.
 LISTS_OWNERS = "owner and group of each file"
+# What the refusal of a long option says. ls takes short flags only, so the check
+# refuses every long option in the same words and names the short flags it refuses.
+NOT_A_SHORT_FLAG = "other than a short flag"
 
 ADMITTED_COMMANDS = [
     "cat app.py",
@@ -860,7 +863,7 @@ REFUSED_COMMANDS = [
     (" ls", "single spaces"),
     ("ls\tapp", "single spaces"),
     # A listing that prints the owner and group of each file, alone or in a bundle,
-    # before or after the paths, or by a long option or an abbreviation of one.
+    # before or after the paths.
     ("ls -l", LISTS_OWNERS),
     ("ls -la .ash", LISTS_OWNERS),
     ("ls -al .ash", LISTS_OWNERS),
@@ -871,16 +874,21 @@ REFUSED_COMMANDS = [
     ("ls -n", LISTS_OWNERS),
     ("ls -a -l .ash", LISTS_OWNERS),
     ("ls .ash -l", LISTS_OWNERS),
-    ("ls --format=long", LISTS_OWNERS),
-    ("ls --format=verbose", LISTS_OWNERS),
-    ("ls --form=long", LISTS_OWNERS),
-    ("ls --numeric-uid-gid", LISTS_OWNERS),
-    ("ls --numeric", LISTS_OWNERS),
-    ("ls --full-time", LISTS_OWNERS),
-    # A long option that prints no owners is still refused, for being an option.
-    ("ls --format=across", "option"),
-    ("ls --author", "option"),
-    ("ls --no-group", "option"),
+    # Every ls long option is refused in the same words, whatever it prints: the owners
+    # (--format=long), nothing (--author), or a spelling that GNU ls reads as ambiguous
+    # (--f, --n, --format=v), which the check does not try to place.
+    ("ls --format=long", NOT_A_SHORT_FLAG),
+    ("ls --format=verbose", NOT_A_SHORT_FLAG),
+    ("ls --form=long", NOT_A_SHORT_FLAG),
+    ("ls --numeric-uid-gid", NOT_A_SHORT_FLAG),
+    ("ls --numeric", NOT_A_SHORT_FLAG),
+    ("ls --full-time", NOT_A_SHORT_FLAG),
+    ("ls --f", NOT_A_SHORT_FLAG),
+    ("ls --n", NOT_A_SHORT_FLAG),
+    ("ls --format=v", NOT_A_SHORT_FLAG),
+    ("ls --format=across", NOT_A_SHORT_FLAG),
+    ("ls --author", NOT_A_SHORT_FLAG),
+    ("ls --no-group", NOT_A_SHORT_FLAG),
     # Shell syntax of the kinds the path pattern has to keep out.
     ("cat .*/secret", "relative path"),
     ("cat {..,x}/secret", "relative path"),
@@ -934,6 +942,37 @@ def test_a_long_option_that_prints_no_owners_does_not_claim_to(cast, command):
     problem = cast.command_problem(command)
     assert problem is not None
     assert LISTS_OWNERS not in problem
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        "--f",
+        "--n",
+        "--format=v",
+        "--format=long",
+        "--format=verbose",
+        "--full-time",
+        "--numeric-uid-gid",
+        "--author",
+        "--all",
+    ],
+)
+def test_every_ls_long_option_gets_the_one_generic_refusal(cast, option):
+    # GNU ls reads --f, --n and --format=v as ambiguous, so the check does not guess
+    # which option a spelling stands for: any long option is refused in the same words.
+    generic = cast.command_problem("ls --no-such-option")
+    assert generic is not None
+    problem = cast.command_problem(f"ls {option}")
+    assert problem == generic.replace("--no-such-option", option)
+
+
+def test_the_generic_ls_refusal_names_the_short_flags_that_print_owners(cast):
+    problem = cast.command_problem("ls --all")
+    assert problem is not None
+    assert "-l, -g, -o, -n" in problem
+    # cat has no such flags, so its refusal of an option does not name them.
+    assert "-l, -g, -o, -n" not in cast.command_problem("cat --all")
 
 
 # --- ids, kinds and the other keys
@@ -1060,7 +1099,7 @@ def test_loop_playback_is_accepted(cast):
         (("scenes", 0), "hold_s", -0.5, "0 or more"),
         (("scenes", 3), "output_window_s", 0, "greater than 0"),
         (("typing",), "lead_in_s", -0.1, "0 or more"),
-        (("typing",), "chars_per_second", 0, "greater than 0"),
+        (("typing",), "chars_per_second", 0, "at least 0.1"),
         (("typing",), "chars_per_second", 5000, "at most 1000"),
         (("output",), "max_gap_s", 0, "greater than 0"),
     ],
@@ -1167,6 +1206,40 @@ def test_the_slowest_admitted_typing_rate_is_the_floor(cast):
     data["typing"]["chars_per_second"] = floor * 0.99
     with pytest.raises(cast.StoryboardError, match="at least"):
         _parse(cast, data)
+
+
+def test_the_fastest_admitted_typing_rate_is_the_ceiling(cast):
+    ceiling = cast.MAX_CHARS_PER_SECOND
+    data = _two_scenes(15.0, 15.0)
+    data["typing"]["chars_per_second"] = ceiling
+    assert _parse(cast, data).typing.chars_per_second == ceiling
+    data["typing"]["chars_per_second"] = ceiling * 1.01
+    with pytest.raises(cast.StoryboardError, match="at most"):
+        _parse(cast, data)
+
+
+def _refused_typing_rate(cast, rate):
+    """The refusal of a storyboard with this typing rate, without the rate it quotes."""
+    data = _good()
+    data["typing"]["chars_per_second"] = rate
+    with pytest.raises(cast.StoryboardError) as caught:
+        _parse(cast, data)
+    head, _, quoted = str(caught.value).rpartition(", not ")
+    assert quoted == repr(rate)
+    return head
+
+
+@pytest.mark.parametrize(
+    "rate",
+    [0, -1, 0.05, 0.0999, 1000.5, 5000, "30", None, True, float("nan"), float("inf")],
+)
+def test_a_typing_rate_out_of_range_gets_one_message_naming_both_bounds(cast, rate):
+    head = _refused_typing_rate(cast, rate)
+    assert f"at least {cast.MIN_CHARS_PER_SECOND}" in head
+    assert f"at most {cast.MAX_CHARS_PER_SECOND}" in head
+    assert "greater than 0" not in head
+    # One message for every rate: only the rate it quotes differs.
+    assert head == _refused_typing_rate(cast, -1)
 
 
 @pytest.mark.parametrize(
@@ -1680,6 +1753,60 @@ def test_the_flat_view_drops_exactly_the_box_drawing_block(cast):
     assert cast.flatten_text(f"a{chr(0x2500)}b{chr(0x257F)}c") == "abc"
     kept = f"a{chr(0x24FF)}b{chr(0x2580)}c"
     assert cast.flatten_text(kept) == kept
+
+
+#: A path that wraps inside a cell of a table of three columns, as a terminal prints
+#: it: the first line holds the cells and the start of the path, the second the rest of
+#: it. In ``last`` no cell follows the wrapped one on its row. In ``middle`` another
+#: cell does, and that cell's text lies between the two halves of the path.
+WRAPPED_IN_A_TABLE = {
+    "bordered": {
+        "last": (
+            f"{BAR} B324 {BAR} HIGH {BAR} /home/bu {BAR}\r\n"
+            f"{BAR}      {BAR}      {BAR} ilder/x  {BAR}\r\n"
+        ),
+        "middle": (
+            f"{BAR} B324 {BAR} /home/bu {BAR} HIGH {BAR}\r\n"
+            f"{BAR}      {BAR} ilder/x  {BAR}      {BAR}\r\n"
+        ),
+    },
+    "spaced": {
+        "last": " B324   HIGH   /home/bu\r\n               ilder/x\r\n",
+        "middle": " B324   /home/bu   HIGH\r\n        ilder/x\r\n",
+    },
+}
+
+
+@pytest.mark.parametrize("shape", sorted(WRAPPED_IN_A_TABLE))
+def test_a_token_wrapped_in_the_last_cell_of_a_row_is_found_in_flat_view(cast, shape):
+    text = WRAPPED_IN_A_TABLE[shape]["last"]
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    assert "/home/builder" not in text
+    hits = cast.scan_text(text, tokens, "event 6")
+    assert [(hit.kind, hit.where, hit.view) for hit in hits] == [
+        ("home", "event 6", "flat")
+    ]
+
+
+@pytest.mark.parametrize("shape", sorted(WRAPPED_IN_A_TABLE))
+def test_a_token_wrapped_inside_a_middle_column_is_not_rejoined_so_recordings_must_not_wrap(
+    cast, shape
+):
+    """A limit of the flat view, pinned as it is, not a promise: it does not rejoin a
+    path that wraps inside a cell with other cells after it on its row. The text of
+    those cells lies between the halves of the path, and the view keeps it. So a
+    recording must not wrap a table of several columns; the scan is not what keeps
+    such a path out of one. If the view comes to rejoin these cells, this test turns
+    red and becomes a must-flag case beside the last-cell one above.
+    """
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    middle = WRAPPED_IN_A_TABLE[shape]["middle"]
+    assert "/home/builder" not in cast.flatten_text(middle)
+    assert cast.scan_text(middle, tokens, "event 6") == []
+    # The same halves with no cell after the wrapped one are found, so the miss is the
+    # cell's place in its row and not the text of the path.
+    last = WRAPPED_IN_A_TABLE[shape]["last"]
+    assert "/home/builder" in cast.flatten_text(last)
 
 
 def test_a_hit_names_its_kind_and_never_the_value(cast):
