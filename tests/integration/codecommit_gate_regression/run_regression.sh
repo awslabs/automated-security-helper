@@ -74,10 +74,47 @@ build_repo() {
   chmod -R a+rX "$repo"
 }
 
-# Returns ASH's exit code on stdout. Mirrors CODECOMMIT_GATE_HANDLER's argv,
-# including how it names the directory: `ash scan fs PATH` when the image's ASH
-# has the `fs` subject (3.9 and later, whose help names `scan fs`), and
-# `--source-dir PATH` when it does not.
+# What the image's /bin/sh runs for one scan, with the destination commit as $1.
+#
+# It mirrors CODECOMMIT_GATE_HANDLER's argv, including how it names the directory:
+# `ash scan fs PATH` when the image's ASH has the `fs` subject (3.9 and later, whose
+# help names `scan fs`), and `--source-dir PATH` when it does not. As in the handler,
+# only an answer picks the older spelling: a help that does not name `scan fs`, or a
+# usage error that refuses the word `fs`. A probe that fails any other way (a crash,
+# an out-of-memory kill) says nothing about the image's ASH, so the script exits 70
+# with the end of the probe's output BEFORE it prints the ASH_EXIT marker. The caller
+# then reports that ash never ran, with the diagnosis in the log, instead of scoring a
+# scan that used a spelling chosen by guess.
+#
+# A quoted heredoc: this shell expands none of it. `read -d ''` takes the whole text and
+# returns non-zero at the end of it, which is why `|| true` follows.
+IFS= read -r -d '' INNER_SCAN <<'SH' || true
+cd /work/src || exit 70
+probe_status=0
+probe_help="$(ash scan fs --help 2>&1)" || probe_status=$?
+case "$probe_status:$probe_help" in
+  0:*"scan fs"*)
+    directory="fs /work/src"
+    echo "ash: scanning with 'ash scan fs': its help names 'scan fs'" >&2 ;;
+  0:*)
+    directory="--source-dir /work/src"
+    echo "ash: scanning with the older spelling: the help of 'ash scan fs --help' does not name 'scan fs', as an ASH older than 3.9 answers" >&2 ;;
+  *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*)
+    directory="--source-dir /work/src"
+    echo "ash: scanning with the older spelling: this ASH refused the word 'fs', as an ASH older than 3.9 does" >&2 ;;
+  *)
+    echo "ash: could not tell whether this ASH has 'ash scan fs': 'ash scan fs --help' exited $probe_status without saying it refused 'fs', so no spelling is chosen by guess. The end of its output:" >&2
+    printf '%s\n' "$probe_help" | tail -n 20 >&2
+    exit 70 ;;
+esac
+# $directory is two words on purpose: `fs PATH` or `--source-dir PATH`.
+ash scan $directory --output-dir /work/out \
+  --no-progress --simple --compact-report --changed-files-only --base-ref "$1" \
+  --min-severity medium
+echo "ASH_EXIT=$?"
+SH
+
+# Returns ASH's exit code on stdout.
 run_scan() {
   local repo="$1" out="$2" dest="$3" log="$4"
   mkdir -p "$out"
@@ -88,12 +125,7 @@ run_scan() {
   docker run --rm --entrypoint /bin/sh \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
     -v "$repo:/work/src" -v "$out:/work/out" \
-    "$IMAGE" -c "cd /work/src && \
-if ash scan fs --help 2>/dev/null | grep 'scan fs' >/dev/null; then \
-directory='fs /work/src'; else directory='--source-dir /work/src'; fi && \
-ash scan \$directory --output-dir /work/out \
---no-progress --simple --compact-report --changed-files-only --base-ref $dest \
---min-severity medium; echo \"ASH_EXIT=\$?\"" > "$log" 2>&1 || true
+    "$IMAGE" -c "$INNER_SCAN" sh "$dest" > "$log" 2>&1 || true
   sed -n 's/^ASH_EXIT=\([0-9]\+\).*/\1/p' "$log" | tail -1
 }
 
@@ -114,6 +146,9 @@ for spec in "vulnerable:feat/unsafe-subprocess" "clean:feat/safe-math"; do
   code="$(run_scan "$repo" "$out" "$dest" "$log")"
   if [ -z "$code" ]; then
     echo "FAIL: the container produced no ASH_EXIT marker; ash never ran."
+    echo "      (a probe that could not tell which spelling this image's ASH has"
+    echo "      stops the scan with exit 70 and says why at the top of the log)"
+    echo "      full log: $log"
     echo "      last lines of $log:"
     tail -15 "$log" | sed 's/^/        /'
     OVERALL=1

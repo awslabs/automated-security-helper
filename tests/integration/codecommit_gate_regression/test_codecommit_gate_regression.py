@@ -45,6 +45,9 @@ Marked `integration` to match the rest of this tree, so the integration job's
 from __future__ import annotations
 
 import json
+import os
+import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +58,7 @@ HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 ASSERT_CASE = HERE / "assert_case.py"
 EXPECTED_JSON = HERE / "expected.json"
+RUN_REGRESSION = HERE / "run_regression.sh"
 
 sys.path.insert(0, str(HERE))
 
@@ -333,3 +337,188 @@ def test_the_measured_observations_were_not_touched():
     )
     assert observed.get("scanner_statuses"), "the recorded scanner table is gone"
     assert observed.get("observations"), "the recorded observations are gone"
+
+
+# ---------------------------------------------------------------------------
+# The scan run_regression.sh hands the image's shell, against a stand-in ash
+# ---------------------------------------------------------------------------
+
+posix_only = pytest.mark.skipif(
+    os.name == "nt" or shutil.which("sh") is None,
+    reason="runs the script the image's /bin/sh runs, which is a POSIX shell script",
+)
+
+#: A stand-in ``ash``. It answers ``ash scan fs --help`` as each kind of image's ASH
+#: does and records every other call as one JSON argv per line. Kinds:
+#: ``with-subject`` (ASH 3.9), ``without-subject`` (an older ASH, which shows the
+#: subject-less scan's help for ``scan fs --help`` since click reads ``--help`` before
+#: it refuses the extra argument), ``refusing`` (an older ASH that refuses the word
+#: ``fs`` with the usage error instead) and ``crashing``.
+_STAND_IN_ASH = """\
+import json
+import os
+import sys
+
+argv = sys.argv[1:]
+release = os.environ["ASH_STUB_RELEASE"]
+if argv == ["scan", "fs", "--help"]:
+    if release == "crashing":
+        sys.stderr.write("Traceback (most recent call last):\\nMemoryError\\n")
+        sys.exit(1)
+    if release == "with-subject":
+        sys.stdout.write("Usage: ash scan fs [OPTIONS] [PATH]\\n")
+        sys.exit(0)
+    if release == "without-subject":
+        sys.stdout.write("Usage: ash scan [OPTIONS]\\n")
+        sys.exit(0)
+    sys.stderr.write("Usage: ash scan [OPTIONS]\\n")
+    sys.stderr.write("Error: Got unexpected extra argument (fs)\\n")
+    sys.exit(5)
+with open(os.environ["ASH_STUB_LOG"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(argv) + "\\n")
+sys.exit(int(os.environ.get("ASH_STUB_EXIT", "0")))
+"""
+
+#: The destination commit the script is handed as ``$1``.
+DESTINATION = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _inner_scan() -> str:
+    """The script run_regression.sh hands the image's /bin/sh, as its heredoc holds it."""
+    text = RUN_REGRESSION.read_text(encoding="utf-8")
+    match = re.search(
+        r"^IFS= read -r -d '' INNER_SCAN <<'SH' \|\| true\n(?P<body>.*?)^SH\n",
+        text,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match, "run_regression.sh no longer holds its scan script in INNER_SCAN"
+    return match["body"]
+
+
+def _run_inner_scan(
+    tmp_path: Path, release: str, exit_status: int = 0
+) -> tuple[list[list[str]], subprocess.CompletedProcess, Path, Path]:
+    """Run the inner script in a POSIX shell with the stand-in first on PATH.
+
+    The container's two mount points are two directories here. Returns the calls the
+    stand-in recorded, the finished shell, and the source and output directories.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    ash = bin_dir / "ash"
+    ash.write_text(f"#!{sys.executable} -I\n{_STAND_IN_ASH}", encoding="utf-8")
+    ash.chmod(0o755)
+    source = tmp_path / "src"
+    output = tmp_path / "out"
+    source.mkdir()
+    output.mkdir()
+    log = tmp_path / "ash.jsonl"
+    shell = shutil.which("sh")
+    assert shell, "no sh on PATH"
+    script = _inner_scan().replace("/work/src", str(source))
+    script = script.replace("/work/out", str(output))
+    # `sh -c SCRIPT sh DESTINATION`, as run_scan hands it to the container.
+    finished = subprocess.run(
+        [shell, "-c", script, "sh", DESTINATION],
+        cwd=tmp_path,
+        env={
+            "PATH": f"{bin_dir}{os.pathsep}/usr/bin{os.pathsep}/bin",
+            "ASH_STUB_RELEASE": release,
+            "ASH_STUB_LOG": str(log),
+            "ASH_STUB_EXIT": str(exit_status),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    calls = (
+        [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if log.exists()
+        else []
+    )
+    return calls, finished, source, output
+
+
+def _scan_argv(directory: list[str], output: Path) -> list[str]:
+    """The gate's flags after the directory, which both spellings carry."""
+    return [
+        "scan",
+        *directory,
+        "--output-dir",
+        str(output),
+        "--no-progress",
+        "--simple",
+        "--compact-report",
+        "--changed-files-only",
+        "--base-ref",
+        DESTINATION,
+        "--min-severity",
+        "medium",
+    ]
+
+
+def test_the_script_hands_the_scan_its_destination_commit_as_the_first_argument():
+    text = RUN_REGRESSION.read_text(encoding="utf-8")
+    assert '"$IMAGE" -c "$INNER_SCAN" sh "$dest"' in text, (
+        "run_scan must pass the destination commit after the script's own name, "
+        "which is where the script reads it as $1"
+    )
+    assert '--base-ref "$1"' in _inner_scan()
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, spelling",
+    [
+        ("with-subject", "fs"),
+        ("without-subject", "--source-dir"),
+        ("refusing", "--source-dir"),
+    ],
+)
+def test_the_script_scans_the_way_its_ash_does(tmp_path, release, spelling):
+    calls, finished, source, output = _run_inner_scan(tmp_path, release, exit_status=2)
+
+    assert finished.returncode == 0, finished.stderr
+    assert calls == [_scan_argv([spelling, str(source)], output)], calls
+    # The scan's own status reaches the marker the caller reads.
+    assert "ASH_EXIT=2" in finished.stdout, finished.stdout
+
+
+@posix_only
+def test_the_script_does_not_read_a_crashed_probe_as_an_older_ash(tmp_path):
+    """A crash says nothing about the image's ASH. Read as an older one, it would scan
+    with the older spelling on an ASH that has the new one and score that run."""
+    calls, finished, _, _ = _run_inner_scan(tmp_path, "crashing")
+
+    assert calls == [], calls
+    assert finished.returncode == 70, finished.stderr
+    # No marker: the caller reports that ash never ran, with this output in the log.
+    assert "ASH_EXIT=" not in finished.stdout, finished.stdout
+    assert "could not tell whether this ASH has 'ash scan fs'" in finished.stderr
+    assert "'ash scan fs --help' exited 1" in finished.stderr
+    assert "MemoryError" in finished.stderr
+
+
+@posix_only
+@pytest.mark.parametrize(
+    "release, said",
+    [
+        ("with-subject", "scanning with 'ash scan fs': its help names 'scan fs'"),
+        (
+            "without-subject",
+            (
+                "scanning with the older spelling: the help of 'ash scan fs --help' "
+                "does not name 'scan fs'"
+            ),
+        ),
+        (
+            "refusing",
+            "scanning with the older spelling: this ASH refused the word 'fs'",
+        ),
+    ],
+)
+def test_the_script_says_which_spelling_it_chose_and_why(tmp_path, release, said):
+    _, finished, _, _ = _run_inner_scan(tmp_path, release)
+
+    assert f"ash: {said}" in finished.stderr, finished.stderr
