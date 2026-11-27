@@ -643,6 +643,28 @@ def test_the_executed_count_is_checked_from_both_sides(delta):
 
 
 @pytest.mark.unit
+def test_a_count_below_the_floor_names_the_counter_each_kind_of_deleted_block_moves():
+    """A count below its floor is a block that stopped running, and the numbers cannot
+    say which kind. A marked block that was deleted instead of converted lost its seed
+    line, and SEED_LINES_RETIRED_NOT_RUN, which counts seed lines, is raised for it. A
+    block with no marker that ran and was deleted lost no seed line, so the counter for
+    it is EXECUTED_BLOCKS_ADDED_SINCE_MAIN, lowered by the blocks removed. The message
+    says each beside its own kind, so an author who deleted an unmarked block is not
+    sent to put a seed line on the books that never existed."""
+    now = SEED_LINES_ON_RUN_PAGES_AT_MAIN - 2
+    executed = executed_blocks_floor(now) - 1
+
+    (message,) = executed_blocks_problems(executed, now)
+
+    assert "lower EXECUTED_BLOCKS_ADDED_SINCE_MAIN" in message
+    marked, _, unmarked = message.partition("A block with no marker")
+    assert "raise SEED_LINES_RETIRED_NOT_RUN" in marked
+    assert "EXECUTED_BLOCKS_ADDED_SINCE_MAIN" not in marked
+    assert "lower EXECUTED_BLOCKS_ADDED_SINCE_MAIN" in unmarked
+    assert "SEED_LINES_RETIRED_NOT_RUN" not in unmarked
+
+
+@pytest.mark.unit
 def test_a_deleted_block_cannot_hide_behind_blocks_added_earlier():
     """Three blocks that run are added, so the runner executes three more than the floor
     says. Two marked blocks are then deleted with their seed lines instead of converted:
