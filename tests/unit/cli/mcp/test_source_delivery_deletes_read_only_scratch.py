@@ -279,7 +279,9 @@ def test_a_new_clone_replaces_a_previous_one_whose_pack_files_are_read_only(
     tmp_path, monkeypatch, windows_semantics
 ):
     """Fails on a re-delivery that cannot delete the previous clone: the old
-    ``.git`` is still there beside the new tree."""
+    ``.git`` is still there beside the new tree. Fails as well on a git double that
+    writes relative to the working directory: the delivery runs from an empty
+    directory of the test's own, which is still empty afterwards."""
     session = "redelivered"
     previous = tmp_path / session / "source"
     _clone_tree_with_a_read_only_pack(previous)
@@ -293,6 +295,12 @@ def test_a_new_clone_replaces_a_previous_one_whose_pack_files_are_read_only(
 
     monkeypatch.setattr(sd, "_git_executable", lambda: "git")
     monkeypatch.setattr(sd, "_run_git", clone_that_works)
+    # The delivery runs from an empty directory of the test's own: a double that
+    # writes relative to the working directory writes there, where the last assert
+    # finds it, rather than into the directory pytest was started from.
+    working_directory = tmp_path / "working-directory"
+    working_directory.mkdir()
+    monkeypatch.chdir(working_directory)
     windows_semantics()
 
     target = sd.set_source_git(
@@ -301,6 +309,7 @@ def test_a_new_clone_replaces_a_previous_one_whose_pack_files_are_read_only(
 
     assert (target / "cloned.txt").read_text() == "new delivery\n"
     assert not (target / ".git").exists()
+    assert [p.name for p in working_directory.iterdir()] == []
 
 
 def test_a_leftover_staging_tree_with_read_only_files_stays_out_of_the_next_zip(
