@@ -13988,8 +13988,9 @@ _TRIVY_REPO_READS_OUTPUT_DIRS_CLAIMS = ("still reads those directories",)
 
 _OUTPUT_DIRS_ARE_SKIPPED_SENTENCE = (
     "ASH tells each scanner that can skip a directory to skip the output directories "
-    "that hold no committed file (`trivy --skip-dirs` for trivy and trivy-repo), and "
-    "drops the findings a scanner still reports there, except in committed files."
+    "it leaves out that hold no committed file (`trivy --skip-dirs` for trivy and "
+    "trivy-repo), and drops the findings a scanner still reports there, except in "
+    "committed files and in the current scan's `converted/` directory."
 )
 
 
@@ -14000,9 +14001,10 @@ def test_trivy_and_trivy_repo_skip_the_output_directories_that_hold_no_committed
     """faq.md and index.md (the paragraph on ASH's own output).
 
     Both pages say ASH tells each scanner that can skip a directory to skip the
-    output directories that hold no committed file, ``trivy --skip-dirs`` for trivy
-    and trivy-repo alike, and drops what a scanner still reports there, except in
-    committed files. Neither may say trivy-repo still reads those directories. The
+    output directories it leaves out that hold no committed file,
+    ``trivy --skip-dirs`` for trivy and trivy-repo alike, and drops what a scanner
+    still reports there, except in committed files and in this scan's ``converted/``
+    directory. Neither may say trivy-repo still reads those directories. The
     probe builds each scanner's command for a tree whose output directory is inside
     it. While the scan set holds no file of that directory, it is one
     ``--skip-dirs`` value; once the scan set holds a committed file there, the
@@ -14168,6 +14170,65 @@ def test_trivy_and_trivy_repo_skip_the_output_directories_that_hold_no_committed
     ]
     assert removed == 1, (removed, kept)
     assert kept == [in_the_committed_file, in_the_tree], kept
+
+
+#: How coverage.md named the scanners that skip ASH's output directories before it
+#: listed trivy and trivy-repo among them.
+_COVERAGE_SKIPPERS_WITHOUT_TRIVY = "and ferret-scan skip ASH's output directories"
+
+#: How coverage.md said ASH treats its output directories outside a git checkout
+#: before it matched the code.
+_COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE = (
+    "Outside git, these directories are left out whole"
+)
+
+_COVERAGE_TRIVY_SKIPS_OUTPUT_DIRS_SENTENCE = (
+    "bandit, checkov, semgrep, opengrep, grype, syft, ferret-scan, trivy, and "
+    "trivy-repo skip ASH's output directories that hold no file git tracks. trivy and "
+    "trivy-repo get each of them as a `trivy --skip-dirs` value."
+)
+
+_COVERAGE_OUTSIDE_GIT_SENTENCE = (
+    "Outside a git checkout, or when git cannot list the repository, only this scan's "
+    "own output directory is left out: an earlier run's `.ash/ash_output` is scanned "
+    "like the rest of the tree, and ASH logs a warning while the scan set holds files "
+    "in it."
+)
+
+
+@pytest.mark.unit
+def test_coverage_lists_trivy_and_trivy_repo_with_the_output_dir_skippers() -> None:
+    """coverage.md (What decides the files; the scanners that walk the directory).
+
+    The page lists trivy and trivy-repo with the scanners that skip ASH's output
+    directories that hold no file git tracks, and says both get each of them as a
+    ``trivy --skip-dirs`` value. This is the page half: the commands both scanners
+    build are probed by the faq.md and index.md test above.
+    """
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_TRIVY_SKIPS_OUTPUT_DIRS_SENTENCE)
+    text = _normalize(_page_text(COVERAGE_PAGE))
+    assert _normalize(_COVERAGE_SKIPPERS_WITHOUT_TRIVY) not in text, (
+        COVERAGE_PAGE,
+        _COVERAGE_SKIPPERS_WITHOUT_TRIVY,
+    )
+
+
+@pytest.mark.unit
+def test_coverage_says_outside_git_only_this_scans_output_dir_is_left_out() -> None:
+    """coverage.md (What decides the files; ASH's own output directories).
+
+    Outside a git checkout, or where git cannot list the repository, only this scan's
+    own output directory is left out. An earlier run's ``.ash/ash_output`` is scanned
+    like the rest of the tree, and ASH logs a warning while the scan set holds files
+    in it. This is the page half: the behavior is probed by
+    tests/unit/test_leftover_output_dir_without_git_is_scanned.py.
+    """
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_OUTSIDE_GIT_SENTENCE)
+    text = _normalize(_page_text(COVERAGE_PAGE))
+    assert _normalize(_COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE) not in text, (
+        COVERAGE_PAGE,
+        _COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE,
+    )
 
 
 # --------------------------------------------------------------------------- #
