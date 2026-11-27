@@ -9,11 +9,11 @@ it is, how ASH was installed, and whether the express path is available.
 How the reads work:
 
 * No network and no child process. A read is a file (the processor flags, the kernel
-  release, os-release, and the head of the interpreter's own executable, which names
-  its program loader when the C library does not say glibc), a ctypes call (the macOS
-  translation flag and feature strings, the Windows processor-feature and machine-type
-  calls), a value the interpreter already holds, or an ``importlib.metadata`` lookup.
-  No loader is ever run to ask it a version.
+  release, os-release, and the start of the interpreter's own executable as far as the
+  name of its program loader, which tells the library when the C library does not say
+  glibc), a ctypes call (the macOS translation flag and feature strings, the Windows
+  processor-feature and machine-type calls), a value the interpreter already holds, or
+  an ``importlib.metadata`` lookup. No loader is ever run to ask it a version.
 * Each fact is one token of a closed set (``TOKENS``). A reader that fails, or that
   cannot tell, gives ``unknown``, and ``unknown`` matches no row that marks a host as
   unsupported, so detection never stops a scan and never guesses.
@@ -283,10 +283,16 @@ _CPUINFO_LIMIT = 65536
 _KERNEL_RELEASE_LIMIT = 4096
 _FLAGS_FILE_LIMIT = 4096
 #: The head of the interpreter's executable that is read to find its program loader,
-#: and how many program headers are looked at in it. The loader is named by the first
-#: segments of an executable, well inside the head.
+#: and how many program headers are looked at in it. The program headers are at the
+#: start of an executable, well inside the head, and in most executables so is the
+#: loader's name.
 _ELF_HEAD_LIMIT = 4096
 _ELF_HEADERS_LIMIT = 64
+#: Some executables put the name further in, long after the headers that point at it
+#: (the standalone Pythons that uv installs: about 115 KB). One more read reaches a name
+#: that ends within this many bytes of the start of the file; a name past it is not
+#: looked for.
+_ELF_NAME_REACH = 1 << 20
 _NAME_LIMIT = 32
 #: A version text longer than this is left to ``packaging`` rather than read here.
 _PLAIN_LIMIT = 64
@@ -512,8 +518,8 @@ class Sources:
     sysctl_str: Callable[[str], str] = _live_sysctl_str
     wow64_machines: Callable[[], tuple[int, int]] = _live_wow64_machines
     windows_feature_present: Callable[[int], bool] = _live_windows_feature_present
-    # libc: the C library's own answer, and the interpreter's executable, whose head
-    # names its program loader.
+    # libc: the C library's own answer, the interpreter's executable, and the first
+    # bytes of a file, which is how that executable names its program loader.
     libc_version: Callable[[], str] = _live_libc_version
     executable: Callable[[], str] = _live_executable
     read_head: Callable[[str, int], bytes] = _live_read_head
@@ -1028,14 +1034,14 @@ _PT_INTERP = 3
 _GLIBC_LOADERS = ("ld-linux", "ld64.so", "ld.so")
 
 
-def _elf_interpreter(head: bytes) -> Optional[str]:
-    """The program loader that the head of an ELF executable names, else None.
+def _elf_loader_segment(head: bytes) -> Optional[tuple[int, int]]:
+    """Where an ELF executable keeps its loader's name: ``(offset, length)``, else None.
 
-    The loader is the string of the ``PT_INTERP`` program header, such as
-    ``/lib/ld-musl-x86_64.so.1`` on musl or ``/lib64/ld-linux-x86-64.so.2`` on glibc.
-    ``head`` is the first bytes of the file, and nothing past it is read. None means a
-    file that is not an ELF executable, a head that stops before the program header
-    table or before the loader's name, or an executable with no loader (a static one).
+    The name is the string of the ``PT_INTERP`` program header's segment, at that file
+    offset and that long. ``head`` is the first bytes of the file and the segment may
+    lie past them: only the program headers are read. None means a file that is not an
+    ELF executable, a head that stops before the program header table or inside the
+    header that names the loader, or an executable with no loader (a static one).
     """
     if len(head) < 6 or head[:4] != b"\x7fELF" or head[4] not in (1, 2):
         return None
@@ -1068,11 +1074,29 @@ def _elf_interpreter(head: bytes) -> Optional[str]:
             continue
         offset = field(entry + offset_at, word)
         length = field(entry + length_at, word)
-        if offset is None or length is None or offset + length > len(head):
+        if offset is None or length is None:
             return None
-        name, terminator, _rest = head[offset : offset + length].partition(b"\x00")
-        return name.decode("utf-8", errors="replace") if terminator else None
+        return (offset, length)
     return None
+
+
+def _elf_interpreter(head: bytes) -> Optional[str]:
+    """The program loader that the head of an ELF executable names, else None.
+
+    The loader is the string of the ``PT_INTERP`` program header, such as
+    ``/lib/ld-musl-x86_64.so.1`` on musl or ``/lib64/ld-linux-x86-64.so.2`` on glibc.
+    ``head`` is the first bytes of the file, and nothing past it is read. None means
+    that ``_elf_loader_segment`` finds no segment in it, that the head stops before the
+    segment ends, or that the segment holds no name that ends.
+    """
+    segment = _elf_loader_segment(head)
+    if segment is None:
+        return None
+    offset, length = segment
+    if offset + length > len(head):
+        return None
+    name, terminator, _rest = head[offset : offset + length].partition(b"\x00")
+    return name.decode("utf-8", errors="replace") if terminator else None
 
 
 # --------------------------------------------------------------------------------------
@@ -1259,6 +1283,22 @@ class HostFactsReader:
             return "no"
         return "wsl2" if "wsl2" in release else "wsl1"
 
+    def _loader(self, path: str) -> Optional[str]:
+        """The program loader the executable at ``path`` names, read from the file."""
+        head: bytes = self._src("read_head", path, _ELF_HEAD_LIMIT)
+        segment = _elf_loader_segment(head)
+        if segment is not None:
+            end = segment[0] + segment[1]
+            # A first read that came back full may have stopped before the name, which
+            # some executables put well past their headers: one more read reaches it. A
+            # read that came back short already holds the whole file.
+            if (
+                len(head) == _ELF_HEAD_LIMIT
+                and _ELF_HEAD_LIMIT < end <= _ELF_NAME_REACH
+            ):
+                head = self._src("read_head", path, end)
+        return _elf_interpreter(head)
+
     def libc(self) -> str:
         """``glibc`` or ``musl`` on Linux, ``n/a`` elsewhere."""
         if self._platform() != "linux":
@@ -1275,7 +1315,7 @@ class HostFactsReader:
         path = self._src("executable")
         if not path:
             return UNKNOWN
-        loader = _elf_interpreter(self._src("read_head", path, _ELF_HEAD_LIMIT))
+        loader = self._loader(path)
         if loader is None:
             return UNKNOWN
         if "musl" in loader:
