@@ -89,9 +89,13 @@ class _Run:
             (self.root / "dev.code-workspace").write_text(
                 json.dumps({"folders": [{"path": "p1"}]}), encoding="utf-8"
             )
-            args += ["--workspace", "dev.code-workspace"]
-        else:
+            args[1:1] = ["workspace", "dev.code-workspace"]
+        elif dry_run:
+            # `scan fs` has no --dry-run, a workspace option: only the subject-less
+            # form takes it, so the one test that reads its refusal keeps that form.
             args += ["--source-dir", str(self.project)]
+        else:
+            args[1:1] = ["fs", str(self.project)]
         if named:
             args += ["--config", str(self.named)]
         if dry_run:
@@ -271,10 +275,10 @@ def test_a_scan_with_use_existing_refuses_a_config_that_does_not_parse(run):
         run.root,
         [
             "scan",
+            "fs",
+            str(run.project),
             "--no-progress",
             "--use-existing",
-            "--source-dir",
-            str(run.project),
             "--output-dir",
             str(run.output),
         ],

@@ -205,9 +205,9 @@ def _invoke(args) -> _Reply:
 def _scan_args(world: _World, *more: str) -> list:
     return [
         "scan",
-        "--no-progress",
-        "--source-dir",
+        "fs",
         str(world.project),
+        "--no-progress",
         "--output-dir",
         str(world.output),
         *more,
@@ -233,9 +233,9 @@ def _cli_scan_ash_config(world: _World, text: str) -> _Reply:
 def _ws_args(world: _World, *more: str) -> list:
     return [
         "scan",
-        "--no-progress",
-        "--workspace",
+        "workspace",
         str(world.workspace_file),
+        "--no-progress",
         "--output-dir",
         str(world.output),
         *more,

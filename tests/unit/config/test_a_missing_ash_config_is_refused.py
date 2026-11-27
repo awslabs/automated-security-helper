@@ -108,7 +108,7 @@ def test_a_scan_exits_3_without_scanning(missing, tmp_path, monkeypatch):
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
@@ -153,7 +153,7 @@ def test_an_unreadable_ash_config_exits_3_naming_the_errno(tmp_path, monkeypatch
             app,
             [
                 "scan",
-                "--source-dir",
+                "fs",
                 str(tmp_path / "src"),
                 "--output-dir",
                 str(tmp_path / "out"),
@@ -194,7 +194,7 @@ def test_a_looped_ash_config_exits_3_naming_the_loop(tmp_path, monkeypatch):
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),

@@ -317,7 +317,7 @@ def test_an_invalid_ash_config_file_stops_the_scan_with_exit_3(project, text):
             lambda *_a, **_k: (_ for _ in ()).throw(SystemExit(0)),
         )
         result = CliRunner().invoke(
-            app, ["scan", "--mode", "local", "--no-progress", "--source-dir", "repo"]
+            app, ["scan", "fs", "repo", "--mode", "local", "--no-progress"]
         )
 
     assert result.exit_code == 3, result.output

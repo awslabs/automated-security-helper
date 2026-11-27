@@ -230,7 +230,7 @@ def test_the_command_line_hands_them_to_the_scan(tmp_path, monkeypatch, how, pac
 
     source = _tree(tmp_path, [package])
     monkeypatch.chdir(source)
-    args = ["scan", "--source-dir", str(source)]
+    args = ["scan", "fs", str(source)]
     env = {"ASH_PLUGIN_MODULES": package} if how == "environment" else {}
     if how == "option":
         args += ["--ash-plugin-modules", package]

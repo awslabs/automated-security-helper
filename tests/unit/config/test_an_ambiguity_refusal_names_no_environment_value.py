@@ -72,7 +72,7 @@ def _surface(tmp_path, monkeypatch, surface, body):
     if surface == "scan":
         argv = [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(tmp_path / "out"),

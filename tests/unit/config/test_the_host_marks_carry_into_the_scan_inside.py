@@ -87,7 +87,7 @@ def _scan(args: list[str], tmp_path: Path) -> "CliRunner.Result":
         app,
         [
             "scan",
-            "--source-dir",
+            "fs",
             str(source),
             "--output-dir",
             str(tmp_path / "out"),

@@ -173,7 +173,7 @@ def _cli(tmp_path, src, extra_env):
             _CHILD_IMPORT_PROBE
             + "from automated_security_helper.cli.entrypoint import main; main()",
             "scan",
-            "--source-dir",
+            "fs",
             str(src),
             "--output-dir",
             str(out),

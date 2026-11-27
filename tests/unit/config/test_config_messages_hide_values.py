@@ -703,7 +703,7 @@ def _workspace(project: Path, project_config: str) -> list:
     (project / "svc" / ".ash.yaml").write_text(
         textwrap.dedent(project_config), encoding="utf-8"
     )
-    return ["scan", "--no-progress", "--workspace", "team.code-workspace"]
+    return ["scan", "workspace", "team.code-workspace", "--no-progress"]
 
 
 def _stub_scan(monkeypatch):
@@ -848,7 +848,7 @@ def test_an_ash_config_file_model_error_is_hidden(
             _stub_scan(monkeypatch)
             result = CliRunner().invoke(
                 app,
-                ["scan", "--mode", "local", "--no-progress", "--source-dir", "repo"],
+                ["scan", "fs", "repo", "--mode", "local", "--no-progress"],
             )
             assert result.exit_code == 3, result.output
             output = result.output
