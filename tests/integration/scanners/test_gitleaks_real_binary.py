@@ -598,8 +598,9 @@ def test_an_unparseable_operator_config_fails_rather_than_reports_clean(
     source = _copy_fixture(tmp_path)
     broken = tmp_path / "broken.toml"
     broken.write_text("this is [ not toml\n", encoding="utf-8")
-    # The scanner template refuses the run before gitleaks' own results reader.
-    with pytest.raises(ScannerError, match="exited with code 1"):
+    # ASH reads the operator's config to check its [extend] path, so it refuses
+    # one it cannot parse before gitleaks runs, rather than handing it on.
+    with pytest.raises(ScannerError, match="could not be parsed"):
         _scan_direct(source, tmp_path / "out", config_file=str(broken))
 
 

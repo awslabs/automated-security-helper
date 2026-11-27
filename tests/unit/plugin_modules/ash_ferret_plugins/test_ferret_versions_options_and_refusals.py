@@ -48,6 +48,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_ferret_plugins import (
@@ -196,17 +197,34 @@ def test_version_output_without_a_version_number_is_unknown(
     assert version is None
 
 
+def _default_layout_context(tmp_path: Path) -> MagicMock:
+    """A context in ASH's default layout: the results directory inside the tree."""
+    context = MagicMock(spec=PluginContext)
+    context.source_dir = tmp_path / "source"
+    context.output_dir = context.source_dir / ".ash" / "ash_output"
+    context.work_dir = context.output_dir / "converted"
+    context.work_dir.mkdir(parents=True)
+    context.global_ignore_paths = []
+    return context
+
+
 @patch(
     "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"
 )
 def test_the_version_probe_reads_no_config_from_its_working_directory(
-    mock_find_executable, mock_plugin_context
+    mock_find_executable, tmp_path
 ):
     """ferret-scan loads a config from its working directory before it handles
-    ``--version``, so the probe runs outside the scanned tree and is given a
-    ``--config`` the way the scan run is."""
+    ``--version``, so the probe runs outside the scanned tree and is given ASH's
+    empty config, the way the scan run is. The context is ASH's default layout,
+    whose results directory is inside the tree, so a probe run from there, or a
+    config written there, fails this test."""
     mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
-    scanner = FerretScanScanner(context=mock_plugin_context)
+    context = _default_layout_context(tmp_path)
+    source = Path(context.source_dir).resolve()
+    for directory in (Path(context.source_dir), Path(context.output_dir)):
+        (directory / "ferret.yaml").write_text("checks: NONE\n")
+    scanner = FerretScanScanner(context=context)
 
     with patch(
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.spawn_run"
@@ -217,15 +235,12 @@ def test_the_version_probe_reads_no_config_from_its_working_directory(
     argv = mock_run.call_args.args[0]
     cwd = mock_run.call_args.kwargs.get("cwd")
     assert cwd is not None
-    assert not Path(os.path.abspath(cwd)).is_relative_to(
-        Path(os.path.abspath(mock_plugin_context.source_dir))
-    )
-    assert "--config" in argv
-    assert (
-        not Path(argv[argv.index("--config") + 1])
-        .resolve()
-        .is_relative_to(Path(mock_plugin_context.source_dir).resolve())
-    )
+    assert not Path(os.path.abspath(cwd)).resolve().is_relative_to(source)
+    assert argv.count("--config") == 1
+    assert argv[-1] == "--version"
+    config = Path(argv[argv.index("--config") + 1])
+    assert not config.resolve().is_relative_to(source)
+    assert config.read_text() == "{}\n"
 
 
 # --- options --------------------------------------------------------------------------

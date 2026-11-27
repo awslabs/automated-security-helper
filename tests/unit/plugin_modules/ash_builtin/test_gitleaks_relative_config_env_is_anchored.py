@@ -31,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.core.exceptions import ScannerError
 from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import _scanner
 
 pytestmark = pytest.mark.unit
@@ -62,10 +63,10 @@ def test_a_relative_config_env_the_operator_lacks_is_never_read_from_the_tree(
     tmp_path, monkeypatch
 ):
     """The operator's directory has no ``rules.toml`` and the scanned tree does.
-    The value is still anchored where the operator set it and passed as
-    ``--config``: gitleaks is handed a path that does not exist and fails on
-    it, which is the right outcome, where leaving the value to gitleaks would
-    have it read the tree's copy and run the repository's rules."""
+    The value is still anchored where the operator set it. ASH reads that file to
+    check its ``[extend]`` path, finds none, and refuses the run naming the path
+    it anchored; leaving the value to gitleaks would have had it read the tree's
+    copy and run the repository's rules."""
     operator_dir = tmp_path / "operator"
     operator_dir.mkdir()
     monkeypatch.chdir(operator_dir)
@@ -74,15 +75,16 @@ def test_a_relative_config_env_the_operator_lacks_is_never_read_from_the_tree(
     scanner = _scanner(tmp_path)
     source = scanner.context.source_dir
     (source / "rules.toml").write_text('title = "repo"\n')
+    anchored = Path(os.path.abspath("rules.toml"))
 
-    chosen = scanner._resolve_config_file()
+    with pytest.raises(ScannerError, match="could not be read") as refused:
+        scanner._resolve_config_file()
 
-    assert chosen == Path(os.path.abspath("rules.toml"))
-    assert not chosen.exists()
-    args = scanner._build_arguments(source, tmp_path / "o.sarif")
-    configs = [a for a in args if a.startswith("--config")]
-    assert configs == [f"--config={chosen.as_posix()}"]
-    assert not any((source / "rules.toml").as_posix() in a for a in args)
+    message = str(refused.value)
+    assert repr(str(anchored)) in message or str(anchored) in message, message
+    assert str(source / "rules.toml") not in message
+    assert (source / "rules.toml").as_posix() not in message
+    assert not anchored.exists()
 
 
 def _operator_home(tmp_path, monkeypatch) -> Path:
@@ -149,6 +151,7 @@ def test_the_rescan_anchors_the_variable_where_the_first_run_did(tmp_path, monke
 
 def test_an_absolute_config_env_is_passed_as_it_is(tmp_path, monkeypatch):
     """Control: an absolute path is passed unchanged, now as ``--config``."""
+    (tmp_path / "operator.toml").write_text('title = "operator"\n')
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
     scanner = _scanner(tmp_path)
