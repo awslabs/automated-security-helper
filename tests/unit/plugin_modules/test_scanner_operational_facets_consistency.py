@@ -721,9 +721,12 @@ _IMAGE_ROUTES = {
     "zizmor": "dependencies_install",
 }
 
-#: Words that mark a comment as being about licensing.
+#: Words that mark a comment as being about licensing. The GPL family is read as a word
+#: or with a version after it (GPL-3.0, GPLv3, AGPL-3.0, LGPL-2.1), in any case, and
+#: not inside another word.
 _LICENSING = re.compile(
-    r"licen[sc]|copyleft|\bgpl\b|\bmit\b|spdx|\bnotices?\b", re.IGNORECASE
+    r"licen[sc]|copyleft|\b[al]?gpl(?:v?\d|(?![a-z]))|\bmit\b|spdx|\bnotices?\b",
+    re.IGNORECASE,
 )
 
 
