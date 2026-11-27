@@ -103,7 +103,11 @@ phases:
       # ASH 3.9 merges with `ash results merge`. An ash_version older than 3.9 has
       # only `ash merge`, which 3.9 still runs with a deprecation line and v4.0
       # removes, so the image's ASH is asked which it has, as each shard asks
-      # about `scan fs`.
+      # about `scan fs`. Only an answer picks a spelling: a help that names
+      # `results merge` (the new one), or a usage error naming `results` (an older
+      # ASH, which has no such command). Any other failure of the probe says
+      # nothing about the ASH, so the action fails with what the probe printed
+      # instead of guessing. Each choice and its reason is printed to stderr.
       - |
         set -eu
         if [ -z "$ASH_BASE_CONFIG_SSM_PARAMETER" ]; then
@@ -111,7 +115,24 @@ phases:
           printf '{}\n' > "$ASH_CONFIG"
           export ASH_CONFIG
         fi
-        if ash results merge --help 2>/dev/null | grep "results merge" >/dev/null; then
+        ASH_PROBE_STATUS=0
+        ASH_PROBE_HELP="$(ash results merge --help 2>&1)" || ASH_PROBE_STATUS=$?
+        case "$ASH_PROBE_STATUS:$ASH_PROBE_HELP" in
+          0:*"results merge"*)
+            ASH_RESULTS_MERGE=yes
+            echo "ash: merging with 'ash results merge': its help names 'results merge'" >&2 ;;
+          0:*)
+            ASH_RESULTS_MERGE=no
+            echo "ash: merging with the older spelling: the help of 'ash results merge --help' does not name 'results merge', as an ASH older than 3.9 answers" >&2 ;;
+          *:*"No such command"*"results"*|*:*"unexpected extra argument"*"results"*)
+            ASH_RESULTS_MERGE=no
+            echo "ash: merging with the older spelling: this ASH refused the word 'results', as an ASH older than 3.9 does" >&2 ;;
+          *)
+            echo "ash: could not tell whether this ASH has 'ash results merge': 'ash results merge --help' exited $ASH_PROBE_STATUS without saying it refused 'results', so no spelling is chosen by guess. The end of its output:" >&2
+            printf '%s\n' "$ASH_PROBE_HELP" | tail -n 20 >&2
+            exit 1 ;;
+        esac
+        if [ "$ASH_RESULTS_MERGE" = yes ]; then
           set -- /usr/local/bin/ash-container-init ash results merge \
             --output-dir merged \
             --min-severity "$MIN_SEVERITY"
