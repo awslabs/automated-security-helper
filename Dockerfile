@@ -70,6 +70,10 @@ RUN apt-get clean && \
     curl=7.88.1-10+deb12u15 && \
     rm -rf /var/lib/apt/lists/*
 
+# "LOCAL" builds this checkout. Any other value is a branch, tag or commit cloned from
+# ASH_REPO_CLONE_URL. The default command at the end of this file, `ash scan fs`, needs
+# ASH 3.9 or later: an image built from an earlier revision has no `fs` subject, and
+# is run with a command of its own, such as bare `ash`.
 ARG INSTALL_ASH_REVISION="LOCAL"
 ARG ASH_REPO_CLONE_URL="https://github.com/awslabs/automated-security-helper.git"
 ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
