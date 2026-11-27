@@ -245,23 +245,34 @@ def _give_the_start_names_a_value(
     monkeypatch: pytest.MonkeyPatch,
     environment: Optional[MutableMapping[str, str]] = None,
 ) -> None:
-    """Set a stand-in for each name in WINDOWS_CHILD_START_NAMES the run lacks.
+    """Set a value for each name in WINDOWS_CHILD_START_NAMES the run lacks.
 
     A name the run has keeps its own value. On Windows those are SYSTEMROOT,
     COMSPEC, PATHEXT and PROCESSOR_ARCHITECTURE, which a process started meanwhile
     reads to start (a Windows Python needs SYSTEMROOT) and to find programs
     (``shutil.which`` reads PATHEXT), so a stand-in there would hand it values that
-    name nothing. What the run lacks (every name on Linux and macOS, and
-    PROCESSOR_ARCHITEW6432 under a 64-bit Windows Python) gets "stand-in", which
-    shows that the child carries a name as well as a real value does.
+    name nothing. What the run lacks (every name on Linux and macOS) gets
+    "stand-in", which shows that the child carries a name as well as a real value
+    does.
+
+    PROCESSOR_ARCHITEW6432, which a 64-bit Windows Python lacks, gets
+    PROCESSOR_ARCHITECTURE's value instead. Python 3.11 on Windows names the machine
+    from PROCESSOR_ARCHITEW6432 before PROCESSOR_ARCHITECTURE, so a stand-in there
+    would make a process started meanwhile read its machine as "stand-in". It is set
+    after the loop, because on Linux and macOS PROCESSOR_ARCHITECTURE exists only
+    once the loop has given it its stand-in; there both names hold "stand-in".
 
     ``environment`` is os.environ unless a test hands in a plain mapping to stand for
     it, so what the call does to a Windows run can be shown on any platform.
     """
     target = os.environ if environment is None else environment
     for name in WINDOWS_CHILD_START_NAMES:
-        if name not in target:
+        if name != "PROCESSOR_ARCHITEW6432" and name not in target:
             monkeypatch.setitem(target, name, "stand-in")
+    if "PROCESSOR_ARCHITEW6432" not in target:
+        monkeypatch.setitem(
+            target, "PROCESSOR_ARCHITEW6432", target["PROCESSOR_ARCHITECTURE"]
+        )
 
 
 @pytest.mark.unit
@@ -275,10 +286,13 @@ def test_a_scrubbed_child_keeps_what_a_windows_python_needs_to_start(
     polars, so it errored at setup before it made the write the guard refuses. That
     needs a Windows runner to show; what a Linux run can show is that the names this
     run has reach the child, which is the part the fix is. A name the run lacks gets a
-    stand-in and one it has keeps its own value, so on Windows no start-up variable
+    value and one it has keeps its own value, so on Windows no start-up variable
     is overwritten. The child is not started: the launch of a child pytest is
-    replaced by one that keeps the environment it was given, and any other process a
-    fixture starts meanwhile gets the start-up names the run has, as they are.
+    replaced by one that keeps the environment it was given. Any other process a
+    fixture starts meanwhile inherits os.environ as the helper left it: the start-up
+    names the run has as they are, "stand-in" for each it lacks, and, on a 64-bit
+    Windows run, PROCESSOR_ARCHITEW6432 holding PROCESSOR_ARCHITECTURE's value, so
+    that process still names the machine it runs on.
     """
     _give_the_start_names_a_value(monkeypatch)
     given = []
@@ -306,8 +320,10 @@ def test_a_start_name_the_run_has_keeps_its_value(monkeypatch):
 
     A Windows run has SYSTEMROOT, COMSPEC, PATHEXT and PROCESSOR_ARCHITECTURE. Only a
     32-bit process on a 64-bit Windows has PROCESSOR_ARCHITEW6432, so a 64-bit Python
-    lacks it. A plain mapping of that shape stands for the run's environment here, so
-    the check touches no real name and runs on any platform.
+    lacks it. It gets PROCESSOR_ARCHITECTURE's value, not a stand-in: Python 3.11
+    reads this name first, and a stand-in is no machine. A plain mapping of that
+    shape stands for the run's environment here, so the check touches no real name
+    and runs on any platform.
     """
     windows = {
         name: f"existing-{name.lower()}"
@@ -319,12 +335,34 @@ def test_a_start_name_the_run_has_keeps_its_value(monkeypatch):
 
     _give_the_start_names_a_value(monkeypatch, environment)
 
-    assert environment == {**windows, "PROCESSOR_ARCHITEW6432": "stand-in"}
+    assert environment == {
+        **windows,
+        "PROCESSOR_ARCHITEW6432": windows["PROCESSOR_ARCHITECTURE"],
+    }
+
+
+@pytest.mark.unit
+def test_a_wow64_run_keeps_both_processor_architecture_names(monkeypatch):
+    """A 32-bit Python on a 64-bit Windows has both names and keeps each as it is.
+
+    PROCESSOR_ARCHITEW6432 names the native machine and PROCESSOR_ARCHITECTURE the
+    process's own, so the two differ, and the helper must not copy one onto the other.
+    """
+    wow64 = {name: f"existing-{name.lower()}" for name in WINDOWS_CHILD_START_NAMES}
+    environment = wow64.copy()
+
+    _give_the_start_names_a_value(monkeypatch, environment)
+
+    assert environment == wow64
 
 
 @pytest.mark.unit
 def test_a_run_without_the_start_names_gets_a_stand_in_for_each(monkeypatch):
-    """Linux and macOS have none of the names, so each gets a stand-in."""
+    """Linux and macOS have none of the names, so each gets a stand-in.
+
+    PROCESSOR_ARCHITEW6432 takes PROCESSOR_ARCHITECTURE's value, which is the
+    stand-in there, so all five read "stand-in".
+    """
     environment: dict = {}
 
     _give_the_start_names_a_value(monkeypatch, environment)
