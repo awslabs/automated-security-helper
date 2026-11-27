@@ -1816,7 +1816,8 @@ def unexecuted_command_problems(pages: Sequence[Page], root: Path) -> list[Findi
         return []
     seed, findings = read
     generated, listing = read_generated_pages(root)
-    return findings + listing + _seed_findings(
+    findings += listing
+    return findings + _seed_findings(
         pages,
         seed,
         root,
