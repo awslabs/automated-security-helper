@@ -25,6 +25,9 @@ from __future__ import annotations
 import dataclasses
 import errno
 import importlib.metadata
+import inspect
+import platform
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
@@ -1336,6 +1339,73 @@ def test_a_flag_that_is_both_declared_and_spelled_is_not_drift(tmp_path):
         )
         == []
     )
+
+
+# The arm64 lanes. polars sets target-feature flags only for its x86-64 builds, so the
+# runtime wheel an arm64 host installs carries an empty BUILD_FEATURE_FLAGS: there is
+# no declared set to compare it with, and the reader answers n/a without reading it.
+# The four tests above run here under a planted lane (a runtime holding the text given,
+# on a host of the machine given), so every host runs the branch that is not its own.
+
+EMPTY_FLAGS_TEXT = 'BUILD_FEATURE_FLAGS = ""\n'
+
+DRIFT_TESTS = [
+    test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named,
+    test_an_unchanged_copy_of_the_real_file_is_the_must_not_flag_control,
+    test_a_copy_with_one_flag_added_turns_the_drift_check_red,
+    test_a_copy_with_one_flag_removed_turns_the_drift_check_red,
+]
+
+
+def plant_lane(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, machine: str, flags_text: str
+) -> None:
+    """Install a runtime holding ``flags_text`` on a host of ``machine``."""
+    runtime = Site(tmp_path).add_runtime("32", flags_text)
+    real = _installed
+
+    def installed(name: str) -> Optional[importlib.metadata.Distribution]:
+        return runtime if name == "polars-runtime-32" else real(name)
+
+    monkeypatch.setattr(sys.modules[__name__], "_installed", installed)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+
+
+def run_drift_test(test: Callable[..., None], tmp_path: Path) -> None:
+    if "tmp_path" in inspect.signature(test).parameters:
+        test(tmp_path)
+    else:
+        test()
+
+
+@pytest.mark.parametrize("test", DRIFT_TESTS, ids=lambda test: test.__name__)
+@pytest.mark.parametrize("machine", ["aarch64", "arm64"])
+def test_the_drift_tests_hold_on_an_arm64_lane(monkeypatch, tmp_path, machine, test):
+    plant_lane(monkeypatch, tmp_path, machine, EMPTY_FLAGS_TEXT)
+    run_drift_test(test, tmp_path)
+
+
+@pytest.mark.parametrize("test", DRIFT_TESTS, ids=lambda test: test.__name__)
+@pytest.mark.parametrize("machine", ["x86_64", "AMD64"])
+def test_the_drift_tests_hold_on_an_x86_64_lane(monkeypatch, tmp_path, machine, test):
+    plant_lane(monkeypatch, tmp_path, machine, DEFAULT_FLAGS_TEXT)
+    run_drift_test(test, tmp_path)
+
+
+@pytest.mark.parametrize("machine", ["aarch64", "arm64"])
+def test_flags_in_an_arm64_runtime_are_drift(monkeypatch, tmp_path, machine):
+    # The reader never reads the file there. A polars that starts to set flags for
+    # arm64 must turn the lane red, not pass as unread.
+    plant_lane(monkeypatch, tmp_path, machine, DEFAULT_FLAGS_TEXT)
+    with pytest.raises(AssertionError):
+        test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named()
+
+
+@pytest.mark.parametrize("machine", ["x86_64", "AMD64"])
+def test_an_empty_flags_file_on_x86_64_is_drift(monkeypatch, tmp_path, machine):
+    plant_lane(monkeypatch, tmp_path, machine, EMPTY_FLAGS_TEXT)
+    with pytest.raises(AssertionError):
+        test_the_locked_runtimes_flags_equal_the_declared_set_and_are_all_named()
 
 
 # The second lane, where polars[rtcompat] (or polars[rt64]) is installed. The default

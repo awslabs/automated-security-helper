@@ -30,6 +30,10 @@ import ast
 import dataclasses
 import errno
 import itertools
+import ntpath
+import os
+import struct
+import subprocess
 import sys
 from collections import Counter
 from importlib.metadata import PathDistribution
@@ -88,6 +92,41 @@ def _raises(*args: object, **kwargs: object) -> object:
 
 def canonical(name: str) -> str:
     return name.lower().replace("_", "-")
+
+
+def planted_elf(
+    interpreter: Optional[str], *, bits: int = 64, order: str = "little"
+) -> bytes:
+    """The first bytes of an ELF executable whose program loader is ``interpreter``.
+
+    The bytes are an ELF header, two program headers (a loadable segment, then the
+    interpreter segment) and the loader's name, in the width and byte order asked for.
+    ``interpreter`` None gives the second header a note segment instead, which is what
+    a statically linked executable has: no loader to name.
+    """
+    endian = "<" if order == "little" else ">"
+
+    def pack(layout: str, *values: int) -> bytes:
+        return struct.pack(endian + layout, *values)
+
+    ident = bytes([0x7F, 0x45, 0x4C, 0x46, 2 if bits == 64 else 1])
+    ident += bytes([1 if order == "little" else 2, 1]) + bytes(9)
+    entry = 56 if bits == 64 else 32
+    table = 64 if bits == 64 else 52
+    end = table + 2 * entry
+    name = b"" if interpreter is None else interpreter.encode("ascii") + b"\x00"
+    length = len(name)
+    top = end + length
+    kind = 4 if interpreter is None else 3
+    if bits == 64:
+        header = pack("HHIQQQIHHHHHH", 2, 62, 1, 0, table, 0, 0, 64, entry, 2, 0, 0, 0)
+        load = pack("IIQQQQQQ", 1, 5, 0, 0, 0, top, top, 4096)
+        second = pack("IIQQQQQQ", kind, 4, end, end, end, length, length, 1)
+    else:
+        header = pack("HHIIIIIHHHHHH", 2, 3, 1, 0, table, 0, 0, 52, entry, 2, 0, 0, 0)
+        load = pack("IIIIIIII", 1, 0, 0, 0, top, top, 5, 4096)
+        second = pack("IIIIIIII", kind, end, end, end, length, length, 4, 1)
+    return ident + header + load + second + name
 
 
 #: The text a default runtime (32 or 64) carries, as the 1.44 wheels write it.
@@ -279,8 +318,8 @@ VOCABULARY = {
     "express_available": {"yes", "no", "unknown"},
 }
 
-#: The fields a support row matches on that a host reader fills, in their order.
-SUPPORT_FIELDS = [
+#: Every fact a host reader fills, in the order a reading holds them.
+READING_FIELDS = [
     "os",
     "host_os",
     "os_release",
@@ -295,6 +334,10 @@ SUPPORT_FIELDS = [
     "wsl",
     "express_available",
 ]
+
+#: The fields a support row matches on, in their order: the reading's facts without
+#: ``os_release``, which the design records beside them and no row matches on.
+SUPPORT_FIELDS = [name for name in READING_FIELDS if name != "os_release"]
 
 
 def assert_closed(reading: HostReading) -> None:
@@ -548,7 +591,6 @@ def test_the_supported_linux_host_reads_as_the_reference_environment(tmp_path):
     assert host_facts.fact_tokens(reading) == {
         "os": "linux",
         "host_os": "linux",
-        "os_release": "ubuntu 24.04",
         "arch": "amd64",
         "translation": "native",
         "cpu_level": "full",
@@ -560,6 +602,7 @@ def test_the_supported_linux_host_reads_as_the_reference_environment(tmp_path):
         "wsl": "no",
         "express_available": "yes",
     }
+    assert reading.os_release == "ubuntu 24.04"
     assert reading.failed == ()
     assert reading.cpu_missing_flags == ()
     assert reading.python_version == "3.12.15"
@@ -572,7 +615,6 @@ def test_the_supported_macos_host_reads_as_a_native_intel_mac(tmp_path):
     assert host_facts.fact_tokens(reading) == {
         "os": "darwin",
         "host_os": "darwin",
-        "os_release": "macos 15.1",
         "arch": "amd64",
         "translation": "native",
         "cpu_level": "full",
@@ -584,6 +626,7 @@ def test_the_supported_macos_host_reads_as_a_native_intel_mac(tmp_path):
         "wsl": "n/a",
         "express_available": "yes",
     }
+    assert reading.os_release == "macos 15.1"
     assert reading.failed == ()
     assert stand_in_matches(reading) == []
 
@@ -593,7 +636,6 @@ def test_the_supported_windows_host_reads_as_a_native_x64_machine(tmp_path):
     assert host_facts.fact_tokens(reading) == {
         "os": "windows",
         "host_os": "windows",
-        "os_release": "windows 10.0.26100",
         "arch": "amd64",
         "translation": "native",
         "cpu_level": "full",
@@ -605,6 +647,7 @@ def test_the_supported_windows_host_reads_as_a_native_x64_machine(tmp_path):
         "wsl": "n/a",
         "express_available": "no",
     }
+    assert reading.os_release == "windows 10.0.26100"
     assert reading.failed == ()
     assert stand_in_matches(reading) == []
 
@@ -624,10 +667,19 @@ def test_the_fact_fields_are_the_support_fields_in_their_order():
     assert list(FACT_FIELDS) == SUPPORT_FIELDS
 
 
+def test_os_release_is_recorded_and_no_support_row_matches_on_it():
+    # The design records the release text beside the facts and matches nothing on it:
+    # it is a field of the reading, not one of the fields a row matches on, and it has
+    # no closed vocabulary.
+    assert "os_release" not in FACT_FIELDS
+    assert "os_release" not in host_facts.TOKENS
+    assert "os_release" in {field.name for field in dataclasses.fields(HostReading)}
+
+
 def test_the_reading_carries_exactly_those_fields_and_its_details():
     names = [field.name for field in dataclasses.fields(HostReading)]
-    assert names[: len(SUPPORT_FIELDS)] == SUPPORT_FIELDS
-    assert names[len(SUPPORT_FIELDS) :] == [
+    assert names[: len(READING_FIELDS)] == READING_FIELDS
+    assert names[len(READING_FIELDS) :] == [
         "cpu_missing_flags",
         "python_version",
         "requires_python",
@@ -644,6 +696,17 @@ def test_fact_tokens_is_the_one_mapping_onto_the_fields_a_support_row_matches_on
     assert all(mapping[name] == getattr(reading, name) for name in SUPPORT_FIELDS)
     # What a notice names beside the tokens, and the failures, are not facts a row matches.
     assert not {"failed", "cpu_missing_flags", "python_version"} & set(mapping)
+    assert "os_release" not in mapping
+
+
+def test_failures_are_listed_in_the_order_of_the_reading_fields(tmp_path):
+    # os_release leaves the fields a row matches on, not the failures a reading names.
+    sources = dataclasses.replace(
+        linux_host(tmp_path), freedesktop_os_release=_raises, machine=_raises
+    )
+    names = [name for name, _kind in read(sources).failed]
+    assert "os_release" in names
+    assert names == sorted(names, key=READING_FIELDS.index)
 
 
 def test_a_reading_is_frozen_and_compares_by_value(tmp_path):
@@ -809,36 +872,80 @@ def test_a_translated_x86_process_is_a_rosetta_reading_with_its_row(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("wow64", "expected"),
+    ("platform_name", "wow64", "expected"),
     [
-        ((0, IMAGE_FILE_MACHINE_AMD64), "native"),
-        ((0, IMAGE_FILE_MACHINE_ARM64), "native"),
-        ((IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64), "x64-on-arm64"),
+        ("win-amd64", (0, IMAGE_FILE_MACHINE_AMD64), "native"),
+        # arm64 Python on Windows on Arm: native.
+        ("win-arm64", (0, IMAGE_FILE_MACHINE_ARM64), "native"),
+        # x64 Python on Windows on Arm runs under emulation with no WOW64 layer, so the
+        # call names no process machine beside the arm64 native machine: the
+        # interpreter's own architecture says which of the two this is.
+        ("win-amd64", (0, IMAGE_FILE_MACHINE_ARM64), "x64-on-arm64"),
+        # An interpreter that is neither family cannot be placed beside (0, arm64).
+        ("win32", (0, IMAGE_FILE_MACHINE_ARM64), "unknown"),
+        ("", (0, IMAGE_FILE_MACHINE_ARM64), "unknown"),
+        # A process machine of its own beside an arm64 host is emulation too.
+        (
+            "win-amd64",
+            (IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64),
+            "x64-on-arm64",
+        ),
         # 32-bit x86 on 64-bit x86 Windows is WOW64, which translates nothing.
-        ((IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_AMD64), "native"),
+        (
+            "win-amd64",
+            (IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_AMD64),
+            "native",
+        ),
         # 32-bit x86 emulated on arm64 has no token: unknown, never x64-on-arm64.
-        ((IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_ARM64), "unknown"),
-        ((0x1234, 0x5678), "unknown"),
+        (
+            "win-amd64",
+            (IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_ARM64),
+            "unknown",
+        ),
+        ("win-amd64", (0x1234, 0x5678), "unknown"),
         # Windows before 10 1511 has no IsWow64Process2.
-        (AttributeError("IsWow64Process2"), "unknown"),
-        (OSError(errno.EINVAL, "failed"), "unknown"),
+        ("win-amd64", AttributeError("IsWow64Process2"), "unknown"),
+        ("win-amd64", OSError(errno.EINVAL, "failed"), "unknown"),
     ],
 )
-def test_windows_translation_is_the_two_machines_of_iswow64process2(
-    tmp_path, wow64, expected
+def test_windows_translation_follows_iswow64process2_and_the_interpreter(
+    tmp_path, platform_name, wow64, expected
 ):
-    reading = read(windows_host(tmp_path, wow64=wow64))
+    reading = read(windows_host(tmp_path, platform_name=platform_name, wow64=wow64))
     assert reading.translation == expected
 
 
-def test_an_x64_process_on_an_arm64_host_matches_the_emulation_row(tmp_path):
+def test_an_x64_python_on_a_windows_arm_host_matches_the_emulation_row(tmp_path):
     reading = read(
         windows_host(
-            tmp_path, wow64=(IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_ARM64)
+            tmp_path, platform_name="win-amd64", wow64=(0, IMAGE_FILE_MACHINE_ARM64)
         )
     )
-    assert reading.arch == "amd64"
+    assert (reading.arch, reading.translation) == ("amd64", "x64-on-arm64")
     assert stand_in_matches(reading) == ["host.translation.x64-on-arm64"]
+
+
+def test_an_arm64_python_on_a_windows_arm_host_is_native_and_matches_no_row(tmp_path):
+    reading = read(
+        windows_host(
+            tmp_path, platform_name="win-arm64", wow64=(0, IMAGE_FILE_MACHINE_ARM64)
+        )
+    )
+    assert (reading.arch, reading.translation) == ("arm64", "native")
+    assert stand_in_matches(reading) == []
+
+
+def test_an_unreadable_interpreter_architecture_leaves_arm_host_translation_unknown(
+    tmp_path,
+):
+    sources = dataclasses.replace(
+        windows_host(tmp_path, wow64=(0, IMAGE_FILE_MACHINE_ARM64)),
+        sysconfig_platform=_raises,
+    )
+    reading = read(sources)
+    assert reading.translation == UNKNOWN
+    assert ("translation", "RuntimeError") in reading.failed
+    assert stand_in_matches(reading) == []
 
 
 def test_linux_translation_is_native_with_no_read(tmp_path):
@@ -1072,6 +1179,187 @@ def test_libc_is_not_applicable_off_linux(tmp_path):
     # libc_version and platform_tags stay unplanted there.
     assert read(macos_host(tmp_path)).libc == "n/a"
     assert read(windows_host(tmp_path / "w")).libc == "n/a"
+
+
+# The C library read says glibc or it says nothing. When it says nothing the answer is
+# the loader the interpreter's own executable names, read as a file: the module starts
+# no child process, so the libc fallback may not run a loader (what packaging does to
+# find a musl version) and may not call anything that does.
+
+
+@pytest.fixture
+def child_processes(monkeypatch):
+    """The child processes a test starts, each one recorded and refused.
+
+    Nothing runs: ``subprocess.Popen`` (so ``run``, ``check_output`` and ``os.popen``),
+    ``os.system`` and ``os.posix_spawn`` note the call and raise instead.
+    """
+    started: list[str] = []
+
+    class Refusing(subprocess.Popen):  # type: ignore[type-arg]
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            started.append("subprocess.Popen")
+            raise RuntimeError("a child process was started")
+
+    def refuse(name: str) -> Callable[..., object]:
+        def start(*args: object, **kwargs: object) -> object:
+            started.append(name)
+            raise RuntimeError("a child process was started")
+
+        return start
+
+    monkeypatch.setattr(subprocess, "Popen", Refusing)
+    monkeypatch.setattr(os, "system", refuse("os.system"))
+    monkeypatch.setattr(os, "posix_spawn", refuse("os.posix_spawn"), raising=False)
+    return started
+
+
+def test_the_child_process_detector_records_a_planted_start(child_processes):
+    with pytest.raises(RuntimeError):
+        subprocess.run(["/bin/true"], check=False)
+    with pytest.raises(RuntimeError):
+        os.system("/bin/true")
+    assert child_processes == ["subprocess.Popen", "os.system"]
+
+
+def libc_beside(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: Optional[bytes],
+    *,
+    libc_version: Callable[[], str] = _raises,
+) -> str:
+    """What ``libc()`` says on a Linux host whose C library read does not answer.
+
+    The interpreter is found the way a run finds it, through ``sys.executable``, and
+    its executable is a file holding ``content`` (None: a file that is not there).
+    Only the platform and the C library read come from the test: ``libc()`` reads no
+    other fact. A failed read gives ``failed <exception type>``.
+    """
+    executable = tmp_path / "python3"
+    if content is not None:
+        executable.write_bytes(content)
+    monkeypatch.setattr(sys, "executable", str(executable))
+    sources = dataclasses.replace(
+        Sources(), sys_platform=lambda: "linux", libc_version=libc_version
+    )
+    try:
+        return HostFactsReader(sources).libc()
+    except host_facts._SourceFailure as failure:
+        return f"failed {failure.failure.kind}"
+    except Exception as exc:
+        return f"failed {type(exc).__name__}"
+
+
+def test_a_musl_host_is_read_without_starting_a_child_process(
+    tmp_path, monkeypatch, child_processes
+):
+    content = planted_elf("/lib/ld-musl-x86_64.so.1")
+    got = libc_beside(tmp_path, monkeypatch, content)
+    assert child_processes == [], "the libc read started a child process"
+    assert got == "musl"
+
+
+def test_a_glibc_loader_is_read_without_starting_a_child_process(
+    tmp_path, monkeypatch, child_processes
+):
+    content = planted_elf("/lib64/ld-linux-x86-64.so.2")
+    got = libc_beside(tmp_path, monkeypatch, content)
+    assert child_processes == []
+    assert got == "glibc"
+
+
+#: (id, loader, planted_elf options, libc): what the loader an executable names says.
+LOADERS = [
+    ("musl-x86_64", "/lib/ld-musl-x86_64.so.1", {}, "musl"),
+    ("musl-aarch64", "/lib/ld-musl-aarch64.so.1", {}, "musl"),
+    ("musl-armhf", "/lib/ld-musl-armhf.so.1", {"bits": 32}, "musl"),
+    ("musl-mips", "/lib/ld-musl-mips.so.1", {"bits": 32, "order": "big"}, "musl"),
+    ("musl-s390x", "/lib/ld-musl-s390x.so.1", {"order": "big"}, "musl"),
+    ("glibc-x86_64", "/lib64/ld-linux-x86-64.so.2", {}, "glibc"),
+    ("glibc-aarch64", "/lib/ld-linux-aarch64.so.1", {}, "glibc"),
+    ("glibc-armhf", "/lib/ld-linux-armhf.so.3", {"bits": 32}, "glibc"),
+    ("glibc-ppc64le", "/lib64/ld64.so.2", {}, "glibc"),
+    ("glibc-s390x", "/lib/ld64.so.1", {"order": "big"}, "glibc"),
+    # A loader of neither family names no library this reader knows.
+    ("bionic", "/system/bin/linker64", {}, "unknown"),
+    ("uclibc", "/lib/ld-uClibc.so.0", {}, "unknown"),
+    # A statically linked executable has no loader at all.
+    ("static", None, {}, "unknown"),
+]
+
+
+@pytest.mark.parametrize(
+    ("interpreter", "options", "expected"),
+    [pytest.param(*case[1:], id=case[0]) for case in LOADERS],
+)
+def test_a_silent_c_library_leaves_the_answer_to_the_loader_the_executable_names(
+    tmp_path, monkeypatch, child_processes, interpreter, options, expected
+):
+    content = planted_elf(interpreter, **options)
+    assert libc_beside(tmp_path, monkeypatch, content) == expected
+    assert child_processes == []
+
+
+_WHOLE_ELF = planted_elf("/lib/ld-musl-x86_64.so.1")
+
+#: (id, content): files that are not an ELF executable, or not all of one.
+NOT_ELF = [
+    ("a-script", b'#!/bin/sh\nexec python3.12 "$@"\n'),
+    ("empty", b""),
+    ("the-magic-alone", b"\x7fELF"),
+    ("header-cut-short", _WHOLE_ELF[:30]),
+    ("program-headers-cut-short", _WHOLE_ELF[:100]),
+    ("loader-name-cut-short", _WHOLE_ELF[:-8]),
+    ("an-unknown-class", b"\x7fELF\x03\x01\x01" + bytes(120)),
+    ("an-unknown-byte-order", b"\x7fELF\x02\x03\x01" + bytes(120)),
+]
+
+
+@pytest.mark.parametrize(
+    "content", [pytest.param(case[1], id=case[0]) for case in NOT_ELF]
+)
+def test_an_executable_that_is_not_a_whole_elf_file_names_no_library(
+    tmp_path, monkeypatch, child_processes, content
+):
+    assert libc_beside(tmp_path, monkeypatch, content) == UNKNOWN
+    assert child_processes == []
+
+
+def test_an_executable_that_is_not_there_is_a_failed_libc_read(
+    tmp_path, monkeypatch, child_processes
+):
+    got = libc_beside(tmp_path, monkeypatch, None)
+    assert got == "failed FileNotFoundError"
+    assert child_processes == []
+
+
+def test_an_interpreter_with_no_executable_path_names_no_library(
+    monkeypatch, child_processes
+):
+    monkeypatch.setattr(sys, "executable", "")
+    sources = dataclasses.replace(
+        Sources(), sys_platform=lambda: "linux", libc_version=_raises
+    )
+    assert HostFactsReader(sources).libc() == UNKNOWN
+    assert child_processes == []
+
+
+@pytest.mark.parametrize(
+    ("version", "loader", "expected"),
+    [
+        # A C library that is not glibc, or gives no text, leaves it to the loader.
+        ("uClibc 1.0", "/lib/ld-musl-x86_64.so.1", "musl"),
+        ("", "/lib64/ld-linux-x86-64.so.2", "glibc"),
+    ],
+)
+def test_a_c_library_that_does_not_say_glibc_leaves_the_answer_to_the_loader(
+    tmp_path, monkeypatch, child_processes, version, loader, expected
+):
+    content = planted_elf(loader)
+    got = libc_beside(tmp_path, monkeypatch, content, libc_version=lambda: version)
+    assert got == expected
+    assert child_processes == []
 
 
 # --------------------------------------------------------------------------------------
@@ -1595,6 +1883,125 @@ def test_a_runtime_version_spelled_with_a_prefix_goes_to_packaging(
 
 
 # --------------------------------------------------------------------------------------
+# What a first reading asks of the installed distributions
+# --------------------------------------------------------------------------------------
+
+
+def test_the_versions_and_the_requires_python_are_read_from_their_header_lines(
+    tmp_path,
+):
+    # The version is the Version: line of the METADATA text and ASH's Requires-Python
+    # its own line, so a distribution whose parsed metadata is unreadable still reads.
+    unparsed = {"version", "metadata"}
+    sources, proxies = counted_sources(
+        tmp_path,
+        polars_site(tmp_path),
+        fail={
+            "polars": unparsed,
+            "polars-runtime-32": unparsed,
+            "automated-security-helper": unparsed,
+        },
+    )
+    reading = read(sources)
+    assert reading.failed == ()
+    assert (reading.polars_runtime, reading.cpu_level) == ("runtime-32", "full")
+    assert (reading.python_in_range, reading.requires_python) == ("yes", ">=3.11,<3.15")
+    assert proxies["polars"].reads["METADATA"] == 1
+
+
+RUNTIME_TEXTS = {
+    "compat": COMPAT_FLAGS_TEXT,
+    "64": DEFAULT_FLAGS_TEXT,
+    "32": DEFAULT_FLAGS_TEXT,
+}
+
+
+@pytest.mark.parametrize(
+    ("installed", "env", "runtime", "looked_up"),
+    [
+        # Only the 32-bit runtime: polars tries the other two first, and so does the
+        # reader, because only the lookup tells that a runtime is absent.
+        (["32"], {}, "runtime-32", ["compat", "64", "32"]),
+        # The first runtime polars tries that loads decides, so the rest are never
+        # looked up.
+        (["compat", "64", "32"], {}, "compat", ["compat"]),
+        (["64", "32"], {}, "runtime-64", ["compat", "64"]),
+        # A forced runtime is the only one tried; a preferred one is tried first.
+        (["compat", "64", "32"], {"POLARS_FORCE_PKG": "64"}, "runtime-64", ["64"]),
+        (["32"], {"POLARS_PREFER_PKG": "32"}, "runtime-32", ["32"]),
+        (["compat", "32"], {"POLARS_PREFER_PKG": "32"}, "runtime-32", ["32"]),
+        # A forced runtime that is not installed is absent, whatever else is.
+        (["compat", "32"], {"POLARS_FORCE_PKG": "64"}, "absent", ["64"]),
+        # A variable that names no runtime leaves every runtime unlooked.
+        (["32"], {"POLARS_FORCE_PKG": "nope"}, UNKNOWN, []),
+    ],
+)
+def test_the_runtimes_looked_up_are_those_polars_would_try_in_its_order(
+    tmp_path, installed, env, runtime, looked_up
+):
+    texts = {selector: RUNTIME_TEXTS[selector] for selector in installed}
+    site = polars_site(tmp_path, runtimes=texts)
+    reading = read(linux_host(tmp_path, site=site, env=env))
+    assert reading.polars_runtime == runtime
+    assert site.lookups == [
+        "polars",
+        *(f"polars-runtime-{selector}" for selector in looked_up),
+        "automated-security-helper",
+    ]
+
+
+#: (id, METADATA text): every shape of header block a reader of the Version: line has
+#: to agree with importlib.metadata about, the parsed answer being the one that stands.
+METADATA_SHAPES = [
+    ("plain", "Metadata-Version: 2.1\nName: x\nVersion: 1.44.2\nSummary: s\n\nbody\n"),
+    ("no-blank-line", "Name: x\nVersion: 1.44.2\n"),
+    ("only-the-version", "Version: 1.44.2\n"),
+    ("no-space-after-the-colon", "Version:1.44.2\n"),
+    ("a-tab-after-the-colon", "Version:\t1.44.2\n"),
+    ("trailing-spaces", "Version:   1.44.2   \nName: x\n"),
+    ("windows-line-ends", "Version: 1.44.2\r\nName: x\r\n"),
+    ("old-mac-line-ends", "Version: 1.44.2\rName: x\r"),
+    ("a-continuation-line", "Version: 1.44.2\n continued\nName: x\n"),
+    ("a-folded-value", "Version:\n 1.44.2\nName: x\n"),
+    ("an-indented-line-before", "Name: x\n version: 3\nVersion: 1.44.2\n"),
+    ("a-lower-case-name", "version: 1.44.2\n"),
+    ("an-upper-case-name", "VERSION: 1.44.2\n"),
+    ("a-repeated-header", "Version: 1.44.2\nVersion: 2.0\n"),
+    ("after-the-blank-line", "Name: x\n\nVersion: 1.44.2\n"),
+    ("a-blank-first-line", "\nVersion: 1.44.2\n"),
+    ("a-line-that-is-no-header", "Name: x\nnot a header\nVersion: 1.44.2\n"),
+    ("an-empty-value", "Version: \n"),
+    ("no-version", "Name: x\n"),
+    ("an-empty-file", ""),
+    ("a-byte-order-mark", "\N{BYTE ORDER MARK}Version: 1.44.2\n"),
+    ("a-line-separator-in-the-value", "Version: 1.44.2\N{LINE SEPARATOR}x\nName: y\n"),
+    ("a-v-prefix", "Version: v1.44.2\n"),
+    ("a-local-version", "Version: 1.44.2+local\n"),
+    ("non-ascii-digits", "Version: \N{ARABIC-INDIC DIGIT ONE}.2\n"),
+    ("a-space-before-the-colon", "Version : 1.44.2\n"),
+]
+
+
+@pytest.mark.parametrize(
+    "text", [pytest.param(text, id=name) for name, text in METADATA_SHAPES]
+)
+def test_the_version_agrees_with_importlib_metadata_on_every_shape(tmp_path, text):
+    info = tmp_path / "x-1.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_bytes(text.encode("utf-8"))
+    distribution = PathDistribution(info)
+    try:
+        expected: Any = distribution.version
+    except Exception as exc:
+        expected = ("raises", type(exc).__name__)
+    try:
+        got: Any = HostFactsReader(NOTHING)._version("x", distribution)
+    except host_facts._SourceFailure as failure:
+        got = ("raises", failure.failure.kind)
+    assert got == expected
+
+
+# --------------------------------------------------------------------------------------
 # install_channel
 # --------------------------------------------------------------------------------------
 
@@ -1837,6 +2244,119 @@ def test_a_symlinked_home_is_matched_after_resolving_the_links(tmp_path):
     assert channel(tmp_path / "other", prefix=prefix) != "uv-tool"
 
 
+def link_resolver(link: str, target: str) -> Callable[[str], str]:
+    """A ``realpath`` that follows one link: the paths under it move, no others."""
+
+    def realpath(path: str) -> str:
+        if path == link or path.startswith(link + "/"):
+            return target + path[len(link) :]
+        return path
+
+    return realpath
+
+
+def junction_resolver(link: str, target: str) -> Callable[[str], str]:
+    """The same for a Windows junction, matched without regard to case."""
+
+    def realpath(path: str) -> str:
+        shown = ntpath.normcase(path)
+        base = ntpath.normcase(link)
+        if shown == base or shown.startswith(base + "\\"):
+            return target + path[len(link) :]
+        return path
+
+    return realpath
+
+
+@pytest.mark.parametrize(
+    ("link", "target", "prefix", "env", "expected"),
+    [
+        # HOME is /home/u and /home is a link to /data/home. A tool environment is
+        # created at the spelling the tool directory has, and the interpreter keeps
+        # that spelling in sys.prefix, so the prefix is the link's spelling too.
+        (
+            "/home",
+            "/data/home",
+            "/home/u/.local/share/uv/tools/automated-security-helper",
+            {},
+            "uv-tool",
+        ),
+        (
+            "/home",
+            "/data/home",
+            "/home/u/.cache/uv/environments-v2/9f1c2d3e4a5b6c7d",
+            {},
+            "uvx",
+        ),
+        (
+            "/home",
+            "/data/home",
+            "/home/u/.local/pipx/venvs/automated-security-helper",
+            {},
+            "pipx",
+        ),
+        (
+            "/home",
+            "/data/home",
+            "/home/u/.local/share/pipx/venvs/automated-security-helper",
+            {},
+            "pipx",
+        ),
+        # The directory a variable names is spelled through the link as well, or by
+        # its real path while the prefix keeps the link's spelling.
+        (
+            "/home",
+            "/data/home",
+            "/home/u/tools/automated-security-helper",
+            {"UV_TOOL_DIR": "/home/u/tools"},
+            "uv-tool",
+        ),
+        (
+            "/home",
+            "/data/home",
+            "/home/u/tools/automated-security-helper",
+            {"UV_TOOL_DIR": "/data/home/u/tools"},
+            "uv-tool",
+        ),
+        # The tools directory itself is the link.
+        (
+            "/home/u/.local/share/uv/tools",
+            "/mnt/big/uv-tools",
+            "/home/u/.local/share/uv/tools/automated-security-helper",
+            {},
+            "uv-tool",
+        ),
+    ],
+)
+def test_a_prefix_spelled_through_a_link_is_matched_after_resolving_it(
+    tmp_path, link, target, prefix, env, expected
+):
+    realpath = link_resolver(link, target)
+    assert channel(tmp_path, prefix=prefix, env=env, realpath=realpath) == expected
+
+
+def test_a_prefix_beside_the_link_but_not_under_this_home_is_no_tool_of_it(tmp_path):
+    realpath = link_resolver("/home", "/data/home")
+    prefix = "/home/other/.local/share/uv/tools/automated-security-helper"
+    assert channel(tmp_path, prefix=prefix, realpath=realpath) != "uv-tool"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "expected"),
+    [
+        (WINDOWS_PREFIX, "uv-tool"),
+        ("C:\\Users\\u\\AppData\\Local\\uv\\cache\\environments-v2\\9f1c2d", "uvx"),
+        ("C:\\Users\\u\\pipx\\venvs\\automated-security-helper", "pipx"),
+    ],
+)
+def test_a_windows_prefix_spelled_through_a_junction_is_matched_after_resolving_it(
+    tmp_path, prefix, expected
+):
+    realpath = junction_resolver("C:\\Users\\u", "D:\\Users\\u")
+    got = channel(tmp_path, prefix=prefix, host="windows", realpath=realpath)
+    assert got == expected
+
+
 def test_a_path_with_dot_dot_is_normalized_before_it_is_compared(tmp_path):
     prefix = "/home/u/.local/share/uv/tools/x/../automated-security-helper"
     assert channel(tmp_path, prefix=prefix) == "uv-tool"
@@ -1993,7 +2513,7 @@ def test_a_failing_source_changes_facts_to_unknown_and_nothing_else(host, tmp_pa
         reading = read(failing, express=EXPRESS[host])
         changed = {
             name
-            for name in SUPPORT_FIELDS
+            for name in READING_FIELDS
             if getattr(reading, name) != getattr(baseline, name)
         }
         assert all(getattr(reading, name) == UNKNOWN for name in changed), (
@@ -2051,7 +2571,7 @@ def test_the_facts_a_failing_linux_source_takes_with_it(
     reading = read(dataclasses.replace(sources, **{source: _raises}))
     changed = {
         name
-        for name in SUPPORT_FIELDS
+        for name in READING_FIELDS
         if getattr(reading, name) != getattr(baseline, name)
     }
     assert changed == unknown_facts
@@ -2074,7 +2594,7 @@ def test_an_unreadable_proc_file_takes_only_its_own_fact(tmp_path, path, unknown
     reading = read(dataclasses.replace(sources, read_text=read_text))
     changed = {
         name
-        for name in SUPPORT_FIELDS
+        for name in READING_FIELDS
         if getattr(reading, name) != getattr(baseline, name)
     }
     assert changed == unknown_facts
@@ -2091,7 +2611,7 @@ def test_every_source_failing_at_once_reads_unknown_everywhere_with_no_notice(tm
     assert set(host_facts.fact_tokens(reading).values()) == {UNKNOWN}
     assert stand_in_matches(reading) == []
     assert reading.cpu_missing_flags == ()
-    assert {name for name, _kind in reading.failed} <= set(SUPPORT_FIELDS)
+    assert {name for name, _kind in reading.failed} <= set(READING_FIELDS)
 
 
 def test_a_failure_records_the_exception_type_and_never_its_text(tmp_path):
@@ -2216,13 +2736,22 @@ def test_a_failed_read_is_remembered_not_retried(tmp_path):
 class Counted:
     """A real distribution behind a proxy that counts what the reader asks of it.
 
-    ``fail`` names the attributes whose read raises ``RuntimeError`` instead.
+    ``fail`` names the attributes whose read raises ``RuntimeError`` instead. ``reads``
+    counts the files read through ``read_text``, by name: how often a reader opens the
+    METADATA text itself.
     """
 
     def __init__(self, inner: PathDistribution, fail: Collection[str] = ()) -> None:
         self._inner = inner
         self._fail = frozenset(fail)
         self.asked: Counter = Counter()
+        self.reads: Counter = Counter()
+
+    def read_text(self, filename: str) -> Optional[str]:
+        self.reads[filename] += 1
+        if "read_text" in self._fail:
+            raise RuntimeError("planted failure reading read_text")
+        return self._inner.read_text(filename)
 
     def __getattr__(self, name: str) -> Any:
         self.asked[name] += 1
@@ -2272,30 +2801,34 @@ def test_installed_distributions_are_read_once_per_reader(tmp_path):
     second = reader.read(express_supported=lambda: True)
     assert first == second
     assert first.polars_runtime == "compat"
-    for name in (
+    # polars and the runtime in use are read once for both readings. The runtimes
+    # polars would try only after it are never looked up: the first that loads decides.
+    for name in ("polars", "polars-runtime-compat"):
+        assert proxies[name].reads["METADATA"] == 1, name
+    assert set(proxies) == {
         "polars",
         "polars-runtime-compat",
-        "polars-runtime-64",
-        "polars-runtime-32",
-    ):
-        assert proxies[name].asked["version"] == 1, name
-    # The flags file of the runtime in use is found once, and ASH's metadata is parsed
+        "automated-security-helper",
+    }
+    # The flags file of the runtime in use is found once, and ASH's metadata is read
     # once, not once per reading.
     assert proxies["polars-runtime-compat"].asked["files"] == 1
-    assert proxies["automated-security-helper"].asked["metadata"] == 1
+    assert proxies["automated-security-helper"].reads["METADATA"] == 1
 
 
 def test_a_new_reader_reads_the_distributions_again(tmp_path):
     sources, proxies = counted_sources(tmp_path, polars_site(tmp_path))
     HostFactsReader(sources).read(express_supported=lambda: True)
     HostFactsReader(sources).read(express_supported=lambda: True)
-    assert proxies["polars"].asked["version"] == 2
-    assert proxies["automated-security-helper"].asked["metadata"] == 2
+    assert proxies["polars"].reads["METADATA"] == 2
+    assert proxies["automated-security-helper"].reads["METADATA"] == 2
 
 
 def test_a_failed_version_read_is_remembered_not_retried(tmp_path):
+    # Whichever way the version is asked for, it cannot be read: once is all it costs.
+    unreadable = {"read_text", "version", "metadata"}
     sources, proxies = counted_sources(
-        tmp_path, polars_site(tmp_path), fail={"polars": {"version"}}
+        tmp_path, polars_site(tmp_path), fail={"polars": unreadable}
     )
     reader = HostFactsReader(sources)
     first = reader.read(express_supported=lambda: True)
@@ -2303,7 +2836,7 @@ def test_a_failed_version_read_is_remembered_not_retried(tmp_path):
     assert first == second
     assert ("polars_runtime", "RuntimeError") in second.failed
     assert (second.polars_runtime, second.cpu_level) == (UNKNOWN, UNKNOWN)
-    assert proxies["polars"].asked["version"] == 1
+    assert proxies["polars"].reads["METADATA"] == 1
 
 
 def test_a_failed_requires_python_read_is_remembered_not_retried(tmp_path):
@@ -2315,7 +2848,7 @@ def test_a_failed_requires_python_read_is_remembered_not_retried(tmp_path):
     second = reader.read(express_supported=lambda: True)
     assert first == second
     assert ("python_in_range", "InvalidSpecifier") in second.failed
-    assert proxies["automated-security-helper"].asked["metadata"] == 1
+    assert proxies["automated-security-helper"].reads["METADATA"] == 1
 
 
 def test_the_default_reader_is_built_once_per_process(tmp_path, monkeypatch):
@@ -2482,7 +3015,8 @@ def test_the_sources_are_exactly_the_host_reads_the_module_makes():
         "wow64_machines",
         "windows_feature_present",
         "libc_version",
-        "platform_tags",
+        "executable",
+        "read_head",
         "distribution",
         "getenv",
         "sys_prefix",
