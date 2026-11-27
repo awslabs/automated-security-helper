@@ -7593,15 +7593,21 @@ def mcp_set_source_zip_finalize(
     Returns:
         ``{"success": True, "source_dir": str}`` on success;
         ``{"success": False, "error": str}`` on checksum mismatch,
-        oversize zip, oversize extraction, too-many-files, any
-        path-traversal/symlink-out-of-tree entry, a NUL in a member name, an
-        encrypted member, two members whose names ASH reads as one path on
-        Windows or macOS (they differ only in letter case or Unicode
-        normalization), an archive zipfile cannot read (a zip version or
-        compression method it does not support, a damaged member), or
-        assembled bytes that are not a zip archive (``zipfile.BadZipFile``: the
-        checksum matched, so the client sent what it meant to and packaged it
-        wrong), and with ``error_type``
+        oversize zip, oversize extraction, too-many-files, a member name that is
+        not a plain relative path (empty, a backslash, absolute, a ``..``, ``.``
+        or empty component, a NUL, or on Windows a name Windows cannot hold), a
+        Unicode path field that names another file than the member's own name, a
+        symlink, two members that extract to one path or a member under a path
+        another member holds as a file (on Windows or macOS, names that differ
+        only in letter case or Unicode normalization are one path), an encrypted
+        member, a compression method other than stored and deflate, a member
+        whose data is not the size it declares, a file that is not one zip from
+        its first byte to its last (bytes before, between or after the members,
+        a local header or end record that does not match the central directory),
+        an archive zipfile cannot read (a zip version it does not support, a
+        damaged member), or assembled bytes that are not a zip archive
+        (``zipfile.BadZipFile``: the checksum matched, so the client sent what it
+        meant to and packaged it wrong), and with ``error_type``
         ``session_workspace_unavailable`` when the session's workspace could not
         take the tree: a directory of it could not be created, the previous tree
         could not be renamed aside (nothing is deleted where it stands), the
