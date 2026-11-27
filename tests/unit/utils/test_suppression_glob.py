@@ -32,5 +32,5 @@ pytestmark = pytest.mark.unit
         ("tests/**", "src/test.py", False),
     ],
 )
-def testfile_path_matches(pattern, path, expected):
+def test_file_path_matches(pattern, path, expected):
     assert file_path_matches(path, pattern) == expected
