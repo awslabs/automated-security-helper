@@ -5,7 +5,9 @@
 #
 #   Source  -> CodeCommit
 #   Scan    -> N CodeBuild actions, all at run_order 1 so they run in parallel,
-#              each `ash scan --shard-index <i> --shard-count <n>`
+#              each `ash scan fs . --shard-index <i> --shard-count <n>`
+#              (`ash scan --source-dir .` before ASH 3.9; the action asks the image's ASH
+#              which it has)
 #   Merge   -> one CodeBuild action, `ash results merge --results ... --output-dir ...`
 #              (`ash merge` before ASH 3.9; the action asks the image's ASH which it has)
 #

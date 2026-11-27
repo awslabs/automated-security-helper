@@ -49,8 +49,9 @@ variable "shard_count" {
     Contract name: ShardCount.
 
     How many parallel shards the scan is split across. Each shard runs
-    `ash scan --shard-index <i> --shard-count <n>` with a zero-based index, and
-    every index from 0 to shard_count - 1 runs exactly once.
+    `ash scan fs . --shard-index <i> --shard-count <n>` (`ash scan --source-dir .`
+    before ASH 3.9) with a zero-based index, and every index from 0 to
+    shard_count - 1 runs exactly once.
 
     All shards occupy one pipeline stage. CodePipeline permits up to 100 parallel
     actions per stage and that quota is not adjustable, so 100 is the ceiling

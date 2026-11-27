@@ -10,7 +10,8 @@ Consumes the `image_uri` output of `ash-image-pipeline`.
 ```text
 Source  ->  CodeCommit (existing repository, read only)
 Scan    ->  N CodeBuild actions, all at run_order 1 (parallel)
-            each: ash scan --shard-index <i> --shard-count <n>
+            each: ash scan fs . --shard-index <i> --shard-count <n>
+            (ash scan --source-dir . before ASH 3.9; the action asks the image's ASH which it has)
 Merge   ->  one CodeBuild action
             ash results merge --results <shard-0> ... --results <shard-n-1> --output-dir merged
             (ash merge before ASH 3.9; the action asks the image's ASH which it has)
