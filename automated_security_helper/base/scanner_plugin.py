@@ -80,6 +80,7 @@ from typing import (
     Set,
     Tuple,
     TypeVar,
+    cast,
 )
 from abc import abstractmethod
 
@@ -440,7 +441,10 @@ _SCAN_ENTRY_POINTS = ("scan", "scan_image")
 _TARGET_RECORD_MARK = "_ash_starts_the_target_record"
 
 
-def _with_a_record_for_the_target(method: Any) -> Any:
+_ScanMethod = TypeVar("_ScanMethod", bound=Callable[..., Any])
+
+
+def _with_a_record_for_the_target(method: _ScanMethod) -> _ScanMethod:
     """*method*, which scans one target, started with a fresh ingest record.
 
     One plugin instance scans source and then converted, so a record that carried
@@ -463,7 +467,8 @@ def _with_a_record_for_the_target(method: Any) -> Any:
             raise
 
     setattr(with_a_record_for_the_target, _TARGET_RECORD_MARK, True)
-    return with_a_record_for_the_target
+    # Typed as the method it wraps, so an override is still checked against it.
+    return cast(_ScanMethod, with_a_record_for_the_target)
 
 
 class ScannerPluginBase(PluginBase, Generic[T]):
