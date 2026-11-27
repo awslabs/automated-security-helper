@@ -414,6 +414,11 @@ PLAYBACK_MODES = ("once", "loop")
 MIN_COLS, MAX_COLS = 20, 300
 MIN_ROWS, MAX_ROWS = 5, 100
 MAX_CHARS_PER_SECOND = 1000
+#: The slowest typing a storyboard may ask for. A scene lasts a minute at most, so no
+#: command is typed this slowly; the floor keeps the time to type one a number the
+#: arithmetic can hold (at 1e-320 characters a second it is infinite, and rounding it
+#: raised OverflowError).
+MIN_CHARS_PER_SECOND = 0.1
 #: A time in a storyboard is refused above this many seconds, before any arithmetic.
 MAX_SECONDS = 3600
 
@@ -575,7 +580,16 @@ def command_problem(command: str) -> str | None:
 
 
 def typing_ms(chars: int, chars_per_second: float) -> int:
-    """Milliseconds to type ``chars`` characters at ``chars_per_second``."""
+    """Milliseconds to type ``chars`` characters at ``chars_per_second``.
+
+    The rate must be a number of at least ``MIN_CHARS_PER_SECOND``. Anything else is a
+    ``CastError``: a rate near zero would make the time infinite.
+    """
+    if not _is_number(chars_per_second) or chars_per_second < MIN_CHARS_PER_SECOND:
+        raise CastError(
+            f"typing rate {chars_per_second!r} must be a number of characters a "
+            f"second, at least {MIN_CHARS_PER_SECOND}"
+        )
     return round(chars * 1000 / chars_per_second)
 
 
@@ -723,6 +737,11 @@ def _parse_typing(raw: object, source: str) -> TypingPolicy:
             where,
             "chars_per_second must be greater than 0 and at most "
             f"{MAX_CHARS_PER_SECOND}, not {rate!r}",
+        )
+    if rate < MIN_CHARS_PER_SECOND:
+        _fail(
+            where,
+            f"chars_per_second must be at least {MIN_CHARS_PER_SECOND}, not {rate!r}",
         )
     lead_in = _seconds(data["lead_in_s"], where, "lead_in_s", positive=False)
     return TypingPolicy(chars_per_second=rate, lead_in_ms=lead_in)
@@ -1136,7 +1155,10 @@ def retime_scene(storyboard: Storyboard, scene: Scene, run: SceneRun) -> Retimed
     follows it, retimed by ``_retimed_offsets``. The rest of the scene is the hold.
     """
     policy = storyboard.typing
-    typed_ms = typing_ms(len(run.typed), policy.chars_per_second)
+    try:
+        typed_ms = typing_ms(len(run.typed), policy.chars_per_second)
+    except CastError as exc:
+        raise RetimeError(f"scene {scene.scene_id!r}: {exc}") from exc
     window = _window_ms(scene, policy.lead_in_ms, typed_ms, has_output=bool(run.chunks))
     start = scene.start_ms
     events = [_event(start, "m", scene.caption)]
