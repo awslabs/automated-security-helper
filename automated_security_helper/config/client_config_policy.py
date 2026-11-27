@@ -675,6 +675,17 @@ PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = _OptionDefaults(
 )
 
 
+#: Defaults of the denied fields of converter sections. A default ``AshConfig``
+#: carries no section for a converter, so a delivered value equal to one of these
+#: is accepted as no change, as a scanner option equal to its default is. Used
+#: only where the trusted config has no value of its own.
+#: ``test_the_converter_default_is_the_converters_own`` pins each value to the
+#: converter's config model.
+CONVERTER_SECTION_DEFAULTS: Mapping[Tuple[str, str], Any] = _OptionDefaults(
+    {("sdist-lock-harvester", "enabled"): True}
+)
+
+
 class ClientConfigRules(BaseModel):
     """The policy a client-delivered config is checked against, and its source."""
 
@@ -1191,6 +1202,20 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
     if denial.from_patch:
         return False
     segments = _path_segments(denial.pointer)
+    if len(segments) == 3 and segments[0] == "converters":
+        field = segments[2].replace("-", "_")
+        names = plugin_key_lookup_names(segments[1])
+        for (converter, name), default in CONVERTER_SECTION_DEFAULTS.items():
+            if name != field or reduced_plugin_name(converter) not in names:
+                continue
+            trusted = base.get_plugin_config("converter", converter)
+            if isinstance(trusted, dict) and (
+                _resolve_dict_key(trusted, field) in trusted
+            ):
+                return False
+            present, value = _walk(document, segments)
+            return present and _equals_as_json(value, default)
+        return False
     if len(segments) != 4 or segments[0] != "scanners" or segments[2] != "options":
         return False
     option = segments[3].replace("-", "_")
