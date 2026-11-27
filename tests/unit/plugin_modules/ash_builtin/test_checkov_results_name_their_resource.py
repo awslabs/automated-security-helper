@@ -13,7 +13,9 @@ checkov's JSON report names the resource of every record. The scanner asks for
 that report on every run and copies each record's resource to its SARIF result
 under ``ash_resource_id``, the resource-identity contract of
 ``utils/package_identity.py``. An id that one file's records give at two line
-ranges names two resources, so it is copied to neither.
+ranges names two resources, so it is copied to neither. The records of the checks
+that passed count as places, so a finding keeps or loses its id whichever of the
+other checks fail.
 """
 
 import importlib.util

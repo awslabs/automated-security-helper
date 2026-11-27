@@ -410,6 +410,10 @@
   scanner's results directory instead of below checkov's working directory, the
   filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
+- The `resource_id` of a checkov finding no longer changes when a check at the
+  resource's other line range starts to fail. An id that a file gives at two line
+  ranges is dropped from its findings, and the checks that passed now count as
+  places, as the ones that failed already did.
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.
