@@ -1438,9 +1438,13 @@ jobs:
 
                   parse_toml = tomllib.loads
               except ModuleNotFoundError:
-                  # tomllib is standard library from Python 3.11, and the python-version
-                  # input accepts 3.10. There ASH reads TOML with the `toml` package it
-                  # declares as a dependency, which the uv environment above installs.
+                  # tomllib is standard library from Python 3.11, the floor of
+                  # requires-python at this commit, so for this commit's ASH the
+                  # import above succeeds. The python-version input reaches
+                  # setup-python as given, so it can still name 3.10, for an
+                  # ash-version whose requires-python admits it. v3.7.0 and
+                  # v3.7.1 do, and declare the `toml` package as a dependency,
+                  # which the uv environment above installs for the fallback below.
                   import toml
 
                   parse_toml = toml.loads
