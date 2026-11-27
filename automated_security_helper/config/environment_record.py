@@ -765,6 +765,8 @@ class _Index:
                 )
                 if key in renamed:
                     key = self._whole(renamed[key])
+                else:
+                    key = self._unreplaced(key)
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
@@ -776,6 +778,11 @@ class _Index:
                 )
                 for index, value in enumerate(item)
             )
+        if isinstance(item, (set, frozenset)):
+            # A set has no positions: each member is read as an entry whose
+            # position is unknown (``EnvironmentReference.position_unknown``),
+            # by the shape the reference resolved to, and the set keeps its type.
+            return type(item)(self._member(value, path, exact) for value in item)
         if isinstance(item, str):
             here = self.values.get(path)
             if here:
@@ -783,8 +790,44 @@ class _Index:
                 # one: a plain entry equal to the value, beside the reference's
                 # own entry, is the file's own text and stays as written.
                 candidates = self.pending(exact, here, item)
-                return self._string(item, candidates, exact)
+                return self._unreplaced(self._string(item, candidates, exact))
+            return self._unreplaced(item)
         return item
+
+    def _member(
+        self,
+        member: Any,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...],
+    ) -> Any:
+        """One member of a set at ``path``: read against the references at an
+        unknown position there (the entry's own shape), and shown as the
+        reference its mark carries when none replaced it."""
+        if not isinstance(member, str):
+            return member
+        here = self.values.get((*path, _ANY_INDEX))
+        where = (*exact, _ANY_INDEX)
+        if here:
+            candidates = self.pending(where, here, member)
+            return self._unreplaced(self._string(member, candidates, where))
+        return self._unreplaced(member)
+
+    def _unreplaced(self, text: Any) -> Any:
+        """``text``, a string or a mapping key the walk left as it was, shown as
+        the reference its own mark carries when it still carries the loader's
+        mark (``EnvResolvedScalar.from_environment``): a value read from the
+        environment that no reference replaced, whole or in part, is never shown.
+        Only for a view (``mark`` given); text without the mark, and text the
+        walk replaced (a plain string by then), is returned as it is. Not for a
+        file written to be loaded again (``whole_only``), whose writer refuses a
+        value left as text by its own check."""
+        if (
+            self.mark is not None
+            and not self.whole_only
+            and getattr(text, "from_environment", False)
+        ):
+            return self.mark(text.shown)
+        return text
 
     def fill(
         self,
@@ -893,12 +936,109 @@ def record_environment_references(
     text is shown as it is. Without it, a reference matches every entry of its
     list, so it follows an entry a patch moves. A copy: ``data`` itself is not
     changed.
+
+    A set or frozenset is walked too, and keeps its type: a set has no
+    positions, so each member is an entry whose position is unknown and is read
+    against the references at the set's place by the shape they resolved to
+    (``references_to_marked_values`` makes one for each member the loader
+    marked).
+
+    With ``mark`` (a view; not ``whole_only``), a string, a mapping key or a set member that still
+    carries the loader's mark after the walk (``EnvResolvedScalar``: no
+    reference replaced it, whole or in part) is shown as ``mark(x.shown)``, the
+    reference its own mark carries: a value no reference describes is never
+    shown in clear. It changes nothing where a reference replaced the value, and
+    nothing in text the loader did not mark.
     """
-    if not references:
+    if not references and mark is None:
         return data
     index = _Index(references, mark, whole_only, exact_indices)
     index.scan(data, _exact_path(at))
     return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
+
+
+def _marked(text: Any) -> bool:
+    """Whether ``text`` is a string the loader read from the environment."""
+    return isinstance(text, str) and bool(getattr(text, "from_environment", False))
+
+
+def references_to_marked_values(
+    data: Any,
+    at: Sequence[PathSegment],
+    described: Iterable[EnvironmentReference] = (),
+) -> List[EnvironmentReference]:
+    """A reference for each string and mapping key of ``data`` that carries the
+    loader's mark (``EnvResolvedScalar.from_environment``) and that none of
+    ``described`` already describes at its exact place.
+
+    ``data`` is the value of the option at ``at`` (a path of keys) in a python-mode
+    dump of a configuration, which holds the loader's marked strings as they
+    are. A load that copies a value from one place of the configuration to
+    another (the reporter confinement and the settle) copies the mark with it,
+    while the reference the file wrote stays at the place it wrote it: the copy
+    is described from the value's own mark instead. Mapping keys and values, list
+    and tuple entries, and set and frozenset members are walked.
+
+    Each reference is shaped as ``environment_references`` shapes the one the
+    loader makes for the same text at that place: ``written`` is the text the
+    mark shows (``${VAR}`` or ``${VAR}tail``), ``resolved`` the string, ``value``
+    the part the variable gave, ``key`` for a mapping key (its path is the
+    mapping's), and for a list entry the ``length`` and ``index_at`` of the
+    innermost list. A set member has no position: its path ends in the unknown
+    index, so a walk reads the reference into the member by its shape at any
+    position (``EnvironmentReference.position_unknown``).
+
+    ``described`` are the references already at hand; a marked value or key is
+    described when one of them is at its exact place (a list index kept) and
+    resolved to it as a whole. The marks never leave this module in clear: a
+    reference holds ``value``, as every one does, and is held in memory only.
+    """
+    from automated_security_helper.config.config_validator import _rewrite_for
+
+    known = {
+        (_exact_path(reference.path), reference.key, reference.resolved)
+        for reference in described
+    }
+    found: List[EnvironmentReference] = []
+
+    def make(
+        path: Tuple[PathSegment, ...],
+        text: Any,
+        key: bool,
+        innermost: Optional[Tuple[int, int]],
+    ) -> None:
+        resolved = str(text)
+        if (_exact_path(path), key, resolved) in known:
+            return
+        written = str(text.shown)
+        part = _rewrite_for("key" if key else "value", path, written, resolved)
+        length, index_at = (None, None) if innermost is None or key else innermost
+        reference = EnvironmentReference(
+            path, written, resolved, part.environment_part, key, None, length, index_at
+        )
+        known.add((_exact_path(path), key, resolved))
+        found.append(reference)
+
+    def walk(
+        node: Any, path: Tuple[PathSegment, ...], innermost: Optional[Tuple[int, int]]
+    ) -> None:
+        if isinstance(node, dict):
+            for name, value in node.items():
+                if _marked(name):
+                    make(path, name, True, innermost)
+                walk(value, (*path, str(name)), innermost)
+        elif isinstance(node, (list, tuple)):
+            for index, value in enumerate(node):
+                walk(value, (*path, index), (len(node), len(path)))
+        elif isinstance(node, (set, frozenset)):
+            for member in node:
+                if _marked(member):
+                    make((*path, _ANY_INDEX), member, False, None)
+        elif _marked(node):
+            make(path, node, False, innermost)
+
+    walk(data, tuple(at), None)
+    return found
 
 
 def setting_names(

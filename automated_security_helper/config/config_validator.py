@@ -3200,11 +3200,20 @@ def record_of_config(
     write as text (config_writer): a reference made of it would read as other
     text, or another variable. A client's patch is not one: a runtime patch
     drops the rewrite of a value an op wrote over (runtime_patch).
+
+    After the rewrites, every string, mapping key and set member of the record
+    that still carries the loader's mark (``EnvResolvedScalar.from_environment``)
+    is written as ``marked(x.shown)``, the reference its own mark carries, sets
+    walked too, with or without rewrites. A value no rewrite describes (one a
+    load copied from another place, or a set member, which no rewrite can
+    name) is never recorded in clear.
     """
     rewrites = list(getattr(config, "_written_references", None) or [])
-    if not rewrites or not isinstance(dumped, dict):
+    if not isinstance(dumped, dict):
         return dumped
     marked = mark if mark is not None else (lambda text: text)
+    if not rewrites:
+        return _loader_marked_shown(dumped, marked)
     record = copy.deepcopy(dumped)
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
@@ -3294,7 +3303,47 @@ def record_of_config(
         }
         container.clear()
         container.update(renamed)
-    return record
+    return _loader_marked_shown(record, marked)
+
+
+def _loader_marked(text: Any) -> bool:
+    """Whether ``text`` is a string the loader read from the environment."""
+    return isinstance(text, str) and bool(getattr(text, "from_environment", False))
+
+
+def _holds_loader_mark(node: Any) -> bool:
+    if isinstance(node, dict):
+        return any(
+            _loader_marked(key) or _holds_loader_mark(value)
+            for key, value in node.items()
+        )
+    if isinstance(node, (list, tuple, set, frozenset)):
+        return any(_holds_loader_mark(item) for item in node)
+    return _loader_marked(node)
+
+
+def _loader_marked_shown(node: Any, marked: Callable[[str], Any]) -> Any:
+    """``node`` with each string, mapping key and set member that still carries
+    the loader's mark (``EnvResolvedScalar.from_environment``) written as
+    ``marked(x.shown)``, the reference its own mark carries; sets are walked
+    too. A copy where it changes anything, else ``node`` itself.
+
+    No rewrite replaced such a value (a rewrite leaves a plain string in its
+    place), so no reference of the record describes it: a value no rewrite
+    describes is never recorded in clear.
+    """
+    if not _holds_loader_mark(node):
+        return node
+    if isinstance(node, dict):
+        return {
+            (marked(key.shown) if _loader_marked(key) else key): _loader_marked_shown(
+                value, marked
+            )
+            for key, value in node.items()
+        }
+    if isinstance(node, (list, tuple, set, frozenset)):
+        return type(node)(_loader_marked_shown(item, marked) for item in node)
+    return marked(node.shown)
 
 
 def record_of_metadata(config: Any, dumped: Any) -> Any:

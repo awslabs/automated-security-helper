@@ -5281,10 +5281,14 @@ def _answer_get_config(
     # (AshConfig._displayed_environment_references, the reads the merged
     # document still shows; a read an overlay wrote a literal over marks
     # nothing, since that place's value is the overlay's own), whatever its
-    # length; text elsewhere that equals it is the file's own and is shown. A
-    # list entry is the one at the index the file wrote the reference at: in a
-    # session config, the index the profile's patch moved it to. Any other entry
-    # of that list, one a client added say, is shown as written whatever it holds.
+    # length; text elsewhere that equals it is the file's own and is shown, where
+    # the loader did not mark it: a string, mapping key or set member the loader
+    # marked as read from the environment (EnvResolvedScalar) that no reference
+    # replaced is shown as the reference its own mark carries, never as the
+    # value. A list entry is the one at the index the file wrote the reference
+    # at: in a session config, the index the profile's patch moved it to. Any
+    # other entry of that list, one a client added say, is shown as written
+    # whatever it holds.
     # Run it on a dump BEFORE mark_operator_only_options writes its markers, never
     # on a marked one: it replaces a reference's value inside any string at the
     # reference's place, a marker included (the two call sites say why).

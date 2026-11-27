@@ -1446,10 +1446,11 @@ def mark_operator_only_options(
     destination options) is not marked: it is not an operator-only option. The
     load gives those options the operator's values
     (``confine_reporter_destinations`` replaces or fills each one from the
-    operator's configuration), so the answer shows the operator's value there,
-    as the reference the operator's file wrote where it read the value from the
-    environment (``_take_confined_references``), and never a value a
-    repository's file wrote. The record this marking reads
+    operator's configuration), and the reference each value carries (the
+    loader's mark on a value the operator's file read from the environment)
+    goes with it, so the answer shows the reference where the operator's file
+    read the value from the environment, and never a value a repository's file
+    wrote. The record this marking reads
     (``RepositorySettings``) holds only the operator-only places, so it has
     nothing to mark for the rest of the section.
     """

@@ -14,6 +14,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Tuple,
     overload,
 )
 import uuid
@@ -2322,6 +2323,29 @@ def apply_suppressions_to_sarif(
         )
 
 
+def _written_entry_records(config: Any) -> Tuple[Any, Any]:
+    """The written-form records of *config*'s full ``ignore_paths`` and
+    ``exclusions`` lists (``suppression_matcher.recorded_ignore_paths``).
+
+    A record of the lists as the config holds them, which the lines of the
+    suppression pass look a matched entry up in by ``id()``: it reads the lists
+    to describe them and applies no entry, so it takes the lists whole and not
+    through ``active_ignore_paths``.
+    """
+    recorded_ignore = recorded_ignore_paths(
+        config,
+        config.global_settings.ignore_paths,
+        ("global_settings", "ignore_paths"),
+    )
+    recorded_exclusions = recorded_ignore_paths(
+        config,
+        getattr(config.global_settings, "exclusions", None),
+        ("global_settings", "exclusions"),
+        fields=("rule_id", *SHOWN_IGNORE_PATH_FIELDS),
+    )
+    return recorded_ignore, recorded_exclusions
+
+
 def _apply_suppressions_within_budget(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
@@ -2357,17 +2381,7 @@ def _apply_suppressions_within_budget(
     # reference to its entry by list position; the filtered lists above hold the
     # same objects, so a line looks its entry up by id(). An exclusion is quoted by
     # its rule id too, which an ignore path's shown fields do not hold.
-    recorded_ignore = recorded_ignore_paths(
-        plugin_context.config,
-        plugin_context.config.global_settings.ignore_paths,
-        ("global_settings", "ignore_paths"),
-    )
-    recorded_exclusions = recorded_ignore_paths(
-        plugin_context.config,
-        getattr(plugin_context.config.global_settings, "exclusions", None),
-        ("global_settings", "exclusions"),
-        fields=("rule_id", *SHOWN_IGNORE_PATH_FIELDS),
-    )
+    recorded_ignore, recorded_exclusions = _written_entry_records(plugin_context.config)
 
     suppressions = plugin_context.config.global_settings.suppressions or []
     # The written form each used entry is recorded by (written_suppression_id),
