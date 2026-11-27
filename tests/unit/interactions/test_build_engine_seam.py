@@ -14,7 +14,9 @@ runner), and ``_resolve_engines`` finds the programs a call needs. These tests p
   build take the build engine's path and the run phase takes the run engine's path.
   The default engine gives both jobs one path, so those two are told apart with a
   lookup that answers with two different programs.
-* ``ScanOptions.build_engine`` reaches ``run_ash_container``.
+* ``ScanOptions.build_engine`` reaches ``run_ash_container``, and ``run_ash_scan``, the
+  library entry point, takes the same ``build_engine`` and builds its ``ScanOptions``
+  with it.
 
 No container tool runs. ``run_cmd_direct`` is the one call that starts a program, and
 a recorder takes its place.
@@ -1109,3 +1111,84 @@ class TestTheOptionReachesTheContainerRun:
             )
 
         assert handed_over["build_engine"] is BuildEngine.RUNNER
+
+
+# ---------------------------------------------------------------------------
+# The library entry point takes the option
+# ---------------------------------------------------------------------------
+
+#: How a library caller names the engine to ``run_ash_scan``: not at all, which means
+#: the default, and each engine as the member and as its value.
+NAMED_TO_THE_SCAN = [
+    pytest.param({}, BuildEngine.RUNNER, id="no-engine-given"),
+    *[
+        pytest.param({"build_engine": named}, engine, id=f"{engine.value}-{how}")
+        for engine in BuildEngine
+        for how, named in (("member", engine), ("value", engine.value))
+    ],
+]
+
+
+@pytest.fixture
+def scan_options(monkeypatch, handed_over) -> List[Any]:
+    """An ``(arguments, options)`` pair for each ScanOptions a scan call builds.
+
+    ``arguments`` is what the call gave ``ScanOptions``. With one engine to name, the
+    options read the same whether the call handed its engine on or dropped it (the
+    default is that engine), so only the arguments tell the two apart. The scan goes
+    as far as one can with ``handed_over``'s stand-in for the container run: nothing
+    is built or started, and no container tool is looked for.
+    """
+    built: List[Any] = []
+
+    class Recording(ras.ScanOptions):
+        def __init__(self, **arguments: Any) -> None:
+            super().__init__(**arguments)
+            built.append((arguments, self))
+
+    monkeypatch.setattr(ras, "ScanOptions", Recording)
+    return built
+
+
+def _scan_in_a_container(tmp_path: Path, **named: Any) -> None:
+    """``run_ash_scan`` in container mode; the stand-in container run exits it."""
+    (tmp_path / "src").mkdir(exist_ok=True)
+    with pytest.raises(SystemExit):
+        ras.run_ash_scan(
+            source_dir=str(tmp_path / "src"),
+            output_dir=str(tmp_path / "out"),
+            mode=RunMode.container,
+            **named,
+        )
+
+
+class TestTheScanEntryPointTakesTheOption:
+    def test_its_default_is_the_runner_like_the_options_and_the_container_run(self):
+        entry = inspect.signature(ras.run_ash_scan).parameters
+        assert "build_engine" in entry, "run_ash_scan takes no build_engine"
+        container = inspect.signature(rac.run_ash_container).parameters
+        field = ras.ScanOptions.model_fields["build_engine"]
+
+        assert entry["build_engine"].default is BuildEngine.RUNNER
+        assert container["build_engine"].default is BuildEngine.RUNNER
+        assert field.default is BuildEngine.RUNNER
+
+    @pytest.mark.parametrize("named, engine", NAMED_TO_THE_SCAN)
+    def test_the_engine_reaches_the_options_the_call_builds(
+        self, named, engine, scan_options, tmp_path
+    ):
+        meant = named.get("build_engine", BuildEngine.RUNNER)
+
+        _scan_in_a_container(tmp_path, **named)
+
+        [(arguments, options)] = scan_options
+        assert arguments["build_engine"] is meant
+        assert options.build_engine is engine
+
+    @pytest.mark.parametrize("named, engine", NAMED_TO_THE_SCAN)
+    def test_the_engine_reaches_the_container_run(
+        self, named, engine, handed_over, tmp_path
+    ):
+        _scan_in_a_container(tmp_path, **named)
+
+        assert handed_over["build_engine"] is engine
