@@ -42,7 +42,8 @@ Modes (exactly one):
                        ended; reads no network and runs no uv
 
 Exit status: 0 nothing to report, 1 a difference or a failed control, 2 the run could
-not measure (uv or the index did not answer, an unreadable input). A run that could
+not measure (uv or the index did not answer, an unreadable input, the plugin register
+among them: one that does not load is an input, not a difference). A run that could
 not measure never counts as a failed cell and is never recorded.
 
 What ``--check`` fails on:
@@ -357,25 +358,42 @@ def normalize_distribution(name: str) -> str:
 
 
 def load_register(path: Path) -> Any:
-    """Import the plugin register by path: it is standard library only on purpose."""
+    """Import the plugin register by path: it is standard library only on purpose.
+
+    The register is a Python file that is executed, so a broken one raises whatever
+    Python raises for it: a syntax error, an import that fails, anything its own code
+    does. Each of those means the input cannot be read, so each is raised as a
+    ValueError that names the file, which ``main`` reports as a run that could not
+    measure (exit code 2) and not as a difference.
+    """
     spec = importlib.util.spec_from_file_location(
         "ash_plugin_provisioning_for_platform_wheels", path
     )
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load the plugin register from {path}")
+        raise ValueError(f"cannot read the plugin register {path}: not a Python file")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     try:
         spec.loader.exec_module(module)
-    except BaseException:
+    except BaseException as exc:
         sys.modules.pop(spec.name, None)
-        raise
+        if not isinstance(exc, Exception):
+            raise
+        raise ValueError(
+            f"cannot read the plugin register {path}: {type(exc).__name__}: {exc}"
+        ) from exc
     return module
 
 
 def load_blocks(path: Path) -> Mapping[str, Any]:
     """``{scanner: provisioning block}`` from the register at *path*."""
-    return load_register(path).PROVISIONING
+    module = load_register(path)
+    try:
+        return module.PROVISIONING
+    except AttributeError as exc:
+        raise ValueError(
+            f"cannot read the plugin register {path}: it has no PROVISIONING"
+        ) from exc
 
 
 def render_pin(pin: Any) -> tuple[str, ...]:
