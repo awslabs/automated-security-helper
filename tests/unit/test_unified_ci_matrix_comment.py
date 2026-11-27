@@ -1558,6 +1558,7 @@ _PULL_REQUEST_ONLY_IF = _squash(
 #: has a serial link behind it. TestEnsureCache in test_unified_ci_job_counts.py pins it.
 ENSURE_CACHE = "ensure-cache"
 _EVERY_EVENT_IF = _squash("${{ !cancelled() }}")
+_PUBLISH_STEP_ENV_VALUE = "${{ github.token }}"
 _CHECKOUT_REF = (
     "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha "
     "|| github.sha }}"
@@ -1690,7 +1691,8 @@ class TestTheLiveLinks:
             job = jobs[link]
             assert "env" not in job and "secrets" not in str(job), link
             *others, publish_step = job["steps"]
-            assert publish_step["env"] == {"GITHUB_TOKEN": "${{ github.token }}"}, link
+            assert set(publish_step["env"]) == {"GITHUB_TOKEN"}, link
+            assert publish_step["env"]["GITHUB_TOKEN"] == _PUBLISH_STEP_ENV_VALUE, link
             assert PUBLISH_COMMAND in publish_step["run"], link
             for step in others:
                 assert "GITHUB_TOKEN" not in str(step), link
