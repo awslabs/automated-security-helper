@@ -747,19 +747,44 @@ def fixture_skipped_workspace_model(
 
 
 @pytest.fixture
+def fixture_support_notices_model(pinned_clock, fixture_context, tmp_path: Path):
+    """The single-directory fixture scan of a host ASH supports only in part.
+
+    The ``single`` model with the support notices of ``support_notices_fixture`` in
+    its metadata: one unsupported, one degraded and one polyfilled configuration.
+    """
+    from tests.snapshot.support.fixture_model import (
+        build_fixture_model,
+        support_notices_fixture,
+    )
+
+    return build_fixture_model(
+        tmp_path,
+        fixture_context,
+        metadata={"support_notices": support_notices_fixture()},
+    )
+
+
+@pytest.fixture
 def fixture_variant(request: pytest.FixtureRequest, tmp_path: Path):
-    """``fixture_variant("single" | "workspace" | "skipped-workspace")`` -> (model, context).
+    """``fixture_variant(name)`` -> (model, context), for a name in ``MODEL_VARIANTS``.
 
     The context is the one ASH gives reporters for that shape: the fixture
-    repository's own config for a single scan, and the workspace-level default
-    config ``emit_workspace_reports`` uses for the two workspace shapes.
+    repository's own config for a single scan (``single``, and ``support-notices``,
+    which is that scan with its support notices recorded), and the workspace-level
+    default config ``emit_workspace_reports`` uses for the two workspace shapes.
     """
     from tests.snapshot.support.fixture_model import workspace_reporter_context
 
+    single_scans = {
+        "single": "fixture_model",
+        "support-notices": "fixture_support_notices_model",
+    }
+
     def _for(variant: str):
-        if variant == "single":
+        if variant in single_scans:
             return (
-                request.getfixturevalue("fixture_model"),
+                request.getfixturevalue(single_scans[variant]),
                 request.getfixturevalue("fixture_context"),
             )
         name = {

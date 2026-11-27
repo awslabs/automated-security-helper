@@ -1,7 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""What every built-in reporter writes, for each of the three model shapes.
+"""What every built-in reporter writes, for each of the four model shapes.
+
+The fourth shape, ``support-notices``, is the single-directory scan of a host ASH
+supports only in part: the ``single`` model with the support notices such a run
+records in its metadata. Its snapshots differ from the ``single`` ones by what each
+reporter does with them.
 
 One snapshot file per reporter and shape, stored with the extension of the file ASH
 writes (``ash.summary.md`` is snapshotted as ``.md``), so a change to any report a
@@ -25,6 +30,7 @@ from tests.snapshot.support.reporter_catalog import (
     AWS_REPORTER_NAMES,
     BUILTIN_REPORTER_NAMES,
     MODEL_VARIANTS,
+    SINGLE_PROJECT_VARIANTS,
     build_reporter,
     reporter_classes,
     snapshot_extension,
@@ -81,7 +87,7 @@ def test_builtin_reporter_output(
 ):
     model, context = fixture_variant(variant)
     reporter = build_reporter(reporter_classes()[reporter_name], context)
-    if reporter_name == "asff" and variant != "single":
+    if reporter_name == "asff" and variant not in SINGLE_PROJECT_VARIANTS:
         with pytest.raises(ValueError, match="asff exports one project at a time"):
             reporter.report(model)
         return
