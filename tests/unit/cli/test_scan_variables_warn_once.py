@@ -44,6 +44,7 @@ from automated_security_helper.cli.scan_deprecation import (
     WORKSPACE_CONFIG_VARIABLE_LINE,
     WORKSPACE_VARIABLE_LINE,
 )
+from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.workspace import WorkspaceExitCode
 
 pytestmark = pytest.mark.unit
@@ -161,6 +162,29 @@ def test_a_clone_beside_the_variable_is_not_told(engine, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert _deprecation_lines(result.stderr) == [], result.stderr
+
+
+@pytest.mark.parametrize(
+    "image_option",
+    [
+        pytest.param(["--image", "registry.example.com/team/app:1.2.3"], id="image"),
+        pytest.param(["--image-archive", "image.tar"], id="image-archive"),
+        pytest.param(["--image-layout", "layout"], id="image-layout"),
+    ],
+)
+def test_an_image_beside_the_variable_is_refused_with_no_line_ahead_of_it(
+    image_option, no_scan, tmp_path, monkeypatch
+):
+    """The engine refuses an image beside the variable in its own words, so the variable
+    is not told as the directory of that scan: the refusal is the first thing said."""
+    monkeypatch.setenv("ASH_SOURCE_DIR", str(tmp_path))
+
+    result = _invoke(["scan", "fs", *image_option])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert f"{image_option[0]} cannot be combined with ASH_SOURCE_DIR" in result.output
+    assert _deprecation_lines(result.stderr) == [], result.stderr
+    assert no_scan == []
 
 
 def test_the_option_beside_the_variable_prints_the_options_line_only(
