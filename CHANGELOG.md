@@ -177,6 +177,45 @@
   directories, user names and host names) that names each hit by its kind and never by
   its value, and the record of a recording run. `tests/unit/docs/test_cast_core.py`
   covers it. No recorder or renderer uses it yet.
+- `scripts/_generated_blocks.py` now replaces each file in one step, through a temporary
+  file beside it, so a write that fails or is cut off leaves the page as it was. A body
+  given as an iterator or a generator is refused, because its first read uses it up and a
+  template and the page rendered from it would get different lines. A block whose begin
+  marker names the generator, and for which a call gives no body, is drift in a check and
+  a refusal in a write, unless the caller says it renders only some of its blocks.
+  `tests/unit/test_generated_blocks.py` pins each rule.
+- `scripts/_ci_matrix.py` now refuses a `runs-on` that reads a matrix key which the job's
+  matrix, or one of its legs, lacks (GitHub reads that runner as empty), and an `exclude`
+  entry that names a key no axis has (GitHub rejects the workflow). It also checks the
+  runner labels a job passes in `with:` to a reusable workflow that feeds them to a
+  `runs-on` against the runner table. The tests that list the workflows read both `.yml`
+  and `.yaml` files, and the four tests that share the reader load it through
+  `tests/utils/ci_matrix_loader.py`, which leaves no half-loaded module in `sys.modules`
+  when the load fails. `tests/unit/test_ci_matrix_reader.py` covers each change.
+- The three remaining tests that expanded a workflow matrix by hand
+  (`tests/integration/docs/ci_runners/reports.py`,
+  `tests/unit/test_pre_commit_hooks_manifest.py` and `tests/unit/test_unit_test_shards.py`)
+  now read it through the shared reader, so a matrix shape the reader cannot read fails
+  there and is not counted as a match.
+- Corrected documentation that disagreed with the code. `deploy/README.md` no longer says
+  the CDK and Terraform deployments produce the same infrastructure: it names where they
+  differ (the source of the CodePipeline distributed executor, how the image architecture
+  is chosen, the default x86 build image and the default rebuild schedule).
+  `deploy/cdk-constructs/README.md` says which versions its `package.json` pins
+  (`constructs` at its floor and `aws-cdk-lib` at 2.278.0, newer than its floor). The
+  GitHub Actions guide no longer lists the inputs of one release and sends the reader to
+  the `inputs:` block of the workflow at the tag they pin, and the comment in
+  `.pre-commit-hooks.yaml` names the current pre-commit guide. The scan workflow's config
+  step reads a TOML config with `tomli`, then `toml`, when `tomllib` is missing (a
+  `python-version` of 3.10), and stops with a message when none of the three can be
+  imported. `tests/unit/test_scan_workflow_reads_toml_without_tomllib.py` covers it.
+- The scanner reference (`docs/content/reference/scanners.md`) now gives each scanner's
+  tier and whether its module loads by default, both read from the scanner's manifest,
+  and calls the column that said whether a scanner is enabled by default "On once
+  loaded". `scripts/generate_scanner_reference.py` stops and names a scanner that has no
+  manifest. The docs check compares a table column headed "Loads by default" with the
+  manifest's `default_enabled`, and one headed "On once loaded" with the scanner's
+  `enabled` default.
 
 ### Deprecations
 
