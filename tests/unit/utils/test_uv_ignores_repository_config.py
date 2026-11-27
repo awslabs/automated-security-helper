@@ -1331,9 +1331,15 @@ def test_the_nbconvert_uv_route_is_guarded(tree, tmp_path, spawns, monkeypatch):
 # as the ``[env: ...]`` of the options that take a path: requirements files
 # (constraints, build constraints, overrides, excludes), index and find-links
 # locations (each a URL or a local directory), and the project and working
-# directories. uv reads a relative value, a leading ``~`` included (uv does not
-# expand it), against the directory it starts in. Every route that starts uv for
-# a tool drops such a value, and one that lies inside the tree being scanned.
+# directories. uv also reads location variables that no option names, among the
+# ``UV_*`` names in the uv binary: the mirrors and the download list it takes a
+# managed Python from (``uv tool run --show-settings`` shows them), the
+# directories of its Python archive cache and of its stored credentials, and the
+# Python search path. That one replaces PATH when uv looks for an interpreter, and
+# uv runs each candidate it finds there to ask it what it is (measured with
+# ``uv python find``). uv reads a relative value, a leading ``~`` included (uv does
+# not expand it), against the directory it starts in. Every route that starts uv
+# for a tool drops such a value, and one that lies inside the tree being scanned.
 
 #: Each added variable: a relative value, the path under the tree that its
 #: absolute form names, and the operator's value, which stays (None: the same
@@ -1350,6 +1356,15 @@ _ADDED_VARIABLES = {
     "UV_FIND_LINKS": ("./wheels", "wheels", "https://mirror.invalid/wheels/"),
     "UV_PROJECT": (".", "sub", None),
     "UV_WORKING_DIR": ("sub", "sub", None),
+    "UV_PYTHON_SEARCH_PATH": ("bin", "bin", None),
+    "UV_PYTHON_INSTALL_MIRROR": ("./mirror", "mirror", "https://mirror.invalid/cp"),
+    "UV_PYPY_INSTALL_MIRROR": ("./mirror", "mirror", "https://mirror.invalid/pypy"),
+    "UV_GRAALPY_INSTALL_MIRROR": ("./mirror", "mirror", "https://mirror.invalid/gp"),
+    "UV_PYODIDE_INSTALL_MIRROR": ("./mirror", "mirror", "https://mirror.invalid/pd"),
+    "UV_ASTRAL_MIRROR_URL": ("./mirror", "mirror", "https://mirror.invalid/astral"),
+    "UV_PYTHON_DOWNLOADS_JSON_URL": ("downloads.json", "downloads.json", None),
+    "UV_PYTHON_CACHE_DIR": ("python-cache", "python-cache", None),
+    "UV_CREDENTIALS_DIR": ("credentials", "credentials", None),
 }
 
 
@@ -1660,6 +1675,29 @@ _SHAPES = [
             {"UV_FIND_LINKS": str(out)},
         ),
         id="the-tree-itself",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_PYTHON_SEARCH_PATH": f"{out / 'a'}{os.pathsep}{src / 'b'}"},
+            {"UV_PYTHON_SEARCH_PATH": f"{out / 'a'}{os.pathsep}{out / 'b'}"},
+        ),
+        id="a-search-path-list",
+    ),
+    pytest.param(
+        # An empty entry of the search path names no directory: uv does not look
+        # in the directory it starts in for it, as a shell does for PATH.
+        lambda src, out: (
+            {"UV_PYTHON_SEARCH_PATH": f"{src / 'a'}{os.pathsep * 2}{out / 'b'}"},
+            {"UV_PYTHON_SEARCH_PATH": f"{out / 'a'}{os.pathsep * 2}{out / 'b'}"},
+        ),
+        id="a-search-path-list-with-an-empty-entry",
+    ),
+    pytest.param(
+        lambda src, out: (
+            {"UV_PYTHON_INSTALL_MIRROR": (src / "mirror").as_uri()},
+            {"UV_PYTHON_INSTALL_MIRROR": (out / "mirror").as_uri()},
+        ),
+        id="a-mirror-file-url",
     ),
 ]
 
