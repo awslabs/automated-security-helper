@@ -5054,11 +5054,18 @@ def _resolve(
     except ValueError as exc:
         raise ASHConfigSourceError(f"Config {state.shown(real)}: {exc}") from None
 
+    # The file as it was written, its known-plugin sections folded as above:
+    # what the client rules and every check of a delivered file judge, so a key's
+    # text and a `patch` pointer are read as the file spelled them. Recorded
+    # before the spelling fold below.
+    state.documents.setdefault(real, copy.deepcopy(data))
+
     # Each old spelling of a renamed key (the table in config/spellings.py) the
     # file writes, as a key, in a `patch` pointer or in an operation's value, is
-    # the canonical one from here on: before the document is recorded, before the
-    # references are paired and before it is merged or patched, so a base and the
-    # file that extends it agree on one spelling whichever each was written in.
+    # the canonical one from here on: before the references are paired and
+    # before it is merged or patched, so a base and the file that extends it
+    # agree on one spelling whichever each was written in. The record above
+    # keeps the file as written.
     # The deprecation is said once for the file and the spelling, naming the file.
     # A file past the release that removes the old spelling, or writing both
     # spellings with different values, is refused naming the file, the place in
@@ -5072,7 +5079,6 @@ def _resolve(
         if line not in state.spelling_warnings:
             state.spelling_warnings.append(line)
 
-    state.documents.setdefault(real, copy.deepcopy(data))
     # In read order, so a file's own come before those of the bases it extends,
     # which are read below. The order decides only which of two references at
     # one position that resolved to the same text is recorded: the extending
