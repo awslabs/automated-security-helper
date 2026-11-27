@@ -1521,14 +1521,17 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         else:
             message = f"{lead}they match what the scan runs."
             log = ASH_LOGGER.info
-        text = shown_on_one_line(
-            text_without_values(message, self._baseline_redaction_needles(values))
+        redacted = text_without_values(
+            message, self._baseline_redaction_needles(values)
         )
-        key = hashlib.sha256(str(text).encode("utf-8", "replace")).hexdigest()
+        key = hashlib.sha256(redacted.encode("utf-8", "replace")).hexdigest()
         if key in self._reported_baseline_settings:
             return
         self._reported_baseline_settings.add(key)
-        log(text, extra=NO_MARKUP)
+        # The whole message as one shown_on_one_line call, which the log sinks
+        # pass on as it is: text escaped first and then handed to a sink would be
+        # shown twice (tests/unit/utils/test_no_text_is_shown_twice.py).
+        log(shown_on_one_line(redacted), extra=NO_MARKUP)
 
     def _baseline_settings_differences(
         self,

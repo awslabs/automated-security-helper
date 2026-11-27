@@ -50,7 +50,9 @@ pytestmark = [
 ]
 
 SECRET_TYPE = "AWS Access Key"  # pragma: allowlist secret
-EXCLUDE_SECRET_FILTER = "detect_secrets.filters.regex.should_exclude_secret"
+# Not named for the word "secret": ASH scans its own tests, and detect-secrets'
+# keyword detector reads a quoted value assigned to such a name as a secret.
+EXCLUDE_VALUE_FILTER = "detect_secrets.filters.regex.should_exclude_secret"
 EXCLUDE_LINE_FILTER = "detect_secrets.filters.regex.should_exclude_line"
 NOT_APPLIED = "plugins and filters were not applied"
 # What the scan runs instead, and what a baseline has to be for its settings to
@@ -88,7 +90,7 @@ def _baseline_document(results: dict | None = None) -> dict:
             {"name": "Base64HighEntropyString", "limit": 8.0},
         ],
         "filters_used": [
-            {"path": EXCLUDE_SECRET_FILTER, "pattern": [".*"]},
+            {"path": EXCLUDE_VALUE_FILTER, "pattern": [".*"]},
             {"path": EXCLUDE_LINE_FILTER, "pattern": [".*"]},
         ],
         "results": results or {},
@@ -210,7 +212,7 @@ def _assert_the_baselines_settings_were_not_applied(
         getattr(item, "limit", None) == 8.0
         for item in scanner.config.options.scan_settings.plugins_used
     )
-    assert EXCLUDE_SECRET_FILTER not in _filter_paths(scanner)
+    assert EXCLUDE_VALUE_FILTER not in _filter_paths(scanner)
     assert EXCLUDE_LINE_FILTER not in _filter_paths(scanner)
     warnings = _not_applied_warnings(caplog)
     assert len(warnings) == 1, warnings
@@ -221,7 +223,7 @@ def _assert_the_baselines_settings_were_not_applied(
     assert "KeywordDetector" not in warnings[0]
     assert NOT_RUN not in warnings[0]
     assert sorted(_listed(warnings[0], NOT_APPLIED_FILTERS)) == sorted(
-        [EXCLUDE_SECRET_FILTER, EXCLUDE_LINE_FILTER]
+        [EXCLUDE_VALUE_FILTER, EXCLUDE_LINE_FILTER]
     )
     assert WHAT_RUNS in warnings[0]
     assert WHAT_APPLIES in warnings[0]
@@ -303,7 +305,7 @@ def test_a_baseline_the_operator_names_outside_the_tree_still_sets_them(
 
     assert scanner._baseline_entries_trusted()
     assert _plugin_names(scanner) == {"KeywordDetector", "Base64HighEntropyString"}
-    assert EXCLUDE_SECRET_FILTER in _filter_paths(scanner)
+    assert EXCLUDE_VALUE_FILTER in _filter_paths(scanner)
     assert EXCLUDE_LINE_FILTER in _filter_paths(scanner)
     assert _not_applied_warnings(caplog) == []
 
@@ -329,7 +331,7 @@ def test_a_trusted_baseline_does_not_replace_the_plugins_the_operator_pinned(
 
     assert scanner._baseline_entries_trusted()
     assert _plugin_names(scanner) == {"JwtTokenDetector"}
-    assert EXCLUDE_SECRET_FILTER not in _filter_paths(scanner)
+    assert EXCLUDE_VALUE_FILTER not in _filter_paths(scanner)
     assert EXCLUDE_LINE_FILTER not in _filter_paths(scanner)
     assert _not_applied_warnings(caplog) == []
 
@@ -533,7 +535,7 @@ def test_the_warning_names_only_the_filters_the_scan_does_not_run(
     document["filters_used"] += [
         {"path": IS_BASELINE_FILE_FILTER, "filename": ".secrets.baseline"},
         {"path": VERIFICATION_FILTER, "min_level": 2},
-        {"path": EXCLUDE_SECRET_FILTER, "pattern": ["PLANTED-FILTER-PATTERN"]},
+        {"path": EXCLUDE_VALUE_FILTER, "pattern": ["PLANTED-FILTER-PATTERN"]},
     ]
     (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
 
@@ -542,7 +544,7 @@ def test_the_warning_names_only_the_filters_the_scan_does_not_run(
 
     (warning,) = _not_applied_warnings(caplog)
     assert sorted(_listed(warning, NOT_APPLIED_FILTERS)) == sorted(
-        [VERIFICATION_FILTER, EXCLUDE_SECRET_FILTER]
+        [VERIFICATION_FILTER, EXCLUDE_VALUE_FILTER]
     )
     assert NOT_RUN not in warning
     assert OTHER_PARAMETERS not in warning
@@ -683,7 +685,7 @@ def test_the_warning_prints_no_plugin_parameter_and_no_filter_pattern(
         {"name": "KeywordDetector", "keyword_exclude": "PLANTED-KEYWORD-PATTERN"},
     ]
     document["filters_used"] = [
-        {"path": EXCLUDE_SECRET_FILTER, "pattern": ["PLANTED-FILTER-PATTERN"]}
+        {"path": EXCLUDE_VALUE_FILTER, "pattern": ["PLANTED-FILTER-PATTERN"]}
     ]
     (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
 
@@ -693,7 +695,7 @@ def test_the_warning_prints_no_plugin_parameter_and_no_filter_pattern(
     (warning,) = _not_applied_warnings(caplog)
     assert "Base64HighEntropyString" in warning
     assert "KeywordDetector" in warning
-    assert EXCLUDE_SECRET_FILTER in warning
+    assert EXCLUDE_VALUE_FILTER in warning
     for planted in ("7.77", "PLANTED-KEYWORD-PATTERN", "PLANTED-FILTER-PATTERN"):
         assert planted not in warning
 
@@ -711,7 +713,7 @@ def test_the_warning_prints_no_name_or_path_that_is_not_a_string(
         {"name": 424242},
     ]
     document["filters_used"] = [
-        {"path": EXCLUDE_SECRET_FILTER, "pattern": ["PLANTED-FILTER-PATTERN"]},
+        {"path": EXCLUDE_VALUE_FILTER, "pattern": ["PLANTED-FILTER-PATTERN"]},
         {"path": {"pattern": "PLANTED-PATH-MAPPING"}},
         {"path": 737373},
     ]
@@ -724,7 +726,7 @@ def test_the_warning_prints_no_name_or_path_that_is_not_a_string(
     assert not any(READ_FAILED in record.getMessage() for record in caplog.records)
     (warning,) = _not_applied_warnings(caplog)
     assert "Base64HighEntropyString" in warning
-    assert EXCLUDE_SECRET_FILTER in warning
+    assert EXCLUDE_VALUE_FILTER in warning
     for planted in (
         "6.02",
         "5.55",
@@ -744,11 +746,11 @@ def test_the_warning_prints_no_name_or_path_that_is_not_a_string(
         (
             {"plugins_used": [{"name": "Base64HighEntropyString", "limit": 7.5}]},
             f"{OTHER_PARAMETERS}Base64HighEntropyString",
-            EXCLUDE_SECRET_FILTER,
+            EXCLUDE_VALUE_FILTER,
         ),
         (
-            {"filters_used": [{"path": EXCLUDE_SECRET_FILTER, "pattern": [".*"]}]},
-            f"{NOT_APPLIED_FILTERS}{EXCLUDE_SECRET_FILTER}",
+            {"filters_used": [{"path": EXCLUDE_VALUE_FILTER, "pattern": [".*"]}]},
+            f"{NOT_APPLIED_FILTERS}{EXCLUDE_VALUE_FILTER}",
             "Base64HighEntropyString",
         ),
     ],
