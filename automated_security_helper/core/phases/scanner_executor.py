@@ -737,6 +737,26 @@ def _rejected_exit_code(scanner_plugin: Any) -> int | None:
     return code if completed is False else None
 
 
+def _recorded_reason(
+    error: BaseException, values: Iterable[str]
+) -> FailureReason | None:
+    """The reason a raise site recorded on *error*, redacted with *values*, or None.
+
+    Found as ``reason_of`` finds it: on the error, else on what it was raised from.
+    The sentence is redacted as every plugin-sourced text is, because it can name
+    an option the run's configuration read from the environment. Every handler
+    that files a reason for an error it caught reads it here first, so the raising
+    code's own cause is what the row says and a fixed one stands in only for an
+    error that recorded none.
+    """
+    recorded = reason_of(error)
+    if recorded is None:
+        return None
+    return FailureReason(
+        recorded.code, text_without_values(recorded.sentence, tuple(values))
+    )
+
+
 def _failure_reason(
     error: BaseException, scanner_plugin: Any, values: Iterable[str]
 ) -> FailureReason | None:
@@ -770,11 +790,9 @@ def _failure_reason(
     kept = _kept_flag(scanner_plugin)
     if kept is None and _post_run_error(scanner_plugin) is not None:
         return FailureReason(ReasonCode.OUTPUT_NOT_RECORDED)
-    recorded = reason_of(error)
+    recorded = _recorded_reason(error, values)
     if recorded is not None:
-        return FailureReason(
-            recorded.code, text_without_values(recorded.sentence, values)
-        )
+        return recorded
     if kept is not None:
         return _kept_flag_reason(kept, scanner_plugin, None, values)
     exit_code = _rejected_exit_code(scanner_plugin)
@@ -808,11 +826,9 @@ def _scanner_failure_reason(
     ``sys.exit`` has exited. Nothing else is a reason the reports can show, and
     None leaves them the failure's first sentence.
     """
-    recorded = reason_of(error)
+    recorded = _recorded_reason(error, values)
     if recorded is not None:
-        return FailureReason(
-            recorded.code, text_without_values(recorded.sentence, tuple(values))
-        )
+        return recorded
     if isinstance(error, ResultsProcessingFailed):
         return FailureReason(ReasonCode.RESULTS_NOT_MERGED)
     if isinstance(error, SystemExit):
@@ -2571,12 +2587,18 @@ class ScannerExecutor:
                             f"{target_type} that could not be graded: {described}",
                             environment_values,
                         )
-                        # The exception's text is not in the reason: it quotes
-                        # what the result held.
+                        # A step of grading can fail for a cause it knows, as the
+                        # suppression pass does when a pattern a client delivered
+                        # runs past its time limit: the reason it recorded is the
+                        # row's, as the failure handlers file it, and "could not
+                        # be graded" stands only for a step that recorded none. The
+                        # exception's text is in neither: it quotes what the
+                        # result held.
                         _refuse_to_grade(
                             container,
                             refusal,
-                            reason=FailureReason(ReasonCode.RESULT_UNGRADABLE),
+                            reason=_recorded_reason(grading_error, environment_values)
+                            or FailureReason(ReasonCode.RESULT_UNGRADABLE),
                         )
                         if isinstance(
                             container.raw_results, (SarifReport, CycloneDXReport)

@@ -44,6 +44,9 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.config.client_scanner_exclusions import (
+    ClientScannerExclusion,
+)
 from automated_security_helper.core.asset import Asset, ImageLocator
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.exceptions import (
@@ -190,6 +193,56 @@ def _sarif() -> SarifReport:
             "runs": [{"tool": {"driver": {"name": "tool"}}, "results": []}],
         }
     )
+
+
+def _checkov_finding() -> SarifReport:
+    """What checkov returns: one finding in a file a client's exclusion names."""
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "checkov"}},
+                    "results": [
+                        {
+                            "ruleId": "CKV_1",
+                            "message": {"text": "finding"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "vendor/x.tf"},
+                                        "region": {"startLine": 1},
+                                    }
+                                }
+                            ],
+                            "properties": {"scanner_name": "checkov"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _delivers_a_checkov_skip_path(context, scan_timeout) -> None:
+    """Give *context*'s config the checkov ``skip_path`` pattern a client delivered.
+
+    The entry sits where the scan puts one it moved out of the scanner's options
+    (``AshConfig._client_scanner_exclusions``), and the suppression pass reads it
+    for every finding checkov reports. ``vend.r`` is a regular expression, so the
+    pass searches it under the pattern time limit: ``scan_timeout`` seconds for the
+    whole pass.
+    """
+    context.config._client_scanner_exclusions = [
+        ClientScannerExclusion(
+            scanner="checkov",
+            option="skip_path",
+            kind="checkov",
+            pattern="vend.r",
+            reason="the client's own",
+            scan_timeout=scan_timeout,
+        )
+    ]
 
 
 def _records(**attributes):
@@ -572,6 +625,114 @@ class TestAResultTheExecutorRefusesToGrade:
         row = _one_row(context, _scanner(context, {"status": "odd secret status"}))
 
         assert row.error_reason and "secret" not in row.error_reason, row.error_reason
+
+
+class TestAGradingStepThatRecordedItsOwnReason:
+    """A step of grading that fails for a cause it knows says so on the row.
+
+    The grading steps run on what the scanner returned, inside one handler: the
+    levels, the path sanitizing, the suppression pass. A step can fail for a reason of
+    its own (the suppression pass, when a pattern a client delivered runs past its
+    time limit), and the handler filed "could not be graded" over it, so the reason
+    the raising code recorded never reached a row. It files that reason now, and the
+    generic one only for a step that recorded none.
+    """
+
+    def test_the_suppression_pass_that_ran_out_of_time_says_so(self, tmp_path):
+        """The real pass, with a pattern time limit of nothing: the first search of the
+        client's pattern finds the limit spent and raises its own reason."""
+        context = _context(tmp_path)
+        _delivers_a_checkov_skip_path(context, scan_timeout=0.0)
+
+        row = _one_row(context, _scanner(context, _checkov_finding()), name="checkov")
+
+        assert row.status == ScannerStatus.ERROR, (row.status, row.errors)
+        assert row.error_reason_code == ReasonCode.PATTERN_TIME_LIMIT, _why(row)
+        assert row.error_reason and "pattern time limit" in row.error_reason
+        assert is_short_reason(row.error_reason), row.error_reason
+
+    def test_the_row_keeps_the_failure_as_its_record(self, tmp_path):
+        """The reason changes what the row says, not what it holds: the refusal is
+        still in its errors, and the half-processed report is still replaced."""
+        context = _context(tmp_path)
+        _delivers_a_checkov_skip_path(context, scan_timeout=0.0)
+
+        row = _one_row(context, _scanner(context, _checkov_finding()), name="checkov")
+
+        assert any("could not be graded" in error for error in row.errors), row.errors
+        assert not isinstance(row.raw_results, SarifReport), type(row.raw_results)
+
+    @pytest.mark.parametrize(
+        "chained", [False, True], ids=["on the error", "on what it was raised from"]
+    )
+    def test_a_reason_a_grading_step_recorded_is_the_reason(
+        self, tmp_path, monkeypatch, chained
+    ):
+        context = _context(tmp_path)
+        recorded = ScannerError(
+            "the step failed on /somewhere/x",
+            reason=FailureReason(
+                ReasonCode.PATTERN_TIME_LIMIT,
+                "a pattern from the configuration ran out of time",
+            ),
+        )
+
+        def failing(**kwargs):
+            if chained:
+                raise RuntimeError("the pass wrapped what failed") from recorded
+            raise recorded
+
+        monkeypatch.setattr(scanner_executor, "apply_suppressions_to_sarif", failing)
+
+        row = _one_row(context, _scanner(context, _sarif()))
+
+        _assert_reason(
+            row,
+            ReasonCode.PATTERN_TIME_LIMIT,
+            "a pattern from the configuration ran out of time",
+        )
+        assert "/somewhere" not in row.error_reason
+
+    def test_a_recorded_sentence_is_redacted_with_the_runs_values(
+        self, tmp_path, monkeypatch
+    ):
+        _plugin_values(monkeypatch, CANARY)
+        context = _context(tmp_path)
+        recorded = ScannerError(
+            "refused",
+            reason=FailureReason(
+                ReasonCode.PATTERN_TIME_LIMIT, f"its option {CANARY} ran out of time"
+            ),
+        )
+
+        def failing(**kwargs):
+            raise recorded
+
+        monkeypatch.setattr(scanner_executor, "apply_suppressions_to_sarif", failing)
+
+        row = _one_row(context, _scanner(context, _sarif()))
+
+        assert row.error_reason_code == ReasonCode.PATTERN_TIME_LIMIT, _why(row)
+        assert row.error_reason and CANARY not in row.error_reason, row.error_reason
+
+    def test_control_a_step_that_recorded_no_reason_is_ungradable(
+        self, tmp_path, monkeypatch
+    ):
+        context = _context(tmp_path)
+
+        def failing(**kwargs):
+            raise ValueError("the pass failed on /somewhere/x")
+
+        monkeypatch.setattr(scanner_executor, "apply_suppressions_to_sarif", failing)
+
+        row = _one_row(context, _scanner(context, _sarif()))
+
+        _assert_reason(
+            row,
+            ReasonCode.RESULT_UNGRADABLE,
+            DEFAULT_SENTENCES[ReasonCode.RESULT_UNGRADABLE],
+        )
+        assert "/somewhere" not in row.error_reason
 
 
 class TestWhatTheRowRecordsAfterTheScan:
@@ -1208,6 +1369,27 @@ class TestTheControls:
         row = _one_row(context, killed_tool())
 
         assert row.error_reason_code == ReasonCode.RESULTS_UNREADABLE, _why(row)
+
+    def test_without_the_grading_handlers_reading_of_the_reason_the_row_is_ungradable(
+        self, tmp_path, monkeypatch
+    ):
+        context = _context(tmp_path)
+        _delivers_a_checkov_skip_path(context, scan_timeout=0.0)
+
+        def spent_pass():
+            return _one_row(
+                context, _scanner(context, _checkov_finding()), name="checkov"
+            )
+
+        assert spent_pass().error_reason_code == ReasonCode.PATTERN_TIME_LIMIT
+
+        monkeypatch.setattr(
+            scanner_executor, "_recorded_reason", lambda error, values: None
+        )
+        row = spent_pass()
+
+        assert row.status == ScannerStatus.ERROR
+        assert row.error_reason_code == ReasonCode.RESULT_UNGRADABLE, _why(row)
 
     def test_the_path_check_is_what_keeps_a_path_out_of_a_reason(self, monkeypatch):
         from automated_security_helper.core import exceptions
