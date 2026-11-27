@@ -1006,8 +1006,9 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # writes none when it fails, and the read below takes whatever is here.
             results_file.unlink(missing_ok=True)
 
-            # Absolute for the same reason. The converted target is tested in
-            # place; the copy that stands in for the source target is absolute.
+            # Absolute for the same reason: the converted target, tested in
+            # place, and the copy that stands in for the source target below,
+            # whose path mkdtemp gives relative on Python 3.11 when TMPDIR is.
             tested = Path(os.path.abspath(target))
             if target_type == TargetType.SOURCE:
                 staged = self._stage_source(target, global_ignore_paths or [], cleanup)
@@ -1026,7 +1027,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     excluding = tree_exclusion_files(staged)
                     if excluding:
                         raise ScannerError(self._exclusion_refusal(excluding, staged))
-                tested = staged
+                tested = Path(os.path.abspath(staged))
 
             final_args = self._resolve_arguments(
                 target=tested, results_file=results_file
