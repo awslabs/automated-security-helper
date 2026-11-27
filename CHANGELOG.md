@@ -174,7 +174,10 @@
   scanned tree unless no private directory outside it is available, for example
   when `TMPDIR` is inside the tree and the output directory is in its default
   place under the source. Then ASH makes it inside the tree and logs a warning
-  that names each directory it passed over.
+  that names each directory it passed over. When no private directory is
+  available at all, for example under a directory other accounts can write, the
+  scan fails before the CLI starts. The error names each directory it passed over
+  and says to set `TMPDIR` to a directory only this account can write.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
