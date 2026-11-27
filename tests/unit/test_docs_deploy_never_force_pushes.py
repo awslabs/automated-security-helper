@@ -1,0 +1,1001 @@
+"""A docs deploy never force-pushes gh-pages, and no tag push reaches a job that writes it.
+
+Why this file exists
+--------------------
+A pushed tag runs the workflow files of the commit it points at, not main's. On
+2026-11-12 a tag push reached a commit whose ``ash-repo-docs.yml`` still triggered on
+every tag and ran ``mkdocs gh-deploy --clean --force``. ``gh-deploy`` builds one
+unversioned site and force-pushes it to gh-pages as a commit with no parent, so the
+released versions and the ``latest`` alias disappeared from the published site.
+
+Main's copy of that file no longer has the shape: it runs on pushes to main only, its
+deploy job admits only a push to main, and it publishes through
+``scripts/docs_versions.py``, which adds one version with mike and pushes without
+force. Nothing, though, kept a later change from bringing the shape back. Commits that
+already carry the old copy cannot be edited, and a ruleset on gh-pages that refuses
+non-fast-forward updates is a repository setting, not a file this suite can read; the
+releases page of the contributing guide says what to do about both.
+
+What it asserts
+---------------
+For every file under ``.github/workflows/``, read with ``tests/utils/github_actions.py``:
+
+1. No step runs ``mkdocs gh-deploy`` or ``ghp-import``. Each replaces the whole branch
+   with one build.
+2. No step pushes gh-pages with a force spelling: ``--force``, ``-f``,
+   ``--force-with-lease`` or a ``+`` refspec. A push that names another branch is not
+   a push of gh-pages. A push whose branch the text does not name is read as one that
+   could be.
+3. No job that can write gh-pages is reachable from a ``push`` trigger on tags. A job
+   can when its token can write repository contents (``contents: write``, or no
+   permissions declared, so the repository default applies) or when one of its steps
+   publishes the site. Triggers, ``if:`` conditions and calls of local reusable
+   workflows are evaluated, so moving the deploy into another file, or narrowing a
+   tag filter, changes the answer the way it changes what GitHub runs.
+
+Rules 1 and 2 also read the steps of the local composite actions under
+``.github/actions/``, since a workflow can call one.
+
+How each rule is shown to fail
+------------------------------
+* ``OLD_COPY`` is the workflow file as it was at the v3.7.1 release commit, its git
+  blob id pinned. It is planted in ``tmp_path`` and read with the same loader as the
+  real files. It breaks all three rules, and each rule reports it with a message of
+  its own.
+* Planted workflows break one rule each, in several spellings. Dropping a rule from
+  ``RULES`` leaves its cases unreported, and the tests that expect them go red.
+* The same shapes made safe, and every real workflow and composite action, break no
+  rule. A push to main still reaches the real deploy job, which shows the checks read
+  something.
+
+What it does not cover
+----------------------
+* A publisher reached through a script, a Makefile target or a third-party action. A
+  job that calls one is still caught by rule 3 when its token can write.
+* A reusable workflow named by repository and ref instead of by local path.
+* A deletion of gh-pages (``git push --delete``), which no rule here reads.
+* Tag names. Triggers are evaluated for a fixed set of names and for names built from
+  the workflow's own tag filters, so an unusual filter may need a name added.
+* Anything outside the repository, such as a ruleset on gh-pages.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import shlex
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+from tests.utils import github_actions as ga
+
+pytestmark = pytest.mark.unit
+
+REPO = "awslabs/automated-security-helper"
+DOCS_WORKFLOW = "ash-repo-docs.yml"
+
+#: The rules, by name. A violation carries one of these.
+NO_BRANCH_REPLACING_PUBLISHER = "no-branch-replacing-publisher"
+NO_FORCE_PUSH = "no-force-push"
+NO_TAG_REACHABLE_WRITER = "no-tag-reachable-writer"
+
+#: Tag names a push is tried with, besides the names built from a workflow's own tag
+#: filters: a floating major, a release, a prerelease, a word, a name with a slash.
+TAG_PROBES = ("v3", "v3.8.0", "v4.0.0-rc.1", "docs-preview", "release/1.0", "latest")
+
+#: How many calls of local reusable workflows are followed.
+MAX_CALL_DEPTH = 4
+
+#: ``.github/workflows/ash-repo-docs.yml`` as it was at the v3.7.1 release commit
+#: (af1206aff596f1288ad066828058b3011de2a998), and the git blob id of that file. A
+#: test below hashes the text, so the planted file is that file and not a likeness.
+OLD_COPY_BLOB = "301767fe4f75f5d93433b01d1dcf701654eeb5b4"
+OLD_COPY = """\
+name: Docs Build & Deploy
+on:
+  push:
+    branches:
+      - "*"
+    tags:
+      - "*"
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch: {}
+env:
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict, and push/tag runs feed docs and releases.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-docs:
+    name: Build documentation
+    needs: []
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Build documentation
+        run: uv run mkdocs build --clean
+
+  deploy-docs:
+    name: Deploy documentation
+    needs: []
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      #checkov:skip=CKV2_GHA_1:The permissions are not set to write-all at the top-level, or any level
+      contents: write
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Deploy documentation
+        run: uv run mkdocs gh-deploy --clean --force
+"""
+
+
+# --------------------------------------------------------------------------- shapes
+
+
+@dataclass(frozen=True)
+class Violation:
+    rule: str
+    where: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"[{self.rule}] {self.where}: {self.message}"
+
+
+@dataclass(frozen=True)
+class Step:
+    """One ``run:`` step, with where it sits for a message."""
+
+    where: str
+    run: str
+
+
+@dataclass(frozen=True)
+class Unit:
+    """A file the rules read: a workflow, or a local composite action (no workflow)."""
+
+    name: str
+    steps: tuple[Step, ...]
+    workflow: ga.Workflow | None
+    root: Path
+
+
+@dataclass(frozen=True)
+class ReachedJob:
+    """A job an event starts, with what its token can do once its callers have capped it."""
+
+    workflow: str
+    job_id: str
+    steps: tuple[Step, ...]
+    token_can_write: bool
+    via: tuple[str, ...]
+
+
+# --------------------------------------------------------------------------- shell
+
+_SEPARATOR = re.compile(r"&&|\|\||[;|&]")
+_GROUPING = re.compile(r"[()`]")
+_SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
+_GIT_OPTIONS_WITH_A_VALUE = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+)
+
+#: ``gh-deploy`` is mkdocs' command, and ``gh_deploy`` its module; ``ghp-import`` is the
+#: package it wraps, and ``ghp_import`` the module. Both build one site and replace
+#: the whole branch with it.
+_BRANCH_REPLACING_PUBLISHER = re.compile(
+    r"(?<![\w-])(?:gh[-_]deploy|ghp[-_]import)(?![\w-])"
+)
+
+#: Commands that add or change a version of the site without replacing the branch.
+_PUBLISHES_DOCS = re.compile(
+    r"docs_versions\.py\s+deploy\b"
+    r"|\bmike\s+(?:deploy|delete|alias|retitle|set-default|rename)\b"
+)
+
+
+def _strip_comment(line: str) -> str:
+    """The line without a shell comment: a ``#`` that opens a word outside quotes."""
+    quote = ""
+    skip = False
+    for position, char in enumerate(line):
+        if skip:
+            skip = False
+        elif char == "\\" and quote != "'":
+            skip = True
+        elif quote:
+            if char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and (position == 0 or line[position - 1] in " \t;&|("):
+            return line[:position]
+    return line
+
+
+def _logical_lines(script: str) -> list[str]:
+    """The script's lines with comments dropped and backslash continuations joined."""
+    lines: list[str] = []
+    pending = ""
+    for raw in script.splitlines():
+        line = pending + _strip_comment(raw)
+        pending = ""
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            pending = stripped[:-1] + " "
+        else:
+            lines.append(line)
+    if pending:
+        lines.append(pending)
+    return lines
+
+
+def _words(segment: str) -> list[str]:
+    try:
+        return shlex.split(segment)
+    except ValueError:
+        return segment.split()
+
+
+def _commands(script: str) -> list[list[str]]:
+    """Every command of a script as its words. A script a shell runs with -c is read too."""
+    commands: list[list[str]] = []
+    for line in _logical_lines(script):
+        for segment in _SEPARATOR.split(line):
+            words = _words(_GROUPING.sub(" ", segment))
+            if not words:
+                continue
+            commands.append(words)
+            if "-c" in words and any(Path(word).name in _SHELLS for word in words):
+                position = words.index("-c") + 1
+                if position < len(words):
+                    commands.extend(_commands(words[position]))
+    return commands
+
+
+def _git_push_args(words: list[str]) -> list[str] | None:
+    """The words after ``git push``, or None when the command is not a push."""
+    for index, word in enumerate(words):
+        if Path(word).name != "git":
+            continue
+        position = index + 1
+        while position < len(words) and words[position].startswith("-"):
+            position += 2 if words[position] in _GIT_OPTIONS_WITH_A_VALUE else 1
+        if position < len(words) and words[position] == "push":
+            return words[position + 1 :]
+    return None
+
+
+def _short_options_include(word: str, letter: str) -> bool:
+    """Whether ``word`` is short options, such as ``-f`` or ``-fu``, that include ``letter``."""
+    return re.fullmatch(r"-[A-Za-z]+", word) is not None and letter in word
+
+
+def _forces_git_push(arguments: list[str]) -> bool:
+    return any(
+        word.startswith("--force")
+        or _short_options_include(word, "f")
+        or (word.startswith("+") and len(word) > 1)
+        for word in arguments
+    )
+
+
+def _may_name_gh_pages(refspec: str) -> bool:
+    """Whether a refspec's destination is gh-pages, or cannot be told from its text."""
+    destination = refspec.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/")
+    return destination == "gh-pages" or "$" in destination
+
+
+def _may_push_gh_pages(arguments: list[str]) -> bool:
+    """Whether a ``git push`` can update gh-pages.
+
+    It can when it names the branch, pushes every branch, or does not name one: the
+    first word that is not an option is the remote, and the words after it are
+    refspecs.
+    """
+    if "--all" in arguments or "--mirror" in arguments:
+        return True
+    positional = [word for word in arguments if not word.startswith("-")]
+    refspecs = positional[1:]
+    return not refspecs or any(_may_name_gh_pages(refspec) for refspec in refspecs)
+
+
+def _forces_a_gh_pages_push(words: list[str]) -> bool:
+    """Whether one command pushes gh-pages with a force spelling."""
+    if any(re.fullmatch(r"gh[-_]deploy", word) for word in words):
+        return "--force" in words
+    if any(re.fullmatch(r"ghp[-_]import", Path(word).name) for word in words):
+        return any(
+            word == "--force" or _short_options_include(word, "f") for word in words
+        )
+    arguments = _git_push_args(words)
+    return (
+        arguments is not None
+        and _forces_git_push(arguments)
+        and _may_push_gh_pages(arguments)
+    )
+
+
+def _publishes(run: str) -> bool:
+    """Whether a step's script publishes the docs site, or pushes a branch that may be it."""
+    for line in _logical_lines(run):
+        if _BRANCH_REPLACING_PUBLISHER.search(line) or _PUBLISHES_DOCS.search(line):
+            return True
+    for words in _commands(run):
+        arguments = _git_push_args(words)
+        if arguments is not None and _may_push_gh_pages(arguments):
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------- triggers
+
+
+def _push(ref: str, ref_type: str) -> dict[str, Any]:
+    return ga.base_context(
+        event_name="push",
+        ref=ref,
+        ref_name=ref.split("/", 2)[2],
+        ref_type=ref_type,
+        repository=REPO,
+        repository_owner=REPO.split("/")[0],
+        event={"repository": {"default_branch": "main", "full_name": REPO}},
+    )
+
+
+def _tag_push(name: str) -> dict[str, Any]:
+    return _push(f"refs/tags/{name}", "tag")
+
+
+def _branch_push(name: str) -> dict[str, Any]:
+    return _push(f"refs/heads/{name}", "branch")
+
+
+def _example_name(pattern: str) -> str | None:
+    """A tag name the push filter ``pattern`` admits: its wildcards filled in."""
+    if pattern.startswith("!"):
+        return None
+    name = re.sub(r"\[([^\]])[^\]]*\]", r"\1", pattern)
+    name = re.sub(r"\*+", "x", name)
+    return name.replace("?", "").replace("+", "")
+
+
+def _tag_names(workflow: ga.Workflow) -> list[str]:
+    """The tag names to push: the probes, then one built from each of the tag filters."""
+    names = list(TAG_PROBES)
+    config = workflow.on.get("push")
+    patterns = config.get("tags") if isinstance(config, dict) else None
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    for pattern in patterns or []:
+        name = _example_name(str(pattern))
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _allows_write(permissions: dict[str, str] | None) -> bool:
+    """Whether declared permissions leave the token able to write contents.
+
+    Nothing declared leaves the repository's default, which may be write.
+    """
+    return permissions is None or permissions.get("contents") == "write"
+
+
+def _run_steps(label: str, steps: Any) -> list[Step]:
+    found: list[Step] = []
+    for number, step in enumerate(steps or [], start=1):
+        if isinstance(step, dict) and isinstance(step.get("run"), str):
+            name = step.get("name") or f"step {number}"
+            found.append(Step(f"{label}, step {name!r}", step["run"]))
+    return found
+
+
+def _local_callee(job: dict[str, Any], root: Path) -> ga.Workflow | None:
+    """The workflow a job calls by a path in this repository, if it calls one."""
+    uses = str(job.get("uses") or "")
+    if not uses.startswith("./"):
+        return None
+    path = root / uses.removeprefix("./")
+    return ga.load_workflow(path) if path.is_file() else None
+
+
+def _call_context(
+    job: dict[str, Any], callee: ga.Workflow, context: dict[str, Any]
+) -> dict[str, Any]:
+    """The context a called workflow sees: the caller's, plus the inputs of the call."""
+    try:
+        return ga.with_inputs(context, ga.call_inputs(job, callee, context))
+    except ga.ExpressionError:
+        return context
+
+
+def _reached_jobs(
+    workflow: ga.Workflow,
+    context: dict[str, Any],
+    root: Path,
+    *,
+    caller_may_write: bool = True,
+    via: tuple[str, ...] = (),
+) -> list[ReachedJob]:
+    """The jobs that start when the event in ``context`` starts ``workflow``.
+
+    A job that calls a workflow of this repository stands for that workflow's jobs,
+    which can write only if the calling job lets them.
+    """
+    scoped = dict(context)
+    scoped["needs"] = {
+        job_id: {"result": "success", "outputs": {}} for job_id in workflow.jobs
+    }
+    reached: list[ReachedJob] = []
+    for job_id, job in workflow.jobs.items():
+        if not ga.job_runs(job, scoped):
+            continue
+        may_write = caller_may_write and _allows_write(
+            ga.job_permissions(workflow, job)
+        )
+        label = f"{workflow.name}: job {job_id!r}"
+        callee = _local_callee(job, root)
+        if callee is not None and len(via) < MAX_CALL_DEPTH:
+            reached += _reached_jobs(
+                callee,
+                _call_context(job, callee, scoped),
+                root,
+                caller_may_write=may_write,
+                via=(*via, label),
+            )
+            continue
+        steps = tuple(_run_steps(label, job.get("steps")))
+        reached.append(ReachedJob(workflow.name, job_id, steps, may_write, via))
+    return reached
+
+
+def _writes_gh_pages(job: ReachedJob) -> str | None:
+    """Why the job can write gh-pages, or None when it cannot."""
+    if job.token_can_write:
+        return "its token can write repository contents"
+    for step in job.steps:
+        if _publishes(step.run):
+            return f"it publishes the site: {step.where}"
+    return None
+
+
+# --------------------------------------------------------------------------- the rules
+
+
+def _check_publishers(unit: Unit) -> list[Violation]:
+    found: list[Violation] = []
+    for step in unit.steps:
+        for line in _logical_lines(step.run):
+            match = _BRANCH_REPLACING_PUBLISHER.search(line)
+            if match:
+                found.append(
+                    Violation(
+                        NO_BRANCH_REPLACING_PUBLISHER,
+                        step.where,
+                        f"runs {match.group(0)!r}, which replaces the whole gh-pages "
+                        "branch with one build and drops every published version; "
+                        "publish with scripts/docs_versions.py deploy instead",
+                    )
+                )
+                break
+    return found
+
+
+def _check_force_pushes(unit: Unit) -> list[Violation]:
+    found: list[Violation] = []
+    for step in unit.steps:
+        for words in _commands(step.run):
+            if _forces_a_gh_pages_push(words):
+                found.append(
+                    Violation(
+                        NO_FORCE_PUSH,
+                        step.where,
+                        f"force-pushes gh-pages with `{' '.join(words)}`; a push that "
+                        "is not a fast-forward discards the branch's history, and "
+                        "every published version with it",
+                    )
+                )
+    return found
+
+
+def _check_tag_reachable_writers(unit: Unit) -> list[Violation]:
+    workflow = unit.workflow
+    if workflow is None:
+        return []
+    found: list[Violation] = []
+    seen: set[tuple[str, str, tuple[str, ...]]] = set()
+    for name in _tag_names(workflow):
+        context = _tag_push(name)
+        if not ga.triggers(workflow, context):
+            continue
+        for job in _reached_jobs(workflow, context, unit.root):
+            reason = _writes_gh_pages(job)
+            key = (job.workflow, job.job_id, job.via)
+            if reason is None or key in seen:
+                continue
+            seen.add(key)
+            where = f"{job.workflow}: job {job.job_id!r}"
+            if job.via:
+                where += f", called from {' > '.join(job.via)}"
+            found.append(
+                Violation(
+                    NO_TAG_REACHABLE_WRITER,
+                    where,
+                    f"can write gh-pages ({reason}), and a push of the tag {name!r} "
+                    "starts it; no tag push may reach a job that can write the "
+                    "published docs",
+                )
+            )
+    return found
+
+
+RULES = (
+    _check_publishers,
+    _check_force_pushes,
+    _check_tag_reachable_writers,
+)
+
+
+def violations(unit: Unit) -> list[Violation]:
+    found: list[Violation] = []
+    for rule in RULES:
+        found += rule(unit)
+    return found
+
+
+# --------------------------------------------------------------------------- files
+
+
+def _workflow_unit(workflow: ga.Workflow, root: Path) -> Unit:
+    steps: list[Step] = []
+    for job_id, job in workflow.jobs.items():
+        steps += _run_steps(f"{workflow.name}: job {job_id!r}", job.get("steps"))
+    return Unit(workflow.name, tuple(steps), workflow, root)
+
+
+def _action_unit(path: Path, root: Path) -> Unit:
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    runs = document.get("runs") if isinstance(document, dict) else None
+    steps = runs.get("steps") if isinstance(runs, dict) else None
+    label = path.relative_to(root).as_posix()
+    return Unit(label, tuple(_run_steps(label, steps)), None, root)
+
+
+WORKFLOW_FILES = sorted(
+    path.name for path in ga.WORKFLOWS_DIR.iterdir() if path.suffix in (".yml", ".yaml")
+)
+ACTION_FILES = sorted(
+    path.relative_to(ga.REPO_ROOT).as_posix()
+    for path in (ga.REPO_ROOT / ".github" / "actions").rglob("action.y*ml")
+)
+
+
+def _describe(found: list[Violation]) -> str:
+    return "\n".join(f"  {violation}" for violation in found)
+
+
+def _rules_broken(workflow: ga.Workflow, root: Path) -> set[str]:
+    return {violation.rule for violation in violations(_workflow_unit(workflow, root))}
+
+
+# --------------------------------------------------------------------------- planting
+
+READ = {"contents": "read"}
+WRITE = {"contents": "write"}
+ON_MAIN = {"push": {"branches": ["main"]}}
+ON_ANY_TAG = {"push": {"tags": ["*"]}}
+DEPLOY = 'uv run python scripts/docs_versions.py deploy --ref "$GITHUB_REF" --push'
+
+
+def _workflow(
+    on: dict[str, Any],
+    run: str = DEPLOY,
+    *,
+    permissions: Any = WRITE,
+    condition: str | None = None,
+) -> dict[str, Any]:
+    """A workflow with one job and one step, as the document a YAML file would hold."""
+    job: dict[str, Any] = {
+        "runs-on": "ubuntu-latest",
+        "steps": [{"name": "Publish", "run": run}],
+    }
+    if condition is not None:
+        job["if"] = condition
+    document: dict[str, Any] = {"name": "Planted", "on": on, "jobs": {"publish": job}}
+    if permissions is not None:
+        document["permissions"] = permissions
+    return document
+
+
+def _plant(
+    directory: Path, document: dict[str, Any], name: str = "planted.yml"
+) -> ga.Workflow:
+    """Write ``document`` as a file and read it back with the repository's loader."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    return ga.load_workflow(path)
+
+
+def _old_copy(tmp_path: Path) -> ga.Workflow:
+    path = tmp_path / DOCS_WORKFLOW
+    path.write_text(OLD_COPY, encoding="utf-8")
+    return ga.load_workflow(path)
+
+
+def _cases(table: dict[str, Any]) -> list[Any]:
+    return [pytest.param(value, id=label) for label, value in table.items()]
+
+
+#: Each of these replaces the branch, and none forces a push.
+PUBLISHER_CASES = {
+    "mkdocs gh-deploy": "uv run mkdocs gh-deploy --clean",
+    "gh-deploy after a global option": "uv run mkdocs --quiet gh-deploy",
+    "gh-deploy through python -m": "python -m mkdocs gh-deploy",
+    "gh-deploy at the end of a chain": (
+        "uv sync && uv run mkdocs build && uv run mkdocs gh-deploy"
+    ),
+    "gh-deploy in a shell string": "bash -c 'uv run mkdocs gh-deploy'",
+    "gh-deploy called from python": (
+        "python -c 'from mkdocs.commands.gh_deploy import gh_deploy'"
+    ),
+    "ghp-import": "ghp-import --push site",
+    "ghp-import as a module": "python -m ghp_import -n -p site",
+    "ghp-import through uvx": "uvx ghp-import -p site",
+}
+
+#: Each of these forces a push of gh-pages with a command other than gh-deploy and
+#: ghp-import, so only the force rule reports it.
+FORCE_CASES = {
+    "--force": "git push --force origin gh-pages",
+    "-f": "git push -f origin HEAD:gh-pages",
+    "--force-with-lease": "git push --force-with-lease origin gh-pages",
+    "--force-with-lease with a value": (
+        "git push --force-with-lease=gh-pages:abc123 origin gh-pages"
+    ),
+    "a clustered -f": "git push -fu origin gh-pages",
+    "a + refspec": "git push origin +HEAD:gh-pages",
+    "a + refspec of the full ref": "git push origin +HEAD:refs/heads/gh-pages",
+    "after a global option": "git -C site push --force origin gh-pages",
+    "after other commands": (
+        "cd site && git add -A && git commit -m 'Deploy #12' "
+        "&& git push -f origin gh-pages"
+    ),
+    "over continued lines": "git push \\\n  --force \\\n  origin gh-pages",
+    "in a subshell": "(cd site && git push --force origin gh-pages)",
+    "in a shell string": "sh -c 'git push --force origin gh-pages'",
+    "to a destination the text does not name": (
+        'git push --force origin "HEAD:${TARGET}"'
+    ),
+    "to no named destination": "git push --force",
+    "of every branch": "git push --force --all origin",
+}
+
+#: gh-deploy and ghp-import with their force spellings break both rules.
+FORCING_PUBLISHER_CASES = {
+    "gh-deploy --force": "uv run mkdocs gh-deploy --clean --force",
+    "ghp-import -f": "ghp-import -p -f site",
+    "ghp-import --force": "ghp-import --push --force site",
+    "ghp-import with clustered options": "ghp-import -pf site",
+}
+
+#: Each of these breaks no rule. The last two show that a comment is not a command.
+CLEAN_CASES = {
+    "the versioned deploy": DEPLOY,
+    "a strict build": "uv run mkdocs build --clean --strict",
+    "serving a preview": "uv run mkdocs serve --no-strict",
+    "a build with a config file": "uv run mkdocs build -f mkdocs.yml",
+    "a plain push of gh-pages": "git push origin gh-pages",
+    "a plain push of the current branch": 'git push -u origin "$BRANCH"',
+    "a forced push of another branch": "git push --force origin refs/heads/preview",
+    "a force flag on another tool": "docker image prune --all --force",
+    "a comment line naming the old command": (
+        "# never run mkdocs gh-deploy --force\nuv run mkdocs build"
+    ),
+    "a trailing comment naming it": "uv run mkdocs build  # not mkdocs gh-deploy --force",
+}
+
+#: Each of these starts a job that publishes the site on a tag push.
+TAG_REACHABLE_CASES = {
+    "every tag": {"on": ON_ANY_TAG},
+    "release tags": {"on": {"push": {"tags": ["v*"]}}},
+    "a tag shape of its own": {"on": {"push": {"tags": ["rel-*"]}}},
+    "a tag shape with a slash": {"on": {"push": {"tags": ["build/**"]}}},
+    "tags beside branches": {"on": {"push": {"branches": ["main"], "tags": ["*"]}}},
+    "a push with no filter": {"on": {"push": None}},
+    "a push filtered by path": {"on": {"push": {"paths": ["docs/**"]}}},
+    "every tag but one": {"on": {"push": {"tags-ignore": ["v3"]}}},
+    "a condition that admits any push": {
+        "on": ON_ANY_TAG,
+        "condition": "github.event_name == 'push'",
+    },
+    "a condition that names tag refs": {
+        "on": ON_ANY_TAG,
+        "condition": "startsWith(github.ref, 'refs/tags/')",
+    },
+    "no permissions declared": {"on": ON_ANY_TAG, "permissions": None},
+}
+
+#: Each of these publishes the site and is reached by no tag push, or is reached by
+#: one and cannot write.
+TAG_UNREACHABLE_CASES = {
+    "pushes to main only": {"on": ON_MAIN},
+    "manual and called runs only": {
+        "on": {"workflow_dispatch": None, "workflow_call": None}
+    },
+    "a tag trigger, and a job that admits main only": {
+        "on": ON_ANY_TAG,
+        "condition": "github.ref == 'refs/heads/main'",
+    },
+    "a tag trigger, and a job that cannot write": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "uv run mkdocs build --strict",
+    },
+}
+
+
+def _call_tree(
+    root: Path,
+    caller_on: dict[str, Any],
+    *,
+    caller_permissions: dict[str, str],
+    callee_permissions: dict[str, str],
+    callee_run: str,
+) -> ga.Workflow:
+    """A caller and the reusable workflow it calls, planted under ``root``."""
+    workflows = root / ".github" / "workflows"
+    callee = _workflow({"workflow_call": None}, callee_run, permissions=None)
+    callee["jobs"]["publish"]["permissions"] = callee_permissions
+    _plant(workflows, callee, "deploy.yml")
+    caller = {
+        "name": "Caller",
+        "on": caller_on,
+        "jobs": {
+            "call": {
+                "uses": "./.github/workflows/deploy.yml",
+                "permissions": caller_permissions,
+            }
+        },
+    }
+    return _plant(workflows, caller, "caller.yml")
+
+
+# --------------------------------------------------------------------------- tests
+
+
+class TestTheWorkflowAtTheV371Commit:
+    """The file that ran on 2026-11-12, planted and read like any workflow."""
+
+    def test_the_planted_text_is_that_file(self):
+        data = OLD_COPY.encode("utf-8")
+        blob = hashlib.sha1(
+            b"blob %d\0" % len(data) + data, usedforsecurity=False
+        ).hexdigest()
+        assert blob == OLD_COPY_BLOB, (
+            f"the planted text hashes to the git blob {blob} ({len(data)} bytes), not "
+            f"to {OLD_COPY_BLOB}, the file at the v3.7.1 release commit"
+        )
+
+    def test_it_breaks_the_rule_against_branch_replacing_publishers(self, tmp_path):
+        found = violations(_workflow_unit(_old_copy(tmp_path), tmp_path))
+        publishers = [v for v in found if v.rule == NO_BRANCH_REPLACING_PUBLISHER]
+        assert len(publishers) == 1, _describe(found)
+        assert "Deploy documentation" in publishers[0].where
+        assert "'gh-deploy'" in publishers[0].message
+
+    def test_it_breaks_the_rule_against_force_pushes(self, tmp_path):
+        found = violations(_workflow_unit(_old_copy(tmp_path), tmp_path))
+        forced = [v for v in found if v.rule == NO_FORCE_PUSH]
+        assert len(forced) == 1, _describe(found)
+        assert "mkdocs gh-deploy --clean --force" in forced[0].message
+
+    def test_it_breaks_the_rule_against_tag_reachable_writers(self, tmp_path):
+        found = violations(_workflow_unit(_old_copy(tmp_path), tmp_path))
+        writers = [v for v in found if v.rule == NO_TAG_REACHABLE_WRITER]
+        assert len(writers) == 1, _describe(found)
+        assert "'deploy-docs'" in writers[0].where
+        assert "a push of the tag" in writers[0].message
+
+    def test_each_rule_reports_it_once_with_a_message_of_its_own(self, tmp_path):
+        found = violations(_workflow_unit(_old_copy(tmp_path), tmp_path))
+        assert len(found) == 3, _describe(found)
+        assert {v.rule for v in found} == {
+            NO_BRANCH_REPLACING_PUBLISHER,
+            NO_FORCE_PUSH,
+            NO_TAG_REACHABLE_WRITER,
+        }
+        assert len({v.message for v in found}) == 3
+
+    def test_a_tag_push_starts_its_deploy_job(self, tmp_path):
+        """The shape itself: the trigger takes the tag and the job's condition admits it."""
+        workflow = _old_copy(tmp_path)
+        context = _tag_push("v3")
+        assert ga.triggers(workflow, context)
+        started = [job.job_id for job in _reached_jobs(workflow, context, tmp_path)]
+        assert "deploy-docs" in started
+
+
+class TestEachRuleFlagsItsOwnShape:
+    @pytest.mark.parametrize("command", _cases(PUBLISHER_CASES))
+    def test_a_branch_replacing_publisher_breaks_that_rule_alone(
+        self, tmp_path, command
+    ):
+        workflow = _plant(tmp_path, _workflow(ON_MAIN, command, permissions=READ))
+        assert _rules_broken(workflow, tmp_path) == {NO_BRANCH_REPLACING_PUBLISHER}
+
+    @pytest.mark.parametrize("command", _cases(FORCE_CASES))
+    def test_a_forced_push_of_gh_pages_breaks_that_rule_alone(self, tmp_path, command):
+        workflow = _plant(tmp_path, _workflow(ON_MAIN, command, permissions=READ))
+        assert _rules_broken(workflow, tmp_path) == {NO_FORCE_PUSH}
+
+    @pytest.mark.parametrize("command", _cases(FORCING_PUBLISHER_CASES))
+    def test_a_publisher_that_forces_its_push_breaks_both_rules(
+        self, tmp_path, command
+    ):
+        workflow = _plant(tmp_path, _workflow(ON_MAIN, command, permissions=READ))
+        assert _rules_broken(workflow, tmp_path) == {
+            NO_BRANCH_REPLACING_PUBLISHER,
+            NO_FORCE_PUSH,
+        }
+
+    @pytest.mark.parametrize("shape", _cases(TAG_REACHABLE_CASES))
+    def test_a_tag_push_that_starts_a_publishing_job_breaks_that_rule_alone(
+        self, tmp_path, shape
+    ):
+        workflow = _plant(tmp_path, _workflow(**shape))
+        assert _rules_broken(workflow, tmp_path) == {NO_TAG_REACHABLE_WRITER}
+
+    def test_a_local_composite_action_is_read_by_the_first_two_rules(self, tmp_path):
+        action = tmp_path / ".github" / "actions" / "deploy" / "action.yml"
+        action.parent.mkdir(parents=True)
+        steps = [{"run": "uv run mkdocs gh-deploy --clean --force", "shell": "bash"}]
+        document = {"name": "Deploy", "runs": {"using": "composite", "steps": steps}}
+        action.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        found = violations(_action_unit(action, tmp_path))
+        assert {v.rule for v in found} == {
+            NO_BRANCH_REPLACING_PUBLISHER,
+            NO_FORCE_PUSH,
+        }
+
+    def test_a_tag_push_reaches_a_publisher_called_from_another_workflow(
+        self, tmp_path
+    ):
+        caller = _call_tree(
+            tmp_path,
+            ON_ANY_TAG,
+            caller_permissions=WRITE,
+            callee_permissions=WRITE,
+            callee_run=DEPLOY,
+        )
+        found = violations(_workflow_unit(caller, tmp_path))
+        assert [v.rule for v in found] == [NO_TAG_REACHABLE_WRITER], _describe(found)
+        assert "deploy.yml" in found[0].where
+        assert "caller.yml" in found[0].where
+
+
+class TestTheSafeShapesBreakNoRule:
+    @pytest.mark.parametrize("command", _cases(CLEAN_CASES))
+    def test_a_command_that_is_none_of_the_three_shapes(self, tmp_path, command):
+        workflow = _plant(tmp_path, _workflow(ON_MAIN, command))
+        found = violations(_workflow_unit(workflow, tmp_path))
+        assert not found, _describe(found)
+
+    @pytest.mark.parametrize("shape", _cases(TAG_UNREACHABLE_CASES))
+    def test_a_publisher_no_tag_push_reaches(self, tmp_path, shape):
+        workflow = _plant(tmp_path, _workflow(**shape))
+        found = violations(_workflow_unit(workflow, tmp_path))
+        assert not found, _describe(found)
+
+    def test_a_publisher_called_only_from_a_push_to_main(self, tmp_path):
+        caller = _call_tree(
+            tmp_path,
+            ON_MAIN,
+            caller_permissions=WRITE,
+            callee_permissions=WRITE,
+            callee_run=DEPLOY,
+        )
+        found = violations(_workflow_unit(caller, tmp_path))
+        assert not found, _describe(found)
+
+    def test_a_called_job_cannot_write_more_than_its_caller_allows(self, tmp_path):
+        caller = _call_tree(
+            tmp_path,
+            ON_ANY_TAG,
+            caller_permissions=READ,
+            callee_permissions=WRITE,
+            callee_run="echo nothing is published",
+        )
+        found = violations(_workflow_unit(caller, tmp_path))
+        assert not found, _describe(found)
+
+
+class TestTheRealFiles:
+    @pytest.mark.parametrize("name", WORKFLOW_FILES)
+    def test_a_real_workflow_breaks_no_rule(self, name):
+        workflow = ga.load_workflow(ga.WORKFLOWS_DIR / name)
+        found = violations(_workflow_unit(workflow, ga.REPO_ROOT))
+        assert not found, f"{name} breaks a rule:\n{_describe(found)}"
+
+    @pytest.mark.parametrize("relative", ACTION_FILES)
+    def test_a_real_composite_action_breaks_no_rule(self, relative):
+        found = violations(_action_unit(ga.REPO_ROOT / relative, ga.REPO_ROOT))
+        assert not found, f"{relative} breaks a rule:\n{_describe(found)}"
+
+    def test_the_controls_read_the_docs_workflow(self):
+        assert DOCS_WORKFLOW in WORKFLOW_FILES
+        assert len(WORKFLOW_FILES) > 1
+
+    def test_a_push_to_main_reaches_the_real_publisher_and_no_tag_push_does(self):
+        """The control: the checks above read a deploy job, and it is reached by main."""
+        workflow = ga.load_workflow(ga.WORKFLOWS_DIR / DOCS_WORKFLOW)
+        reached = _reached_jobs(workflow, _branch_push("main"), ga.REPO_ROOT)
+        writers = [job for job in reached if _writes_gh_pages(job) is not None]
+        assert writers, (
+            "a push to main no longer reaches a job that can write gh-pages, so the "
+            "checks against tag pushes would compare nothing"
+        )
+        assert any(_publishes(step.run) for job in writers for step in job.steps), (
+            "no step of the job that main's push starts is recognized as publishing "
+            "the site, so the publisher check would pass whatever it ran"
+        )
+        for name in _tag_names(workflow):
+            assert not ga.triggers(workflow, _tag_push(name)), (
+                f"a push of the tag {name!r} starts {DOCS_WORKFLOW}, whose deploy "
+                "job holds a token that can write gh-pages"
+            )
