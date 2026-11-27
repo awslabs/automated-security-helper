@@ -1526,10 +1526,13 @@ def test_a_loader_name_past_the_end_of_the_file_reads_unknown(tmp_path):
 
 
 def test_a_file_that_the_first_read_holds_whole_is_not_read_again(tmp_path):
+    # The file is 201 bytes, shorter than the first read, and its header puts the name
+    # 114,800 bytes in: a read of more bytes could not find any.
     asked: list[tuple[str, int]] = []
-    cut = _WHOLE_ELF[:-8]
-    reading = read(with_executable(linux_host(tmp_path), cut, asked=asked))
+    short = patched(_WHOLE_ELF, 128, 114_800, 8)
+    reading = read(with_executable(linux_host(tmp_path), short, asked=asked))
     assert reading.libc == UNKNOWN
+    assert reading.failed == ()
     assert asked == [(PLANTED_PATH, 4096)]
 
 
