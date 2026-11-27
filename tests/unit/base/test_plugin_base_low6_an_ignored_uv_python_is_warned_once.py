@@ -1,12 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A ``UV_PYTHON`` inside the scanned tree is ignored with one warning per plugin.
+"""A ``UV_PYTHON`` inside the scanned tree is ignored with one warning in a process.
 
 ``_run_subprocess`` drops a ``UV_PYTHON`` that names an interpreter inside the
-scanned tree before the child starts. That was said at debug level, where an
-operator whose variable was not honored never saw it. It is now a warning, said
-once for a plugin and not once for each tool run, and it does not show the value.
+scanned tree before the child starts. It says so at warning level, without the
+value, in the warning the uv runner names each variable it does not pass to uv in
+(``uv_tool_runner._warn_of_a_variable_left_out``). That warning is said once in a
+process for each variable and reason, so two runs, two plugins, and a run followed
+by a judgment of the same value on another route say it once between them. What
+was said is forgotten by ``_reset_uv_tool_runner_caches``, which each test here
+calls before and after it runs.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils import subprocess_utils, uv_tool_runner
 from automated_security_helper.utils.log import ASH_LOGGER
 
 pytestmark = pytest.mark.unit
@@ -34,7 +38,9 @@ PluginContext.model_rebuild()
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
 
-SAID = "Ignoring a UV_PYTHON"
+# How the uv runner's warning for a variable it does not pass to uv starts, for
+# this variable; the reason follows it.
+SAID = "UV_PYTHON is not passed to uv"
 
 
 class _Config(ScannerPluginConfigBase):
@@ -71,6 +77,15 @@ def _run(scanner: _Scanner, results: Path, env: Optional[Dict[str, str]]) -> Non
         scanner._run_subprocess(
             command=["uv", "pip", "list"], results_dir=results, env=env
         )
+
+
+@pytest.fixture(autouse=True)
+def forget_what_was_said():
+    """The uv variables already warned of are remembered for the process, so each
+    test starts and ends with none remembered."""
+    uv_tool_runner._reset_uv_tool_runner_caches()
+    yield
+    uv_tool_runner._reset_uv_tool_runner_caches()
 
 
 @pytest.fixture
@@ -122,7 +137,7 @@ def test_the_warning_does_not_show_the_value(tmp_path, logged):
     assert ".venv" not in said[0][1], said
 
 
-def test_another_plugin_says_it_again(tmp_path, logged):
+def test_two_plugins_give_one_warning_between_them(tmp_path, logged):
     first, first_source = _scanner(tmp_path, "one")
     second, second_source = _scanner(tmp_path, "two")
 
@@ -137,7 +152,28 @@ def test_another_plugin_says_it_again(tmp_path, logged):
         {"UV_PYTHON": str(second_source / ".venv" / "bin" / "python")},
     )
 
-    assert len(_said(logged)) == 2, logged
+    # Each value is a path inside its plugin's tree: one reason, said once.
+    assert len(_said(logged)) == 1, logged
+
+
+def test_a_run_and_a_later_judgment_of_the_same_value_name_it_in_one_line(
+    tmp_path, logged
+):
+    scanner, source = _scanner(tmp_path, "one")
+    value = str(source / ".venv" / "bin" / "python")
+
+    _run(scanner, tmp_path / "results", {"PATH": "/usr/bin", "UV_PYTHON": value})
+    left = uv_tool_runner.without_tree_uv_files({"UV_PYTHON": value}, (source,))
+
+    # The uv runner's filter leaves the same value out too, for the same reason (a
+    # path inside the tree), and says nothing more: one line names it in all.
+    names = set(left)
+    assert "UV_PYTHON" not in names, names
+    naming = [text for _, text in logged if "UV_PYTHON" in text]
+    assert len(naming) == 1, naming
+    # Control: the filter passes on a value outside the tree.
+    kept = {"UV_PYTHON": str(tmp_path / "elsewhere" / "bin" / "python")}
+    assert uv_tool_runner.without_tree_uv_files(dict(kept), (source,)) == kept
 
 
 def test_a_variable_outside_the_tree_is_kept_and_nothing_is_said(tmp_path, logged):

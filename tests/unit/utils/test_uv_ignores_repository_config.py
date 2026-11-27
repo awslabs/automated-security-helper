@@ -1512,8 +1512,9 @@ def test_the_probes_drop_a_uv_path_inside_the_scanned_tree_by_its_absolute_path(
     assert len(runs) == 3, spawns.runs
     for run in runs:
         env = _effective(run["env"])
-        assert "UV_CONFIG_FILE" not in env, run["command"]
-        assert "UV_FIND_LINKS" not in env, run["command"]
+        names = set(env)
+        assert "UV_CONFIG_FILE" not in names, run["command"]
+        assert "UV_FIND_LINKS" not in names, run["command"]
         # Control: a URL names nothing in the tree.
         assert env.get("UV_INDEX_URL") == "https://mirror.invalid/simple", run[
             "command"
@@ -1545,8 +1546,9 @@ def test_the_nbconvert_route_drops_a_uv_path_inside_the_source_or_the_output_dir
     assert runs, spawns.runs
     for run in runs:
         env = _effective(run["env"])
-        assert "UV_CONFIG_FILE" not in env, run["command"]
-        assert "UV_CONSTRAINT" not in env, run["command"]
+        names = set(env)
+        assert "UV_CONFIG_FILE" not in names, run["command"]
+        assert "UV_CONSTRAINT" not in names, run["command"]
         # Control: a URL names nothing in either directory.
         assert env.get("UV_FIND_LINKS") == "https://mirror.invalid/wheels/", run[
             "command"
@@ -1574,8 +1576,9 @@ def test_uv_tool_install_and_list_started_in_the_checkout_get_no_uv_path_the_tre
     assert installs and listings, spawns.runs
     for run in [*installs, *listings]:
         env = _effective(run["env"])
+        names = set(env)
         for name in ("UV_CONFIG_FILE", "UV_ENV_FILE", "UV_CONSTRAINT", "UV_FIND_LINKS"):
-            assert name not in env, (name, run["command"])
+            assert name not in names, (name, run["command"])
         # Control: a URL names nothing in the tree.
         assert env.get("UV_INDEX_URL") == "https://mirror.invalid/simple", run[
             "command"
@@ -1642,9 +1645,9 @@ def _assert_guarddog_run_got_no_tree_uv_path(runs: List[dict], src: Path):
         # run's own working directory is no root that covers the tree.
         assert run["cwd"] is not None, run["command"]
         assert not Path(run["cwd"]).is_relative_to(src), run["cwd"]
-        env = _effective(run["env"])
-        assert "UV_CONFIG_FILE" not in env, run["command"]
-        assert "UV_CONSTRAINT" not in env, run["command"]
+        names = set(_effective(run["env"]))
+        assert "UV_CONFIG_FILE" not in names, run["command"]
+        assert "UV_CONSTRAINT" not in names, run["command"]
 
 
 @pytest.mark.unit
@@ -1905,9 +1908,10 @@ def test_ash_dependencies_install_drops_a_uv_path_inside_the_source_tree(
     assert dependencies.run_command(list(spelling)) == 0
     [env] = started
     child = _effective(env)
+    names = set(child)
     # The tree fixture names its .env by a relative path, too.
     for name in ("UV_CONFIG_FILE", "UV_FIND_LINKS", "UV_ENV_FILE"):
-        assert name not in child, name
+        assert name not in names, name
     # Controls: the operator's own values reach uv.
     assert child.get("UV_CONSTRAINT") == operator
     assert child.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
@@ -1946,8 +1950,9 @@ def test_every_command_ash_dependencies_install_runs_drops_a_uv_path_in_the_tree
     assert dependencies.run_command(list(command), shell=shell) == 0
     [env] = started
     child = _effective(env)
+    names = set(child)
     for name in ("UV_CONFIG_FILE", "UV_FIND_LINKS", "UV_ENV_FILE"):
-        assert name not in child, name
+        assert name not in names, name
     # Controls: the operator's own values are passed on.
     assert child.get("UV_CONSTRAINT") == operator
     assert child.get("UV_INDEX_URL") == "https://mirror.invalid/simple"
@@ -2210,6 +2215,10 @@ def test_ash_dependencies_install_names_ashs_interpreter_for_a_left_out_uv_pytho
     # starts in. A UV_PYTHON of the tree that the filter leaves out is no interpreter
     # chosen, so the command gets ASH's, not the tree's and not none.
     monkeypatch.chdir(tree)
+    # uv pip takes a UV_SYSTEM_PYTHON uv reads as true as a choice of interpreter,
+    # and ASH then names none, so the result does not depend on whether the
+    # environment the tests run in sets one.
+    monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
     start = _dependencies_install_command(
         spawns, monkeypatch, ["uv", "pip", "install", "x"]
     )
@@ -2221,6 +2230,68 @@ def test_ash_dependencies_install_names_ashs_interpreter_for_a_left_out_uv_pytho
     assert _uv_python_seen(spawns, monkeypatch, "3.12", start, _a_pip_install) == {
         "3.12"
     }
+
+
+def _a_pip_listing(command) -> bool:
+    return command[1:3] == ["pip", "list"]
+
+
+def _direct_runs_of_one_run(
+    scanner, spawns: _Spawns, tmp_path: Path, cwd: Path
+) -> List[dict]:
+    """The ``uv pip list`` that one run of the scanner started in ``cwd``.
+
+    uv is not the scanner's own tool, so ``_run_subprocess`` starts the command
+    itself, in the working directory its caller names, and not through
+    ``uv tool run``.
+    """
+    before = len(spawns.runs)
+    scanner._run_subprocess(
+        ["uv", "pip", "list"],
+        results_dir=tmp_path / "results",
+        stdout_preference="return",
+        stderr_preference="return",
+        cwd=cwd,
+        timeout=30,
+    )
+    return [run for run in spawns.runs[before:] if _a_pip_listing(run["command"])]
+
+
+@pytest.mark.unit
+def test_a_scanners_direct_run_gives_uv_no_bare_uv_python_naming_an_entry_where_it_starts(
+    tree, tmp_path, spawns, monkeypatch
+):
+    # uv reads a bare UV_PYTHON as a path when the directory it starts in holds an
+    # entry of that name, and a command the scanner starts itself starts in the
+    # working directory its caller names: here a directory of the tree that holds
+    # a ``.venv``. After the filter, python_child.uv_child_overrides names ASH's own
+    # interpreter for a ``uv pip`` command that names none, so what is pinned is
+    # that the planted value does not reach uv, not that the variable is absent.
+    app = tree / "app"
+    (app / ".venv" / "bin").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    # ASH's own working directory is judged for a bare name too, and the directory
+    # the tests run from may hold a ``.venv``, so ASH works from an empty one.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    # Both variables the run reads to choose an interpreter for uv pip are set or
+    # cleared here, so nothing of the environment the tests run in takes part.
+    monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
+    monkeypatch.setenv("UV_PYTHON", ".venv")
+    scanner = _bandit(tree, tmp_path)
+    seen = {}
+    for label, cwd in (("in-the-tree", app), ("outside", outside)):
+        runs = _direct_runs_of_one_run(scanner, spawns, tmp_path, cwd)
+        assert [run["cwd"] for run in runs] == [cwd], [
+            run["command"] for run in spawns.runs
+        ]
+        seen[label] = {_effective(run["env"]).get("UV_PYTHON") for run in runs}
+    assert ".venv" not in seen["in-the-tree"], seen
+    # Control: started outside the tree, in a directory that holds no such entry,
+    # the same name is passed on.
+    assert seen["outside"] == {".venv"}, seen
 
 
 # The warning a left-out uv variable is named in: once per process for each
@@ -2375,7 +2446,8 @@ def test_inside_judging_uv_paths_in_a_tool_listing_gets_no_uv_path_of_that_direc
     assert len(listings) == 2, [run["command"] for run in spawns.runs]
     judged = _effective(listings[0]["env"])
     unjudged = _effective(listings[1]["env"])
-    assert "UV_CONFIG_FILE" not in judged
+    names = set(judged)
+    assert "UV_CONFIG_FILE" not in names
     # Control: the operator's file outside that directory is passed on.
     assert judged.get("UV_CONSTRAINT") == operator
     assert unjudged.get("UV_CONFIG_FILE") == inside
@@ -2439,7 +2511,8 @@ def test_ash_dependencies_install_judges_its_tool_listing_against_its_directory(
     assert listings, (result.exit_code, result.output)
     for run in listings:
         env = _effective(run["env"])
-        assert "UV_CONFIG_FILE" not in env, run["command"]
+        names = set(env)
+        assert "UV_CONFIG_FILE" not in names, run["command"]
         # Control: the operator's file outside the directory is passed on.
         assert env.get("UV_CONSTRAINT") == operator, run["command"]
 
