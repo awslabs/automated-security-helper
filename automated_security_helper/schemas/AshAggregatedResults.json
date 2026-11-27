@@ -23870,7 +23870,7 @@
           "type": "string"
         },
         "paths": {
-          "description": "The ways to a supported configuration that can be offered here, the ones on this machine first and then the ones elsewhere. Empty when the row declares none, and for a polyfill.",
+          "description": "The ways to a supported configuration that can be offered here, the ones on this machine first and then the ones elsewhere. Empty when the row declares none, and for a polyfill. In a report that combines runs, only the paths every run that met the row was offered.",
           "items": {
             "$ref": "#/$defs/UpgradePathNotice"
           },

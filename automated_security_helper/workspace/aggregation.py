@@ -1795,12 +1795,14 @@ class WorkspaceAggregator:
         that falls back) is recorded only by the projects that reached the decision,
         so the first project's notices alone would drop the others'. A notice that
         more than one project met is recorded once, holding only what every one of
-        them recorded: the facts they recorded alike, and the ``found`` text when it is
-        the same in all, None when it is not. Two projects that meet one row can read
-        different things of it, and the first project's record would publish its read
-        as the workspace's. The writer warns of each such notice, naming the projects
-        that met it (by their names in the workspace, and by their place in the list
-        when none was added) and what the record leaves out.
+        them recorded: the facts they recorded alike, the ``found`` text when it is the
+        same in all, None when it is not, and the upgrade paths every project was
+        offered, by path id. Two projects that meet one row can read different things
+        of it and be offered different paths, and the first project's record would
+        publish its read and its offer as the workspace's. The writer warns of each
+        such notice, naming the projects that met it (by their names in the workspace,
+        and by their place in the list when none was added) and what the record leaves
+        out.
         """
         payload = self.results_payload(
             exit_code,

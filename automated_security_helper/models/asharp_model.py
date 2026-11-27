@@ -1230,7 +1230,8 @@ class SupportNotice(StrippedRecordModel):
             description=(
                 "The ways to a supported configuration that can be offered here, the "
                 "ones on this machine first and then the ones elsewhere. Empty when "
-                "the row declares none, and for a polyfill."
+                "the row declares none, and for a polyfill. In a report that combines "
+                "runs, only the paths every run that met the row was offered."
             ),
         ),
     ]
@@ -1279,17 +1280,25 @@ def _agreed_support_notice(
 ) -> SupportNotice:
     """The one record of a notice id that holds only what every record of it holds.
 
-    The first record is the base, copied whole. What a run read of a row is what
-    differs between runs, and the record keeps it only where they agree: ``facts`` is
-    the pairs every record has with the same token, in the first record's order, and
-    ``found`` is its text when every record has the same text, None when they differ (a
-    record with no text differs from one with some). Every other field is the first
-    record's.
+    The first record is the base, copied whole. What a run read of a row, and what the
+    register offered on its host, are what differ between runs, and the record keeps
+    them only where the runs agree: ``facts`` is the pairs every record has with the
+    same token, in the first record's order; ``found`` is its text when every record
+    has the same text, None when they differ (a record with no text differs from one
+    with some); and ``paths`` is the paths every record offers, compared by path id, in
+    the first record's order and as the first record words them.
+
+    Every other field is the first record's, because none of them is something a run
+    read or was offered. The id is what the records are grouped by. The scope,
+    dimension, level, behavior, polyfill, moment, sentence and docs anchor are what the
+    register declares of the row, which every run of one ASH says alike; where a run of
+    another ASH version declares it otherwise, the first record's declaration stands.
 
     What the record leaves out is said, not dropped in silence: one warning for the id
-    names the runs that recorded it (``runs``) and the fields it leaves out, ``found``
-    and ``facts.<name>``, with the facts any run read that the record does not hold. It
-    names what differed and never what a run read, so a log does not repeat a notice.
+    names the runs that recorded it (``runs``) and what it leaves out, ``found``,
+    ``facts.<name>`` and ``paths.<id>``, with the facts and the paths any run recorded
+    that the record does not hold. It names what differed and never what a run read, so
+    a log does not repeat a notice.
     """
     first, *others = records
     update: Dict[str, Any] = {}
@@ -1306,6 +1315,16 @@ def _agreed_support_notice(
         left_out.append("found")
     read = {name for record in records for name in record.facts}
     left_out.extend(f"facts.{name}" for name in sorted(read.difference(shared)))
+    offered = [{path.id for path in record.paths} for record in records]
+    common = set.intersection(*offered)
+    kept = [path for path in first.paths if path.id in common]
+    if len(kept) != len(first.paths):
+        # model_copy does not copy what it is given to update, so the kept paths are
+        # copies here: the record shares no object with the run it came from.
+        update["paths"] = [path.model_copy(deep=True) for path in kept]
+    left_out.extend(
+        f"paths.{path_id}" for path_id in sorted(set.union(*offered) - common)
+    )
     if left_out:
         ASH_LOGGER.warning(
             f"Support notice '{first.id}' was recorded by {_joined(runs)}, and they "
@@ -1331,20 +1350,27 @@ def combined_support_notices(
 
     A row two runs meet is recorded once, and the record holds only what every one of
     those runs recorded. Two hosts that meet one row do not read the same of it (the
-    processor flags that are missing, the level the processor is at), and a record that
-    kept the first run's read would publish one host's as the scan's, with nothing in
-    it to say that another run read otherwise. So ``facts`` is the pairs every run
-    recorded with the same token, ``found`` is the text every run recorded and is None
-    when they did not record the same, and every other field is the first run's: the
-    row is one configuration, so the runs say the same of it, and where a run of
-    another ASH version words it otherwise the first run's wording stands.
+    processor flags that are missing, the level the processor is at), and the register
+    does not offer them the same ways out: the compatibility runtime goes to a uv tool
+    and not to a Homebrew install, nor to a processor below that runtime. A record that
+    kept the first run's would publish one host's read and one host's offer as the
+    scan's, with nothing in it to say that another run recorded otherwise, and would
+    publish another list of paths when the runs came in another order. So ``facts`` is
+    the pairs every run recorded with the same token, ``found`` is the text every run
+    recorded and is None when they did not record the same, ``paths`` is the paths
+    every run offered, compared by path id and kept in the first run's order and
+    wording, and every other field is the first run's. None of those is something a
+    run read or was offered: the register declares them of the row, so the runs of one
+    ASH say the same of it, and where a run of another ASH version declares the row
+    otherwise the first run's declaration stands.
 
     What a record leaves out is said: one warning for each notice the runs did not read
-    alike, naming the notice, the runs that recorded it and the fields it leaves out
-    (``found``, ``facts.<name>``), and not what any run read. ``labels`` names the runs
-    in the order they are given, for that warning; a run it does not name is named by
-    its place in the list (``run 3`` for the third, a run that recorded nothing
-    counted), so a caller that knows its shards or its projects says which.
+    alike, naming the notice, the runs that recorded it and what it leaves out
+    (``found``, ``facts.<name>``, ``paths.<id>``), and not what any run read.
+    ``labels`` names the runs in the order they are given, for that warning; a run it
+    does not name is named by its place in the list (``run 3`` for the third, a run
+    that recorded nothing counted), so a caller that knows its shards or its projects
+    says which.
 
     The records come in the order the runs are given and each run's own order, so a
     caller that passes them in workspace-file or shard-index order gets a result that
@@ -1566,7 +1592,8 @@ class ReportMetadata(StrippedRecordModel):
     # every run's notices by id, since the runs can be on different hosts: the
     # workspace results file (workspace/aggregation.py) and `ash merge`
     # (combined_support_notices). A notice that more than one run met is recorded once,
-    # holding only what every one of them read.
+    # holding only what every one of them recorded: the facts they read alike, the found
+    # text when it is the same, and the upgrade paths every run was offered.
     support_notices: Annotated[
         List[SupportNotice] | None,
         Field(

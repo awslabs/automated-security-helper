@@ -1706,10 +1706,11 @@ def merge_shard_results(
     ``metadata.support_notices``, every shard's notices by id
     (``models.asharp_model.combined_support_notices``): a notice that more than one
     shard met is recorded once, holding only what every one of them recorded (the
-    facts they recorded alike, and the ``found`` text when it is the same in all, None
-    when it is not), because two hosts that meet one row do not read the same of it.
-    The merge warns of each such notice, naming the shards that met it and what its
-    record leaves out. The ``report_id`` is the exception: see
+    facts they recorded alike, the ``found`` text when it is the same in all, None
+    when it is not, and the upgrade paths every shard was offered, by path id), because
+    two hosts that meet one row do not read the same of it and the register does not
+    offer them the same paths. The merge warns of each such notice, naming the shards
+    that met it and what its record leaves out. The ``report_id`` is the exception: see
     :func:`_union_report_id`.
 
     Args:
@@ -1831,9 +1832,10 @@ def merge_shard_results(
     # Every shard's notices, united by id in shard order. The shards of one scan can
     # run on different hosts and a notice says what its own run met, so the base
     # shard's copy would describe one host only. A notice two shards met is recorded
-    # once with what both recorded: the facts they recorded alike, and the found text
-    # when it is the same, since two hosts that meet one row do not read the same of
-    # it, and a warning names the notice, the shards and what the record leaves out.
+    # once with what both recorded: the facts they recorded alike, the found text when
+    # it is the same and the paths both were offered, since two hosts that meet one row
+    # do not read the same of it and the register does not offer them the same paths,
+    # and a warning names the notice, the shards and what the record leaves out.
     # None when no shard recorded one, as a single scan writes it.
     merged.metadata.support_notices = combined_support_notices(
         (shard.metadata.support_notices for _, shard, _ in shards),
