@@ -2,11 +2,11 @@
 
 The exit code of every `ash` command, with the conditions that produce it. For how to change the scan verdict, see [Set the gate](../how-to/set-the-gate.md).
 
-On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan`, `ash container build`, and `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as an `--only-scanners` list that names no scanner, a directory to scan that does not exist, or an `--output-dir` that ASH cannot create, while `ash results report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Some `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, a `--plugin-type` other than `converter`, `scanner`, or `reporter`, an unknown name in `--providers`, a `--create-virtualenv` or `--no-create-virtualenv` typed without `--virtualenv-path`, and a `--binary-path` entry that is malformed, names no selected scanner, or whose path is not an absolute, executable, regular file outside the scanned directory. A `--virtualenv-path` that does not exist (without `--create-virtualenv`) or that exists and is not a virtualenv exits 3, and a tool that no listed `--providers` entry can install fails the run with 1. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
+On every command, a command-line usage error exits 5: an unknown option, subcommand, or argument; a value outside the choices an option takes (such as `--mode` or `--min-severity`) or a number that is not one; a missing required option; or a `--cli-json-input` document that ASH cannot read or use. `ash scan fs`, `ash container build`, and the deprecated `ash` with no subcommand reject an option or argument they do not define. An option given to `ash` before a subcommand is passed to the command named right after `ash`, and is a usage error when that command does not take it: `ash --source-dir . config get` exits 5, because `ash config` has no `--source-dir`, while `ash config get --source-dir .` works. Some names and paths that ASH cannot use are usage errors too, such as an `--only-scanners` list that names no scanner, a directory to scan that does not exist, or an `--output-dir` that ASH cannot create, while `ash results report`, and a scan with `--use-existing`, exit 1 when they find no results to use. The tables below list both. Some `ash dependencies install` selections exit 2 instead: a `--tool` name that it has no plugin for, or whose plugin type `--plugin-type` leaves out, a `--plugin-type` other than `converter`, `scanner`, or `reporter`, an unknown name in `--providers`, a `--create-virtualenv` or `--no-create-virtualenv` typed without `--virtualenv-path`, and a `--binary-path` entry that is malformed, names no selected scanner, or whose path is not an absolute, executable, regular file outside the scanned directory. A `--virtualenv-path` that does not exist (without `--create-virtualenv`) or that exists and is not a virtualenv exits 3, and a tool that no listed `--providers` entry can install fails the run with 1. Usage errors have a code of their own so that a CI gate does not read a mistyped flag as a scan with findings.
 
 ## `ash scan` {#scan}
 
-`ash` with no subcommand runs a scan and exits the same way.
+`ash scan fs` is the scan. `ash scan` with no subject and `ash` with no subcommand, both deprecated, run it and exit the same way.
 
 | Code | Condition |
 |---|---|
@@ -95,7 +95,7 @@ ash scan fs . --only-scanners detect-secrets --offline --no-progress --config no
 
 <!-- doctest: run expect-exit=4 -->
 ```bash
-ash --source-dir . --dry-run
+ash scan fs . --dry-run
 ```
 
 A mistyped `--min-severity` value is a usage error, 5, and nothing is scanned:

@@ -386,7 +386,7 @@ the program: `pytest --run-integration`, not the bare option. On a generated ref
 page, a row a plugin's code wrote names the program even for an option ASH also has,
 because there a bare `--config` could be either. That covers the rows of a plugin's
 options table and the environment variables whose purpose is quoted from a plugin
-module. Write `zizmor --config`, and `ash --config` for ASH's own.
+module. Write `zizmor --config`, and `ash scan fs --config` for ASH's own.
 
 Every `ASH_*` name anywhere on a page must be a variable ASH reads. So must every name
 in the first column of a table headed "Variable" or "Environment variable". Write a
@@ -868,7 +868,7 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | needs a value | give the option a value |
 | takes no positional arguments | pass the path with an option such as the source-directory option |
 | is not an option of any ash command | another program's option: put the program in the code span |
-| a plugin's code wrote this row | put the program in the span, or write `ash --config` for ASH's own; the page is generated, so change the text in the plugin's code |
+| a plugin's code wrote this row | put the program in the span, or write `ash scan fs --config` for ASH's own; the page is generated, so change the text in the plugin's code |
 | placeholder | a run block cannot contain `<placeholder>`; use a real value or mark it `illustrative` |
 | `no __main__` | that module cannot be run with `python -m` |
 | names no action, has no input | a GitHub Actions `uses:` of this repository names a path or input that does not exist |

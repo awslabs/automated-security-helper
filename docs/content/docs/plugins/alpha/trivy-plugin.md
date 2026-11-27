@@ -447,7 +447,15 @@ class TrivyPerformanceMonitor:
 
         # Run ASH with Trivy
         process = subprocess.Popen(
-            ["ash", "--only-scanners", "trivy-repo", "--formats", "flat-json"],
+            [
+                "ash",
+                "scan",
+                "fs",
+                "--only-scanners",
+                "trivy-repo",
+                "--formats",
+                "flat-json",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

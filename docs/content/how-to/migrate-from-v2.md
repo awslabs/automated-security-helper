@@ -60,7 +60,7 @@ v2 command line with `--format json` fails this way:
 
 <!-- doctest: run expect-exit=5 -->
 ```bash
-ash --format json
+ash scan fs --format json
 ```
 
 ## Configuration
