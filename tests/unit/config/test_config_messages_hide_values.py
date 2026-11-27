@@ -103,6 +103,7 @@ def _run(project: Path, command: str, config: Path, monkeypatch, *extra: str):
         )
         args = [
             "scan",
+            "fs",
             "--mode",
             "local",
             "--no-progress",
@@ -777,7 +778,7 @@ def test_an_ash_config_file_chain_error_is_hidden_from_the_scan(
     operator = _operator_config(project, monkeypatch)
     _stub_scan(monkeypatch)
     if mode == "scan":
-        args = ["scan", "--mode", "local", "--no-progress", "--output-dir", "out"]
+        args = ["scan", "fs", "--mode", "local", "--no-progress", "--output-dir", "out"]
     else:
         args = _workspace(project, "project_name: svc\n")
         if mode == "workspace-config":

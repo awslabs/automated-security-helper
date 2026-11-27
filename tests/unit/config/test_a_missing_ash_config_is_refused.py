@@ -235,6 +235,7 @@ _REFUSED_ASH_CONFIG = {
 def _command(command: str, config: Path, tmp_path: Path) -> list:
     if command == "report":
         return [
+            "results",
             "report",
             "--output-dir",
             str(tmp_path / "out"),
@@ -276,7 +277,9 @@ def test_a_check_of_another_file_refuses_it_wherever_that_file_is(
 
 
 def test_report_refuses_it(missing, tmp_path):
-    result = CliRunner().invoke(app, ["report", "--output-dir", str(tmp_path / "out")])
+    result = CliRunner().invoke(
+        app, ["results", "report", "--output-dir", str(tmp_path / "out")]
+    )
 
     assert result.exit_code == 3, result.output
     assert f"ASH_CONFIG names {missing}, {NOT_THERE}" in _flat(result.output)
@@ -289,7 +292,15 @@ def test_report_refuses_a_config_option_that_does_not_exist(
     named = tmp_path / "named-but-missing.yaml"
 
     result = CliRunner().invoke(
-        app, ["report", "--output-dir", str(tmp_path / "out"), "--config", str(named)]
+        app,
+        [
+            "results",
+            "report",
+            "--output-dir",
+            str(tmp_path / "out"),
+            "--config",
+            str(named),
+        ],
     )
 
     assert result.exit_code == 3, result.output

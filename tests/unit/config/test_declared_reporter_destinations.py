@@ -610,7 +610,7 @@ def test_ash_report_does_not_take_it_from_an_in_tree_config(tmp_path, site):
         AshAggregatedResults(ash_config=AshConfig()).model_dump_json(),
         encoding="utf-8",
     )
-    args = ["report", "--format", REPORTER, "--config", str(config)]
+    args = ["results", "report", "--format", REPORTER, "--config", str(config)]
     args += ["--output-dir", str(output)]
 
     result = _run(_REPORT, {"cwd": str(repo), "args": args}, site, {})

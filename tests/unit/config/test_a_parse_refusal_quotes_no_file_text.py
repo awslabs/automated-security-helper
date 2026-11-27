@@ -297,7 +297,14 @@ def _cli_plugin_list(world: _World, text: str) -> _Reply:
 def _cli_report_config(world: _World, text: str) -> _Reply:
     world.write(world.named, text)
     return _invoke(
-        ["report", "--config", str(world.named), "--output-dir", str(world.output)]
+        [
+            "results",
+            "report",
+            "--config",
+            str(world.named),
+            "--output-dir",
+            str(world.output),
+        ]
     )
 
 
@@ -895,6 +902,7 @@ def test_a_merge_config_that_does_not_parse_is_refused_without_its_text(world, a
 
     reply = _invoke(
         [
+            "results",
             "merge",
             "--results",
             str(results),
