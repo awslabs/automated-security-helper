@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Tuple
 
 import yaml
 
+from automated_security_helper.config import spellings
 from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
     AshConfig,
@@ -348,15 +349,16 @@ def render_config_file(
     `keep_from` is the file's previous contents. Its top-level keys that are no
     AshConfig field (a JSON `$schema`, a key for another ASH version) are kept:
     the model drops them on load, and a rewrite must not delete what the user
-    wrote.
+    wrote. A field's name, its alias and every old spelling the table of
+    renamed keys gives it are the field (``spellings.field_spellings``): the
+    rewrite writes the field itself, so none of them is kept beside it.
     """
     data = user_config_data(ash_config)
     if isinstance(keep_from, dict):
         known = {
             spelling
-            for name, info in AshConfig.model_fields.items()
-            for spelling in (name, info.alias)
-            if spelling
+            for name in AshConfig.model_fields
+            for spelling in spellings.field_spellings(AshConfig, name)
         }
         for key, value in keep_from.items():
             if key not in known and key not in data:

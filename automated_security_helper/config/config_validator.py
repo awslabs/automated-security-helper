@@ -5021,21 +5021,27 @@ class ConfigValidator:
 
     @classmethod
     def _both_spellings_warnings(cls, config_data: dict) -> List[str]:
-        """A top-level key written both as its alias and as its field name.
+        """A top-level key written under two of its spellings.
 
-        A scan accepts both spellings and reads the alias, so the other one has
-        no effect.
+        A scan accepts each spelling a field is read under (``field_spellings``:
+        its name, its alias and every old spelling the table of renamed keys gives
+        it) and reads the one the field is written under, its alias or else its
+        name, so any other one has no effect.
         """
+        from automated_security_helper.config import spellings
         from automated_security_helper.config.ash_config import AshConfig
 
         warnings = []
         for name, info in AshConfig.model_fields.items():
-            alias = info.alias
-            if alias and alias != name and alias in config_data and name in config_data:
-                warnings.append(
-                    f"Top-level field '{alias}' is set twice, as '{alias}' and "
-                    f"'{name}'; a scan reads '{alias}' and ignores '{name}'"
-                )
+            read = info.alias or name
+            if read not in config_data:
+                continue
+            for other in spellings.field_spellings(AshConfig, name):
+                if other != read and other in config_data:
+                    warnings.append(
+                        f"Top-level field '{read}' is set twice, as '{read}' and "
+                        f"'{other}'; a scan reads '{read}' and ignores '{other}'"
+                    )
         return warnings
 
     @classmethod

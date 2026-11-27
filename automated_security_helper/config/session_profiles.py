@@ -47,6 +47,7 @@ from typing import (
     Union,
 )
 
+from automated_security_helper.config import spellings
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.config_sources import (
     describe_config_path,
@@ -382,10 +383,11 @@ def register_profiles(specs: List[str]) -> Dict[str, ProfileEntry]:
                 ConfigValidator,
             )
 
-            allowed = set(AshConfig.model_fields.keys())
-            for finfo in AshConfig.model_fields.values():
-                if finfo.alias:
-                    allowed.add(finfo.alias)
+            allowed = {
+                spelling
+                for field_name in AshConfig.model_fields
+                for spelling in spellings.field_spellings(AshConfig, field_name)
+            }
             # And every top-level key the config validator accepts, so the two
             # cannot disagree about a file: "$schema", which a JSON config
             # carries for editors and a scan ignores, is one the model does

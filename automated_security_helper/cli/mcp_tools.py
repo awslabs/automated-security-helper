@@ -6816,6 +6816,7 @@ def _select_profile(
     session_id: Optional[str],
 ) -> Dict[str, Any]:
     """:func:`mcp_select_profile`, once the session is held against the sweep."""
+    from automated_security_helper.config import spellings
     from automated_security_helper.config.session_profiles import (
         bind_session_config,
         client_values_present,
@@ -6948,10 +6949,11 @@ def _select_profile(
         # Strict-extra gate: AshConfig.model_config has extra='ignore' for
         # back-compat with end-user configs, but profiles are operator-
         # controlled deployment artifacts and should fail on typos.
-        allowed = set(AshConfig.model_fields.keys())
-        for finfo in AshConfig.model_fields.values():
-            if finfo.alias:
-                allowed.add(finfo.alias)
+        allowed = {
+            spelling
+            for field_name in AshConfig.model_fields
+            for spelling in spellings.field_spellings(AshConfig, field_name)
+        }
         unknown = sorted(set(raw or {}) - allowed)
         if unknown:
             return {
