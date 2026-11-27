@@ -208,6 +208,21 @@ _ALLOWED_SIZED_READS = {
     ): "a 64 KiB head of the environment's own pyvenv.cfg; parsed as key=value "
     "lines, and only a version matching the number shape leaves the reader",
     (
+        "utils/host_facts.py",
+        "_live_read_text",
+    ): "a host file (the processor flags, the kernel release) at the byte limit "
+    "its caller names; parsed for the host's facts, never shown",
+    (
+        "utils/host_facts.py",
+        "read_runtime_flags",
+    ): "a polars runtime's generated flags file at _FLAGS_FILE_LIMIT + 1, "
+    "refused over the cap and compared as text with the declared set; never shown",
+    (
+        "utils/host_facts.py",
+        "read_host_facts",
+    ): "not a file read: the call of the host-facts reader's own read method "
+    "with the express gate as its keyword argument",
+    (
         "utils/oci_layout_archive.py",
         "_write_layer",
     ): "a 4-byte magic sniff of a layer blob before it is streamed into the "
