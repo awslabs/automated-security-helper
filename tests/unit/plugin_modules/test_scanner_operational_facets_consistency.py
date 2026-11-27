@@ -8,7 +8,9 @@ mirrors, and does not replace, what ASH already declares: ``offline_strategy``,
 ``SandboxRequirements``, ``CONTENT_DATABASES``, ``SCANNERS_WITHOUT_CONTENT_
 DATABASE``, ``tool_type`` (and the ``SCANNER_TOOL_TYPES`` table), ``covers``,
 ``python_only``, ``use_uv_tool``, ``external_executables``,
-``success_exit_codes`` and the ``tool_downloads`` tables. Each test here binds
+``success_exit_codes`` and the ``tool_downloads`` tables, the
+``THIRD_PARTY_LICENSES`` entries that an ``upstream_license`` string cites, and
+the Dockerfile's apt install of Node.js. Each test here binds
 one mirrored field to the production declaration it names and fails, naming
 the scanner, when they tell different stories. A register that only validated
 its own shape could never fail; these are the rows that can.
@@ -26,6 +28,7 @@ mis-parsed universe would pass vacuously.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -464,10 +467,16 @@ _SOURCE_FOR_RUNTIME = {
     opsf.RuntimeKind.PINNED_BINARY: {opsf.ProvenanceSource.PINNED_RELEASE_BINARY},
     opsf.RuntimeKind.UV_PYTHON: {opsf.ProvenanceSource.PYPI_VIA_UV},
     opsf.RuntimeKind.RUBY_GEM: {opsf.ProvenanceSource.GEMFILE_LOCK},
-    opsf.RuntimeKind.NODE_SUBCOMMAND: {opsf.ProvenanceSource.USER_INSTALLED},
+    opsf.RuntimeKind.NODE_SUBCOMMAND: {
+        opsf.ProvenanceSource.IMAGE_APT_PACKAGE,
+        opsf.ProvenanceSource.USER_INSTALLED,
+    },
     opsf.RuntimeKind.USER_INSTALLED_CLI: {opsf.ProvenanceSource.USER_INSTALLED},
     opsf.RuntimeKind.IN_PROCESS: {opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY},
-    opsf.RuntimeKind.PYPI_PACKAGE: {opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY},
+    # A pypi_package runtime is installed by ``ash dependencies install`` under
+    # the plugin's version range and is not pinned by uv.lock (the in-process
+    # dependencies uv.lock pins are IN_PROCESS).
+    opsf.RuntimeKind.PYPI_PACKAGE: {opsf.ProvenanceSource.PYPI_RANGE_INSTALL},
 }
 
 
@@ -480,6 +489,175 @@ def test_provenance_agrees_with_the_runtime(cls) -> None:
         f"{facets.scanner_name}: a {facets.runtime.kind.value} runtime cannot "
         f"have provenance {facets.provenance.source.value}"
     )
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: ``apt-get ... install ... nodejs=<version>`` on one Dockerfile line.
+_DOCKERFILE_NODE_APT_INSTALL = re.compile(
+    r"apt-get\b[^\n]*\binstall\b[^\n]*\bnodejs=\S+"
+)
+
+
+def _installs_nodejs_with_apt(text: str) -> bool:
+    """True when a non-comment Dockerfile line installs ``nodejs=<version>``."""
+    return any(
+        _DOCKERFILE_NODE_APT_INSTALL.search(line) is not None
+        for line in text.splitlines()
+        if not line.lstrip().startswith("#")
+    )
+
+
+def _the_image_installs_nodejs_with_apt_at_a_pinned_version() -> bool:
+    text = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    return _installs_nodejs_with_apt(text)
+
+
+def test_a_node_subcommand_provenance_mirrors_the_images_nodejs_install() -> None:
+    """A Node.js subcommand scanner's provenance says IMAGE_APT_PACKAGE exactly
+    when a non-comment Dockerfile line installs Node.js with apt at a pinned
+    version, and USER_INSTALLED when it does not."""
+    expected = (
+        opsf.ProvenanceSource.IMAGE_APT_PACKAGE
+        if _the_image_installs_nodejs_with_apt_at_a_pinned_version()
+        else opsf.ProvenanceSource.USER_INSTALLED
+    )
+    node_rows = {
+        _ops(cls).scanner_name: _ops(cls).provenance.source
+        for cls in SCANNER_CLASSES
+        if _ops(cls).runtime.kind is opsf.RuntimeKind.NODE_SUBCOMMAND
+    }
+    assert node_rows, "no scanner has a node_subcommand runtime: the sweep is vacuous"
+    wrong = {name: src.value for name, src in node_rows.items() if src is not expected}
+    assert not wrong, (
+        f"the Dockerfile implies provenance {expected.value}, but {wrong} differ"
+    )
+
+
+def test_the_dockerfile_node_install_pattern_reads_a_pinned_install_only() -> None:
+    pinned = "apt-get -qy install --no-install-recommends nodejs=22.23.5-1nodesource1;"
+    unpinned = "apt-get -qy install --no-install-recommends nodejs;"
+    assert _installs_nodejs_with_apt(pinned)
+    assert not _installs_nodejs_with_apt(unpinned)
+    assert not _installs_nodejs_with_apt("# " + pinned)
+    assert not _installs_nodejs_with_apt("    # " + pinned)
+
+
+#: The one phrase that may mention THIRD_PARTY_LICENSES without citing an entry.
+_NOT_IN_TPL = "not in THIRD_PARTY_LICENSES"
+#: The phrase is exempt only where it ends a clause, so a citation glued to it
+#: ("not in THIRD_PARTY_LICENSES['x']") is still read.
+_NOT_IN_TPL_CLAUSE = re.compile(re.escape(_NOT_IN_TPL) + r"(?=[),;]|$)")
+
+# The canonical citation of a THIRD_PARTY_LICENSES entry in a register string.
+_TPL_CITATION = re.compile(
+    r"^(?P<spdx>[^()]+?) \(source: utils/tool_downloads\.py "
+    r"THIRD_PARTY_LICENSES\['(?P<key>[^']+)'\], "
+    r"pinned commit (?P<commit>[0-9a-f]{7,40})[;)]"
+)
+
+
+def _tpl_citation_problems(upstream_license: str) -> list[str]:
+    """What is wrong with a register string's THIRD_PARTY_LICENSES citation.
+
+    Any mention of THIRD_PARTY_LICENSES other than the literal
+    "not in THIRD_PARTY_LICENSES", which is exempt only where it ends a
+    clause (followed by ")", ";", "," or the end), must be the one canonical
+    leading citation.
+    A string with no other mention cites no entry and has no problem here.
+    One that does must match the canonical form, name an entry that exists,
+    lead with that entry's license and cite a prefix of its commit; a citation
+    that drifts from the form, or a second mention, fails rather than passing
+    unread.
+    """
+    rest = _NOT_IN_TPL_CLAUSE.sub("", upstream_license)
+    if "THIRD_PARTY_LICENSES" not in rest:
+        return []
+    if rest.count("THIRD_PARTY_LICENSES") > 1:
+        return [
+            (
+                "cites THIRD_PARTY_LICENSES more than once; only a single leading "
+                "citation can be checked"
+            )
+        ]
+    match = _TPL_CITATION.match(upstream_license)
+    if match is None:
+        return [
+            (
+                "cites THIRD_PARTY_LICENSES but not in the canonical form "
+                "'<spdx> (source: utils/tool_downloads.py "
+                "THIRD_PARTY_LICENSES['<key>'], pinned commit <hex>)'"
+            )
+        ]
+    key = match.group("key")
+    entry = tool_downloads.THIRD_PARTY_LICENSES.get(key)
+    if entry is None:
+        return [f"THIRD_PARTY_LICENSES has no entry {key!r}"]
+    problems = []
+    if match.group("spdx") != entry.license:
+        problems.append(
+            f"the register says {match.group('spdx')!r} but the {key!r} entry "
+            f"says {entry.license!r}"
+        )
+    if not entry.commit.startswith(match.group("commit")):
+        problems.append(
+            f"the register cites commit {match.group('commit')!r} but the "
+            f"{key!r} entry's commit is {entry.commit!r}"
+        )
+    return problems
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_an_upstream_license_citing_third_party_licenses_matches_the_entry(
+    cls,
+) -> None:
+    problems = _tpl_citation_problems(_ops(cls).provenance.upstream_license)
+    assert problems == [], f"{_ops(cls).scanner_name}: {problems}"
+
+
+def test_the_third_party_licenses_citation_sweep_is_not_vacuous() -> None:
+    citing = sorted(
+        _ops(cls).scanner_name
+        for cls in SCANNER_CLASSES
+        if "THIRD_PARTY_LICENSES[" in _ops(cls).provenance.upstream_license
+    )
+    assert len(citing) >= 16, f"only {len(citing)} scanners cite an entry: {citing}"
+
+
+def test_the_citation_check_reports_a_planted_mismatch() -> None:
+    entry = tool_downloads.THIRD_PARTY_LICENSES["bandit"]
+    commit = entry.commit[:7]
+    good = (
+        f"{entry.license} (source: utils/tool_downloads.py "
+        f"THIRD_PARTY_LICENSES['bandit'], pinned commit {commit})"
+    )
+    assert _tpl_citation_problems(good) == []
+    wrong_commit = good.replace(
+        f"commit {commit})",
+        f"commit {commit[:-1]}{'0' if commit[-1] != '0' else '1'})",
+    )
+    planted = {
+        "a wrong SPDX": good.replace(entry.license, "MIT", 1),
+        "a wrong commit": wrong_commit,
+        "an unknown key": good.replace("['bandit']", "['no-such-tool']"),
+        "a malformed citation": "THIRD_PARTY_LICENSES['bandit'] says Apache-2.0",
+        "a bracketless mention": (
+            "MIT (source: the THIRD_PARTY_LICENSES entry for bandit, "
+            "pinned commit 0000000)"
+        ),
+        "a second citation": (
+            good[:-1] + "; rules: THIRD_PARTY_LICENSES['no-such-tool'], "
+            "pinned commit 0000000)"
+        ),
+        "a citation glued to the exempt phrase": (
+            "Apache-2.0 (source: a pinned read; not in "
+            "THIRD_PARTY_LICENSES['no-such-tool'])"
+        ),
+    }
+    for name, text in planted.items():
+        assert _tpl_citation_problems(text), f"{name} was not reported"
+    negative = "Apache-2.0 (source: a pinned read; not in THIRD_PARTY_LICENSES)"
+    assert _tpl_citation_problems(negative) == []
 
 
 # ---------------------------------------------------------------------------

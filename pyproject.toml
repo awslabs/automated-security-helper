@@ -5,6 +5,11 @@ description = "Automated Security Helper, the agentic security harness: open-sou
 requires-python = ">=3.11,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
+# Listing license-files replaces hatchling's default patterns, so LICENSE and NOTICE
+# are named too. THIRD-PARTY-LICENSES attributes the Open Sans font the HTML reporter
+# ships inside the package. .github/scripts/assert-artifact-contents.py pins the
+# .dist-info members.
+license-files = ["LICENSE", "NOTICE", "THIRD-PARTY-LICENSES"]
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
  "uv>=0.13.4,<0.14",

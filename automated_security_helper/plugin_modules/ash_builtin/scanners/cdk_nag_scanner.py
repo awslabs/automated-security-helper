@@ -1329,9 +1329,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=("options nag packs",),
                 upstream_license=(
-                    "Apache-2.0 (source: the cdk-nag row of the 2026-11-24 "
-                    "scanner license check, a live GitHub license read; not pinned to the version ASH installs and not in "
-                    "THIRD_PARTY_LICENSES)"
+                    "Apache-2.0 (source: the cdklabs/cdk-nag LICENSE at tag "
+                    "v3.0.2, commit 67ae6d0, SHA-256 begins cfc7749b96f63bd3, "
+                    "the version uv.lock pins; the wheel and its jsii tarball "
+                    "carry the same bytes; not in THIRD_PARTY_LICENSES)"
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(

@@ -917,7 +917,11 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             provenance=opsf.ProvenanceFacet(
                 source=opsf.ProvenanceSource.PYPI_PINNED_DEPENDENCY,
                 selection_surfaces=(),
-                upstream_license="not read",
+                upstream_license=(
+                    "Apache-2.0 (source: ASH's own LICENSE, SHA-256 begins "
+                    "cfc7749b96f63bd3, and the license field of pyproject.toml; "
+                    "the scanner has no upstream tool and runs inside ASH)"
+                ),
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),

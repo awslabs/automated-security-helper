@@ -21,8 +21,9 @@ and floating-navigation defaults.
 - Short labels, commands, factual bullets, and sentence-case headings.
 - `Built with <3 at Amazon Web Services` in human-facing footers.
 
-The homepage uses Anime.js 4.5.0 (MIT) for local SVG motion. Phosphor icons use
-MIT; Open Sans uses the SIL Open Font License. Licenses ship with the assets.
+The homepage uses Anime.js 4.5.0 (MIT) for SVG motion, loaded from cdnjs and pinned
+by version and Subresource Integrity. Phosphor icons use MIT; Open Sans uses the SIL
+Open Font License. Their licenses ship with the assets.
 
 ## Navigation architecture
 

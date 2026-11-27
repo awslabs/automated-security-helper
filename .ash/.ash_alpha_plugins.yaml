@@ -579,8 +579,8 @@ global_settings:
     # self-scan runs it. Each was read at the reported line and is pinned to it.
     - path: automated_security_helper/base/scanner_operational_facets.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 714
-      line_end: 714
+      line_start: 724
+      line_end: 724
       reason: >-
         False positive. An enum member whose name is a token word and whose value is a
         lowercase label of the same word; no credential is held.

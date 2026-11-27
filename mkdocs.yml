@@ -69,18 +69,20 @@ plugins:
       # readers to the latest release rather than to whichever version they crawled.
       canonical_version: latest
   # The privacy plugin downloads external assets at build time and serves them from
-  # the site. The build must not need the network, so the two assets that cannot be
-  # downloaded offline are left external rather than fetched: mermaid, which the
-  # browser loads from unpkg (the diagrams on the site already depended on unpkg
-  # through mermaid2), and the star-history chart, a live image that a downloaded
-  # copy would freeze and whose server refuses the build anyway (403). Emoji are
-  # written as Unicode characters by the emoji extension below, so nothing else is
-  # fetched.
+  # the site. The build must not need the network, so these assets are left external
+  # rather than fetched: mermaid, which the browser loads from unpkg (the diagrams on
+  # the site already depended on unpkg through mermaid2); the star-history chart, a
+  # live image that a downloaded copy would freeze and whose server refuses the build
+  # anyway (403); and the homepage's Anime.js, which loads from cdnjs pinned by
+  # version and Subresource Integrity (docs/overrides/home.html) so that no copy of it
+  # is vendored here. Emoji are written as Unicode characters by the emoji extension
+  # below, so nothing else is fetched.
   - privacy:
       assets_exclude:
         - 'github.com/*/actions/workflows/*'
         - 'unpkg.com/mermaid@*'
         - 'api.star-history.com/*'
+        - 'cdnjs.cloudflare.com/ajax/libs/animejs/4.5.0/*'
   - search
   - awesome-nav
   - autorefs

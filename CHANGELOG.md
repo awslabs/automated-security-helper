@@ -114,6 +114,14 @@
 
 ### Maintenance
 
+- The documentation site's homepage loads Anime.js 4.5.0 from cdnjs.cloudflare.com,
+  pinned by version and Subresource Integrity, instead of a reduced copy vendored in
+  the repository, and THIRD-PARTY-LICENSES no longer carries an Anime.js entry. Read
+  offline, or with the CDN blocked, the homepage's scan example shows the finished
+  scan without motion and says so. HTML reports are unchanged: they embed their font,
+  stylesheet and script, load nothing from the network, and stay readable offline.
+  The Open Sans font and the Phosphor icons stay vendored, with their entries in
+  THIRD-PARTY-LICENSES, because cdnjs does not host them.
 - Removed the four stale `.ash.yaml` suppressions for GHSA-g3hv-75wg-m249 /
   CVE-2026-118764 (minimatch globparts amplification): they pinned the minimatch
   10.2.5 copy bundled inside aws-cdk-lib 2.273.0, and the aws-cdk-lib 2.278.0 bump

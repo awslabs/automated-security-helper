@@ -5,8 +5,16 @@
 
 {% block extrahead %}
   {{ super() }}
-  <script type="module" src="{{ 'assets/javascripts/ash-scan.js' | url }}"></script>
   <script defer src="{{ 'assets/javascripts/ash-snippet-builder.js' | url }}"></script>
+  {#- Anime.js 4.5.0 (MIT) for the scan example, from cdnjs, pinned by version and
+      Subresource Integrity. It loads async: as a deferred script it would hold up
+      the module below and DOMContentLoaded, on which the theme starts its
+      components, until the CDN answered. Because it can finish before or after the
+      module runs, its handlers record the outcome in data-state, which the module
+      reads. Until it loads, and when it does not, the example keeps its finished,
+      static state. -#}
+  <script async id="ash-motion-library" src="https://cdnjs.cloudflare.com/ajax/libs/animejs/4.5.0/anime.umd.min.js" integrity="sha512-dnhflec5WaXvpVYrt0oWfe0iUyWpjNiZbxkjrhNu9WAWWHLX7VqqyxCZHL7dWCrwj6lN+XGN9FtiWIBgX2b/PA==" crossorigin="anonymous" referrerpolicy="no-referrer" onload="this.dataset.state = 'loaded'" onerror="this.dataset.state = 'failed'"></script>
+  <script type="module" src="{{ 'assets/javascripts/ash-scan.js' | url }}"></script>
 {% endblock %}
 
 {% block site_nav %}{% endblock %}

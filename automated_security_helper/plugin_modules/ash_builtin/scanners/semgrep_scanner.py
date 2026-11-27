@@ -311,8 +311,12 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
                 selection_surfaces=("options.config",),
                 upstream_license=(
                     "LGPL-2.1-only (source: utils/tool_downloads.py "
-                    "THIRD_PARTY_LICENSES['semgrep'], pinned commit a5844e7; the "
-                    "rules it downloads carry their own license, not read)"
+                    "THIRD_PARTY_LICENSES['semgrep'], pinned commit a5844e7; "
+                    "upstream declares two readings, LGPL-2.1-only in the "
+                    "repository's COPYRIGHT and semgrep.opam and "
+                    "LGPL-2.1-or-later in the 1.186.0 package metadata, and ASH "
+                    "records the narrower; the rules it downloads carry their "
+                    "own license, not read)"
                 ),
             ),
             prerequisites=opsf.PrerequisitesFacet(

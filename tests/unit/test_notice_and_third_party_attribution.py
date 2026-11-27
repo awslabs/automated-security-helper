@@ -50,8 +50,8 @@ def provenance_project_names() -> list[str]:
         for block in blocks
         if any(line.startswith("Source:") for line in block.splitlines())
     ]
-    assert len(names) >= 3, (
-        "the provenance parse went dead: expected at least the three known "
+    assert len(names) >= 2, (
+        "the provenance parse went dead: expected at least the two known "
         f"assets, read {names!r} from {ASSET_PROVENANCE}"
     )
     return names

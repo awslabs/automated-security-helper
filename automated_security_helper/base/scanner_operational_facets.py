@@ -677,6 +677,13 @@ class ProvenanceSource(str, Enum):
     GEMFILE_LOCK = "gemfile_lock"
     PYPI_VIA_UV = "pypi_via_uv"
     PYPI_PINNED_DEPENDENCY = "pypi_pinned_dependency"
+    #: ``ash dependencies install`` installs the distribution from PyPI into the
+    #: environment ASH runs in, with pip or uv, at a release inside the plugin's
+    #: version range. uv.lock does not pin it.
+    PYPI_RANGE_INSTALL = "pypi_range_install"
+    #: The container image installs the tool with apt, at a pinned package
+    #: version. Outside the image ASH installs nothing and the user provides it.
+    IMAGE_APT_PACKAGE = "image_apt_package"
     USER_INSTALLED = "user_installed"
 
 
@@ -685,6 +692,9 @@ class ProvenanceFacet(_Frozen):
     #: Switches below the tier: sub-scanners, opt-in modes.
     selection_surfaces: tuple[str, ...]
     #: ``"not read"`` or ``"<spdx> (source: <pinned upstream LICENSE>)"``.
+    #: A value citing a THIRD_PARTY_LICENSES entry is checked against that
+    #: entry's license and commit by
+    #: tests/unit/plugin_modules/test_scanner_operational_facets_consistency.py.
     upstream_license: str
 
     @model_validator(mode="after")

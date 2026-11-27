@@ -1,10 +1,44 @@
-/* Homepage example. Local Anime.js (MIT); no project files or scans leave the browser. */
-import {
-  createTimeline, createDrawable, createMotionPath, cubicBezier, stagger
-} from "./vendor/anime.js";
+/* Homepage example. Anime.js 4.5.0 (MIT) loads from cdnjs through the async script
+   element in docs/overrides/home.html, pinned by version and Subresource Integrity;
+   no project files or scans leave the browser. The library can finish loading
+   before or after this module runs, so its element records the outcome in
+   data-state. Until the library arrives, and when it does not, the example keeps
+   its finished, static state; when it does not load, the caption says so. */
+let createTimeline, createDrawable, createMotionPath, cubicBezier, stagger;
 
 const host = document.querySelector("[data-ash-scan]");
-if (host) initialize(host);
+if (host) {
+  whenMotionSettles((loaded) => {
+    if (loaded && bindMotion()) initialize(host);
+    else showFinishedExample(host);
+  });
+}
+
+function whenMotionSettles(settle) {
+  const library = document.getElementById("ash-motion-library");
+  const state = library?.dataset.state;
+  if (state === "loaded" || globalThis.anime) settle(true);
+  else if (!library || state === "failed") settle(false);
+  else {
+    library.addEventListener("load", () => settle(true), { once: true });
+    library.addEventListener("error", () => settle(false), { once: true });
+  }
+}
+
+function bindMotion() {
+  ({ createTimeline, createDrawable, createMotionPath, cubicBezier, stagger } =
+    globalThis.anime ?? {});
+  return [createTimeline, createDrawable, createMotionPath, cubicBezier, stagger]
+    .every((member) => typeof member === "function");
+}
+
+function showFinishedExample(example) {
+  const caption = example.querySelector("[data-scan-caption]");
+  if (caption) {
+    caption.textContent =
+      "Example data · Scanner coverage depends on configuration. The animation did not load.";
+  }
+}
 
 function initialize(example) {
   const root = document.documentElement;
