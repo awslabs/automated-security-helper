@@ -1434,7 +1434,10 @@ jobs:
               document = json.loads(text)
           elif config_file.name.endswith(".toml"):
               try:
-                  import tomllib
+                  try:
+                      import tomllib
+                  except ModuleNotFoundError:
+                      import tomli as tomllib
 
                   parse_toml = tomllib.loads
               except ModuleNotFoundError:
