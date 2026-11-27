@@ -866,12 +866,16 @@ def _self_test_model(tally: _Tally) -> None:
     with _support_model.isolated_commands():
         tally.refuses(
             "ash command text nobody read from the CLI",
-            lambda: _planted_matrix(intro="Run ash scan to see it."),
+            lambda: _planted_matrix(intro="Run ash scan."),
         )
         _support_model.ash_command(("scan",), exists=lambda path: True)
         tally.accepts(
             "ash command text that was read",
-            lambda: _planted_matrix(intro="Run ash scan to see it."),
+            lambda: _planted_matrix(intro="Run ash scan."),
+        )
+        tally.refuses(
+            "ash command text that goes on past the command that was read",
+            lambda: _planted_matrix(intro="Run ash scan fs."),
         )
 
 
