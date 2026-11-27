@@ -1074,9 +1074,12 @@ def _probe_failed(probe_argv, outcome, stdout, stderr):
     """What a probe that did not answer printed, in the function's log.
 
     The last PROBE_LOG_LINES lines of its standard output followed by its standard
-    error, as a shell step that reads the probe with 2>&1 prints them.
+    error: the lines of the first and then the lines of the second, with no separator
+    line between them, so every line kept is one the probe printed. A shell step that
+    reads the probe with 2>&1 prints the end of the two in the order they were
+    written; the gate holds the streams apart, so its standard output comes first.
     """
-    lines = (stdout + "\\n" + stderr).strip().splitlines()
+    lines = stdout.splitlines() + stderr.splitlines()
     _note("%s %s; the last %d lines of its output:\\n%s"
           % (" ".join(probe_argv), outcome, PROBE_LOG_LINES,
              "\\n".join(lines[-PROBE_LOG_LINES:])))
