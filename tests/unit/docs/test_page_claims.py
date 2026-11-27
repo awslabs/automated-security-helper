@@ -14182,10 +14182,17 @@ _COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE = (
     "Outside git, these directories are left out whole"
 )
 
+#: How coverage.md named the directories those scanners skip before it said ASH leaves
+#: them out. By the page's own definition that included an earlier run's
+#: ``.ash/ash_output``, which outside a git checkout no scanner is told to skip.
+_COVERAGE_SKIPS_EVERY_OUTPUT_DIR = (
+    "skip ASH's output directories that hold no file git tracks"
+)
+
 _COVERAGE_TRIVY_SKIPS_OUTPUT_DIRS_SENTENCE = (
     "bandit, checkov, semgrep, opengrep, grype, syft, ferret-scan, trivy, and "
-    "trivy-repo skip ASH's output directories that hold no file git tracks. trivy and "
-    "trivy-repo get each of them as a `trivy --skip-dirs` value."
+    "trivy-repo skip the output directories ASH leaves out that hold no file git "
+    "tracks. trivy and trivy-repo get each of them as a `trivy --skip-dirs` value."
 )
 
 _COVERAGE_OUTSIDE_GIT_SENTENCE = (
@@ -14195,22 +14202,49 @@ _COVERAGE_OUTSIDE_GIT_SENTENCE = (
     "in it."
 )
 
+#: How coverage.md said what ASH drops before it said that outside a git checkout that
+#: is this scan's own output directory, and not an earlier run's.
+_COVERAGE_DROPS_EVERY_FINDING = "drops every finding in those directories"
+_COVERAGE_DROPS_IN_ITS_OUTPUT_DIRS = (
+    "ASH drops the findings scanners report in its output directories"
+)
+
+_COVERAGE_DROP_SENTENCE = (
+    "ASH drops the findings scanners report in the output directories it leaves out, "
+    "even with `--ignore-suppressions`, except in files git tracks there and in this "
+    "scan's `converted/`."
+)
+
+_COVERAGE_OUTSIDE_GIT_DROP_SENTENCE = (
+    "Outside a git checkout, or when git cannot list the repository, ASH cannot tell a "
+    "committed file from its own, so it drops what scanners report in this scan's own "
+    "output directory, apart from its `converted/`. An earlier run's `.ash/ash_output` "
+    "is scanned like the rest of the tree, and its findings are kept."
+)
+
 
 @pytest.mark.unit
 def test_coverage_lists_trivy_and_trivy_repo_with_the_output_dir_skippers() -> None:
     """coverage.md (What decides the files; the scanners that walk the directory).
 
-    The page lists trivy and trivy-repo with the scanners that skip ASH's output
-    directories that hold no file git tracks, and says both get each of them as a
-    ``trivy --skip-dirs`` value. This is the page half: the commands both scanners
-    build are probed by the faq.md and index.md test above.
+    The page lists trivy and trivy-repo with the scanners that skip the output
+    directories ASH leaves out that hold no file git tracks, and says both get each of
+    them as a ``trivy --skip-dirs`` value. It does not say they skip ASH's output
+    directories without that qualifier: outside a git checkout no scanner is told to
+    skip an earlier run's ``.ash/ash_output``. This is the page half: the commands
+    both scanners build are probed by the faq.md and index.md test above.
     """
     assert_on_page(COVERAGE_PAGE, _COVERAGE_TRIVY_SKIPS_OUTPUT_DIRS_SENTENCE)
     text = _normalize(_page_text(COVERAGE_PAGE))
-    assert _normalize(_COVERAGE_SKIPPERS_WITHOUT_TRIVY) not in text, (
-        COVERAGE_PAGE,
-        _COVERAGE_SKIPPERS_WITHOUT_TRIVY,
-    )
+    stale = [
+        phrase
+        for phrase in (
+            _COVERAGE_SKIPPERS_WITHOUT_TRIVY,
+            _COVERAGE_SKIPS_EVERY_OUTPUT_DIR,
+        )
+        if _normalize(phrase) in text
+    ]
+    assert not stale, (COVERAGE_PAGE, stale)
 
 
 @pytest.mark.unit
@@ -14229,6 +14263,35 @@ def test_coverage_says_outside_git_only_this_scans_output_dir_is_left_out() -> N
         COVERAGE_PAGE,
         _COVERAGE_OUTSIDE_GIT_LEFT_OUT_WHOLE,
     )
+
+
+@pytest.mark.unit
+def test_coverage_says_outside_git_only_this_scans_output_dir_is_dropped() -> None:
+    """coverage.md (What decides the files; what ASH drops from its own output).
+
+    ASH drops what scanners report in the output directories it leaves out, except in
+    files git tracks there and in this scan's ``converted/``. Outside a git checkout,
+    or where git cannot list the repository, that is this scan's own output directory
+    apart from its ``converted/``: an earlier run's ``.ash/ash_output`` is scanned and
+    its findings are kept. This is the page half. The code halves are
+    tests/unit/test_leftover_output_dir_without_git_is_scanned.py, which asserts that
+    no output directory is named in a tree outside git that holds an earlier run's
+    ``.ash/ash_output`` (the drop acts only on named directories), and
+    tests/unit/test_ash_output_dirs_are_not_scanned.py, for what the drop removes and
+    keeps.
+    """
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_DROP_SENTENCE)
+    assert_on_page(COVERAGE_PAGE, _COVERAGE_OUTSIDE_GIT_DROP_SENTENCE)
+    text = _normalize(_page_text(COVERAGE_PAGE))
+    stale = [
+        phrase
+        for phrase in (
+            _COVERAGE_DROPS_EVERY_FINDING,
+            _COVERAGE_DROPS_IN_ITS_OUTPUT_DIRS,
+        )
+        if _normalize(phrase) in text
+    ]
+    assert not stale, (COVERAGE_PAGE, stale)
 
 
 # --------------------------------------------------------------------------- #
