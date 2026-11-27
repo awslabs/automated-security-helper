@@ -14,6 +14,12 @@ entry: the key itself, its ``-``/``_`` twin (``global-settings``), or a plugin
 section's case variant (``Bandit``). A refusal ends with the sentence the
 command registry gives, which names the command that rewrites the file once one
 is registered.
+
+guarddog's section is read as the scanner's own config class, since its manifest
+gives no typed section, so an old spelling in it is refused at 4.0 too, as a key
+and through a pointer, under the name its manifest declares or a case variant of
+it. A section no shipped manifest names is not read that way, and loads as
+written.
 """
 
 import warnings
@@ -215,7 +221,7 @@ def _excluded_paths_base(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 def _old_spelling_op(list_pointer: str, op: str, entry: Dict[str, Any]) -> Any:
     """One ``op`` that writes the old spelling through ``list_pointer``, the
-    pointer to a list whose one entry the base writes in the new spelling.
+    pointer to a list whose one entry the base writes.
 
     A ``test`` holds that entry with its expiry in the old spelling, a
     ``replace`` and a ``remove`` name the expiry in the old spelling, and an
@@ -312,6 +318,101 @@ def test_an_op_through_either_spelling_of_a_scanner_section_is_refused_at_remova
     assert REMOVAL in message
     assert "repo.yaml" in message
     assert "patch[0]" in message
+
+
+def _section_holding(section: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    """A file whose scanner section ``section`` holds ``entry`` as its one
+    excluded path."""
+    return {"scanners": {section: {"options": {"excluded_paths": [entry]}}}}
+
+
+@pytest.mark.parametrize(
+    "section", ["guarddog", "GuardDog"], ids=["manifest-name", "case-variant"]
+)
+def test_an_excluded_path_in_guarddogs_section_in_the_old_spelling_is_refused(
+    tmp_path: Path, running, section: str
+) -> None:
+    """guarddog's manifest gives no typed section, so the scanners segment
+    declares no field for it, and the loader reads the section as the scanner's
+    own config class, under the manifest's name or a case variant of it. Its
+    excluded path in the old spelling is refused at the removal release, naming
+    the file and the entry by the keys the file writes, and no value."""
+    running(REMOVAL_RELEASE)
+    config = _write(
+        tmp_path / "cfg" / "only.yaml",
+        _section_holding(section, {**_EXCLUDED, "expiration": "2099-01-01"}),
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(config)
+
+    message = str(refused.value)
+    assert REMOVAL in message
+    assert "only.yaml" in message
+    assert f"scanners.{section}.options.excluded_paths[0]" in message
+    assert "2099-01-01" not in message
+
+
+#: guarddog's excluded paths, by how a pointer spells the scanner's section: the
+#: name its manifest declares, and a case variant of it.
+_GUARDDOG_EXCLUDED_PATHS = "/scanners/guarddog/options/excluded_paths"
+_GUARDDOG_EXCLUDED_PATHS_VARIANT = "/scanners/GuardDog/options/excluded_paths"
+
+
+@pytest.mark.parametrize("op", ["test", "replace", "remove", "add"])
+@pytest.mark.parametrize(
+    "excluded_paths",
+    [_GUARDDOG_EXCLUDED_PATHS, _GUARDDOG_EXCLUDED_PATHS_VARIANT],
+    ids=["manifest-name", "case-variant"],
+)
+def test_an_op_into_guarddogs_section_in_the_old_spelling_is_refused_at_removal(
+    tmp_path: Path, running, excluded_paths: str, op: str
+) -> None:
+    """A pointer reads guarddog's section as the loader does, under the name its
+    manifest declares or a case variant of it. Over a base whose excluded path
+    writes the old spelling too, an op whose pointer or value writes it is
+    refused naming the child's file and the op: a file is read, and refused,
+    before the bases it extends. The ``repo.yaml`` and ``patch[0]`` assertions
+    hold because of that order, so a failure there after a change to the order
+    is the order, not the spelling."""
+    running(REMOVAL_RELEASE)
+    child = _child_of(
+        tmp_path,
+        _section_holding("guarddog", {**_EXCLUDED, "expiration": "2099-01-01"}),
+        [_old_spelling_op(excluded_paths, op, _EXCLUDED)],
+    )
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        AshConfig.from_file(child)
+
+    message = str(refused.value)
+    assert REMOVAL in message
+    assert "repo.yaml" in message
+    assert "patch[0]" in message
+
+
+#: A scanner section no shipped manifest names: a plugin from elsewhere.
+_UNSHIPPED_SECTION = "in-house-tool"
+
+
+def test_an_old_spelling_in_a_section_no_shipped_manifest_names_loads_at_removal(
+    tmp_path: Path, running
+) -> None:
+    """The limit of that walk: an undeclared section is read only as the config
+    class of a scanner ASH ships whose manifest gives no typed section. A section
+    no shipped manifest names, a plugin from elsewhere, is not walked, so the
+    loader does not refuse its old spelling at the removal release: the section
+    loads as written, and that plugin's own model renames the key silently."""
+    running(REMOVAL_RELEASE)
+    entry = {**_EXCLUDED, "expiration": "2099-01-01"}
+    config = _write(
+        tmp_path / "cfg" / "only.yaml", _section_holding(_UNSHIPPED_SECTION, entry)
+    )
+
+    loaded = AshConfig.from_file(config)
+
+    section = (loaded.scanners.model_extra or {})[_UNSHIPPED_SECTION]
+    assert section["options"]["excluded_paths"] == [entry]
 
 
 def test_an_entry_validated_outside_the_loader_loads_at_the_removal_release(

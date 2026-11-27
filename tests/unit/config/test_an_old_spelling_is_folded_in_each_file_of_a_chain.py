@@ -12,6 +12,10 @@ the canonical key before it layers the file over another. So:
   pointer or an op's value in the old spelling is said like any other key;
 * a key that is canonical in another model (a content database staleness
   override's ``expiration``) is left as written;
+* a scanner section the scanners segment does not declare is read as the
+  config class of a scanner ASH ships whose manifest gives no typed section
+  (guarddog's), under the manifest's name or a case variant of it, and any other
+  such section is left as written;
 * the line names the file as it is, and the sink that shows a resolution
   warning writes a control in the name as its escape, once;
 * a value an old-spelling key reads from the environment is recorded at the
@@ -21,8 +25,9 @@ Each of these is pinned below: three entries in two files give two lines, one
 naming each file, and ``fail_on_unknown_keys: true`` gives the line too; a
 disagreement in a base is refused naming the base; a pointer in either spelling
 applies over a base in the other; an op's value is folded, its line naming the
-file, and a disagreement in it is refused naming the op; and an environment
-read is recorded at the canonical key.
+file, and a disagreement in it is refused naming the op; guarddog's excluded
+path gives its file one line under either key, and a section no shipped manifest
+names gives none; and an environment read is recorded at the canonical key.
 """
 
 from pathlib import Path
@@ -379,6 +384,74 @@ def test_a_staleness_overrides_expiration_is_its_own_canonical_key(
 
     assert loaded.content_db_staleness_overrides[0].expiration == "2099-01-01"
     assert _deprecation_lines(loaded) == []
+
+
+#: An excluded path of a scanner's section, without its expiry.
+_EXCLUDED = {"path": "tests/", "reason": "reviewed"}
+
+#: A scanner section no shipped manifest names: a plugin from elsewhere.
+_UNSHIPPED_SECTION = "in-house-tool"
+
+
+def _excluded_paths_document(section: str, **expiry: str) -> Dict[str, Any]:
+    """A file whose scanner section ``section`` holds one excluded path, with
+    ``expiry``."""
+    entry = {**_EXCLUDED, **expiry}
+    return {"scanners": {section: {"options": {"excluded_paths": [entry]}}}}
+
+
+def _held_excluded_paths(config: AshConfig, section: str) -> List[Dict[str, Any]]:
+    """The excluded paths of the section ``section``. The scanners segment
+    declares no field for it, so it holds the section as the mapping the file
+    wrote."""
+    return (config.scanners.model_extra or {})[section]["options"]["excluded_paths"]
+
+
+@pytest.mark.parametrize(
+    "section", ["guarddog", "GuardDog"], ids=["manifest-name", "case-variant"]
+)
+def test_an_excluded_path_in_guarddogs_section_says_the_deprecation_for_its_file(
+    tmp_path: Path, section: str
+) -> None:
+    """guarddog's manifest gives no typed section, so the scanners segment
+    declares no field for it. The fold reads the section as the scanner's own
+    config class, under the manifest's name or a case variant of it, which the
+    loader keeps as the file writes it: the line is said once, naming the file,
+    and the excluded path holds its expiry under the canonical key."""
+    config = _write(
+        tmp_path / "cfg" / "only.yaml",
+        _excluded_paths_document(section, expiration="2099-01-01"),
+    )
+
+    loaded = AshConfig.from_file(config)
+
+    lines = _deprecation_lines(loaded)
+    assert len(lines) == 1, lines
+    assert "only.yaml" in lines[0], lines
+    assert _held_excluded_paths(loaded, section) == [
+        {**_EXCLUDED, "expires": "2099-01-01"}
+    ]
+
+
+def test_an_excluded_path_in_a_section_no_shipped_manifest_names_is_left_as_written(
+    tmp_path: Path,
+) -> None:
+    """The limit of that walk: an undeclared section is read only as the config
+    class of a scanner ASH ships whose manifest gives no typed section. A section
+    no shipped manifest names, a plugin from elsewhere, is not walked: its old
+    spelling is not respelled or said here, that plugin's own model renames it
+    (silently from the removal release), and lint does not report it."""
+    config = _write(
+        tmp_path / "cfg" / "only.yaml",
+        _excluded_paths_document(_UNSHIPPED_SECTION, expiration="2099-01-01"),
+    )
+
+    loaded = AshConfig.from_file(config)
+
+    assert _deprecation_lines(loaded) == []
+    assert _held_excluded_paths(loaded, _UNSHIPPED_SECTION) == [
+        {**_EXCLUDED, "expiration": "2099-01-01"}
+    ]
 
 
 def test_a_files_name_with_a_control_in_it_is_shown_once_in_its_line(

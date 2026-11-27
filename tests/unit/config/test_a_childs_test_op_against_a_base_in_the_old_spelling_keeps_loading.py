@@ -12,6 +12,11 @@ key's ``-``/``_`` twin (``global-settings``) and a plugin section's case variant
 ``replace`` or ``remove`` of its expiry by the old spelling, and an ``add`` of an
 entry that writes the old spelling all reach the base's entry through such a
 pointer, and the old spelling the op names is said once, naming the child's file.
+
+A pointer reaches the entry model through guarddog's section too, under the
+name its manifest declares or a case variant of it (``GuardDog``): the scanners
+segment declares no field for the section, and the fold and the pointer read it
+as the scanner's own config class, since its manifest gives no typed section.
 """
 
 from pathlib import Path
@@ -269,4 +274,49 @@ def test_a_childs_op_through_either_spelling_of_a_scanner_section_keeps_loading(
 
     entries = config.scanners.bandit.options.excluded_paths
     assert [(entry.reason, entry.expires) for entry in entries] == _LOADED[op]
+    _said_once_for_each_file(config)
+
+
+#: guarddog's excluded paths, by how a pointer spells the scanner's section: the
+#: name its manifest declares, and a case variant of it.
+_GUARDDOG_EXCLUDED_PATHS = "/scanners/guarddog/options/excluded_paths"
+_GUARDDOG_EXCLUDED_PATHS_VARIANT = "/scanners/GuardDog/options/excluded_paths"
+
+
+def _guarddog_base(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """A base whose guarddog section, spelled as its manifest names it, holds
+    ``entry`` as its one excluded path. The scanners segment declares no field
+    for the section, so it holds it as the mapping the files wrote."""
+    return {"scanners": {"guarddog": {"options": {"excluded_paths": [entry]}}}}
+
+
+@pytest.mark.parametrize("op", _OPS)
+@pytest.mark.parametrize(
+    "excluded_paths",
+    [_GUARDDOG_EXCLUDED_PATHS, _GUARDDOG_EXCLUDED_PATHS_VARIANT],
+    ids=["manifest-name", "case-variant"],
+)
+def test_a_childs_op_into_guarddogs_section_keeps_loading(
+    tmp_path: Path, excluded_paths: str, op: str
+) -> None:
+    """The same through guarddog's section. Its manifest gives no typed section,
+    and the fold and the pointer read the section as the scanner's own config
+    class: the base's excluded path is read in the canonical spelling, the op
+    reaches it, and the old spelling is said once for each file. An op whose
+    pointer writes ``GuardDog`` reaches the excluded path of a base that writes
+    ``guarddog``, as one that writes ``guarddog`` does: the loader folds the
+    pointer's segment onto the one key of that section the document holds."""
+    child = _child_of(
+        tmp_path,
+        _guarddog_base(dict(_EXCLUDED)),
+        _ops(excluded_paths, op, _EXCLUDED),
+    )
+
+    config = AshConfig.from_file(child)
+
+    section = (config.scanners.model_extra or {})["guarddog"]
+    entries = section["options"]["excluded_paths"]
+    pairs = [(entry["reason"], entry.get("expires")) for entry in entries]
+    assert pairs == _LOADED[op]
+    assert not [entry for entry in entries if "expiration" in entry], entries
     _said_once_for_each_file(config)

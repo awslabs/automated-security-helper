@@ -8,6 +8,10 @@ spelling of that model's field: a content database staleness override's
 
 So an exclusion written with ``expiration`` is reported, as a suppression is,
 under its section's key or that key's ``-``/``_`` twin.
+
+An excluded path in guarddog's section, which the scanners segment does not
+declare, is reported too: lint reads the section as the scanner's own config
+class, since its manifest gives no typed section, under the key the file writes.
 """
 
 from pathlib import Path
@@ -78,6 +82,26 @@ def test_an_exclusion_under_the_twin_of_its_sections_key_is_reported(
     )
 
     assert _deprecated_spelling_paths(issues) == ["global-settings.exclusions[0]"]
+
+
+@pytest.mark.parametrize(
+    "section", ["guarddog", "GuardDog"], ids=["manifest-name", "case-variant"]
+)
+def test_an_excluded_path_in_guarddogs_section_is_reported_where_the_file_writes_it(
+    tmp_path: Path, section: str
+) -> None:
+    """guarddog's manifest gives no typed section, so the scanners segment
+    declares no field for it. Lint reads the section as the scanner's own config
+    class, under the manifest's name or a case variant of it, and names the entry
+    by the keys the file writes."""
+    excluded = {"path": "tests/", "reason": "vendored", "expiration": "2099-01-01"}
+    issues = _lint(
+        tmp_path, {"scanners": {section: {"options": {"excluded_paths": [excluded]}}}}
+    )
+
+    assert _deprecated_spelling_paths(issues) == [
+        f"scanners.{section}.options.excluded_paths[0]"
+    ]
 
 
 def test_a_suppression_written_with_the_old_spelling_is_still_reported(

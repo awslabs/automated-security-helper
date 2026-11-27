@@ -7,6 +7,10 @@ past its row's removal release itself, with the removal message naming both
 spellings. It changes nothing else it reads: the canonical spelling applies at
 the removal release, the old one applies before it, and an op's pointer is
 applied as the caller wrote it.
+
+A reader reads guarddog's section, which the scanners segment does not declare,
+as the scanner's own config class, since its manifest gives no typed section: an
+excluded path a config override writes there in the old spelling is refused too.
 """
 
 import json
@@ -264,4 +268,46 @@ def test_a_config_override_is_applied_unless_it_writes_a_removed_spelling(
 
     assert [entry.expires for entry in config.global_settings.suppressions] == [
         "2099-01-01"
+    ]
+
+
+def _guarddog_override(key: str) -> str:
+    """``scanners.guarddog.options.excluded_paths=<a list of one excluded path>``,
+    its expiry written under ``key``."""
+    excluded = {"path": "tests/", "reason": "reviewed", key: "2099-01-01"}
+    return "scanners.guarddog.options.excluded_paths=" + json.dumps([excluded])
+
+
+def test_a_config_override_writing_the_old_spelling_in_guarddogs_section_is_refused(
+    running,
+) -> None:
+    """guarddog's manifest gives no typed section, so the scanners segment
+    declares no field for it. The reader reads the section as the scanner's own
+    config class, and refuses an excluded path in the old spelling, naming the
+    entry and both spellings, and no value."""
+    running(REMOVAL_RELEASE)
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        apply_config_overrides(AshConfig(), [_guarddog_override("expiration")])
+
+    message = str(refused.value)
+    assert "scanners.guarddog.options.excluded_paths[0]" in message
+    assert "'expiration'" in message
+    assert "'expires'" in message
+    assert "2099-01-01" not in message
+
+
+@pytest.mark.parametrize("version,key", _ACCEPTED)
+def test_a_guarddog_override_is_applied_unless_it_writes_a_removed_spelling(
+    running, version: str, key: str
+) -> None:
+    """The control: the reader refuses the removed spelling alone, and changes
+    nothing it applies, so the section holds the excluded path as written."""
+    running(version)
+
+    config = apply_config_overrides(AshConfig(), [_guarddog_override(key)])
+
+    section = (config.scanners.model_extra or {})["guarddog"]
+    assert section["options"]["excluded_paths"] == [
+        {"path": "tests/", "reason": "reviewed", key: "2099-01-01"}
     ]
