@@ -177,7 +177,7 @@ class TestTheBashWrapperMountsTheSourceReadOnly:
         rc, output_text, calls = _run_ash(
             fake_runner,
             tmp_path,
-            ["--no-build", "--source-dir", str(source), "--output-dir", str(output)],
+            ["--no-build", "scan", "fs", str(source), "--output-dir", str(output)],
         )
 
         assert rc == 0, output_text
@@ -458,7 +458,8 @@ def _bash_decision(fake_runner, source: Path, output: Path, config: Path, cwd: P
         cwd,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(source),
             "--output-dir",
             str(output),

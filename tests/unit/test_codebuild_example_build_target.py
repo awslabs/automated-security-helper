@@ -46,7 +46,9 @@ def test_every_container_command_asks_for_the_ci_stage(name):
 
 def test_the_matcher_sees_a_command_without_the_stage():
     """Control for the check above."""
-    assert _CONTAINER_COMMAND.search("      - ash --mode container --no-progress")
+    assert _CONTAINER_COMMAND.search(
+        "      - ash scan fs . --mode container --no-progress"
+    )
     assert not _CONTAINER_COMMAND.search(
         "      - pip install automated-security-helper"
     )

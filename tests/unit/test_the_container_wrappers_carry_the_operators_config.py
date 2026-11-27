@@ -661,7 +661,7 @@ def _bash_decision(
     cwd: Path,
     extra_env: Optional[Dict[str, str]] = None,
 ):
-    args = ["--no-build", "--source-dir", str(source), "--output-dir", str(output)]
+    args = ["--no-build", "scan", "fs", str(source), "--output-dir", str(output)]
     if config is not None:
         args.extend(["--config", str(config)])
     rc, output_text, calls = _run_ash(fake_runner, cwd, args, extra_env)
@@ -1021,7 +1021,7 @@ def test_the_bash_wrapper_judges_a_relative_config_from_the_directory_the_shell_
     rc, output_text, calls = _run_ash(
         fake_runner,
         cwd,
-        ["--no-build", "--source-dir", str(source), "--output-dir", str(output)]
+        ["--no-build", "scan", "fs", str(source), "--output-dir", str(output)]
         + ["--config", str(config)],
         {"PWD": str(cwd)},
     )
@@ -1820,7 +1820,8 @@ def _run_with_a_checkout_that_is_a_link(fake_runner, tmp_path, via):
         tmp_path,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(home / "repo"),
             "--output-dir",
             str(tmp_path / "out"),
@@ -1899,7 +1900,8 @@ def test_a_name_back_into_the_checkout_through_its_own_link_still_meets_the_link
         tmp_path,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(home / "repo"),
             "--output-dir",
             str(tmp_path / "out"),
@@ -1940,7 +1942,8 @@ def test_a_file_in_the_checkout_is_the_repositorys_when_the_source_is_reached_th
         tmp_path,
         [
             "--no-build",
-            "--source-dir",
+            "scan",
+            "fs",
             str(home / "alias" / "lnk"),
             "--output-dir",
             str(tmp_path / "out"),

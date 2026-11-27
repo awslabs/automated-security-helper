@@ -455,7 +455,8 @@ class TestTheBashEntrypoint:
         args = [
             "bash",
             str(ASH_SCRIPT),
-            "--source-dir",
+            "scan",
+            "fs",
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
