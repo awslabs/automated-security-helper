@@ -726,7 +726,11 @@ def test_the_rc_file_measures_the_package_per_block_into_the_coverage_directory(
     assert Path(data_file) == directory / "data" / ".coverage"
     assert run["context"].strip() == "${DOCS_COVERAGE_CONTEXT-unattributed}"
     assert run["parallel"].strip().lower() == "true"
-    assert {"_exit", "fork"} <= set(re.split(r"[,\s]+", run["patch"].strip()))
+    patches = set(re.split(r"[,\s]+", run["patch"].strip()))
+    assert "fork" in patches
+    # Nothing saves inside os._exit: a fork pool shut down by its with block sends
+    # SIGTERM to a worker still in that save, which leaves a file the check refuses.
+    assert "_exit" not in patches
     for falls_back in ("branch", "concurrency", "dynamic_context"):
         assert falls_back not in run, falls_back
     assert "identifiers" not in run.get("omit", "")

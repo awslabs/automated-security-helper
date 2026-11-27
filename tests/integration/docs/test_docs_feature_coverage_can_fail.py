@@ -12,6 +12,8 @@ and the runner's records:
 * a page whose block does not call the planted function fails the gate, naming it;
 * a python block that calls it passes;
 * a shell block's python grandchild carries the block's coverage context;
+* a forked child that ends in ``os._exit`` saves no coverage data, so no pool's
+  shutdown can cut a save off and leave a file the check cannot read;
 * a block that reaches the function and then fails its expected exit does not count;
 * nor does a block that reaches it while it shows ASH refusing something (its marker
   expects the usage-error exit), nor one whose output sample no longer matches;
@@ -321,6 +323,43 @@ python -c "import automated_security_helper.core.constants as c; c.is_blank_bin_
 
     assert code == 0
     assert feature["covered"] is True
+
+
+def test_a_forked_child_that_ends_in_os_exit_writes_no_coverage_data(tmp_path):
+    """No measured process saves its coverage data inside ``os._exit``.
+
+    multiprocessing's fork workers end in ``os._exit``, and a pool shut down by its
+    ``with`` block sends SIGTERM to every worker still alive, one inside that save
+    included: the save is cut off and the data file it leaves cannot be read, which
+    stops the check with exit 2. So a forked child that ends in ``os._exit`` leaves no
+    data file, while the block's own process still leaves its own."""
+    coverage = _coverage(tmp_path)
+    _page, results = _run_page(
+        tmp_path,
+        f"""{FENCE}python
+import os
+
+import automated_security_helper.core.constants as constants
+
+child = os.fork()
+if child == 0:
+    constants.is_blank_bin_path("{REACHES_THE_REGION}")
+    os._exit(0)
+os.waitpid(child, 0)
+print("pids", os.getpid(), child)
+{FENCE}
+""",
+        coverage,
+    )
+
+    assert [r.ok for r in results] == [True], runner.failure_report(results)
+    (line,) = [
+        text for text in results[0].output.splitlines() if text.startswith("pids ")
+    ]
+    parent, child = (int(word) for word in line.split()[1:])
+    names = [part.name for part in (coverage.directory / "data").glob(".coverage.*")]
+    assert any(f".pid{parent}." in name for name in names), names
+    assert not [name for name in names if f".pid{child}." in name], names
 
 
 def test_a_block_that_reaches_the_planted_function_and_then_fails_does_not_count(
