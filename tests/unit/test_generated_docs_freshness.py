@@ -118,6 +118,7 @@ REFERENCE_PAGES = {
     "generate_mcp_tool_reference.py": "mcp-tools.md",
     "generate_reporter_docs.py": "reporters.md",
     "generate_scanner_reference.py": "scanners.md",
+    "generate_support_matrices.py": "support-matrix.md",
 }
 #: The pages with plugin options tables, and the config section each one documents.
 OPTIONS_PAGES = {
