@@ -6,10 +6,9 @@
 No image is pulled and no engine is involved anywhere a test uses this. The
 committed fixture ``tests/test_data/images/secret-image.tar`` is what
 :func:`build_secret_image_archive` writes (its sha256 is recorded in the README
-beside it, and a unit test holds the two equal); :func:`archive_to_layout` is
-the other direction of the re-pack the production code does
-(``utils/oci_layout_archive.layout_to_docker_archive``), so a test can go
-archive -> layout -> archive and compare what survives.
+beside it, and a unit test holds the two equal); :func:`archive_to_layout`
+turns that archive into an OCI image-layout directory, so the layout
+submission shape is tested from the same committed bytes.
 
 The image: one gzip-compressed layer holding ``app/creds.txt`` with a fake GitHub
 token (assembled at build time, so this file holds no token-shaped string, and the
@@ -141,9 +140,9 @@ def build_image_archive(
 def archive_to_layout(archive: Path, layout: Path) -> Path:
     """Re-pack a docker-archive as an OCI image-layout directory at *layout*.
 
-    The inverse of ``layout_to_docker_archive`` for the one-layer fixture shape:
-    the config and each layer become blobs named by their digests, an image
-    manifest names them, and ``index.json`` names the manifest.
+    For the one-layer fixture shape: the config and each layer become blobs
+    named by their digests, an image manifest names them, and ``index.json``
+    names the manifest.
     """
     layout.mkdir(parents=True, exist_ok=True)
     blobs = layout / "blobs" / "sha256"

@@ -30,8 +30,15 @@ IMAGE_REF = "registry.example.com/team/app:1.2.3"
 
 @pytest.fixture(autouse=True)
 def _here(tmp_path, monkeypatch):
-    for name in ("ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_CONFIG", "ASH_WORKSPACE"):
-        monkeypatch.delenv(name, raising=False)
+    # EVERY ASH_* variable, not a named few: a PR pipeline exports
+    # ASH_CHANGED_FILES_ONLY (an env-set scope the CLI refuses with an image,
+    # which one row here pins), and any shell that exports one of those would
+    # otherwise flip the positive rows to exit 5.
+    import os
+
+    for name in list(os.environ):
+        if name.startswith("ASH_"):
+            monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("COLUMNS", "400")
     monkeypatch.setenv("NO_COLOR", "1")
     monkeypatch.chdir(tmp_path)
@@ -69,10 +76,12 @@ class TestExclusivityIsRefusedBeforeAnyWork:
         assert "--workspace" in result.output
 
 
-class TestOptionsThatReadTheWorkingDirectoryAreRefused:
-    """These flags resolve against the directory a scan starts in, which is not an
-    image scan's subject: ``--staged`` could exit 0 as "nothing staged" without the
-    image ever being scanned, and the others would read or filter by the cwd."""
+class TestScopesAnImageScanCannotObeyAreRefused:
+    """Each with its own reason: the git-history scopes (an image has none),
+    saved results (nothing would be scanned) and a baseline (scoped to a
+    scanned directory, keyed on digests no other image shares). The rules live
+    in run_ash_scan's shared gate; the CLI loop exists for the wording, naming
+    the flag as typed or the variable that set it."""
 
     @pytest.mark.parametrize(
         "image_options",
@@ -97,6 +106,16 @@ class TestOptionsThatReadTheWorkingDirectoryAreRefused:
         assert other[0] in result.output
         assert image_options[0] in result.output
 
+    def test_a_value_set_through_the_environment_names_the_variable(self, monkeypatch):
+        # A PR pipeline exports ASH_CHANGED_FILES_ONLY; the operator never
+        # typed the flag, so the refusal names what actually set it, as the
+        # sibling env-aware refusals do.
+        monkeypatch.setenv("ASH_CHANGED_FILES_ONLY", "true")
+        result = _scan("--image", IMAGE_REF)
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR
+        assert "ASH_CHANGED_FILES_ONLY is set" in result.output
+        assert "--changed-files-only" in result.output
+
 
 class TestThePayloadGateReachesTheOperator:
     def test_a_missing_archive_shows_the_gate_text(self, tmp_path):
@@ -111,6 +130,32 @@ class TestThePayloadGateReachesTheOperator:
         result = _scan("--image-layout", str(bare))
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert f"Image layout has no oci-layout marker file: {bare}" in result.output
+
+
+class TestANonReferenceIsRefusedBeforeAnyWork:
+    """``--image`` takes references only, checked by the one grammar.
+
+    A path given as ``--image`` (``/etc``, ``../app``) reaches the scanner
+    tools as text they read as a directory to catalog, so it is refused with
+    the usage exit before run_ash_scan starts, in a list as well as alone.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("/etc", id="absolute-path"),
+            pytest.param("../app", id="relative-path"),
+            pytest.param("-x", id="option"),
+            pytest.param("Team/App", id="uppercase-path"),
+            pytest.param(f"{IMAGE_REF},/etc", id="in-a-list"),
+        ],
+    )
+    def test_the_value_is_refused_and_named(self, value):
+        with patch("automated_security_helper.cli.scan.run_ash_scan") as run:
+            result = _scan(f"--image={value}")
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert "not an image reference" in result.output
+        assert run.call_count == 0
 
 
 class TestWhatTheCliHandsRunAshScan:

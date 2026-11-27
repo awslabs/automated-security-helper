@@ -120,7 +120,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.base.uv_tool_mixin import guarded_values
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    _restore_uv_route,
+    guarded_values,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -1058,6 +1062,14 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         # binary the resolver found on PATH has to run that binary. With
         # use_uv_tool left True, every scan then went through uv, whose install
         # had just failed, and refused to start.
+        if resolved[:1] == ["uv"]:
+            _restore_uv_route(self)
+        elif self.use_uv_tool:
+            # Off uv for the resolver's binary, which runs unverified and with no
+            # version read: the uv probe's answer names another environment. A
+            # re-validation already on a direct route keeps the record that route
+            # made.
+            _record_direct_route_version(self, None)
         self.use_uv_tool = resolved[:1] == ["uv"]
         self.dependencies_satisfied = True
         return True
@@ -1081,6 +1093,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         if resolved[:1] == ["uv"]:
             # Reachable only if the resolver found a uv the availability check did
             # not; run through it as the final fallback does.
+            _restore_uv_route(self)
             self.use_uv_tool = True
             self.dependencies_satisfied = True
             return True
@@ -1109,6 +1122,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 f"({checked.detail}); running it anyway.",
                 level=logging.WARNING,
             )
+        _record_direct_route_version(self, getattr(checked, "version", None))
         self.use_uv_tool = False
         self.dependencies_satisfied = True
         return True
