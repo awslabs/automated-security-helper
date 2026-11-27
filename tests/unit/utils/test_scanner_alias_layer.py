@@ -113,6 +113,8 @@ def test_the_config_fold_applies_a_retired_section_to_the_serving_plugin(
 def test_the_fold_drops_options_the_serving_plugin_does_not_declare(
     retired_oldname, caplog
 ):
+    """The fold drops retired_only_knob, an option bandit does not declare,
+    and its warning counts the dropped option without naming it."""
     from automated_security_helper.config.ash_config import ScannerConfigSegment
 
     with caplog.at_level(logging.WARNING, logger="ash"):
@@ -121,10 +123,12 @@ def test_the_fold_drops_options_the_serving_plugin_does_not_declare(
         )
     assert segment.bandit.enabled is True
     assert not hasattr(segment.bandit.options, "retired_only_knob")
+    messages = [record.getMessage() for record in caplog.records]
     assert any(
-        "retired_only_knob" in record.getMessage() and "dropped" in record.getMessage()
-        for record in caplog.records
-    )
+        "1 option with no bandit counterpart was dropped" in message
+        for message in messages
+    ), messages
+    assert not [m for m in messages if "retired_only_knob" in m], messages
 
 
 def test_the_operators_alias_section_wins_over_the_canonical_defaults(retired_oldname):
