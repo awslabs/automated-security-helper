@@ -418,6 +418,7 @@ from automated_security_helper.workspace.aggregation import (
     inputs_not_scanned_for_project,
     is_policy_origin,
     result_is_suppressed,
+    result_states_no_finding,
     rewrite_workspace_block,
     stale_content_databases_for_project,
 )
@@ -1681,11 +1682,18 @@ def _reduce_project_scan(
 
     # A suppression that has not taken effect (rejected, underReview) hides
     # nothing: the same reading the per-scanner counts and the flat finding make.
-    unsuppressed = [entry for entry in results_list if not result_is_suppressed(entry)]
-    policy_origin = [entry for entry in unsuppressed if is_policy_origin(entry)]
+    # A result whose kind states no finding (pass, notApplicable, informational)
+    # is none of the project's findings, whatever its level: the exit code and
+    # the per-scanner counts leave it out, and so does the rollup that sums these.
+    counted = [
+        entry
+        for entry in results_list
+        if not result_is_suppressed(entry) and not result_states_no_finding(entry)
+    ]
+    policy_origin = [entry for entry in counted if is_policy_origin(entry)]
 
     # What the verdict is allowed to see. Findings from a scanner only the policy
-    # added are REPORTED either way -- they are in `unsuppressed` above and carry
+    # added are REPORTED either way -- they are in `counted` above and carry
     # their tag -- but they decide nothing unless the operator set
     # policy_scanners_gate. A workspace that adds a scanner to gather visibility
     # must not thereby fail projects that never opted into it.
@@ -1873,7 +1881,7 @@ def _reduce_project_scan(
         # falls back to for them is not the gate the verdict used. Names only;
         # the values stay unpublished.
         withheld_scanner_thresholds=sorted(environment_read),
-        finding_count=len(unsuppressed),
+        finding_count=len(counted),
         actionable_finding_count=actionable,
         policy_origin_finding_count=len(policy_origin),
         policy_scanners_gate=bool(project.policy_scanners_gate),

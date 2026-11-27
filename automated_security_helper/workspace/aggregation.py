@@ -844,6 +844,21 @@ def result_is_suppressed(result: Mapping[str, Any]) -> bool:
     return is_result_suppressed(result)
 
 
+def result_states_no_finding(result: Mapping[str, Any]) -> bool:
+    """Whether *result*'s kind says no problem was found.
+
+    A result of kind ``pass``, ``notApplicable`` or ``informational`` states no
+    finding (``utils.sarif_utils.is_not_a_finding``): SARIF gives it level
+    ``none``, which ASH grades INFO, and the exit code and the per-scanner counts
+    leave it out. A project's finding counts and the rollup that sums them ask it
+    here, so the two cannot disagree on a result. Imported inside the function for
+    the reason :func:`result_is_suppressed` is.
+    """
+    from automated_security_helper.utils.sarif_utils import is_not_a_finding
+
+    return is_not_a_finding(result)
+
+
 def effective_threshold_resolver(
     threshold: Optional[str],
     threshold_for: Optional[OwnThresholdResolver] = None,
