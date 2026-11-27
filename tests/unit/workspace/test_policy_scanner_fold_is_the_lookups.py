@@ -19,9 +19,11 @@ holds twins when the workspace policy requires that scanner, naming every such
 project. A pair that may be read by the plugin's exact name, such as ``Snyk_Code``
 beside ``snyk-code``, cannot be resolved: it is listed only when every section of it
 is on (a section with no body is off), and its pin is recorded only when the sections
-agree. When they do not, each version either section may apply is held against the
-pins every other project records for the scanner, under whichever spelling of it the
-other project's file order gives the key its lookup reads. A declared scanner's
+agree. When they do not, the pair is held with the version each section sets, and it
+is compared with the other projects name by name: for each name the plugin may be
+registered under, the version of the section that name selects is held against what
+every other project applies under it, whichever spelling of the scanner that
+project's file order gives the key its lookup reads. A declared scanner's
 section is read by its exact name,
 so a spelling beside it does not decide whether the policy adds the scanner.
 """
@@ -1249,3 +1251,355 @@ def test_the_refusal_names_every_project_that_holds_the_twinned_scanner(tmp_path
     assert "'web'" in text
     # Control: a project with one section of the scanner is not named.
     assert "'docs'" not in text
+
+
+# ---------------------------------------------------------------------------
+# The versions a pair may apply are compared by the name the plugin is registered as
+# ---------------------------------------------------------------------------
+
+#: The operator's version for each rank of one scanner. ``snyk-code`` claims the
+#: reduced name in the first pass of the plugin lookup and ``snyk-code-scanner`` only
+#: in the second, so a lookup by a name that is no key reads ``snyk-code``, whichever
+#: order a file writes the two in.
+RANK_PINS = {"snyk-code": "<2.0.0", "snyk-code-scanner": ">=2.0.0"}
+
+#: Two spellings of the same rank, one of which (``Snyk_Code``) no plugin registers.
+SAME_RANK_PINS = {"Snyk_Code": "<2.0.0", "snyk-code": ">=2.0.0"}
+
+
+def _operator_file(root, sections: dict):
+    """An operator config that pins each of *sections* (key to version), in order.
+
+    It is written beside the workspace root and not inside it, because a file in the
+    tree is refused as the operator's.
+    """
+    path = root / "ops" / "ash.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "".join(
+        f'  {name}:\n    options:\n      tool_version: "{pin}"\n'
+        for name, pin in sections.items()
+    )
+    path.write_text(f"project_name: operator\nscanners:\n{body}", encoding="utf-8")
+    return path
+
+
+def _operator_workspace(root, bodies):
+    """A workspace under ``root/ws`` of the projects in *bodies*, with no policy file.
+
+    *bodies* maps a project key to its own config file, or to ``None`` for a project
+    that has none and so takes the operator's file alone.
+    """
+    workspace_root = root / "ws"
+    for key, body in bodies.items():
+        project = workspace_root / key
+        (project / "src").mkdir(parents=True)
+        (project / "src" / "app.py").write_text("print('x')\n", encoding="utf-8")
+        if body is not None:
+            (project / ".ash.yaml").write_text(body, encoding="utf-8")
+    path = workspace_root / "dev.code-workspace"
+    path.write_text(
+        json.dumps({"folders": [{"path": key} for key in bodies]}), encoding="utf-8"
+    )
+    return path
+
+
+def _resolved_config(root, operator, key):
+    """The configuration of project *key* of ``_operator_workspace``, as a plan has it.
+
+    It is what ``_resolve_project_config`` returns, the call ``resolve_workspace``
+    makes for each project, so the operator's file is layered over the project's own.
+    """
+    from pathlib import Path
+
+    from automated_security_helper.workspace.resolver import (
+        _Candidate,
+        _resolve_project_config,
+    )
+
+    workspace_root = root / "ws"
+    candidate = _Candidate(key, workspace_root / key, Path(key), key)
+    config, _path, _overlay = _resolve_project_config(
+        candidate, default_config=operator, workspace_root=workspace_root
+    )
+    return config
+
+
+def _held_by_the_resolution(root, operator, key):
+    """What the plan holds of snyk-code for project *key* of ``_operator_workspace``.
+
+    Returns the keys of its sections in the order the configuration lists them, the
+    pins the plan records for them and the pairs it holds.
+    """
+    from automated_security_helper.workspace.resolver import _unresolved_pins
+
+    config = _resolved_config(root, operator, key)
+    keys = _twin_names(config.scanners.model_dump(by_alias=True))
+    _enabled, pins, _twins = _scanner_state(config)
+    return keys, _pins_of_the_twins(pins), _unresolved_pins(config)
+
+
+def _section_versions_by_the_resolution(root, operator, key):
+    """The version each snyk-code section of project *key* sets, by the section's key.
+
+    The order of the keys is not part of the answer.
+    """
+    from automated_security_helper.workspace.resolver import _scanner_pin
+
+    sections = _resolved_config(root, operator, key).scanners.model_dump(by_alias=True)
+    return {name: _scanner_pin(sections[name]) for name in _twin_names(sections)}
+
+
+@pytest.mark.parametrize(
+    "bodies",
+    [
+        pytest.param({"api": None, "web": None}, id="no-config-of-their-own"),
+        pytest.param({"api": _THRESHOLD, "web": _THRESHOLD}, id="threshold-only"),
+        pytest.param(
+            {"api": _THRESHOLD, "web": _THRESHOLD, "docs": _THRESHOLD},
+            id="three-projects",
+        ),
+    ],
+)
+def test_projects_that_share_the_operators_two_ranks_of_a_scanner_are_planned(
+    tmp_path, monkeypatch, bodies
+):
+    """The operator's ``snyk-code`` and ``snyk-code-scanner`` reach every project with
+    the same two versions, so any name the plugin is registered under reads the same
+    version in each. Holding each version against the others as if the name could
+    differ between projects refused a workspace that cannot conflict."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    operator = _operator_file(tmp_path, RANK_PINS)
+    workspace = _operator_workspace(tmp_path, bodies)
+    # Every project holds the pair, with the sections of both ranks: this is what the
+    # plan compares, and without it nothing here would be held against anything.
+    for key in bodies:
+        _keys, _pins, held = _held_by_the_resolution(tmp_path, operator, key)
+        assert list(held) == ["snyk-code"]
+        assert held["snyk-code"].sections == ["snyk-code", "snyk-code-scanner"]
+        assert held["snyk-code"].pins == ["<2.0.0", ">=2.0.0"]
+
+    plan = resolve_workspace(workspace, default_config=operator)
+
+    assert sorted(project.key for project in plan.projects) == sorted(bodies)
+    assert not any(project.skipped for project in plan.projects)
+    # Both sections reached every project: this is what the plan compares.
+    for project in plan.projects:
+        assert project.scanner_pins["snyk-code"] == "<2.0.0"
+        assert project.scanner_pins["snyk-code-scanner"] == ">=2.0.0"
+
+
+def test_projects_that_share_two_spellings_of_one_rank_in_one_order_are_planned(
+    tmp_path, monkeypatch
+):
+    """``Snyk_Code`` then ``snyk-code`` give every project the same pair, so no name
+    the plugin is registered under reads different versions in two projects."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    operator = _operator_file(tmp_path, SAME_RANK_PINS)
+    workspace = _operator_workspace(tmp_path, {"api": _THRESHOLD, "web": _THRESHOLD})
+    # Both projects hold the pair: without it nothing here would be compared.
+    for key in ("api", "web"):
+        keys, _pins, held = _held_by_the_resolution(tmp_path, operator, key)
+        assert keys == ["Snyk_Code", "snyk-code"]
+        assert list(held) == ["Snyk_Code"]
+        assert held["Snyk_Code"].pins == ["<2.0.0", ">=2.0.0"]
+
+    plan = resolve_workspace(workspace, default_config=operator)
+
+    assert sorted(project.key for project in plan.projects) == ["api", "web"]
+    assert not any(project.skipped for project in plan.projects)
+
+
+def test_two_ranks_written_in_either_order_are_compared_by_the_section_each_project_reads():
+    """``snyk-code-scanner`` is read after ``snyk-code`` whichever is written first,
+    so a project that writes the two the other way round holds the same pair, and each
+    name the plugin may be registered under reads the same version in both."""
+    from automated_security_helper.workspace.resolver import _validate_unresolved_pins
+
+    api, api_held = _project_of("api", ("snyk-code", "snyk-code-scanner"), RANK_PINS)
+    web, web_held = _project_of("web", ("snyk-code-scanner", "snyk-code"), RANK_PINS)
+    assert list(api_held) == ["snyk-code"]
+    assert list(web_held) == ["snyk-code"]
+
+    _validate_unresolved_pins([api, web], {"api": api_held, "web": web_held})
+
+
+def test_a_project_that_holds_the_two_ranks_in_another_order_is_planned(
+    tmp_path, monkeypatch
+):
+    """A project whose own config names ``snyk-code`` holds the operator's two ranks
+    with ``snyk-code-scanner`` first. The second rank is read after the first whichever
+    is written first, so the two projects hold the same pair, and each name the plugin
+    may be registered under reads the same version in both."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    operator = _operator_file(tmp_path, RANK_PINS)
+    workspace = _operator_workspace(
+        tmp_path,
+        {
+            "api": _THRESHOLD,
+            "web": _THRESHOLD + "scanners:\n  snyk-code:\n    enabled: true\n",
+        },
+    )
+    # The same two keys with the same versions, written in different orders.
+    api_keys, api_pins, api_held = _held_by_the_resolution(tmp_path, operator, "api")
+    web_keys, web_pins, web_held = _held_by_the_resolution(tmp_path, operator, "web")
+    assert api_keys == ["snyk-code", "snyk-code-scanner"]
+    assert web_keys == ["snyk-code-scanner", "snyk-code"]
+    assert api_pins == web_pins == RANK_PINS
+    assert list(api_held) == list(web_held) == ["snyk-code"]
+
+    plan = resolve_workspace(workspace, default_config=operator)
+
+    assert sorted(project.key for project in plan.projects) == ["api", "web"]
+    assert not any(project.skipped for project in plan.projects)
+
+
+def test_control_a_project_whose_own_config_names_the_scanner_reads_another_section_and_is_refused(
+    tmp_path, monkeypatch
+):
+    """The merge folds a project's same-rank spellings into one section when its own
+    config names the scanner, so web holds only ``snyk-code`` where api holds both.
+    A registered name that is not ``snyk-code`` reads ``Snyk_Code`` in api and
+    ``snyk-code`` in web, and the pair is still refused, with the clause for a name
+    that is no section's key."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    operator = _operator_file(tmp_path, SAME_RANK_PINS)
+    workspace = _operator_workspace(
+        tmp_path,
+        {
+            "api": _THRESHOLD,
+            "web": _THRESHOLD + "scanners:\n  snyk-code:\n    enabled: true\n",
+        },
+    )
+    # The projects hold different sections: this is what the control rests on.
+    api_keys, _api_pins, api_held = _held_by_the_resolution(tmp_path, operator, "api")
+    web_keys, web_pins, web_held = _held_by_the_resolution(tmp_path, operator, "web")
+    assert api_keys == ["Snyk_Code", "snyk-code"]
+    assert list(api_held) == ["Snyk_Code"]
+    assert web_keys == ["snyk-code"]
+    assert web_pins == {"snyk-code": ">=2.0.0"}
+    assert web_held == {}
+
+    with pytest.raises(WorkspaceDefinitionError) as refused:
+        resolve_workspace(workspace, default_config=operator)
+
+    text = str(refused.value)
+    assert "'api'" in text
+    assert "'web'" in text
+    assert "<2.0.0" in text
+    assert ">=2.0.0" in text
+    assert "when the plugin's registered name is no section's key" in text
+    assert "registered as 'Snyk_Code'" not in text
+    assert "reconcile the pins" in text
+    assert "Keep one section" not in text
+
+
+def test_a_key_in_a_spelling_no_plugin_registers_is_not_tried_as_a_name(
+    tmp_path, monkeypatch
+):
+    """``Snyk-Code-Scanner`` is a section of web's pair and no section of api's, where
+    it sits behind ``snykcodescanner``, and the lookup under it reads ``>=2.0.0`` in
+    both. No plugin is registered under a name with capitals, so it is not tried as a
+    name, and a workspace that cannot conflict is planned."""
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    sections = {
+        "snykcodescanner": "<2.0.0",
+        "snyk_code": "<1.0.0",
+        "Snyk-Code-Scanner": ">=2.0.0",
+    }
+    operator = _operator_file(tmp_path, sections)
+    workspace = _operator_workspace(
+        tmp_path,
+        {
+            "api": None,
+            "web": _THRESHOLD + "scanners:\n  Snyk-Code-Scanner:\n    enabled: true\n",
+        },
+    )
+    # api holds the operator's three sections. web, whose own config names
+    # ``Snyk-Code-Scanner``, holds one section for the second rank, so the two
+    # projects hold different keys.
+    api = _section_versions_by_the_resolution(tmp_path, operator, "api")
+    web = _section_versions_by_the_resolution(tmp_path, operator, "web")
+    assert api == sections
+    assert web == {"Snyk-Code-Scanner": ">=2.0.0", "snyk_code": "<1.0.0"}
+
+    plan = resolve_workspace(workspace, default_config=operator)
+
+    assert sorted(project.key for project in plan.projects) == ["api", "web"]
+    assert not any(project.skipped for project in plan.projects)
+
+
+def test_pairs_that_hold_different_sections_are_not_refused_under_a_name_no_plugin_registers():
+    """In api ``Snyk-Code-Scanner`` is a section of the pair. In web it sits behind
+    ``snyk-code-scanner`` and is not. The lookup under it reads ``>=2.0.0`` in both and
+    every other name reads versions that fit, so the two are not refused."""
+    from automated_security_helper.workspace.resolver import _validate_unresolved_pins
+
+    api, api_held = _project_of(
+        "api",
+        ("Snyk_Code", "Snyk-Code-Scanner"),
+        {"Snyk_Code": "<1.0.0", "Snyk-Code-Scanner": ">=2.0.0"},
+    )
+    web, web_held = _project_of(
+        "web",
+        ("Snyk_Code", "snyk-code-scanner", "Snyk-Code-Scanner"),
+        {
+            "Snyk_Code": "<1.0.0",
+            "snyk-code-scanner": "<1.5.0",
+            "Snyk-Code-Scanner": ">=2.0.0",
+        },
+    )
+    assert list(api_held) == ["Snyk_Code"]
+    assert api_held["Snyk_Code"].sections == ["Snyk_Code", "Snyk-Code-Scanner"]
+    assert list(web_held) == ["Snyk_Code"]
+    assert web_held["Snyk_Code"].sections == ["Snyk_Code", "snyk-code-scanner"]
+
+    _validate_unresolved_pins([api, web], {"api": api_held, "web": web_held})
+
+
+def test_pins_that_fit_two_at_a_time_but_not_together_under_a_name_that_is_no_key_are_refused():
+    """Each pair of these versions fits, and the three read under a name that is no key
+    do not: ``>=1,<3`` and ``>=2,<4`` share only 2.x, which ``!=2.*`` removes. A pair
+    records no pin, so the check of the other projects together has to read the version
+    each pair applies under the name."""
+    from automated_security_helper.workspace.resolver import _validate_unresolved_pins
+
+    api, api_held = _project_of(
+        "api", PAIR_FIRST, {"Snyk_Code": ">=1,<3", "snyk-code": ">=0.1"}
+    )
+    web, web_held = _project_of(
+        "web", PAIR_FIRST, {"Snyk_Code": ">=2,<4", "snyk-code": ">=0.1"}
+    )
+    docs, docs_held = _project_of("docs", ("Snyk_Code",), {"Snyk_Code": "!=2.*"})
+    assert list(api_held) == ["Snyk_Code"]
+    assert list(web_held) == ["Snyk_Code"]
+    assert docs_held == {}
+
+    with pytest.raises(WorkspaceDefinitionError) as refused:
+        _validate_unresolved_pins([api, web, docs], {"api": api_held, "web": web_held})
+
+    text = str(refused.value)
+    assert "project 'api'" in text
+    assert "no one version satisfies all of them together" in text
+    assert "when the plugin's registered name is no section's key" in text
+
+
+def test_a_pair_whose_mapping_misses_a_section_may_apply_each_of_its_versions():
+    """A mapping with no entry for the section a name selects cannot say which version
+    that section sets, so the pair may apply each of its versions, as one built without
+    a mapping does. ``_unresolved_pins`` fills every section; this keeps a hand-built
+    partial mapping from failing open."""
+    from automated_security_helper.workspace.resolver import (
+        _PossiblePins,
+        _validate_unresolved_pins,
+    )
+
+    pair = _PossiblePins(["Snyk_Code", "snyk-code"], ["<1.0.0", ">=2.0.0"], {})
+    projects = [_held_pins("api"), _held_pins("web", **{"snyk-code": ">=2.0.0"})]
+
+    with pytest.raises(WorkspaceDefinitionError) as refused:
+        _validate_unresolved_pins(projects, {"api": {"Snyk_Code": pair}})
+
+    text = str(refused.value)
+    assert "'api'" in text
+    assert "'web'" in text
+    assert "<1.0.0" in text

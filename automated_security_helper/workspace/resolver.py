@@ -127,7 +127,17 @@ Failure modes and known limitations
   a plugin's registered name selects is unknown here, so the section the lookup
   reads records its pin whether or not it is on, and a pair the plan cannot
   resolve records one only when every section of it sets the same pin
-  (``_scanner_state``).
+  (``_scanner_state``). A pair whose sections set different pins is held with
+  the pin of each (``_unresolved_pins``) and compared with the other projects by
+  the name the plugin may be registered under: for each section's key in the
+  spelling a plugin registers its name in (``_REGISTRABLE_SPELLING``), and for a
+  name that is no key, the version the section one project's lookup reads sets is
+  held against the version another project's lookup reads
+  (``_validate_unresolved_pins``). Projects that write the same sections with the
+  same versions apply the same version under every name, so they cannot conflict,
+  and refusing them would refuse a workspace that cannot go wrong; projects that
+  write different sections can conflict, for the name that tells them apart. A key
+  in another spelling is not tried as a name: no plugin is registered as it.
 * A refusal for a remote MCP client names a folder entry as the client wrote it
   and the rule it broke, never the real path it resolved to, which a client
   that supplies the workspace file could otherwise learn for any server path.
@@ -293,10 +303,12 @@ def _scanner_state(
     are not known until the plugin modules load, after the plan. Such a pair is
     unresolved: it is not listed as enabled unless every section of it is, and a
     section with no body is off and sets no pin. It records a pin when the
-    sections set the same one. When they differ, ``_unresolved_pins`` holds each
-    version the pair may apply, and ``_validate_unresolved_pins`` compares them
-    with the pins of the other projects. The sections of the two ranks record a pin
-    each, under their own keys, and ``_unresolved_pins`` holds them as a pair too.
+    sections set the same one. When they differ, ``_unresolved_pins`` holds the
+    pair with the version each section sets, and ``_validate_unresolved_pins``
+    compares, for each name the plugin may be registered under, the version of the
+    section that name selects with what the other projects apply. The sections of
+    the two ranks record a pin each, under their own keys, and
+    ``_unresolved_pins`` holds them as a pair too.
 
     The twins are returned by reduced name, the keys of every rank together. The
     caller refuses a project's twins when the workspace policy requires that
@@ -492,12 +504,23 @@ def _section_is_on(body: Any) -> bool:
 class _PossiblePins(NamedTuple):
     """The tool versions the scan may apply for one unresolved pair of sections.
 
-    *sections* are the keys of the pair in file order, *pins* the distinct
-    versions they set, sorted. A section that sets none adds no version.
+    *sections* are the keys of the pair, the group the lookup reads first and then
+    the other rank's, each in file order, and *pins* the distinct versions they
+    set, sorted. A section that sets none adds no version.
+
+    *by_section* is the version each section sets, ``None`` for one that sets
+    none. The scan reads one section of the pair, and which one depends on the
+    name the plugin is registered under, so a version conflicts with another
+    project's only when the same name reads both, and that needs to know which
+    section sets which. ``_unresolved_pins`` always fills it. A pair built without
+    it cannot say, so it is compared as possibly applying each of its versions
+    under any name, which is the comparison as it stood before the mapping was
+    kept.
     """
 
     sections: List[str]
     pins: List[str]
+    by_section: Optional[Dict[str, Optional[str]]] = None
 
 
 def _unresolved_pins(config: AshConfig) -> Dict[str, _PossiblePins]:
@@ -511,10 +534,17 @@ def _unresolved_pins(config: AshConfig) -> Dict[str, _PossiblePins]:
     Only a pair whose sections do not all set the same pin is held: the plan
     records a pin for the rest (``_scanner_state``), and for the sections of the
     two ranks it records the pin of each on its own. The scan applies the pin of the
-    section the registered name selects, so ``_validate_unresolved_pins`` holds each
-    version against the other projects' pins. A section with no body, or one that
-    sets no pin, differs from one that sets a pin, and contributes no version. A pair
-    is held under the key its first group reads.
+    section the registered name selects, so a pair keeps the pin of each section
+    (``_PossiblePins.by_section``), and ``_validate_unresolved_pins`` holds the pin
+    of the section each name selects against what the other projects apply under
+    that name. A section with no body, or one that sets no pin, differs from one
+    that sets a pin, and contributes no version: under a name that selects it, the
+    scan runs on the plugin's own default, which the plan does not know for an
+    extra scanner, so the project is not held against another that applies a
+    pinned version under that name. The plan records no pin for such a section
+    either (``_scanner_state``), so ``_validate_scanner_pins`` does not compare
+    it. A pair is held under the key its first group reads, which is the section
+    a name that is no key selects.
     """
     segment = config.scanners
     by_name: Dict[str, List[_ExtraScanners]] = {}
@@ -526,10 +556,11 @@ def _unresolved_pins(config: AshConfig) -> Dict[str, _PossiblePins]:
         if len(groups) == 1 and not groups[0].unresolved:
             continue
         sections = [name for group in groups for name in group.candidates()]
-        pins = {_scanner_pin(_field(segment, name)) for name in sections}
+        by_section = {name: _scanner_pin(_field(segment, name)) for name in sections}
+        pins = set(by_section.values())
         if len(pins) > 1:
             held[groups[0].read] = _PossiblePins(
-                sections, sorted(pin for pin in pins if pin is not None)
+                sections, sorted(pin for pin in pins if pin is not None), by_section
             )
     return held
 
@@ -549,30 +580,119 @@ def _first_clash(mine: List[str], theirs: List[str]) -> Optional[Tuple[str, str,
     return None
 
 
-def _pins_under_name(
-    folded: str, project: ProjectPlan, held: Dict[str, _PossiblePins]
-) -> Tuple[List[str], bool]:
-    """The versions *project* may apply to the scanner reduced to *folded*, and
-    whether any of them comes from a pair it holds.
+def _pairs_under_name(
+    folded: str, held: Dict[str, _PossiblePins]
+) -> List[Tuple[str, _PossiblePins]]:
+    """The pairs in *held* for the scanner reduced to *folded*, each with its key.
 
     The scan reads one section of a scanner in every project, but which key that
-    is depends on the order the project writes its sections in, so the plan
-    records a pin, or holds a pair, under the key that project's lookup reads.
-    Two projects can therefore record one scanner under different spellings. The
-    keys are matched by the reduced name they share, as ``_extra_scanner_groups``
-    groups them.
+    is depends on the sections the project writes and the order it writes them in,
+    so the plan holds a pair, or records a pin, under the key that project's lookup
+    reads. Two projects can therefore hold one scanner under different spellings.
+    The keys are matched by the reduced name they share, as
+    ``_extra_scanner_groups`` groups them.
     """
-    versions = {
-        pin
-        for name, pin in project.scanner_pins.items()
+    return [
+        (name, pair)
+        for name, pair in held.items()
         if normalise_scanner_name(name) == folded
-    }
-    pairs = [
-        pair for name, pair in held.items() if normalise_scanner_name(name) == folded
     ]
-    for pair in pairs:
-        versions.update(pair.pins)
-    return sorted(versions), bool(pairs)
+
+
+def _pair_versions(
+    pair: _PossiblePins, held_under: str, registered: Optional[str]
+) -> List[str]:
+    """The versions *pair*, held under *held_under*, applies when the plugin is
+    registered as *registered*, which is ``None`` for a name that is no section's key.
+    A *registered* that is a key is one in the spelling a plugin registers
+    (``_registered_names``), and every section of the pair in that spelling is in
+    ``by_section``.
+
+    The lookup reads the section spelled exactly as the registered name when there
+    is one, and otherwise the section the pair is held under (``_unresolved_pins``).
+    The answer is that section's version, or none when the section sets none. A pair
+    built without ``by_section``, or whose mapping misses the section the name
+    selects, cannot say which section sets which version, so it may apply any of its
+    versions whatever the name.
+    """
+    if pair.by_section is None:
+        return list(pair.pins)
+    section = held_under
+    if registered is not None and registered in pair.by_section:
+        section = registered
+    # ``_unresolved_pins`` fills every section, so production never takes this
+    # branch; it keeps a hand-built partial mapping from failing open.
+    if section not in pair.by_section:
+        return list(pair.pins)
+    pin = pair.by_section[section]
+    return [] if pin is None else [pin]
+
+
+def _versions_applied(
+    registered: Optional[str],
+    pairs: List[Tuple[str, _PossiblePins]],
+    recorded: List[str],
+    *,
+    with_pair_pins: bool,
+) -> List[str]:
+    """The versions a project applies to a scanner when the plugin is registered as
+    *registered*, sorted.
+
+    *pairs* are the pairs it holds for the scanner (``_pairs_under_name``) and
+    *recorded* the pins it records for it under any spelling
+    (``_recorded_pins_under_name``). A project that holds no pair sets the same pin
+    on every section the scan can read under a name tried (``_registered_names``),
+    which is why none was held, so it applies the pin it records whatever the name
+    is. A pair that keeps the pin of each section applies the pin of the section the
+    name selects. A pair that does not may apply any version it holds, beside the
+    pins its project records; *with_pair_pins* says whether those versions count.
+    They do when the pair is compared with one project, and they do not when the
+    pins of all the other projects are held together, which takes what each of them
+    records.
+    """
+    if not pairs:
+        return sorted(set(recorded))
+    versions: set[str] = set()
+    for held_under, pair in pairs:
+        if pair.by_section is None:
+            versions.update(recorded)
+            if with_pair_pins:
+                versions.update(pair.pins)
+        else:
+            versions.update(_pair_versions(pair, held_under, registered))
+    return sorted(versions)
+
+
+def _registered_names(pairs: Sequence[_PossiblePins]) -> List[Optional[str]]:
+    """The names the plugin may be registered under, as far as *pairs* tell.
+
+    A plugin registers its name in the spelling ``_REGISTRABLE_SPELLING`` admits,
+    and every section of a project in that spelling is a candidate of its group
+    (``_extra_scanner_groups``), so it is in the project's pair whenever the project
+    holds one. Each section of the pairs in that spelling is tried, in sorted order,
+    and ``None`` follows for a name that is no key, which reads the section each
+    pair is held under. A section in another spelling (``Snyk_Code``) is not tried
+    as a name, since no plugin is registered as it; the scan still reads it under a
+    name that is no key when it is the section a pair is held under.
+    """
+    return [
+        *sorted(
+            {
+                name
+                for pair in pairs
+                for name in pair.sections
+                if _REGISTRABLE_SPELLING.fullmatch(name)
+            }
+        ),
+        None,
+    ]
+
+
+def _registered_as(registered: Optional[str]) -> str:
+    """The clause that says which registered name a clash is for."""
+    if registered is None:
+        return ", when the plugin's registered name is no section's key"
+    return f", when the plugin is registered as '{registered}'"
 
 
 def _recorded_pins_under_name(folded: str, project: ProjectPlan) -> List[str]:
@@ -584,87 +704,195 @@ def _recorded_pins_under_name(folded: str, project: ProjectPlan) -> List[str]:
     ]
 
 
+def _clash_with_project(
+    name: str,
+    key: str,
+    mine: _PossiblePins,
+    other: ProjectPlan,
+    held: Dict[str, _PossiblePins],
+) -> Optional[str]:
+    """The problem the pair *mine* of project *key*, held under *name*, makes with
+    project *other*, or ``None``. *held* is what ``_unresolved_pins`` held for
+    *other*, and the caller redacts the text.
+
+    Each project's lookup reads one section, and which one depends on the name the
+    plugin is registered under, which the plan cannot tell. So the two are compared
+    name by name (``_registered_names``): the version of the section the name
+    selects in one project, against what the other applies under that name
+    (``_versions_applied``). The first name at which they clash is reported, one
+    problem for the project being enough to refuse, and the problem names it when
+    either side's pair says which section sets which version. Holding every
+    version of the pair against every version of the other project, whatever the
+    name, refused workspaces that cannot conflict: two projects that write the same
+    sections with the same versions apply the same version under every name.
+
+    A pair *other* holds for the same scanner is compared once, from the project
+    whose key sorts first.
+    """
+    folded = normalise_scanner_name(name)
+    pairs = _pairs_under_name(folded, held)
+    if pairs and other.key < key:
+        return None
+    recorded = _recorded_pins_under_name(folded, other)
+    known = mine.by_section is not None or any(
+        pair.by_section is not None for _, pair in pairs
+    )
+    for registered in _registered_names([mine, *(pair for _, pair in pairs)]):
+        their_versions = _versions_applied(
+            registered, pairs, recorded, with_pair_pins=True
+        )
+        clash = _first_clash(_pair_versions(mine, name, registered), their_versions)
+        if clash is None:
+            continue
+        first, second, reason = clash
+        verb = "may apply" if pairs or len(their_versions) > 1 else "requires"
+        where = _registered_as(registered) if known else ""
+        return (
+            f"scanner '{name}': project '{key}' may apply '{first}' "
+            f"(scanners.{' and scanners.'.join(mine.sections)} set "
+            "different tool versions and the plan cannot tell which "
+            f"one the scan reads) and project '{other.key}' {verb} "
+            f"'{second}' -- {reason}{where}"
+        )
+    return None
+
+
+def _clash_with_projects_together(
+    name: str,
+    key: str,
+    mine: _PossiblePins,
+    others: Sequence[ProjectPlan],
+    unresolved: Dict[str, Dict[str, _PossiblePins]],
+) -> Optional[str]:
+    """The problem the pair *mine* of project *key*, held under *name*, makes with
+    the versions of *others* held together, or ``None``. The caller redacts the text.
+
+    Pairwise compatibility is not enough once two or more other projects apply a
+    version to the scanner: a version that fits each on its own can fit no version
+    they allow together (``>=1,<3`` beside ``>=2,<4`` and ``!=2.*``). For each name
+    the plugin may be registered under, the version of the pair is held against
+    everything the other projects apply under that name, at once
+    (``compare_pin_set``). What another project applies is what it records or, for
+    a pair that keeps the pin of each section, the pin of the section the name
+    selects (``_versions_applied``): the scan applies only one version of a pair.
+    The caller asks only when no clash was found with any project the pair was
+    compared with. A project whose pair is compared from the other side
+    (``_clash_with_project``) is not among those, so the set can hold a pair whose
+    clash is already reported, and the line then repeats it. The first name and
+    version that fail are reported.
+    """
+    folded = normalise_scanner_name(name)
+    pairs = {
+        other.key: _pairs_under_name(folded, unresolved.get(other.key, {}))
+        for other in others
+    }
+    recorded = {other.key: _recorded_pins_under_name(folded, other) for other in others}
+    their_pairs = [pair for held in pairs.values() for _, pair in held]
+    known = mine.by_section is not None or any(
+        pair.by_section is not None for pair in their_pairs
+    )
+    for registered in _registered_names([mine, *their_pairs]):
+        fixed = sorted(
+            {
+                pin
+                for other in others
+                for pin in _versions_applied(
+                    registered,
+                    pairs[other.key],
+                    recorded[other.key],
+                    with_pair_pins=False,
+                )
+            }
+        )
+        if len(fixed) < 2:
+            continue
+        for first in _pair_versions(mine, name, registered):
+            together = compare_pin_set([first, *fixed])
+            if together is PinVerdict.COMPATIBLE:
+                continue
+            explanation = (
+                "no one version satisfies all of them together"
+                if together is PinVerdict.INCOMPATIBLE
+                else "ASH cannot prove one version satisfies all of them together"
+            )
+            where = _registered_as(registered) if known else ""
+            return (
+                f"scanner '{name}': project '{key}' may apply '{first}' "
+                f"(scanners.{' and scanners.'.join(mine.sections)} set "
+                "different tool versions and the plan cannot tell which "
+                "one the scan reads) and the other projects require "
+                f"{', '.join(repr(pin) for pin in fixed)}; each of them can "
+                f"be satisfied with it, but {explanation}{where}"
+            )
+    return None
+
+
 def _validate_unresolved_pins(
     projects: Sequence[ProjectPlan], unresolved: Dict[str, Dict[str, _PossiblePins]]
 ) -> None:
-    """Refuse a workspace where a version an unresolved pair may apply cannot be
-    reconciled with the pin of another project.
+    """Refuse a workspace where the version a pair of sections sets cannot be
+    reconciled with what another project applies, for a name the plugin may be
+    registered under.
 
-    *unresolved* maps a project key to what ``_unresolved_pins`` held for it. The
-    scan may apply any one version of a pair, so one that no version of the other
-    project fits is enough to refuse, as an undecidable comparison is refused in
-    ``_validate_scanner_pins``. The pins of the other project are every one it
-    records under a key that reduces to the same name as the pair's, whatever the
-    spelling (``_pins_under_name``), and each version of a pair it holds under such
-    a key. A project that no other project pins has nothing to be compared with,
-    and a pair of two such projects is compared once.
+    *unresolved* maps a project key to what ``_unresolved_pins`` held for it. A
+    project's lookup reads one section of the scanner, which one depends on the
+    name the plugin is registered under, and the plan cannot tell that name. So each
+    name it may have is tried: every section of the pairs compared that is in the
+    spelling a plugin registers (``_REGISTRABLE_SPELLING``), and a name that is no
+    section's key. For each, the version of the section the name selects is held
+    against what the other project applies under the same name
+    (``_clash_with_project``). Two projects that write the same sections with the
+    same versions apply the same version under every name and cannot conflict, so
+    holding every version of a pair against every version of the other refused
+    workspaces that cannot go wrong; two that write different sections can
+    conflict, for the name that tells them apart. A comparison ASH cannot decide
+    is refused, as it is in ``_validate_scanner_pins``. A project that no other
+    project pins has nothing to be compared with, and a pair of two such projects
+    is compared once.
 
-    Pairwise compatibility is not enough once two or more other projects pin the
-    scanner: a version that fits each of their pins on its own can fit no version
-    they allow together (``>=1,<3`` beside ``>=2,<4`` and ``!=2.*``). So each
-    version a pair may apply is also held against all the pins the other projects
-    record, at once (``compare_pin_set``), when no pairwise clash was found for it.
-    The versions another project's own pair may apply are compared pairwise, as
-    before: the scan applies only one of them.
+    A project that holds no pair for the scanner sets one pin on every section the
+    scan can read under a name tried, so it applies the pin it records whatever the
+    name, and one that holds a pair applies the pin of the section the name selects
+    (``_versions_applied``). A section in another spelling is not tried as a name,
+    since no plugin is registered as it.
+
+    Pairwise compatibility is not enough once two or more other projects apply a
+    version: one that fits each on its own can fit no version they allow together.
+    So when no clash was found with any project the pair was compared with, the
+    versions of the pair are also held against what all the other projects apply,
+    at once (``_clash_with_projects_together``). A project whose pair is compared
+    from the other side is not among those, so a line for the whole set can repeat
+    a clash already reported for that pair.
     """
     by_key = {project.key: project for project in projects}
     problems: List[str] = []
     for key, by_name in sorted(unresolved.items()):
         for name, mine in sorted(by_name.items()):
-            folded = normalise_scanner_name(name)
+            others = [project for project in projects if project.key != key]
             before = len(problems)
-            for other in projects:
-                if other.key == key:
-                    continue
-                their_pins, theirs_held = _pins_under_name(
-                    folded, other, unresolved.get(other.key, {})
+            for other in others:
+                clash = _clash_with_project(
+                    name, key, mine, other, unresolved.get(other.key, {})
                 )
-                if theirs_held and other.key < key:
-                    continue
-                verb = "may apply" if theirs_held or len(their_pins) > 1 else "requires"
-                clash = _first_clash(mine.pins, their_pins)
-                if clash is None:
-                    continue
-                first, second, reason = clash
-                problems.append(
-                    text_without_values(
-                        f"scanner '{name}': project '{key}' may apply '{first}' "
-                        f"(scanners.{' and scanners.'.join(mine.sections)} set "
-                        "different tool versions and the plan cannot tell which "
-                        f"one the scan reads) and project '{other.key}' {verb} "
-                        f"'{second}' -- {reason}",
-                        (*by_key[key]._environment_values, *other._environment_values),
+                if clash is not None:
+                    problems.append(
+                        text_without_values(
+                            clash,
+                            (
+                                *by_key[key]._environment_values,
+                                *other._environment_values,
+                            ),
+                        )
                     )
-                )
             if len(problems) != before:
                 continue
-            fixed = sorted(
-                {
-                    pin
-                    for other in projects
-                    if other.key != key
-                    for pin in _recorded_pins_under_name(folded, other)
-                }
+            together = _clash_with_projects_together(
+                name, key, mine, others, unresolved
             )
-            if len(fixed) < 2:
-                continue
-            for first in mine.pins:
-                together = compare_pin_set([first, *fixed])
-                if together is PinVerdict.COMPATIBLE:
-                    continue
-                explanation = (
-                    "no one version satisfies all of them together"
-                    if together is PinVerdict.INCOMPATIBLE
-                    else "ASH cannot prove one version satisfies all of them together"
-                )
+            if together is not None:
                 problems.append(
                     text_without_values(
-                        f"scanner '{name}': project '{key}' may apply '{first}' "
-                        f"(scanners.{' and scanners.'.join(mine.sections)} set "
-                        "different tool versions and the plan cannot tell which "
-                        "one the scan reads) and the other projects require "
-                        f"{', '.join(repr(pin) for pin in fixed)}; each of them can "
-                        f"be satisfied with it, but {explanation}",
+                        together,
                         tuple(
                             value
                             for project in projects
@@ -672,15 +900,16 @@ def _validate_unresolved_pins(
                         ),
                     )
                 )
-                break
 
     if problems:
         raise _refuse(
-            "A project's configuration cannot be planned: it holds sections that may "
-            "each be the one the plugin lookup reads for a scanner, and a tool "
-            "version one of them sets cannot be reconciled with another project's. "
-            "One ASH run installs one version of each tool. Keep one section per "
-            "scanner, or reconcile the pins:",
+            "A project's configuration cannot be planned: for a name the plugin "
+            "may be registered under, the section the lookup reads in one project "
+            "sets a tool version that cannot be reconciled with the version the "
+            "section it reads in another project sets. One ASH run installs one "
+            "version of each tool. Give every project the same sections for the "
+            "scanner, in the same order, or reconcile the pins, or scan the "
+            "projects separately:",
             problems,
         )
 
