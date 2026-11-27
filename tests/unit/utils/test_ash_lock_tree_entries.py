@@ -133,7 +133,7 @@ def _bound(root: Path, *scopes: LockScope) -> AshLock:
 def _states(root: Path) -> dict:
     lock = AshLock.load(root)
     entry = lock.entries[KEY]
-    locked = lock.read(KEY)
+    locked = lock.locked_file(KEY)
     return {
         (s.rule_id, s.symbol): lock.scope_state(KEY, s, locked).state
         for s in entry.scopes

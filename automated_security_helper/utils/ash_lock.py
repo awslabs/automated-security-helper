@@ -502,7 +502,7 @@ class LockedFile:
         self._analysis: Any = None
 
     @classmethod
-    def read(cls, source_dir: Path | str, key: str) -> "LockedFile":
+    def load(cls, source_dir: Path | str, key: str) -> "LockedFile":
         return cls(key, locked_file_bytes(source_dir, key))
 
     @property
@@ -880,9 +880,9 @@ class AshLock:
             if staged.exists():
                 staged.unlink()
 
-    def read(self, key: str) -> LockedFile:
+    def locked_file(self, key: str) -> LockedFile:
         """One read of the locked file ``key``."""
-        return LockedFile.read(self.source_dir, key)
+        return LockedFile.load(self.source_dir, key)
 
     def _snapshot(
         self,
@@ -979,7 +979,7 @@ class AshLock:
             if invalidation_scope is not None
             else scope.invalidation_scope
         )
-        locked = self.read(key)
+        locked = self.locked_file(key)
         if locked.raw is None:
             raise AshLockError(f"{key} is not a readable file inside the scan root")
         entry = self.entries.get(key)
@@ -1084,7 +1084,7 @@ class AshLock:
                     scope = replace(scope, invalidation_scope=kind)
                 updated.append(scope)
             scopes = updated
-        locked = self.read(key)
+        locked = self.locked_file(key)
         if locked.raw is None:
             return RefreshOutcome(key, "missing", old, None)
         unchanged_bytes = (
@@ -1156,7 +1156,7 @@ class AshLock:
             entry = self.entries[key]
             if not entry.is_legacy:
                 continue
-            locked = self.read(key)
+            locked = self.locked_file(key)
             if locked.raw is None:
                 outcomes.append(MigrateOutcome(key, "missing"))
                 continue
@@ -1189,9 +1189,9 @@ class AshLock:
     ) -> ScopeState:
         """The state of one recorded scope (``check_scope``), from ``locked``
         or a fresh read."""
-        return check_scope(
-            self.entries[key], scope, locked if locked is not None else self.read(key)
-        )
+        if locked is None:
+            locked = self.locked_file(key)
+        return check_scope(self.entries[key], scope, locked)
 
     def status(self, key: str) -> str:
         """``"unlocked"`` (no entry), ``"missing"`` (the file cannot be read),
@@ -1200,7 +1200,7 @@ class AshLock:
         entry = self.entries.get(key)
         if entry is None:
             return "unlocked"
-        locked = self.read(key)
+        locked = self.locked_file(key)
         level = _file_level(entry, locked)
         if level is not None:
             return level.state
@@ -1217,7 +1217,9 @@ class AshLock:
         unverifiable, its grammar changed), one per symbol for a symbol scope."""
         found: List[LockProblem] = []
         for key in sorted(self.entries):
-            found.extend(self._problems_of(key, self.entries[key], self.read(key)))
+            found.extend(
+                self._problems_of(key, self.entries[key], self.locked_file(key))
+            )
         return found
 
     def _problems_of(

@@ -989,7 +989,7 @@ class SymbolResolver:
     def _locked_file(self, key: str) -> Any:
         locked = self._files.get(key)
         if locked is None:
-            locked = _ash_lock.LockedFile.read(self._source_dir, key)
+            locked = _ash_lock.LockedFile.load(self._source_dir, key)
             self._files[key] = locked
         return locked
 
