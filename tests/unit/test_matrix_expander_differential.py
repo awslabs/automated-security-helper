@@ -172,7 +172,7 @@ SURFACES = (
 
 @pytest.mark.parametrize("name, job_id", SURFACES)
 def test_the_effective_cells_equal_the_old_ones_on_every_event_the_cover_is_void_on(
-    name, job_id
+    name, job_id, record_property
 ):
     old, new = _workflow(name)
     matrix = new["jobs"][job_id]["strategy"]["matrix"]
@@ -185,14 +185,17 @@ def test_the_effective_cells_equal_the_old_ones_on_every_event_the_cover_is_void
             after = _adapted_cells(matrix, method, event)
             assert before == after, (name, job_id, event, method)
             per_method[method] = len(before)
-        print(
-            f"counts site1 {_shown(name)} {_shown(job_id)} {event}: "
-            f"methods={len(methods)} cells={sum(per_method.values())} {per_method}"
+        record_property(
+            "counts",
+            f"site1 {_shown(name)} {_shown(job_id)} {event}: "
+            f"methods={len(methods)} cells={sum(per_method.values())} {per_method}",
         )
 
 
 @pytest.mark.parametrize("name, job_id", SURFACES)
-def test_a_pull_request_reads_fewer_cells_than_the_old_expander_did(name, job_id):
+def test_a_pull_request_reads_fewer_cells_than_the_old_expander_did(
+    name, job_id, record_property
+):
     """The event matters: the cover takes cells off a pull request and nowhere else."""
     old, new = _workflow(name)
     matrix = new["jobs"][job_id]["strategy"]["matrix"]
@@ -204,9 +207,10 @@ def test_a_pull_request_reads_fewer_cells_than_the_old_expander_did(name, job_id
         static += len(before)
         pull_request += len(after)
     assert pull_request < static, (static, pull_request)
-    print(
-        f"counts site1 {_shown(name)} {_shown(job_id)} pull_request: "
-        f"cells={pull_request} (the old expander read {static})"
+    record_property(
+        "counts",
+        f"site1 {_shown(name)} {_shown(job_id)} pull_request: "
+        f"cells={pull_request} (the old expander read {static})",
     )
 
 
@@ -242,7 +246,9 @@ def _includes_only(matrix):
 
 
 @pytest.mark.parametrize("path", ALL_WORKFLOWS, ids=lambda path: path.name)
-def test_the_matrix_entries_equal_the_old_ones_but_for_the_include_only_matrices(path):
+def test_the_matrix_entries_equal_the_old_ones_but_for_the_include_only_matrices(
+    path, record_property
+):
     old = yaml.safe_load(path.read_text(encoding="utf-8"))
     new = ci.load_workflow(path)
     compared = 0
@@ -269,21 +275,24 @@ def test_the_matrix_entries_equal_the_old_ones_but_for_the_include_only_matrices
         old_total += len(before)
         compared += 1
     shown = " ".join(f"{event}={count}" for event, count in totals.items())
-    print(
-        f"counts site2 {_shown(path.name)}: jobs={len(new['jobs'])} "
+    record_property(
+        "counts",
+        f"site2 {_shown(path.name)}: jobs={len(new['jobs'])} "
         f"matrices={compared} {shown} old_expander={old_total} "
-        f"include_only={len(include_only)} {include_only}"
+        f"include_only={len(include_only)} {include_only}",
     )
 
 
-def test_every_matrix_the_workflows_hold_is_compared():
+def test_every_matrix_the_workflows_hold_is_compared(record_property):
     """The denominator: the comparison above reads matrices, not an empty list."""
     count = 0
     for path in ALL_WORKFLOWS:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         count += sum(1 for job in document["jobs"].values() if _matrix_of(job))
     assert count >= 20, count
-    print(f"counts site2 matrices in {len(ALL_WORKFLOWS)} workflows: {count}")
+    record_property(
+        "counts", f"site2 matrices in {len(ALL_WORKFLOWS)} workflows: {count}"
+    )
 
 
 PLANTED_MATRICES = {
@@ -392,7 +401,9 @@ def test_a_matrix_neither_side_can_count_is_a_value_error_on_both(matrix):
 
 
 @pytest.mark.parametrize("path", ALL_WORKFLOWS, ids=lambda path: path.name)
-def test_the_cover_check_equals_the_old_one_on_every_exclude_value(path):
+def test_the_cover_check_equals_the_old_one_on_every_exclude_value(
+    path, record_property
+):
     document = ci.load_workflow(path)
     values = 0
     covers = 0
@@ -413,13 +424,14 @@ def test_the_cover_check_equals_the_old_one_on_every_exclude_value(path):
                 assert ci.resolve_overlay(value, "pull_request") == quoted
                 for event in STATIC_EVENTS:
                     assert ci.resolve_overlay(value, event) is None
-    print(
-        f"counts site3 {_shown(path.name)}: excludes={values} covers={covers} "
-        f"static={values - covers}"
+    record_property(
+        "counts",
+        f"site3 {_shown(path.name)}: excludes={values} covers={covers} "
+        f"static={values - covers}",
     )
 
 
-def test_the_tier_jobs_carry_the_covers_the_comparison_reads():
+def test_the_tier_jobs_carry_the_covers_the_comparison_reads(record_property):
     """The denominator: the tier jobs of the unified CI have cover entries to compare."""
     document = ci.load_workflow(WORKFLOWS / "ash-unified-ci.yml")
     covers = {
@@ -428,7 +440,7 @@ def test_the_tier_jobs_carry_the_covers_the_comparison_reads():
         if job_id.startswith(("unit-test-", "integration-test-", "e2e-test-"))
     }
     assert sum(covers.values()) >= 15, covers
-    print(f"counts site3 tier jobs of the unified CI: {covers}")
+    record_property("counts", f"site3 tier jobs of the unified CI: {covers}")
 
 
 def test_the_cover_check_comparison_can_fail():
