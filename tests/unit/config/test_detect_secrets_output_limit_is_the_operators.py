@@ -192,8 +192,9 @@ def test_an_override_under_a_retired_scanner_name_sets_the_limit(
     scanner name the alias table resolves to detect-secrets, over a checkout
     whose .ash.yaml writes no scanner section. An override's key path never
     passes the loader's fold: the apply writes the override under the name as
-    written, and the model folds that section onto detect-secrets'. The settle
-    reads the section's segment as detect-secrets' through the alias table
+    written, and the model folds that section onto detect-secrets'. The gate
+    reads the section's segment as detect-secrets' through the alias table,
+    and the key path ends at the limit's declared name, which the fold keeps
     (operator_only_options._set_by_override), so it counts the override as one
     that wrote the limit, the scan reads the operator's 1024, and nothing the
     repository wrote is ignored. The canonical-control row writes the
@@ -214,6 +215,94 @@ def test_an_override_under_a_retired_scanner_name_sets_the_limit(
         )
 
     assert _limit(config) == 1024
+    assert not _about_the_limit(messages), messages
+
+
+#: --config-overrides entries under the retired name that write nothing the scan
+#: reads at the limit: the option spelled with dashes, which the alias fold drops
+#: because detect-secrets declares only max_worker_output_mib, and a section or
+#: options value that does not hold the option. 512 is no other limit in the
+#: cells below, so a cell can tell which value the scan read.
+_RETIRED_OVERRIDES_WRITING_NO_LIMIT = [
+    f"scanners.{_RETIRED_NAME}.options.max-worker-output-mib=512",
+    f'scanners.{_RETIRED_NAME}={{"enabled": true}}',
+    f'scanners.{_RETIRED_NAME}.options={{"skip_generated_lockfiles": false}}',
+]
+
+
+@pytest.mark.parametrize(
+    "override",
+    _RETIRED_OVERRIDES_WRITING_NO_LIMIT,
+    ids=["dashed-option", "section-value", "options-value"],
+)
+@pytest.mark.parametrize("scene", ["repository-sets-it", "trusted-file-sets-it"])
+def test_an_override_under_a_retired_name_that_writes_no_limit_leaves_it_confined(
+    tmp_path, monkeypatch, plant_scanner_alias, override, scene
+):
+    """An override under a retired scanner name the alias table resolves to
+    detect-secrets writes nothing the scan reads at the limit: the apply
+    writes the section under the name as typed, and the model's alias fold
+    lays over detect-secrets' only the options it declares, under their
+    declared names. So the override does not set the limit, and the limit
+    stays confined (operator_only_options._set_by_override). Where the
+    repository's .ash.yaml writes 2048, that value is ignored with the one
+    warning and the scan keeps the default, 256. Where only the trusted file
+    writes 64, its bound holds and nothing is ignored. Counting every such
+    override as one that set the limit kept the repository's 2048 with no
+    warning, and dropped the trusted file's 64 for the default."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    call: dict = {"config_overrides": [override]}
+    if scene == "repository-sets-it":
+        call["source_dir"] = _checkout(tmp_path, _setting(2048))
+    else:
+        call["source_dir"] = _checkout(tmp_path, "project_name: p\n")
+        operator = tmp_path / "operator.yaml"
+        operator.write_text(_setting(64), encoding="utf-8")
+        call["trusted_config_path"] = operator
+
+    with _warnings() as messages:
+        config = resolve_config(**call)
+
+    about = _about_the_limit(messages)
+    if scene == "repository-sets-it":
+        assert _limit(config) == 256
+        assert any(
+            f"Ignoring {OPTION}" in message and ".ash.yaml" in message
+            for message in about
+        ), messages
+    else:
+        assert _limit(config) == 64
+        assert not about, messages
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        f'scanners.{_RETIRED_NAME}={{"options": {{"max_worker_output_mib": 512}}}}',
+        f'scanners.{_RETIRED_NAME}.options={{"max_worker_output_mib": 512}}',
+    ],
+    ids=["section-value", "options-value"],
+)
+def test_an_override_under_a_retired_name_whose_value_holds_the_limit_sets_it(
+    tmp_path, monkeypatch, plant_scanner_alias, override
+):
+    """The control: the override's value holds the limit under its declared
+    name, so the alias fold keeps it over detect-secrets' and the override is
+    the operator's last word. The scan reads 512 over the repository's 2048,
+    and nothing is ignored."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _plant_the_retired_name(plant_scanner_alias)
+    checkout = _checkout(tmp_path, _setting(2048))
+
+    with _warnings() as messages:
+        config = resolve_config(source_dir=checkout, config_overrides=[override])
+
+    assert _limit(config) == 512
     assert not _about_the_limit(messages), messages
 
 

@@ -189,10 +189,12 @@
   the retired name's own key, as before. An option the serving scanner does not declare
   is dropped when a file that writes it under the retired name is read, so a `patch`
   operation that removes, replaces or tests that option refuses the load, and the
-  refusal says the option was dropped. A value read from the environment under the
-  retired name, in a file's section or in one a `patch` adds, is recorded and shown by
-  its reference, as under the current name. No shipped scanner name is retired today, so
-  no current configuration reads differently.
+  refusal says the option was dropped. A `--config-overrides` entry under the retired
+  name counts as setting an operator-only option only where it writes that option under
+  its declared name. A value read from the environment under the retired name, in a
+  file's section or in one a `patch` adds, is recorded and shown by its reference, as
+  under the current name. No shipped scanner name is retired today, so no current
+  configuration reads differently.
 
 - **A session's patched profile that reads a value from the environment is no longer
   refused for that value.** When the registered profile sets an option a client may
