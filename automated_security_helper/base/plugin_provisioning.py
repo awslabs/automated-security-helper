@@ -44,7 +44,8 @@ Registry rules, enforced when the tables are first read (:func:`check_registry`)
 * a content database name is declared once;
 * two scanners may declare the same offline variable only with the same value;
 * a PyPI distribution is pinned once, compared by its PEP 503 normalized name;
-* a pin is a member of an extra or excluded from it, never both;
+* a pin is a member of a known extra or is excluded from it: one of the two, never both
+  and never neither;
 * a pin's specifier is non-empty and holds no ``;`` (a marker has its own field);
 * a cooldown exclusion carries the date the pin leaves the window.
 """
@@ -178,6 +179,11 @@ class Exclusion:
     until: str = ""
 
 
+#: The extras a pin can be a member of. The register holds the PyPI pins of the alpha
+#: scanners, which the ``alpha`` extra installs, so that is the only one.
+PIN_EXTRAS: frozenset[str] = frozenset({"alpha"})
+
+
 @dataclass(frozen=True)
 class PypiPin:
     """The PyPI distribution a scanner installs, and the range ASH holds it to.
@@ -187,8 +193,9 @@ class PypiPin:
     ``python_marker`` and ``platform_marker``, never into the specifier. ``runtime``
     is ``"uv-tool"`` for a scanner that installs into a uv tool environment of its own
     and ``"ash-environment"`` for one that installs into the environment ASH runs in.
-    A pin is a member of the extra named by ``extra`` or is ``excluded`` from it, and
-    the registry refuses a pin that is both.
+    A pin is a member of the extra named by ``extra`` (one of :data:`PIN_EXTRAS`) or
+    is ``excluded`` from it. The registry refuses a pin that is both, a pin that is
+    neither, and an extra it does not know.
     """
 
     distribution: str
@@ -715,6 +722,17 @@ def check_registry(
                     f"{scanner!r} pins {pypi_pin.distribution!r} as a member of the "
                     f"{pypi_pin.extra!r} extra and also excludes it; a pin is one "
                     "or the other"
+                )
+            if not pypi_pin.extra and pypi_pin.excluded is None:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} as neither a member "
+                    "of an extra nor excluded from one; a pin is one or the other"
+                )
+            if pypi_pin.extra and pypi_pin.extra not in PIN_EXTRAS:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} as a member of the "
+                    f"unknown extra {pypi_pin.extra!r}; the extras are "
+                    f"{', '.join(sorted(PIN_EXTRAS))}"
                 )
             if not pypi_pin.specifier.strip() or ";" in pypi_pin.specifier:
                 raise ProvisioningRegistryError(
