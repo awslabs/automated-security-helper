@@ -111,6 +111,19 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **A result whose `kind` states no finding is no longer graded.** A SARIF result of
+  kind `pass`, `notApplicable` or `informational` (the note ASH records for an image it
+  did not scan, a cdk-nag rule that was not evaluated) carries level `none`, which ASH
+  reads as INFO. Under a `severity_threshold` of `ALL`, which fails INFO, such a result
+  made the scan exit 2; it is now left out of the exit-code gate, of the
+  `--min-severity` check and of a workspace project's verdict. The per-scanner and
+  summary counts leave it out too, so the info and total counts drop by exactly those
+  results, and the ASFF export and the Security Hub import no longer carry it as an
+  INFORMATIONAL finding. With `archive_resolved_findings` on, a finding exported earlier
+  for such a result is archived by the next import, as any finding the scan no longer
+  reports is. A suppression in effect on such a result is still counted as suppressed.
+  At the default threshold, `MEDIUM`, the exit code does not change, because INFO never
+  failed it.
 
 ### Maintenance
 
