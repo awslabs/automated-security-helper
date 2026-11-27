@@ -906,7 +906,10 @@ class Register:
     )
 
     def __post_init__(self) -> None:
-        polyfills = _index("polyfill", self.polyfills, lambda item: item.id)
+        # Not the bare word: the vocabulary drift test reads a string equal to a member
+        # of CompatResolution as a stray spelling of it, and this module imports no
+        # other part of the package.
+        polyfills = _index("polyfill entry", self.polyfills, lambda item: item.id)
         paths = _index("path", self.paths, lambda item: item.id)
         profiles = _index("profile", self.profiles, lambda item: item.name)
         rows = _index("row", self.rows, lambda item: item.id)
