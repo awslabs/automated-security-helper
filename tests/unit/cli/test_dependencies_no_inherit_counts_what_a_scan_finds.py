@@ -13,11 +13,19 @@ default run and the scan call absent.
 
 The tool here has a name no machine has: ASH's own environment directories, which
 both modes search, can then never satisfy it.
+
+The answer is also the same on every platform. ``shutil.which`` searches the working
+directory before the directory it is asked about on Windows, and the working directory
+is the scanned tree, so a same-named file at the root of that tree, which the sweep
+refuses, would answer for every directory in turn and hide the managed copy. The tests
+that put such a file there emulate that order where it is not native, and one runs the
+real Windows lookup.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -93,6 +101,24 @@ def _on_path_first(monkeypatch, directory: str) -> None:
     monkeypatch.setenv("PATH", os.pathsep.join([directory, os.environ.get("PATH", "")]))
 
 
+def _working_directory_first(monkeypatch) -> None:
+    """Give ``shutil.which`` the order it has on Windows, on whatever platform runs this.
+
+    CPython's Windows ``which`` puts the working directory ahead of the directories in
+    ``path=``, so a file there answers for every directory a caller asks about. This
+    replaces ``shutil.which``, for every caller, with one that puts ``os.curdir`` ahead
+    of ``path`` itself.
+    """
+    real_which = shutil.which
+
+    def which(cmd, mode=os.F_OK | os.X_OK, path=None):
+        if path is None:
+            path = os.environ.get("PATH", "")
+        return real_which(cmd, mode, os.curdir + os.pathsep + path)
+
+    monkeypatch.setattr(shutil, "which", which)
+
+
 @MODES
 def test_a_copy_in_a_bin_directory_inside_the_tree_is_absent(
     tmp_path, monkeypatch, mode
@@ -138,6 +164,56 @@ def test_a_refused_in_tree_copy_is_passed_over_for_the_next_managed_directory(
     assert scene.result.exit_code == 0, scene.text
     assert str(bin_dir / TOOL) in scene.text, scene.text
     assert str(in_tree) not in scene.text, scene.text
+
+
+def test_a_same_named_file_in_the_working_directory_does_not_hide_the_managed_copy(
+    tmp_path, monkeypatch
+):
+    """On Windows a lookup searches the working directory before the directory it was
+    asked about, and the working directory is the scanned tree. A file at the root of
+    that tree, which the sweep refuses, must not stand in front of the managed copy
+    for every directory in turn: a scan finds the copy in the bin directory."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    bin_dir = _bin_directory_holding_the_tool(tmp_path)
+    write_stand_in(tmp_path / "src-tree", TOOL, "")
+    _working_directory_first(monkeypatch)
+
+    run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert str(bin_dir / TOOL) in scene.text, scene.text
+
+
+def test_the_managed_copy_is_counted_when_the_working_directory_holds_no_such_file(
+    tmp_path, monkeypatch
+):
+    """The control: the same lookup order with nothing at the root of the tree."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    bin_dir = _bin_directory_holding_the_tool(tmp_path)
+    _working_directory_first(monkeypatch)
+
+    run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert str(bin_dir / TOOL) in scene.text, scene.text
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="only Windows searches the working directory first"
+)
+def test_a_batch_file_at_the_root_of_the_tree_does_not_hide_the_managed_copy(
+    tmp_path, monkeypatch
+):
+    """The real Windows lookup, with nothing replaced: ``<tool>.bat`` at the root of
+    the scanned tree, and the managed copy in a bin directory outside it."""
+    scene = _scene_beside_a_tree(monkeypatch, tmp_path)
+    bin_dir = _bin_directory_holding_the_tool(tmp_path)
+    (tmp_path / "src-tree" / f"{TOOL}.bat").write_bytes(b"@echo off\r\n")
+
+    run_install(scene, monkeypatch, tmp_path, "--no-inherit-system-tools")
+
+    assert scene.result.exit_code == 0, scene.text
+    assert str(bin_dir / TOOL) in scene.text, scene.text
 
 
 @MODES
