@@ -84,11 +84,15 @@ GITHUB_ACTIONS_TEMPLATE = GITHUB_ACTIONS_PAGE.with_name(
 )
 
 #: What the GitHub Actions page says the reusable workflow passes to ASH, written out
-#: here and not computed. It names ``--source-dir .`` in prose, as the workflow passes
-#: it (an ASH before 3.9 reads it, and so does a later one), and no release rewrites a
-#: sentence of prose, so the page says it the same way for every release.
+#: here and not computed. It says "the directory to scan" and not how the workflow
+#: spells it: before 3.9 the workflow passed ``--source-dir .``, and from 3.9 it gives
+#: the directory as the PATH of ``ash scan fs``. No release rewrites a sentence of
+#: prose, so a sentence that held either spelling would be false on the pages of the
+#: other. The spelling comes in the sentence after this one, as a code span that a
+#: render for a release before 3.9 respells: ``ash scan fs <directory>`` is ``ash scan
+#: --source-dir <directory>`` there.
 GITHUB_ACTIONS_RUN_SENTENCE = (
-    "It runs ASH with `uvx --reinstall`, passing `--source-dir .`, the output "
+    "It runs ASH with `uvx --reinstall`, passing the directory to scan, the output "
     "directory, `--no-progress`, the fail-on-findings choice, `--build-target ci`, "
     "`--mode`, and `--config` when a config is set; `--verbose` unless `verbose` is "
     "`false`; `--changed-files-only` and `--base-ref` when `changed-files-only` is "

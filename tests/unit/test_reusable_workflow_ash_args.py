@@ -43,12 +43,22 @@ What is asserted
   with --base-ref, and the three --config-overrides of the betterleaks switch) reaches
   uvx in order and is parsed by `ash` and by `ash scan fs` alike.
 * A directory named in ash-args (`--source-dir sub`) is the directory scanned, on both
-  spellings. What else names what is scanned and which `fs` takes beside its PATH
-  (`--workspace`, `--source-git`) is refused by `fs` or handed on to the engine as it
-  was typed, and never dropped.
-* The step's list of options that take a value is the `ash` group's: every option that
-  is not a flag or a count, long and short spellings, each taking one word. It holds
-  every one that `ash scan fs` takes as well, bar the one it names below.
+  spellings.
+* A workspace named in ash-args (`--workspace FILE`, with `--workspace-config`) goes to
+  the `workspace` subject of an ASH whose help for it names it: the step runs `ash scan
+  workspace FILE` with the workflow's options, and this tree's own CLI reads that
+  command line strictly, as the scan of that workspace with its policy file. An ASH
+  that does not have the subject keeps ash-args as it was written, on the spelling it
+  has, where `ash scan fs` refuses `--workspace` by name or hands it on to the engine;
+  it is never dropped. A workspace named beside a directory, an image or a clone is not
+  routed either: the options stay as written, for ASH to refuse. What else names what is
+  scanned and which `fs` takes beside its PATH (`--source-git`) is refused by `fs` or
+  handed on to the engine as it was typed, and never dropped.
+  tests/unit/test_reusable_workflow_scan_subject.py holds the rest of the routing, the
+  image and git subjects among it.
+* The step's list of options that take a value is the `ash` group's and `ash scan fs`'s:
+  every option that is not a flag or a count, long and short spellings, each taking one
+  word. `ash scan fs` takes two the group does not, `--archive` and `--cli-json-input`.
 * Click does read a bare word after the options as a subcommand, and a word after a
   value-taking option as its value (a control on ASH's own CLI).
 * An ASH that has the `fs` subject (3.9 and later) scans the checkout as the path of
@@ -150,6 +160,13 @@ SUBJECT_HELP = (
 SUBJECT_HELP_IN_COLOR = (
     "\n \x1b[33mUsage:\x1b[0m \x1b[1mash scan\x1b[0m \x1b[1mfs\x1b[0m [OPTIONS] [PATH]\n\n"
     " Scan a directory for code, infrastructure, secrets, and dependency findings.\n"
+)
+#: The help of an ASH that has the `workspace` subject as well as `fs`. The stand-in
+#: prints one text for every probe, so this one names both subjects: the probe for `fs`
+#: finds `scan fs` in it, and the probe for `workspace` finds `scan workspace`.
+SUBJECTS_HELP = (
+    "\n Usage: ash scan fs [OPTIONS] [PATH]\n\n"
+    " Usage: ash scan workspace [OPTIONS] {FILE}\n"
 )
 OLDER_HELP = (
     "\n Usage: ash scan [OPTIONS]\n\n"
@@ -434,6 +451,12 @@ def _fs():
     return _ash_group().commands["scan"].commands["fs"]
 
 
+def _workspace():
+    """The `workspace` subject of `ash scan`: the command the step's scan runs when
+    ash-args names a workspace and the ASH has the subject."""
+    return _ash_group().commands["scan"].commands["workspace"]
+
+
 def _parse(ash_argv: list[str], *, strict: bool = True):
     """ASH's own CLI parsing a command line: (subcommand or None, params).
 
@@ -466,12 +489,17 @@ def _runs_the_fs_subject(words: list[str]) -> bool:
     return words[:2] == ["scan", "fs"]
 
 
-def _hand_to_the_engine(after_fs: list[str], monkeypatch) -> dict:
-    """Run `ash scan fs` on its words with the engine replaced by a recorder.
+def _runs_the_workspace_subject(words: list[str]) -> bool:
+    return words[:2] == ["scan", "workspace"]
 
-    Returns the keywords the engine is handed, or raises the usage error `fs` refuses
-    with: an option it lacks, a value its type refuses, a directory named twice. Nothing
-    is scanned: the command's own parsing and refusals are what is read.
+
+def _hand_to_the_engine(after_name: list[str], monkeypatch, command=None) -> dict:
+    """Run `ash scan fs`, or the subject *command*, on its words with the engine
+    replaced by a recorder.
+
+    Returns the keywords the engine is handed, or raises the usage error the command
+    refuses with: an option it lacks, a value its type refuses, a directory named twice.
+    Nothing is scanned: the command's own parsing and refusals are what is read.
     """
     from automated_security_helper.cli import scan_group
 
@@ -481,16 +509,24 @@ def _hand_to_the_engine(after_fs: list[str], monkeypatch) -> dict:
         handed.update(kwargs)
 
     monkeypatch.setattr(scan_group, "run_ash_scan_cli_command", engine)
-    _fs().main(args=list(after_fs), prog_name="ash scan fs", standalone_mode=False)
+    command = _fs() if command is None else command
+    command.main(
+        args=list(after_name),
+        prog_name=f"ash scan {command.name}",
+        standalone_mode=False,
+    )
     return handed
 
 
 def _what_the_scan_is_given(argv: list[str], monkeypatch) -> dict:
     """What the scan of a uvx call is given, by the spelling it runs: the keywords the
-    engine is handed by `ash scan fs`, or the parameters the `ash` group parses."""
+    engine is handed by `ash scan fs` or by `ash scan workspace`, or the parameters the
+    `ash` group parses."""
     words = _ash_words(argv)
     if _runs_the_fs_subject(words):
         return _hand_to_the_engine(words[2:], monkeypatch)
+    if _runs_the_workspace_subject(words):
+        return _hand_to_the_engine(words[2:], monkeypatch, _workspace())
     subcommand, params = _parse(words)
     assert subcommand is None, f"click runs {subcommand!r} for {argv}"
     return params
@@ -675,6 +711,7 @@ def test_the_directory_a_caller_names_is_the_directory_scanned(
 
 
 _WORKSPACE = "services.code-workspace"
+_CLONE = "https://example.invalid/repo.git"
 
 
 @pytest.mark.integration
@@ -687,7 +724,9 @@ def test_a_workspace_in_ash_args_is_refused_or_handed_on_never_dropped(
     it. A scan of the checkout is not a scan of a workspace: `ash` refuses the pair
     (--workspace and --source-dir are exclusive) once the engine has it, and `ash scan
     fs` either takes the option and hands it on to the same refusal or refuses it as an
-    option it does not have. It is not left out of the scan."""
+    option it does not have. It is not left out of the scan. The ASH here has no
+    `workspace` subject (its help names `scan fs` and no other), so the step leaves the
+    option as typed; the tests below are for an ASH that has it."""
     result, argv = _run(tmp_path, f"--workspace {_WORKSPACE}", help_text=help_text)
 
     assert result.returncode == 0, result.stdout + result.stderr
@@ -703,7 +742,96 @@ def test_a_workspace_in_ash_args_is_refused_or_handed_on_never_dropped(
         assert given["workspace"] == _WORKSPACE, given
 
 
-_CLONE = "https://example.invalid/repo.git"
+#: What the step passes before ash-args to an ASH that has the `workspace` subject, for
+#: a workspace named in ash-args: the file comes right after the subject's name.
+_WORKSPACE_OPTIONS = [
+    "--reinstall",
+    "--from",
+    "ash-source",
+    "ash",
+    "scan",
+    "workspace",
+    _WORKSPACE,
+    "--output-dir",
+    "out",
+    "--no-progress",
+    "--fail-on-findings",
+    "--build-target",
+    "ci",
+    "--mode",
+    "local",
+]
+
+
+@pytest.mark.integration
+@posix_only
+def test_a_workspace_in_ash_args_goes_to_the_workspace_subject_of_an_ash_with_it(
+    tmp_path, monkeypatch
+):
+    """The strict reading of the test above, for an ASH whose help names the subject:
+    the workspace is scanned, not refused and not dropped. The step runs `ash scan
+    workspace FILE` with its own options, and this tree's CLI reads that command line
+    strictly (an option the subject lacks, or a value its type refuses, fails here), as
+    the scan of that workspace with its policy file, behind the workflow's findings
+    gate."""
+    result, argv = _run(
+        tmp_path,
+        f"--workspace {_WORKSPACE} --workspace-config policy.yaml",
+        help_text=SUBJECTS_HELP,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _WORKSPACE_OPTIONS + ["--workspace-config", "policy.yaml"], argv
+    # The subject is asked as `fs` is: from RUNNER_TEMP.
+    assert (tmp_path / "uvx-help-cwd").read_text(encoding="utf-8").strip() == str(
+        tmp_path / "runner_temp"
+    )
+    given = _what_the_scan_is_given(argv, monkeypatch)
+    assert given["workspace"] == _WORKSPACE, given
+    assert given["workspace_config"] == "policy.yaml", given
+    assert given["fail_on_findings"] is True, given
+
+
+def _fs_options_for(directory: str) -> list[str]:
+    """What the step passes before ash-args to an ASH that has the `fs` subject, for
+    the directory *directory*."""
+    return [*_SUBJECT_OPTIONS[:6], directory, *_SUBJECT_OPTIONS[7:]]
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize(
+    ("ash_args", "directory", "words", "refused"),
+    [
+        pytest.param(
+            f"--source-dir sub --workspace {_WORKSPACE}",
+            "sub",
+            ["--workspace", _WORKSPACE],
+            "--workspace",
+            id="a-directory-and-a-workspace",
+        ),
+        pytest.param(
+            f"--workspace {_WORKSPACE} --source-git {_CLONE}",
+            ".",
+            ["--workspace", _WORKSPACE, "--source-git", _CLONE],
+            "--workspace",
+            id="a-workspace-and-a-clone",
+        ),
+    ],
+)
+def test_a_workspace_named_with_something_else_is_left_for_fs_to_refuse(
+    tmp_path, monkeypatch, ash_args, directory, words, refused
+):
+    """No scan has a directory or a clone and a workspace, so the step does not take
+    the workspace for the subject of an ASH that has it: the words stay as typed on
+    `ash scan fs`, which refuses the one it lacks by name. Nothing is dropped, and
+    nothing scans one of the two in place of both."""
+    result, argv = _run(tmp_path, ash_args, help_text=SUBJECTS_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _fs_options_for(directory) + words, argv
+    with pytest.raises(UsageError, match=refused):
+        _what_the_scan_is_given(argv, monkeypatch)
 
 
 @pytest.mark.integration
@@ -777,18 +905,19 @@ def _takes_a_value(command) -> set[str]:
 
 
 @pytest.mark.unit
-def test_the_options_that_take_a_value_are_the_ash_groups():
-    assert _value_options_in_the_step() == _takes_a_value(_ash_group())
+def test_the_options_that_take_a_value_are_those_of_the_ash_group_and_the_fs_subject():
+    """The step reads the options of the `ash` group, which an ASH older than 3.9 runs
+    the scan with, and of `ash scan fs`, which an ASH with the subject runs it with. The
+    list holds neither fewer nor more: an option it lacks has its value read as a bare
+    word and refused, and one it holds that neither command takes would skip a word
+    both commands read."""
+    assert _value_options_in_the_step() == (
+        _takes_a_value(_ash_group()) | _takes_a_value(_fs())
+    )
     # The step skips exactly one word after each, as click does for nargs 1; that the
     # word is skipped even when it starts with a dash is the next test's.
     assert all(option.nargs == 1 for option in _options_of(_ash_group()))
-
-
-#: The options that take a value on `ash scan fs` and are not in the step's list. The
-#: step reads the word after one of them as a bare word and refuses it, so a document
-#: of parameters cannot come in through ash-args; the options of the scan itself all
-#: sit in the list.
-_FS_OPTIONS_THE_STEP_DOES_NOT_LIST = {"--cli-json-input"}
+    assert all(option.nargs == 1 for option in _options_of(_fs()))
 
 
 @pytest.mark.unit
@@ -798,11 +927,39 @@ def test_the_options_that_take_a_value_include_those_of_the_fs_subject():
     value read as a bare word and refused, though the scan takes it as the value; the
     step's reading of a cluster of short options and of `--name=value` follows from
     the same list."""
-    fs = _fs()
-    missing = _takes_a_value(fs) - _value_options_in_the_step()
+    missing = _takes_a_value(_fs()) - _value_options_in_the_step()
 
-    assert missing <= _FS_OPTIONS_THE_STEP_DOES_NOT_LIST, sorted(missing)
-    assert all(option.nargs == 1 for option in _options_of(fs))
+    assert not missing, sorted(missing)
+    assert all(option.nargs == 1 for option in _options_of(_fs()))
+
+
+@pytest.mark.integration
+@posix_only
+@pytest.mark.parametrize("option", ["--archive", "--cli-json-input"])
+def test_an_option_only_the_fs_subject_takes_keeps_its_value_in_ash_args(
+    tmp_path, option
+):
+    """The two options `ash scan fs` takes and the `ash` group does not. Each is in the
+    step's list, so the word after it is its value and is passed on to `fs`, not
+    refused as a bare word, as the word after any other option is."""
+    result, argv = _run(tmp_path, f"{option} params.json", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + [option, "params.json"], argv
+
+
+@pytest.mark.integration
+@posix_only
+def test_an_archive_in_ash_args_is_refused_beside_the_path_of_fs(tmp_path, monkeypatch):
+    """The archive is the directory `ash scan fs` scans, so it refuses a PATH beside
+    --archive. The step always gives the PATH, so a caller's archive stops the scan with
+    an error that names it, and is not scanned in place of the checkout or dropped."""
+    result, argv = _run(tmp_path, "--archive source.zip", help_text=SUBJECT_HELP)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert argv == _SUBJECT_OPTIONS + ["--archive", "source.zip"], argv
+    with pytest.raises(UsageError, match="--archive"):
+        _what_the_scan_is_given(argv, monkeypatch)
 
 
 def _value_spellings() -> list[str]:

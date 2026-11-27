@@ -3164,12 +3164,13 @@ def test_a_scan_workflow_uv_call_with_another_source_is_refused(run, named):
     assert named in message and UV_CALL_REFUSAL in message, message
 
 
-@pytest.mark.parametrize("option,expected", [("--from", 11), ("--with", 5)])
+@pytest.mark.parametrize("option,expected", [("--from", 13), ("--with", 5)])
 def test_each_uv_call_of_the_real_scan_workflow_is_read(option, expected):
-    """The control for the rule above: the real workflow's eleven uvx calls and five
+    """The control for the rule above: the real workflow's thirteen uvx calls and five
     uv run calls each pass it, and each is refused once its source names a
-    release. The scan and the report each have a help probe and one call per
-    spelling, for an ASH that has its 3.9 spelling and one that does not."""
+    release. The scan has a help probe and one call per spelling, for an ASH that has
+    its 3.9 spelling and one that does not, and a second probe and a third call for the
+    subject its ash-args name. The report has a help probe and one call per spelling."""
     rewrite_called = _api("rewrite", "rewrite_called_workflow")
     error = _api("rewrite", "RewriteError")
     text = SCAN_WORKFLOW.read_text(encoding="utf-8")
