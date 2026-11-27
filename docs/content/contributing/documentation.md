@@ -155,6 +155,11 @@ That file holds a line for each such block as it was when the check was added: t
 page's path, a tab, and the block's first command. It only shrinks too. Fence the block
 as `bash`, or mark it `output`, and delete its line.
 
+The check does not read a page that a generator writes. Such a page opens with the
+banner that [Add a generated reference page](#add-a-generated-reference-page) asks for,
+and the freshness test holds its text to the generator's output, so the usage line of a
+new command in the CLI reference needs no line in that list.
+
 ### Output samples
 
 A `text` block marked `output` directly after a block the runner runs is a sample of
