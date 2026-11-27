@@ -846,8 +846,8 @@ def test_a_decoy_section_does_not_reach_ash_report_either(
 
     assert result.returncode == 0, (result.stdout, result.stderr)
     # The reporter ran and imported, every finding under the operator's scope.
-    # `ash results report` skips the dependency check (DescribeHub), so the first call
-    # is report()'s own account lookup.
+    # `ash results report` runs the dependency check first (DescribeHub), so the
+    # account lookup (GetCallerIdentity) is a later call.
     assert ("sts", "GetCallerIdentity") in requests, (requests, result.stderr)
     imported = _findings_imported(bodies)
     assert imported, (requests, result.stderr[-2000:])
