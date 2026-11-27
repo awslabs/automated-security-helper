@@ -4,10 +4,12 @@
 """The findings array of the flat JSON report, pinned against the original loop.
 
 The oracle below is the per-finding dump the reporter ran before the suppressed
-flag was read off the flat frame, copied verbatim. The report's ``findings`` must
-equal what it gives, finding for finding, for findings that differ in which
-fields they set, in whether they are suppressed, and in what their text and line
-numbers hold (a lone surrogate in a path, a line wider than 64 bits).
+flag was read off the flat frame, copied verbatim, with the one key every finding
+has gained since: ``result_kind``, written for a finding whose constructor never
+set it, as ``is_suppressed`` is. The report's ``findings`` must equal what it
+gives, finding for finding, for findings that differ in which fields they set, in
+whether they are suppressed, and in what their text and line numbers hold (a lone
+surrogate in a path, a line wider than 64 bits).
 """
 
 import json
@@ -27,6 +29,7 @@ pytestmark = pytest.mark.unit
 def _oracle(vuln: Any) -> Dict[str, Any]:
     data = vuln.model_dump(exclude_none=True, exclude_unset=True, mode="json")
     data.setdefault("is_suppressed", bool(getattr(vuln, "is_suppressed", False)))
+    data.setdefault("result_kind", vuln.result_kind)
     return data
 
 
