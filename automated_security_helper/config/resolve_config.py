@@ -1564,8 +1564,8 @@ def apply_config_overrides(
             changes.extend(removals)
         # A replacing override sets the value itself: a list an earlier append
         # started at or under the key it landed on is gone.
-        landed, _, appended = applied[-1]
-        if not appended:
+        landed, _, operator = applied[-1]
+        if operator == REPLACE:
             path = tuple(landed)
             replaced_paths.append(path)
             started[:] = [entry for entry in started if entry[0][: len(path)] != path]
