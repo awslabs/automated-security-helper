@@ -148,7 +148,9 @@ class ScannerMetrics(ScannerSeverityCount):
     # of its kind. Both are None on every other status, and on an ERROR row whose
     # cause nothing recorded. Read from the scanner's row, then its per-target reports
     # (the code and the sentence from one of them), else derived from the counts and
-    # statuses the row itself was graded from; see ``recorded_error_reason``.
+    # statuses the row itself was graded from, else the completeness pass's guess
+    # that it never completed; see ``recorded_error_reason`` and
+    # ``queued_not_completed_reason``.
     error_reason: Optional[str] = None
     error_reason_code: Optional[str] = None
 
@@ -554,16 +556,17 @@ def recorded_error_reason(
     which is where the executor records the reason of a scanner it ran. Both
     parts come from the same row or report.
 
-    A row's ``queued_not_completed`` is the exception to "the row first". The scan
-    phase's completeness pass files it for a scanner that left no row, and the
-    pass runs after the executor has recorded why a scanner that did run ended in
-    ERROR (a timeout, a refused exit code, a result that could not be graded). Its
-    sentence, "it was queued for execution but did not complete", is a guess about
-    a scanner nothing was recorded for; where a per-target report holds a recorded
-    pair, that pair is the cause and wins. The row's guess stands only when no
-    report records one. This is done here and not in the pass because the pass
-    lives in ``models``, which does not read the reports, and because a results
-    file written with the guess in front of a cause is read back right here too.
+    The completeness pass's guess is no recorded reason and is never returned here
+    (``queued_not_completed_reason`` reads it). The pass files it, as a row's
+    ``queued_not_completed``, for a scanner that left no row, and it runs after the
+    executor has recorded why a scanner that did run ended in ERROR (a timeout, a
+    refused exit code, a result that could not be graded). Its sentence, "it was
+    queued for execution but did not complete", says only what the pass knows,
+    that nothing completed. A pair on a report is the cause and wins, and so does
+    whatever else the reports say; ``get_unified_scanner_metrics`` reads the
+    order. This is done here and not in the pass because the pass lives in
+    ``models``, which does not read the reports, and because a results file
+    written with the guess in front of a cause is read back right here too.
 
     Not read for a scanner that is not ERROR: a PASSED or FAILED scanner can carry
     an error beside its findings (a target that was lost, with findings on the
@@ -577,7 +580,27 @@ def recorded_error_reason(
         found = _reason_pair(reports[key])
         if found is not None:
             return found
-    return from_row
+    return None
+
+
+def queued_not_completed_reason(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> tuple[str, str] | None:
+    """The completeness pass's guess on *scanner_name*'s row, or None.
+
+    ``queued_not_completed`` and its sentence when the row holds them, else None.
+    The pass files the pair for a scanner it found no row for that was queued and
+    never completed. For a scanner that did run and was graded ERROR the sentence
+    is false, so it is the last thing an ERROR row says:
+    ``get_unified_scanner_metrics`` asks for it only when no row or report
+    recorded a reason, no report has a sentence to list, and the counts and
+    statuses the row was graded from say nothing either. It stays the answer for
+    a scanner that left no report at all, and for one whose report says nothing.
+    """
+    pair = _reason_pair((asharp_model.scanner_results or {}).get(scanner_name))
+    if pair is not None and pair[0] == ReasonCode.QUEUED_NOT_COMPLETED:
+        return pair
+    return None
 
 
 def _records_a_status(asharp_model: AshAggregatedResults, scanner_name: str) -> bool:
@@ -1084,8 +1107,11 @@ def get_unified_scanner_metrics(
         # its place it hid the cause. What the counts and statuses the row was
         # graded from say (``derived_error_reason``) is the reason of the ERRORs
         # the statistics alone decide, or whose errors say nothing a report can
-        # show. Every other status has none, so a row that stops being ERROR drops
-        # it when it is rebuilt.
+        # show. The completeness pass's guess comes last
+        # (``queued_not_completed_reason``): it says only that the scanner never
+        # completed, so it stands when none of the above says why, and no earlier.
+        # Every other status has none, so a row that stops being ERROR drops it
+        # when it is rebuilt.
         error_reason = None
         error_reason_code = None
         if status == ScannerStatus.ERROR.value:
@@ -1101,6 +1127,8 @@ def get_unified_scanner_metrics(
                     targets_attempted=scanner_targets_attempted,
                     targets_failed=scanner_targets_failed,
                 )
+                if reason is None:
+                    reason = queued_not_completed_reason(asharp_model, scanner_name)
             if reason is not None:
                 error_reason_code, error_reason = reason
 
