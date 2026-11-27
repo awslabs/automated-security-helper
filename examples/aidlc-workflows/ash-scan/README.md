@@ -12,8 +12,8 @@ scans at the two construction checkpoints where code exists to scan:
 
 | File | What it does |
 |---|---|
-| [`contributions/construction/code-generation.md`](contributions/construction/code-generation.md) | After each Unit's code is generated, the agent runs `ash scan fs --mode precommit --no-progress` (the fast five-scanner set; `ash --mode precommit --no-progress` with an ASH older than 3.9) and fixes or suppresses actionable findings before the Unit's completion handoff. |
-| [`contributions/construction/build-and-test.md`](contributions/construction/build-and-test.md) | At Build and Test, once per intent, the agent runs a full `ash scan fs --no-progress` (`ash scan --no-progress` with an ASH older than 3.9), copies the scanner table into the stage summary, and does not proceed while the scan exits 1 or 2. |
+| [`contributions/construction/code-generation.md`](contributions/construction/code-generation.md) | After each Unit's code is generated, the agent reads `ash --version` and runs the fast five-scanner scan in that version's spelling, `ash scan fs --mode precommit --no-progress` (`ash scan --mode precommit --no-progress` with an ASH older than 3.9), and fixes or suppresses actionable findings before the Unit's completion handoff. |
+| [`contributions/construction/build-and-test.md`](contributions/construction/build-and-test.md) | At Build and Test, once per intent, the agent reads `ash --version` and runs a full scan in that version's spelling, `ash scan fs --no-progress` (`ash scan --no-progress` with an ASH older than 3.9), copies the scanner table into the stage summary, and does not proceed while the scan exits 1 or 2. |
 | [`memory/rules.md`](memory/rules.md) | House rules the engine keeps in front of the agent in every stage: read the exit code, suppress with a reason and an expiry instead of loosening the gate, never commit `.ash/ash_output/`. |
 | [`.aidlc-plugin/plugin.json`](.aidlc-plugin/plugin.json) | The plugin manifest. The plugin is prose-only: it contributes overlays and rules, and ships no new stages, agents, scopes, or sensors. |
 

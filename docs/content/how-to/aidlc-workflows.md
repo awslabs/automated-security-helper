@@ -27,9 +27,10 @@ What the plugin adds once it is composed in:
   agent: read the exit code, never loosen the gate to pass, never commit
   `.ash/ash_output/`.
 
-An ASH older than 3.9 has no `ash scan fs`, so with one the agent runs the
-same two scans as `ash --mode precommit --no-progress` and
-`ash scan --no-progress`. The plugin has it read `ash --version` to tell which.
+An ASH older than 3.9 has no `ash scan fs`: it refuses the word with a usage
+error, before it scans anything. So at both checkpoints the agent reads
+`ash --version` before it scans, and with an older ASH it runs the same two
+scans as `ash scan --mode precommit --no-progress` and `ash scan --no-progress`.
 
 ## 1. Install AI-DLC and configure your project
 

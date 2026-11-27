@@ -118,7 +118,7 @@ ABOUT_THE_OLD_SPELLINGS = {
 #: command. Each entry is dropped when the page stops giving the command.
 NAMED_ON_PURPOSE = {
     "docs/content/how-to/aidlc-workflows.md": {
-        "ash --mode precommit --no-progress": (
+        "ash scan --mode precommit --no-progress": (
             "what the plugin runs on an ASH older than 3.9, which has no `ash scan fs`"
         ),
         "ash scan --no-progress": (
