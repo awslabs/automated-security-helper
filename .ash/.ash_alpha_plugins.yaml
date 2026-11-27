@@ -774,22 +774,24 @@ global_settings:
       path: "**"
       reason: "Python Software Foundation License is an approved license"
     # =====================================================================
-    # Alpha-plugin mode: bandit, ferret-scan, trivy-repo
+    # Alpha-plugin mode: the scanner set this file runs
     # =====================================================================
     #
-    # This file enables a different scanner set from .ash.yaml -- bandit,
-    # ferret-scan and trivy-repo, with cdk-nag, cfn-nag, checkov, detect-secrets,
-    # grype, npm-audit, opengrep, semgrep, snyk-code and syft all off. Everything
-    # below exists because of that difference rather than because the code differs.
-    # Most of it is trivy-repo asking a question checkov or cfn-nag already asked
-    # under a different rule id and answering it differently, and the rest is
-    # bandit findings whose decision had only ever been written down in the other
-    # file.
+    # This file runs a different scanner set from .ash.yaml. Its
+    # ash_plugin_modules add trivy-repo, ferret-scan, GuardDog and hadolint, each
+    # enabled in the scanners section below; cdk-nag, cfn-nag, checkov,
+    # detect-secrets, grype, npm-audit, opengrep, semgrep, snyk-code and syft are
+    # off, and the other built-in scanners run in both modes. The trivy-repo and
+    # bandit sections below exist because of that difference rather than because
+    # the code differs. Most of them are trivy-repo asking a question checkov or
+    # cfn-nag already asked under a different rule id and answering it
+    # differently, and the rest are bandit findings whose decision had only ever
+    # been written down in the other file.
     #
-    # WHERE THE COUNT GOES, counted rather than estimated. 107 active findings
-    # collapse to 21 distinct (scanner, rule_id) pairs: 12 trivy misconfiguration
-    # rules, 2 trivy license rules, 4 bandit rules, and 3 more bandit rules on one
-    # deliberately-unsafe fixture file, which ignore_paths handles instead.
+    # WHERE THE MISCONFIGURATION FINDINGS GO. No total is written here, because
+    # each scan of a changed tree moves it. trivy-repo's misconfiguration findings
+    # fall under the twelve rule ids the next paragraph maps, each decided once
+    # below.
     #
     # Of the 12 misconfiguration rules, 9 map to a named checkov or cfn-nag rule
     # whose decision is already recorded, either in .ash.yaml or as an inline
@@ -812,15 +814,11 @@ global_settings:
     # means `ash config validate` and the unused-suppressions report can see them,
     # which an inline comment would not be.
     #
-    # FERRET-SCAN, AT v2.4.5, reports two finding types here, both false positives
-    # and both suppressed above: 4 PASSPORT hits on scripts/generate_test_docx.py
-    # (the PASSPORT entry) and 6 high-confidence API_KEY_OR_SECRET hits from its
-    # v2.3.3 unquoted-assignment detector (the API_KEY_OR_SECRET block near the top
-    # of this file). With those suppressions applied it reaches status PASSED rather
-    # than MISSING or SKIPPED. Note this corrects an earlier claim that ferret-scan
-    # "contributes nothing" — that held for the pre-2.x binary but not for v2.4.5,
-    # which is why the API_KEY_OR_SECRET suppressions now exist. v2.5.2 reports the
-    # same set; it also scans `.github/`, which 2.4.x skipped because its --exclude
+    # FERRET-SCAN's false positives (names, placeholders and fixtures its secret,
+    # token and passport checks misread) are decided by this file's
+    # API_KEY_OR_SECRET, JWT_TOKEN and PASSPORT entries. An earlier claim that
+    # ferret-scan "contributes nothing" held only for its pre-2.x binary. Release
+    # 2.5.2 started reading `.github/`, which 2.4.x skipped because its --exclude
     # matched `.git` as a substring.
     #
     # PATHS ARE NAMED FILE BY FILE. A trailing `**` is a whole-subtree match, so a
@@ -1864,6 +1862,7 @@ scanners:
   # GuardDog suppressions above. Only this config raises it: ASH's default is
   # unchanged.
   guarddog:
+    enabled: true
     options:
       max_hits: 0
       # The self-scan reads the product, not its tests. The unit and integration
@@ -1875,6 +1874,8 @@ scanners:
           reason: "Test code plants the hazards it asserts ASH refuses; the self-scan covers the product."
         - path: "deploy/cdk-constructs/test/**"
           reason: "Construct tests plant the inputs they assert synth rejects; the self-scan covers the product."
+  hadolint:
+    enabled: true
   ferret-scan:
     enabled: true
     options:
