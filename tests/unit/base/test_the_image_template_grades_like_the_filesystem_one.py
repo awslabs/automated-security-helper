@@ -38,7 +38,7 @@ from automated_security_helper.core.asset import ImageLocator
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("online")]
 
 REF = "registry.example.com/team/app:1.2.3"
 STDERR_SENTINEL = "the-tools-own-stderr-must-not-be-quoted-for-a-rejected-run"
@@ -217,7 +217,15 @@ class TestAnEmptyResultsFile:
 
 @pytest.fixture
 def online(monkeypatch):
-    """Offline mode off, whatever environment the suite runs in carries."""
+    """Offline mode off, whatever environment the suite runs in carries.
+
+    Every row of this module uses it, through ``pytestmark``. A row that reaches
+    the offline decision must not read the environment the suite runs in, and an
+    image built for offline runs sets ``ASH_OFFLINE``: a reference is then
+    skipped before the tool starts, and a row that waits for the tool's failure
+    or its report gets neither. The rows that need offline mode set it
+    themselves, after this fixture has run.
+    """
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
 
 
@@ -238,7 +246,6 @@ def _config_applications(scanner, run):
     return applied.call_count
 
 
-@pytest.mark.usefixtures("online")
 class TestAConfigThatDoesNotValidate:
     """A config the scan cannot apply still ends the target's timing.
 
@@ -270,7 +277,6 @@ class TestAConfigThatDoesNotValidate:
         assert scanner.end_time is not None
 
 
-@pytest.mark.usefixtures("online")
 class TestTheConfigIsAppliedOnce:
     """One image scan swaps its config in once, ahead of the offline decision.
 
@@ -341,7 +347,6 @@ class TestTheConfigIsAppliedOnce:
         assert applications == 1
 
 
-@pytest.mark.usefixtures("online")
 class TestTheSkipReadsTheConfigBeingApplied:
     """The offline decision reads the config being applied.
 
@@ -362,7 +367,6 @@ class TestTheSkipReadsTheConfigBeingApplied:
         assert "offline" in scanner._nothing_scanned_reason
 
 
-@pytest.mark.usefixtures("online")
 class TestAnOfflineReferenceSkipIsAWarning:
     """The skip of a reference in offline mode is logged as a warning.
 
