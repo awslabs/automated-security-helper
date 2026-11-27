@@ -234,13 +234,13 @@ def test_a_current_database_is_graded_on_findings(layout, monkeypatch):
 # ---------------------------------------------------------------------------
 #
 # A scanner recorded ERROR for a stale database did run, and the exit-1 message,
-# the MCP payload and ``ash merge`` each treat it as a scanner that ran:
+# the MCP payload and ``ash results merge`` each treat it as a scanner that ran:
 # ``scan_incompleteness`` drops its row so the condition is reported once, as a
 # stale database with its refresh advice, and a shard whose only scanner it was
 # merges and then exits 1 on staleness. Taken as any other ERROR, the row would sit
 # as "ERROR (stale content database: ...)" under "Install the missing tools", the
 # payload would list it as an incomplete scanner with reason "error", the set-level
-# arm would read every scanner as not having run, and ``ash merge`` would refuse
+# arm would read every scanner as not having run, and ``ash results merge`` would refuse
 # the shard as having completed nothing.
 
 
@@ -299,7 +299,7 @@ def stale_error(layout, monkeypatch):
 
 
 def _as_read_back(results: AshAggregatedResults) -> AshAggregatedResults:
-    """The model ``ash report`` and ``ash merge`` read from ash_aggregated_results.json."""
+    """The model ``ash results report`` and ``ash results merge`` read from ash_aggregated_results.json."""
     return AshAggregatedResults.model_validate_json(results.model_dump_json())
 
 

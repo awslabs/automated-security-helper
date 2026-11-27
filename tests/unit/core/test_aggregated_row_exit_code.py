@@ -83,7 +83,7 @@ def test_with_no_error_target_the_largest_code_is_the_row_s():
 
 
 def test_a_report_read_back_from_json_carries_its_code_too():
-    """``ash merge`` reads the reports from files, so the status is a plain string."""
+    """``ash results merge`` reads the reports from files, so the status is a plain string."""
     row = _row(
         {
             "source": _report("PASSED", 0),

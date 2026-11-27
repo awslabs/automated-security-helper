@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The table printed at the end of ``ash scan`` names each input a scanner skipped.
+"""The table printed at the end of ``ash scan fs`` names each input a scanner skipped.
 
 ash.summary.md and ash.summary.txt list inputs not scanned (an offline
 npm-audit's lockfiles), and their tests read those files. The console table is

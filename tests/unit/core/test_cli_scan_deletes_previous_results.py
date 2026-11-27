@@ -1,12 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan`` deletes the previous results when it starts; only MCP scans keep them.
+"""``ash scan fs`` deletes the previous results when it starts; only MCP scans keep them.
 
 Why this file exists
 --------------------
 Keeping the previous scan's results until a new scan has its own is right over MCP
-and wrong for the CLI. A crashed or interrupted ``ash scan`` would leave an output
+and wrong for the CLI. A crashed or interrupted ``ash scan fs`` would leave an output
 directory holding a complete, parseable earlier run with a marker file beside it
 that only the MCP server reads. Anything else that reads the directory, a CI
 publish step or the container and Nix wrappers' read-back, would take those files

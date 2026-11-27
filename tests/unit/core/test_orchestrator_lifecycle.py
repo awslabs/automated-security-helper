@@ -569,7 +569,7 @@ class TestIgnoredConfigSources:
     warning as a resolution warning; initialize() logs it and execute_scan() adds
     it to the results as a ``config_warning`` validation checkpoint, which the
     end-of-scan summary prints. Covered both ways a scan gets its config: the
-    orchestrator discovering it, and ``ash scan`` passing the file it discovered.
+    orchestrator discovering it, and ``ash scan fs`` passing the file it discovered.
     """
 
     @staticmethod
@@ -635,7 +635,7 @@ class TestIgnoredConfigSources:
     ):
         """Discovery's warning is logged once in a scan, then shown in the summary.
 
-        Named is how ``ash scan`` runs: run_ash_scan discovers the file and passes
+        Named is how ``ash scan fs`` runs: run_ash_scan discovers the file and passes
         its path, and the orchestrator resolves it.
         """
         import logging

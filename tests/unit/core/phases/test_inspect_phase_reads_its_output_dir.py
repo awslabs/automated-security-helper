@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""``ash scan --inspect`` analyzes the SARIF of the scan it ran, wherever that went.
+"""``ash scan fs --inspect`` analyzes the SARIF of the scan it ran, wherever that went.
 
 The inspect phase called ``analyze_sarif_fields(output_dir=...)`` without
 ``sarif_dir``, and that function defaults ``sarif_dir`` to ``.ash/ash_output`` under

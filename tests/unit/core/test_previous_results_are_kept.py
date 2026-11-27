@@ -20,7 +20,7 @@ For an MCP scan the previous results are set aside when it starts
 (``core/previous_results.py``), dropped when the scan has results of its own, and
 put back when it ends any other way. The MCP server asks the orchestrator for this
 with ``keep_previous_results``, for its single scans and its workspace projects.
-The CLI does not: ``ash scan`` deletes them when it starts, and
+The CLI does not: ``ash scan fs`` deletes them when it starts, and
 test_cli_scan_deletes_previous_results.py covers that.
 
 Putting them back makes a second way to be wrong: the directory then holds

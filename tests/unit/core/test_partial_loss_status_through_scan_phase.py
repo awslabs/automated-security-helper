@@ -19,7 +19,7 @@ These cells run ``ScanPhase`` with the real executor loop, the real
 per-scanner work is replaced, and it returns containers graded by the container's own
 ``determine_status``, so the reports are the ones a run writes. Each cell reads the
 row at three points: as the phase leaves it, after the rebuild the engine runs, and
-after a JSON round trip and a second rebuild (what ``ash report`` and ``ash merge`` do).
+after a JSON round trip and a second rebuild (what ``ash results report`` and ``ash results merge`` do).
 """
 
 from __future__ import annotations
@@ -201,7 +201,7 @@ def _scan(
 
 def _rows(results: AshAggregatedResults):
     """The scanner's row as the phase leaves it (None when it left none), as the
-    engine rebuilds it, and as ``ash report`` and ``ash merge`` rebuild it after
+    engine rebuilds it, and as ``ash results report`` and ``ash results merge`` rebuild it after
     reading the JSON back. Each with the model it belongs to."""
     left = results.scanner_results.get(SCANNER)
     left = left.model_copy(deep=True) if left is not None else None

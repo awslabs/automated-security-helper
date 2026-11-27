@@ -396,7 +396,7 @@ class TestCandidateSetBackwardCompatibility:
         assert "record no candidate scanner set" in str(excinfo.value)
 
     def test_the_field_round_trips_through_json(self):
-        """``ash merge`` reads these back off disk, so serialization is the contract."""
+        """``ash results merge`` reads these back off disk, so serialization is the contract."""
         original = ShardAssignment(
             shard_index=0,
             shard_count=2,
@@ -510,7 +510,7 @@ class TestSelectedScannersIsVerified:
         verify_shard_coverage(shards)
 
     def test_the_field_round_trips_through_json(self):
-        """``ash merge`` reads these back off disk, so serialization is the contract."""
+        """``ash results merge`` reads these back off disk, so serialization is the contract."""
         original = ShardAssignment(
             shard_index=0,
             shard_count=2,
@@ -622,7 +622,7 @@ class TestRefusalsShowShardChosenNames:
 
     The names come from the shard results, which any job in the matrix wrote. Each
     refusal below named them raw: "x\\n##[error]v1" assigned on two shards put a line
-    "##[error]v1 (shards 0 and 1)..." on stdout through ``ash merge``, which GitHub
+    "##[error]v1 (shards 0 and 1)..." on stdout through ``ash results merge``, which GitHub
     Actions reads as an error annotation, and an ESC sequence reached the terminal.
     """
 

@@ -1342,7 +1342,7 @@ def _vendor_link_out(tmp_path: Path):
 def test_scanning_the_working_directory_inside_a_symlink_counts_the_checkout(
     tmp_path, monkeypatch
 ):
-    # `cd checkout/vendor && ash scan`: the operating system reports the physical
+    # `cd checkout/vendor && ash scan fs`: the operating system reports the physical
     # directory, outside the checkout; only $PWD still says where the shell is.
     checkout, ci = _vendor_link_out(tmp_path)
     monkeypatch.chdir(checkout / "vendor")
@@ -1400,7 +1400,7 @@ def _confined(sandbox) -> bool:
 def test_a_root_above_a_symlinked_cwd_counts_the_checkout(
     tmp_path, monkeypatch, spelling
 ):
-    # From `cd checkout/vendor/sub`, the CLI turns `--source-dir ..` into an
+    # From `cd checkout/vendor/sub`, the CLI turns the scan PATH `..` into an
     # absolute path under the physical working directory, outside the checkout.
     checkout, ci = _vendor_link_out(tmp_path)
     (tmp_path / "elsewhere" / "other").mkdir()

@@ -10,7 +10,7 @@ rows are computed from the rebuilt rows, so ``dependencies_missing`` and
 These tests run the scan phase over real scanner plugins, rebuild the rows the way
 the engine does, and read the aggregated row, the flat row and the per-target report
 for each case. They also reload the results from JSON and rebuild again, which is
-what ``ash report`` and ``ash merge`` do, and expect the same rows.
+what ``ash results report`` and ``ash results merge`` do, and expect the same rows.
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ def _scan(context, plugins: List[type], **phase_kwargs) -> AshAggregatedResults:
 
 
 def _reloaded(results: AshAggregatedResults) -> AshAggregatedResults:
-    """The results as ``ash report`` and ``ash merge`` read them back."""
+    """The results as ``ash results report`` and ``ash results merge`` read them back."""
     reloaded = AshAggregatedResults.model_validate_json(results.model_dump_json())
     return populate_metrics_from_unified_source(aggregated_results=reloaded)
 

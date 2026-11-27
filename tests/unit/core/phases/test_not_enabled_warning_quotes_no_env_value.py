@@ -7,8 +7,8 @@ An off-host reporter runs only when its section sets ``enabled`` to the boolean
 true, and a section that sets it to anything else is told so once, at WARNING.
 The value can be one the configuration file reads from the environment
 (``enabled: ${VAR}``), so the warning names the key and the value's type, never
-the value. Checked on the console and in ash.log of ``ash scan``, and on the
-console of ``ash report``, which refuses the reporter outright, with the
+the value. Checked on the console and in ash.log of ``ash scan fs``, and on the
+console of ``ash results report``, which refuses the reporter outright, with the
 operator's own --config file setting it. Each command runs in a child process,
 so the console is the one an operator sees.
 """
@@ -30,7 +30,7 @@ CANARY = "ash-canary-zq9"
 AWS_PLUGIN_MODULE = "automated_security_helper.plugin_modules.ash_aws_plugins"
 #: The control for the scan: the warning was written, for this reporter.
 WARNING = "Reporter 's3' sends findings off the host and is not run"
-#: The control for ash report, which refuses the requested reporter instead.
+#: The control for ash results report, which refuses the requested reporter instead.
 REFUSAL = "reporter 's3' sends findings off the host and is not enabled"
 
 #: Run in the child before ASH loads: every start the subprocess layer would
@@ -91,7 +91,7 @@ def _ash(root: Path, *args: str) -> subprocess.CompletedProcess:
 
 @pytest.fixture(scope="module")
 def runs(tmp_path_factory: pytest.TempPathFactory):
-    """An ash scan and an ash report, each with the operator's --config file
+    """An ash scan fs and an ash results report, each with the operator's --config file
     setting reporters.s3.enabled from ASH_ENABLED_CANARY."""
     root = tmp_path_factory.mktemp("not-enabled")
     (root / "src").mkdir()
@@ -112,21 +112,22 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
     scan = _ash(
         root,
         "scan",
+        "fs",
+        "src",
         "--no-progress",
         "--no-color",
-        "--source-dir",
-        "src",
         "--output-dir",
         "out",
         "--config",
         str(config),
-        "--scanners",
+        "--add-scanners",
         "detect-secrets",
         "--no-fail-on-incomplete-scanners",
         "--no-fail-on-findings",
     )
     report = _ash(
         root,
+        "results",
         "report",
         "--format",
         "s3",

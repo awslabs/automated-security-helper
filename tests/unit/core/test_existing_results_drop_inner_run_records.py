@@ -146,7 +146,7 @@ def test_existing_results_without_scanner_results_are_refused(tmp_path):
 
 
 def test_a_refusal_only_results_file_then_use_existing_exits_3(tmp_path):
-    """Through ``ash scan --use-existing``'s own path, which used to exit 0 here.
+    """Through ``ash scan fs --use-existing``'s own path, which used to exit 0 here.
 
     3, as for any input ASH cannot use: the file holds no scan to report on.
     """

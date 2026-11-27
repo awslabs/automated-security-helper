@@ -307,8 +307,8 @@ class TestTheRebuiltRow:
             assert model.scanner_results["tool"].exit_code == 3, ran
 
     def test_rebuilding_a_rebuilt_row_gives_the_same_exit_code(self):
-        """A rebuild is run again on a file that was rebuilt (``ash report``,
-        ``ash merge``), so the rule has to give one answer however often it is
+        """A rebuild is run again on a file that was rebuilt (``ash results report``,
+        ``ash results merge``), so the rule has to give one answer however often it is
         applied. Red at the base: a PASSED row with code 3 rebuilt to ERROR kept
         the 3, and the second rebuild, which finds an ERROR row, dropped it, so a
         saved results file and the same file after a report disagreed."""

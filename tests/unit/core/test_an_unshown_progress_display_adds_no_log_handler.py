@@ -4,7 +4,7 @@
 """A progress display that will never be shown puts no handler on the logger.
 
 The display's panel exists to be drawn. Built with ``show_progress=False`` --
-as every scan the MCP server runs builds it, and as ``ash merge`` does -- it
+as every scan the MCP server runs builds it, and as ``ash results merge`` does -- it
 is never drawn, so a log handler feeding it shows nobody anything. On the
 logger it is worse than useless: the server's workspace scans build one per
 project on a plain pool thread, where it joins the logger without a run's

@@ -80,7 +80,7 @@ def _processed(tmp_path) -> AshAggregatedResults:
 
 
 def _reloaded(model: AshAggregatedResults) -> AshAggregatedResults:
-    """The model as ``ash report`` reads it back from the saved results.
+    """The model as ``ash results report`` reads it back from the saved results.
 
     The model's own JSON round trip, as ``save_model`` and ``load_model`` make
     it: a ``json.dumps(..., default=str)`` of ``additional_reports`` alone wrote

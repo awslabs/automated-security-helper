@@ -8,8 +8,8 @@ The bases of a class statement are evaluated when the module is imported, and
 (it has no ``__class_getitem__`` on 3.10). The package declares
 ``requires-python >= 3.10``, so on 3.10 the import raised
 ``TypeError: 'type' object is not subscriptable``, and every module that imports
-the progress display (the orchestrator, the execution engine, ``ash merge`` and
-``ash scan``) failed to load. The type checker cannot see this, because the
+the progress display (the orchestrator, the execution engine, ``ash results merge`` and
+``ash scan fs``) failed to load. The type checker cannot see this, because the
 typeshed stub declares ``StreamHandler`` generic on every version.
 
 What is asserted. The first test reads the source and requires that no base of

@@ -6,7 +6,7 @@
 Why this exists
 ---------------
 The unused-suppressions reporter reads ``metadata.suppressions_ignored`` beside its
-own context's flag, so a results file re-rendered later by ``ash report`` (whose
+own context's flag, so a results file re-rendered later by ``ash results report`` (whose
 context carries no flag) still says the suppressions were not evaluated instead of
 listing every entry as unused. Nothing wrote that field: the engine applied the
 flag in every phase and recorded it nowhere. The engine now records it on the
@@ -15,7 +15,7 @@ too. The control is a run without the flag, which records nothing.
 
 The scan phase is a stand-in that returns the results unchanged; no scanner runs.
 
-The reporter reads the field off a results FILE a later ``ash report`` loaded, so
+The reporter reads the field off a results FILE a later ``ash results report`` loaded, so
 the in-memory record is not the whole claim: the field has to survive
 ``save_model`` and ``AshAggregatedResults.from_json``. ``ReportMetadata`` keeps
 unknown keys (``extra="allow"``) and ``save_model`` dumps the whole model, so the
@@ -87,7 +87,7 @@ def test_a_normal_run_records_nothing(tmp_path, monkeypatch):
 
 
 def _saved_and_reloaded(results, saved_dir: Path):
-    """The results written by ``save_model`` and read back the way ``ash report``
+    """The results written by ``save_model`` and read back the way ``ash results report``
     reads a results file: ``(the file's parsed JSON, the reloaded model)``."""
     saved_dir.mkdir(parents=True, exist_ok=True)
     results.save_model(saved_dir)
@@ -96,7 +96,7 @@ def _saved_and_reloaded(results, saved_dir: Path):
 
 
 def test_the_flag_survives_the_saved_results_file(tmp_path, monkeypatch):
-    """What a later ``ash report`` run reads is the file, not this run's model."""
+    """What a later ``ash results report`` run reads is the file, not this run's model."""
     results = _scan_only(tmp_path, monkeypatch, ignore_suppressions=True)
 
     on_disk, reloaded = _saved_and_reloaded(results, tmp_path / "saved")
