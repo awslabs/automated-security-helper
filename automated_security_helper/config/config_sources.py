@@ -2115,6 +2115,14 @@ def _legacy_location_warning(source: ConfigSource) -> str:
             f"{ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, so renaming the "
             "TOML file is not enough"
         )
+    elif is_json_file(source.path):
+        # A JSON file is read as JSON only under a .json name. At the canonical
+        # name it is read as YAML, which refuses a tab used for indentation.
+        remedy = (
+            f"move this file to {canonical}; {ASH_CANONICAL_CONFIG_FILE_NAME} is "
+            "read as YAML, so re-indent this file with spaces first if it is "
+            "indented with tabs"
+        )
     else:
         remedy = f"move this file to {canonical}"
     return (

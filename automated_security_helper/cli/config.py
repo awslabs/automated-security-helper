@@ -896,6 +896,15 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
             f"{selected.label} in place, or pass --config to write the new file "
             "somewhere else"
         )
+    elif is_json_file(selected.path):
+        # A JSON file is read as JSON only under a .json name. At the target it
+        # is read as YAML, which refuses a tab used for indentation.
+        advice = (
+            f"Move {selected.label} to {target} (the canonical config file, "
+            f"which is read as YAML: if {selected.label} is indented with tabs, "
+            f"re-indent it with spaces first), edit {selected.label} in place, "
+            "or pass --config to write the new file somewhere else"
+        )
     else:
         advice = (
             f"Move {selected.label} to {target} (the canonical config file), "

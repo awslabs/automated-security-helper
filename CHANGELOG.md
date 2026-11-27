@@ -70,14 +70,17 @@
   before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
   `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
   `ashrc` names. A scan that reads one of them prints one warning that names the file
-  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
-  `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
-  file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
-  which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
+  as deprecated and gives the path to move it to (for a TOML file, the path to rewrite
+  it in as YAML), and ASH 4.0 stops reading them. When `.ash.yaml` and an older file both
+  exist, `.ash.yaml` is read and the warning names the file it shadowed; for a project
+  that has `.ash.yml` beside `.ash.yaml`, this reverses which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
   warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
   names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
-  (or the same with the file's own name). This repository's own config moved the same
-  way.
+  (or the same with the file's own name). A TOML config, `.ashrc.toml` or `ashrc.toml`,
+  cannot be moved: `.ash.yaml` is read as YAML, so rewrite its settings as YAML in
+  `.ash.yaml` and delete the TOML file. A JSON config indented with tabs needs
+  re-indenting with spaces first, for the same reason. This repository's own config
+  moved the same way.
 - **A finding moved from an MCP config's generated script back to the config file has a
   new property name and a new id.** The result property that names the generated script
   is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name

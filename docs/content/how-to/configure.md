@@ -57,7 +57,7 @@ For a config under another legacy name, such as `.ashrc.yaml`, use that name as 
 git mv .ashrc.yaml .ash.yaml
 ```
 
-A TOML file, `.ashrc.toml` or `ashrc.toml`, cannot be moved this way: `.ash.yaml` is read as YAML, so the moved file is refused and every scan exits 3 until it is fixed. Write the same settings as YAML in a new `.ash.yaml`, then remove the TOML file with `git rm`. Only the syntax changes: a `[global_settings]` table in the TOML file is a `global_settings:` mapping in YAML.
+A TOML file, `.ashrc.toml` or `ashrc.toml`, cannot be moved this way: `.ash.yaml` is read as YAML, so the moved file is refused and every scan exits 3 until it is fixed. Write the same settings as YAML in a new `.ash.yaml`, then remove the TOML file with `git rm`. Only the syntax changes: a `[global_settings]` table in the TOML file is a `global_settings:` mapping in YAML. A JSON file, such as `.ash.json` or `.ashrc.json`, can be moved, but `.ash.yaml` is read as YAML and refuses a tab used for indentation, so re-indent a JSON file with spaces first if it uses tabs.
 
 The deprecation warning names the file ASH loaded and the `.ash.yaml` path to move it to, or, for a TOML file, to rewrite it in. Run `ash config validate` afterward to confirm that ASH reads the new location.
 
