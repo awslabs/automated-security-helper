@@ -55,6 +55,7 @@ from automated_security_helper.core.constants import (
 )
 from automated_security_helper.core.enums import (
     AshLogLevel,
+    BuildEngine,
     BuildTarget,
     ExecutionPhase,
     ExecutionStrategy,
@@ -1090,6 +1091,70 @@ def _resolve_oci_runner(oci_runner: str | None, quiet: bool = False) -> str:
     raise RuntimeError("Unable to resolve an OCI runner")
 
 
+class ResolvedEngines(NamedTuple):
+    """The programs one call to :func:`run_ash_container` starts.
+
+    ``build_kind`` is the build engine the call asked for. ``build_path`` is the
+    program that builds the image and ``run_path`` the one that runs the scan in
+    it; each is None when the call does not take that step. With the ``runner``
+    build engine they are one program, the container runner, which builds the image
+    and then runs the scan in it.
+    """
+
+    build_path: str | None
+    build_kind: BuildEngine
+    run_path: str | None
+
+    @property
+    def build_program(self) -> str:
+        """The program that builds the image, for a call that builds one."""
+        path = self.build_path
+        if path is None:
+            raise RuntimeError("No build engine was resolved for this call")
+        return path
+
+    @property
+    def run_program(self) -> str:
+        """The program that runs the scan, for a call that runs one."""
+        path = self.run_path
+        if path is None:
+            raise RuntimeError("No run engine was resolved for this call")
+        return path
+
+
+def _resolve_engines(
+    build_engine: BuildEngine | str,
+    oci_runner: str | None,
+    *,
+    build: bool,
+    run: bool,
+) -> ResolvedEngines:
+    """Find the programs a call to :func:`run_ash_container` needs.
+
+    ``build_engine`` is a :class:`BuildEngine` or its value. ``oci_runner`` names
+    the container runner, or is None to look for one in the usual order
+    (``_OCI_RUNNER_CANDIDATES``).
+
+    The ``runner`` build engine is the container runner itself, so one lookup
+    serves the build and the run. It is made for every call, as it always was: a
+    host with no runner fails with "Unable to resolve an OCI runner" even when the
+    call neither builds nor runs. ``build`` and ``run`` say which steps the call
+    takes; a step it does not take has no path, and asking the result for that
+    step's program is an error.
+
+    Raises:
+        ValueError: When ``build_engine`` is not a build engine.
+        RuntimeError: When no container runner is found.
+    """
+    kind = BuildEngine(build_engine)
+    runner = _resolve_oci_runner(oci_runner)
+    return ResolvedEngines(
+        build_path=runner if build else None,
+        build_kind=kind,
+        run_path=runner if run else None,
+    )
+
+
 def _is_relative_path(value: str) -> bool:
     """Whether ``value`` is a path with a directory part that names no place by itself.
 
@@ -1815,6 +1880,71 @@ def _build_date_epoch() -> int:
     return now - now % 86400
 
 
+def _ash_build_args(
+    *,
+    dockerfile_path: Path,
+    image_name: str,
+    build_target: str,
+    container_uid: str,
+    container_gid: str,
+    resolved_revision: str | None,
+    offline: bool,
+    offline_semgrep_rulesets: str,
+) -> List[str]:
+    """The words an image build is given for ASH's own Dockerfile, in order.
+
+    ``--build-arg`` for the UID and GID and, when the revision moves, the clone
+    date; ``--tag``, ``--target`` and ``--file``; then ``--build-arg`` for the
+    revision, offline mode, the offline Semgrep rulesets and the build date.
+
+    What belongs to the program that builds is not here: the layer cache and the
+    base image handoff, which depend on it, the caller's own ``--custom-build-arg``
+    values, which come last, ``--no-cache``, ``-q`` and the context directory.
+    Nothing here is read from the environment.
+    """
+    words: List[str] = []
+    words.extend(["--build-arg", f"UID={container_uid}"])
+    words.extend(["--build-arg", f"GID={container_gid}"])
+    # A branch moves, but the Dockerfile's clone step is the same command every time,
+    # so without a new value for this ARG the build cache served the first clone of
+    # the branch to every later build (--force aside). A tag or a commit id clones the
+    # same tree each time and gets none, so its clone stays cached. Neither does a
+    # build whose context is ASH's own tree, which the clone step builds instead of
+    # cloning.
+    if _revision_moves(resolved_revision) and not _is_ash_source_tree(
+        dockerfile_path.parent
+    ):
+        words.extend(
+            [
+                "--build-arg",
+                f"{CLONE_DATE_BUILD_ARG}={int(datetime.now().timestamp())}",
+            ]
+        )
+    words.extend(
+        [
+            "--tag",
+            image_name,
+            "--target",
+            build_target,
+            "--file",
+            dockerfile_path.as_posix(),
+            "--build-arg",
+            f"INSTALL_ASH_REVISION={resolved_revision}",
+            "--build-arg",
+            f"OFFLINE={'YES' if offline else 'NO'}",
+            "--build-arg",
+            f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
+            # A new value re-runs the Dockerfile's core stage from its apt-get
+            # upgrade step down, offline download included; see ARG BUILD_DATE_EPOCH
+            # there. One value per UTC day, so rebuilds on the same day come from the
+            # layer cache, and OS packages and offline databases are at most a day old.
+            "--build-arg",
+            f"BUILD_DATE_EPOCH={_build_date_epoch()}",
+        ]
+    )
+    return words
+
+
 def _build_image(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -1832,6 +1962,10 @@ def _build_image(
     debug: bool,
 ) -> None:
     """Build the base ASH container image.
+
+    ``resolved_oci_runner`` is the program that builds: the build engine's, which is
+    the container runner under the default build engine. What the layer cache and
+    the base image handoff do is decided from its name.
 
     Raises:
         CalledProcessError: On non-zero exit from the build command.
@@ -1858,44 +1992,17 @@ def _build_image(
     else:
         build_cmd = [*oci_command_prefix, resolved_oci_runner, "build"]
     build_cmd.extend(cache_args)
-    build_cmd.extend(["--build-arg", f"UID={container_uid}"])
-    build_cmd.extend(["--build-arg", f"GID={container_gid}"])
-    # A branch moves, but the Dockerfile's clone step is the same command every time,
-    # so without a new value for this ARG the build cache served the first clone of
-    # the branch to every later build (--force aside). A tag or a commit id clones the
-    # same tree each time and gets none, so its clone stays cached. Neither does a
-    # build whose context is ASH's own tree, which the clone step builds instead of
-    # cloning.
-    if _revision_moves(resolved_revision) and not _is_ash_source_tree(
-        dockerfile_path.parent
-    ):
-        build_cmd.extend(
-            [
-                "--build-arg",
-                f"{CLONE_DATE_BUILD_ARG}={int(datetime.now().timestamp())}",
-            ]
-        )
     build_cmd.extend(
-        [
-            "--tag",
-            image_name,
-            "--target",
-            build_target,
-            "--file",
-            dockerfile_path.as_posix(),
-            "--build-arg",
-            f"INSTALL_ASH_REVISION={resolved_revision}",
-            "--build-arg",
-            f"OFFLINE={'YES' if offline else 'NO'}",
-            "--build-arg",
-            f"OFFLINE_SEMGREP_RULESETS={offline_semgrep_rulesets}",
-            # A new value re-runs the Dockerfile's core stage from its apt-get
-            # upgrade step down, offline download included; see ARG BUILD_DATE_EPOCH
-            # there. One value per UTC day, so rebuilds on the same day come from the
-            # layer cache, and OS packages and offline databases are at most a day old.
-            "--build-arg",
-            f"BUILD_DATE_EPOCH={_build_date_epoch()}",
-        ]
+        _ash_build_args(
+            dockerfile_path=dockerfile_path,
+            image_name=image_name,
+            build_target=build_target,
+            container_uid=container_uid,
+            container_gid=container_gid,
+            resolved_revision=resolved_revision,
+            offline=offline,
+            offline_semgrep_rulesets=offline_semgrep_rulesets,
+        )
     )
 
     # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at the registry that actually
@@ -2031,6 +2138,8 @@ def _build_custom_image(
     """Build a custom image layered on top of the base ASH image.
 
     Args:
+        resolved_oci_runner: The program that builds: the build engine's, as for
+            ``_build_image``.
         base_image_name: Name of the base image to build on top of.
         custom_containerfile: Path to the custom Containerfile/Dockerfile.
         target: The custom file's stage to build, or None for the whole file.
@@ -5359,6 +5468,7 @@ def run_ash_container(
     run: bool = True,
     force: bool = False,
     oci_runner: str | None = None,
+    build_engine: BuildEngine = BuildEngine.RUNNER,
     build_target: BuildTarget | None = None,
     offline_semgrep_rulesets: str = "p/ci",
     container_uid: str | None = None,
@@ -5395,6 +5505,9 @@ def run_ash_container(
         force: Force rebuild of the ASH container image
         quiet: Don't print verbose text about the build process
         oci_runner: Use the specified OCI runner instead of docker to run the containerized tools
+        build_engine: The program that builds the image. ``runner``, the default, is
+            the OCI runner, which also runs the scan in the image. A value that is not
+            a :class:`BuildEngine` raises ValueError.
         build_target: The image stage to build and run. None means ``non-root``;
             CI environment variables do not change it (see _resolve_build_target).
         offline: Build ASH for offline execution
@@ -5520,9 +5633,11 @@ def run_ash_container(
     if container_gid is None:
         container_gid = str(host_gid)
 
-    # Resolve OCI runner
+    # Resolve the programs this call starts: with the default build engine, the OCI
+    # runner, which builds the image and runs the scan in it. Looked up here, after
+    # every refusal above that needs no program, and once for the whole call.
     try:
-        resolved_oci_runner = _resolve_oci_runner(oci_runner)
+        engines = _resolve_engines(build_engine, oci_runner, build=build, run=run)
     except RuntimeError as e:
         secho(str(e), fg=typer.colors.RED)
         return _not_started(
@@ -5707,11 +5822,13 @@ def run_ash_container(
                 )
             )
 
+        # The build engine's program builds the image, and the custom image on it.
+        build_program = engines.build_program
         try:
             with subprocess_utils._spawn_values(build_hidden):
                 _build_image(
                     oci_command_prefix=oci_command_prefix,
-                    resolved_oci_runner=resolved_oci_runner,
+                    resolved_oci_runner=build_program,
                     dockerfile_path=dockerfile_path,
                     image_name=ash_base_image_name,
                     build_target=resolved_build_target,
@@ -5729,7 +5846,7 @@ def run_ash_container(
                 if custom_containerfile is not None:
                     ash_base_image_name = _build_custom_image(
                         oci_command_prefix=oci_command_prefix,
-                        resolved_oci_runner=resolved_oci_runner,
+                        resolved_oci_runner=build_program,
                         base_image_name=ash_base_image_name,
                         custom_containerfile=custom_containerfile,
                         quiet=quiet,
@@ -5778,6 +5895,8 @@ def run_ash_container(
 
     # Run phase
     if run:
+        # The run engine's program starts the scan's container and is recorded with it.
+        run_program = engines.run_program
         if build:
             # The record above served the refusals and the build. The container
             # reads the operator's files when it starts, so the run phase reads
@@ -5862,7 +5981,7 @@ def run_ash_container(
                         _env_file(
                             environment_names,
                             snapshot_environ(),
-                            resolved_oci_runner,
+                            run_program,
                             Path(source_dir),
                             Path(output_dir),
                         )
@@ -5880,7 +5999,7 @@ def run_ash_container(
                 run_cmd = _assemble_run_command(
                     container_name=container_name,
                     oci_command_prefix=oci_command_prefix,
-                    resolved_oci_runner=resolved_oci_runner,
+                    resolved_oci_runner=run_program,
                     image_name=ash_base_image_name,
                     source_dir=source_dir,
                     output_dir=output_dir,
@@ -5950,7 +6069,7 @@ def run_ash_container(
                     # start's sweep; a run that ended on its own leaves the
                     # container gone with --rm.
                     record = record_container(
-                        container_name, [*oci_command_prefix, resolved_oci_runner]
+                        container_name, [*oci_command_prefix, run_program]
                     )
                     result = _execute_container(
                         run_cmd, debug=debug, env=_run_environment(outer_run_id)

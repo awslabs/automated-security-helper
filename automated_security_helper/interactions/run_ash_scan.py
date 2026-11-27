@@ -75,6 +75,7 @@ from automated_security_helper.core.enums import (
     DEFAULT_EXECUTION_PHASES,
     AshExitCode,
     AshLogLevel,
+    BuildEngine,
     BuildTarget,
     ExecutionPhase,
     ExecutionStrategy,
@@ -381,6 +382,7 @@ class ScanOptions(BaseModel):
     run: bool = True
     force: bool = False
     oci_runner: Optional[str] = None
+    build_engine: BuildEngine = BuildEngine.RUNNER
     build_target: Optional[BuildTarget] = None
     offline_semgrep_rulesets: str = "p/ci"
     container_uid: Optional[str] = None
@@ -4487,6 +4489,7 @@ def _run_container_mode(
         run=opts.run,
         force=opts.force,
         oci_runner=opts.oci_runner,
+        build_engine=opts.build_engine,
         build_target=opts.build_target,
         offline_semgrep_rulesets=opts.offline_semgrep_rulesets,
         container_uid=opts.container_uid,
@@ -4813,7 +4816,7 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       resolved path), ``client_overrides`` and ``selection_origin`` (who gave
       the options on this side; the inner scan's own are the CLI's), and the
       container-only fields (``build``, ``run``, ``force``, ``oci_runner``,
-      ``build_target``, ``container_uid``, ``container_gid``,
+      ``build_engine``, ``build_target``, ``container_uid``, ``container_gid``,
       ``container_network``, ``ash_revision_to_install``,
       ``custom_containerfile``, ``custom_build_arg``), which no shell reads.
 
