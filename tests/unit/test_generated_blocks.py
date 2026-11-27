@@ -14,11 +14,15 @@ tests/unit/test_version_template_round_trip.py keeps holding.
 
 Three more guarantees are pinned the same way. A body is a string or a sequence of
 strings, read once per call: an iterator or a generator is used up by its first read,
-so it is refused instead of leaving a template and its page different. A write is
-all or nothing: one that fails or is cut off partway leaves the page as it was, with
-no temporary file beside it. And a block whose begin marker names the generator but
-that the call gives no body is drift in a check and a refusal in a write, unless the
-caller says it renders only some of its blocks.
+so it is refused instead of leaving a template and its page different, and bytes are
+refused with a message that says to decode them. A write is all or nothing: one that
+fails or is cut off partway leaves the page as it was, with no temporary file beside
+it. On Windows, where a swap is refused while another process has the page open, it is
+tried again a few times and then raised naming the page; nowhere else is it tried
+again, and the tests fake the platform and the refusal, never a Windows call. And a
+block whose begin marker names the generator but that the call gives no body is drift
+in a check and a refusal in a write, unless the caller says it renders only some of
+its blocks.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ import io
 import os
 import stat
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -180,6 +185,37 @@ def fill_the_disk_at_file(patch, number):
         return handle
 
     patch.setattr(io, "open", opener)
+
+
+def held_open():
+    """The error Windows gives while another process has the page open."""
+    return PermissionError(errno.EACCES, "planted: another process has the page open")
+
+
+def stub_the_swap(patch, platform, refusals, make_error):
+    """Run as if on ``platform``, with ``os.replace`` refusing ``refusals`` times.
+
+    ``patch`` is a ``monkeypatch.context()``, so the fake platform is undone before the
+    test ends. A refusal raises ``make_error()``; every call after the last refusal
+    runs the real ``os.replace``, and ``refusals=None`` refuses every call. The platform
+    is only a string and ``time.sleep`` only records what it was asked for, so nothing
+    here calls a Windows API or waits. Returns the ``(source, target)`` of each call to
+    ``os.replace`` and the pauses asked for, both in order.
+    """
+    real_replace = os.replace
+    calls = []
+    pauses = []
+
+    def swap(source, target):
+        calls.append((source, target))
+        if refusals is None or len(calls) <= refusals:
+            raise make_error()
+        return real_replace(source, target)
+
+    patch.setattr(sys, "platform", platform)
+    patch.setattr(os, "replace", swap)
+    patch.setattr(time, "sleep", pauses.append)
+    return calls, pauses
 
 
 # --- the marker text --------------------------------------------------------------
@@ -469,9 +505,19 @@ BAD_MEMBERS = [
     pytest.param(["a", None], 2, "NoneType", id="none-member"),
     pytest.param([b"a"], 1, "bytes", id="bytes-member"),
     pytest.param(("a", ["b"]), 2, "list", id="nested-list"),
-    pytest.param(b"abc", 1, "int", id="bytes"),
-    pytest.param(bytearray(b"abc"), 1, "int", id="bytearray"),
     pytest.param(range(2), 1, "int", id="range"),
+]
+
+#: The rows as bytes, which is how a subprocess or a file read in binary mode hands
+#: them over.
+ROW_BYTES = "\n".join(ROWS).encode("utf-8")
+
+#: Bodies that are bytes, each as a factory with the type name the message names. A
+#: bytes object is a sequence, so it must not be read as one: its items are ints.
+BYTES_BODIES = [
+    pytest.param(lambda: ROW_BYTES, "bytes", id="bytes"),
+    pytest.param(lambda: bytearray(ROW_BYTES), "bytearray", id="bytearray"),
+    pytest.param(lambda: memoryview(ROW_BYTES), "memoryview", id="memoryview"),
 ]
 
 
@@ -495,6 +541,21 @@ def test_a_body_with_a_member_that_is_not_a_string_is_refused(
         reason=f"body line {line} is not a string",
     )
     assert f"`{kind}`" in error.reason
+
+
+@pytest.mark.parametrize("operation", OPERATIONS)
+@pytest.mark.parametrize(("make", "kind"), BYTES_BODIES)
+def test_a_bytes_body_is_refused_with_a_message_that_says_to_decode_it(
+    operation, make, kind
+):
+    error = refused(
+        lambda: operation(page(begin(), end()), FILE, {NAME: make()}, GENERATOR),
+        reason="decode it to a string",
+    )
+    assert f"`{kind}`" in error.reason
+    # Not the message for a list of ints, which is what the bytes were taken for.
+    assert "body line" not in error.reason
+    assert "`int`" not in error.reason
 
 
 @pytest.mark.parametrize(
@@ -827,6 +888,110 @@ def test_a_swap_that_fails_leaves_the_page_and_its_directory_as_they_were(
     results = gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
     assert [(r.status, r.blocks) for r in results] == [(gb.WRITTEN, (NAME,))]
     assert text_of(path) == page(begin(), *ROWS, end())
+
+
+def test_on_windows_a_swap_refused_twice_is_tried_again_and_lands(
+    tmp_path, monkeypatch
+):
+    path = put(tmp_path, "page.md", page(begin(), "stale", end()))
+
+    with monkeypatch.context() as patch:
+        calls, pauses = stub_the_swap(patch, "win32", 2, held_open)
+        results = gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    assert [(r.status, r.blocks) for r in results] == [(gb.WRITTEN, (NAME,))]
+    assert text_of(path) == page(begin(), *ROWS, end())
+    # Three tries with the same temporary file over the same page, and a pause between.
+    assert len(calls) == 3
+    assert len(set(calls)) == 1
+    assert len(pauses) == 2
+    assert os.listdir(tmp_path) == ["page.md"]
+
+
+#: What a refusal can look like: the two-argument form the operating system raises, and
+#: a bare message, which carries no errno and no message of its own.
+REFUSALS = [
+    pytest.param(held_open, id="with-errno"),
+    pytest.param(
+        lambda: PermissionError("planted: another process has the page open"),
+        id="bare-message",
+    ),
+]
+
+
+@pytest.mark.parametrize("make_error", REFUSALS)
+def test_on_windows_a_swap_that_is_always_refused_gives_up_and_names_the_page(
+    tmp_path, monkeypatch, make_error
+):
+    original = page(begin(), "stale", end()).encode("utf-8")
+    path = put(tmp_path, "page.md", original)
+    listing = sorted(os.listdir(tmp_path))
+
+    with monkeypatch.context() as patch:
+        calls, pauses = stub_the_swap(patch, "win32", None, make_error)
+        with pytest.raises(PermissionError, match="planted") as caught:
+            gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    # A few tries, a short pause between each two of them and none after the last.
+    assert 3 <= len(calls) <= 10, len(calls)
+    assert len(pauses) == len(calls) - 1
+    assert all(0 < pause <= 1 for pause in pauses), pauses
+    # The error names the page and keeps the last refusal as its cause.
+    error = caught.value
+    assert error.filename == os.path.realpath(path)
+    assert "page.md" in str(error)
+    assert isinstance(error.__cause__, PermissionError)
+    # Nothing was written, and no temporary file is left beside the page.
+    assert path.read_bytes() == original
+    assert sorted(os.listdir(tmp_path)) == listing
+
+
+def test_on_windows_a_failure_that_is_not_a_permission_error_is_not_tried_again(
+    tmp_path, monkeypatch
+):
+    original = page(begin(), "stale", end()).encode("utf-8")
+    path = put(tmp_path, "page.md", original)
+    listing = sorted(os.listdir(tmp_path))
+
+    def disk_full():
+        return OSError(errno.ENOSPC, "planted: no space left on device")
+
+    with monkeypatch.context() as patch:
+        calls, pauses = stub_the_swap(patch, "win32", None, disk_full)
+        with pytest.raises(OSError, match="planted: no space") as caught:
+            gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    assert not isinstance(caught.value, PermissionError)
+    assert len(calls) == 1
+    assert pauses == []
+    assert path.read_bytes() == original
+    assert sorted(os.listdir(tmp_path)) == listing
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_off_windows_a_refused_swap_is_raised_at_once_and_not_tried_again(
+    tmp_path, monkeypatch, platform
+):
+    original = page(begin(), "stale", end()).encode("utf-8")
+    path = put(tmp_path, "page.md", original)
+    listing = sorted(os.listdir(tmp_path))
+    raised = []
+
+    def refusal():
+        raised.append(held_open())
+        return raised[-1]
+
+    with monkeypatch.context() as patch:
+        calls, pauses = stub_the_swap(patch, platform, None, refusal)
+        with pytest.raises(PermissionError, match="planted") as caught:
+            gb.write_blocks(tmp_path, "page.md", {NAME: ROWS}, GENERATOR)
+
+    # The first refusal, as the system raised it: not retried and not rewrapped.
+    assert len(calls) == 1
+    assert pauses == []
+    assert caught.value is raised[0]
+    assert path.read_bytes() == original
+    assert sorted(os.listdir(tmp_path)) == listing
 
 
 def test_a_write_that_runs_out_of_disk_partway_leaves_the_page_as_it_was(
