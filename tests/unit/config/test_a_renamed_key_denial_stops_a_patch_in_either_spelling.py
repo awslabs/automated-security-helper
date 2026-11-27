@@ -118,6 +118,29 @@ def test_a_denial_in_the_canonical_spelling_stops_a_write_in_the_old_one(
     assert f"denied_paths entry {CANONICAL_DENIAL!r}" in refused.value.rule
 
 
+def test_a_denial_in_the_old_spelling_still_holds_once_the_spelling_is_removed(
+    monkeypatch,
+) -> None:
+    """At the release that stops reading ``expiration`` in a config, an
+    operator's denial written that way still names the expiry it always named:
+    a list nobody rewrote keeps denying, and never denies a path that can no
+    longer exist."""
+    import automated_security_helper
+
+    monkeypatch.setattr(automated_security_helper, "__version__", "4.0.0")
+    base = _profile(OLD_SPELLING_DENIAL)
+    op = {
+        "op": "replace",
+        "path": "/global_settings/suppressions/0/expires",
+        "value": "2199-12-31",
+    }
+
+    with pytest.raises(RuntimePatchDeniedError) as refused:
+        _patch(base, [op])
+
+    assert f"denied_paths entry {OLD_SPELLING_DENIAL!r}" in refused.value.rule
+
+
 def test_a_denial_in_the_spelling_the_write_uses_still_stops_it() -> None:
     """The control: the denial and the write spelled alike, refused as always."""
     base = _profile(CANONICAL_DENIAL)
