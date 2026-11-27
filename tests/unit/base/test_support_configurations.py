@@ -20,7 +20,12 @@ import pytest
 
 from automated_security_helper.base import support_register as sr
 from tests.utils.scanner_enumeration import load_scanner_universe
-from tests.utils.support_gaps import all_platforms_but, pinned_binaries
+from tests.utils.support_gaps import (
+    UNALLOWED_GAP,
+    all_platforms_but,
+    pinned_binaries,
+    unallowed_gap_rows,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -772,6 +777,7 @@ def test_no_other_platform_and_no_other_tool_has_a_missing_build_row() -> None:
         for row in sr.no_build_rows(binaries)
     }
     assert found == wanted
+    assert unallowed_gap_rows(sr.no_build_rows(binaries)) == [], UNALLOWED_GAP
 
 
 def _planted_lacking(platform: str) -> sr.PinnedBinary:

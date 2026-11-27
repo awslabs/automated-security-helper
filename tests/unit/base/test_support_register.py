@@ -38,7 +38,12 @@ from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base import support_register as sr
 from tests.utils.helpers import importing_this_checkout
 from tests.utils.scanner_enumeration import load_scanner_universe
-from tests.utils.support_gaps import all_platforms_but, pinned_binaries
+from tests.utils.support_gaps import (
+    UNALLOWED_GAP,
+    all_platforms_but,
+    pinned_binaries,
+    unallowed_gap_rows,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -1384,11 +1389,16 @@ def _derivation_failures(
 
 def test_the_rows_derived_from_the_shipped_scanners_are_valid() -> None:
     """Every pinned binary gets a row for each platform it has no build for and for
-    no other, and each row's paths lead out."""
+    no other, only the allowed platforms are among them, and each row's paths lead out.
+
+    The derivation check compares the rows with the declaration they come from, so it
+    cannot tell a gap declared by mistake from one upstream leaves. The allowed
+    platforms are what the declaration is held to."""
     binaries = _pinned_binaries()
     assert binaries, "the scanner universe holds no pinned binary"
     derived = sr.no_build_rows(binaries)
     assert _derivation_failures(binaries, derived) == []
+    assert unallowed_gap_rows(derived) == [], UNALLOWED_GAP
     register = _with(rows=derived)
     assert _validity_failures(register, rows=derived) == []
 
