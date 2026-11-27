@@ -1704,8 +1704,11 @@ def merge_shard_results(
     ``metadata.plugin_load_errors``, every shard's modules that failed to import
     (``plugins.loader.combined_plugin_load_errors``), and so is
     ``metadata.support_notices``, every shard's notices by id
-    (``models.asharp_model.combined_support_notices``). The ``report_id`` is the
-    exception: see :func:`_union_report_id`.
+    (``models.asharp_model.combined_support_notices``): a notice that more than one
+    shard met is recorded once, holding only what every one of them recorded (the
+    facts they recorded alike, and the ``found`` text when it is the same in all, None
+    when it is not), because two hosts that meet one row do not read the same of it.
+    The ``report_id`` is the exception: see :func:`_union_report_id`.
 
     Args:
         loaded: (path, results) pairs, in any order.
@@ -1825,8 +1828,10 @@ def merge_shard_results(
     merged.metadata.requested_scanners_not_run = requested_not_run or None
     # Every shard's notices, united by id in shard order. The shards of one scan can
     # run on different hosts and a notice says what its own run met, so the base
-    # shard's copy would describe one host only. None when no shard recorded one, as
-    # a single scan writes it.
+    # shard's copy would describe one host only. A notice two shards met is recorded
+    # once with what both recorded: the facts they recorded alike, and the found text
+    # when it is the same, since two hosts that meet one row do not read the same of
+    # it. None when no shard recorded one, as a single scan writes it.
     merged.metadata.support_notices = combined_support_notices(
         shard.metadata.support_notices for _, shard, _ in shards
     )

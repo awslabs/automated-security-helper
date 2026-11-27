@@ -1174,7 +1174,9 @@ class SupportNotice(StrippedRecordModel):
             default=None,
             description=(
                 "What ASH read that matched the row, for example the processor flags "
-                "that are missing. Null when the row has nothing to add."
+                "that are missing. Null when the row has nothing to add, and, in a "
+                "report that combines runs, when the runs that met the row did not "
+                "record the same text."
             ),
         ),
     ] = None
@@ -1185,7 +1187,8 @@ class SupportNotice(StrippedRecordModel):
             description=(
                 "The tokens the row matched, by fact name, for example arch amd64 and "
                 "cpu_level compat-only. The names are the support register's facts, "
-                "and no other name is accepted."
+                "and no other name is accepted. In a report that combines runs, only "
+                "the tokens every run that met the row recorded."
             ),
         ),
     ]
@@ -1252,6 +1255,30 @@ class SupportNotice(StrippedRecordModel):
         return value
 
 
+def _agreed_support_notice(records: List[SupportNotice]) -> SupportNotice:
+    """The one record of a notice id that holds only what every record of it holds.
+
+    The first record is the base, copied whole. What a run read of a row is what
+    differs between runs, and the record keeps it only where they agree: ``facts`` is
+    the pairs every record has with the same token, in the first record's order, and
+    ``found`` is its text when every record has the same text, None when they differ (a
+    record with no text differs from one with some). Every other field is the first
+    record's.
+    """
+    first, *others = records
+    update: Dict[str, Any] = {}
+    shared = {
+        name: token
+        for name, token in first.facts.items()
+        if all(other.facts.get(name) == token for other in others)
+    }
+    if shared != first.facts:
+        update["facts"] = shared
+    if any(other.found != first.found for other in others):
+        update["found"] = None
+    return first.model_copy(update=update, deep=True)
+
+
 def combined_support_notices(
     runs: Iterable[Optional[Iterable[Any]]],
 ) -> Optional[List[SupportNotice]]:
@@ -1261,18 +1288,28 @@ def combined_support_notices(
     run for each project, and ``ash merge``, which has one for each shard. A notice
     says what its own run met, and the runs meet different rows: the shards of one
     scan can run on different hosts, and the projects of a workspace reach different
-    decisions, so the first run's list alone would leave the others' out. The first
-    record of an id is kept (a row describes one configuration, so the runs that meet
-    it say the same of it), in the order the runs are given and each run's own order,
-    so a caller that passes them in workspace-file or shard-index order gets a result
-    that does not depend on which run finished first. Each notice is a copy, so the
-    list shares no object with a run it came from. A record that is a mapping, as one
-    read from a results file can be, is taken as a notice.
+    decisions, so the first run's list alone would leave the others' out.
+
+    A row two runs meet is recorded once, and the record holds only what every one of
+    those runs recorded. Two hosts that meet one row do not read the same of it (the
+    processor flags that are missing, the level the processor is at), and a record that
+    kept the first run's read would publish one host's as the scan's, with nothing in
+    it to say that another run read otherwise. So ``facts`` is the pairs every run
+    recorded with the same token, ``found`` is the text every run recorded and is None
+    when they did not record the same, and every other field is the first run's: the
+    row is one configuration, so the runs say the same of it, and where a run of
+    another ASH version words it otherwise the first run's wording stands.
+
+    The records come in the order the runs are given and each run's own order, so a
+    caller that passes them in workspace-file or shard-index order gets a result that
+    does not depend on which run finished first. Each notice is a copy, so the list
+    shares no object with a run it came from. A record that is a mapping, as one read
+    from a results file can be, is taken as a notice.
 
     None when no run recorded one, which is how a run on a fully supported
     configuration writes the field.
     """
-    united: Dict[str, SupportNotice] = {}
+    records: Dict[str, List[SupportNotice]] = {}
     for notices in runs:
         for notice in notices or ():
             record = (
@@ -1280,9 +1317,8 @@ def combined_support_notices(
                 if isinstance(notice, SupportNotice)
                 else SupportNotice.model_validate(notice)
             )
-            if record.id not in united:
-                united[record.id] = record.model_copy(deep=True)
-    return list(united.values()) or None
+            records.setdefault(record.id, []).append(record)
+    return [_agreed_support_notice(group) for group in records.values()] or None
 
 
 class ReportMetadata(StrippedRecordModel):
@@ -1474,7 +1510,8 @@ class ReportMetadata(StrippedRecordModel):
     # they were before the field existed. The two outputs that combine runs record
     # every run's notices by id, since the runs can be on different hosts: the
     # workspace results file (workspace/aggregation.py) and `ash merge`
-    # (combined_support_notices).
+    # (combined_support_notices). A notice that more than one run met is recorded once,
+    # holding only what every one of them read.
     support_notices: Annotated[
         List[SupportNotice] | None,
         Field(

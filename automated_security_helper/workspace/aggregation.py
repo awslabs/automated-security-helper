@@ -1788,13 +1788,17 @@ class WorkspaceAggregator:
 
         ``support_notices`` holds each project's ``metadata.support_notices`` (None
         for a project that recorded none), in workspace-file order. They are written
-        to ``metadata`` united by id, the first record of an id kept
-        (``models.asharp_model.combined_support_notices``), and not at all when no
-        project recorded one. Each project's scan records what it met: the rows
-        raised at the start of a run are the same for every project, and a row raised
-        at a decision (a scanner that is skipped, a sandbox backend that falls back)
-        is recorded only by the projects that reached the decision, so the first
-        project's notices alone would drop the others'.
+        to ``metadata`` united by id (``models.asharp_model.combined_support_notices``),
+        and not at all when no project recorded one. Each project's scan records what
+        it met: the rows raised at the start of a run are the same for every project,
+        and a row raised at a decision (a scanner that is skipped, a sandbox backend
+        that falls back) is recorded only by the projects that reached the decision,
+        so the first project's notices alone would drop the others'. A notice that
+        more than one project met is recorded once, holding only what every one of
+        them recorded: the facts they recorded alike, and the ``found`` text when it is
+        the same in all, None when it is not. Two projects that meet one row can read
+        different things of it, and the first project's record would publish its read
+        as the workspace's.
         """
         payload = self.results_payload(
             exit_code,

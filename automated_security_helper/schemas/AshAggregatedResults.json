@@ -23804,7 +23804,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The tokens the row matched, by fact name, for example arch amd64 and cpu_level compat-only. The names are the support register's facts, and no other name is accepted.",
+          "description": "The tokens the row matched, by fact name, for example arch amd64 and cpu_level compat-only. The names are the support register's facts, and no other name is accepted. In a report that combines runs, only the tokens every run that met the row recorded.",
           "propertyNames": {
             "enum": [
               "os",
@@ -23844,7 +23844,7 @@
             }
           ],
           "default": null,
-          "description": "What ASH read that matched the row, for example the processor flags that are missing. Null when the row has nothing to add.",
+          "description": "What ASH read that matched the row, for example the processor flags that are missing. Null when the row has nothing to add, and, in a report that combines runs, when the runs that met the row did not record the same text.",
           "title": "Found"
         },
         "id": {
