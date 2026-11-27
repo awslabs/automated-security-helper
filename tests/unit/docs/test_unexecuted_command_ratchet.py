@@ -12,14 +12,18 @@ past release, or ``scripts/docs_unexecuted_commands_seed.tsv`` lists it. That se
 measured at main and only shrinks: a line for each such block, the page's path, a tab,
 and the first command of the block.
 
-A page that a generator writes is not read at all. The repository keeps a list of them,
-``REFERENCE_PAGES`` in the freshness test, which holds each page on it to its
-generator's output, and a page is one of them when that list names it and the page
-opens with the banner of the generator listed for it. The usage line that each command's
-section of the CLI reference prints is no command the page tells a reader to run, and
-without this rule every new subcommand would add a block that no seed lists. A banner
-alone decides nothing: the journey pages open with one and their blocks are written by
-hand, and any page can open with a copied one.
+A page that a generator writes is read for what the generator does not print. The
+repository keeps a list of such pages, ``REFERENCE_PAGES`` in the freshness test, which
+holds each page on it to its generator's output, and a page is one of them when that
+list names it and the page opens with the banner of the generator listed for it. The
+usage line that each command's section of the CLI reference prints (``ash scan
+[OPTIONS]``) is no command the page tells a reader to run, and without this rule every
+new subcommand would add a block that no seed lists, so a block of such a page is left
+out when its first command has the shape of a usage line. The help text of a command
+holds examples that a person wrote, and the generator fences them as ``text`` as well,
+which keeps them out of the runs: they are counted like the blocks of any page. A
+banner alone decides nothing: the journey pages open with one and their blocks are
+written by hand, and any page can open with a copied one.
 
 Each case plants the defect the check exists for and requires it to be reported, with a
 clean control beside it, so a check that reports everything, or nothing, fails one of
@@ -35,6 +39,7 @@ block, a fence inside a block quote), which no check of the markers reads.
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -47,6 +52,48 @@ FENCE = "```"
 SCAN = "ash scan --source-dir ."
 MESSAGE = "shows a command that nothing runs"
 USAGE = "ash scan [OPTIONS]"
+#: An example from the help text of a command, as the generator fences it: a ``text``
+#: block in the command's section of the page, before the usage block. HELP_COMMAND is
+#: how the seed names it: the first line joined with the line it continues.
+HELP_EXAMPLE = (
+    "ash suppress add B602 --symbol Handler.run --file src/app.py \\\n"
+    '    --reason "The command is a constant."'
+)
+HELP_COMMAND = (
+    "ash suppress add B602 --symbol Handler.run --file src/app.py "
+    '--reason "The command is a constant."'
+)
+#: What the generator prints for a command's usage that a block of a generated page may
+#: have as its first command without being counted: the program, the command's path,
+#: ``[OPTIONS]`` (click prints it for every command, since ``--help`` is an option), and
+#: a placeholder for each argument. Restated here, as the census restates the parser's
+#: rules: the check must not be the only place that says what the generator prints.
+USAGE_SHAPED = [
+    "ash [OPTIONS] COMMAND [ARGS]...",
+    "ash scan [OPTIONS]",
+    "ash config get [OPTIONS] [config_path]",
+    "ash diff [OPTIONS] {before} {after}",
+    "ash plugin verify [OPTIONS] [names]...",
+    "ash results inspect findings [OPTIONS]",
+    "ash suppress add [OPTIONS] {rule_id}",
+    "ash new [OPTIONS] NAME",
+    "ash new [OPTIONS] [NAME]...",
+]
+#: First commands that are no usage line, though they begin like one or hold ``[OPTIONS]``:
+#: an example is a command with values, and a usage line has none.
+NOT_USAGE_SHAPED = [
+    "ash scan",
+    "ash config lint",
+    "ash config validate --config path/to/config.yaml",
+    "ash scan --source-dir . [OPTIONS]",
+    "ash scan [OPTIONS] --source-dir .",
+    "ash scan [OPTIONS] src",
+    "ash suppress add B602 --symbol Handler.run",
+    "uvx ash scan [OPTIONS]",
+]
+#: How a usage line begins, for the checks of this checkout that read the page and the
+#: seed: the program, the command's path, then ``[OPTIONS]``.
+USAGE_START = re.compile(r"^ash(?: [a-z][a-z0-9-]*)* \[OPTIONS\]")
 CLI_REFERENCE = "docs/content/reference/cli.md"
 JOURNEY_PAGE = "docs/content/getting-started/local.md"
 #: The four pages of the two getting-started journeys: written from a journey file by
@@ -140,6 +187,15 @@ def _list_generators(root: Path, listed: dict[str, str] | None = None) -> Path:
 def _fence(text: str) -> int:
     """The line of the first ``text`` fence of a page."""
     return text.split("\n").index(f"{FENCE}text") + 1
+
+
+def _fences(text: str) -> list[int]:
+    """The line of each ``text`` fence of a page, in page order."""
+    return [
+        number
+        for number, line in enumerate(text.split("\n"), 1)
+        if line == f"{FENCE}text"
+    ]
 
 
 def _read_real(rel: str) -> str:
@@ -339,6 +395,20 @@ SHOWN = [
     ("uv run ash scan", "uv run ash scan"),
     ("sudo ash scan", "sudo ash scan"),
     ("sudo -E ash scan", "sudo -E ash scan"),
+    ("sudo -E -H ash scan", "sudo -E -H ash scan"),
+    (
+        "sudo -u root ash scan --source-dir .",
+        "sudo -u root ash scan --source-dir .",
+    ),
+    ("sudo -Eu root ash scan", "sudo -Eu root ash scan"),
+    ("sudo --user root ash scan", "sudo --user root ash scan"),
+    ("sudo --user=root ash scan", "sudo --user=root ash scan"),
+    ("sudo -- ash scan", "sudo -- ash scan"),
+    ("env -i ASH_OFFLINE=true ash scan", "env -i ASH_OFFLINE=true ash scan"),
+    ("env -u HOME ash scan", "env -u HOME ash scan"),
+    ("time -p ash scan", "time -p ash scan"),
+    ("time -f %e ash scan", "time -f %e ash scan"),
+    ("exec -a scanner ash scan", "exec -a scanner ash scan"),
     ("time ash scan", "time ash scan"),
     ("nohup ash scan", "nohup ash scan"),
     ("exec ash scan", "exec ash scan"),
@@ -374,6 +444,13 @@ NOT_SHOWN = [
     "uvx",
     "sudo ash",
     "time ash",
+    "sudo -u root ls -la",
+    "sudo -E -H systemctl restart docker",
+    "time -p ls -la",
+    "sudo -u ash ls -la",
+    "sudo --user ash ls -la",
+    "env -u ash ls -la",
+    "sudo -u ash",
     "Run docker ps to list them",
     "the git command",
     "gitlab ci",
@@ -475,7 +552,7 @@ def test_a_template_and_the_page_it_renders_each_need_their_own_seed_line(tmp_pa
 
 
 # ---------------------------------------------------------------------------
-# A page a generator writes is not read
+# A page a generator writes is read for what its generator does not print
 # ---------------------------------------------------------------------------
 
 
@@ -506,6 +583,119 @@ def test_the_same_block_in_a_hand_written_page_fails(tmp_path):
 
     assert [(f.path, f.line) for f in findings] == [(CLI_REFERENCE, 3)]
     assert USAGE in findings[0].message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "example_first", [True, False], ids=["example first", "usage first"]
+)
+def test_a_help_text_example_in_a_generated_page_is_counted_and_its_usage_block_is_not(
+    tmp_path, example_first
+):
+    """The generator prints a usage block for each command and fences the examples that
+    a person put in the command's help text as ``text`` too. The usage line is no
+    command the page tells a reader to run. An example is one, and fencing it as
+    ``text`` keeps it out of the runs with no marker: left out with the usage lines it
+    would never run, and nothing would track it, which is the relabeling this check
+    exists to stop. So the example is counted like a block of any page, and the usage
+    block next to it is not."""
+    dc = checks()
+    _seed(tmp_path)
+    _list_generators(tmp_path)
+    blocks = [_text(HELP_EXAMPLE), _text(USAGE)]
+    ordered = blocks if example_first else blocks[::-1]
+    text = _reference(*ordered, banner=BANNER + "\n")
+    page = _write(tmp_path, CLI_REFERENCE, text)
+    generated, listing = dc.read_generated_pages(tmp_path)
+    example_line = _fences(text)[0 if example_first else 1]
+
+    counted = dc.unexecuted_command_blocks(dc.parse_page(page, tmp_path), generated)
+    findings = _problems(tmp_path, page)
+
+    assert listing == []
+    assert [(block.fence_line, found) for block, found in counted] == [
+        (example_line, HELP_COMMAND)
+    ]
+    assert [(f.path, f.line) for f in findings] == [(CLI_REFERENCE, example_line)]
+    assert HELP_COMMAND in findings[0].message
+
+
+@pytest.mark.unit
+def test_a_seed_line_for_a_help_text_example_of_a_generated_page_lists_it(tmp_path):
+    """The twin of the stale usage line below: the example is a block the check counts,
+    so the seed line that names it is used, and the page passes with it."""
+    _seed(tmp_path, f"{CLI_REFERENCE}\t{HELP_COMMAND}")
+    _list_generators(tmp_path)
+    page = _write(
+        tmp_path,
+        CLI_REFERENCE,
+        _reference(_text(HELP_EXAMPLE), _text(USAGE), banner=BANNER + "\n"),
+    )
+
+    assert _problems(tmp_path, page) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", USAGE_SHAPED)
+def test_a_block_with_the_shape_of_a_usage_line_is_left_out_of_a_generated_page(
+    tmp_path, command
+):
+    """What click prints for a command is the program, the command's path, ``[OPTIONS]``
+    (every command has it: ``--help`` is an option) and a placeholder for each argument,
+    in brackets, in braces, or in capitals as click spells a required one. A block of a
+    generated page that shows that and no more is the usage block."""
+    dc = checks()
+    _list_generators(tmp_path)
+    page = _write(
+        tmp_path, CLI_REFERENCE, _reference(_text(command), banner=BANNER + "\n")
+    )
+    generated, _listing = dc.read_generated_pages(tmp_path)
+
+    counted = dc.unexecuted_command_blocks(dc.parse_page(page, tmp_path), generated)
+
+    assert counted == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", NOT_USAGE_SHAPED)
+def test_a_block_without_the_shape_of_a_usage_line_is_counted_in_a_generated_page(
+    tmp_path, command
+):
+    """The controls for the case above: a command with values, one with flags before or
+    after ``[OPTIONS]``, a bare word where a placeholder belongs, and a command that
+    starts with another program. Each is something a person wrote, so each is counted."""
+    dc = checks()
+    _list_generators(tmp_path)
+    text = _reference(_text(command), banner=BANNER + "\n")
+    page = _write(tmp_path, CLI_REFERENCE, text)
+    generated, _listing = dc.read_generated_pages(tmp_path)
+
+    counted = dc.unexecuted_command_blocks(dc.parse_page(page, tmp_path), generated)
+
+    assert [(block.fence_line, found) for block, found in counted] == [
+        (_fence(text), command)
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("command", USAGE_SHAPED)
+def test_a_block_with_the_shape_of_a_usage_line_is_counted_in_a_hand_written_page(
+    tmp_path, command
+):
+    """The shape leaves a block out only on a page a generator writes. On a page a
+    person writes, a usage line is a command shown in a block nothing runs, like any
+    other."""
+    dc = checks()
+    _list_generators(tmp_path)
+    text = _reference(_text(command))
+    page = _write(tmp_path, CLI_REFERENCE, text)
+    generated, _listing = dc.read_generated_pages(tmp_path)
+
+    counted = dc.unexecuted_command_blocks(dc.parse_page(page, tmp_path), generated)
+
+    assert [(block.fence_line, found) for block, found in counted] == [
+        (_fence(text), command)
+    ]
 
 
 @pytest.mark.unit
@@ -593,9 +783,10 @@ def test_a_block_of_a_journey_page_that_the_seed_lists_passes(tmp_path):
 
 
 @pytest.mark.unit
-def test_a_seed_line_for_a_generated_page_matches_nothing(tmp_path):
-    """Once a page is one a generator writes its blocks are not read, so a line that
-    names one of them is stale: the seed shrinks in the commit that stops reading it."""
+def test_a_seed_line_for_a_usage_block_of_a_generated_page_matches_nothing(tmp_path):
+    """Once a page is one a generator writes its usage blocks are not read, so a line
+    that names one of them is stale: the seed shrinks in the commit that stops reading
+    it."""
     seed = _seed(tmp_path, f"{CLI_REFERENCE}\t{USAGE}")
     _list_generators(tmp_path)
     page = _write(
@@ -611,11 +802,15 @@ def test_a_seed_line_for_a_generated_page_matches_nothing(tmp_path):
 
 
 @pytest.mark.unit
-def test_the_writer_leaves_a_generated_page_out_and_lists_a_journey_page(tmp_path):
+def test_the_writer_leaves_a_usage_block_out_and_lists_the_rest_of_the_pages(tmp_path):
+    """A generated page's usage block has no line, its help-text example has one, and a
+    journey page, which opens with a banner too, is listed like a page a person writes."""
     dc = checks()
     _list_generators(tmp_path)
     generated = _write(
-        tmp_path, CLI_REFERENCE, _reference(_text(USAGE), banner=BANNER + "\n")
+        tmp_path,
+        CLI_REFERENCE,
+        _reference(_text(HELP_EXAMPLE), _text(USAGE), banner=BANNER + "\n"),
     )
     journey = _write(tmp_path, JOURNEY_PAGE, _journey(_text(SCAN)))
     hand_written = _write(tmp_path, "docs/page.md", _page(_text(SCAN)))
@@ -624,24 +819,28 @@ def test_the_writer_leaves_a_generated_page_out_and_lists_a_journey_page(tmp_pat
 
     assert written == [dc.UNEXECUTED_SEED_FILE]
     assert (tmp_path / dc.UNEXECUTED_SEED_FILE).read_text(encoding="utf-8") == (
-        f"{JOURNEY_PAGE}\t{SCAN}\ndocs/page.md\t{SCAN}\n"
+        f"{CLI_REFERENCE}\t{HELP_COMMAND}\n{JOURNEY_PAGE}\t{SCAN}\ndocs/page.md\t{SCAN}\n"
     )
 
 
 @pytest.mark.unit
-def test_a_real_generated_page_with_a_planted_block_passes(tmp_path):
+def test_a_real_generated_page_with_a_planted_block_is_read_for_that_block(tmp_path):
     """The real list and the real CLI reference, copied under a temporary root, with a
-    block added that no seed lists: the page is one a generator writes, so the check
-    has nothing to say about any of its blocks."""
+    block added that no seed lists. The page is one a generator writes, so none of its
+    usage blocks is counted, but the block a person planted is, as is any example the
+    page's help text holds."""
     _seed(tmp_path)
     _write(tmp_path, FRESHNESS_TEST, _read_real(FRESHNESS_TEST))
-    page = _write(
-        tmp_path, CLI_REFERENCE, f"{_read_real(CLI_REFERENCE)}\n{_text(SCAN)}"
-    )
+    text = f"{_read_real(CLI_REFERENCE)}\n{_text(SCAN)}"
+    page = _write(tmp_path, CLI_REFERENCE, text)
+    planted = text.count("\n", 0, text.rindex(f"{FENCE}text")) + 1
 
     findings = _unexecuted(tmp_path, page)
 
-    assert findings == [], [str(f) for f in findings]
+    assert planted in {f.line for f in findings}, [str(f) for f in findings][-3:]
+    assert [f.line for f in findings if "[OPTIONS]" in f.message] == [], (
+        "the page's usage blocks are left out"
+    )
 
 
 @pytest.mark.unit
@@ -973,19 +1172,25 @@ def test_the_seed_lists_no_record_of_a_past_release(corpus):
 
 
 @pytest.mark.integration
-def test_the_seed_lists_no_page_a_generator_writes(corpus):
+def test_the_seed_lists_no_usage_line_of_a_page_a_generator_writes(corpus):
+    """A page a generator writes has seed lines for what a person put on it, its
+    help-text examples, and none for the usage lines the generator prints."""
     dc = checks()
     generated = _listed()
     pages = {page.rel: page for page in dc.load_pages(corpus, REPO_ROOT)}
 
-    listed = {line.partition("\t")[0] for line in _committed_seed()}
+    usage = []
+    for line in _committed_seed():
+        rel, _tab, command = line.partition("\t")
+        page = pages.get(rel)
+        if (
+            page is not None
+            and dc.is_generated_page(page, generated)
+            and USAGE_START.match(command)
+        ):
+            usage.append(line)
 
-    written = sorted(
-        rel
-        for rel in listed
-        if rel in pages and dc.is_generated_page(pages[rel], generated)
-    )
-    assert written == []
+    assert usage == []
 
 
 @pytest.mark.unit
@@ -995,6 +1200,35 @@ def test_the_list_names_the_reference_pages_of_this_checkout():
     assert generated.get("generate_cli_docs.py") == CLI_REFERENCE
     gone = [rel for rel in generated.values() if not (REPO_ROOT / rel).is_file()]
     assert gone == [], "the list names pages this checkout does not have"
+
+
+@pytest.mark.unit
+def test_the_list_says_the_docs_checks_read_it_as_source():
+    """scripts/docs_checks.py reads REFERENCE_PAGES with ast.literal_eval and never
+    imports the freshness test, so the list has to stay one literal dict assigned once
+    at the top of its module: a comprehension, ``{**other}``, an ``update`` or a ``del``
+    after it would hide a page from the check, or keep one left out after the freshness
+    test stopped holding it. The comment above the list says so, for whoever edits it."""
+    dc = checks()
+    lines = _read_real(FRESHNESS_TEST).splitlines()
+    start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.startswith(f"{dc.GENERATED_PAGES_LIST_NAME} = ")
+        ),
+        None,
+    )
+    assert start is not None, f"{FRESHNESS_TEST} no longer assigns the list"
+    comment: list[str] = []
+    for line in reversed(lines[:start]):
+        if not line.startswith("#"):
+            break
+        comment.append(line.lstrip("#: ").strip())
+    text = " ".join(reversed(comment))
+
+    assert "scripts/docs_checks.py" in text, text
+    assert "ast.literal_eval" in text, text
 
 
 @pytest.mark.unit
@@ -1014,13 +1248,24 @@ def test_every_page_the_list_names_opens_with_the_banner_of_its_script():
 def test_the_cli_reference_is_a_page_a_generator_writes():
     """The usage lines of the CLI reference were most of the seed. The list and its
     banner are what leave them out of the check: a banner reworded out of the shape the
-    check reads, or a page left off the list, would put them back."""
+    check reads, or a page left off the list, would put them back. What the check still
+    counts on the page is the examples of the commands' help text, and the seed lists
+    each of those."""
     dc = checks()
     page = dc.parse_page(REPO_ROOT / CLI_REFERENCE, REPO_ROOT)
     generated = _listed()
 
     assert dc.is_generated_page(page, generated), f"{CLI_REFERENCE} is read as a page"
-    assert dc.unexecuted_command_blocks(page, generated) == []
+    counted = [
+        command for _block, command in dc.unexecuted_command_blocks(page, generated)
+    ]
+    assert [command for command in counted if USAGE_START.match(command)] == []
+    listed = sorted(
+        line.partition("\t")[2]
+        for line in _committed_seed()
+        if line.startswith(f"{CLI_REFERENCE}\t")
+    )
+    assert sorted(counted) == listed
 
 
 @pytest.mark.unit
