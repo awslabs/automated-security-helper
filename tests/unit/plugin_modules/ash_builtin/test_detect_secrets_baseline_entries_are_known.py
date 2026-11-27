@@ -825,14 +825,17 @@ def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchor
 def test_an_operators_pinned_scan_settings_keep_their_patterns_at_the_scan_root(
     tmp_path, monkeypatch
 ):
-    """The operator named detectors (``scan_settings.plugins_used``), so the
-    baseline's own filters are never loaded (the settings gate takes the
-    baseline's settings only for an empty plugin list; ``version`` alone does
-    not gate) and every pattern in play is the operator's. The anchor still
+    """The operator named detectors (``scan_settings.plugins_used``) beside the
+    ``^tests/`` pattern. The baseline is the tree's own, so it sets no filters
+    whether or not detectors are named, and every pattern in play is the
+    operator's. (That named detectors keep a baseline the operator names from
+    outside the tree from replacing them is asserted in
+    test_detect_secrets_scanner_behavior and in
+    test_detect_secrets_tree_baseline_settings_are_not_applied.) The anchor still
     moves for the baseline's KEYS, which the baseline wrote from the checkout;
     the operator's ``^tests/`` must not move with it. It did: ``tests/fixture.py``
     was scanned, and ``docs/notes.py`` stays scanned because the baseline's
-    pattern was never loaded."""
+    pattern is never loaded."""
     monkeypatch.chdir(tmp_path)
     service, context = _monorepo_service(
         tmp_path, json.dumps(_shared_baseline_excluding("^service/docs/"))
@@ -848,11 +851,11 @@ def test_an_operators_pinned_scan_settings_keep_their_patterns_at_the_scan_root(
     assert not any(
         item.pattern == ["^service/docs/"]
         for item in scanner.config.options.scan_settings.filters_used
-    ), "the baseline's filters were loaded past the operator's pinned settings"
+    ), "the baseline's filters were loaded from a baseline found in the tree"
     assert not any(
         item.path == HEURISTIC_FILTER
         for item in scanner.config.options.scan_settings.filters_used
-    ), "the baseline's filter under another path was loaded past the pin"
+    ), "the baseline's filter under another path was loaded from the tree"
     seen = _recording_known_worker(scanner, monkeypatch)
 
     report = scanner.scan(target=service, target_type="source")

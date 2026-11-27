@@ -40,6 +40,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfig,
     DetectSecretsScannerConfigOptions,
     DetectSecretsScanSettings,
+    DetectSecretsScanSettingsFiltersUsed,
     DetectSecretsScanSettingsPluginsUsed,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -66,13 +67,16 @@ WHAT_APPLIES = (
     "checkout that holds the scan root, the operator's own settings name it with "
     "baseline_file, and scan_settings.plugins_used is empty"
 )
+# What the groups of the warning are of: only what the baseline lists.
+WHAT_DIFFERS = "What it lists that the scan does not run as listed: "
 # The groups the warning lists, each only for what the scan does not run as the
 # baseline lists it.
 NOT_RUN = "plugins that do not run: "
 OTHER_PARAMETERS = "plugins that run with other parameters: "
 NOT_APPLIED_FILTERS = "filters that do not apply: "
+OTHER_FILTER_PARAMETERS = "filters that run with other parameters: "
 # What the INFO line says of a baseline that lists nothing the scan does not run.
-SAME_AS_THE_RUN = "they match what the scan runs"
+SAME_AS_THE_RUN = "lists no plugin or filter that the scan does not run as listed"
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
 )
@@ -166,22 +170,26 @@ def _standard_plugin_entries() -> list[dict]:
     ]
 
 
-def _standard_filter_entries() -> list[dict]:
-    """The filters ``detect-secrets scan`` writes when none is turned off."""
+def _standard_filter_entries(verification: bool = True) -> list[dict]:
+    """The filters ``detect-secrets scan`` writes: the default ones and, unless
+    ``--no-verify`` is given, the verification filter with its level."""
     from detect_secrets.settings import Settings
 
-    return [
+    entries = [
         {"path": path}
         for path in sorted(Settings().filters)
         if path not in Settings.DEFAULT_FILTERS
     ]
+    if verification:
+        entries.append({"path": VERIFICATION_FILTER, "min_level": 2})
+    return entries
 
 
-def _standard_baseline() -> dict:
+def _standard_baseline(verification: bool = True) -> dict:
     return {
         "version": "1.5.0",
         "plugins_used": _standard_plugin_entries(),
-        "filters_used": _standard_filter_entries(),
+        "filters_used": _standard_filter_entries(verification),
         "results": {},
         "generated_at": "2026-01-01T00:00:00Z",
     }
@@ -401,14 +409,11 @@ def test_a_baseline_whose_settings_are_not_lists_still_marks_its_candidates(
     """A tree baseline's settings are never applied, so their shape is not a
     reason to drop the baseline: a ``plugins_used`` or ``filters_used`` that is
     a number or a flag leaves the parsed document in place and its ``results``
-    still mark, with no read failure reported."""
-    pinned = DetectSecretsScanSettings(
-        plugins_used=[DetectSecretsScanSettingsPluginsUsed(name="AWSKeyDetector")]
-    )
-
+    still mark, with no read failure reported. No plugins are named, so the
+    settings block is reached: the value would have been read as a list there."""
     with caplog.at_level(logging.WARNING):
         scanner = _scanner_over_a_marking_baseline(
-            tmp_path, monkeypatch, settings={key: value}, scan_settings=pinned
+            tmp_path, monkeypatch, settings={key: value}
         )
 
     assert not any(READ_FAILED in record.getMessage() for record in caplog.records)
@@ -430,14 +435,11 @@ def test_a_baseline_whose_settings_hold_entries_that_are_not_mappings_still_mark
     """A list whose entries are not mappings is still a list: the entry is
     skipped, the constructor returns, no read failure is reported and the
     baseline's ``results`` still mark. The repository chooses these entries, so
-    a raise here would let it keep the scanner out of the run."""
-    pinned = DetectSecretsScanSettings(
-        plugins_used=[DetectSecretsScanSettingsPluginsUsed(name="AWSKeyDetector")]
-    )
-
+    a raise here would let it keep the scanner out of the run. No plugins are
+    named, so the settings block is reached."""
     with caplog.at_level(logging.WARNING):
         scanner = _scanner_over_a_marking_baseline(
-            tmp_path, monkeypatch, settings={key: value}, scan_settings=pinned
+            tmp_path, monkeypatch, settings={key: value}
         )
 
     assert not any(READ_FAILED in record.getMessage() for record in caplog.records)
@@ -501,13 +503,13 @@ def _scan_with_the_candidate_found(scanner, tmp_path, monkeypatch):
 def test_a_baseline_that_lists_what_the_scan_runs_draws_no_warning(
     tmp_path, monkeypatch, caplog
 ):
-    """``detect-secrets scan`` writes every plugin with the parameters it runs
-    with by default, the filters it has by default, and the filter that names
-    the baseline file itself, which ASH never hands the worker. A baseline of
-    that shape lists nothing the scan does not run, so the scan says so at INFO
-    and warns of nothing: a warning here would fire on every scan of a standard
-    baseline and name plugins that are running."""
-    document = _standard_baseline()
+    """``detect-secrets scan --no-verify`` writes every plugin with the
+    parameters it runs with by default, the filters it has by default, and the
+    filter that names the baseline file itself, which ASH never hands the
+    worker. A baseline of that shape lists nothing the scan does not run, so
+    the scan says so at INFO and warns of nothing: a warning here would name
+    plugins that are running."""
+    document = _standard_baseline(verification=False)
     document["filters_used"].append(
         {"path": IS_BASELINE_FILE_FILTER, "filename": ".secrets.baseline"}
     )
@@ -520,8 +522,32 @@ def test_a_baseline_that_lists_what_the_scan_runs_draws_no_warning(
     assert _not_applied_warnings(caplog) == []
     (info,) = _not_applied_messages(caplog, logging.INFO)
     assert SAME_AS_THE_RUN in info
+    assert WHAT_RUNS in info
     assert ".secrets.baseline" in info
     assert "AWSKeyDetector" not in info
+
+
+def test_a_default_baseline_is_named_only_for_its_verification_filter(
+    tmp_path, monkeypatch, caplog
+):
+    """Without ``--no-verify``, ``detect-secrets scan`` also writes the
+    verification filter. ASH applies that filter only from the operator's own
+    settings, so a baseline in the tree that lists it is warned of, naming that
+    filter and nothing else the scan runs."""
+    document = _standard_baseline()
+    document["filters_used"].append(
+        {"path": IS_BASELINE_FILE_FILTER, "filename": ".secrets.baseline"}
+    )
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        _scanner(tmp_path, monkeypatch)
+
+    (warning,) = _not_applied_warnings(caplog)
+    assert _listed(warning, NOT_APPLIED_FILTERS) == [VERIFICATION_FILTER]
+    assert NOT_RUN not in warning
+    assert OTHER_PARAMETERS not in warning
+    assert OTHER_FILTER_PARAMETERS not in warning
 
 
 def test_the_warning_names_only_the_filters_the_scan_does_not_run(
@@ -531,7 +557,7 @@ def test_the_warning_names_only_the_filters_the_scan_does_not_run(
     filter that names the baseline file is one ASH never hands the worker. What
     the scan does not apply is the verification filter and the filters the
     baseline adds."""
-    document = _standard_baseline()
+    document = _standard_baseline(verification=False)
     document["filters_used"] += [
         {"path": IS_BASELINE_FILE_FILTER, "filename": ".secrets.baseline"},
         {"path": VERIFICATION_FILTER, "min_level": 2},
@@ -558,7 +584,7 @@ def test_a_plugin_is_named_when_its_parameters_differ_and_its_values_are_not(
     are listed: a baseline's ``limit: 4.5`` on Base64HighEntropyString is the
     default, so that plugin is not named, while a raised limit on
     HexHighEntropyString and a keyword exclusion are."""
-    document = _standard_baseline()
+    document = _standard_baseline(verification=False)
     for entry in document["plugins_used"]:
         if entry["name"] == "HexHighEntropyString":
             entry["limit"] = 3.14159
@@ -578,6 +604,119 @@ def test_a_plugin_is_named_when_its_parameters_differ_and_its_values_are_not(
     assert "Base64HighEntropyString" not in warning
     assert "3.14159" not in warning
     assert "PLANTED-KEYWORD-PATTERN" not in warning
+
+
+@pytest.mark.parametrize(
+    ("limits", "named"),
+    [([4.5, 2.0], True), ([2.0, 4.5], False)],
+    ids=["the-last-differs", "the-last-is-the-default"],
+)
+def test_a_plugin_listed_twice_is_judged_by_its_last_entry(
+    tmp_path, monkeypatch, caplog, limits, named
+):
+    """detect-secrets keeps the last entry of a plugin listed twice
+    (``Settings.configure_plugins``), so that is the entry the baseline would
+    have run, whatever order the two are in."""
+    document = _standard_baseline(verification=False)
+    document["plugins_used"] = [
+        entry
+        for entry in document["plugins_used"]
+        if entry["name"] != "Base64HighEntropyString"
+    ] + [{"name": "Base64HighEntropyString", "limit": limit} for limit in limits]
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.INFO, logger=ASH_LOGGER.name):
+        _scanner(tmp_path, monkeypatch)
+
+    if named:
+        (warning,) = _not_applied_warnings(caplog)
+        assert _listed(warning, OTHER_PARAMETERS) == ["Base64HighEntropyString"]
+    else:
+        assert _not_applied_warnings(caplog) == []
+        (info,) = _not_applied_messages(caplog, logging.INFO)
+        assert SAME_AS_THE_RUN in info
+
+
+def _scanner_with_own_filter_pattern(tmp_path, monkeypatch, pattern: list[str]):
+    """A scanner whose operator settings list ``EXCLUDE_VALUE_FILTER`` with
+    *pattern*, over the baseline written to ``tmp_path``."""
+    own = DetectSecretsScanSettings(
+        filters_used=[
+            DetectSecretsScanSettingsFiltersUsed(
+                path=EXCLUDE_VALUE_FILTER, pattern=pattern
+            )
+        ]
+    )
+    return _scanner(tmp_path, monkeypatch, scan_settings=own)
+
+
+@pytest.mark.parametrize(
+    ("baseline_patterns", "named"),
+    [
+        ([["^baseline/"]], True),
+        ([["^operator/"]], False),
+        ([["^operator/"], ["^baseline/"]], True),
+        ([["^baseline/"], ["^operator/"]], False),
+    ],
+    ids=[
+        "other-pattern",
+        "same-pattern",
+        "listed-twice-the-last-differs",
+        "listed-twice-the-last-is-the-same",
+    ],
+)
+def test_a_filter_the_operator_lists_with_other_parameters_is_named(
+    tmp_path, monkeypatch, caplog, baseline_patterns, named
+):
+    """Filters are judged as plugins are, by path and by the parameters each
+    runs with. The operator's own entry for a path is the one that runs, so the
+    baseline's entry for that path is named when its pattern differs (the last
+    entry of a path counts, as detect-secrets keeps it), by path and never by
+    pattern."""
+    document = _standard_baseline(verification=False)
+    document["filters_used"] = [
+        {"path": EXCLUDE_VALUE_FILTER, "pattern": pattern}
+        for pattern in baseline_patterns
+    ]
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+
+    with caplog.at_level(logging.INFO, logger=ASH_LOGGER.name):
+        _scanner_with_own_filter_pattern(tmp_path, monkeypatch, ["^operator/"])
+
+    if named:
+        (warning,) = _not_applied_warnings(caplog)
+        assert _listed(warning, OTHER_FILTER_PARAMETERS) == [EXCLUDE_VALUE_FILTER]
+        assert NOT_APPLIED_FILTERS not in warning
+        assert NOT_RUN not in warning
+        assert OTHER_PARAMETERS not in warning
+        assert "^baseline/" not in warning
+        assert "^operator/" not in warning
+    else:
+        assert _not_applied_warnings(caplog) == []
+        (info,) = _not_applied_messages(caplog, logging.INFO)
+        assert SAME_AS_THE_RUN in info
+
+
+def test_a_value_the_cut_would_split_is_hidden_before_the_cut(
+    tmp_path, monkeypatch, caplog
+):
+    """A name is redacted and then cut. Cut first, an environment value that
+    crosses the cut is split in two, neither half is a value any more, and the
+    first half is printed."""
+    value = "".join(chr(ord("a") + (index * 7) % 26) for index in range(100))
+    document = _baseline_document()
+    document["plugins_used"] = [{"name": "p" * 70 + value}]
+    (tmp_path / ".secrets.baseline").write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(
+        DetectSecretsScanner, "_environment_values", lambda self: (value,)
+    )
+
+    with caplog.at_level(logging.WARNING):
+        _scanner(tmp_path, monkeypatch)
+
+    (warning,) = _not_applied_warnings(caplog)
+    assert "p" * 70 in warning
+    assert value[:8] not in warning
 
 
 def test_the_warning_names_the_baselines_plugins_the_configuration_does_not_run(
@@ -876,6 +1015,7 @@ def test_the_warning_says_what_the_scan_runs_when_the_configuration_names_plugin
     (warning,) = _not_applied_warnings(caplog)
     assert WHAT_RUNS in warning
     assert WHAT_APPLIES in warning
+    assert WHAT_DIFFERS in warning
     assert "the scan uses the default plugins" not in warning
     # The two the baseline lists beyond the configuration's one do not run.
     assert sorted(_listed(warning, NOT_RUN)) == [

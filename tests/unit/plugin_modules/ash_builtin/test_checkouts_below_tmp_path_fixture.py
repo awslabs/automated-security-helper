@@ -6,10 +6,11 @@ a baseline the test places there and names as the operator's reads as the
 repository's. ``checkouts_below_tmp_path`` (conftest.py) keeps only the checkouts
 at or below ``tmp_path``. The first two tests show what it changes, with the walk
 replaced by a fixed answer so that no ``.git`` is made above the temporary
-directory. The rest keep the seven modules whose cases depend on it using it: each
-module's source is parsed for the module-level ``pytestmark`` that names the
-fixture, so no test module is imported a second time, and two cases show the check
-reading a module that names the fixture and refusing one that does not.
+directory. The rest keep the modules that this change touches and whose cases
+depend on it using it: each module's source is parsed for the module-level
+``pytestmark`` that names the fixture, so no test module is imported a second time,
+and two cases show the check reading a module that names the fixture and refusing
+one that does not.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ NEEDS_IT = (
     "test_detect_secrets_baseline_links_are_judged_where_named",
     "test_detect_secrets_malformed_baseline_falls_back",
     "test_detect_secrets_operator_filters_keep_precedence",
+    "test_detect_secrets_repository_baseline_is_scanned",
     "test_detect_secrets_scanner_behavior",
     "test_detect_secrets_settings_edges",
     "test_detect_secrets_tree_baseline_settings_are_not_applied",
