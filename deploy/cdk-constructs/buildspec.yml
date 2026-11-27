@@ -11,10 +11,13 @@
 # Runs a full, unsharded ASH scan and fails the build on findings.
 # This document owns its own pass/fail verdict.
 #
-# Each ASH command first asks the installed ASH whether it has the ASH 3.9
-# spelling (`ash scan fs DIR`, `ash results merge`) and runs the older one
-# (`ash scan --source-dir DIR`, `ash merge`) when it does not, so an older
-# ASH_VERSION keeps working.
+# The scan command first asks the installed ASH whether it has the ASH 3.9
+# spelling (`ash scan fs DIR`) and runs the older one (`ash scan --source-dir DIR`)
+# when it does not, so an older ASH_VERSION keeps working. Only an answer
+# picks the older spelling: a help that does not name the command, or a usage
+# error that refuses the word `fs`. A probe that fails any other way stops
+# the step with exit status 70 and the end of its output instead of being read as
+# an older ASH.
 version: 0.2
 env:
   variables:
@@ -30,7 +33,7 @@ phases:
       - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
   build:
     commands:
-      - 'if ash scan fs --help 2>/dev/null | grep "scan fs" >/dev/null; then ash scan fs "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings; else ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings; fi'
+      - 'ash_probe_status=0; ash_probe_help="$(ash scan fs --help 2>&1)" || ash_probe_status=$?; case "$ash_probe_status:$ash_probe_help" in 0:*"scan fs"*) ash_spelling=current; echo "ash: scanning with ''ash scan fs'': its help names ''scan fs''" >&2;; 0:*) ash_spelling=older; echo "ash: scanning with the older spelling: the help of ''ash scan fs --help'' does not name ''scan fs'', as an ASH older than 3.9 answers" >&2;; *:*"unexpected extra argument"*"fs"*|*:*"No such command"*"fs"*) ash_spelling=older; echo "ash: scanning with the older spelling: this ASH refused the word ''fs'', as an ASH older than 3.9 does" >&2;; *) echo "ash: could not tell whether this ASH has ''ash scan fs'': ''ash scan fs --help'' exited $ash_probe_status without saying it refused ''fs'', so no spelling is chosen by guess. The end of its output:" >&2; printf ''%s\n'' "$ash_probe_help" | tail -n 20 >&2; (exit 70);; esac && if [ "$ash_spelling" = current ]; then ash scan fs "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings; else ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings; fi'
 artifacts:
   base-directory: '$ASH_OUTPUT_DIR'
   files:
