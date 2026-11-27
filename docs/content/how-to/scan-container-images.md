@@ -129,8 +129,8 @@ declared daemons -- else the platform's default socket), then podman (`CONTAINER
 then its sockets), then none. Docker *contexts* are not read: a daemon reachable only
 through one (Colima, OrbStack, Docker Desktop without the default socket) counts once
 `DOCKER_HOST` names it. With a daemon present, one pull serves every scanner -- the
-engine's content store is the dedup; trivy is told
-`--image-src=<engine>,remote`, so an image the daemon does not hold still scans from
+engine's content store is the dedup; ASH passes
+`trivy image --image-src=<engine>,remote`, so an image the daemon does not hold still scans from
 the registry. For a daemon that is only *declared* (no local socket), grype and syft
 get the reference without a scheme and with its sources named
 (`--from <engine> --from registry`): their client honors the declaration, the registry
@@ -149,8 +149,8 @@ offline hosts use.
 
 containerd is reached only through a tool's own options and is never probed by ASH.
 
-trivy reads an OCI image-layout directory directly through the same `--input` flag
-that reads a saved archive (the pinned trivy's own container-image target
+trivy reads an OCI image-layout directory directly through `trivy image --input`, the
+same flag that reads a saved archive (the pinned trivy's own container-image target
 documentation, its OCI Layout section), so every submission shape reaches every image
 scanner without re-packing.
 
