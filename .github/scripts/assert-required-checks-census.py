@@ -51,12 +51,14 @@ could be mistaken for a job key.
 
 JOBS THAT MAY DELIBERATELY GO UNGATED
 -------------------------------------
-``_UNGATED`` below is the named, reasoned exemption list; today it holds two
-entries, the image layer-cache warm-up and the advisory express-daemon cells.
+``_UNGATED`` below is the named, reasoned exemption list; today it holds six
+entries, the image layer-cache warm-up, the advisory express-daemon cells and the
+four jobs that write the pull request's matrix comment.
 The mechanism exists rather than being omitted because there is a legitimate
 case for it -- an advisory job whose failure is information rather than a
-verdict, and which still turns the run red when it fails, because an advisory
-job does not carry ``continue-on-error`` -- and the alternative when that case arrives
+verdict. The first two still turn the run red when they fail; the four
+comment jobs carry job-level ``continue-on-error``, because their result says only
+whether the view was written -- and the alternative when that case arrives
 is to weaken the census instead. An exemption is checked for staleness on every
 run: an entry naming a job the workflow no longer has, or one that has since
 been added to ``needs``, is a false statement in the tree and fails.
@@ -118,6 +120,31 @@ _UNGATED: dict[str, str] = {
         "correctness is gated where every other module's is, by its unit and "
         "integration tests in the gated tiers, and Windows's unix-only refusal "
         "runs in the gated e2e tier."
+    ),
+    "matrix-comment-checks": (
+        "the first link of the matrix comment chain, which renders what the gated jobs "
+        "did into the pull request's comment. It runs only for a pull request from this "
+        "repository (its `if:`). A gated job may not carry such a condition: it would "
+        "skip the job on a run that was not cancelled, a skip the gate's own condition "
+        "cannot see, and tests/unit/test_required_checks_census.py refuses it. Its "
+        "result says whether the view was written, never whether code passed."
+    ),
+    "matrix-comment-scans": (
+        "the second link of the matrix comment chain: it needs the first link and the "
+        "scan jobs. It runs only for a pull request from this repository (its `if:`), "
+        "a condition no gated job may carry (see matrix-comment-checks). Its result "
+        "says whether the view was written, never whether code passed."
+    ),
+    "matrix-comment-tiers": (
+        "the third link of the matrix comment chain: it needs the second link and the "
+        "install and unit jobs. It runs only for a pull request from this repository "
+        "(its `if:`), a condition no gated job may carry (see matrix-comment-checks). "
+        "Its result says whether the view was written, never whether code passed."
+    ),
+    "matrix-comment": (
+        "the last link of the matrix comment chain: it needs the gate itself and every "
+        "other link, so it could not be among the gate's `needs` in any case; its "
+        "result says whether the view was written, never whether code passed."
     ),
 }
 

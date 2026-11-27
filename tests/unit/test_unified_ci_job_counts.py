@@ -143,6 +143,11 @@ def _push_only(job: dict[str, Any]) -> bool:
     return "github.event_name == 'push'" in str(job.get("if", ""))
 
 
+def _pull_request_only(job: dict[str, Any]) -> bool:
+    """A job whose `if:` limits it to pull requests: it is skipped on every other event."""
+    return "github.event_name == 'pull_request'" in str(job.get("if", ""))
+
+
 def _comment_text(path: Path) -> str:
     """The file's comment lines, unwrapped into one string."""
     lines = []
@@ -176,14 +181,16 @@ PYTEST_JOB_IDS = [
     if any(step.get("uses") == RUN_UNIT_TESTS_USES for step in job.get("steps") or [])
 ]
 PYTEST_CHECK_RUNS = sum(LEGS[name] for name in PYTEST_JOB_IDS)
-#: LEGS as the workflow's comments list it: the three unit-test jobs under one name.
+#: The legs of a push to main: the static matrices less the jobs limited to pull requests.
+PUSH_LEGS = {name: n for name, n in LEGS.items() if not _pull_request_only(JOBS[name])}
+#: PUSH_LEGS as the workflow's comments list it: the three unit-test jobs under one name.
 COMMENT_LEGS = {
-    **{name: n for name, n in LEGS.items() if name not in UNIT_TEST_JOB_IDS},
+    **{name: n for name, n in PUSH_LEGS.items() if name not in UNIT_TEST_JOB_IDS},
     "unit-test": UNIT_TEST_LEGS,
 }
-ON_PUSH = sum(LEGS.values())
-#: A merge_group run: the static matrices less the push-only jobs.
-ON_MERGE_QUEUE = sum(n for name, n in LEGS.items() if not _push_only(JOBS[name]))
+ON_PUSH = sum(PUSH_LEGS.values())
+#: A merge_group run: the static matrices less the push-only and the pull-request-only jobs.
+ON_MERGE_QUEUE = sum(n for name, n in PUSH_LEGS.items() if not _push_only(JOBS[name]))
 #: A pull_request run: the overlay resolved, the push-only jobs left out.
 PR_LEGS = {
     name: _legs(job, "pull_request")
@@ -256,6 +263,17 @@ class TestTheExpansion:
         assert [name for name, job in JOBS.items() if _push_only(job)] == [
             "warm-image-layers"
         ]
+
+    def test_only_the_first_three_matrix_comment_jobs_wait_for_a_pull_request(self):
+        """Positive control on `_pull_request_only`: the three links that skip every
+        other event, and none of the jobs that run on all of them."""
+        assert [name for name, job in JOBS.items() if _pull_request_only(job)] == [
+            "matrix-comment-checks",
+            "matrix-comment-scans",
+            "matrix-comment-tiers",
+        ]
+        assert not _pull_request_only(JOBS["matrix-comment"])
+        assert not _pull_request_only(JOBS["lint"])
 
 
 #: What a pull request keeps of each pool: the arm64 Linux image, the pinned macOS
@@ -666,6 +684,20 @@ class TestTheCommentsMatchTheWorkflow:
             "the 818 above",
             "(818 to a merge-queue run",
             "Most of the 455 is the",
+            # Before the four matrix-comment jobs were added (+4 on a pull request, +1 on a
+            # push and in the merge queue: push 383 -> 384, merge-queue 381 -> 382, pull
+            # request 159 -> 163). The history chain keeps "383, 381 and 159" as its
+            # previous link, so that phrasing is not listed.
+            "expands to 383 jobs",
+            "383-job",
+            "~776 runner jobs",
+            "instead of ~387.",
+            "contributes 250 check",
+            "250 is this",
+            "is 674:",
+            "the 674 above",
+            "(674 to a merge-queue run",
+            "Most of the 383 is the",
         ):
             assert stale not in COMMENTS
 

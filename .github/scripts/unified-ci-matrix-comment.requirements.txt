@@ -1,0 +1,5 @@
+# The one package unified-ci-matrix-comment.py needs beyond the standard library, for
+# reading the workflow file. Pinned by version and by the sha256 of the CPython 3.12
+# manylinux wheels (aarch64 and x86_64), so pip installs these bytes or nothing. The
+# hashes are the ones uv.lock records for pyyaml 6.0.3.
+pyyaml==6.0.3 --hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc  # pragma: allowlist secret

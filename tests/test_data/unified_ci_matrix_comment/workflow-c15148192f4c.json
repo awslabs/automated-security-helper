@@ -1,0 +1,1124 @@
+{
+  "job_order": [
+    "lint",
+    "ensure-cache",
+    "actionlint",
+    "snapshot-trailers",
+    "unit-test-linux",
+    "unit-test-macos",
+    "unit-test-windows",
+    "unit-coverage",
+    "integration-test-linux",
+    "integration-test-macos",
+    "integration-test-windows",
+    "e2e-test-linux",
+    "e2e-test-macos",
+    "e2e-test-windows",
+    "e2e-express",
+    "warm-image-layers",
+    "scan-validation",
+    "non-root-image-permissions",
+    "external-target-scan",
+    "sandbox",
+    "sandbox-scanner-parity",
+    "multi-project-attribution",
+    "deploy-aws-helpers",
+    "integration-test",
+    "docs-examples",
+    "build-docs",
+    "converter-integration",
+    "install-validation",
+    "homebrew-macos",
+    "required-checks"
+  ],
+  "source": {
+    "commit": "c15148192f4c70ca54c93b9333a281c0e054d727",
+    "derived": "the workflow parsed with yaml.safe_load, every job's steps left out",
+    "path": ".github/workflows/ash-unified-ci.yml"
+  },
+  "workflow": {
+    "concurrency": {
+      "cancel-in-progress": "${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}",
+      "group": "${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}"
+    },
+    "env": {
+      "COLUMNS": 160
+    },
+    "jobs": {
+      "actionlint": {
+        "env": {
+          "ACTIONLINT_SHA256": "325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6",
+          "ACTIONLINT_VERSION": "1.7.12",
+          "SHELLCHECK_SHA256": "12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588",
+          "SHELLCHECK_VERSION": "0.11.0"
+        },
+        "name": "actionlint",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 10
+      },
+      "build-docs": {
+        "name": "build-docs",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 20
+      },
+      "converter-integration": {
+        "name": "converter-integration (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "os": [
+              "macos-latest",
+              "windows-latest"
+            ]
+          },
+          "max-parallel": 2
+        },
+        "timeout-minutes": 20
+      },
+      "deploy-aws-helpers": {
+        "name": "deploy-tree AWS helpers (moto server)",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 15
+      },
+      "docs-examples": {
+        "name": "docs-examples",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 20
+      },
+      "e2e-express": {
+        "env": {
+          "ASH_E2E_EXPRESS": "1"
+        },
+        "name": "e2e-express (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "os": [
+              "ubuntu-24.04-arm",
+              "macos-15"
+            ]
+          }
+        },
+        "timeout-minutes": 20
+      },
+      "e2e-test-linux": {
+        "name": "e2e-test (${{ matrix.os }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+              }
+            ],
+            "os": [
+              "ubuntu-latest",
+              "ubuntu-24.04-arm"
+            ]
+          }
+        },
+        "timeout-minutes": 30
+      },
+      "e2e-test-macos": {
+        "name": "e2e-test (${{ matrix.os }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}"
+              }
+            ],
+            "os": [
+              "macos-latest",
+              "macos-15"
+            ]
+          }
+        },
+        "timeout-minutes": 30
+      },
+      "e2e-test-windows": {
+        "name": "e2e-test (${{ matrix.os }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "os": [
+              "windows-latest"
+            ]
+          }
+        },
+        "timeout-minutes": 30
+      },
+      "ensure-cache": {
+        "name": "ensure-cache (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+              },
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || '' }}"
+              },
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}"
+              },
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'macos-15' || '' }}"
+              }
+            ],
+            "os": [
+              "ubuntu-latest",
+              "ubuntu-24.04",
+              "ubuntu-24.04-arm",
+              "macos-latest",
+              "macos-15",
+              "windows-latest"
+            ]
+          },
+          "max-parallel": 6
+        },
+        "timeout-minutes": 15
+      },
+      "external-target-scan": {
+        "name": "external-target scan (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "os": [
+              "ubuntu-24.04-arm",
+              "windows-latest"
+            ]
+          },
+          "max-parallel": 2
+        },
+        "timeout-minutes": 30
+      },
+      "homebrew-macos": {
+        "name": "homebrew (macos-15, in-repo formula)",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "macos-15",
+        "timeout-minutes": 20
+      },
+      "install-validation": {
+        "name": "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})",
+        "runs-on": "${{ (matrix.method == 'finch' && matrix.os == 'ubuntu-latest') && 'ubuntu-24.04' || matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "method": "bundle",
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+              },
+              {
+                "method": "homebrew",
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+              },
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              },
+              {
+                "method": "homebrew",
+                "os": "windows-latest"
+              },
+              {
+                "method": "homebrew",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "method": "podman",
+                "os": "windows-latest"
+              },
+              {
+                "method": "finch",
+                "os": "windows-latest"
+              },
+              {
+                "method": "nerdctl",
+                "os": "windows-latest"
+              },
+              {
+                "method": "finch",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "method": "nerdctl",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "method": "nerdctl",
+                "os": "macos-latest"
+              },
+              {
+                "method": "nerdctl",
+                "os": "macos-15"
+              },
+              {
+                "method": "nerdctl",
+                "os": "ubuntu-latest",
+                "python-version": "3.11"
+              },
+              {
+                "method": "nerdctl",
+                "os": "ubuntu-latest",
+                "python-version": "3.13"
+              },
+              {
+                "method": "nerdctl",
+                "os": "ubuntu-latest",
+                "python-version": "3.14"
+              },
+              {
+                "method": "podman",
+                "os": "ubuntu-latest",
+                "python-version": "3.11"
+              },
+              {
+                "method": "podman",
+                "os": "ubuntu-latest",
+                "python-version": "3.13"
+              },
+              {
+                "method": "podman",
+                "os": "ubuntu-latest",
+                "python-version": "3.14"
+              },
+              {
+                "method": "podman",
+                "os": "ubuntu-24.04-arm",
+                "python-version": "3.11"
+              },
+              {
+                "method": "podman",
+                "os": "ubuntu-24.04-arm",
+                "python-version": "3.13"
+              },
+              {
+                "method": "podman",
+                "os": "ubuntu-24.04-arm",
+                "python-version": "3.14"
+              },
+              {
+                "method": "podman",
+                "os": "macos-latest"
+              },
+              {
+                "method": "podman",
+                "os": "macos-15"
+              },
+              {
+                "method": "finch",
+                "os": "ubuntu-latest",
+                "python-version": "3.11"
+              },
+              {
+                "method": "finch",
+                "os": "ubuntu-latest",
+                "python-version": "3.13"
+              },
+              {
+                "method": "finch",
+                "os": "ubuntu-latest",
+                "python-version": "3.14"
+              },
+              {
+                "method": "finch",
+                "os": "macos-latest"
+              },
+              {
+                "method": "finch",
+                "os": "macos-15"
+              },
+              {
+                "method": "homebrew",
+                "os": "ubuntu-latest",
+                "python-version": "3.11"
+              },
+              {
+                "method": "homebrew",
+                "os": "ubuntu-latest",
+                "python-version": "3.13"
+              },
+              {
+                "method": "homebrew",
+                "os": "ubuntu-latest",
+                "python-version": "3.14"
+              },
+              {
+                "method": "homebrew",
+                "os": "macos-latest",
+                "python-version": "3.11"
+              },
+              {
+                "method": "homebrew",
+                "os": "macos-latest",
+                "python-version": "3.13"
+              },
+              {
+                "method": "homebrew",
+                "os": "macos-latest",
+                "python-version": "3.14"
+              },
+              {
+                "method": "homebrew",
+                "os": "macos-15",
+                "python-version": "3.11"
+              },
+              {
+                "method": "homebrew",
+                "os": "macos-15",
+                "python-version": "3.13"
+              },
+              {
+                "method": "homebrew",
+                "os": "macos-15",
+                "python-version": "3.14"
+              }
+            ],
+            "method": [
+              "bundle",
+              "homebrew",
+              "podman",
+              "finch",
+              "nerdctl"
+            ],
+            "os": [
+              "ubuntu-latest",
+              "ubuntu-24.04-arm",
+              "macos-latest",
+              "macos-15",
+              "windows-latest"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ]
+          },
+          "max-parallel": 20
+        },
+        "timeout-minutes": "${{ ((matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45) || (matrix.method == 'bundle' && 30) || 20 }}"
+      },
+      "integration-test": {
+        "name": "integration-test (ubuntu-latest, shard ${{ matrix.shard }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-latest",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "shard": [
+              "1of4",
+              "2of4",
+              "3of4",
+              "4of4"
+            ]
+          },
+          "max-parallel": 4
+        },
+        "timeout-minutes": 30
+      },
+      "integration-test-linux": {
+        "name": "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              }
+            ],
+            "os": [
+              "ubuntu-latest",
+              "ubuntu-24.04-arm"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "shard": [
+              "1of6",
+              "2of6",
+              "3of6",
+              "4of6",
+              "5of6",
+              "6of6"
+            ]
+          },
+          "max-parallel": 24
+        },
+        "timeout-minutes": 30
+      },
+      "integration-test-macos": {
+        "name": "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              }
+            ],
+            "os": [
+              "macos-latest",
+              "macos-15"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "shard": [
+              "1of8",
+              "2of8",
+              "3of8",
+              "4of8",
+              "5of8",
+              "6of8",
+              "7of8",
+              "8of8"
+            ]
+          },
+          "max-parallel": 24
+        },
+        "timeout-minutes": 30
+      },
+      "integration-test-windows": {
+        "name": "integration-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              }
+            ],
+            "os": [
+              "windows-latest"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "shard": [
+              "1of8",
+              "2of8",
+              "3of8",
+              "4of8",
+              "5of8",
+              "6of8",
+              "7of8",
+              "8of8"
+            ]
+          },
+          "max-parallel": 24
+        },
+        "timeout-minutes": 30
+      },
+      "lint": {
+        "name": "lint",
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 15
+      },
+      "multi-project-attribution": {
+        "name": "multi-project attribution (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "os": [
+              "ubuntu-24.04-arm",
+              "windows-latest"
+            ]
+          },
+          "max-parallel": 2
+        },
+        "timeout-minutes": 30
+      },
+      "non-root-image-permissions": {
+        "name": "non-root image permissions (ubuntu-latest)",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 45
+      },
+      "required-checks": {
+        "if": "${{ always() && (cancelled() || contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}",
+        "name": "required-checks",
+        "needs": [
+          "lint",
+          "ensure-cache",
+          "actionlint",
+          "snapshot-trailers",
+          "unit-test-linux",
+          "unit-test-macos",
+          "unit-test-windows",
+          "unit-coverage",
+          "integration-test-linux",
+          "integration-test-macos",
+          "integration-test-windows",
+          "e2e-test-linux",
+          "e2e-test-macos",
+          "e2e-test-windows",
+          "scan-validation",
+          "non-root-image-permissions",
+          "external-target-scan",
+          "multi-project-attribution",
+          "deploy-aws-helpers",
+          "integration-test",
+          "docs-examples",
+          "converter-integration",
+          "build-docs",
+          "install-validation",
+          "homebrew-macos",
+          "sandbox",
+          "sandbox-scanner-parity"
+        ],
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 5
+      },
+      "sandbox": {
+        "name": "sandbox escape (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "include": [
+              {
+                "os": "ubuntu-latest",
+                "require": "bwrap,firejail,landlock"
+              },
+              {
+                "os": "macos-latest",
+                "require": "sandbox-exec"
+              }
+            ]
+          },
+          "max-parallel": 2
+        },
+        "timeout-minutes": 20
+      },
+      "sandbox-scanner-parity": {
+        "name": "sandbox scanner parity (${{ matrix.sandbox }}, ${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "include": [
+              {
+                "betterleaks": "true",
+                "os": "ubuntu-latest",
+                "sandbox": "bwrap"
+              },
+              {
+                "betterleaks": "true",
+                "os": "macos-latest",
+                "sandbox": "sandbox-exec"
+              }
+            ]
+          },
+          "max-parallel": 2
+        },
+        "timeout-minutes": 45
+      },
+      "scan-validation": {
+        "if": "${{ !cancelled() }}",
+        "name": "scan (${{ matrix.method }}, ${{ matrix.os }})${{ matrix.oci-runner && matrix.oci-runner != 'docker' && format(' [{0}]', matrix.oci-runner) || '' }}${{ matrix.offline && ' [offline]' || '' }}${{ matrix.config-file == 'alpha' && ' - Alpha Plugins' || '' }}",
+        "needs": [
+          "warm-image-layers"
+        ],
+        "runs-on": "${{ (matrix.oci-runner == 'finch' && matrix.os == 'ubuntu-latest') && 'ubuntu-24.04' || matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "include": [
+              {
+                "config-file": "default",
+                "method": "bash",
+                "oci-runner": "docker",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "powershell",
+                "oci-runner": "docker",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "python-container",
+                "oci-runner": "docker",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "python-local",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "bash",
+                "oci-runner": "podman",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "powershell",
+                "oci-runner": "podman",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "python-container",
+                "oci-runner": "podman",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "bash",
+                "oci-runner": "finch",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "powershell",
+                "oci-runner": "finch",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "python-container",
+                "oci-runner": "finch",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "sh-helper",
+                "oci-runner": "docker",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "sh-helper",
+                "oci-runner": "podman",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "sh-helper",
+                "oci-runner": "finch",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "bash",
+                "oci-runner": "docker",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "powershell",
+                "oci-runner": "docker",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "python-container",
+                "oci-runner": "docker",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "python-local",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "bash",
+                "oci-runner": "podman",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "powershell",
+                "oci-runner": "podman",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "python-container",
+                "oci-runner": "podman",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "sh-helper",
+                "oci-runner": "docker",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "sh-helper",
+                "oci-runner": "podman",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "default",
+                "method": "python-local",
+                "os": "macos-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "python-local",
+                "os": "windows-latest"
+              },
+              {
+                "config-file": "default",
+                "method": "python-container",
+                "oci-runner": "docker",
+                "offline": true,
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "alpha",
+                "method": "python-local",
+                "os": "ubuntu-latest"
+              },
+              {
+                "config-file": "alpha",
+                "method": "python-local",
+                "os": "ubuntu-24.04-arm"
+              },
+              {
+                "config-file": "alpha",
+                "method": "python-local",
+                "os": "macos-latest"
+              },
+              {
+                "config-file": "alpha",
+                "method": "python-local",
+                "os": "windows-latest"
+              }
+            ]
+          },
+          "max-parallel": 29
+        },
+        "timeout-minutes": "${{ (matrix.oci-runner == 'podman' || matrix.oci-runner == 'finch') && 45 || 20 }}"
+      },
+      "snapshot-trailers": {
+        "name": "snapshot-trailers",
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 5
+      },
+      "unit-coverage": {
+        "if": "${{ !cancelled() }}",
+        "name": "unit-coverage",
+        "needs": [
+          "unit-test-linux",
+          "unit-test-macos",
+          "unit-test-windows"
+        ],
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "ubuntu-24.04-arm",
+        "timeout-minutes": 25
+      },
+      "unit-test-linux": {
+        "name": "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'ubuntu-latest' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              }
+            ],
+            "os": [
+              "ubuntu-latest",
+              "ubuntu-24.04-arm"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "shard": [
+              "1of6",
+              "2of6",
+              "3of6",
+              "4of6",
+              "5of6",
+              "6of6"
+            ]
+          },
+          "max-parallel": 24
+        },
+        "timeout-minutes": 45
+      },
+      "unit-test-macos": {
+        "name": "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "os": "${{ github.event_name == 'pull_request' && 'macos-latest' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              }
+            ],
+            "os": [
+              "macos-latest",
+              "macos-15"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "shard": [
+              "1of8",
+              "2of8",
+              "3of8",
+              "4of8",
+              "5of8",
+              "6of8",
+              "7of8",
+              "8of8"
+            ]
+          },
+          "max-parallel": 24
+        },
+        "timeout-minutes": 45
+      },
+      "unit-test-windows": {
+        "name": "unit-test (${{ matrix.os }}, py${{ matrix.python-version }}, shard ${{ matrix.shard }})",
+        "permissions": {
+          "checks": "write",
+          "contents": "read",
+          "pull-requests": "write",
+          "statuses": "write"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "exclude": [
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.11' || '' }}"
+              },
+              {
+                "python-version": "${{ github.event_name == 'pull_request' && '3.13' || '' }}"
+              }
+            ],
+            "os": [
+              "windows-latest"
+            ],
+            "python-version": [
+              "3.11",
+              "3.12",
+              "3.13",
+              "3.14"
+            ],
+            "shard": [
+              "1of8",
+              "2of8",
+              "3of8",
+              "4of8",
+              "5of8",
+              "6of8",
+              "7of8",
+              "8of8"
+            ]
+          },
+          "max-parallel": 24
+        },
+        "timeout-minutes": 90
+      },
+      "warm-image-layers": {
+        "concurrency": {
+          "cancel-in-progress": false,
+          "group": "ash-image-layer-cache-${{ matrix.os }}"
+        },
+        "if": "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+        "name": "warm image layers (${{ matrix.os }})",
+        "permissions": {
+          "contents": "read"
+        },
+        "runs-on": "${{ matrix.os }}",
+        "strategy": {
+          "fail-fast": false,
+          "matrix": {
+            "os": [
+              "ubuntu-latest",
+              "ubuntu-24.04-arm"
+            ]
+          },
+          "max-parallel": 2
+        },
+        "timeout-minutes": 30
+      }
+    },
+    "name": "ASH - Unified CI",
+    "on": {
+      "merge_group": {
+        "types": [
+          "checks_requested"
+        ]
+      },
+      "pull_request": {
+        "branches": [
+          "**"
+        ]
+      },
+      "push": {
+        "branches": [
+          "main"
+        ]
+      },
+      "workflow_dispatch": {}
+    },
+    "permissions": {
+      "contents": "read"
+    }
+  }
+}
