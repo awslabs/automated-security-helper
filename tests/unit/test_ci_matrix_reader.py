@@ -966,11 +966,12 @@ class TestRunnerLabels:
         (tmp_path / "notes.txt").write_text(text, encoding="utf-8")
         (tmp_path / "ok.yml.bak").write_text(text, encoding="utf-8")
         (tmp_path / "nested.yml").mkdir()
-        found = _workflow_files(tmp_path)
-        assert [path.name for path in found] == ["ok.yml", "odd.yaml"]
-        assert ci.check_runner_labels(ci.load_workflow(found[0])) == {"ubuntu-latest"}
+        by_name = {path.name: path for path in _workflow_files(tmp_path)}
+        assert list(by_name) == ["odd.yaml", "ok.yml"]
+        ok = ci.load_workflow(by_name["ok.yml"])
+        assert ci.check_runner_labels(ok) == {"ubuntu-latest"}
         with pytest.raises(ci.UnknownRunnerLabel, match="plan9"):
-            ci.check_runner_labels(ci.load_workflow(found[1]))
+            ci.check_runner_labels(ci.load_workflow(by_name["odd.yaml"]))
 
 
 class TestACallToAReusableWorkflow:
