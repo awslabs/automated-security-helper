@@ -38,10 +38,10 @@ can name one advisory by one id), nor a dependency advisory one because of a CWE
 its rule names (npm-audit writes an advisory's CWE ids as tags of its rule). A
 code scanner's finding whose own rule is tagged CWE-798 or CWE-321 is one.
 
-The controls beside these must not move: a dependency advisory is not a secret
-detection whatever CWE its rule names, its excerpt is masked only when the
-masking takes it for a secret, and the baseline gate still matches an ordinary
-finding that moved.
+The controls beside these must not move: a finding of a dependency scanner (SCA
+or SBOM) is not a secret detection whatever CWE it or its rule names, its
+excerpt is masked only when the masking takes it for a secret, and the baseline
+gate still matches an ordinary finding that moved.
 """
 
 from __future__ import annotations
@@ -203,6 +203,11 @@ JWT_TAGS = [
 #: A semgrep rule for a hard-coded password, as a linter raises it on a name such
 #: as ``password`` whatever the value is. Its id has no ``secrets`` segment either.
 DEFAULT_ARGUMENT_RULE = "python.lang.security.audit.hardcoded-password-default-argument"
+
+#: A rule id two code scanners can declare. It has no ``secret.`` or ``secrets.``
+#: segment and no ``CKV_SECRET_`` prefix, so only a tag of the rule or of the
+#: result can mark a finding of it as a secret detection.
+SHARED_RULE = "hardcoded-credential-check"
 
 
 def npm_audit_advisory(
@@ -602,9 +607,18 @@ def test_the_fallback_snippet_of_an_advisory_that_describes_a_credential_is_kept
 #
 # A report-wide set of rule ids is keyed by the bare id of a rule, across every
 # scanner's rules. The flag is read from the rule the result names in its own run
-# and tool component, which two scanners that name one advisory by one id do not
-# share, and a dependency advisory is not a secret detection by a CWE its rule
-# names.
+# and tool component, which two scanners that share a rule id do not share.
+#
+# Two properties are pinned apart. Own-rule scoping is pinned by
+# test_each_results_own_rule_decides_when_two_scanners_share_a_rule_id and by
+# test_a_cwe_tagged_rule_decides_only_the_finding_of_its_own_scanner: the finding
+# each expects not to be a secret detection is bandit's, and bandit is typed SAST,
+# so the dependency exclusion cannot decide it and only the rule it names can.
+# The dependency exclusion is pinned by the tests on an advisory that npm-audit
+# and trivy name by one id. Both scanners are typed SCA (utils/scanner_names.py),
+# so a CWE does not make either finding a secret detection, whichever rule is read
+# for it; those tests pin the exclusion when two scanners share an id, not which
+# rule is read.
 
 
 @pytest.mark.parametrize("cwe", ("CWE-798", "CWE-321"))
@@ -626,11 +640,12 @@ def test_an_advisory_whose_rule_names_a_credential_cwe_is_no_secret_detection(cw
 
 def test_a_same_id_rule_of_another_scanner_does_not_make_an_advisory_a_secret():
     """grype, trivy and npm-audit can name one advisory by one id. npm-audit's rule
-    for it names CWE-798 and trivy's does not, and one scanner's rule says nothing
-    about another scanner's finding, so neither finding is a secret detection:
-    npm-audit's because it is a dependency advisory, trivy's because its own rule
-    is untagged. A set of rule ids keyed by the bare id read the tag of one as the
-    other's."""
+    for it names CWE-798 and trivy's does not. Both scanners are typed SCA
+    (``utils/scanner_names.py``), so neither finding is a secret detection by a
+    CWE, whichever rule is read for it. This pins the dependency exclusion when two
+    scanners share an id, not own-rule scoping, which is pinned by
+    ``test_each_results_own_rule_decides_when_two_scanners_share_a_rule_id`` and
+    ``test_a_cwe_tagged_rule_decides_only_the_finding_of_its_own_scanner``."""
     model = aggregate(
         (npm_audit_advisory(GHSA, ["CWE-798"]), "npm-audit"),
         (trivy_advisory(GHSA), "trivy"),
@@ -660,6 +675,27 @@ def test_each_results_own_rule_decides_when_two_scanners_share_a_rule_id():
     assert sorted(by_scanner) == ["bandit", "trivy"]
     assert len(flat) == 2
     assert by_scanner["trivy"].is_secret_detection is True
+    assert by_scanner["bandit"].is_secret_detection is False
+
+
+def test_a_cwe_tagged_rule_decides_only_the_finding_of_its_own_scanner():
+    """semgrep's rule for ``SHARED_RULE`` is tagged CWE-798 and bandit's rule of the
+    same id carries no tags. Neither scanner is typed SCA or SBOM
+    (``utils/scanner_names.py``), so the dependency exclusion decides neither
+    finding: only the rule each result names in its own run and tool component
+    can. semgrep's finding is a secret detection and bandit's is not. The ids of
+    the rules tagged as detections, taken report-wide, hold the shared id, so a
+    flag read from them would mark bandit's finding too."""
+    model = aggregate(
+        (semgrep_finding(SHARED_RULE, JWT_TAGS), "semgrep"),
+        (sast_finding(SHARED_RULE, "bandit"), "bandit"),
+    )
+    flat = model.to_flat_vulnerabilities()
+    by_scanner = {finding.scanner: finding for finding in flat}
+
+    assert sorted(by_scanner) == ["bandit", "semgrep"]
+    assert len(flat) == 2
+    assert by_scanner["semgrep"].is_secret_detection is True
     assert by_scanner["bandit"].is_secret_detection is False
 
 
@@ -704,8 +740,13 @@ def test_the_baseline_matches_both_findings_of_an_advisory_two_scanners_name_ali
     """The advisory both scanners report, at the same lines in the baseline and in
     the current scan: neither finding is a secret detection, so both are matched.
     A secret detection is matched only by an exact identity with a fingerprint on
-    both sides, and trivy writes none, so trivy's finding stayed in the report when
-    npm-audit's tag was read as its own."""
+    both sides, and trivy writes none, so a trivy finding read as one stays in the
+    report. Both scanners are typed SCA (``utils/scanner_names.py``), so neither
+    finding is a secret detection by a CWE, whichever rule is read for it. This
+    pins the dependency exclusion when two scanners share an id, not own-rule
+    scoping, which is pinned by
+    ``test_each_results_own_rule_decides_when_two_scanners_share_a_rule_id`` and
+    ``test_a_cwe_tagged_rule_decides_only_the_finding_of_its_own_scanner``."""
     pair = [
         (npm_audit_advisory(GHSA, ["CWE-798"]), "npm-audit"),
         (trivy_advisory(GHSA), "trivy"),
@@ -719,7 +760,12 @@ def test_the_baseline_matches_both_findings_of_an_advisory_two_scanners_name_ali
 def test_the_baseline_matches_a_moved_advisory_beside_its_same_id_namesake():
     """trivy's finding moved from lines 13-17 to 40-44. It is an ordinary finding,
     so it is matched without its lines, and npm-audit's, at its lines, is matched
-    exactly."""
+    exactly. Both scanners are typed SCA (``utils/scanner_names.py``), so neither
+    finding is a secret detection by a CWE, whichever rule is read for it. This
+    pins the dependency exclusion when two scanners share an id, not own-rule
+    scoping, which is pinned by
+    ``test_each_results_own_rule_decides_when_two_scanners_share_a_rule_id`` and
+    ``test_a_cwe_tagged_rule_decides_only_the_finding_of_its_own_scanner``."""
     before = [
         (npm_audit_advisory(GHSA, ["CWE-798"]), "npm-audit"),
         (trivy_advisory(GHSA), "trivy"),

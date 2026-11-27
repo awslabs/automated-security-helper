@@ -859,8 +859,8 @@ def secret_detection_rule_ids(sarif_report: Any) -> Set[str]:
 
 def _is_detection_rule_id(rule_id: str) -> bool:
     """Whether a rule id alone marks a detection: the ``CKV_SECRET_`` prefix
-    (checkov's secrets framework) or a ``secrets`` segment (semgrep's and
-    opengrep's ``generic.secrets.*`` rules)."""
+    (checkov's secrets framework) or a ``secret.`` or ``secrets.`` segment
+    (semgrep's and opengrep's ``generic.secrets.*`` rules)."""
     return bool(
         rule_id.startswith(_SECRET_RULE_PREFIXES) or _SECRET_RULE_ID.search(rule_id)
     )
@@ -901,13 +901,14 @@ def is_secret_detection_of_rule(result: Any, rule: Any) -> bool:
     It reads the result's own rule, not every rule of the report that shares its
     id: grype, trivy and npm-audit can name one advisory by one id, and one
     scanner's rule says nothing about another scanner's finding. A secrets
-    scanner's finding is one, and so is one whose rule id has a ``secrets.``
-    segment or the ``CKV_SECRET_`` prefix. A ``secret`` or ``secrets`` tag on the
-    result or on its rule marks one too: trivy marks its secret rules that way,
-    and nothing on the result. So does CWE-798 or CWE-321, except on a dependency
-    advisory or inventory entry (``_DEPENDENCY_TOOL_TYPES``). npm-audit writes an
-    advisory's CWEs as rule tags, and they name a weakness of the dependency, not
-    a value in the scanned files.
+    scanner's finding is one, and so is one whose rule id has a ``secret.`` or
+    ``secrets.`` segment or the ``CKV_SECRET_`` prefix. A ``secret`` or ``secrets``
+    tag on the result or on its rule marks one too: trivy marks its secret rules
+    that way, and nothing on the result. So does CWE-798 or CWE-321, except on a
+    finding of a dependency scanner (the SCA and SBOM tool types,
+    ``_DEPENDENCY_TOOL_TYPES``), whether the CWE is on the result or on its rule.
+    npm-audit writes an advisory's CWEs as rule tags, and they name a weakness of
+    the dependency, not a value in the scanned files.
     """
     from automated_security_helper.utils.scanner_tool_types import (
         SECRETS_TOOL_TYPE,
@@ -944,16 +945,26 @@ def secret_rule_ids(sarif_report: Any) -> Set[str]:
 
 
 class SecretRuleIds(NamedTuple):
-    """The sets of rule ids a report's rule metadata marks, as the masking's
-    ``is_secret_finding`` reads them in ``_index_secrets``.
+    """The sets of rule ids a report's rule metadata marks, as ``_index_secrets``
+    reads them.
 
     ``secret`` is the ids of the rules tagged as secret rules plus the ids of the
     rules described as about a credential in code (``secret_rule_ids``).
     ``described`` is the ids of the rules whose name or description is about a
     credential in code (``_rule_ids_described``). ``described_only`` is
     ``described`` less the tagged ids: the members of ``secret`` that are there
-    for what the rule says about itself. The default holds none, and a predicate
-    given none reads the result alone."""
+    for what the rule says about itself.
+
+    ``_index_secrets`` hands ``secret`` and ``described_only`` to
+    ``is_secret_finding``: a rule in ``secret`` makes its result a secret finding,
+    except that a dependency finding does not enter by a rule that is in
+    ``described_only``. ``is_secret_finding`` takes no ``described``;
+    ``_index_secrets`` reads it itself, for ``resource_only``: a secret finding
+    that quotes no value, is no dependency finding and has a rule in ``described``
+    (or text about a credential in code) is taken to report a resource at its
+    first line, and the range it masks can run to the end of the file.
+
+    The default holds none, and a predicate given none reads the result alone."""
 
     secret: FrozenSet[str] = frozenset()
     described: FrozenSet[str] = frozenset()
@@ -1916,7 +1927,10 @@ def _index_secrets(sarif_report: Any) -> _SecretIndex:
 
     index = _SecretIndex()
     _resolve_artifact_uris(sarif_report, index)
-    rule_ids, described, described_only = report_secret_rule_ids(sarif_report)
+    report_rules = report_secret_rule_ids(sarif_report)
+    rule_ids = report_rules.secret
+    described = report_rules.described
+    described_only = report_rules.described_only
     known: Optional[_KnownLines] = None
     for result in _all_results(sarif_report):
         if not is_secret_finding(result, rule_ids, described_only):

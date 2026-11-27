@@ -231,14 +231,20 @@ reports one observation:
 
 - `secret/<sha256>` on secret detections, keyed by file, start line, and workspace
   project (plus the converted-tree marker for a converted file) — no scanner, no rule.
-  Two secrets on one line share the id; the per-scanner finding id still tells them apart.
+  A secret detection is a finding of a secrets scanner, or one whose rule id or own rule
+  marks a credential: a `secret.` or `secrets.` segment or the `CKV_SECRET_` prefix in
+  the rule id, or a `secret`, `secrets`, CWE-798, or CWE-321 tag on the result or its
+  own rule (trivy tags its secret rules `secret`). A dependency scanner's finding (SCA
+  or SBOM, such as npm-audit) is not one by a CWE tag, which names a weakness of the
+  dependency. Two secrets on one line share the id; the per-scanner finding id still
+  tells them apart.
 - `dep/<sha256>` on dependency findings, keyed by the advisory id (upper-cased), the
   package name, and the installed version — no file or line, because SCA scanners put
   every package of a lockfile at its line 1.
-- SAST and IaC findings carry none, by design. A location does not say *which* problem
-  two SAST tools flagged, and IaC engines spell one resource differently (template
-  logical ids vs. construct paths), so an id there would promise a correlation it cannot
-  deliver.
+- Other SAST and IaC findings carry none, by design. A location does not say *which*
+  problem two SAST tools flagged, and IaC engines spell one resource differently
+  (template logical ids vs. construct paths), so an id there would promise a correlation
+  it cannot deliver.
 
 Where it appears, always under the same absence rule (a finding with no id carries
 nothing, never an empty value): the ASFF reports' `ProductFields["ash/correlationId"]`,

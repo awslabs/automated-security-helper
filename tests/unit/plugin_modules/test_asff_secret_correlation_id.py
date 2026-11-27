@@ -236,7 +236,7 @@ def test_a_secret_with_no_place_to_compare_has_no_value(where):
 
 def test_a_secret_rule_of_a_scanner_of_another_type_correlates_too():
     """A detection is told by its rule or its tags as well as by its scanner's
-    type (``utils/secret_masking.is_secret_detection``)."""
+    type (``utils/secret_masking.is_secret_detection_of_rule``)."""
     by_scanner, by_tag = _findings(
         _result("aws-access-token", scanner="gitleaks"),
         _result("R7", scanner="not-a-shipped-scanner", tags=["secret"]),
