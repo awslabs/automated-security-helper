@@ -614,13 +614,13 @@ def _is_bare_name(text: str) -> bool:
 _LOOKUP_ENV_NAMES = frozenset({"PATH", "PATHEXT"})
 
 
-def _env_sets_the_lookup(env: Dict[str, str]) -> bool:
-    """Whether ``env`` sets PATH or PATHEXT, compared without case."""
-    return any(key.upper() in _LOOKUP_ENV_NAMES for key in env)
+def _env_sets_the_lookup(env_names: List[str]) -> bool:
+    """Whether the env key names hold PATH or PATHEXT, compared without case."""
+    return any(name.upper() in _LOOKUP_ENV_NAMES for name in env_names)
 
 
 def _path_prefix_matches(
-    command: str, prefix: str, env: Optional[Dict[str, str]] = None
+    command: str, prefix: str, env_names: Optional[List[str]] = None
 ) -> bool:
     """Whether the listed ``prefix`` allows ``command``, as the config wrote it.
 
@@ -640,7 +640,7 @@ def _path_prefix_matches(
     if normalized_prefix == ".":
         return False
     if _is_bare_name(prefix):
-        return command == prefix and not _env_sets_the_lookup(env or {})
+        return command == prefix and not _env_sets_the_lookup(env_names or [])
     path = _normalized_command_path(command)
     if path == normalized_prefix:
         return True
@@ -658,8 +658,12 @@ def check_command_prefix(
     """A declared command must be allowed by a listed entry, a bare name or a path."""
     if not prefixes or entry.command is None:
         return []
+    # Every key of the entry's env counts, whatever its value. ``env`` keeps a key only
+    # when its value is text, so ``env_names`` is read too; an entry made by hand may
+    # carry ``env`` alone.
+    env_names = [*entry.env, *entry.env_names]
     if any(
-        _path_prefix_matches(entry.command, prefix, entry.env) for prefix in prefixes
+        _path_prefix_matches(entry.command, prefix, env_names) for prefix in prefixes
     ):
         return []
     return [

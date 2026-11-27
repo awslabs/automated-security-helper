@@ -70,6 +70,15 @@ class McpServerEntry(BaseModel):
     command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
+    env_names: List[str] = Field(
+        default_factory=list,
+        description=(
+            "The name of every key in the entry's env table, whatever its value. "
+            "env keeps a key only when its value is a string, number or boolean, so "
+            "a key set to null, a list, a table or a date has no row in env and is "
+            "named here."
+        ),
+    )
     url: Optional[str] = None
     url_pointer: Optional[str] = Field(
         default=None,
