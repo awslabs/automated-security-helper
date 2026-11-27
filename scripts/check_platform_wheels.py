@@ -105,6 +105,9 @@ EXIT_OK = 0
 EXIT_FOUND = 1
 EXIT_ERROR = 2
 
+#: What a person types to record the matrix, spelled the way the usage text above and
+#: the workflow's comments spell it.
+RECORD_COMMAND = "python scripts/check_platform_wheels.py --record"
 ORIGIN_RECORDED = "recorded by scripts/check_platform_wheels.py --record"
 ORIGIN_MEASURED = (
     "measured by scripts/check_platform_wheels.py --check; copy it over "
@@ -1035,13 +1038,13 @@ def compare(
                     Finding("member-row", set_id, "an alpha member has no recorded row")
                 )
             else:
+                message = (
+                    "no recorded row; every measured row has to be recorded"
+                    if require_complete
+                    else "no recorded row; it is measured and shown, not compared"
+                )
                 findings.append(
-                    Finding(
-                        "unrecorded-row",
-                        set_id,
-                        "no recorded row; it is measured and shown, not compared",
-                        require_complete,
-                    )
+                    Finding("unrecorded-row", set_id, message, require_complete)
                 )
             continue
         before, after = recorded[set_id], measured[set_id]
@@ -1207,6 +1210,36 @@ def _record(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
     return EXIT_OK
 
 
+#: What a failed check says when the record is what differs. The command sits on a line
+#: of its own, indented four spaces: the step summary is Markdown, where that is a code
+#: block a person copies whole.
+RERECORD_ADVICE = (
+    "### To re-record",
+    "",
+    (
+        "- A cell that moved is usually PyPI publishing or withdrawing a wheel: a "
+        "re-record, not a defect in this change. If this change added or changed a "
+        "requirement and a cell went from ok to fail, that is the change's doing."
+    ),
+    "- A row with no record yet is added the same way.",
+    "",
+    (
+        "Run this from the repository root with network access, read the diff (the "
+        "install documents cite these cells), and commit scripts/platform_wheels.json:"
+    ),
+    "",
+    f"    {RECORD_COMMAND}",
+)
+
+#: What a failed check says when the base closure moved. The record does not hold the
+#: closure, so recording changes nothing and is not offered.
+CLOSURE_ADVICE = (
+    "A re-record does not clear a base closure difference: the closure is measured on "
+    "every run and is not part of the record. Change the requirement that causes it; "
+    "for an alpha pin, that can mean taking it out of the candidates in the register."
+)
+
+
 def _check(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
     record = load_record(args.file)
     pyproject, pythons, cutoff, cooldown = _inputs(args, moment)
@@ -1272,20 +1305,14 @@ def _check(args: argparse.Namespace, runner: Runner, moment: datetime) -> int:
         lines.append(f"- {closure_note}")
     elif closure:
         lines += [f"- {line}" for line in closure]
+        lines += ["", CLOSURE_ADVICE]
     else:
         lines.append("- ok: the alpha requirements move no version of the base install")
     if notes:
         lines += ["", "### Notes"]
         lines += [f"- {f.kind}: {f.where}: {f.message}" for f in notes]
-    if failed:
-        lines += [
-            "",
-            (
-                "If the change is intended, re-record with "
-                "`python scripts/check_platform_wheels.py --record` (it needs network "
-                "access) and commit scripts/platform_wheels.json."
-            ),
-        ]
+    if blocking:
+        lines += ["", *RERECORD_ADVICE]
     print(defuse("\n".join(lines)))
     return EXIT_FOUND if failed else EXIT_OK
 
