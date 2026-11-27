@@ -24,12 +24,14 @@ script reads: a cell that changes without a re-record, a member with no recorded
 a clean record, a backtracked pin, a resolution that fails, and an index that cannot
 be reached, which must never be recorded as a failed cell.
 
-The one real ``uv`` call is ``uv pip compile --help``. It checks that every flag and
-platform name the script passes exists in the ``uv`` installed here.
+The unit tests start no real tool, so nothing here runs ``uv``. That the ``uv`` the
+workflow installs accepts every flag and platform name the script passes is measured
+by the workflow's own runs.
 
 What is not asserted
 --------------------
-What PyPI publishes today. The workflow's weekly run measures that.
+What PyPI publishes today, and what that ``uv`` accepts. The workflow's runs, the weekly
+one included, measure both.
 """
 
 from __future__ import annotations
@@ -37,9 +39,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
-import os
 import re
-import subprocess
 import sys
 import tomllib
 from datetime import date, datetime, timedelta, timezone
@@ -47,8 +47,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-from tests.utils.planted_uv import uv_binary
 
 pytestmark = pytest.mark.unit
 
@@ -181,7 +179,7 @@ class FakeUv:
             where = self.broken.get(name, ())
             if "*" in where or triple in where:
                 return self.script.Result(1, "", NO_SOLUTION.format(name=name))
-        pins = {name: "1.0.0" for name in names}
+        pins = dict.fromkeys(names, "1.0.0")
         pins.update(self.base_pins)
         planted = any(line.startswith("anyio<4.16") for line in lines)
         dragged = bool(self.moves_anyio & set(names))
@@ -445,10 +443,11 @@ class TestRequirementSets:
             python_marker="python_version < '3.12' or python_version >= '3.14'",
             platform_marker="sys_platform != 'win32'",
         )
-        assert script.render_pin(pin) == (
+        expected = (
             "a==1.0.0; (python_version < '3.12' or python_version >= '3.14') "
-            "and sys_platform != 'win32'",
+            "and sys_platform != 'win32'"
         )
+        assert script.render_pin(pin) == (expected,)
 
     def test_members_and_held_pins_are_measured_and_the_rest_are_not(
         self, script, register
@@ -608,25 +607,34 @@ class TestReadingUvsAnswers:
         "stderr,expected",
         [
             (
-                "Because nono-py==0.16.0 has no usable wheels and you require "
-                "nono-py==0.16.0, we can conclude that your requirements are "
-                "unsatisfiable.",
+                (
+                    "Because nono-py==0.16.0 has no usable wheels and you require "
+                    "nono-py==0.16.0, we can conclude that your requirements are "
+                    "unsatisfiable."
+                ),
                 ("nono-py",),
             ),
             (
-                "Because only pygit2<=1.18.2 is available and pygit2==1.18.2 has no "
-                "usable wheels, we can conclude that all versions of pygit2 cannot "
-                "be used.",
+                (
+                    "Because only pygit2<=1.18.2 is available and pygit2==1.18.2 has "
+                    "no usable wheels, we can conclude that all versions of pygit2 "
+                    "cannot be used."
+                ),
                 ("pygit2",),
             ),
             (
-                "Because cryptography==50.0.2 has no wheels with a matching platform "
-                "tag (e.g., `macosx_14_0_x86_64`) and you require cryptography>=50.0.2",
+                (
+                    "Because cryptography==50.0.2 has no wheels with a matching "
+                    "platform tag (e.g., `macosx_14_0_x86_64`) and you require "
+                    "cryptography>=50.0.2"
+                ),
                 ("cryptography",),
             ),
             (
-                "Because b==1 has no usable wheels. And because a==2 has no usable "
-                "wheels and b==1 has no usable wheels, a conclusion.",
+                (
+                    "Because b==1 has no usable wheels. And because a==2 has no "
+                    "usable wheels and b==1 has no usable wheels, a conclusion."
+                ),
                 ("a", "b"),
             ),
             ("Because nothing in this message names a wheel problem.", ()),
@@ -1489,28 +1497,3 @@ class TestTheWorkflow:
         assert re.search(r"\b(always|cancelled|failure)\(", upload["if"])
         assert upload["with"]["if-no-files-found"] == "ignore"
         assert "platform_wheels" in upload["with"]["path"]
-
-
-class TestUvAcceptsWhatTheScriptPasses:
-    def test_every_flag_and_platform_name_is_in_the_installed_uvs_help(self, script):
-        uv = uv_binary()
-        done = subprocess.run(
-            [uv, "pip", "compile", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-            env=script.child_environment(os.environ),
-        )
-        assert done.returncode == 0, done.stderr
-        argvs = [
-            script.cell_command(uv, platform, "3.12", CUTOFF)
-            for platform in script.PLATFORMS
-        ]
-        argvs.append(script.closure_command(uv, "3.11", CUTOFF))
-        flags = {arg for argv in argvs for arg in argv if arg.startswith("--")}
-        assert flags
-        missing = sorted(flag for flag in flags if flag not in done.stdout)
-        assert not missing, f"uv pip compile --help does not list {missing}"
-        triples = sorted(p.triple for p in script.PLATFORMS if p.triple not in done.stdout)
-        assert not triples, f"uv does not list the platform names {triples}"
