@@ -466,13 +466,18 @@ class ScannerStatisticsCalculator:
         result with a suppression in effect, otherwise its resolved severity.
         A result that states no finding (``result_states_no_finding``: kind
         ``pass``, ``notApplicable`` or ``informational``, and nothing in it reports a
-        problem) is skipped too, because it counts in no figure, suppressed or not:
-        its level ``none`` resolves to INFO, which counted a rule that was not
-        evaluated as an info finding, and a suppression has no finding to hide on it.
+        problem) counts in no figure, suppressed or not: its level ``none`` resolves
+        to INFO, which counted a rule that was not evaluated as an info finding, and
+        a suppression has no finding to hide on it. It is yielded with the kind
+        ``NOT_A_FINDING`` all the same, so the scanner that reported it keeps its
+        row, and every count leaves that kind out.
         *only*, when given, keeps the results whose name matches it case-insensitively,
         and the per-result readings are made for those alone.
         """
-        from automated_security_helper.utils.count_frame import SUPPRESSED
+        from automated_security_helper.utils.count_frame import (
+            NOT_A_FINDING,
+            SUPPRESSED,
+        )
         from automated_security_helper.utils.sarif_utils import (
             _resolve_result_severity,
             is_result_suppressed,
@@ -492,8 +497,10 @@ class ScannerStatisticsCalculator:
 
             # A result that states no finding is read before the suppression and
             # the level: it carries level none, which resolves to INFO, and it is
-            # in no count, a suppressed one included.
+            # in no count, a suppressed one included. Its scanner is named all the
+            # same, so a scanner that reported nothing else keeps its row.
             if result_states_no_finding(result):
+                yield (result_scanner, NOT_A_FINDING)
                 continue
             # Suppressed means a suppression IN EFFECT: one whose state is
             # rejected or underReview (SARIF 3.35.4) hides nothing, so its
@@ -597,6 +604,7 @@ class ScannerStatisticsCalculator:
             - (default) -> info
         """
         from automated_security_helper.utils.count_frame import (
+            NOT_A_FINDING,
             severity_frame,
             tally_severities,
         )
@@ -607,11 +615,14 @@ class ScannerStatisticsCalculator:
         # tree's and stay in ``_sarif_name_kinds``; the counting is
         # utils.count_frame's group-by. Asked for one name, it reads that name's
         # results alone; ``extract_scanner_statistics`` asks for every name's at once.
+        # A result that states no finding is yielded to name its scanner and is in
+        # no count.
         kinds = [
             kind
             for _, kind in ScannerStatisticsCalculator._sarif_name_kinds(
                 asharp_model, only=scanner_name
             )
+            if kind != NOT_A_FINDING
         ]
         tally_severities(severity_frame(kinds), counts)
 

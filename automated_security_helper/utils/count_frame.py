@@ -19,7 +19,8 @@ rows:
 * :func:`actionable_frame` and :func:`actionable_by_name` for the actionable
   counts. A row is ``(name, actionable)``.
 * :func:`severity_counts_by_name` for the severity counts of every scanner name at
-  once, from one walk. A row is ``(name, kind)``.
+  once, from one walk. A row is ``(name, kind)``; a kind of :data:`NOT_A_FINDING`
+  keeps the name in the count and counts nothing.
 
 Text goes into a String column through :func:`~automated_security_helper.utils.
 frame_text.wire`, so a scanner name or a severity with a lone surrogate is carried,
@@ -43,6 +44,12 @@ if TYPE_CHECKING:
 
 #: What a row of :func:`severity_frame` says when the result is suppressed.
 SUPPRESSED = "suppressed"
+
+#: What a row of :func:`severity_counts_by_name` says for a result that states no
+#: finding. It names a scanner and counts nothing: the scanner ran and reported, so
+#: it keeps its name in the count, and no severity, total or suppressed figure
+#: takes the result.
+NOT_A_FINDING = "not-a-finding"
 
 
 def severity_frame(kinds: Iterable[str]) -> "pl.DataFrame":
@@ -127,14 +134,17 @@ class SeverityCountsByName:
 def severity_counts_by_name(rows: Iterable[Tuple[str, str]]) -> SeverityCountsByName:
     """The counts of every scanner name in *rows*, one ordered count for all of them.
 
-    A row is ``(scanner name, kind)``, the kind a resolved severity or
-    :data:`SUPPRESSED`. Names are folded on the host before they are wired, so
-    one scanner under two spellings is one key of the count, and the exact
-    spellings are kept in first-seen order for the caller that lists them.
+    A row is ``(scanner name, kind)``, the kind a resolved severity,
+    :data:`SUPPRESSED` or :data:`NOT_A_FINDING`. Names are folded on the host before
+    they are wired, so one scanner under two spellings is one key of the count, and
+    the exact spellings are kept in first-seen order for the caller that lists
+    them. Every row names its scanner, but a :data:`NOT_A_FINDING` row is counted
+    in no severity: a scanner whose rows all state no finding is listed and counts
+    nothing.
     """
     rows = list(rows)
     names = list(dict.fromkeys(name for name, _ in rows))
-    frame = named_severity_frame(rows)
+    frame = named_severity_frame(row for row in rows if row[1] != NOT_A_FINDING)
     kinds_by_name: Dict[str, List[Tuple[str, int]]] = {}
     for wired_name, wired_kind, number in ordered_counts(
         frame, ["name", "kind"]
