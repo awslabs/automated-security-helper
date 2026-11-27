@@ -185,7 +185,9 @@ Level: unsupported. ASH stops here. Ways out: [use WSL 2](#wsl2),
 The per-scanner sandbox is not applied in container mode, so the container is the only
 boundary around the scanners.
 
-Level: degraded. ASH carries on. Ways out:
+Level: degraded. ASH carries on. The sandbox backend the host has says nothing about a
+container run, so the rows below about a missing or limited backend do not apply in
+container mode. Ways out:
 [scan in local mode with a sandbox](#mode-local-sandboxed) or, from Windows,
 [use WSL 2 with the sandbox](#wsl2-sandboxed). The scanner sandbox section of
 [Run ASH in a container](run-in-a-container.md#sandbox) describes the sandbox.
@@ -315,14 +317,16 @@ GuardDog runs inside ASH's sandbox-exec confinement instead of its own kernel sa
 
 Level: polyfilled. The stand-in is the ASH sandbox for GuardDog. It stands in for GuardDog's
 kernel sandbox. What you can see: GuardDog's own nono policy is not applied; ASH's sandbox
-confines the scan instead.
+confines the scan instead. It applies on macOS, where the scanner sandbox is on and its
+backend is sandbox-exec, the same configuration as Betterleaks below.
 
 ### GuardDog without a kernel sandbox {#scanner-guarddog-sandbox-unavailable}
 
 GuardDog runs without its own kernel sandbox, because the kernel offers none here.
 
 Level: degraded. ASH carries on. When the scanner's options require the sandbox, the scan
-of that target fails instead. Way out: [enable Landlock](#enable-landlock).
+of that target fails instead. It applies on Linux, where the way out is a kernel setting.
+Way out: [enable Landlock](#enable-landlock).
 
 ### Betterleaks with a private home directory {#scanner-betterleaks-private-home}
 
@@ -363,8 +367,16 @@ ASH downloads some scanner tools at a pinned version. For each platform where a 
 no build, ASH declares one sentence: ASH has no build of that tool, at that version, for
 that platform. The scanner is reported as missing there. Several tools have no build for
 Windows on arm64, for example. The declaration is about a missing tool, so a copy of the
-tool that you put on the path, and that runs, is outside it. Ways out: [use WSL 2](#wsl2),
-[scan in the container image](#container-image) or [use Linux or macOS](#linux-or-macos-host).
+tool that you put on the path, and that runs, is outside it.
+
+The ways out depend on the platform that lacks the build. From a Windows machine:
+[use WSL 2](#wsl2), [scan in the container image](#container-image) or
+[use Linux or macOS](#linux-or-macos-host). From a Mac, scan in the container image.
+The image runs Linux on this machine's processor, so it is no way out of a missing Linux
+build, which leads to another machine. For a missing x86-64 build,
+[use an arm64 machine](#arm64-host). For a missing arm64 build,
+[use an x86-64 processor](#x86-host-with-features) or [scan in CI](#ci-runner).
+
 The [scanner reference](../reference/scanners.md) lists the scanners.
 
 ## Ways to a supported configuration {#ways-out}
