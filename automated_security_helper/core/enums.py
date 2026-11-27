@@ -148,6 +148,16 @@ class BuildTarget(str, Enum):
     CI = "ci"
 
 
+class BuildEngine(str, Enum):
+    """The program that builds the container image.
+
+    ``RUNNER`` is the container runner ASH already resolves, which builds the image
+    and then runs the scan in it. A member is added with the code that uses it.
+    """
+
+    RUNNER = "runner"
+
+
 class RunMode(str, Enum):
     precommit = "precommit"
     container = "container"
