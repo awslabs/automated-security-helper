@@ -512,7 +512,7 @@ td:first-child { font-weight: 550; }
                 <td class="status-passed">PASSED</td>
                 <td>MEDIUM (global)</td>
             </tr>
-            </table></div><h3>Scanners that did not run</h3><ul><li><strong>cdk-nag</strong> (SKIPPED): left out of this run</li><li><strong>npm-audit</strong> (MISSING): its dependencies were not available; no reason was recorded, and ash.log has the scanner&#x27;s own message</li></ul>
+            </table></div><h3>Scanners that did not run</h3><ul><li><strong>cdk-nag</strong> (SKIPPED): left out of this run</li><li><strong>cfn-nag</strong> (ERROR): it failed on 1 of its 1 target(s)</li><li><strong>npm-audit</strong> (MISSING): its dependencies were not available; no reason was recorded, and ash.log has the scanner&#x27;s own message</li></ul>
       <details class="reference"><summary>How to read scanner results</summary><p><strong>Actionable</strong> means a finding meets or exceeds its scanner's configured threshold. Suppressed findings do not contribute to this count.</p><p><strong>PASSED</strong> has no actionable findings. <strong>FAILED</strong> exceeds the threshold. <strong>MISSING</strong> needs dependencies. <strong>SKIPPED</strong> did not run (disabled, or nothing to scan). <strong>ERROR</strong> could not complete. Coverage notices above explain partial results.</p><p>Threshold sources: <code>global</code> settings, scanner <code>config</code>, or the <code>scanner</code> default.</p></details>
       <div class="hotspots"><h3>Top 4 hotspots</h3><p>Files with the most actionable findings.</p><div class="table-scroll" role="region" aria-label="Top hotspots" tabindex="0">
         <table>

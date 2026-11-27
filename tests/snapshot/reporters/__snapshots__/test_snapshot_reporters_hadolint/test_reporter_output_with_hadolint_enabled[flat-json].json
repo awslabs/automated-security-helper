@@ -25,6 +25,8 @@
       "dependencies_missing": false,
       "missing_reason": null,
       "skipped_reason": null,
+      "error_reason": null,
+      "error_reason_code": null,
       "duration": 0.25,
       "targets_attempted": null,
       "targets_failed": 0,
