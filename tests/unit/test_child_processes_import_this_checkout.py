@@ -232,6 +232,12 @@ ALLOWED: Dict[str, str] = {
     "tests/unit/assets/test_install_pinned_tool.py"
     "::TestUvToolPins.test_the_mode_prints_them_under_a_bare_interpreter"
     "::isolated-script#1@run": (_BARE_INTERPRETER),
+    "tests/unit/base/test_image_register.py::_load_by_path::code#1@run": (
+        "an isolated child (-I -B) that loads image_register.py by file path and "
+        "imports nothing from the package; the planted control, "
+        "test_the_probe_sees_a_planted_package_import, shows the probe sees a "
+        "package import when the module makes one"
+    ),
     "tests/unit/cli/mcp/test_mcp_resource_limits.py"
     "::_child_process_scans._ChildProcessScan.execute_scan::unread-code#1@run_command": (
         "the child is _child() or _slow_to_stop(), standard-library code that "

@@ -599,9 +599,9 @@ print(json.dumps({
 """
 
 
-def _load_by_path(path: Path, driver: str = _LOAD_BY_PATH) -> dict:
+def _load_by_path(path: Path) -> dict:
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", driver, str(path)],
+        [sys.executable, "-I", "-B", "-c", _LOAD_BY_PATH, str(path)],
         capture_output=True,
         text=True,
         check=False,
