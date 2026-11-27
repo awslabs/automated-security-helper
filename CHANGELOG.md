@@ -168,6 +168,8 @@
 
 ### Fixes
 
+- **`.ash.lock` is written through the same atomic writer as other config
+  files.**
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
