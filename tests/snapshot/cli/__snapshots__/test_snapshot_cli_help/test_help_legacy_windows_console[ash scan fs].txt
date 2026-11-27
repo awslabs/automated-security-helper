@@ -7,12 +7,14 @@
 
  Review the result with: ash results inspect findings
 
- Options are grouped by workflow below. `fs` is the only subject of `ash scan`
- today; `ash scan` with no subject runs it, but that form is deprecated.
+ Options are grouped by workflow below. To scan the projects of a `.code-workspace`
+ file, use `ash scan workspace`. `ash scan` with no subject runs this subject, but
+ that form is deprecated.
 
 ┌─ Scan ──────────────────────────────────────────────────────────────────────────────────────────┐
 │   [PATH]      <str>  The directory to scan. Defaults to the current directory. --source-dir and │
-│                      ASH_SOURCE_DIR also name it.                                               │
+│                      ASH_SOURCE_DIR also name it, and both are deprecated and will be removed   │
+│                      in ASH v4.0.                                                               │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Options ───────────────────────────────────────────────────────────────────────────────────────┐
 │ --version                                             Prints version number                     │
@@ -53,6 +55,20 @@
 │                                                              in ASH v4.0: give it as the PATH   │
 │                                                              argument of `ash scan fs`.         │
 │                                                              [env var: ASH_SOURCE_DIR]          │
+│ --archive                   FILE                             A zip of source code to scan in    │
+│                                                              place of a directory. ASH checks   │
+│                                                              it against its size, name and link │
+│                                                              rules, extracts it to a temporary  │
+│                                                              directory that is removed when the │
+│                                                              command ends, and scans that;      │
+│                                                              results go to .ash/ash_output in   │
+│                                                              the working directory unless       │
+│                                                              --output-dir names another. Cannot │
+│                                                              be combined with the PATH          │
+│                                                              argument, --source-dir,            │
+│                                                              --source-git, an image option,     │
+│                                                              --staged, --use-existing or        │
+│                                                              --changed-files-only.              │
 │ --scanners                  <str>                            Deprecated: use --only-scanners to │
 │                                                              state the whole selection, or      │
 │                                                              --add-scanners to add to the       │
@@ -627,29 +643,6 @@
 │                                    --mode local and precommit only (exit 5 otherwise).          │
 │                                    [env var: ASH_BASELINE]                                      │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
-┌─ Workspace ─────────────────────────────────────────────────────────────────────────────────────┐
-│ --workspace                     <str>  Path to a '.code-workspace' file whose folders are       │
-│                                        scanned as separate, independently-scoped projects. Pass │
-│                                        'auto' to use the single '*.code-workspace' file in the  │
-│                                        current directory. Mutually exclusive with --source-dir. │
-│                                        [env var: ASH_WORKSPACE]                                 │
-│ --workspace-config              <str>  Path to the workspace policy file (severity ceiling,     │
-│                                        workspace-wide suppressions and ignore paths, additional │
-│                                        scanners). Without this, ASH looks for                   │
-│                                        'ash-workspace.{yaml,yml,json}' in the workspace root or │
-│                                        its '.ash' directory; finding none is not an error. Must │
-│                                        not be any project's own ASH config: workspace policy    │
-│                                        governs every project, so reading one project's config   │
-│                                        as policy would apply its settings to its siblings.      │
-│                                        [env var: ASH_WORKSPACE_CONFIG]                          │
-│ --allow-missing-projects               In workspace mode, skip project folders that are absent  │
-│                                        or unreadable instead of failing. Skipped projects are   │
-│                                        recorded in the plan. Without this, a missing project    │
-│                                        fails the whole workspace, so a typo or an un-cloned     │
-│                                        repository cannot pass as a clean scan.                  │
-│ --dry-run                              In workspace mode, print the resolved execution plan and │
-│                                        exit without scanning anything.                          │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌─ Container ─────────────────────────────────────────────────────────────────────────────────────┐
 │ --build                      -b  --no-build  -B                 Whether to build the ASH        │
 │                                                                 container image                 │
@@ -716,8 +709,9 @@
 │ --generate-cli-skeleton              Print a JSON template for --cli-json-input, listing every  │
 │                                      parameter of this command with its default, or null where  │
 │                                      it is required or an environment variable backs it, and    │
-│                                      exit.                                                      │
+│                                      exit. Deprecated parameters are left out of the template,  │
+│                                      and a document that names one is still read.               │
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 
- Subjects of `ash scan`: fs (scan a directory). Run `ash scan <subject> --help` for a subject's
- own options.
+ Subjects of `ash scan`: fs (scan a directory), workspace (scan the projects of a .code-workspace
+ file). Run `ash scan <subject> --help` for a subject's own options.

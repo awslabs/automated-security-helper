@@ -624,6 +624,8 @@
 │                                        scanned as separate, independently-scoped projects. Pass │
 │                                        'auto' to use the single '*.code-workspace' file in the  │
 │                                        current directory. Mutually exclusive with --source-dir. │
+│                                        Deprecated as an option, removed in ASH v4.0: give it as │
+│                                        the FILE argument of `ash scan workspace`.               │
 │                                        [env var: ASH_WORKSPACE]                                 │
 │ --workspace-config              <str>  Path to the workspace policy file (severity ceiling,     │
 │                                        workspace-wide suppressions and ignore paths, additional │

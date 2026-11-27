@@ -41,7 +41,7 @@
       DeprecationWarning: 'ash report' is deprecated and is removed in 4.0. Use 'ash results report' instead; 'ash report' keeps its current behavior until then.
       Usage: ash [OPTIONS] COMMAND [ARGS]...
       Try 'ash --help' for help.
-      Error: 'ash report' does not take --source-dir, given before it (see 'ash report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or leave out 'report' to scan with it.
+      Error: 'ash report' does not take --source-dir, given before it (see 'ash report --help'). Options given before a subcommand are passed to it only when it takes them: drop it, give it after a subcommand that takes it, or run 'ash scan fs' with it.
   
     ''',
     'stdout': '',
@@ -206,7 +206,7 @@
     'stderr': '''
       Usage: ash scan fs [OPTIONS] [PATH]
       Try 'ash scan fs --help' for help.
-      Error: --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names path, source_dir, output_dir, scanners, exclude_scanners, only_scanners, add_scanners, ash_plugin_modules, config_overrides, offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db, simple, ignore_suppressions, honor_ignore_files, min_severity, compact_report, annotate_duplicates, fold_duplicates, changed_files_only, base_ref, staged, allow_in_tree_tools, shard_index, shard_count, workspace, workspace_config, allow_missing_projects, dry_run, build, run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg, baseline, image, image_archive, image_layout, source_git, git_ref, git_depth; each option's long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.
+      Error: --cli-json-input: unknown key 'output_dirr' in params.json. Valid keys are the parameter names path, source_dir, archive, output_dir, scanners, exclude_scanners, only_scanners, add_scanners, ash_plugin_modules, config_overrides, offline, sandbox, offline_semgrep_rulesets, strategy, progress, output_formats, cleanup, phases, inspect, use_existing, version, mode, python_based_plugins_only, show_summary, quiet, log_level, config, verbose, debug, color, fail_on_findings, fail_on_incomplete_scanners, allow_stale_content_db, simple, ignore_suppressions, honor_ignore_files, min_severity, compact_report, annotate_duplicates, fold_duplicates, changed_files_only, base_ref, staged, allow_in_tree_tools, shard_index, shard_count, build, run, force, oci_runner, build_target, container_uid, container_gid, ash_revision_to_install, custom_containerfile, custom_build_arg, baseline, image, image_archive, image_layout, source_git, git_ref, git_depth; each option's long flag spelling is accepted as well. Run with --generate-cli-skeleton for a template.
   
     ''',
     'stdout': '',
@@ -372,7 +372,8 @@
   dict({
     'exit_code': 5,
     'stderr': '''
-      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ash merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via --source-dir and shard that.
+      Deprecated: A workspace scan without the `workspace` subject is deprecated and will be removed in ASH v4.0. Use `ash scan workspace <file>`.
+      --shard-index/--shard-count cannot be combined with --workspace. Both spread one scan over more compute, but along different axes, and only sharding is recombinable: it partitions the scanners and stamps the partition onto the results so 'ash results merge' can prove the shards reconstruct exactly one whole scan. Workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from -- and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project with `ash scan fs <project>` and shard that.
   
     ''',
     'stdout': '',
@@ -444,7 +445,7 @@
   dict({
     'exit_code': 4,
     'stderr': '''
-      No '*.code-workspace' file found in '<TMP>'. Pass '--workspace <file>' to name one explicitly, or drop '--workspace' to scan a single directory.
+      No '*.code-workspace' file found in '<TMP>'. Name one with `ash scan workspace <file>`, or scan a single directory with `ash scan fs <path>`.
   
     ''',
     'stdout': '',
@@ -454,7 +455,8 @@
   dict({
     'exit_code': 4,
     'stderr': '''
-      --dry-run only applies in workspace mode; pass '--workspace <file>' or '--workspace auto' as well.
+      Deprecated: `ash scan` without a subject is deprecated and will be removed in ASH v4.0. Use `ash scan fs <path>`.
+      --dry-run only applies in workspace mode; run `ash scan workspace <file>` (or `ash scan workspace auto`) to scan a workspace.
   
     ''',
     'stdout': '',
@@ -464,7 +466,8 @@
   dict({
     'exit_code': 4,
     'stderr': '''
-      --allow-missing-projects and --workspace-config only applies in workspace mode; pass '--workspace <file>' or '--workspace auto' as well.
+      Deprecated: `ash scan` without a subject is deprecated and will be removed in ASH v4.0. Use `ash scan fs <path>`.
+      --allow-missing-projects and --workspace-config only applies in workspace mode; run `ash scan workspace <file>` (or `ash scan workspace auto`) to scan a workspace.
   
     ''',
     'stdout': '',
@@ -484,7 +487,7 @@
   dict({
     'exit_code': 4,
     'stderr': '''
-      Deprecated: `--source-dir` is deprecated and will be removed in ASH v4.0. Give the directory as the argument: `ash scan fs <path>`.
+      Deprecated: A workspace scan without the `workspace` subject is deprecated and will be removed in ASH v4.0. Use `ash scan workspace <file>`.
       --workspace and --source-dir are mutually exclusive. In workspace mode the directory holding the workspace file is the scan root, so honouring both would leave it ambiguous which tree was scanned. Note that --source-dir is also set by the ASH_SOURCE_DIR environment variable, which counts as setting it.
   
     ''',

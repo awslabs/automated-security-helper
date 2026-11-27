@@ -7,12 +7,14 @@
 
  Review the result with: ash results inspect findings
 
- Options are grouped by workflow below. `fs` is the only subject of `ash scan`
- today; `ash scan` with no subject runs it, but that form is deprecated.
+ Options are grouped by workflow below. To scan the projects of a `.code-workspace`
+ file, use `ash scan workspace`. `ash scan` with no subject runs this subject, but
+ that form is deprecated.
 
 ╭─ Scan ───────────────────────────────────────────────────────────────────────────────────────────╮
 │   [PATH]      <str>  The directory to scan. Defaults to the current directory. --source-dir and  │
-│                      ASH_SOURCE_DIR also name it.                                                │
+│                      ASH_SOURCE_DIR also name it, and both are deprecated and will be removed in │
+│                      ASH v4.0.                                                                   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --version                                             Prints version number                      │
@@ -625,6 +627,8 @@
 │                                        scanned as separate, independently-scoped projects. Pass  │
 │                                        'auto' to use the single '*.code-workspace' file in the   │
 │                                        current directory. Mutually exclusive with --source-dir.  │
+│                                        Deprecated as an option, removed in ASH v4.0: give it as  │
+│                                        the FILE argument of `ash scan workspace`.                │
 │                                        [env var: ASH_WORKSPACE]                                  │
 │ --workspace-config              <str>  Path to the workspace policy file (severity ceiling,      │
 │                                        workspace-wide suppressions and ignore paths, additional  │
@@ -711,5 +715,5 @@
 │                                      exit.                                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 
- Subjects of `ash scan`: fs (scan a directory). Run `ash scan <subject> --help` for a subject's own
- options.
+ Subjects of `ash scan`: fs (scan a directory), workspace (scan the projects of a .code-workspace
+ file). Run `ash scan <subject> --help` for a subject's own options.
