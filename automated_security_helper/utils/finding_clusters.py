@@ -12,6 +12,11 @@ Finding ids, SARIF results, per-scanner metrics, baselines and suppressions
 stay keyed by the scanner-inclusive identity. A report emitter that wants to
 show one row per cluster does that on top of these annotations.
 
+A row whose result states no finding (``FlatVulnerability.is_finding`` is False)
+is in no cluster: it is listed as information and counted in no total, so it is
+no duplicate of a finding, and it cannot be the bridge that joins two findings
+that do not overlap each other.
+
 Three classes, tried in this order; a finding joins at most one cluster, by
 the first class whose required columns it carries:
 
@@ -483,13 +488,19 @@ def _build(
 def _clusters(
     rows: Sequence[FlatVulnerability], by_project: bool
 ) -> List[FindingCluster]:
-    """The clusters of *rows*; with *by_project*, none spans two projects."""
+    """The clusters of *rows*; with *by_project*, none spans two projects.
+
+    A row that states no finding is in no key group and no location group, so it
+    neither clusters with a finding nor links two of them.
+    """
     if not rows:
         return []
     projects = [row.workspace_project for row in rows] if by_project else None
     keyed: List[Tuple[int, Tuple[Any, ...]]] = []
     unclaimed: Dict[int, Tuple[str, int, int, frozenset[str]]] = {}
     for index, row in enumerate(rows):
+        if not row.is_finding:
+            continue
         key = _package_key(row) or _iac_key(row)
         if key is not None:
             keyed.append((index, key))
