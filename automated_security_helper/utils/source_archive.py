@@ -12,8 +12,8 @@ anything in it is scanned, and both are held to the rules here, so the two entry
 points cannot drift apart: an archive one of them refuses, the other refuses in the
 same words. The rules are the ones the MCP delivery enforced, moved here, with
 additions that hold for both: a NUL, a ``.`` or an empty component in a member name,
-a Unicode path field that renames a member, two members on one path, and a file that
-holds anything besides one zip (below).
+a Unicode path field that renames a member, two members on one path, an encrypted
+member, and a file that holds anything besides one zip (below).
 
 What is refused
 ---------------
@@ -80,6 +80,11 @@ destination as it was.
    or size than its central directory entry is refused too, since a reader of the
    local headers would find that member's data, and the next member, elsewhere. Each
    of these is refused as not a zip.
+7. Encryption. A member whose data is encrypted is refused, a link included: its data
+   cannot be read, so no rule could judge it and no scan read it. The members are
+   checked for it right after they are counted, before any other rule reads the file,
+   so an archive that holds one is refused in the same words by both entry points,
+   whatever else it holds.
 
 A malformed member is refused, never repaired: an archive that has to be rewritten to
 be safe is not the tree its sender meant to send.
@@ -97,16 +102,29 @@ Entry points
 ------------
 * ``extract_source_archive(archive, destination)`` reads the zip at a path, for
   ``ash scan fs --archive``. Besides the rules above it refuses a path that is not a
-  regular file or cannot be read, an encrypted member, and a member zipfile cannot
-  read back whole: damaged data, a compression method or zip version it does not
-  implement, a method whose module this Python was built without. It reads the file
-  once, into memory, and zipfile reads that copy, so nothing zipfile raises is about
-  the disk. Every problem with the archive is a ``SourceArchiveRefused``; an
-  ``OSError`` is a problem with the destination or the disk.
-* ``extract_zip_members(archive, destination, rules)`` extracts an archive its caller
-  holds open. The MCP finalize hashes an upload before extracting it, and has to
-  extract the bytes it hashed, so it passes the handle it read, with its own limits
-  (``ZipRules``). ``admit_zip_members`` is the checking half of it.
+  regular file or cannot be read, and a member zipfile cannot read back whole:
+  damaged data, a compression method or zip version it does not implement, a method
+  whose module this Python was built without. It reads the file once, into memory,
+  and zipfile reads that copy, so nothing zipfile raises is about the disk. Every
+  problem with the archive is a ``SourceArchiveRefused``; an ``OSError`` is a problem
+  with the destination or the disk.
+* ``open_zip(handle)`` opens an archive its caller holds open, and
+  ``extract_zip_members(archive, destination, rules)`` extracts it. The MCP finalize
+  hashes an upload before extracting it, and has to extract the bytes it hashed, so it
+  passes the handle it read, with its own limits (``ZipRules``).
+  ``admit_zip_members`` is the checking half of the extraction.
+
+Both entry points read the archive through one classification of what zipfile raises,
+so an archive one of them refuses, the other refuses with the same kind and words.
+What zipfile raises as it opens the file, reads a link's target or extracts a member
+is about the archive, and is a refusal. Bytes it does not open as a zip are refused as
+not a zip, in its own words, and the refusal is a ``zipfile.BadZipFile`` as well, which
+is what the MCP finalize has always raised for them. Anything else it raises while it
+opens the archive or reads a link's target is refused as unreadable ("the archive
+cannot be read: ..."), and while it extracts a member, as unreadable with the member
+named ("zip entry '...' cannot be read: ..."). An ``OSError`` is raised as it is, since
+it is a problem with the destination or the disk, and so is a ``MemoryError``, which
+is the process's. What ASH's own code raises is not caught.
 
 A refusal is a ``SourceArchiveRefused``, a ``ValueError`` whose ``kind``
 (``SourceArchiveRefusal``) names the rule. Import this module where an archive is
@@ -239,10 +257,10 @@ _WINDOWS_DEVICE_NAMES = frozenset(
     | {f"LPT{digit}" for digit in "123456789\xb9\xb2\xb3"}
 )
 
-#: What ``extract_source_archive`` lets pass from zipfile as it was raised. zipfile
-#: reads the archive from memory there, so every other exception it raises is about
-#: the archive. An OSError is the destination's, since extraction writes there, or a
-#: damaged bzip2 stream's (see Limits); a MemoryError is the process's.
+#: What the classification of zipfile's exceptions lets pass as they were raised.
+#: Every other exception zipfile raises is about the archive. An OSError is the
+#: destination's, since extraction writes there, the disk's where the archive is read
+#: from one, or a damaged bzip2 stream's (see Limits); a MemoryError is the process's.
 _NOT_THE_ARCHIVES: Tuple[Type[BaseException], ...] = (OSError, MemoryError)
 
 
@@ -264,10 +282,10 @@ class SourceArchiveRefusal(str, Enum):
     PATH_COLLISION = "path-collision"
     SYMLINK_MEMBER = "symlink-member"
     NOT_A_ZIP = "not-a-zip"
-    # Only extract_source_archive refuses for these four: it opens the file and
-    # reads every member's data itself.
+    # Only extract_source_archive refuses for these two: it opens the file itself.
     NOT_A_FILE = "not-a-file"
     UNREADABLE_ARCHIVE = "unreadable-archive"
+    # Both entry points refuse for these two.
     ENCRYPTED_MEMBER = "encrypted-member"
     UNREADABLE_MEMBER = "unreadable-member"
 
@@ -285,6 +303,14 @@ class SourceArchiveRefused(ValueError):
         # The default rebuilds an exception from its args, the message alone, which
         # this constructor does not take; a copy or a pickle would fail without this.
         return type(self), (self.kind, str(self))
+
+
+class _BadZipFileRefused(SourceArchiveRefused, zipfile.BadZipFile):
+    """The refusal of bytes that are not a zip (``not-a-zip``), a ``BadZipFile`` too.
+
+    The MCP finalize raised ``zipfile.BadZipFile`` for them before it shared this
+    module, and documents it, so a caller that catches that still does.
+    """
 
 
 def archive_too_large(size: int, limit: int) -> SourceArchiveRefused:
@@ -406,15 +432,18 @@ def admit_zip_members(
     Writes nothing. Reads the file ``archive`` was opened on where its records are (the
     end records, the central directory, each member's local header and any data
     descriptor) and, for a link, the first bytes of its target; no other member data.
-    The member count is checked first; then that the file is one zip and nothing else;
-    then, for each member in archive order, its name, its Unicode path fields and the
-    name an admitted one gives, the uncompressed total so far, and whether it is a
-    link; then that no two members are extracted to one path. The first rule that
-    refuses ends the check.
+    The member count is checked first; then that no member is encrypted; then that the
+    file is one zip and nothing else; then, for each member in archive order, its name,
+    its Unicode path fields and the name an admitted one gives, the uncompressed total
+    so far, and whether it is a link; then that no two members are extracted to one
+    path. The first rule that refuses ends the check.
 
     Raises:
-        SourceArchiveRefused: naming the rule. Whatever ``rules.validate_name`` and
-            zipfile raise is raised as it is.
+        SourceArchiveRefused: naming the rule. What zipfile raises as the first bytes
+            of a link's target are read is refused as unreadable, like anything else
+            zipfile raises about the archive, but an ``OSError`` and a
+            ``MemoryError``. Whatever ``rules.validate_name`` raises, and every
+            exception of this module's own, is raised as it is.
         ValueError: ``archive`` is closed.
     """
     members = archive.infolist()
@@ -423,6 +452,7 @@ def admit_zip_members(
             SourceArchiveRefusal.TOO_MANY_MEMBERS,
             f"too many files in zip: {len(members)} > {rules.max_members}",
         )
+    _refuse_encrypted_members(members)
     spelled_names, local_extras = _refuse_anything_but_one_zip(archive, members)
     total = 0
     for info, spelled, local_extra in zip(members, spelled_names, local_extras):
@@ -503,15 +533,27 @@ def _refuse_anything_but_one_zip(
 
 
 def _not_a_zip(message: str) -> SourceArchiveRefused:
-    return SourceArchiveRefused(SourceArchiveRefusal.NOT_A_ZIP, message)
+    return _BadZipFileRefused(SourceArchiveRefusal.NOT_A_ZIP, message)
 
 
 def _read_at(handle: IO[bytes], offset: int, length: int) -> bytes:
-    """At most ``length`` bytes of ``handle`` from ``offset``; none before its start."""
+    """At most ``length`` bytes of ``handle`` from ``offset``; none before its start.
+
+    The offsets and lengths come from the archive's own records, so one can be larger
+    than any seek or read takes (an ``OverflowError``), or than the filesystem can
+    hold (the ``OSError`` of a seek): nothing is there to read, as for an offset past
+    the end of the file. A read that fails is the disk's, and is raised as it is.
+    """
     if offset < 0 or length <= 0:
         return b""
-    handle.seek(offset)
-    return handle.read(length)
+    try:
+        handle.seek(offset)
+    except (OverflowError, OSError):
+        return b""
+    try:
+        return handle.read(length)
+    except OverflowError:
+        return b""
 
 
 def _end_record_position(handle: IO[bytes], size: int) -> int:
@@ -533,6 +575,10 @@ def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
 
     zipfile reads the record where the locator places it, and when no record is there,
     just before the locator, taking the difference for bytes the zip was appended to.
+    A locator with no whole record in either place is refused as not a zip, in the
+    words zipfile uses for it. Current zipfile releases refuse such an archive as they
+    open it; one without that check opens it and takes the end record's own counts, so
+    the refusal here gives every Python one verdict, whatever offset the locator holds.
     """
     locator_at = end - _ZIP64_LOCATOR.size
     if locator_at < 0:
@@ -543,11 +589,20 @@ def _zip64_end_record(handle: IO[bytes], end: int) -> Optional[Tuple[int, ...]]:
     if signature != _ZIP64_LOCATOR_SIGNATURE:
         return None
     record = _read_at(handle, record_at, _ZIP64_END_RECORD.size)
-    if not record.startswith(_ZIP64_END_RECORD_SIGNATURE):
+    if not _is_zip64_end_record(record):
         record = _read_at(
             handle, locator_at - _ZIP64_END_RECORD.size, _ZIP64_END_RECORD.size
         )
+    if not _is_zip64_end_record(record):
+        raise _not_a_zip("Zip64 end of central directory record not found")
     return _ZIP64_END_RECORD.unpack(record)
+
+
+def _is_zip64_end_record(record: bytes) -> bool:
+    """Whether ``record`` holds a whole zip64 end record."""
+    return len(record) == _ZIP64_END_RECORD.size and record.startswith(
+        _ZIP64_END_RECORD_SIGNATURE
+    )
 
 
 def _spelled_names(
@@ -864,9 +919,11 @@ def _link_refused(
 
     A link member's content is whatever the archive says, up to the uncompressed
     total, and the refusal text is carried through every pass the error path makes
-    over it, so only the head is read and shown.
+    over it, so only the head is read and shown. This is the one read of a member's
+    data that admission makes: what zipfile raises for it is about the archive, and
+    is refused as unreadable, as it is wherever else the archive is read.
     """
-    with archive.open(info) as member:
+    with _zipfile_errors_refused("the archive"), archive.open(info) as member:
         head = member.read(rules.symlink_excerpt_bytes + 1)
     target = head[: rules.symlink_excerpt_bytes].decode("utf-8", errors="replace")
     if len(head) > rules.symlink_excerpt_bytes:
@@ -878,6 +935,31 @@ def _link_refused(
     )
 
 
+def open_zip(handle: IO[bytes]) -> zipfile.ZipFile:
+    """Open the zip that ``handle`` reads, or refuse it.
+
+    What zipfile raises as it opens a file is about the archive, so both entry points
+    refuse it here, in the same words. Bytes it does not open as a zip are refused as
+    not a zip, in zipfile's own words; the refusal is a ``zipfile.BadZipFile`` as
+    well. Anything else, such as a central directory entry that needs a newer reader
+    than zipfile implements, is refused as unreadable ("the archive cannot be read:
+    ..."). An ``OSError`` and a ``MemoryError`` are raised as they are.
+
+    Raises:
+        SourceArchiveRefused: the archive was refused; ``kind`` names the rule.
+    """
+    try:
+        return zipfile.ZipFile(handle)
+    except _NOT_THE_ARCHIVES:
+        raise
+    except (zipfile.BadZipFile, EOFError, ValueError) as error:
+        raise _not_a_zip(str(error)) from error
+    except Exception as error:
+        # "zip file version 6.4": a central directory entry that needs a newer
+        # reader than zipfile, which checks the version as it opens the archive.
+        raise _unreadable("the archive", error) from error
+
+
 def extract_zip_members(
     archive: zipfile.ZipFile,
     destination: Path,
@@ -885,14 +967,26 @@ def extract_zip_members(
 ) -> None:
     """Extract every member of an open ``archive`` into ``destination``, once admitted.
 
-    For a caller that holds the archive open already, as the MCP finalize does. What
-    zipfile raises while it extracts (a damaged or encrypted member) and every
-    ``OSError`` are raised as they are: the caller decides what they mean.
+    For a caller that holds the archive open already, as the MCP finalize does: the
+    members are admitted (:func:`admit_zip_members`, under ``rules``) and then
+    extracted one at a time, so that a failure names its member.
 
     Raises:
-        SourceArchiveRefused: a rule refused the archive; nothing was written.
+        SourceArchiveRefused: a rule refused the archive, and nothing was written; or
+            zipfile could not read a member, as extraction reached it, after the
+            members before it were written. Every ``OSError`` and ``MemoryError`` is
+            raised as it is: the caller decides what it means.
     """
-    archive.extractall(destination, admit_zip_members(archive, rules))
+    _extract_members(archive, destination, admit_zip_members(archive, rules))
+
+
+def _extract_members(
+    archive: zipfile.ZipFile, destination: Path, members: List[zipfile.ZipInfo]
+) -> None:
+    """Extract the admitted ``members`` one at a time, so a failure names its member."""
+    for info in members:
+        with _zipfile_errors_refused(f"zip entry {info.filename!r}"):
+            archive.extractall(destination, [info])
 
 
 def extract_source_archive(archive: Path, destination: Path) -> Path:
@@ -900,15 +994,14 @@ def extract_source_archive(archive: Path, destination: Path) -> Path:
 
     ``destination`` is made when it does not exist, and has to be an empty directory
     when it does. The archive is held to every rule of this module with its default
-    limits, and to three more, since this function opens and extracts the file
-    itself: ``archive`` must be a regular file it can read, no member may be
-    encrypted, and zipfile must read every member's data back whole.
+    limits, and ``archive`` has to be a regular file this function can read, since it
+    opens the file itself.
 
     The file is read once, into memory, and zipfile reads that copy, so whatever
     zipfile raises while it reads is the archive's: a member it cannot read (damaged
     data, a compression method or zip version it does not implement, a method whose
     module this Python lacks) is a ``SourceArchiveRefused`` whatever exception zipfile
-    raised for it.
+    raised for it, as it is for the MCP finalize.
 
     Every rule but the last is decided before anything is written, so a refused
     archive leaves ``destination`` as it was, not made if it did not exist. A member
@@ -923,38 +1016,10 @@ def extract_source_archive(archive: Path, destination: Path) -> Path:
     """
     destination = Path(destination)
     data = _read_archive(Path(archive))
-    try:
-        opened = zipfile.ZipFile(io.BytesIO(data))
-    except (zipfile.BadZipFile, EOFError, ValueError) as error:
-        raise SourceArchiveRefused(
-            SourceArchiveRefusal.NOT_A_ZIP, str(error)
-        ) from error
-    except _NOT_THE_ARCHIVES:
-        raise
-    except Exception as error:
-        # "zip file version 6.4": a central directory entry that needs a newer
-        # reader than zipfile, which checks the version as it opens the archive.
-        raise _unreadable("the archive", error) from error
-    with opened:
-        # Before the shared rules: the link rule reads a link's data, which an
-        # encrypted member does not give up.
-        _refuse_encrypted_members(opened)
-        try:
-            members = admit_zip_members(opened)
-        except SourceArchiveRefused:
-            raise
-        except _NOT_THE_ARCHIVES:
-            raise
-        except Exception as error:
-            raise _unreadable("the archive", error) from error
+    with open_zip(io.BytesIO(data)) as opened:
+        members = admit_zip_members(opened)
         _make_empty_directory(destination)
-        for info in members:
-            try:
-                opened.extract(info, destination)
-            except _NOT_THE_ARCHIVES:
-                raise
-            except Exception as error:
-                raise _unreadable(f"zip entry {info.filename!r}", error) from error
+        _extract_members(opened, destination, members)
     return destination
 
 
@@ -964,6 +1029,25 @@ def _unreadable(what: str, error: Exception) -> SourceArchiveRefused:
         SourceArchiveRefusal.UNREADABLE_MEMBER,
         f"{what} cannot be read: {str(error) or type(error).__name__}",
     )
+
+
+@contextlib.contextmanager
+def _zipfile_errors_refused(what: str) -> Iterator[None]:
+    """Refuse the archive for what zipfile raises in the block, which reads ``what``.
+
+    The one classification of zipfile's exceptions that is not at its open. Every
+    exception zipfile raises there is about the archive, but two: an ``OSError``,
+    which is the destination's or the disk's, and a ``MemoryError``, which is the
+    process's, pass as they were raised, as does a refusal already made.
+    """
+    try:
+        yield
+    except SourceArchiveRefused:
+        raise
+    except _NOT_THE_ARCHIVES:
+        raise
+    except Exception as error:
+        raise _unreadable(what, error) from error
 
 
 def _read_archive(archive: Path) -> bytes:
@@ -1027,8 +1111,13 @@ def _not_a_file(shown: str) -> SourceArchiveRefused:
     )
 
 
-def _refuse_encrypted_members(archive: zipfile.ZipFile) -> None:
-    for info in archive.infolist():
+def _refuse_encrypted_members(members: List[zipfile.ZipInfo]) -> None:
+    """Refuse an archive that holds an encrypted member (rule 7).
+
+    Decided from the flags the central directory gives each member, so it reads no
+    data, and a link is refused for it as any other member is.
+    """
+    for info in members:
         if info.flag_bits & _ENCRYPTED_FLAG:
             raise SourceArchiveRefused(
                 SourceArchiveRefusal.ENCRYPTED_MEMBER,

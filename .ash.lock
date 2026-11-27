@@ -46,7 +46,7 @@
           "symbol": "_validate_zip_member"
         }
       ],
-      "sha256": "330842dac6bc6668d6e102714f25483b8fbaa2ef2994fb1d9f9dcc13b90229cc"
+      "sha256": "e55ff8929854dd052a1f00a0886214ea1566bbbcfcc7491f58262cd84bfcad5a"
     },
     "automated_security_helper/interactions/run_ash_container.py": {
       "created": "2026-11-25T17:02:59Z",

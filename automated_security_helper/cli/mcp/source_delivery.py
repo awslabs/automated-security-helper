@@ -97,6 +97,7 @@ from automated_security_helper.utils.source_archive import (
     ZipRules,
     archive_too_large,
     extract_zip_members,
+    open_zip,
     validate_member_name,
 )
 from automated_security_helper.utils.subprocess_utils import (
@@ -2759,11 +2760,16 @@ def set_source_zip_finalize(
             Windows, a name Windows cannot hold), a Unicode path field, in the
             central directory or a local header, that names another file, two
             members extracted to one path or one under a file, a symlink member,
-            or a file that holds anything besides one zip: bytes before, between
-            or after its members (two zips end to end, a tar whose last member is
-            a zip), or a local header or data descriptor that disagrees with the
-            central directory, each refused as not a zip.
+            an encrypted member, or a file that holds anything besides one zip:
+            bytes before, between or after its members (two zips end to end, a tar
+            whose last member is a zip), or a local header or data descriptor that
+            disagrees with the central directory, each refused as not a zip; or an
+            archive zipfile cannot read (a zip version or compression method it does
+            not implement, a method whose module this Python lacks, a member with
+            damaged data), refused in the words ``ash scan fs --archive`` uses. A
+            refused upload is removed.
         zipfile.BadZipFile: if the assembled bytes are not a zip archive. The
+            refusal (kind ``not-a-zip``) is a ``BadZipFile`` as well. The
             checksum matching means the client sent what it meant to send, so
             this is a client-side packaging error rather than corruption.
     """
@@ -2911,7 +2917,9 @@ def _finalize_zip_upload(
         # source-archive rules (utils/source_archive.py), which judge each member
         # name as the archive spells it and refuse every symlink, applied with
         # this module's limits and member check as they are when the finalize
-        # runs. An archive one of them refuses is removed with the refusal
+        # runs. An archive one of them refuses, or that zipfile cannot open or
+        # read (open_zip and extract_zip_members refuse what zipfile raises, as
+        # `ash scan fs --archive` does), is removed with the refusal
         # (_removing_a_refused_zip): it held its bytes in incoming/ until the
         # session ended otherwise, and a client that sends the same finalize again
         # is told the upload is gone. The archive is read from the handle the
@@ -2920,7 +2928,7 @@ def _finalize_zip_upload(
         with (
             _removing_a_refused_zip(remove_zip),
             handle,
-            zipfile.ZipFile(handle) as zf,
+            open_zip(handle) as zf,
         ):
             extract_zip_members(
                 zf,

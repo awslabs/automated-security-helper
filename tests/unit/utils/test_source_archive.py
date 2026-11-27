@@ -40,12 +40,22 @@ The module reads the Unicode path field itself (rule 3), so its verdict cannot d
 whether this Python's zipfile applies the field, as it does from 3.12. The rows that
 turn on it run twice: under this zipfile, and under one made to ignore the field, as
 zipfile did before 3.12.
+
+What zipfile cannot read is classified once, for both entry points (``open_zip`` and
+``extract_zip_members``). The rows of ``UNREADABLE`` give both an archive that needs a
+newer reader than zipfile implements, a name in the central directory that is not the
+UTF-8 it claims, a member with damaged data, a method whose module this Python lacks
+and a link whose data cannot be read, and each has to reach one verdict, in one set of
+words, with the refused upload removed. An encrypted member, a link too, is a row of
+``REFUSED``, since its flag is read before anything else. What the module's own code
+raises is not about the archive and is not caught.
 """
 
 from __future__ import annotations
 
 import base64
 import copy
+import errno
 import gzip
 import hashlib
 import io
@@ -57,7 +67,7 @@ import zipfile
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import pytest
 
@@ -297,6 +307,23 @@ def _with_local_name_not_utf8(payload: bytes, name: str) -> bytes:
     data[at] = 0xFF
     (flags,) = struct.unpack("<H", data[6:8])
     data[6:8] = struct.pack("<H", flags | 0x800)
+    return bytes(data)
+
+
+def _with_central_name_not_utf8(payload: bytes, name: str) -> bytes:
+    """``payload``, whose one member is named ``name``, with a central entry that lies.
+
+    The central directory entry's copy of the name gets a first byte that starts no
+    UTF-8 sequence, and the entry claims UTF-8 (flag bit 11, offset 8 of the entry).
+    zipfile decodes the name as it opens the archive, so the archive does not open.
+    """
+    spelled = name.encode("ascii")
+    data = bytearray(payload)
+    central = data.find(b"PK\x01\x02")
+    assert central > 0 and data[central + 46 : central + 46 + len(spelled)] == spelled
+    data[central + 46] = 0xFF
+    (flags,) = struct.unpack("<H", data[central + 8 : central + 10])
+    data[central + 8 : central + 10] = struct.pack("<H", flags | 0x800)
     return bytes(data)
 
 
@@ -735,24 +762,25 @@ def _finalize(payload: bytes, workspace: Path) -> Path:
     )
 
 
-def _finalize_refusal(payload: bytes, workspace: Path) -> BaseException:
+def _finalize_refusal(payload: bytes, workspace: Path) -> sa.SourceArchiveRefused:
+    """What the finalize raises for ``payload``, an upload it removes as refused.
+
+    It raises the shared refusal for everything that is about the archive: a rule, and
+    what zipfile cannot read, alike. Bytes that are not a zip are a refusal that is a
+    ``zipfile.BadZipFile`` as well, as the finalize has always raised for them.
+    """
     _upload(payload, workspace)
-    with pytest.raises((ValueError, zipfile.BadZipFile)) as refused:
+    with pytest.raises(sa.SourceArchiveRefused) as refused:
         _finalize(payload, workspace)
+    assert not sd._final_zip_path(workspace / SESSION, UPLOAD).exists(), (
+        "a refused upload was kept"
+    )
     return refused.value
 
 
-def _verdict(error: BaseException) -> Tuple[Kind, str]:
-    """The rule and the words of a refusal from either entry point.
-
-    The finalize raises the shared refusal for every rule, and zipfile's own
-    BadZipFile for bytes that are not a zip, as it always has.
-    """
-    if isinstance(error, sa.SourceArchiveRefused):
-        return error.kind, str(error)
-    if isinstance(error, zipfile.BadZipFile):
-        return Kind.NOT_A_ZIP, str(error)
-    raise AssertionError(f"not an archive refusal: {error!r}")
+def _verdict(error: sa.SourceArchiveRefused) -> Tuple[Kind, str]:
+    """The rule and the words of a refusal from either entry point."""
+    return error.kind, str(error)
 
 
 def _in_the_finalizes_words(message: str) -> str:
@@ -1157,6 +1185,27 @@ REFUSED = [
         "the central directory entry of zip entry 'a.py' runs past the central "
         "directory",
         id="a-central-directory-entry-that-runs-past-the-directory",
+    ),
+    # Rule 7: the flag is read right after the members are counted.
+    pytest.param(
+        _flagged_encrypted(_zip({"a.py": b"print(1)\n"})),
+        Kind.ENCRYPTED_MEMBER,
+        "zip entry 'a.py' is encrypted: an encrypted member cannot be read",
+        id="an-encrypted-member",
+    ),
+    pytest.param(
+        # One kind and one precedence: the flag is read before the link is.
+        _flagged_encrypted(_zip_with_modes({"evil": (b"/outside/the/tree", 0o120777)})),
+        Kind.ENCRYPTED_MEMBER,
+        "zip entry 'evil' is encrypted: an encrypted member cannot be read",
+        id="an-encrypted-link",
+    ),
+    pytest.param(
+        # The flags are read before the names are judged.
+        _raw_zip([_Raw(b"../escape.py", b"x"), _Raw(b"a.py", b"y", flags=0x1)]),
+        Kind.ENCRYPTED_MEMBER,
+        "zip entry 'a.py' is encrypted: an encrypted member cannot be read",
+        id="an-encrypted-member-after-a-name-that-is-refused",
     ),
 ]
 
@@ -1978,6 +2027,389 @@ class TestWhatZipfileCannotReadIsARefusal:
         assert "can't decode byte 0xff" in str(refused)
 
 
+# ---------------------------------------------------------------------------
+# What zipfile cannot read is classified once, for both entry points.
+# ---------------------------------------------------------------------------
+
+_LINK_TARGET = b"/outside/the/tree"
+
+
+def _lzma_member() -> bytes:
+    """A zip of one LZMA member, ``a.py``; built when a row runs, because a Python built
+    without lzma cannot write one."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_LZMA) as archive:
+        archive.writestr("a.py", b"print(1)\n")
+    return buffer.getvalue()
+
+
+def _damaged_zstandard_member() -> bytes:
+    """A zip of one Zstandard member, ``a.py``, whose first data byte is changed."""
+    content = b"print('a source line')\n" * 50
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("a.py", content, compress_type=zipfile.ZIP_ZSTANDARD)
+    return _with_first_data_byte_flipped(buffer.getvalue())
+
+
+def _without_lzma(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Python built without the lzma module, as zipfile sees it."""
+    monkeypatch.setattr(zipfile, "lzma", None)
+
+
+def _payload_of(source: Union[bytes, Callable[[], bytes]]) -> bytes:
+    """The archive of a row: the bytes, or what builds them when the row runs."""
+    return source() if callable(source) else source
+
+
+#: What zipfile cannot read, or what cannot be read of a member, and the verdict both
+#: entry points reach: the archive (or a function that builds it), the rule, the start
+#: of the words (zipfile's own text follows), whether the refusal is made before
+#: anything is written, and what the row changes about zipfile before the archive is
+#: read. Red at the base for the finalize: it raised what zipfile raised, or what the
+#: shared function would not have, and kept the upload.
+UNREADABLE = [
+    pytest.param(
+        _with_version_needed(_zip({"a.py": b"x"}), 64),
+        Kind.UNREADABLE_MEMBER,
+        "the archive cannot be read: zip file version 6.4",
+        True,
+        None,
+        id="an-archive-that-needs-a-newer-zip-reader",
+    ),
+    pytest.param(
+        # zipfile decodes the central directory's names as it opens the archive.
+        _with_central_name_not_utf8(_zip({"aa.py": b"x"}), "aa.py"),
+        Kind.NOT_A_ZIP,
+        "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte",
+        True,
+        None,
+        id="a-central-directory-name-that-is-not-the-utf8-it-claims",
+    ),
+    pytest.param(
+        # Admission reads a link's target, and what zipfile raises for it is refused.
+        _with_damaged_data(
+            _zip_with_modes({"evil": (_LINK_TARGET, 0o120777)}), _LINK_TARGET
+        ),
+        Kind.UNREADABLE_MEMBER,
+        "the archive cannot be read: Bad CRC-32 for file 'evil'",
+        True,
+        None,
+        id="a-link-whose-data-fails-its-checksum",
+    ),
+    pytest.param(
+        _with_damaged_data(_stored(), _STORED),
+        Kind.UNREADABLE_MEMBER,
+        "zip entry 'a.py' cannot be read: Bad CRC-32 for file 'a.py'",
+        False,
+        None,
+        id="a-member-whose-data-fails-its-checksum",
+    ),
+    pytest.param(
+        _with_local_name_not_utf8(_zip({"aa.py": b"x"}), "aa.py"),
+        Kind.UNREADABLE_MEMBER,
+        "zip entry 'aa.py' cannot be read: 'utf-8' codec can't decode byte 0xff in "
+        "position 0: invalid start byte",
+        False,
+        None,
+        id="a-local-header-whose-name-is-not-the-utf8-it-claims",
+    ),
+    pytest.param(
+        _lzma_member,
+        Kind.UNREADABLE_MEMBER,
+        "zip entry 'a.py' cannot be read: "
+        "Compression requires the (missing) lzma module",
+        False,
+        _without_lzma,
+        id="a-method-whose-module-this-python-lacks",
+    ),
+    pytest.param(
+        _damaged_zstandard_member,
+        Kind.UNREADABLE_MEMBER,
+        "zip entry 'a.py' cannot be read: ",
+        False,
+        None,
+        marks=pytest.mark.skipif(
+            getattr(zipfile, "zstd", None) is None,
+            reason="this zipfile has no Zstandard support (Python 3.14 adds it)",
+        ),
+        id="a-damaged-zstandard-member",
+    ),
+]
+
+
+class TestWhatZipfileCannotReadIsRefusedAlikeByBothEntryPoints:
+    """``open_zip`` and ``extract_zip_members`` take what zipfile raises through one
+    classification, so ``extract_source_archive`` and the finalize refuse each of
+    these in the same words, and the finalize removes the upload as it does for every
+    refusal."""
+
+    @pytest.mark.parametrize("source,kind,start,before_writing,setup", UNREADABLE)
+    def test_the_shared_function_refuses_it(
+        self, monkeypatch, tmp_path, source, kind, start, before_writing, setup
+    ):
+        payload = _payload_of(source)
+        if setup is not None:
+            setup(monkeypatch)
+        destination = tmp_path / "tree"
+
+        refused = _extraction_refusal(_archive_file(tmp_path, payload), destination)
+
+        assert refused.kind is kind
+        assert str(refused).startswith(start)
+        if before_writing:
+            assert not destination.exists(), "a refused archive made the destination"
+
+    @pytest.mark.parametrize("source,kind,start,before_writing,setup", UNREADABLE)
+    def test_the_finalize_refuses_it_in_the_same_words(
+        self, monkeypatch, tmp_path, source, kind, start, before_writing, setup
+    ):
+        payload = _payload_of(source)
+        if setup is not None:
+            setup(monkeypatch)
+        shared = _verdict(
+            _extraction_refusal(_archive_file(tmp_path, payload), tmp_path / "tree")
+        )
+
+        delivered = _verdict(_finalize_refusal(payload, tmp_path / "workspace"))
+
+        assert delivered == shared
+        assert delivered[0] is kind
+        assert delivered[1].startswith(start)
+
+
+class _FailingHandle:
+    """A binary handle whose first seek raises ``error``, as the first read of an
+    archive does when it fails."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def seek(self, *args: object) -> int:
+        raise self.error
+
+
+class TestOpeningAnArchive:
+    """What zipfile raises as it opens a file, whichever it is, is refused by
+    ``open_zip`` in the one set of words. Red at the base: ``open_zip`` did not exist,
+    and the finalize opened the file with zipfile itself."""
+
+    @pytest.mark.parametrize(
+        "error,kind,message",
+        [
+            pytest.param(
+                OverflowError("Python int too large to convert to C ssize_t"),
+                Kind.UNREADABLE_MEMBER,
+                "the archive cannot be read: "
+                "Python int too large to convert to C ssize_t",
+                id="an-overflow-from-a-seek",
+            ),
+            pytest.param(
+                RuntimeError("a compression module is missing"),
+                Kind.UNREADABLE_MEMBER,
+                "the archive cannot be read: a compression module is missing",
+                id="a-runtime-error",
+            ),
+            pytest.param(
+                RuntimeError(),
+                Kind.UNREADABLE_MEMBER,
+                "the archive cannot be read: RuntimeError",
+                id="an-error-with-no-words-is-named-by-its-type",
+            ),
+            pytest.param(
+                NotImplementedError("zip file version 6.4"),
+                Kind.UNREADABLE_MEMBER,
+                "the archive cannot be read: zip file version 6.4",
+                id="a-version-zipfile-does-not-implement",
+            ),
+            pytest.param(
+                zipfile.BadZipFile("File is not a zip file"),
+                Kind.NOT_A_ZIP,
+                "File is not a zip file",
+                id="bytes-that-are-not-a-zip",
+            ),
+            pytest.param(
+                EOFError("Ran out of input"),
+                Kind.NOT_A_ZIP,
+                "Ran out of input",
+                id="an-end-of-file",
+            ),
+            pytest.param(
+                ValueError("negative seek value"),
+                Kind.NOT_A_ZIP,
+                "negative seek value",
+                id="a-value-error",
+            ),
+        ],
+    )
+    def test_what_zipfile_raises_is_refused(self, error, kind, message):
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa.open_zip(_FailingHandle(error))
+
+        assert (refused.value.kind, str(refused.value)) == (kind, message)
+        assert isinstance(refused.value, zipfile.BadZipFile) is (kind is Kind.NOT_A_ZIP)
+
+    def test_a_memory_error_is_raised_as_it_is(self):
+        with pytest.raises(MemoryError):
+            sa.open_zip(_FailingHandle(MemoryError()))
+
+    def test_a_zip_is_opened(self):
+        with sa.open_zip(io.BytesIO(_zip({"a.py": b"x"}))) as archive:
+            assert archive.namelist() == ["a.py"]
+
+
+class TestBytesThatAreNotAZipAreABadZipFileToo:
+    """The finalize raised ``zipfile.BadZipFile`` for them before it shared this module,
+    and documents it. Now that both entry points raise the shared refusal for them, the
+    refusal is a ``BadZipFile`` as well, so a caller that catches that still does."""
+
+    NOT_ONE_ZIP = [
+        pytest.param(b"plain text, not an archive\n", id="plain-text"),
+        pytest.param(_tar(gzipped=False), id="a-tar"),
+        pytest.param(_zip({"app.py": b"x"}) + _AFTER_THE_END, id="bytes-after-the-zip"),
+    ]
+
+    @pytest.mark.parametrize("payload", NOT_ONE_ZIP)
+    def test_the_shared_function_raises_one(self, tmp_path, payload):
+        with pytest.raises(zipfile.BadZipFile) as refused:
+            sa.extract_source_archive(
+                _archive_file(tmp_path, payload), tmp_path / "tree"
+            )
+
+        assert isinstance(refused.value, sa.SourceArchiveRefused)
+        assert refused.value.kind is Kind.NOT_A_ZIP
+
+    @pytest.mark.parametrize("payload", NOT_ONE_ZIP)
+    def test_the_finalize_raises_one(self, tmp_path, payload):
+        workspace = tmp_path / "workspace"
+        _upload(payload, workspace)
+
+        with pytest.raises(zipfile.BadZipFile) as refused:
+            _finalize(payload, workspace)
+
+        assert isinstance(refused.value, sa.SourceArchiveRefused)
+        assert refused.value.kind is Kind.NOT_A_ZIP
+
+    def test_a_refusal_for_another_rule_is_not_one(self, tmp_path):
+        refused = _extraction_refusal(
+            _archive_file(tmp_path, _zip({"../escape.py": b"x"})), tmp_path / "tree"
+        )
+
+        assert not isinstance(refused, zipfile.BadZipFile)
+
+
+class _OurDefect(Exception):
+    """A defect of ASH's own code, as a test makes one."""
+
+
+def _a_defect_of_ours(*args: object) -> None:
+    raise _OurDefect("a defect of ours")
+
+
+class TestADefectOfOursIsNotTheArchives:
+    """Admission was wrapped in ``except Exception``, so a defect of this module's own
+    code was refused as an unreadable archive. Only the read of a link's target, which
+    is zipfile's, is classified now; what else is raised is raised as it is. Red at the
+    base for ``extract_source_archive``."""
+
+    def test_extraction_raises_it_as_it_is(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sa, "_refuse_shared_paths", _a_defect_of_ours)
+        destination = tmp_path / "tree"
+
+        with pytest.raises(_OurDefect):
+            sa.extract_source_archive(
+                _archive_file(tmp_path, _zip({"a.py": b"x"})), destination
+            )
+
+        assert not destination.exists()
+
+    def test_the_finalize_raises_it_as_it_is_and_keeps_the_upload(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(sa, "_refuse_shared_paths", _a_defect_of_ours)
+        payload = _zip({"a.py": b"x"})
+        workspace = tmp_path / "workspace"
+        _upload(payload, workspace)
+
+        with pytest.raises(_OurDefect):
+            _finalize(payload, workspace)
+
+        assert sd._final_zip_path(workspace / SESSION, UPLOAD).exists()
+
+
+def _a_file_with_a_zip64_locator(record_at: int, before: int) -> Tuple[io.BytesIO, int]:
+    """``before`` zero bytes, a zip64 end record locator that places the record at
+    ``record_at``, and the end record of an empty archive; and where that begins."""
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, record_at, 1)
+    end_record = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 0, 0, 0, 0, 0)
+    return io.BytesIO(bytes(before) + locator + end_record), before + len(locator)
+
+
+class TestARecordTheArchiveGivesIsNotTrusted:
+    """An offset or a length from the archive's own records can be larger than any seek
+    takes, or point at nothing. Admission refuses what it cannot find, as not a zip: it
+    no longer lets the error of a seek or an unpack out, now that only the read of a
+    link's target is classified. Current zipfile releases refuse these archives as they
+    open them, so the cases call the readers of the records."""
+
+    @pytest.mark.parametrize("offset", [2**63, 2**64 - 1, 2**100])
+    def test_an_offset_no_seek_takes_reads_nothing(self, offset):
+        assert sa._read_at(io.BytesIO(b"abc"), offset, 4) == b""
+
+    def test_a_length_no_read_takes_reads_nothing(self):
+        assert sa._read_at(io.BytesIO(b"abc"), 0, 2**63) == b""
+
+    def test_an_offset_the_filesystem_cannot_hold_reads_nothing(self):
+        """A seek on a file raises an ``OSError`` (EINVAL) for an offset past what the
+        filesystem holds, which the finalize's handle, unlike a copy in memory, can."""
+
+        class Refusing(io.BytesIO):
+            def seek(self, offset, whence=0):
+                if offset > 2**40:
+                    raise OSError(errno.EINVAL, "Invalid argument")
+                return super().seek(offset, whence)
+
+        assert sa._read_at(Refusing(b"abc"), 2**44, 4) == b""
+
+    def test_a_read_that_fails_is_raised_as_it_is(self):
+        class Failing(io.BytesIO):
+            def read(self, size=-1):
+                raise OSError(errno.EIO, "Input/output error")
+
+        with pytest.raises(OSError):
+            sa._read_at(Failing(b"abc"), 0, 4)
+
+    @pytest.mark.parametrize(
+        "record_at,before",
+        [
+            pytest.param(2**63, 100, id="an-offset-no-seek-takes"),
+            pytest.param(2**64 - 1, 100, id="the-largest-offset"),
+            pytest.param(4, 100, id="an-offset-with-no-record"),
+            pytest.param(0, 10, id="a-file-too-short-for-a-record"),
+        ],
+    )
+    def test_a_locator_with_no_record_is_refused_as_not_a_zip(self, record_at, before):
+        handle, end = _a_file_with_a_zip64_locator(record_at, before)
+
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa._zip64_end_record(handle, end)
+
+        assert refused.value.kind is Kind.NOT_A_ZIP
+        assert str(refused.value) == "Zip64 end of central directory record not found"
+
+    def test_a_locator_with_its_record_gives_the_record(self):
+        payload = _raw_zip([_Raw(b"a.py", b"A = 1\n")], zip64_end=True)
+        handle = io.BytesIO(payload)
+
+        record = sa._zip64_end_record(
+            handle, sa._end_record_position(handle, len(payload))
+        )
+
+        assert record is not None
+        assert record[0] == b"PK\x06\x06"
+        assert record[6:8] == (1, 1)
+
+
 class TestTheRefusal:
     def test_it_is_a_value_error_whose_kind_and_words_survive_a_copy(self):
         refused = sa.SourceArchiveRefused(Kind.PATH_TRAVERSAL, "path traversal in zip")
@@ -1987,6 +2419,16 @@ class TestTheRefusal:
         assert isinstance(copied, ValueError)
         assert copied.kind is Kind.PATH_TRAVERSAL
         assert str(copied) == "path traversal in zip"
+
+    def test_a_not_a_zip_refusal_survives_a_copy_as_a_bad_zip_file_too(self):
+        with pytest.raises(sa.SourceArchiveRefused) as refused:
+            sa.open_zip(io.BytesIO(b"plain text, not an archive\n"))
+
+        copied = copy.deepcopy(refused.value)
+
+        assert isinstance(copied, zipfile.BadZipFile)
+        assert copied.kind is Kind.NOT_A_ZIP
+        assert str(copied) == "File is not a zip file"
 
     def test_every_kind_is_a_stable_string(self):
         assert {kind.value for kind in Kind} == {
