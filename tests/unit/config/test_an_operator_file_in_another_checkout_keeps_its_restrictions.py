@@ -650,6 +650,32 @@ FLOOR_MODELS = [
         f"{_PLUGINS}.ash_builtin.scanners.cfn_guard_scanner",
         "CfnGuardScannerConfigOptions",
     ),
+    (
+        "guarddog",
+        "verify",
+        f"{_PLUGINS}.ash_guarddog_plugins.guarddog_scanner",
+        "GuardDogScannerConfigOptions",
+    ),
+    (
+        "trivy-repo",
+        "scanners",
+        f"{_PLUGINS}.ash_trivy_plugins.trivy_repo_scanner",
+        "TrivyRepoScannerConfigOptions",
+    ),
+    # A nested option is dotted; the class named is the nested model, which holds
+    # the last part.
+    (
+        "syft",
+        "sdist_harvest.enabled",
+        f"{_PLUGINS}.ash_builtin.scanners.syft_scanner",
+        "SdistHarvestOptions",
+    ),
+    (
+        "syft",
+        "sdist_harvest.max_sdist_mb",
+        f"{_PLUGINS}.ash_builtin.scanners.syft_scanner",
+        "SdistHarvestOptions",
+    ),
 ]
 
 
@@ -665,7 +691,8 @@ def test_each_floor_default_is_the_plugin_s_own(
     model = getattr(importlib.import_module(module), name)
 
     assert (scanner, option) in floors
-    assert floors[(scanner, option)].default == model.model_fields[option].get_default()
+    field = model.model_fields[option.split(".")[-1]]
+    assert floors[(scanner, option)].default == field.get_default()
 
 
 # The operator's file sits outside every checkout and the repository's config in
@@ -907,4 +934,261 @@ def test_an_in_tree_config_cannot_swap_the_operator_s_shellcheck_for_its_own_nam
     named = [
         w for w in _warnings(ash_log) if "scanners.actionlint.options.shellcheck" in w
     ]
+    assert len(named) == 1, _warnings(ash_log)
+
+
+# ---------------------------------------------------------------------------
+# Network fetching: a config that is not the operator's may turn it off, never on
+# ---------------------------------------------------------------------------
+#
+# A scanner the operator sets offline, guarddog's verify, trivy-repo's misconfig
+# scanner and syft's sdist harvest each fetch from the network when they run. A
+# config that is not the operator's replaces the operator's config, so an option it
+# leaves out reads as the plugin's default, which fetches, and one it writes is its
+# own. Such a config may turn fetching off, and may not turn it on past the
+# operator's value.
+
+#: The scanners whose own ``offline`` switch is held: two with a typed section
+#: and two plugin scanners, whose section is a plain mapping or missing.
+OFFLINE_SCANNERS = ["grype", "npm-audit", "guarddog", "trivy-repo"]
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_a_scanner_the_operator_sets_offline_stays_offline(scanner: str) -> None:
+    trusted = _config_with(scanner, "offline", True)
+    config = _config_with(scanner, "offline", False)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, "offline") is True
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_a_scanner_the_config_leaves_out_stays_offline(scanner: str) -> None:
+    trusted = _config_with(scanner, "offline", True)
+    # A typed section is always there and reads its default; a plugin scanner's
+    # section is missing altogether.
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, "offline") is True
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_control_a_config_may_set_a_scanner_offline(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _config_with(scanner, "offline", True)
+
+    _floors(config, trusted)
+
+    assert _option(config, scanner, "offline") is True
+
+
+@pytest.mark.parametrize("scanner", OFFLINE_SCANNERS)
+def test_control_a_scanner_neither_sets_offline_stays_online(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert not _option(config, scanner, "offline")
+
+
+def test_verify_the_operator_leaves_off_stays_off() -> None:
+    trusted = _loaded({})
+    config = _config_with("guarddog", "verify", True)
+
+    _floors(config, trusted)
+
+    assert _option(config, "guarddog", "verify") is False
+
+
+def test_control_a_config_may_turn_verify_off() -> None:
+    trusted = _config_with("guarddog", "verify", True)
+    config = _config_with("guarddog", "verify", False)
+
+    _floors(config, trusted)
+
+    assert _option(config, "guarddog", "verify") is False
+
+
+def test_control_a_config_that_leaves_verify_out_turns_it_off() -> None:
+    trusted = _config_with("guarddog", "verify", True)
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    # Fetching off is allowed: the section stays missing, which reads as the
+    # default, off.
+    assert not _option(config, "guarddog", "verify")
+
+
+def test_control_verify_both_turn_on_stays_on() -> None:
+    trusted = _config_with("guarddog", "verify", True)
+    config = _config_with("guarddog", "verify", True)
+
+    _floors(config, trusted)
+
+    assert _option(config, "guarddog", "verify") is True
+
+
+def test_misconfig_the_operator_leaves_out_stays_out() -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+    config = _config_with("trivy-repo", "scanners", ["vuln", "misconfig"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["vuln"]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param(
+            {"scanners": {"trivy-repo": {"options": {}}}}, id="section-without-a-list"
+        ),
+        pytest.param({}, id="no-section"),
+    ],
+)
+def test_misconfig_stays_out_when_the_config_leaves_the_list_out(
+    document: Dict[str, Any],
+) -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+    config = _loaded(document)
+
+    _floors(config, trusted)
+
+    # The plugin's default list, less misconfig.
+    assert _option(config, "trivy-repo", "scanners") == ["vuln", "secret", "license"]
+
+
+def test_a_scanners_list_with_nothing_left_keeps_the_operator_s() -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["vuln"])
+    config = _config_with("trivy-repo", "scanners", ["misconfig"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["vuln"]
+
+
+def test_control_a_config_may_leave_misconfig_out() -> None:
+    trusted = _loaded({})
+    config = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["vuln", "secret"]
+
+
+def _harvest(config: AshConfig) -> Dict[str, Any]:
+    """syft's ``sdist_harvest`` options as the config holds them."""
+    section = config.get_plugin_config("scanner", "syft") or {}
+    return (section.get("options") or {}).get("sdist_harvest") or {}
+
+
+def test_the_harvest_the_operator_turns_off_stays_off() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"enabled": False})
+    config = _config_with("syft", "sdist_harvest", {"enabled": True})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["enabled"] is False
+
+
+def test_the_harvest_stays_off_when_the_config_leaves_it_out() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"enabled": False})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["enabled"] is False
+
+
+def test_a_larger_harvest_bound_than_the_operator_s_is_lowered() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"max_sdist_mb": 10})
+    config = _config_with("syft", "sdist_harvest", {"max_sdist_mb": 500})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["max_sdist_mb"] == 10
+
+
+def test_the_harvest_bound_the_config_leaves_out_is_the_operator_s() -> None:
+    trusted = _config_with("syft", "sdist_harvest", {"max_sdist_mb": 10})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["max_sdist_mb"] == 10
+
+
+def test_control_a_config_may_turn_the_harvest_off_or_lower_its_bound() -> None:
+    trusted = _loaded({})
+    config = _config_with(
+        "syft", "sdist_harvest", {"enabled": False, "max_sdist_mb": 10}
+    )
+
+    _floors(config, trusted)
+
+    assert _harvest(config)["enabled"] is False
+    assert _harvest(config)["max_sdist_mb"] == 10
+
+
+GRYPE_OFFLINE_OPERATOR = """\
+project_name: operator
+scanners:
+  grype:
+    options:
+      offline: true
+"""
+
+GRYPE_ONLINE_REPOSITORY = """\
+project_name: repository
+scanners:
+  grype:
+    options:
+      offline: false
+"""
+
+GUARDDOG_VERIFY_REPOSITORY = """\
+project_name: repository
+scanners:
+  guarddog:
+    options:
+      verify: true
+"""
+
+
+def test_an_in_tree_config_cannot_put_back_online_a_scanner_the_operator_sets_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=GRYPE_OFFLINE_OPERATOR,
+        repository_text=GRYPE_ONLINE_REPOSITORY,
+    )
+
+    assert _option(config, "grype", "offline") is True
+    named = [w for w in _warnings(ash_log) if "scanners.grype.options.offline" in w]
+    assert len(named) == 1, _warnings(ash_log)
+
+
+def test_an_in_tree_config_cannot_turn_on_guarddog_verify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text="project_name: operator\n",
+        repository_text=GUARDDOG_VERIFY_REPOSITORY,
+    )
+
+    assert _option(config, "guarddog", "verify") is False
+    named = [w for w in _warnings(ash_log) if "scanners.guarddog.options.verify" in w]
     assert len(named) == 1, _warnings(ash_log)

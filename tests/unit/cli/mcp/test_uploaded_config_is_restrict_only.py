@@ -600,3 +600,44 @@ def test_an_upload_that_leaves_out_the_profile_s_shellcheck_keeps_it(_server) ->
     shown = config.get_plugin_config("scanner", "actionlint")["options"]["shellcheck"]
     assert shown == "shellcheck"
     assert set_by_operator(config, "scanners.actionlint.options.shellcheck", shown)
+
+
+# A scanner the profile sets offline must stay offline under an upload that leaves
+# the option out: offline, npm audit reports no advisory; online it asks the
+# registry for them. The upload's missing option reads as the default, which is
+# online. An upload that writes offline itself is refused by the judge, which this
+# does not change.
+
+
+def test_an_upload_that_leaves_out_offline_keeps_the_profile_s(_server) -> None:
+    _bind_profile(
+        _server["tmp"],
+        "scanners:\n  npm-audit:\n    options:\n      offline: true\n",
+    )
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = config.get_plugin_config("scanner", "npm-audit")["options"]
+    assert options["offline"] is True
+
+
+def test_control_an_upload_that_sets_a_scanner_offline_is_still_refused(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], "project_name: profile\n")
+    within = _upload(
+        {
+            "ash.yaml": (
+                "project_name: uploaded\n"
+                "scanners:\n"
+                "  grype:\n"
+                "    options:\n"
+                "      offline: true\n"
+            )
+        }
+    )
+
+    refusal = _refused_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    assert "scanners.grype.options.offline" in refusal, refusal
