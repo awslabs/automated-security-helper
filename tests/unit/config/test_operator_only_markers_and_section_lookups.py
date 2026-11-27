@@ -433,7 +433,7 @@ def test_places_a_file_outside_every_checkout_also_writes_are_withheld(tmp_path)
 def test_the_other_order_withholds_only_the_places_the_outside_file_writes(tmp_path):
     outside = _a_file_outside_every_checkout(tmp_path)
     inside = _a_file_in_a_checkout(tmp_path)
-    record = scan_repository_settings([])
+    record = scan_repository_settings([], every_file=True)
     record.confine(
         inside,
         inside,

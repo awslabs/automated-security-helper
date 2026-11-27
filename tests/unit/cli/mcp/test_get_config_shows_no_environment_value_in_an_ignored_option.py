@@ -720,7 +720,10 @@ def test_the_answer_with_no_file_shows_a_literal_that_holds_a_read_value_as_writ
 # and the marker for that place is the placeholder. The cells guard: the base's
 # literal and the base's reference are each withheld, a literal the client's
 # file also writes over the base's is withheld too (the place is one the base
-# writes), and a place only the client's file writes is still shown as written.
+# writes), and a place only the client's file writes is withheld as well, since
+# the client's file was read after the base and its patch could have copied one
+# of the base's values there. The control puts the same chain shape's base inside
+# the checkout, where both places are shown as written.
 _BASE_PLACES = {
     "base-literal": (f"findings_scope: {_BASE_SCOPE}\n", ""),
     "base-reference": ("findings_scope: ${ASH_TEST_GETCFG_BASE}\n", ""),
@@ -754,13 +757,15 @@ def test_a_place_a_base_outside_every_checkout_also_writes_is_withheld(
     assert "<from ${" + _BASE_VAR + "}>" not in text, result
 
 
-def test_a_place_only_the_clients_file_writes_is_shown_beside_a_withheld_one(
+def test_the_named_files_own_place_is_withheld_too_over_a_base_outside_every_checkout(
     tmp_path, monkeypatch
 ):
-    """The control for the cell above: the base writes the archive flag and the
-    named file writes findings_scope. The flag is a place the base writes, so it
-    is the placeholder; the scope is the named file's alone, so it is shown as
-    written."""
+    """The base outside every checkout writes the archive flag and the named
+    file writes findings_scope. The flag is a place the base writes, so it is the
+    placeholder. The named file was read after that base, so a place only the
+    named file writes is the placeholder as well: its document was merged over
+    the base's, and its own patch could have copied one of the base's values into
+    that place. The named file's literal is not in the answer."""
     result = _named_over_a_base_outside_every_checkout(
         tmp_path,
         monkeypatch,
@@ -768,8 +773,25 @@ def test_a_place_only_the_clients_file_writes_is_shown_beside_a_withheld_one(
         f"findings_scope: {_ROOT_SCOPE}\n",
     )
 
-    assert _scope(result) == _IGNORED + json.dumps(_ROOT_SCOPE) + ">", result
+    assert _scope(result) == _WITHHELD, result
     assert _flag(result) == _WITHHELD, result
+    assert _ROOT_SCOPE not in json.dumps(result, default=str), result
+
+
+def test_a_base_inside_the_checkout_is_shown_as_written(tmp_path, monkeypatch):
+    """The control for the cell above, with the same chain shape (a named file
+    that extends a base) but the base inside the checkout. The base writes a
+    distinctive findings_scope literal and archive_resolved_findings: true, and
+    both are shown as written, so the placeholder comes from where the base sits
+    and not from the chain's shape."""
+    result = _named_extending_a_base(
+        tmp_path,
+        monkeypatch,
+        _section(f"findings_scope: {_BASE_SCOPE}\narchive_resolved_findings: true\n"),
+    )
+
+    assert _scope(result) == _IGNORED + json.dumps(_BASE_SCOPE) + ">", result
+    assert _flag(result) == _IGNORED + "true>", result
 
 
 @contextlib.contextmanager
