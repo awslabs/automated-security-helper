@@ -22,6 +22,16 @@ The hand-written files among the 24 (``_base/manifest.json``, ``schemas/schemas.
 deploy/ configs, a CI exclusion list and two test fixtures) were formatted once instead,
 and stay in the hook's scope.
 
+Four more files joined the exclusions later, each JSON a tool writes. Three are recordings
+of scanner output under ``tests/test_data/scanners/*/captured/`` (the M0 runs of bandit and
+cfn-lint, and trivy's terraform misconfig run) that are not in the hook's format, and whose
+bytes the ``transcripts.json`` beside them pins by sha256: the hook would rewrite them and
+fail the transcript gate. The fourth is the GitLab SAST projection golden under
+``tests/unit/reporters/golden/``, which its test writes from the reporter and compares in
+the writer's key order. They are listed one by one: the other recordings, and the golden
+under ``tests/unit/utils/golden/`` (which its test compares as data), are in the hook's
+format and stay in its scope.
+
 Files are listed with ``git ls-files``, never by walking the tree.
 """
 
@@ -30,17 +40,38 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
 
+from automated_security_helper.base.tool_transcript import (
+    TRANSCRIPT_FILE_NAME,
+    load_transcript_file,
+)
+
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLUGINS = "ash-agent-plugins/agentic-coding/plugins/"
 BASE_MCP = "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json"
+SCANNER_FIXTURES = "tests/test_data/scanners"
+
+#: The recordings of scanner output the hook must leave alone: not in its format, and
+#: pinned by sha256 in the transcripts.json of their scanner's fixture directory, so a
+#: rewrite fails tests/unit/plugin_conformance/
+#: test_the_committed_transcripts_are_sound_and_fresh.py.
+EXCLUDED_CAPTURES = (
+    f"{SCANNER_FIXTURES}/bandit/captured/bandit-1.9.4-m0.json",
+    f"{SCANNER_FIXTURES}/cfn_lint_guard/captured/cfn-lint-1.61.0-m0-bad-property.json",
+    f"{SCANNER_FIXTURES}/trivy/captured/trivy-0.76.2-misconfig-terraform.json",
+)
+
+#: The GitLab SAST projection golden: its test writes it from the reporter and compares
+#: ``json.dumps`` of it and of the reporter's output, so the key order is part of it.
+GITLAB_SAST_GOLDEN = "tests/unit/reporters/golden/gitlab_sast_projection.json"
 
 #: Generated, vendored, compared byte for byte, or not JSON at all.
 MUST_BE_EXCLUDED = (
@@ -52,9 +83,12 @@ MUST_BE_EXCLUDED = (
     "deploy/cdk/tsconfig.json",
     "deploy/cdk/package.json",
     "deploy/cdk/package-lock.json",
+    *EXCLUDED_CAPTURES,
+    GITLAB_SAST_GOLDEN,
 )
 
-#: Hand-written JSON the hook must keep formatting.
+#: JSON the hook must keep formatting: hand-written files, and the recordings and goldens
+#: that are in its format or that their tests read as data.
 MUST_BE_FORMATTED = (
     ".github/typescript-coverage-exclusions.json",
     "ash-agent-plugins/agentic-coding/transpiler/_base/manifest.json",
@@ -64,6 +98,10 @@ MUST_BE_FORMATTED = (
     "deploy/cdk/cdk.json",
     "tests/integration/codecommit_gate_regression/expected.json",
     "tests/integration/codecommit_gate_regression/cases/observed-2026-08-28/observed.json",
+    # A recording that is already in the hook's format, beside the three that are not.
+    f"{SCANNER_FIXTURES}/cfn_lint_guard/captured/cfn-lint-1.57.2-m0-two-bad-properties.json",
+    # A golden its test compares as data: ``json.loads`` of it must equal the observed output.
+    "tests/unit/utils/golden/finding_diff_characterization.json",
 )
 
 
@@ -76,6 +114,15 @@ EXCLUDED_FAMILIES = {
     r"deploy/[^/]+/package(-lock)?\.json": "npm manifests",
     r"deploy/cdk/tsconfig\.json": "tsc config with comments",
     r"tests/snapshot/.*/__snapshots__/.*": "snapshot bytes",
+    **{
+        re.escape(path): (
+            "recorded tool output, pinned by sha256 in the scanner's transcripts.json"
+        )
+        for path in EXCLUDED_CAPTURES
+    },
+    re.escape(GITLAB_SAST_GOLDEN): (
+        "recorded from the reporter, and compared in the reporter's key order"
+    ),
     r"ash-agent-plugins/agentic-coding/plugins/.*": "transpiler output, byte-compared",
     BASE_MCP.replace(".", r"\."): "copied byte for byte into transpiler output",
     r"ash-agent-plugins/agentic-coding/transpiler/schemas/.*\.schema\.json": "vendored",
@@ -156,7 +203,7 @@ def test_generated_and_compared_files_are_left_alone(excluded, tracked_json, pat
 def test_hand_written_files_are_formatted(excluded, tracked_json, path):
     assert path in tracked_json, f"{path} is no longer tracked; update this list"
     assert not excluded(path), (
-        f"{path} is hand-written JSON, and the hook no longer formats it"
+        f"{path} is JSON the hook has to keep formatting, and it no longer does"
     )
 
 
@@ -174,6 +221,79 @@ def test_the_hook_skips_nothing_outside_the_known_families(excluded, tracked_jso
         "vendored or byte-compared family. Narrow the exclude, or add the family here "
         "with its reason."
     )
+
+
+def _why_no_transcript_pins(root: Path, path: str) -> str | None:
+    """Why no ``transcripts.json`` pins the recording at ``path``, or None when one does.
+
+    ``path`` is relative to ``root`` and has the shape the scanners' fixtures have,
+    ``tests/test_data/scanners/<scanner>/captured/<file>``. A recording is pinned when the
+    transcripts.json of its scanner's directory names it, as a result or a side report;
+    every such entry carries the sha256 of the file, and the plugin_conformance gate
+    refuses a file whose bytes differ from it.
+    """
+    scanner = root.joinpath(*Path(path).parts[:4])
+    relative = "/".join(Path(path).parts[4:])
+    transcript_file = scanner / TRANSCRIPT_FILE_NAME
+    if not transcript_file.is_file():
+        return f"{scanner.name} has no {TRANSCRIPT_FILE_NAME}"
+    pinned = {
+        entry.path
+        for transcript in load_transcript_file(transcript_file).transcripts
+        for entry in (*transcript.results, *transcript.side_reports)
+    }
+    if relative not in pinned:
+        return f"{scanner.name}/{TRANSCRIPT_FILE_NAME} names no recording {relative}"
+    return None
+
+
+def test_every_recording_the_hook_skips_is_pinned_by_its_transcripts(
+    excluded, tracked_json
+):
+    """The reason for skipping a recording is that a transcript pins its bytes.
+
+    Without that reason a recording is just JSON in the wrong format, and the hook should
+    format it. This reads every tracked recording the exclude skips, whatever pattern
+    skips it, so a recording added to the exclude without a transcript fails here.
+    """
+    skipped = [
+        p
+        for p in tracked_json
+        if excluded(p) and re.fullmatch(rf"{SCANNER_FIXTURES}/[^/]+/captured/.+", p)
+    ]
+    assert skipped, "the exclude skips no recording; this test checks nothing"
+    unpinned = {}
+    for path in skipped:
+        why = _why_no_transcript_pins(REPO_ROOT, path)
+        if why:
+            unpinned[path] = why
+    assert not unpinned, unpinned
+
+
+def test_the_pin_check_refuses_a_recording_no_transcript_names(tmp_path):
+    """Must-flag and must-not-flag through the real transcripts file.
+
+    A copy of bandit's fixture directory holds the transcripts.json as committed. The
+    recording it names passes, whatever its bytes; one it does not name, and one in a
+    directory with no transcripts.json, are each refused.
+    """
+    scanner = tmp_path.joinpath(*SCANNER_FIXTURES.split("/"), "bandit")
+    (scanner / "captured").mkdir(parents=True)
+    shutil.copyfile(
+        REPO_ROOT / SCANNER_FIXTURES / "bandit" / TRANSCRIPT_FILE_NAME,
+        scanner / TRANSCRIPT_FILE_NAME,
+    )
+    named = f"{SCANNER_FIXTURES}/bandit/captured/bandit-1.9.4-m0.json"
+    unnamed = f"{SCANNER_FIXTURES}/bandit/captured/recorded-by-nobody.json"
+    bare = f"{SCANNER_FIXTURES}/unrecorded/captured/recorded-by-nobody.json"
+    for path in (named, unnamed, bare):
+        planted = tmp_path / path
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text("{}\n", encoding="utf-8")
+
+    assert _why_no_transcript_pins(tmp_path, named) is None
+    assert "names no recording" in (_why_no_transcript_pins(tmp_path, unnamed) or "")
+    assert "has no transcripts.json" in (_why_no_transcript_pins(tmp_path, bare) or "")
 
 
 def test_every_generated_plugin_file_is_left_alone(excluded, tracked_json):
