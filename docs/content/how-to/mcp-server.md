@@ -402,6 +402,7 @@ not `--stateless-http`. Use it only for a client that cannot use streamable HTTP
 | `ASH_MCP_ALLOWED_ROOTS` | Local clients: everything outside the system directories, the filesystem root, and other sessions' workspaces. Remote clients: only delivered source. | Directories, and their subdirectories, that clients may scan and read results from. |
 | `ASH_MCP_ALLOWED_CONFIG_ROOTS` | A remote client may read config only from the scan roots and its session's `config/` directory. | Extra directories remote clients may read config files from, such as a shared policy file. A config file a client names there counts as yours, not the client's, unless a client delivered it. |
 | `ASH_MCP_GIT_ALLOWED_HOSTS` | No host: `set_source_git` clones from nowhere. | The hosts `set_source_git` may clone from, separated by spaces or commas, matched without regard to case. See [Deliver source to the server](#deliver-source-to-the-server). |
+| `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` | No registry: `set_source_image` accepts no reference. | The registries `set_source_image` accepts references into, as `host[:port]` entries separated by spaces or commas, matched without regard to case (`:443` is the default and may be left off; bare Docker Hub references such as `alpine:3` need `docker.io` listed). Scanning a delivered reference makes the server's own tools reach that registry with the server's network, daemon store and registry credentials, so the list is the image twin of `ASH_MCP_GIT_ALLOWED_HOSTS`. The archive upload needs no registry and is not gated. |
 | `ASH_MCP_WORKSPACE_ROOT` | `$XDG_CACHE_HOME/ash-mcp`, or `~/.cache/ash-mcp` | Where each session's workspace lives: delivered source, uploads, and session configs. |
 | `ASH_CONFIG` | The built-in defaults. | The server's own config. Its `global_settings.mcp.runtime_overrides` section is the policy that delivered configs are checked against, and its `mcp-resource-management` section [limits the scans](#limit-how-many-scans-run-and-for-how-long). When it names a path that is not a file, a file the server cannot read, or a config that does not load or validate, `ashx mcp` refuses to start, on every transport, with exit code 3. An empty value counts as unset. Keep it outside every git checkout and the directories clients scan: inside one, its sandbox grants and plugin modules do not count ([Configuration trust model](../concepts/trust-model.md#how-the-tier-is-decided)). |
 
@@ -508,7 +509,10 @@ gives `git_clone_failed` or `git_checkout_failed`, with git's own message in `er
 
 A session can deliver a container image as its scan subject instead of a tree.
 `set_source_image` records an image reference and fetches nothing: resolution belongs to a
-container engine or the scanner tools' own registry clients at scan start.
+container engine or the scanner tools' own registry clients at scan start. The reference's
+registry must be on the operator's `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` list (empty, the
+default, admits none); a reference into an unlisted registry is refused with `error_type`
+`image_registry_not_permitted`, naming the archive upload as the ungated alternative.
 `set_source_image_archive_chunk` and `set_source_image_archive_finalize` take a saved image
 (an uncompressed `docker save` tar) in the zip channel's exact shape -- the same chunk rules
 and caps, a SHA-256 verified at finalize -- but nothing is extracted: the archive is one file

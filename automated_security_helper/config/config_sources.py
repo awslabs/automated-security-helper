@@ -267,6 +267,7 @@ from automated_security_helper.config.ash_config import (
     AshConfig,
     EnvReferenceNotResolved,
     _PluginConfigSegment,
+    fold_document_scanner_aliases,
     load_yaml_config,
     plugin_key_lookup_names,
     resolve_env_references,
@@ -3015,6 +3016,19 @@ class ResolvedConfigDocument:
     reference_places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = field(
         default_factory=dict
     )
+    #: What a load that filled the files of ``documents`` from the operator's
+    #: profile read in each (``load_config_file``'s ``fill``: the copy of a
+    #: profile a client patched holds each value the profile read from the
+    #: environment as its reference text), by the path ``documents`` names the
+    #: file by. Each reference is at the place the document holds it, and stamped
+    #: with that file (``EnvironmentReference.read_in``), so the document is the
+    #: one that holds the operator's value there. A file the fill read nothing
+    #: in has an empty entry; a load that filled nothing records none. The
+    #: client rules take a leaf holding such a value as the operator's own
+    #: (``runtime_patch.config_document_denials``).
+    filled_references: Dict[Path, Tuple[EnvironmentReference, ...]] = field(
+        default_factory=dict
+    )
 
     def shown_path(self, path: Path) -> str:
         """How a message names ``path``, a file of ``chain``: as
@@ -5133,9 +5147,22 @@ def _resolve(
                     f"{state.shown(real)}, must be a mapping once its own "
                     f"'{PATCH_KEY}' is applied, got {type(base_document).__name__}"
                 )
-            merged = deep_merge(merged, base_document, AshConfig)
+            # A retired scanner's section is the overlay inside one document,
+            # but across documents the extending file has to win. Each base is
+            # folded before it is layered, so the layering is the ordinary
+            # later-over-earlier one whichever spelling either file uses. The
+            # file's own sections are left for the model to fold, so its patch
+            # still names them in the spelling it wrote. The unconfined view
+            # mirrors a document that was folded and logged just above.
+            merged = deep_merge(
+                merged, fold_document_scanner_aliases(base_document), AshConfig
+            )
             if unconfined is not None:
-                unconfined = deep_merge(unconfined, base_unconfined, AshConfig)
+                unconfined = deep_merge(
+                    unconfined,
+                    fold_document_scanner_aliases(base_unconfined, log=False),
+                    AshConfig,
+                )
             if owned is not None and base_owned:
                 for segment_key, keys in base_owned.items():
                     owned.setdefault(segment_key, set()).update(keys)

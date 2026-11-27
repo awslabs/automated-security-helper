@@ -183,9 +183,13 @@ def test_the_community_index_lists_the_plugins_that_ship_in_ash() -> None:
 
 
 def test_the_community_index_modules_exist() -> None:
+    """The three alpha plugin modules, plus ash_aws_plugins, which the page's
+    opening aside names on purpose to say it is NOT an alpha plugin (it loads
+    the same opt-in way; see the AWS reporters page)."""
     text = page_text(COMMUNITY_INDEX)
     modules = re.findall(r"`(ash_[a-z]+_plugins)`", text)
     assert sorted(modules) == [
+        "ash_aws_plugins",
         "ash_betterleaks_plugins",
         "ash_guarddog_plugins",
         "ash_hadolint_plugins",

@@ -36,11 +36,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CONFIG = REPO_ROOT / ".ash.yaml"
 
 RULE = "GHSA-gcqx-w48m-w2h4"
-FILE_PATH = "node_modules/deepmerge/package.json"
+# npm-audit locates a lockfile-sourced advisory at the lockfile itself (the
+# location move the suppress-findings how-to documents), which is what the
+# config entries' `path` pins. The old `node_modules/deepmerge/package.json`
+# location is the shape only of a report converted with no lockfile known.
+FILE_PATH = "deploy/cdk/package-lock.json"
 PACKAGE_PATHS = (
     "deploy/cdk/node_modules/deepmerge",
     "deploy/cdk-constructs/node_modules/deepmerge",
 )
+LOCKFILES = {
+    package_path: f"{package_path.split('/node_modules/')[0]}/package-lock.json"
+    for package_path in PACKAGE_PATHS
+}
 
 
 def _deepmerge_entries() -> list[AshSuppression]:
@@ -78,7 +86,7 @@ def test_the_config_holds_one_entry_per_lockfile() -> None:
 
 @pytest.mark.parametrize("package_path", PACKAGE_PATHS)
 def test_each_finding_is_covered_by_exactly_one_entry(package_path: str) -> None:
-    finding = _finding(package_path=package_path)
+    finding = _finding(package_path=package_path, file_path=LOCKFILES[package_path])
     covering = [entry for entry in _deepmerge_entries() if entry.matches(finding)]
     assert len(covering) == 1, (
         f"{package_path}: covered by {len(covering)} entries; expected exactly one"

@@ -63,10 +63,16 @@ from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 #: beside ``.ash.yaml``.
 LOCK_RELATIVE_PATH = ".ash.lock"
 
+#: The legacy lock's file name inside ``.ash/``. Its own file-name constant so the
+#: docs check, which accepts an ``ash.<name>`` a page names only when the package
+#: declares that file (scripts/docs_checks.py), accepts the suppression guide's
+#: ``git mv .ash/ash.lock .ash.lock``.
+LEGACY_LOCK_FILE_NAME = "ash.lock"
+
 #: Where the lock was first written. Still read, with a deprecation warning, when
 #: ``.ash.lock`` does not exist; never written. Deprecated since v3.9, removed in
 #: v4.1, as the other renamed config paths are.
-LEGACY_LOCK_RELATIVE_PATH = ".ash/ash.lock"
+LEGACY_LOCK_RELATIVE_PATH = f".ash/{LEGACY_LOCK_FILE_NAME}"
 
 #: The legacy locations already warned about in this process, so a scan that loads
 #: the lock for each file it checks says it once.

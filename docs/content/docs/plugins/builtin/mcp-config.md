@@ -82,8 +82,23 @@ With this, a remote server must live under `https://mcp.example.com/` and be rea
 
 ## What the converter writes
 
-For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (`.cursor/mcp.json` becomes `cursor__mcp.json`):
+For each entry that declares a command the converter writes one script and one sidecar into its work directory, under a directory named for the config file (`.cursor/mcp.json` becomes `cursor__mcp.json`). This `.mcp.json` starts one server through `sudo`:
 
+<!-- doctest: config kind=mcp-client save-as=.mcp.json -->
+```json
+{
+  "mcpServers": {
+    "elevated": {
+      "command": "sudo",
+      "args": ["/usr/local/bin/mcp-files", "--root", "/srv/data"]
+    }
+  }
+}
+```
+
+The converter writes this script for it:
+
+<!-- doctest: illustrative reason="the script the converter writes for the entry above; running it would run sudo" -->
 ```sh
 #!/bin/sh
 # ash-mcp-span: {"source":".mcp.json","pointer":"/mcpServers/elevated","line":3,"col":17}
@@ -110,8 +125,14 @@ Some limits to know:
 
 ## Running it
 
+<!-- doctest: run expect-exit=2 -->
 ```sh
-ash --source-dir . --scanners mcp-config,opengrep --output-dir ash_output
+ashx --source-dir . --scanners mcp-config --output-dir ash_output
 ```
 
-The policy findings come from `mcp-config` alone. To have the generated scripts scanned as well, run opengrep in the same scan, as above.
+The policy findings come from `mcp-config` alone. On the `.mcp.json` above it reports `MCP-PRIVILEGE-ESCALATION` (HIGH) at the server's `command`, so the scan exits 2. To have the generated scripts scanned as well, run opengrep in the same scan:
+
+<!-- doctest: illustrative reason="runs opengrep, whose default ruleset p/ci is fetched from the Semgrep registry over the network" -->
+```sh
+ashx --source-dir . --scanners mcp-config,opengrep --output-dir ash_output
+```

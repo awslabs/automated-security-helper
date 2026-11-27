@@ -493,9 +493,9 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
     ) -> Dict[str, Any]:
         """Convert a suppression to a dictionary for JSON serialization.
 
-        Package fields and ``symbol`` are included only when set, so the
-        report for a suppression without them is unchanged, and so the config
-        linter can rebuild an id from the report that matches the entry.
+        Package fields, ``symbol`` and ``image`` are included only when set,
+        so the report for a suppression without them is unchanged, and so the
+        config linter can rebuild an id from the report that matches the entry.
         ``recorded``, when given, is the suppression as its config file wrote
         the fields it read from the environment (``recorded_suppressions``),
         and each value comes from it. For such an entry the rebuilt id hashes
@@ -630,6 +630,11 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                     ("package_version", "Package version"),
                     ("package_path", "Package path"),
                     ("symbol", "Symbol"),
+                    # Without it, two entries differing only by image render
+                    # as identical bullets and the operator cannot tell which
+                    # one to delete -- the exact distinction the id's image=
+                    # part exists to keep.
+                    ("image", "Image"),
                 ):
                     if field in shown:
                         lines.append(f"- **{label}**: {_code_span(shown[field])}")

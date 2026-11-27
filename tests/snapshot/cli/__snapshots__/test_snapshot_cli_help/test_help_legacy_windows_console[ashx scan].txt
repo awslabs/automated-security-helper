@@ -155,11 +155,13 @@
 │                                                              default in ASH v4.                 │
 │                                                              [env var: ASH_STAGED]              │
 │ --image                     <str>                            Scan a container image named by    │
-│                                                              reference (registry/repo[:tag])    │
-│                                                              instead of a source directory. ASH │
-│                                                              fetches nothing itself: the image  │
-│                                                              is prepared by a container engine  │
-│                                                              or the scanner tools' own registry │
+│                                                              reference (registry/repo,          │
+│                                                              optionally followed by :tag,       │
+│                                                              @sha256:digest or both) instead of │
+│                                                              a source directory. ASH fetches    │
+│                                                              nothing itself: the image is       │
+│                                                              prepared by a container engine or  │
+│                                                              the scanner tools' own registry    │
 │                                                              clients. Repeat it, or give a      │
 │                                                              comma list, to scan several        │
 │                                                              images: each is its own scan, with │

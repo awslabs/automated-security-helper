@@ -34,8 +34,14 @@ IMAGE_REF = "registry.example.com/team/app@sha256:" + "a" * 64
 def workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(sd, "resolve_workspace_root", lambda: tmp_path)
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path))
+    # The operator's registry allowlist admits nothing by default; these rows
+    # are about the scan's anchoring, not the gate.
+    monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "registry.example.com")
     yield tmp_path
     sd._drop_session_source_dir(_SESSION)
+    # The locator too: left behind, it points a LATER test's session at this
+    # test's deleted tmp_path (the registry is module-level state).
+    sd._drop_session_image_locator(_SESSION)
 
 
 def _tar_bytes() -> bytes:

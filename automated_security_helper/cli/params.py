@@ -48,3 +48,13 @@ def from_environment(ctx: typer.Context, param: str) -> bool:
     imported here, which an ``is`` or ``==`` against this module's enum never matches.
     """
     return getattr(ctx.get_parameter_source(param), "name", None) == "ENVIRONMENT"
+
+
+def from_command_line(ctx: typer.Context, param: str) -> bool:
+    """Whether *param*'s value was typed on the command line.
+
+    Compared by the source's name, as :func:`from_environment` does, for the same
+    reason. A value from the ``envvar``, from the option's default, from the default
+    map or from a prompt is not typed, so it is not "COMMANDLINE".
+    """
+    return getattr(ctx.get_parameter_source(param), "name", None) == "COMMANDLINE"

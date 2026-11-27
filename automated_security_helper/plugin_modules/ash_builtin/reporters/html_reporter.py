@@ -460,15 +460,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         # With the fold on, one card per duplicate cluster, the others named in
         # its note; off, every finding has its card.
         shown, notes = emitter.fold_findings(emitter.flat_vulns)
-        findings = sorted(
-            shown,
-            key=lambda finding: (
-                finding.is_suppressed,
-                _SEVERITY_ORDER.get(finding.severity.upper(), len(_SEVERITY_ORDER)),
-                finding.file_path or "",
-                finding.line_start or 0,
-                finding.rule_id or "",
-            ),
+        # Live cards first, then suppressed ones; each group most severe first,
+        # then by file, line and rule, the emitter's own finding order.
+        findings = emitter.by_severity(
+            shown, suppressed=[bool(finding.is_suppressed) for finding in shown]
         )
         if not findings:
             return '<p class="notice">No findings in this report. Check the scan outcome and scanner coverage above.</p>'

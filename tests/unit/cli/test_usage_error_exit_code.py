@@ -356,15 +356,17 @@ class TestTheCodeIsPublished:
                 f"{plugin_type_named} `converter`, `scanner` and `reporter`, exit "
                 f"{BAD_SELECTION_EXIT}" in changelog
             ),
-            # The page names the two selections in its opening paragraph, not in
-            # a table row of their own.
-            # One pattern from the code through both selections, over the page with
-            # its whitespace normalized as the CHANGELOG's is, so a re-wrapped
-            # paragraph still reads and a phrase elsewhere on the page does not.
+            # The page names the selections in its opening paragraph, not in
+            # a table row of their own. The sentence has grown past the original
+            # two (it now also names --providers, the virtualenv flags and
+            # --binary-path); this pattern pins the two selections this test
+            # exercises, over the page with its whitespace normalized as the
+            # CHANGELOG's is, so a re-wrapped paragraph still reads and a phrase
+            # elsewhere on the page does not.
             "the exit-codes reference's dependencies install sentence": (
                 re.search(
-                    rf"Two `ashx dependencies install` selections exit "
-                    rf"{BAD_SELECTION_EXIT} instead: a `--tool` name[^.|]*, and a "
+                    rf"Some `ashx dependencies install` selections exit "
+                    rf"{BAD_SELECTION_EXIT} instead: a `--tool` name[^.|]*, a "
                     r"`--plugin-type` other than `converter`, `scanner`, or `reporter`",
                     " ".join(reference.split()),
                 )

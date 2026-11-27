@@ -110,8 +110,14 @@ jobs:
         run: |
           set -euo pipefail
           # An independent read: the registry's own answer for the tag, not ASH's.
+          # The Accept header names all four manifest media types, sorted as
+          # .github/actions/prepull-base-image/oci_layout.py sorts them. The runner's
+          # docker attaches a provenance attestation to the build, so the pushed tag
+          # names an image index. Without the index types the registry answers 404
+          # for an OCI index, and for a Docker manifest list it answers with one
+          # platform's manifest, whose digest is not the tag's.
           digest="$(curl -fsSI \
-            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
             http://127.0.0.1:5000/v2/ash-live-engine/manifests/ci \
             | tr -d '\r' | awk 'tolower($1)=="docker-content-digest:" {print $2}')"
           case "$digest" in

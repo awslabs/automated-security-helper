@@ -377,9 +377,10 @@ def is_blank_bin_path(value: "str | None") -> bool:
     lookup search it. Path() also drops a trailing separator, which made "  /" the
     relative "  ". So a value is blank when it is only whitespace or when every
     component Path() keeps is: "  /", " /" and "\\t/" are blank. "/" and "." name
-    a directory, and so does " /x", a relative path, so they are not blank. Tool
-    lookup does not search a relative ASH_BIN_PATH (subprocess_utils.find_executable),
-    and ``ash dependencies install`` makes a relative bin path absolute.
+    a directory, and so does " /x", a relative path, so they are not blank.
+    ``ashx dependencies install`` makes a relative --bin-path absolute, where it was
+    typed. A relative ASH_BIN_PATH is used neither by tool lookup nor by installs
+    (subprocess_utils.usable_bin_path).
     """
     if not value or not value.strip():
         return True

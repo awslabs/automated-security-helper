@@ -662,6 +662,105 @@ def _declared_option_names(segment_cls: type[BaseModel], plugin_key: str) -> set
     return names
 
 
+def fold_scanner_name_aliases(
+    data: Any, segment_cls: Optional[type[BaseModel]] = None, *, log: bool = True
+) -> Any:
+    """``data``, a ``scanners`` mapping, with each retired scanner's section
+    folded onto the plugin that serves it.
+
+    The fold the scanner segment's validator
+    (``_ScannerConfigSegmentBase._fold_scanner_name_aliases``) runs when the
+    model validates a ``scanners`` mapping, as a function of any such mapping;
+    that docstring states the merge rules, and they are this function's.
+
+    ``segment_cls`` is the segment class whose declared plugins' options decide
+    which of an alias section's option keys are dropped; the shipped
+    ``ScannerConfigSegment`` when it is not given, looked up when the function
+    runs. ``log=False`` suppresses every log line, for a view that mirrors a
+    document already folded with logging on, so no line prints twice.
+
+    Answers ``data`` itself when nothing folds and a new mapping otherwise. It
+    never changes what it is given.
+    """
+    if not isinstance(data, dict):
+        return data
+    if segment_cls is None:
+        segment_cls = ScannerConfigSegment
+    for key in list(data):
+        if not isinstance(key, str):
+            continue
+        canonical = canonical_scanner_name(key)
+        if canonical == key or canonical in (None, ""):
+            continue
+        data = dict(data)
+        section = data.pop(key)
+        if log:
+            ASH_LOGGER.info(
+                f"scanners.{key} is an alias of the {canonical} plugin; "
+                f"applying its section to scanners.{canonical}"
+            )
+        if isinstance(section, BaseModel):
+            section = section.model_dump(exclude_unset=True)
+        if section is None:
+            section = {}
+        if not isinstance(section, dict):
+            if log:
+                ASH_LOGGER.warning(
+                    f"scanners.{key} is not a mapping; nothing of it can be "
+                    f"applied to scanners.{canonical}"
+                )
+            continue
+        section = dict(section)
+        section.pop("name", None)
+        declared = _declared_option_names(segment_cls, canonical)
+        options = section.get("options")
+        if declared is not None and isinstance(options, dict):
+            dropped = sorted(k for k in options if k not in declared)
+            if dropped:
+                section["options"] = {k: v for k, v in options.items() if k in declared}
+                if log:
+                    ASH_LOGGER.warning(
+                        f"scanners.{key}.options.{{{', '.join(dropped)}}} have no "
+                        f"{canonical} counterpart and were dropped"
+                    )
+        if canonical in data:
+            canonical_section = data[canonical]
+            if isinstance(canonical_section, BaseModel):
+                canonical_section = canonical_section.model_dump(exclude_unset=True)
+            data[canonical] = _merge_config_values(canonical_section, section)
+        else:
+            data[canonical] = section
+    return data
+
+
+def fold_document_scanner_aliases(document: Any, *, log: bool = True) -> Any:
+    """``document``, a config document's mapping, with its ``scanners`` section
+    folded (``fold_scanner_name_aliases``).
+
+    What the document loader runs on a document before it layers another over
+    it (config_sources._resolve for each base of an ``extends`` chain,
+    resolve_config.load_config_file for the project document under an operator
+    overlay). Inside one document a retired spelling is the overlay over the
+    plugin's own section; once the document is folded, the layering that follows
+    is the ordinary rule, the later document wins whichever spelling either
+    uses.
+
+    A shallow copy of the document only when its section changed, the same
+    object otherwise. A document that is not a mapping, or whose scanners value
+    is not one, is answered as it is.
+    """
+    if not isinstance(document, dict):
+        return document
+    segment_key = PluginKind.SCANNER.section
+    scanners = document.get(segment_key)
+    if not isinstance(scanners, dict):
+        return document
+    folded = fold_scanner_name_aliases(scanners, log=log)
+    if folded is scanners:
+        return document
+    return {**document, segment_key: folded}
+
+
 def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
     """Map each declared field name to its alias, where the two differ.
 
@@ -859,53 +958,15 @@ class _ScannerConfigSegmentBase(_PluginConfigSegment):
           (``scanners.semgrep.enabled=false`` must win over the dumped
           ``enabled: true``). A hand-written config with both spellings is
           flagged by ``ashx config lint``.
+
+        Across documents (an ``extends`` chain, a workspace overlay) the later
+        document wins whatever spelling either one uses: the document loader
+        folds each base, and the project document under an overlay, with
+        ``fold_document_scanner_aliases`` before it layers the next document
+        over it. This validator folds the topmost document and any
+        configuration built from a dict.
         """
-        if not isinstance(data, dict):
-            return data
-        for key in list(data):
-            if not isinstance(key, str):
-                continue
-            canonical = canonical_scanner_name(key)
-            if canonical == key or canonical in (None, ""):
-                continue
-            data = dict(data)
-            section = data.pop(key)
-            ASH_LOGGER.info(
-                f"scanners.{key} is an alias of the {canonical} plugin; "
-                f"applying its section to scanners.{canonical}"
-            )
-            if isinstance(section, BaseModel):
-                section = section.model_dump(exclude_unset=True)
-            if section is None:
-                section = {}
-            if not isinstance(section, dict):
-                ASH_LOGGER.warning(
-                    f"scanners.{key} is not a mapping; nothing of it can be "
-                    f"applied to scanners.{canonical}"
-                )
-                continue
-            section = dict(section)
-            section.pop("name", None)
-            declared = _declared_option_names(cls, canonical)
-            options = section.get("options")
-            if declared is not None and isinstance(options, dict):
-                dropped = sorted(k for k in options if k not in declared)
-                if dropped:
-                    section["options"] = {
-                        k: v for k, v in options.items() if k in declared
-                    }
-                    ASH_LOGGER.warning(
-                        f"scanners.{key}.options.{{{', '.join(dropped)}}} have no "
-                        f"{canonical} counterpart and were dropped"
-                    )
-            if canonical in data:
-                canonical_section = data[canonical]
-                if isinstance(canonical_section, BaseModel):
-                    canonical_section = canonical_section.model_dump(exclude_unset=True)
-                data[canonical] = _merge_config_values(canonical_section, section)
-            else:
-                data[canonical] = section
-        return data
+        return fold_scanner_name_aliases(data, cls)
 
     if TYPE_CHECKING:
 

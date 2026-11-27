@@ -2241,7 +2241,8 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
     policy lists. The passwd home here holds what a user's often does: a tool in
     ~/bin and one in ~/.local/bin, with PATH naming the home itself and a
     configuration directory in it, ~/.config/tool. No grant may be the passwd home
-    or hold it, and inside it only a bin directory may be granted: the home, its
+    or hold it, unless an empty tmpfs covers the home beneath that grant (how bwrap
+    hides it), and inside it only a bin directory may be granted: the home, its
     ~/.local (keyrings in ~/.local/share) and ~/.config/tool must stay out. The
     tool's own bin directory is granted, which shows the check reads the plan.
     """
@@ -2269,6 +2270,7 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
         backend._executable = "/usr/bin/bwrap"
         policy = _policy(layout, argv0=str(argv0))
         plan = backend.plan([str(argv0)], {"PATH": "/usr/bin"}, policy)
+        hiding = []
         try:
             if backend_class is LandlockBackend:
                 document = json.loads(plan.argv[plan.argv.index("--policy") + 1])
@@ -2290,9 +2292,11 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
                         paths.append(options[index + 1])
                         if option != "--overlay-src":
                             paths.append(options[index + 2])
+                    elif option == "--tmpfs":
+                        hiding.append(options[index + 1])
         finally:
             plan.run_cleanup()
-        return {Path(p) for p in paths}
+        return {Path(p) for p in paths}, {Path(p) for p in hiding}
 
     @pytest.mark.parametrize("tool_dir", ["bin", ".local/bin"])
     @pytest.mark.parametrize("backend_class", [BwrapBackend, LandlockBackend])
@@ -2306,15 +2310,25 @@ class TestBwrapAndLandlockGrantNothingInThePasswdHome:
                 [str(pw), str(pw / ".config" / "tool"), str(argv0.parent), "/usr/bin"]
             ),
         )
-        granted = self._granted(backend_class, layout, argv0)
+        granted, hiding = self._granted(backend_class, layout, argv0)
         hidden = Path(_as_argv(pw))
+
+        def hidden_beneath(grant):
+            # bwrap mounts deeper paths after shallower ones: an empty tmpfs at the
+            # passwd home, or at a directory holding it, beneath a bind of a path
+            # that holds the home keeps the home unshown. A run whose temp tree
+            # sits under the checkout has the import root holding the home.
+            return any(
+                (t == hidden or t in hidden.parents) and grant in t.parents
+                for t in hiding
+            )
 
         assert Path(_as_argv(argv0.parent)) in granted
         opening = sorted(
             str(p)
             for p in granted
             if p == hidden
-            or p in hidden.parents
+            or (p in hidden.parents and not hidden_beneath(p))
             or (hidden in p.parents and p.name not in ("bin", "sbin", "Scripts"))
         )
         assert opening == [], opening

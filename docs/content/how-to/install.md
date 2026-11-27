@@ -254,7 +254,9 @@ install reports installed is what the next scan can import.
 `--binary-path scanner=/absolute/path` forces one binary for one scanner and skips that
 scanner's install commands. Repeat it for each scanner. The path must be absolute, name a
 regular executable file rather than a symlink, and sit outside the directory being
-scanned. ASH reads and hashes the file, records the path and its SHA-256 in its install
+scanned. On Windows, which keeps no execute permission, an executable file is one whose
+name ends in `.exe`, `.com`, `.bat` or `.cmd`, the files Windows starts as programs.
+ASH reads and hashes the file, records the path and its SHA-256 in its install
 records under `~/.ash`, and never runs it. The record is read back: the scanners'
 dependency validation and later `ashx dependencies install` runs resolve the scanner to
 the forced path before any PATH or uv lookup, re-checking the file and its SHA-256 each

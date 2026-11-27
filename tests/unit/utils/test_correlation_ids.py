@@ -168,6 +168,49 @@ class TestSpellingEquality:
         key = secret_correlation_key(_secret_identity(), default_project="fallback")
         assert key["project"] == "web"
 
+    def test_two_images_secrets_at_one_path_and_line_have_different_ids(self):
+        # The identity contract keys the two apart (tree "image" plus the
+        # image component), so the correlation key copies BOTH: with only the
+        # tree copied, one in-image path and line in two different images
+        # shared a secret/<sha> id, and a report over both correlated them.
+        one = _secret_identity(
+            file_path="/etc/app/creds.txt", image="sha256:" + "aa" * 32
+        )
+        other = _secret_identity(
+            file_path="/etc/app/creds.txt", image="sha256:" + "bb" * 32
+        )
+        first = correlation_id(
+            SECRET_CORRELATION_PREFIX, "t", secret_correlation_key(one)
+        )
+        second = correlation_id(
+            SECRET_CORRELATION_PREFIX, "t", secret_correlation_key(other)
+        )
+        assert first != second
+        # The key spells the components as the identity key does.
+        key = secret_correlation_key(one)
+        emitted = identity_key(one)
+        assert key["tree"] == emitted["tree"]
+        assert key["image"] == emitted["image"]
+
+    def test_one_images_secret_correlates_across_scanners(self):
+        # The positive control: the image component keys images apart, not
+        # one image's scanners.
+        image = "sha256:" + "aa" * 32
+        ours = _secret_identity(
+            scanner="scanner-a", file_path="/etc/app/creds.txt", image=image
+        )
+        theirs = _secret_identity(
+            scanner="scanner-b",
+            rule_id="generic.secret.9",
+            file_path="/etc/app/creds.txt",
+            image=image,
+        )
+        assert correlation_id(
+            SECRET_CORRELATION_PREFIX, "t", secret_correlation_key(ours)
+        ) == correlation_id(
+            SECRET_CORRELATION_PREFIX, "t", secret_correlation_key(theirs)
+        )
+
 
 class TestAbsence:
     """A family's key is None without its fields; None hashes to None."""

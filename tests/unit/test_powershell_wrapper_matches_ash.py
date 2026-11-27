@@ -2304,8 +2304,9 @@ def test_a_relative_runner_from_the_environment_is_refused_and_nothing_runs(
     else:
         assert result.returncode == 3, shown
         # The refusal names the variable the value came from, so a caller who set
-        # only the deprecated name is not told to fix one they did not set.
-        assert f"{given} starts with the relative path" in " ".join(shown.split())
+        # only the deprecated name is not told to fix one they did not set. The
+        # whole value is the command Invoke-ASH runs, so it is named whole.
+        assert f"{given} is the relative path ./bin/docker," in " ".join(shown.split())
         assert not log.exists(), log.read_text(encoding="utf-8")
 
 

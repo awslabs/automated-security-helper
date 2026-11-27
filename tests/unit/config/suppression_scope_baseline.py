@@ -1235,9 +1235,7 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         # harvester's locks, the dependabot auto-merge workflow, new tests), one per
         # rule and path. Each is an unpinned entry in origin/main's .ash.yaml; none is
         # on v4's side of the merge. Sorted by path, then rule.
-        ("GHSA-2mjx-qc3c-rqvc*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
         ("GHSA-36hh-v3qg-5jq4*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
-        ("GHSA-c8m5-c952-6cm4*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
         ("GHSA-chgr-c6px-7xpp*", "**/sdist-lock-harvester/sdist-locks/**/Cargo.lock"),
         (
             "SECRET-HEX-HIGH-ENTROPY-STRING",
@@ -1302,6 +1300,29 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         ("SECRET-SECRET-KEYWORD", "tests/unit/utils/mcp_config/test_toml_spans.py"),
         ("generic-api-key", "tests/unit/utils/test_finding_trend.py"),
         ("generic-api-key", "tests/unit/utils/test_scan_history.py"),
+        # The merge of origin/main d9407b54e3d into v4-capabilities: the glob entries
+        # main wrote for the polars-runtime-32 and uv sdist locks when it narrowed two
+        # of the harvester-wide advisory entries above (which it removed), and the
+        # whole-file gitleaks entry for a base test, one per rule and path. Each is an
+        # unpinned entry in origin/main's .ash.yaml. Sorted by path, then rule.
+        (
+            "GHSA-c8m5-c952-6cm4*",
+            "**/sdist-lock-harvester/sdist-locks/uv/*/Cargo.lock",
+        ),
+        ("GHSA-2mjx-qc3c-rqvc", "**/sdist-locks/polars-runtime-32/*/Cargo.lock"),
+        (
+            "GHSA-2mjx-qc3c-rqvc-rustls",
+            "**/sdist-locks/polars-runtime-32/*/Cargo.lock",
+        ),
+        ("GHSA-c8m5-c952-6cm4", "**/sdist-locks/polars-runtime-32/*/Cargo.lock"),
+        (
+            "GHSA-c8m5-c952-6cm4-rustls",
+            "**/sdist-locks/polars-runtime-32/*/Cargo.lock",
+        ),
+        (
+            "generic-api-key",
+            "tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py",
+        ),
     ),
     ".ash/.ash_alpha_plugins.yaml": (
         ("*:Apache-2.0", "**"),
@@ -1684,6 +1705,12 @@ MAIN_BASELINE: dict[str, tuple[tuple[str | None, str], ...]] = {
         # the .ash.yaml list above.
         ("generic-api-key", "tests/unit/utils/test_finding_trend.py"),
         ("generic-api-key", "tests/unit/utils/test_scan_history.py"),
+        # The merge of origin/main d9407b54e3d into v4-capabilities: the whole-file
+        # gitleaks entry main wrote for the same base test as in the .ash.yaml block.
+        (
+            "generic-api-key",
+            "tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py",
+        ),
     ),
 }
 

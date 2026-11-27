@@ -49,6 +49,17 @@ from tests.utils.helpers import importing_this_checkout
 #: The committed fixture files the in-tree controls of the scanners added later are
 #: copied from. Each is the positive its scanner's own tests pin.
 FIXTURES = Path(__file__).resolve().parents[2] / "test_data" / "scanners"
+#: mcp-config's positive, an MCP server config with a ``sudo`` command and an
+#: unpinned ``npx`` runner, both flagged under its defaults
+#: (tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py).
+MCP_CONFIG_FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "test_data"
+    / "mcp_config"
+    / "claude_code"
+    / "violating"
+    / ".mcp.json"
+)
 
 pytestmark = [
     pytest.mark.e2e,
@@ -273,6 +284,7 @@ def _build_in_tree_controls(tree: Path) -> None:
     for source, target in IN_TREE_COPIES:
         (tree / target).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(FIXTURES / source, tree / target)
+    shutil.copyfile(MCP_CONFIG_FIXTURE, tree / ".mcp.json")
     token = fabricated_tokens()["settings_github_pat"]
     (tree / "gitleaks_settings.py").write_text(
         f'GITHUB_TOKEN = "{token}"\n', encoding="utf-8"
@@ -476,7 +488,9 @@ class Control:
 #: (tests/integration/scanners/test_actionlint_real_binary.py,
 #: test_cfn_lint_and_cfn_guard_real.py, test_gitleaks_real_binary.py and
 #: test_zizmor_real_binary.py); hadolint and guarddog read the Dockerfile and the
-#: setup.py that their own tests pin under tests/test_data/scanners.
+#: setup.py that their own tests pin under tests/test_data/scanners. mcp-config runs
+#: in process (no tool, no network), so it can run in every scan; it reads the
+#: ``.mcp.json`` copied from MCP_CONFIG_FIXTURE, which its own tests pin.
 CONTROLS = {
     "bandit": Control(commands=("bandit",), in_tree="real.py"),
     "checkov": Control(commands=("checkov",), uv_tool=True, in_tree="real.tf"),
@@ -518,6 +532,7 @@ CONTROLS = {
     ),
     "syft": Control(commands=("syft",), sbom_package="django"),
     "ferret-scan": Control(commands=("ferret-scan",)),
+    "mcp-config": Control(in_tree=".mcp.json"),
     "npm-audit": Control(
         offline="npm audit asks the package registry, which an offline scan does "
         "not reach"

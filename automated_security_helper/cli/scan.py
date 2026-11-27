@@ -1735,12 +1735,16 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--image",
             rich_help_panel="Scan",
+            # No square brackets in this text: --help renders it as Rich
+            # markup, which drops a bracketed word such as "[@sha256:digest]",
+            # and the CLI reference renders it as markdown, which reads
+            # "[x][y]" as a link.
             help=(
-                "Scan a container image named by reference "
-                "(registry/repo[:tag]) instead of a source "
-                "directory. ASH fetches nothing itself: the image is prepared "
-                "by a container engine or the scanner tools' own registry "
-                "clients. Repeat it, or give a comma list, to scan several "
+                "Scan a container image named by reference (registry/repo, "
+                "optionally followed by :tag, @sha256:digest or both) instead "
+                "of a source directory. ASH fetches nothing itself: the image "
+                "is prepared by a container engine or the scanner tools' own "
+                "registry clients. Repeat it, or give a comma list, to scan several "
                 "images: each is its own scan, with its own reports under "
                 "<output-dir>/<NN>-<image>-<hash>/, and the exit code is the "
                 "worst of theirs. Exclusive with --source-dir, --image-archive "
@@ -1852,10 +1856,12 @@ def run_ash_scan_cli_command(
     except ImageListRefused as refusal:
         _fail_usage(str(refusal))
 
-    # Options that read or filter by the directory the scan starts in are not
-    # an image scan's subject: --staged could exit 0 as "nothing staged"
-    # without the image ever being scanned. Refused first, before the options'
-    # own mode checks, so the operator is told the real conflict.
+    # Scope options an image scan cannot obey, refused first, before the
+    # options' own mode checks, so the operator is told the real conflict.
+    # The rules themselves live in run_ash_scan's _refuse_an_image_scan_scope,
+    # one gate for the CLI and every library caller; this loop exists for the
+    # CLI wording only: it names the flag as typed, or the variable that set
+    # it, which the shared gate cannot know.
     for image_flag, image_value in (
         ("--image", images or None),
         ("--image-archive", image_archive),
@@ -1863,44 +1869,56 @@ def run_ash_scan_cli_command(
     ):
         if image_value is None:
             continue
-        for other_flag, other_given in (
-            ("--staged", staged),
-            ("--baseline", baseline is not None),
-            ("--use-existing", use_existing),
-            ("--changed-files-only", changed_files_only),
+        for other_flag, param, envvar, other_given, why in (
+            (
+                "--staged",
+                "staged",
+                "ASH_STAGED",
+                staged,
+                "scopes the scan to the git index, and an image has none",
+            ),
+            (
+                "--baseline",
+                "baseline",
+                "ASH_BASELINE",
+                baseline is not None,
+                # The reason is the tool's: a baseline is scoped to a scanned
+                # directory (its scan_source) and matched on finding identity,
+                # which for an image carries the image's digest, with a looser
+                # rule-file-message pairing beside it that would pair a
+                # different image's findings.
+                (
+                    "is scoped to a scanned directory, and an image's findings "
+                    "are matched on identities that carry its digest, so no "
+                    "baseline can stand for another image"
+                ),
+            ),
+            (
+                "--use-existing",
+                "use_existing",
+                None,
+                use_existing,
+                "reads saved results, so nothing would be scanned",
+            ),
+            (
+                "--changed-files-only",
+                "changed_files_only",
+                "ASH_CHANGED_FILES_ONLY",
+                changed_files_only,
+                "scopes a scan by git history, and an image has none",
+            ),
         ):
-            if other_given:
-                reason = (
-                    f"{other_flag} reads the working directory, which an image "
-                    "scan does not scan. Scan the image on its own."
-                )
-                if other_flag == "--baseline":
-                    # Kept refused on purpose, and the reason is the tool's:
-                    # a baseline is scoped to a scanned directory (its
-                    # scan_source) and matched on finding identity, which for an
-                    # image carries the image's digest, with a looser
-                    # rule-file-message pairing beside it that would pair a
-                    # different image's findings.
-                    reason = (
-                        "a baseline is scoped to a scanned directory, and an "
-                        "image's findings are matched on identities that carry "
-                        "its digest, so no baseline can stand for another image. "
-                        "Scan the image on its own."
-                    )
-                _fail_usage(
-                    f"{image_flag} cannot be combined with {other_flag}: {reason}"
-                )
-        if changed_files_only:
-            # An image has no diff base, so the scope means nothing there. It is
-            # said once and then dropped, so no git process starts for it and the
-            # whole image is scanned (the run's own warning, below the CLI, is
-            # not reached: the flag no longer arrives).
-            echo(
-                f"Warning: --changed-files-only has no meaning for {image_flag}: "
-                "an image has no diff base, so the whole image is scanned.",
-                err=True,
+            if not other_given:
+                continue
+            source = other_flag
+            if envvar is not None and _from_environment(ctx, param):
+                # The operator may never have typed the flag: name the
+                # variable that set it, as the sibling refusals do.
+                source = f"{envvar} is set, and {other_flag}"
+            _fail_usage(
+                f"{source} cannot be combined with {image_flag}: it {why}. "
+                "Scan the image on its own."
             )
-            changed_files_only = False
 
     if baseline is not None:
         from automated_security_helper.express.runtime import CHILD_ENV

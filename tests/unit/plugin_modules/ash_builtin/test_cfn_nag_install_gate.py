@@ -19,6 +19,7 @@ Same condition, opposite outcome, purely because one plugin declared a command t
 could not work and the other declared none.
 """
 
+import logging
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,6 +27,7 @@ import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.core.constants import home_bin_path
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
     CfnNagScanner,
 )
@@ -38,6 +40,8 @@ _SCANNER = (
 GEM_PROBE = f"{_SCANNER}.find_executable"
 PLATFORM_PROBE = f"{_SCANNER}.platform.system"
 HEADERS_PROBE = f"{_SCANNER}._ruby_headers_present"
+#: What is logged, once per process, for the relative ASH_BIN_PATH the tests below set.
+RELATIVE_VALUE_WARNING = "ASH_BIN_PATH is the relative path 'rel-bin'"
 
 
 @pytest.fixture
@@ -234,6 +238,79 @@ def test_without_a_bin_directory_the_command_only_refuses(context, monkeypatch):
     assert len(commands) == 1
     assert commands[0][2] == "import sys; sys.exit(sys.argv[1])", commands[0]
     assert "--bin-path" in commands[0][3]
+
+
+@pytest.fixture
+def relative_ash_bin_path(tmp_path: Path, monkeypatch) -> tuple:
+    """ASH_BIN_PATH=rel-bin, run from an empty directory, in a home of its own.
+
+    Returns the working directory and the home. The record of what was warned about
+    starts empty, so each test counts its own warnings.
+    """
+    from automated_security_helper.utils import subprocess_utils
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("HOME", str(home))
+    # What Path.home() reads on Windows.
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("ASH_BIN_PATH", "rel-bin")
+    monkeypatch.setattr(subprocess_utils, "_warned_relative_bin_paths", set())
+    return cwd, home
+
+
+def _bindir(command) -> str:
+    """The directory a ``gem install`` command puts the binstub in."""
+    argv = command.args
+    return argv[argv.index("--bindir") + 1]
+
+
+def test_a_relative_ash_bin_path_gives_the_gem_the_default_bindir(
+    context, relative_ash_bin_path, caplog
+):
+    """``--bindir`` is where cfn-nag's binstub lands, so it is a directory written to.
+
+    With ASH_BIN_PATH=rel-bin it was ``<working directory>/rel-bin``, which the gem
+    install then created in the repository being scanned. It is ``~/.ash/bin``, and
+    the relative value is warned about once however many scanners are built.
+
+    Fails at the base on ``--bindir``.
+    """
+    cwd, _home = relative_ash_bin_path
+    with caplog.at_level(logging.WARNING):
+        first = _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")
+        second = _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")
+    assert _bindir(first[0]) == _bindir(second[0]) == str(home_bin_path())
+    assert sorted(path.name for path in cwd.iterdir()) == []
+    messages = [record.getMessage() for record in caplog.records]
+    warnings = [message for message in messages if RELATIVE_VALUE_WARNING in message]
+    assert len(warnings) == 1, warnings
+
+
+def test_a_relative_ash_bin_path_without_a_home_gives_the_refusing_command(
+    context, relative_ash_bin_path, monkeypatch
+):
+    """With no usable home there is no ``--bindir`` to give: the command only refuses.
+
+    As ``test_without_a_bin_directory_the_command_only_refuses`` has it with no
+    ASH_BIN_PATH at all: the command says why and exits 1. With ASH_BIN_PATH=rel-bin
+    it was a gem install into ``<working directory>/rel-bin``.
+
+    Fails at the base on the command: it is the install, not the refusal.
+    """
+    from automated_security_helper.utils import download_utils
+
+    cwd, _home = relative_ash_bin_path
+    monkeypatch.setenv("HOME", "")
+    monkeypatch.setenv("USERPROFILE", "")
+    assert home_bin_path() is None
+    commands = _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")
+    refusal = download_utils.refusing_install_command(download_utils.NO_BIN_DIRECTORY)
+    assert [command.args for command in commands] == [refusal.args], commands
+    assert sorted(path.name for path in cwd.iterdir()) == []
 
 
 def test_the_pinned_version_is_the_one_the_gemfile_declares(context):

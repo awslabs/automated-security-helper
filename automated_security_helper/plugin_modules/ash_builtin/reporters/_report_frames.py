@@ -25,6 +25,7 @@ from typing import Any, Iterable, List, Sequence
 
 import polars as pl
 
+from automated_security_helper.utils.frame_ops import ordered_counts, stable_top
 from automated_security_helper.utils.frame_text import ranks, unwire, wire
 
 
@@ -39,8 +40,9 @@ from automated_security_helper.utils.frame_text import ranks, unwire, wire
 #:   ``flat_frame`` gives it.
 #: - ``left_out`` is the report's policy grading (``is_policy_not_gating``), not
 #:   a model field.
-#: - ``actionable`` is the report's threshold grading; null in every row when the
-#:   caller did not ask for it, so a column of nulls is "not decided", never "no".
+#: - ``actionable`` is the report's threshold grading; null in each row the
+#:   caller did not grade, so a null is "not decided", never "no", and a total
+#:   over the column counts only the rows that were graded.
 GRADED_SCHEMA: dict[str, Any] = {
     "level": pl.String,
     "is_suppressed": pl.Boolean,
@@ -53,15 +55,16 @@ def graded_frame(
     levels: Sequence[str],
     is_suppressed: Sequence[bool],
     left_out: Sequence[bool],
-    actionable: Sequence[bool] | None = None,
+    actionable: Sequence[bool | None] | None = None,
 ) -> pl.DataFrame:
     """One row per finding: its severity bucket and its three yes/no gradings.
 
     ``is_suppressed`` bears the model field's name it carries
-    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because deciding it costs a threshold lookup per
-    finding, and some summaries never need it. The frame has the same four
-    columns either way (:data:`GRADED_SCHEMA`); without ``actionable`` that
-    column is null.
+    (``FlatVulnerability.is_suppressed``). ``actionable`` is optional because
+    deciding it costs a threshold lookup per finding, and a summary reads it for
+    only some of its rows: a row given ``None`` (or every row, when the argument
+    is left out) was not graded. The frame has the same four columns either way
+    (:data:`GRADED_SCHEMA`); a row that was not graded has a null there.
     """
     rows = len(levels)
     return pl.DataFrame(
@@ -82,11 +85,7 @@ def flag_total(frame: pl.DataFrame, flag: str) -> int:
 
 def active_level_counts(frame: pl.DataFrame) -> List[tuple[str, int]]:
     """``(level, count)`` for the unsuppressed rows, levels in first-seen order."""
-    counted = (
-        frame.filter(~pl.col("is_suppressed"))
-        .group_by("level", maintain_order=True)
-        .len()
-    )
+    counted = ordered_counts(frame.filter(~pl.col("is_suppressed")), "level")
     return [(level, int(count)) for level, count in counted.iter_rows()]
 
 
@@ -99,20 +98,17 @@ def top_locations(locations: Iterable[str], limit: int | None) -> List[tuple[str
     """
     if limit is not None and limit <= 0:
         return []
-    ranked = (
-        pl.DataFrame(
-            {"location": pl.Series([wire(item) for item in locations], dtype=pl.String)}
-        )
-        .group_by("location", maintain_order=True)
-        .len()
-        .sort("len", descending=True, maintain_order=True)
+    found = pl.DataFrame(
+        {"location": pl.Series([wire(item) for item in locations], dtype=pl.String)}
     )
-    if limit is not None:
-        ranked = ranked.head(limit)
+    ranked = stable_top(ordered_counts(found, "location"), "n", limit, descending=True)
     return [(unwire(location), int(count)) for location, count in ranked.iter_rows()]
 
 
-def severity_order(keys: Sequence[tuple[int, str, int, str]]) -> List[int]:
+def severity_order(
+    keys: Sequence[tuple[int, str, int, str]],
+    suppressed: Sequence[bool] | None = None,
+) -> List[int]:
     """The positions of *keys* in ascending order, ties in their given order.
 
     Each key is ``(severity place, file, line, rule)``. A file or rule may hold a
@@ -120,21 +116,32 @@ def severity_order(keys: Sequence[tuple[int, str, int, str]]) -> List[int]:
     :func:`wire` and lines as their ranks. The ``line`` column is a dense rank of
     the lines given, not a line: only the order of lines is read here, and every
     line has a rank, where ``models.flat_frame`` holds the line and a null for
-    one that does not fit 64 bits.
+    one that does not fit 64 bits. Every line in a key is an int, never None: a
+    rank map has no entry for None, so a caller whose rows may lack a line gives
+    the line the Python sort it replaces read for it (0 for no line).
+
+    *suppressed*, one flag per key, is a leading sort column: ``False`` rows come
+    before ``True`` rows, as ``False < True`` does in a Python tuple compare, and
+    each group keeps the ordering above. Each flag is read through ``bool()``, so
+    a row whose flag is None sorts as live.
     """
     if not keys:
         return []
+    if suppressed is not None and len(suppressed) != len(keys):
+        raise ValueError("severity_order needs one suppression flag per key")
     line_rank = ranks(k[2] for k in keys)
-    ordered = (
-        pl.DataFrame(
-            {
-                "place": pl.Series([k[0] for k in keys], dtype=pl.Int64),
-                "file": pl.Series([wire(k[1]) for k in keys], dtype=pl.String),
-                "line": pl.Series([line_rank[k[2]] for k in keys], dtype=pl.Int64),
-                "rule": pl.Series([wire(k[3]) for k in keys], dtype=pl.String),
-            }
+    columns: dict[str, pl.Series] = {}
+    if suppressed is not None:
+        columns["suppressed"] = pl.Series(
+            [bool(flag) for flag in suppressed], dtype=pl.Boolean
         )
+    columns["place"] = pl.Series([k[0] for k in keys], dtype=pl.Int64)
+    columns["file"] = pl.Series([wire(k[1]) for k in keys], dtype=pl.String)
+    columns["line"] = pl.Series([line_rank[k[2]] for k in keys], dtype=pl.Int64)
+    columns["rule"] = pl.Series([wire(k[3]) for k in keys], dtype=pl.String)
+    ordered = (
+        pl.DataFrame(columns)
         .with_row_index("position")
-        .sort(["place", "file", "line", "rule"], maintain_order=True)
+        .sort(list(columns), maintain_order=True)
     )
     return ordered["position"].to_list()

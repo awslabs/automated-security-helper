@@ -3975,6 +3975,7 @@ CONTAINER_ENV_NOT_PASSED = frozenset(
         "ASH_DEPENDENCIES_UNKNOWN_TOOLS",
         "ASH_DETECT_SECRETS_REFUSE_HTTP",
         "ASH_MCP_GIT_ALLOWED_HOSTS",
+        "ASH_MCP_IMAGE_ALLOWED_REGISTRIES",
         "ASH_OFFLINE_AT_BUILD_TIME",
         # Named through the helper module's constant: utils/log.py is the one
         # reader of the variable, and this list only names it.

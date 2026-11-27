@@ -10,7 +10,7 @@ metadata:
   name: ashmcpservers.ash.awslabs.github.io
   annotations:
     ash.awslabs.github.io/generated-by: python -m ash_operator.generate_manifests
-    ash.awslabs.github.io/ash-config-schema-sha256: 4cd125e58b31198c
+    ash.awslabs.github.io/ash-config-schema-sha256: ddcf0f6290cb45cb
 spec:
   group: ash.awslabs.github.io
   scope: Namespaced
@@ -856,6 +856,15 @@ spec:
                                           nullable: true
                                         resolved_digest:
                                           type: string
+                                          nullable: true
+                                        resolved_from:
+                                          type: string
+                                          anyOf:
+                                          - enum:
+                                            - engine
+                                            - registry
+                                            - payload
+                                          - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                           nullable: true
                                       type: object
                                       nullable: true
@@ -1785,8 +1794,11 @@ spec:
                                   - pattern: ^(!ENV )?\$\{\w+(:.*)?\}$
                                 type: array
                               frameworks:
-                                description: Specific frameworks to include with Checkov. Defaults to
-                                  `all`.
+                                description: 'Specific frameworks to include with Checkov. Defaults to
+                                  `all`, which leaves out checkov''s `github_configuration`, `gitlab_configuration`
+                                  and `bitbucket_configuration` frameworks: they check the repository
+                                  host''s settings through its API, not files in the scanned tree. Name
+                                  one of them here, with or without `all`, to run it.'
                                 items:
                                   type: string
                                   anyOf:
@@ -1831,7 +1843,9 @@ spec:
                                 type: array
                               skip_frameworks:
                                 description: Specific frameworks to exclude with Checkov. Defaults to
-                                  none.
+                                  none, though `all` in `frameworks` leaves out `github_configuration`,
+                                  `gitlab_configuration` and `bitbucket_configuration` unless `frameworks`
+                                  names them.
                                 items:
                                   type: string
                                   anyOf:

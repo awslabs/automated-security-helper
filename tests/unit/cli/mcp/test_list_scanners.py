@@ -115,10 +115,31 @@ def _uv_answers() -> List[Tuple[str, str]]:
     answers = [("--version", "uv 0.9.99"), ('"tool list"', listing)]
     for tool, release in UV_INSTALLED_TOOLS.items():
         # With or without --from: the constructor's probe names the scan's spec.
-        answers.append(
-            (f'"tool run --offline"*" {tool} --version"', f"{tool} {release}")
-        )
+        # With or without --python: a scanner whose runtime-compat row pins an
+        # interpreter (checkov's >=3.10,<3.15) has its version probe ask for it,
+        # and the probe places that request ahead of --offline.
+        offline_probe = f'"tool run --offline"*" {tool} --version"'
+        pinned_probe = f'"tool run --python "*" --offline"*" {tool} --version"'
+        answers.append((f"{offline_probe}|{pinned_probe}", f"{tool} {release}"))
     return answers
+
+
+def _is_offline_version_probe(call: str, tool: str) -> bool:
+    """Whether a stand-in log line is uv's offline ``--version`` probe of ``tool``.
+
+    The probe's argv is ``uv tool run [--python <request>] --offline [--from
+    <spec>] <tool> --version``: the interpreter request a runtime-compat row pins
+    is the only argument that comes before ``--offline``. The log line is the argv
+    joined by spaces, and no argument holds one (a runtime request refuses
+    whitespace), so splitting it gives the argv back.
+    """
+    argv = call.split()
+    if argv[:3] != ["uv", "tool", "run"] or argv[-2:] != [tool, "--version"]:
+        return False
+    rest = argv[3:]
+    if rest[:1] == ["--python"]:
+        rest = rest[2:]
+    return rest[:1] == ["--offline"]
 
 
 def _install_stand_ins(directory: Path) -> None:
@@ -622,10 +643,7 @@ class TestTheSnapshotStartsOnlyStandIns:
         assert "uv tool list" in snapshot.calls, snapshot.calls
         for tool in UV_ASKED_TOOLS:
             asked = [
-                call
-                for call in snapshot.calls
-                if call.startswith("uv tool run --offline ")
-                and call.endswith(f" {tool} --version")
+                call for call in snapshot.calls if _is_offline_version_probe(call, tool)
             ]
             assert asked, f"uv was never asked for {tool}'s version: {snapshot.calls}"
 
@@ -669,6 +687,8 @@ def _expected_entries() -> Dict[str, Tuple[Optional[str], Optional[bool], bool]]
         "detect_secrets": (distribution_version("detect-secrets"), True, False),
         "ferret_scan": ("2.5.99", True, False),
         "grype": ("0.99.5", True, False),
+        # Entirely Python, run in process: no tool to probe, nothing to install.
+        "mcp_config": (None, True, False),
         "npm_audit": ("10.99.6", True, False),
         "opengrep": ("1.99.7", True, False),
         "snyk_code": (None, False, False),

@@ -190,8 +190,12 @@ class TestSandboxParityLeg:
 
         The macOS sandbox-exec leg once crashed betterleaks before it wrote results and
         its matrix row switched betterleaks off. The scanner now runs under a private
-        HOME there (#1132), so the row is back on, as the bwrap row always was. The
-        denial filter keeps naming betterleaks so a regression shows up in the log.
+        HOME there (#1132), so the row is back on, as the bwrap row always was.
+
+        The macOS step that prints what sandbox-exec denied the scanners named
+        betterleaks in its process filter while that crash was unexplained. #1173
+        took the name out once the crash was fixed, because keeping it "would make a
+        future betterleaks denial look expected", so the filter is pinned without it.
         """
         text = UNIFIED.read_text()
         legs = text.split("sandbox-scanner-parity:", 1)[1].split("steps:", 1)[0]
@@ -201,4 +205,13 @@ class TestSandboxParityLeg:
         assert re.search(r"sandbox: sandbox-exec\n\s+betterleaks: \"true\"", legs), (
             "the sandbox-exec leg compares betterleaks since #1132"
         )
-        assert "|env|betterleaks)" in text, "the denial filter must name betterleaks"
+        marker = "- name: Show what sandbox-exec denied the scanners\n"
+        assert marker in text, "the parity job keeps its macOS denial step"
+        step = text.split(marker, 1)[1].split("- name:", 1)[0]
+        filters = re.findall(r"'Sandbox: \(([^)]*)\)\\\(\[0-9\]\+\\\) deny'", step)
+        assert len(filters) == 1, "the step keeps one process filter for the log"
+        names = filters[0].split("|")
+        assert "env" in names, "the filter keeps the processes the scanners run"
+        assert "betterleaks" not in names, (
+            "#1173 took betterleaks out of the denial filter after the #1132 fix"
+        )

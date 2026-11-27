@@ -991,19 +991,36 @@ def test_an_explicit_runner_path_runs_that_path(given, pwsh, tmp_path):
     os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
 )
 @pytest.mark.parametrize(
-    "wrapper_value",
-    ["bin/wrap -n", "~/bin/wrap -n", "C:\\bin\\|docker"],
-    ids=["relative", "tilde", "rooted-windows-invalid-char"],
+    ("wrapper_value", "refusal"),
+    [
+        pytest.param(
+            "bin/wrap -n",
+            "OCI_RUNNER_WRAPPER starts with the relative path",
+            id="relative",
+        ),
+        pytest.param(
+            "~/bin/wrap -n",
+            "OCI_RUNNER_WRAPPER starts with ~, which Invoke-ASH does not expand, so "
+            "~/bin/wrap is not run",
+            id="tilde",
+        ),
+        pytest.param(
+            "C:\\bin\\|docker",
+            "OCI_RUNNER_WRAPPER starts with the relative path",
+            id="rooted-windows-invalid-char",
+        ),
+    ],
 )
 def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
-    pwsh, tmp_path, wrapper_value
+    pwsh, tmp_path, wrapper_value, refusal
 ):
     """A relative first word of OCI_RUNNER_WRAPPER names a file under the working
     directory, usually the repository being scanned. Invoke-ASH refuses it with exit
     3 and the variable named, as ./ash and the ash CLI do: the wrapper is not run and
     the runner does not start without it. It does not expand a leading ~ (the ash CLI
-    does), so ~/bin/wrap is refused as a relative path, as ./ash refuses it; the
-    docs page for the container runtime says so."""
+    does), so ~/bin/wrap is refused too, as ./ash refuses it, with a text that says
+    the ~ is not expanded and asks for the absolute path; the docs page for the
+    container runtime says so."""
     (tmp_path / "src").mkdir()
     log = tmp_path / "runner-calls.txt"
     runner = _self_recording_runner(tmp_path / "path-bin", log)
@@ -1042,31 +1059,58 @@ def test_a_relative_runner_wrapper_is_refused_and_nothing_runs(
 
     shown = result.stdout + result.stderr
     assert result.returncode == 3, shown
-    assert "OCI_RUNNER_WRAPPER starts with the relative path" in " ".join(shown.split())
+    assert refusal in " ".join(shown.split()), shown
     assert not log.exists(), log.read_text(encoding="utf-8")
+
+
+def _windows_interpreter(name: str, pwsh: str) -> str:
+    """The interpreter a Windows case runs under: pwsh, or Windows PowerShell 5.1,
+    whose runtime has no ``IsPathFullyQualified``, so Invoke-ASH reads a path's root
+    there with a pattern. A Windows runner without powershell.exe fails in CI, as one
+    without pwsh does."""
+    if name == "pwsh":
+        return pwsh
+    found = shutil.which("powershell.exe")
+    if found is None:
+        if _IN_CI:
+            pytest.fail(
+                "powershell.exe is not on PATH; Windows CI runners must run this test"
+            )
+        pytest.skip("powershell.exe is not on PATH (local run only; CI fails instead)")
+    return found
 
 
 @pytest.mark.integration
 @pytest.mark.skipif(
     os.name != "nt",
-    reason="a < in a path is invalid only on Windows, where IsPathRooted can throw on it",
+    reason="< and | are characters only a Windows path cannot hold",
 )
+@pytest.mark.parametrize("interpreter", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize(
-    ("variable", "value"),
+    ("variable", "value", "character"),
     [
-        pytest.param("OCI_RUNNER", "bin/<docker", id="OCI_RUNNER"),
-        pytest.param("OCI_RUNNER_WRAPPER", "bin/<docker", id="OCI_RUNNER_WRAPPER"),
+        pytest.param("OCI_RUNNER", "bin/<docker", "<", id="OCI_RUNNER"),
+        pytest.param("OCI_RUNNER_WRAPPER", "bin/<docker", "<", id="OCI_RUNNER_WRAPPER"),
         pytest.param(
-            "OCI_RUNNER_WRAPPER", "C:\\bin\\|docker", id="rooted-windows-invalid-char"
+            "OCI_RUNNER_WRAPPER",
+            "C:\\bin\\|docker",
+            "|",
+            id="rooted-windows-invalid-char",
         ),
     ],
 )
 def test_a_relative_value_with_an_invalid_path_character_is_refused_not_thrown_on(
-    variable, value, pwsh, tmp_path
+    interpreter, variable, value, character, pwsh, tmp_path
 ):
-    """``bin/<docker`` holds a character a Windows path cannot hold. On Windows
-    PowerShell 5.1 ``IsPathRooted`` throws for it, which would end in a generic
-    exception with no exit code. Invoke-ASH refuses it as a relative path, exit 3."""
+    """``bin/<docker`` and ``C:\\bin\\|docker`` hold a character no Windows path can
+    hold. Invoke-ASH refuses each with exit 3 and a text that names the character,
+    under pwsh and under Windows PowerShell 5.1 alike: 5.1's runtime counts " < > |
+    among the characters a path cannot hold and PowerShell 7's counts only |, so the
+    wrapper adds the other three on Windows. 5.1's ``IsPathRooted`` throws for such a
+    value, which would end in a generic exception with no exit code, so it is not
+    asked; the rooted path ``C:\\bin\\|docker`` is refused for the character, not as
+    a relative path."""
+    program = _windows_interpreter(interpreter, pwsh)
     (tmp_path / "src").mkdir()
     script = (
         f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
@@ -1081,10 +1125,144 @@ def test_a_relative_value_with_an_invalid_path_character_is_refused_not_thrown_o
         tmp_path / "path-bin", tmp_path / "runner-calls.txt"
     )
     env["PATH"] = os.pathsep.join(
-        [runner.parent.as_posix(), Path(pwsh).resolve().parent.as_posix()]
+        [runner.parent.as_posix(), Path(program).resolve().parent.as_posix()]
     )
     env.update(scratch_home(tmp_path))
     env[variable] = value
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [program, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    shown = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 3, shown
+    assert f"{variable} holds the character '{character}'" in shown, shown
+    assert "which a path cannot hold" in shown, shown
+    assert not (tmp_path / "runner-calls.txt").exists()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="a drive letter and a path relative to a drive are Windows path forms",
+)
+@pytest.mark.parametrize("interpreter", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize(
+    ("value", "refused"),
+    [
+        pytest.param("C:sub\\docker.exe", True, id="drive-relative"),
+        pytest.param("\\tools\\docker.exe", True, id="root-relative"),
+        pytest.param("C:\\tools\\docker.exe", False, id="drive-and-separator"),
+        pytest.param("\\\\server\\share\\docker.exe", False, id="two-separators"),
+    ],
+)
+def test_a_windows_oci_runner_is_rooted_only_by_a_drive_root_or_two_separators(
+    interpreter, value, refused, pwsh, tmp_path
+):
+    """On Windows a path is absolute only when it starts with a drive letter, a colon
+    and a separator, or with two separators. ``C:sub\\docker.exe`` is relative to
+    drive C's current directory and ``\\tools\\docker.exe`` to the root of the current
+    drive (``IsPathRooted`` calls both rooted), so the file either names depends on
+    where Invoke-ASH runs. Invoke-ASH refuses both, exit 3, with the relative-path
+    text, before anything is looked up. ``C:\\tools\\docker.exe``
+    and ``\\\\server\\share\\docker.exe`` are absolute and are looked up as written;
+    neither exists here, so the lookup ends in the not-found refusal, which names the
+    value. Run under pwsh, which reads the root with ``IsPathFullyQualified``, and
+    under Windows PowerShell 5.1, whose runtime has no such method."""
+    program = _windows_interpreter(interpreter, pwsh)
+    (tmp_path / "src").mkdir()
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        "try { Invoke-ASH -NoBuild -NoRun -SourceDir src -OutputDir out } "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
+    env = inherited_env(
+        "PATH", "ASH_CONFIG", "OCI_RUNNER", "ASH_OCI_RUNNER", "OCI_RUNNER_WRAPPER"
+    )
+    env["PATH"] = Path(program).resolve().parent.as_posix()
+    env.update(scratch_home(tmp_path))
+    env["OCI_RUNNER"] = value
+
+    result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
+        [program, "-NoProfile", "-NonInteractive", "-Command", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=120,
+        check=False,
+    )
+
+    shown = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 3, shown
+    if refused:
+        assert f"OCI_RUNNER is the relative path {value}," in shown, shown
+        assert "run as one command and takes no runner arguments" in shown, shown
+    else:
+        assert "relative path" not in shown, shown
+        assert f"Unable to resolve an OCI_RUNNER: '{value}' was not found" in shown, (
+            shown
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.name == "nt", reason="the stand-in runners are POSIX shell scripts"
+)
+@pytest.mark.parametrize(
+    ("value", "refusal"),
+    [
+        pytest.param(
+            "~/bin/docker",
+            "OCI_RUNNER starts with ~, which Invoke-ASH does not expand, so "
+            "~/bin/docker is not run",
+            id="tilde",
+        ),
+        pytest.param(
+            "docker ./bin/docker",
+            "OCI_RUNNER is the relative path docker ./bin/docker,",
+            id="a-name-then-a-relative-path",
+        ),
+    ],
+)
+def test_an_oci_runner_from_the_environment_is_judged_as_one_command(
+    value, refusal, pwsh, tmp_path
+):
+    """Invoke-ASH runs the whole OCI_RUNNER as one command, with no runner arguments,
+    so the whole value is what is judged, not its first word. ``docker ./bin/docker``
+    is the relative path of a file under a directory named ``docker .`` in the
+    working directory, and ``~/bin/docker`` would be found under HOME by PowerShell's
+    own ~, which Invoke-ASH does not expand from the environment. Each is refused
+    with exit 3 and its own text, and the file it names, placed here, is not run."""
+    (tmp_path / "src").mkdir()
+    log = tmp_path / "runner-calls.txt"
+    env = inherited_env(
+        "PATH", "ASH_CONFIG", "OCI_RUNNER", "ASH_OCI_RUNNER", "OCI_RUNNER_WRAPPER"
+    )
+    env.update(scratch_home(tmp_path))
+    if value.startswith("~"):
+        _self_recording_runner(Path(env["HOME"]) / "bin", log)
+    else:
+        _self_recording_runner(tmp_path / "docker ." / "bin", log)
+    env["PATH"] = Path(pwsh).resolve().parent.as_posix()
+    env["OCI_RUNNER"] = value
+    script = (
+        f"$ErrorActionPreference = 'Stop'; . '{HELPERS.as_posix()}'; "
+        "try { Invoke-ASH -NoBuild -SourceDir src -OutputDir out } "
+        "catch { Write-Error -ErrorRecord $_ -ErrorAction Continue; "
+        "exit $(if ($LASTEXITCODE) { $LASTEXITCODE } else { 1 }) }; "
+        "exit [int]$LASTEXITCODE"
+    )
 
     result = subprocess.run(  # nosec B603 - fixed interpreter, script built here
         [pwsh, "-NoProfile", "-NonInteractive", "-Command", script],
@@ -1097,9 +1275,10 @@ def test_a_relative_value_with_an_invalid_path_character_is_refused_not_thrown_o
         check=False,
     )
 
-    shown = result.stdout + result.stderr
+    shown = " ".join((result.stdout + result.stderr).split())
     assert result.returncode == 3, shown
-    assert f"{variable} starts with the relative path" in " ".join(shown.split())
+    assert refusal in shown, shown
+    assert not log.exists(), log.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

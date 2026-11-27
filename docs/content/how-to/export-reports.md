@@ -136,7 +136,8 @@ moves to a different line, with no stable fingerprint from the scanner, is liste
 `moved` when ASH can pair it unambiguously, and as both new and absent when it cannot.
 The command
 exits 0 after a successful comparison even if findings changed, and 1 when it cannot
-read or compare the results. It is not a CI findings gate.
+read or compare the results. It is not a CI findings gate. To follow findings over more
+than two scans, see [Track findings over time](track-findings-over-time.md).
 
 ## GitHub code scanning {#github}
 

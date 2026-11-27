@@ -2307,10 +2307,7 @@ class TestThePowerShellConfigCarryAsText:
 
         start = text.index("$envConfigReal = $null try {")
         handler = text.index("} catch {", start)
-        assert (
-            text.index("[System.IO.Path]::IsPathRooted($envConfigGiven)", start)
-            < handler
-        )
+        assert text.index("Test-AshRootedPath $envConfigGiven", start) < handler
         assert text.index("Resolve-AshRealPath $envConfigAbsolute", start) < handler
         refusal = text[handler : handler + 260]
         assert "$global:LASTEXITCODE = $refusalExitCode" in refusal, refusal

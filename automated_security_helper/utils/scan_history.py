@@ -32,11 +32,14 @@ workspace aggregate, an un-merged shard, a ``--changed-files-only`` run and a
 baseline-filtered run are left out, so a series never contains a point a trend
 would have to refuse. A scan with no usable ``report_id`` is left out too: the
 record is named by it, and the name is what orders the series and what pruning
-reads. ``ash merge`` does not record either: the merged results are rebuilt
-from shards after the scans ended, and recording them would need the history
-configuration and output directory of a scan it never ran. So a CI that only
-ever runs shards builds no history, which :func:`record_run` says at warning;
-record from an unsharded, unfiltered scan instead.
+reads. ``ashx results merge`` records the merged run the same way
+(``cli/merge._record_merge_history``): its history configuration is the merge's
+config of record (the shards' recorded configuration with ``--config-overrides``
+applied), its owning output directory is the merge's own ``--output-dir``, and
+the merged results are one run under their own ``report_id``, so a re-merge of
+the same shards replaces its record. A sharded CI's history therefore comes
+from the merge; a lone shard is still never recorded, which :func:`record_run`
+says at warning.
 
 Retention never deletes what is not ASH's to delete: a record git tracks, and
 the record a write just made, are kept (:func:`prune_history`), and every
@@ -408,10 +411,11 @@ def record_run(
         # Warning, not info: the operator turned the history on, and a CI whose
         # every run is a shard or filtered builds no history at all in silence.
         ASH_LOGGER.warning(
-            "This scan is not recorded in the history: it is a shard, a workspace "
+            "This run is not recorded in the history: it is a shard, a workspace "
             "aggregate, or filtered by --changed-files-only or --baseline. "
-            "``ashx results merge`` does not record either, so a sharded CI builds no "
-            "history; record from an unsharded, unfiltered scan."
+            "``ashx results merge`` records the merged run under the same rules, so a "
+            "sharded CI's history comes from the merge; a filtered run is not "
+            "recorded, merged or not."
         )
     return path
 

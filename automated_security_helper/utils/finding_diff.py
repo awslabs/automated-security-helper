@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -57,6 +58,56 @@ def check_comparable(results: AshAggregatedResults) -> None:
         raise ComparabilityRefusal("invalid workspace project marker")
 
 
+#: What an image scan's recorded scan source reads as when the ids key on the
+#: image's digest (``utils/image_attribution.image_scan_source``).
+_IMAGE_DIGEST_SOURCE = re.compile(r"image:sha256:[0-9a-f]{64}")
+
+
+def _image_id_basis(results: AshAggregatedResults) -> str | None:
+    """What an image scan's finding ids key on: ``digest``, ``reference``, or
+    None for a scan whose subject is not an image.
+
+    Read from the recorded scan source, which an image scan writes as
+    ``image:<digest>`` once the digest is known and ``image:<reference>``
+    otherwise (``utils/image_attribution.image_scan_source``): the identity
+    keys on the same value (``utils/finding_identity``), so the source IS the
+    recorded basis.
+    """
+    source = getattr(results.metadata, "scan_source", None)
+    if not isinstance(source, str) or not source.startswith("image:"):
+        return None
+    return "digest" if _IMAGE_DIGEST_SOURCE.fullmatch(source) else "reference"
+
+
+def check_same_id_basis(
+    baseline: AshAggregatedResults, current: AshAggregatedResults
+) -> None:
+    """Refuse a pair whose finding ids key on different bases.
+
+    An image scan's ids key on the image's digest when one was named and on
+    the reference text otherwise, so a scan whose digest lookup failed pairs
+    with NOTHING of a scan whose lookup succeeded: every finding would read
+    as new and every old one as resolved, silently. The failed lookup logs
+    one warning at scan time; here, where the two scans meet, the mismatch is
+    a refusal naming the remedy instead of a wrong diff.
+    """
+    bases = (_image_id_basis(baseline), _image_id_basis(current))
+    if bases[0] == bases[1]:
+        return
+    if None in bases:
+        raise ComparabilityRefusal(
+            "cannot compare a container-image scan with a directory scan: "
+            "their findings never share an id"
+        )
+    raise ComparabilityRefusal(
+        "the scans key their finding ids on different bases: one on the "
+        "image's resolved digest, the other on the reference text (its digest "
+        "was not resolved; the scan's log says why). Re-run the unresolved "
+        "scan where the digest resolves, or pin the reference by digest "
+        "(repo@sha256:...), so the ids can pair."
+    )
+
+
 def check_same_project(
     baseline: AshAggregatedResults, current: AshAggregatedResults
 ) -> None:
@@ -92,6 +143,7 @@ def comparable_findings(
     check_comparable(baseline)
     check_comparable(current)
     check_same_project(baseline, current)
+    check_same_id_basis(baseline, current)
     return unique_findings(baseline, "Baseline"), unique_findings(current, "Current")
 
 
@@ -132,6 +184,27 @@ def coverage_warnings(
             )
         if result.metadata.inputs_not_scanned:
             warnings.append(f"{label} scan records inputs that were not scanned.")
+    sources = (
+        getattr(baseline.metadata, "scan_source", None),
+        getattr(current.metadata, "scan_source", None),
+    )
+    if (
+        all(isinstance(s, str) and s.startswith("image:") for s in sources)
+        and sources[0] != sources[1]
+    ):
+        # Two different image subjects share one basis (check_same_id_basis
+        # admits them) but their ids key on different values, so nothing
+        # pairs: everything reads new and everything old reads resolved.
+        # Comparing two builds IS the intended rebuild reading -- the contract
+        # documents it -- so this is a warning naming the subjects, never a
+        # refusal.
+        warnings.append(
+            f"The scans are of two different images ({sources[0]} vs "
+            f"{sources[1]}): no finding of one can pair with the other's, so "
+            "every finding reads as new or resolved. That is the intended "
+            "reading for a rebuild; for anything else, compare scans of one "
+            "subject."
+        )
     return warnings
 
 

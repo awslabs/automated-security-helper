@@ -1167,6 +1167,19 @@ def _ci_runner_unselected(item, config) -> bool:
 #: thing the tryfirst hook below does, so it sees every collected item before -k, -m or
 #: any deselection removes one.
 #:
+#: Under pytest-xdist (``-n``, which pytest.ini turns on) the hook runs in each worker,
+#: because the workers collect and the controller does not, and a usage error raised
+#: there never reaches the output. pytest still hands the worker's whole collection to
+#: the controller (``pytest_collection_finish`` runs in a ``finally``), the worker then
+#: ends its session, and the controller, which sees neither the exception nor the
+#: worker's stderr, schedules tests on workers that have stopped and fails with
+#: "Unexpectedly no active workers available" or ``assert not crashitem``, naming no
+#: test. So a worker does not raise (``_refuse_the_session``): it sets the text as its
+#: session's ``shouldfail``, which pytest-xdist sends to the controller when the worker
+#: finishes, and empties its collection, so nothing is scheduled and no test runs. The
+#: controller then stops the run with the same text: "Interrupted: ..." and exit status
+#: 2, where a run without workers gets the usage error and exit status 4.
+#:
 #: A second refusal, for a test marked both ``unit`` and ``slow``. The unit CI job runs
 #: ``-m unit`` with neither ``--run-integration`` nor ``--run-slow``, so the ``--run-slow``
 #: skip below would skip such a test there, and ``-m integration`` and ``-m e2e`` do not
@@ -1195,7 +1208,7 @@ def _items_without_one_tier(items) -> List[Tuple[str, List[str]]]:
 
 
 def _tier_refusal_message(offenders: List[Tuple[str, List[str]]]) -> str:
-    """The usage error's text: the count, the rule, and the first offenders."""
+    """The refusal's text: the count, the rule, and the first offenders."""
     listed = [
         f"{nodeid} -> {', '.join(tiers) if tiers else 'none'}"
         for nodeid, tiers in offenders[:_TIER_REFUSAL_LISTED]
@@ -1221,7 +1234,7 @@ def _unit_items_marked_slow(items) -> List[str]:
 
 
 def _unit_slow_refusal_message(nodeids: List[str]) -> str:
-    """The usage error's text for unit tests that are also slow: count, rule, ids."""
+    """The refusal's text for unit tests that are also slow: count, rule, ids."""
     listed = nodeids[:_TIER_REFUSAL_LISTED]
     unlisted = len(nodeids) - len(listed)
     if unlisted:
@@ -1234,16 +1247,34 @@ def _unit_slow_refusal_message(nodeids: List[str]) -> str:
     )
 
 
+def _refuse_the_session(config, items, message: str) -> None:
+    """Stop the session before any test runs, with ``message`` in the run's output.
+
+    Without xdist workers this is a usage error, which pytest prints before it exits.
+    In an xdist worker a raise would be lost (the note above ``_TEST_TIERS``), so the
+    text becomes the session's ``shouldfail``, which the controller receives when the
+    worker finishes and stops the run with, and the worker's collection is emptied so
+    the controller has nothing to schedule. ``items`` is never empty here: the refusal
+    names some of them, and each item knows its session.
+    """
+    if not hasattr(config, "workerinput"):
+        raise pytest.UsageError(message)
+    items[0].session.shouldfail = message
+    items[:] = []
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     """Modify the collected test items based on command-line options."""
     untiered = _items_without_one_tier(items)
     if untiered:
-        raise pytest.UsageError(_tier_refusal_message(untiered))
+        _refuse_the_session(config, items, _tier_refusal_message(untiered))
+        return
 
     unit_and_slow = _unit_items_marked_slow(items)
     if unit_and_slow:
-        raise pytest.UsageError(_unit_slow_refusal_message(unit_and_slow))
+        _refuse_the_session(config, items, _unit_slow_refusal_message(unit_and_slow))
+        return
 
     deselected = [
         item

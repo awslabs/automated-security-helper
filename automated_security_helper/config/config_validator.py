@@ -3049,6 +3049,40 @@ def recorded_value_at(config: Any, record: Any, path: Tuple[Any, ...]) -> Any:
     return None if key is _MISSING_IN_RECORD else container[key]
 
 
+def validated_with(
+    config: Any,
+    dumped: Any,
+    keys: Tuple[Any, ...],
+    value: Any,
+    *,
+    strict: bool = False,
+) -> Optional[Tuple[Any, Any]]:
+    """``dumped``, a dump of ``config``, with ``value`` at ``keys`` (keys of
+    ``dumped``, as ``dumped_path`` gives them), validated by ``config``'s model:
+    the model it validates to and that model dumped as JSON, or None where the
+    model refuses it (a validation error, or a value its dump cannot hold).
+
+    ``strict`` validates as a config file is loaded (``build_config``); left
+    off, the model's own settings apply. A copy of ``dumped`` is validated, and
+    a copy of ``value`` is what is placed, so a validator that edits its input
+    changes neither argument.
+    """
+    from pydantic import ValidationError
+
+    trial = copy.deepcopy(dumped)
+    node = trial
+    for key in keys[:-1]:
+        node = node[key]
+    node[keys[-1]] = copy.deepcopy(value)
+    try:
+        # ``None`` is the parameter's own default: with ``strict`` off the call
+        # reads as it always did, and a model that sets strictness itself keeps it.
+        model = type(config).model_validate(trial, strict=True if strict else None)
+        return model, model.model_dump(mode="json", by_alias=True)
+    except (ValidationError, ValueError, TypeError):
+        return None
+
+
 def reads_back_as(
     config: Any, dumped: Any, path: Tuple[Any, ...], text: str, current: Any
 ) -> bool:
@@ -3058,22 +3092,13 @@ def reads_back_as(
     something other than a string of (a list of formats from one string), so the
     reference that read ``text`` is written only where it loads back as what the
     configuration holds. A copy of ``dumped`` is validated."""
-    from pydantic import ValidationError
-
     keys = dumped_path(config, dumped, path)
     if not keys:
         return False
-    trial = copy.deepcopy(dumped)
-    node = trial
-    for key in keys[:-1]:
-        node = node[key]
-    node[keys[-1]] = text
-    try:
-        rebuilt: Any = (
-            type(config).model_validate(trial).model_dump(mode="json", by_alias=True)
-        )
-    except (ValidationError, ValueError, TypeError):
+    validated = validated_with(config, dumped, keys, text)
+    if validated is None:
         return False
+    rebuilt: Any = validated[1]
     for key in keys:
         try:
             rebuilt = rebuilt[key]

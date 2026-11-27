@@ -256,10 +256,13 @@ scanners need more:
   `pnpm-lock.yaml`. ASH installs none of them.
 - cfn-nag is a Ruby gem. It needs RubyGems and a C compiler (on Windows, a Ruby
   DevKit) before `ashx dependencies install --tool cfn-nag` can install it. Run it
-  on a Ruby built from source or from your distribution's package (3.1, 3.3 and
-  3.4 were tried). On a Homebrew portable-ruby build (3.3.8 and 3.4.5 were tried)
-  cfn-nag 0.8.10 cannot load its YAML parser, so every template is reported as one
-  ASH could not evaluate.
+  on a Ruby built from source (3.1, 3.3 and 3.4 were tried), or run ASH with
+  `--mode container`, whose image runs cfn-nag on the Ruby 3.1 package it
+  installs. Homebrew's portable-ruby, the Ruby that Homebrew bundles to run
+  itself, does not work (3.3.8 and 3.4.5 were tried): cfn-nag 0.8.10 loads its
+  pinned psych 3, but the `Psych::Parser` it then uses is the one built into
+  that Ruby, which has no public `parse` method, so every template is reported
+  as one ASH could not evaluate. Homebrew's `ruby` formula has not been tried.
 
 If you do not need a scanner, leave it out, as in `ashx --exclude-scanners npm-audit`.
 It is then recorded SKIPPED, which does not make the scan incomplete.

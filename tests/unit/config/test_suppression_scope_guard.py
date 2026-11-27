@@ -91,7 +91,10 @@ FROZEN_SIZES = {
     # ae28f8411ce (29 and 2), keyed by main's new config paths (#1112, #1044).
     # 453 and 196: the self-scan hygiene pass removed the pin test's hex entry and
     # pinned or removed five whole-file and glob ferret-scan entries.
-    "main": {".ash.yaml": 453, ".ash/.ash_alpha_plugins.yaml": 196},
+    # 457 and 197: the merge of origin/main d9407b54e3d dropped the two harvester-wide
+    # advisory keys main replaced and added the six glob and whole-file entries main
+    # wrote since c15148192f4 (6 and 1).
+    "main": {".ash.yaml": 457, ".ash/.ash_alpha_plugins.yaml": 197},
     "pre_guard": {".ash.yaml": 27, ".ash/.ash_alpha_plugins.yaml": 8},
 }
 
