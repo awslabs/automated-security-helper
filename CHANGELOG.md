@@ -146,11 +146,21 @@
   The same path given as `-OCIRunner` is used as written, as before.
 - **`./ash` keeps the container's stdin open for the commands that read it, not for
   whole command groups.** `./ash results inspect findings` now gets its keyboard
-  input, as `./ash inspect findings` does. `config lint`, `config wizard`, `inspect
-  findings`, `results inspect findings` and `mcp` keep stdin open. The other commands
-  of those groups, such as `config get` and `inspect sarif-fields`, read nothing and
-  no longer take the caller's stdin, so a `while read` loop that runs one of them
-  keeps its remaining lines.
+  input, as `./ash inspect findings` does. `config wizard`, `inspect findings`,
+  `results inspect findings` and `mcp` keep stdin open, and so does `config lint` when
+  it is given `--fix` or `--fix-unused` and none of `-y`, `--yes` and
+  `--non-interactive`, the runs of it that ask a question. The other commands of
+  `config` and `inspect`, such as `config get` and `inspect sarif-fields`, and a
+  `config lint` that asks nothing, read nothing and no longer take the caller's stdin,
+  so a `while read` loop that runs one of them keeps its remaining lines.
+- **`ash --express` no longer hands `ash container build` and a bare `ash results` to
+  the express daemon, and no longer takes an option's value for a command name.** The
+  client did not know the `container` and `results` groups, so it took both for scans
+  and sent them to a running daemon; they now run directly, as every other command
+  that is not a scan does. And a scan whose option value spells a command, as `report`
+  does in `--output-dir report` and `config` in `--source-dir config`, was kept off the
+  daemon for that reason; the word is now read as the option's value and the scan can
+  use the daemon.
 
 ### Features
 
