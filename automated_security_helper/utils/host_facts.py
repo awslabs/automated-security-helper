@@ -359,9 +359,10 @@ def _live_sysctl_str(name: str) -> str:
 def _live_wow64_machines() -> tuple[int, int]:
     """``(process machine, native machine)`` from the machine-type call.
 
-    The process machine is 0 for a process that runs natively. The function does not
-    exist before Windows 10 1511: its absence is an ``AttributeError``, which the
-    reader reports as ``unknown``.
+    The process machine is 0 for every process that is not WOW64: one that runs
+    natively, and an x64 one under emulation on Windows on Arm, which has no WOW64
+    layer. The function does not exist before Windows 10 1511: its absence is an
+    ``AttributeError``, which the reader reports as ``unknown``.
     """
     import ctypes
     from ctypes import wintypes
@@ -1091,7 +1092,16 @@ class HostFactsReader:
         if platform == "windows":
             process_machine, native_machine = self._src("wow64_machines")
             if process_machine == 0:
-                return "native"
+                if native_machine != _IMAGE_MACHINE_ARM64:
+                    return "native"
+                # Windows on Arm runs an x64 process under emulation with no WOW64
+                # layer, so IsWow64Process2 names no process machine for it either (it
+                # reports the unknown machine for every process that is not WOW64).
+                # Beside an arm64 native machine the call cannot tell an x64 Python
+                # from an arm64 one, and the interpreter's own architecture can.
+                return {"amd64": "x64-on-arm64", "arm64": "native"}.get(
+                    self._arch(), UNKNOWN
+                )
             if process_machine == _IMAGE_MACHINE_I386:
                 # 32-bit x86 on 64-bit x86 Windows translates nothing. Emulated on arm64
                 # it has no token.
