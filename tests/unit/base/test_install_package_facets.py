@@ -5,9 +5,10 @@
 
 Every row names an ecosystem that is an implemented install provider (a row for a
 stub would promise a route that refuses), a row's package is not blank, a tool is
-declared once, no two rows of one ecosystem overlap in host match (today's rows name
-no host, so a tool has one row per ecosystem), and the Nix rows name the flake output
-the repository actually builds.
+declared once, no two rows of one ecosystem conflict (two that one host can match, or
+two that name no host, which are two fallbacks; a host row and the one row with no host
+beside it do not conflict), and the Nix rows name the flake output the repository
+actually builds.
 
 Host matching is held over planted rows: the register's rows name no host yet, so a
 real-register run cannot tell a matcher that routes on ``ID_LIKE`` from one that does
@@ -34,6 +35,16 @@ from automated_security_helper.utils.install_providers import INSTALL_PROVIDERS
 pytestmark = pytest.mark.unit
 
 
+def _conflicting_pairs(facet):
+    """The pairs of rows of one facet that cannot both stand: the rule the shipped
+    register is held to, and the planted facets below."""
+    return [
+        (first, second)
+        for first, second in itertools.combinations(facet.rows, 2)
+        if first.overlaps(second)
+    ]
+
+
 def test_every_row_names_an_implemented_provider_and_a_package():
     for tool, facet in INSTALL_PACKAGE_FACETS.items():
         assert facet.tool == tool
@@ -42,8 +53,7 @@ def test_every_row_names_an_implemented_provider_and_a_package():
             provider = INSTALL_PROVIDERS.get(row.ecosystem)
             assert provider is not None and provider.implemented, (tool, row)
             assert row.package.strip(), (tool, row)
-        for first, second in itertools.combinations(facet.rows, 2):
-            assert not first.overlaps(second), (tool, first, second)
+        assert _conflicting_pairs(facet) == [], tool
 
 
 def test_every_preferred_ecosystem_is_a_known_provider():
@@ -262,13 +272,58 @@ def test_two_rows_overlap_when_one_host_can_match_both():
     assert not debian_13.overlaps(debian_12)
     assert not debian_13.overlaps(ubuntu_13)
     assert not debian_1.overlaps(debian_13)
-    # No versions means every version; no hosts means every host.
+    # No versions means every version of the id.
     assert any_debian.overlaps(debian_13) and any_debian.overlaps(debian_12)
     assert not any_debian.overlaps(ubuntu_13)
-    assert anywhere.overlaps(debian_12) and debian_12.overlaps(anywhere)
+    # A row with no hosts is the fallback for the hosts no host row names, so a host row
+    # does not conflict with it; only another fallback does.
+    assert not anywhere.overlaps(debian_12) and not debian_12.overlaps(anywhere)
+    assert not anywhere.overlaps(any_debian) and not any_debian.overlaps(anywhere)
     assert anywhere.overlaps(_row("apt", "another-name"))
     # Rows of two ecosystems never compete.
     assert not debian_13.overlaps(other_manager)
+    assert not anywhere.overlaps(_row("dnf"))
+
+
+def test_a_fallback_row_and_the_host_rows_of_one_ecosystem_may_stand_together():
+    """The shape row_for documents: rows for the hosts they were read on and one row
+    with no hosts for every other host. The shipped-register rule must let it ship."""
+    anywhere = _row("apt", "jq-anywhere")
+    debian_13 = _row("apt", "jq-debian-13", hosts=_on("debian", "13"))
+    ubuntu = _row("apt", "jq-ubuntu", hosts=_on("ubuntu", "24.04"))
+    facet = ipf.InstallPackageFacet(
+        tool="jq", rows=(anywhere, debian_13, ubuntu), preference=()
+    )
+
+    assert _conflicting_pairs(facet) == []
+    assert facet.row_for("apt", _host("debian", "13.1")) is debian_13
+    assert facet.row_for("apt", _host("ubuntu", "24.04")) is ubuntu
+    assert facet.row_for("apt", _host("fedora", "43")) is anywhere
+
+
+def test_two_rows_that_name_no_host_conflict_in_one_ecosystem_only():
+    first = _row("apt", "jq-one")
+    second = _row("apt", "jq-two")
+    same_ecosystem = ipf.InstallPackageFacet(
+        tool="jq", rows=(first, second), preference=()
+    )
+    two_ecosystems = ipf.InstallPackageFacet(
+        tool="jq", rows=(first, _row("dnf", "jq-two")), preference=()
+    )
+
+    assert _conflicting_pairs(same_ecosystem) == [(first, second)]
+    assert _conflicting_pairs(two_ecosystems) == []
+
+
+def test_two_host_rows_that_match_one_host_conflict_beside_a_fallback():
+    anywhere = _row("apt", "jq-anywhere")
+    debian_13 = _row("apt", "jq-debian-13", hosts=_on("debian", "13"))
+    debian_13_1 = _row("apt", "jq-debian-13-1", hosts=_on("debian", "13.1"))
+    facet = ipf.InstallPackageFacet(
+        tool="jq", rows=(anywhere, debian_13, debian_13_1), preference=()
+    )
+
+    assert _conflicting_pairs(facet) == [(debian_13, debian_13_1)]
 
 
 def test_the_collision_and_runtime_tables_exist_and_are_empty():
