@@ -33,6 +33,8 @@ before it writes anything:
   missing;
 - CRLF or any carriage return, in the file or in a body. Files are written with LF only
   and never converted;
+- a body that is not a string or a sequence of strings. A generator or any other
+  iterator is used up by its first read, so it is refused and never half written;
 - a body that holds ``{{VERSION}}`` or ``{{RELEASE}}``, a marker of its own, or a code
   fence it leaves open.
 
@@ -377,14 +379,31 @@ def parse_blocks(text: str, file: str) -> list[GeneratedBlock]:
 def _body_lines(file: str, name: str, body: Body) -> list[str]:
     """``body`` as lines, or a MarkerError when it is not fit to be written.
 
-    A string is its lines joined with ``\\n``, with one trailing ``\\n`` ignored.
+    A string is its lines joined with ``\\n``, with one trailing ``\\n`` ignored. Any
+    other body must be a sequence of strings, one per line. An iterator is not one: its
+    first read uses it up, and a second read finds it empty.
     """
     if isinstance(body, str):
         text = body.removesuffix("\n")
         lines = text.split("\n") if body else []
-    else:
+    elif isinstance(body, Sequence):
         lines = list(body)
+    else:
+        raise MarkerError(
+            file,
+            name,
+            f"the body is a `{type(body).__name__}`, not a string or a sequence of "
+            "strings; pass one string, or a list or tuple of lines (an iterator is "
+            "used up by its first read)",
+        )
     for number, line in enumerate(lines, start=1):
+        if not isinstance(line, str):
+            raise MarkerError(
+                file,
+                name,
+                f"body line {number} is not a string (it is "
+                f"`{type(line).__name__}`); pass one string per line",
+            )
         if "\n" in line:
             raise MarkerError(
                 file,
@@ -549,23 +568,25 @@ def write_blocks(
 ) -> list[WriteResult]:
     """Rewrite the named blocks of ``root / file`` and of its template or page twin.
 
-    Returns one ``WriteResult`` per file, the template first. Every file is read and
+    Returns one ``WriteResult`` per file, the template first. Each body is read once,
+    before any file is, so both files get the same lines. Every file is read and
     checked before the first is written, so a refusal leaves both as they were, and a
     file whose blocks are already current is not touched. The two writes are not one
     atomic step: if the second fails (a full disk, a permission error), the first stays
     written and the next run finishes the pair.
     """
-    names = sorted(bodies)
+    wanted = _wanted(file, bodies, generator)
+    names = tuple(wanted)
     plan = []
     for member in twin_files(root, file):
         text = _read(root, member, names)
-        plan.append((member, text, replace_blocks(text, member, bodies, generator)))
+        plan.append((member, text, replace_blocks(text, member, wanted, generator)))
     results = []
     for member, text, new in plan:
         if new == text:
             results.append(WriteResult(member, UNCHANGED, ()))
             continue
-        changed = [d.block for d in diff_blocks(text, member, bodies, generator)]
+        changed = [d.block for d in diff_blocks(text, member, wanted, generator)]
         (root / member).write_bytes(new.encode("utf-8"))
         results.append(WriteResult(member, WRITTEN, tuple(changed)))
     return results
@@ -574,10 +595,14 @@ def write_blocks(
 def check_blocks(
     root: Path, file: str, bodies: Mapping[str, Body], generator: str
 ) -> list[Drift]:
-    """The drift of the named blocks in ``root / file`` and its twin; writes nothing."""
-    names = sorted(bodies)
+    """The drift of the named blocks in ``root / file`` and its twin; writes nothing.
+
+    Each body is read once, before any file is, so both files get the same lines.
+    """
+    wanted = _wanted(file, bodies, generator)
+    names = tuple(wanted)
     drifts: list[Drift] = []
     for member in twin_files(root, file):
         text = _read(root, member, names)
-        drifts += diff_blocks(text, member, bodies, generator)
+        drifts += diff_blocks(text, member, wanted, generator)
     return drifts
