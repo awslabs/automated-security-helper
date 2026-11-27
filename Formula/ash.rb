@@ -1,7 +1,7 @@
 class Ash < Formula
   include Language::Python::Virtualenv
 
-  desc "Automated Security Helper - security scanning tool for code repositories"
+  desc "Automated Security Helper, the agentic security harness for code repositories"
   homepage "https://github.com/awslabs/automated-security-helper"
   # Kept current by `cz bump` via [tool.commitizen] version_files in
   # pyproject.toml. tests/unit/test_homebrew_formula_version.py fails if this
