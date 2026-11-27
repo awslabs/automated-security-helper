@@ -1570,6 +1570,7 @@ class TestARegisterThatCannotBeRead:
         "has no PROVISIONING": "OTHER = {}\n",
         "fails an import": "import ash_no_such_module_for_platform_wheels\n",
         "raises when it runs": "raise RuntimeError('broken register')\n",
+        "exits the interpreter": "raise SystemExit(0)\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
@@ -1603,6 +1604,15 @@ class TestARegisterThatCannotBeRead:
         register = tmp_path / "register.py"
         register.write_text(self.SHAPES[shape], encoding="utf-8")
         with pytest.raises(ValueError, match="cannot read the plugin register"):
+            script.load_blocks(register)
+        assert "ash_plugin_provisioning_for_platform_wheels" not in sys.modules
+
+    def test_a_keyboard_interrupt_is_passed_on_and_leaves_no_module_behind(
+        self, script, tmp_path
+    ):
+        register = tmp_path / "register.py"
+        register.write_text("raise KeyboardInterrupt\n", encoding="utf-8")
+        with pytest.raises(KeyboardInterrupt):
             script.load_blocks(register)
         assert "ash_plugin_provisioning_for_platform_wheels" not in sys.modules
 
