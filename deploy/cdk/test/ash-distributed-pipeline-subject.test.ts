@@ -9,9 +9,9 @@
  * it) has only the older spellings. So each command asks the installed ASH first and
  * runs the spelling it has. Only an answer picks the older one: a probe that fails any
  * other way (a crash, an out-of-memory kill) fails the build with what it printed, and
- * every build prints the spelling it chose and why to stderr. This runs the committed
- * build commands against a stand-in `ash` answering as each kind of release, and reads
- * what it was given.
+ * every build prints the spelling it chose and why to stderr. This synthesizes the stack
+ * and runs its build commands against a stand-in `ash` answering as each kind of
+ * release, and reads what it was given.
  */
 
 import { spawnSync } from 'child_process';
@@ -145,7 +145,8 @@ describe('a probe that does not answer is not read as an older ASH', () => {
     const { records, statuses, stderr } = run(SHARD_BUILD, 'new-spellings-crash');
 
     expect(records).toEqual([]);
-    expect(statuses).toEqual([1]);
+    // The shard's build runs an echo first, which succeeds; the script after it fails.
+    expect(statuses.filter((status) => status !== 0)).toEqual([1]);
     expect(stderr).toContain("could not tell whether this ASH has 'ash scan fs'");
     expect(stderr).toContain("'ash scan fs --help' exited 1");
     expect(stderr).toContain('MemoryError');
