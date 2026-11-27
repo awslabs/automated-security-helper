@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import dataclasses
+import importlib
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -26,6 +27,10 @@ import pytest
 
 from automated_security_helper.base import plugin_provisioning as prov
 from automated_security_helper.plugin_manifests import scanner_manifests
+from automated_security_helper.utils.sandbox.policy import (
+    SandboxPolicy,
+    SandboxRequirements,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -397,9 +402,61 @@ def _scanner_module(scanner: str) -> Path:
     return _ROOT / (module.replace(".", "/") + ".py")
 
 
+def _scanner_class(scanner: str) -> type:
+    """The class a scanner's manifest names."""
+    manifests = {m.name: m for m in scanner_manifests()}
+    assert scanner in manifests, scanner
+    module, _, name = manifests[scanner].entry_points.scanner.partition(":")
+    return getattr(importlib.import_module(module), name)
+
+
+def _scanner_modules(scanner: str) -> list[Path]:
+    """The files of the modules that hold a scanner's class."""
+    return [_scanner_module(scanner)]
+
+
+def test_the_module_reader_takes_in_the_shared_base_and_not_the_generic_one() -> None:
+    """Both trivy scanners read their cache variable in ``_trivy_scanner_base.py``,
+    which neither scanner module holds, and the base every scanner shares reads no
+    scanner's variable."""
+    names = {path.name for path in _scanner_modules("trivy-repo")}
+
+    assert {"trivy_repo_scanner.py", "_trivy_scanner_base.py"} <= names
+    assert "scanner_plugin.py" not in names
+
+
 def _image_sets(dockerfile: str, variable: str) -> bool:
     """Whether the image sets the variable with an ``ENV`` line of its own."""
     return bool(re.search(rf"^ENV {variable}=", dockerfile, flags=re.MULTILINE))
+
+
+def _image_env_value(dockerfile: str, variable: str) -> str | None:
+    """The value the image's own ``ENV`` line gives *variable*, without its quotes."""
+    match = re.search(
+        rf'^ENV {re.escape(variable)}="?([^"\s]+)"?\s*$',
+        dockerfile,
+        flags=re.MULTILINE,
+    )
+    return match.group(1) if match else None
+
+
+def test_the_value_reader_sees_a_quoted_and_a_bare_value_and_not_a_mention() -> None:
+    dockerfile = (
+        'ENV A_VARIABLE="/quoted/path"\n'
+        "ENV B_VARIABLE=/bare/path\n"
+        "ENV C_VARIABLE=\n"
+        '# ENV D_VARIABLE="/commented"\n'
+        "RUN echo ENV E_VARIABLE=/in/a/run\n"
+        'ENV A_VARIABLE_LONGER="/other"\n'
+    )
+
+    assert _image_env_value(dockerfile, "A_VARIABLE") == "/quoted/path"
+    assert _image_env_value(dockerfile, "B_VARIABLE") == "/bare/path"
+    assert _image_env_value(dockerfile, "C_VARIABLE") is None
+    assert _image_env_value(dockerfile, "D_VARIABLE") is None
+    assert _image_env_value(dockerfile, "E_VARIABLE") is None
+    assert _image_env_value(dockerfile, "A_VARIABLE_LONGER") == "/other"
+    assert _image_env_value(dockerfile, "MISSING") is None
 
 
 def test_the_readers_see_a_planted_variable_and_not_a_mention(tmp_path: Path) -> None:
@@ -421,20 +478,144 @@ def test_the_readers_see_a_planted_variable_and_not_a_mention(tmp_path: Path) ->
     assert not _image_sets(dockerfile, "C_VARIABLE")
 
 
-@pytest.mark.parametrize(
-    "database", ["grype-db", "semgrep-offline-rules", "opengrep-offline-rules"]
+_DATABASES = (
+    "grype-db",
+    "trivy-db",
+    "semgrep-offline-rules",
+    "opengrep-offline-rules",
 )
+
+
+def _row(database: str) -> prov.ContentDatabase:
+    return next(db for db in prov.content_databases() if db.name == database)
+
+
+@pytest.mark.parametrize("database", _DATABASES)
 def test_a_cache_variable_is_one_the_scanner_names_and_the_image_sets(
     database: str,
 ) -> None:
     """The scanner reads the variable (grype sets it for its child as well) and the
     Dockerfile sets it, so the register records a fact the code holds."""
-    row = next(db for db in prov.content_databases() if db.name == database)
+    row = _row(database)
     dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    constants = set().union(
+        *(_string_constants(path) for path in _scanner_modules(row.scanner))
+    )
 
     assert row.cache_env is not None, database
-    assert row.cache_env in _string_constants(_scanner_module(row.scanner)), database
+    assert row.cache_env in constants, database
     assert _image_sets(dockerfile, row.cache_env), database
+
+
+def _database(**changes) -> prov.ContentDatabase:
+    fields = {
+        "name": "db",
+        "scanner": "a",
+        "cache_path": "/deps/.x",
+        "max_age": timedelta(hours=1),
+        "bound_source": "s",
+        "bound_is_tool_default": False,
+        "age_source": "a",
+        "refresh": "r",
+        "cache_env": "X_CACHE_DIR",
+    }
+    fields.update(changes)
+    return prov.ContentDatabase(**fields)
+
+
+def cache_value_problems(row: prov.ContentDatabase, dockerfile: str) -> list[str]:
+    """What the image's value for a row's cache variable says against the row.
+
+    The value is an absolute directory, because a relative one is read against the
+    working directory of whoever reads it. A row with an absolute ``cache_path`` names
+    the directory the image keeps the cache in, so the image sets the variable to that
+    directory. A row whose ``cache_path`` is under ``~`` names the tool's own default,
+    which the image moves with the variable, so there is nothing to equate it to."""
+    variable = row.cache_env or ""
+    value = _image_env_value(dockerfile, variable)
+    if value is None:
+        return [f"the image sets no {variable}"]
+    problems = []
+    if not value.startswith("/"):
+        problems.append(
+            f"the image sets {variable} to {value!r}, which is not absolute"
+        )
+    if row.cache_path.startswith("/") and value != row.cache_path:
+        problems.append(
+            f"the row keeps the cache in {row.cache_path!r} and the image sets "
+            f"{variable} to {value!r}"
+        )
+    return problems
+
+
+def test_the_value_rule_refuses_a_value_the_row_does_not_name() -> None:
+    keeps = _database()
+    tool_default = _database(cache_path="~/.cache/x")
+
+    assert cache_value_problems(keeps, 'ENV X_CACHE_DIR="/deps/.x"\n') == []
+    moved = cache_value_problems(keeps, 'ENV X_CACHE_DIR="/deps/.y"\n')
+    assert len(moved) == 1 and "keeps the cache in '/deps/.x'" in moved[0]
+    missing = cache_value_problems(keeps, "RUN true\n")
+    assert missing == ["the image sets no X_CACHE_DIR"]
+    # A row that is the tool's default is not equated to the directory the image moves
+    # it to, but the value is an absolute directory whatever the row says.
+    assert cache_value_problems(tool_default, 'ENV X_CACHE_DIR="/deps/.x"\n') == []
+    relative = cache_value_problems(tool_default, 'ENV X_CACHE_DIR="deps/.x"\n')
+    assert len(relative) == 1 and "which is not absolute" in relative[0]
+
+
+@pytest.mark.parametrize("database", _DATABASES)
+def test_the_image_sets_a_cache_variable_to_the_directory_its_row_names(
+    database: str,
+) -> None:
+    dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert cache_value_problems(_row(database), dockerfile) == [], database
+
+
+def passes_the_allowlist(requirements: SandboxRequirements, variable: str) -> bool:
+    """Whether the sandbox hands *variable* to a scanner that declares *requirements*:
+    the policy's own filter, given the scanner's prefixes and names."""
+    policy = SandboxPolicy(
+        scanner_name="probe",
+        read_only=(),
+        writable=(Path("/results"),),
+        cache=(),
+        network=True,
+        home=Path("/home/probe"),
+        cwd=None,
+        env_prefixes=requirements.env_prefixes,
+        env_names=requirements.env_names,
+    )
+    return variable in policy.filter_env({variable: "/deps/.x"})
+
+
+def test_the_allowlist_reader_tells_a_passed_variable_from_a_dropped_one() -> None:
+    trivy = SandboxRequirements(env_prefixes=("TRIVY_",))
+    other = SandboxRequirements(env_prefixes=("OTHER_",))
+
+    assert passes_the_allowlist(trivy, "TRIVY_CACHE_DIR")
+    assert not passes_the_allowlist(SandboxRequirements(), "TRIVY_CACHE_DIR")
+    assert not passes_the_allowlist(other, "TRIVY_CACHE_DIR")
+    # A name that looks like a credential is dropped under an allowed prefix, and
+    # passes only when the scanner names it.
+    assert not passes_the_allowlist(trivy, "TRIVY_PASSWORD")
+    named = SandboxRequirements(env_names=("TRIVY_PASSWORD",))
+    assert passes_the_allowlist(named, "TRIVY_PASSWORD")
+
+
+@pytest.mark.parametrize("database", _DATABASES)
+def test_a_cache_variable_passes_the_allowlist_of_each_scanner_that_reads_it(
+    database: str,
+) -> None:
+    row = _row(database)
+
+    for scanner in row.readers:
+        requirements = _scanner_class(scanner).sandbox_requirements
+        assert passes_the_allowlist(requirements, row.cache_env or ""), (
+            database,
+            scanner,
+        )
 
 
 def test_a_database_may_leave_its_cache_variable_out() -> None:
@@ -452,10 +633,9 @@ def test_a_database_may_leave_its_cache_variable_out() -> None:
     assert database.cache_env is None
 
 
-def test_the_trivy_cache_variable_is_the_one_the_plugin_and_the_image_name() -> None:
+def test_the_trivy_plugin_readme_documents_the_cache_variable() -> None:
+    """The variable the scanner reads and the image sets is also the one the plugin's
+    readme tells an operator to use; the binding tests above read the code."""
     readme_path = _PACKAGE / "plugin_modules" / "ash_trivy_plugins" / "README.md"
-    readme = readme_path.read_text(encoding="utf-8")
-    dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "`TRIVY_CACHE_DIR`" in readme
-    assert re.search(r"^ENV TRIVY_CACHE_DIR=", dockerfile, flags=re.MULTILINE)
+    assert "`TRIVY_CACHE_DIR`" in readme_path.read_text(encoding="utf-8")
