@@ -1708,7 +1708,9 @@ def merge_shard_results(
     shard met is recorded once, holding only what every one of them recorded (the
     facts they recorded alike, and the ``found`` text when it is the same in all, None
     when it is not), because two hosts that meet one row do not read the same of it.
-    The ``report_id`` is the exception: see :func:`_union_report_id`.
+    The merge warns of each such notice, naming the shards that met it and what its
+    record leaves out. The ``report_id`` is the exception: see
+    :func:`_union_report_id`.
 
     Args:
         loaded: (path, results) pairs, in any order.
@@ -1831,9 +1833,11 @@ def merge_shard_results(
     # shard's copy would describe one host only. A notice two shards met is recorded
     # once with what both recorded: the facts they recorded alike, and the found text
     # when it is the same, since two hosts that meet one row do not read the same of
-    # it. None when no shard recorded one, as a single scan writes it.
+    # it, and a warning names the notice, the shards and what the record leaves out.
+    # None when no shard recorded one, as a single scan writes it.
     merged.metadata.support_notices = combined_support_notices(
-        shard.metadata.support_notices for _, shard, _ in shards
+        (shard.metadata.support_notices for _, shard, _ in shards),
+        labels=[_shard_label(shard) for _, shard, _ in shards],
     )
     _merge_timing(merged, shards)
     _record_merge_provenance(merged, shards)

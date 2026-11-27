@@ -3240,7 +3240,9 @@ def execute_workspace(
             for project in plan.projects
             if project.key in collected
         ),
-        # Likewise in workspace-file order: the first project's notice of an id wins.
+        # Likewise in workspace-file order, one entry for each project added above: the
+        # aggregator names the projects of a notice they read differently by the place
+        # of their entry, and records that notice once, with what they all recorded.
         support_notices=[
             collected[project.key].support_notices
             for project in plan.projects

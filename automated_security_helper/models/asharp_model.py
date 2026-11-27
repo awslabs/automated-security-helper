@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -52,6 +52,7 @@ from typing import (
     Iterator,
     Literal,
     Optional,
+    Tuple,
     Union,
     List,
     get_args,
@@ -1255,7 +1256,16 @@ class SupportNotice(StrippedRecordModel):
         return value
 
 
-def _agreed_support_notice(records: List[SupportNotice]) -> SupportNotice:
+def _joined(items: Sequence[str]) -> str:
+    """``items`` as a phrase: one alone, two joined by "and", more as a list."""
+    if len(items) <= 2:
+        return " and ".join(items)
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def _agreed_support_notice(
+    records: List[SupportNotice], runs: Sequence[str]
+) -> SupportNotice:
     """The one record of a notice id that holds only what every record of it holds.
 
     The first record is the base, copied whole. What a run read of a row is what
@@ -1264,6 +1274,11 @@ def _agreed_support_notice(records: List[SupportNotice]) -> SupportNotice:
     ``found`` is its text when every record has the same text, None when they differ (a
     record with no text differs from one with some). Every other field is the first
     record's.
+
+    What the record leaves out is said, not dropped in silence: one warning for the id
+    names the runs that recorded it (``runs``) and the fields it leaves out, ``found``
+    and ``facts.<name>``, with the facts any run read that the record does not hold. It
+    names what differed and never what a run read, so a log does not repeat a notice.
     """
     first, *others = records
     update: Dict[str, Any] = {}
@@ -1274,13 +1289,26 @@ def _agreed_support_notice(records: List[SupportNotice]) -> SupportNotice:
     }
     if shared != first.facts:
         update["facts"] = shared
+    left_out: List[str] = []
     if any(other.found != first.found for other in others):
         update["found"] = None
+        left_out.append("found")
+    read = {name for record in records for name in record.facts}
+    left_out.extend(f"facts.{name}" for name in sorted(read.difference(shared)))
+    if left_out:
+        ASH_LOGGER.warning(
+            f"Support notice '{first.id}' was recorded by {_joined(runs)}, and they "
+            "did not read it alike. The combined record leaves out "
+            f"{_joined(left_out)}, so it holds only what every one of them recorded.",
+            extra=NO_MARKUP,
+        )
     return first.model_copy(update=update, deep=True)
 
 
 def combined_support_notices(
     runs: Iterable[Optional[Iterable[Any]]],
+    *,
+    labels: Optional[Sequence[str]] = None,
 ) -> Optional[List[SupportNotice]]:
     """Several runs' ``metadata.support_notices`` as one list, each notice id once.
 
@@ -1300,6 +1328,13 @@ def combined_support_notices(
     row is one configuration, so the runs say the same of it, and where a run of
     another ASH version words it otherwise the first run's wording stands.
 
+    What a record leaves out is said: one warning for each notice the runs did not read
+    alike, naming the notice, the runs that recorded it and the fields it leaves out
+    (``found``, ``facts.<name>``), and not what any run read. ``labels`` names the runs
+    in the order they are given, for that warning; a run it does not name is named by
+    its place in the list (``run 3`` for the third, a run that recorded nothing
+    counted), so a caller that knows its shards or its projects says which.
+
     The records come in the order the runs are given and each run's own order, so a
     caller that passes them in workspace-file or shard-index order gets a result that
     does not depend on which run finished first. Each notice is a copy, so the list
@@ -1309,16 +1344,25 @@ def combined_support_notices(
     None when no run recorded one, which is how a run on a fully supported
     configuration writes the field.
     """
-    records: Dict[str, List[SupportNotice]] = {}
-    for notices in runs:
+    names = list(labels or ())
+    recorded: Dict[str, List[Tuple[str, SupportNotice]]] = {}
+    for position, notices in enumerate(runs, start=1):
+        run = names[position - 1] if position <= len(names) else f"run {position}"
         for notice in notices or ():
             record = (
                 notice
                 if isinstance(notice, SupportNotice)
                 else SupportNotice.model_validate(notice)
             )
-            records.setdefault(record.id, []).append(record)
-    return [_agreed_support_notice(group) for group in records.values()] or None
+            recorded.setdefault(record.id, []).append((run, record))
+    united = [
+        _agreed_support_notice(
+            [record for _, record in group],
+            list(dict.fromkeys(run for run, _ in group)),
+        )
+        for group in recorded.values()
+    ]
+    return united or None
 
 
 class ReportMetadata(StrippedRecordModel):

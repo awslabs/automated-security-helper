@@ -1798,7 +1798,9 @@ class WorkspaceAggregator:
         them recorded: the facts they recorded alike, and the ``found`` text when it is
         the same in all, None when it is not. Two projects that meet one row can read
         different things of it, and the first project's record would publish its read
-        as the workspace's.
+        as the workspace's. The writer warns of each such notice, naming the projects
+        that met it (by their names in the workspace, and by their place in the list
+        when none was added) and what the record leaves out.
         """
         payload = self.results_payload(
             exit_code,
@@ -1828,7 +1830,17 @@ class WorkspaceAggregator:
             metadata["ignore_file_exclusions"] = ignore_file_exclusions
         if plugin_load_errors:
             metadata["plugin_load_errors"] = dict(plugin_load_errors)
-        notices = combined_support_notices(support_notices or ())
+        # The projects added, in workspace-file order as the notices are, name the
+        # projects a warning of a notice they read differently speaks of.
+        per_project = list(support_notices or ())
+        names = [outcome.project for outcome in payload.projects]
+        notices = combined_support_notices(
+            per_project,
+            labels=[
+                names[index] if index < len(names) else f"project {index + 1}"
+                for index in range(len(per_project))
+            ],
+        )
         if notices:
             metadata["support_notices"] = [
                 notice.model_dump(mode="json") for notice in notices
