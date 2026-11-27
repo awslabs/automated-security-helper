@@ -70,6 +70,7 @@ from typing import (
     Callable,
     Iterable,
     Iterator,
+    Literal,
     Mapping,
     NamedTuple,
     NoReturn,
@@ -1041,7 +1042,7 @@ def _elf_interpreter(head: bytes) -> Optional[str]:
     if head[5] not in (1, 2):
         return None
     wide = head[4] == 2
-    order = "little" if head[5] == 1 else "big"
+    order: Literal["little", "big"] = "little" if head[5] == 1 else "big"
 
     def field(start: int, size: int) -> Optional[int]:
         if start + size > len(head):
