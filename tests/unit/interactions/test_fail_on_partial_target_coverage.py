@@ -347,7 +347,7 @@ class TestTheOptOutIsWhatUngatesPartialCoverage:
         ERROR for these counts when its surviving findings are clean
         (``determine_status`` runs the severity gate first and grades a partial
         loss ERROR or FAILED), so this row is the artifact an older ASH's shard wrote -- which ``ash
-        merge`` still loads, and which must keep counting as having run. The
+        results merge`` still loads, and which must keep counting as having run. The
         current-scan ERROR shape has its own seam: ``cli.merge._ran_partially``
         reads the counts for ERROR entries, and only to widen; both of its
         sides are pinned in ``tests/unit/cli/test_merge.py``.
@@ -962,7 +962,7 @@ class TestTheGateReadsTheRealRollup:
         """The artifact an older ASH wrote keeps gating.
 
         Before the fail-closed status rule, a real partial loss was written as
-        PASSED beside its counters. ``ash merge`` still loads such results, so
+        PASSED beside its counters. ``ash results merge`` still loads such results, so
         the gate keeps reading the counts whatever the status says.
         """
         listed = dict(

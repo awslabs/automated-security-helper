@@ -176,14 +176,12 @@ class TestCli:
             seen.update(kwargs)
 
         monkeypatch.setattr(scan_cli, "run_ash_scan", fake_run_ash_scan)
-        result = CliRunner().invoke(app, ["scan", *args], env=env)
+        result = CliRunner().invoke(app, ["scan", "fs", *args], env=env)
         assert result.exit_code == 0, result.output
         return seen
 
     def test_env_debug_is_left_to_run_ash_scan(self, monkeypatch, tmp_path):
-        seen = self._invoke(
-            monkeypatch, ["--source-dir", str(tmp_path)], {"ASH_DEBUG": "true"}
-        )
+        seen = self._invoke(monkeypatch, [str(tmp_path)], {"ASH_DEBUG": "true"})
 
         # Dropped at the CLI so run_ash_scan applies it below the flags; it
         # still resolves to DEBUG there.
@@ -197,7 +195,7 @@ class TestCli:
     def test_env_debug_does_not_beat_quiet(self, monkeypatch, tmp_path):
         seen = self._invoke(
             monkeypatch,
-            ["--source-dir", str(tmp_path), "--quiet"],
+            [str(tmp_path), "--quiet"],
             {"ASH_DEBUG": "true"},
         )
         monkeypatch.setenv("ASH_DEBUG", "true")
@@ -211,7 +209,7 @@ class TestCli:
         assert _resolve_log_level(opts) == AshLogLevel.ERROR
 
     def test_the_flag_itself_still_works(self, monkeypatch, tmp_path):
-        seen = self._invoke(monkeypatch, ["--source-dir", str(tmp_path), "--debug"], {})
+        seen = self._invoke(monkeypatch, [str(tmp_path), "--debug"], {})
 
         assert seen["debug"] is True
 

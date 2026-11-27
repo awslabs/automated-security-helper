@@ -171,7 +171,7 @@ class TestAWorkspaceProjectReportsOneRead:
 
         ``--scanners cdk-nag`` records every other scanner SKIPPED, so the partial
         audit is the only row that can answer the set-level question. The project
-        has to answer as ``ash --source-dir P`` does.
+        has to answer as ``ash scan fs P`` does.
 
         ``scan_incomplete`` is True in both rows, but not because of
         ``no_scanner_ran``: the ``cdk-nag`` row in ``incomplete_scanners`` already

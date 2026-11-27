@@ -47,7 +47,13 @@ pytestmark = pytest.mark.integration
 _CHECKOUT = Path(automated_security_helper.__file__).resolve().parents[1]
 
 #: The scan every test runs: one scanner, Python only, and one secret to find.
-_SCAN = ["--scanners", "detect-secrets", "--python-only", "--no-progress", "--no-color"]
+_SCAN = [
+    "--add-scanners",
+    "detect-secrets",
+    "--python-only",
+    "--no-progress",
+    "--no-color",
+]
 
 #: What the child runs: ``ash`` as its console script does, after the tool probes are
 #: answered. Without them the child found the uv installed with ASH beside its
@@ -204,7 +210,7 @@ def test_a_local_scan_into_it_logs_and_reports_as_into_a_utf8_one(tmp_path):
     source = _source(tmp_path)
     plain = tmp_path / "plain-out"
     odd = _not_utf8(tmp_path) / "out"
-    scan = ["scan", "--mode", "local", "--source-dir", str(source), *_SCAN]
+    scan = ["scan", "fs", str(source), "--mode", "local", *_SCAN]
 
     plain_child = _ash(tmp_path, [*scan, "--output-dir", str(plain)])
     odd_child = _ash(tmp_path, [*scan, "--output-dir", str(odd)])
@@ -216,7 +222,7 @@ def test_a_local_scan_into_it_logs_and_reports_as_into_a_utf8_one(tmp_path):
 def test_a_report_over_existing_results_there_works_too(tmp_path):
     source = _source(tmp_path)
     seeded = tmp_path / "seed-out"
-    scan = ["scan", "--mode", "local", "--source-dir", str(source), *_SCAN]
+    scan = ["scan", "fs", str(source), "--mode", "local", *_SCAN]
     assert _ash(tmp_path, [*scan, "--output-dir", str(seeded)]).returncode == 2
     plain = tmp_path / "plain-out"
     odd = _not_utf8(tmp_path) / "out"
@@ -235,17 +241,17 @@ def test_a_report_over_existing_results_there_works_too(tmp_path):
 
 
 def test_a_merge_into_it_reports_as_into_a_utf8_one(tmp_path):
-    """ash merge writes no ash.log; its lines are on stdout, and compared there."""
+    """ash results merge writes no ash.log; its lines are on stdout, and compared there."""
     source = _source(tmp_path)
     shard = tmp_path / "shard-0"
     sharded = _ash(
         tmp_path,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(shard),
             "--shard-index",
@@ -258,7 +264,7 @@ def test_a_merge_into_it_reports_as_into_a_utf8_one(tmp_path):
     assert sharded.returncode == 2, _outcome(sharded)
     plain = tmp_path / "plain-out"
     odd = _not_utf8(tmp_path) / "out"
-    merge = ["merge", "--results", str(shard), "--no-color"]
+    merge = ["results", "merge", "--results", str(shard), "--no-color"]
 
     plain_child = _ash(tmp_path, [*merge, "--output-dir", str(plain)])
     odd_child = _ash(tmp_path, [*merge, "--output-dir", str(odd)])

@@ -25,7 +25,7 @@ Where git could find a repository, it is still asked for the root:
 Here git cannot answer (its start is refused), and the scan records the absolute
 path, as it does for any directory git gives no root for.
 
-Each cell runs ``ash scan`` in a child process with the driver of
+Each cell runs ``ash scan fs`` in a child process with the driver of
 test_a_name_that_is_not_utf8_keeps_the_results_file.py: every tool probe is answered
 as on a host without the tool, and every program start but ASH's detect-secrets
 worker is refused and logged, so a git start is seen and never runs. A ``git`` that
@@ -108,7 +108,7 @@ def _scan(
     extra_env: Optional[Dict[str, str]] = None,
     deny: Optional[Path] = None,
 ) -> Tuple[int, str, Path, List[str]]:
-    """``ash scan`` of *source* in a child that starts no program but ASH's
+    """``ash scan fs`` of *source* in a child that starts no program but ASH's
     detect-secrets worker, with the starts it tried, as the driver logged them."""
     output = tmp_path / f"{source.name}-out"
     starts = tmp_path / f"{source.name}-starts.log"
@@ -142,13 +142,13 @@ def _scan(
             "-c",
             _DENY_LOOKUP + base._DRIVER,
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
-            "--scanners",
+            "--add-scanners",
             "detect-secrets",
             "--python-only",
             "--no-progress",

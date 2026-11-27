@@ -47,7 +47,7 @@ def scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def _scan(*args: str):
         result = CliRunner().invoke(
-            app, ["scan", "--source-dir", "src", "--output-dir", "out", *args]
+            app, ["scan", "fs", "src", "--output-dir", "out", *args]
         )
         log = tmp_path / "out" / "ash.log"
         logged = log.read_text(encoding="utf-8") if log.exists() else ""

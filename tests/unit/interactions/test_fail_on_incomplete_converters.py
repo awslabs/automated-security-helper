@@ -24,7 +24,7 @@ default-on gate for them would turn currently-passing runs red without an operat
 having opted in anywhere. With the flag off, which is the shipped default, these
 inputs still exit 0.
 
-``ash merge`` inherits this for free: ``cli.merge._merged_exit_code`` delegates to
+``ash results merge`` inherits this for free: ``cli.merge._merged_exit_code`` delegates to
 ``_compute_exit_code`` precisely so the union is held to the same completeness
 rules as a single scan.
 
@@ -238,7 +238,7 @@ class TestAnUnknownKindReadsAsTool:
     @pytest.mark.parametrize("made", ["constructed", "assigned"])
     def test_a_record_that_never_passed_validation(self, made, capsys):
         """A record can skip the validator: built with model_construct, or with
-        its kind assigned after it was made, and ``ash merge`` can carry such
+        its kind assigned after it was made, and ``ash results merge`` can carry such
         records. Its unknown kind reads as "tool" in the row, the payload and
         the advice, as the validator reads it."""
         if made == "constructed":
@@ -464,7 +464,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
 
         ``None`` covers three real cases at once: a converter that has not implemented
         the count, one whose count raised, and a results file written by a version
-        predating the field -- ``ash merge`` reads shard results from whatever ASH wrote
+        predating the field -- ``ash results merge`` reads shard results from whatever ASH wrote
         each one. All three keep the strict answer, so adding the field cannot have
         quietly relaxed any converter that did not opt in.
         """
@@ -489,7 +489,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
         pydantic coerces ``False`` to ``0`` on validation, which legitimately means "no
         candidates". This measures the un-validated path instead --
         ``incomplete_converters`` reads rows with ``getattr``, so what it is handed is
-        whatever the caller assembled, and ``ash merge`` assembles from shard files.
+        whatever the caller assembled, and ``ash results merge`` assembles from shard files.
 
         An earlier version of this test asserted the bool survived validation. It did
         not, and the test failed for that reason rather than finding a defect, so it is
@@ -513,7 +513,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
     def test_a_row_that_converted_paths_is_not_exempted_by_a_zero_count(self):
         """ "Never ran" is the gate's inference, not the writer's promise.
 
-        ``ash merge`` reads rows from any producer, and a row's fields are what it
+        ``ash results merge`` reads rows from any producer, and a row's fields are what it
         says about its own run, not what this phase's dependency check would have
         said. A row with converted paths describes a converter that ran; a count of
         0 beside it answers a question that was not asked, so the row keeps the
@@ -891,7 +891,7 @@ class TestTheAdviceNamesEachRecordKind:
         assert entry["failed_input_kinds"] == ["input"]
 
     def test_the_gate_does_not_trust_accepted_on_a_tool_failure(self):
-        """A results file can come from any producer (ash merge reads shard
+        """A results file can come from any producer (ash results merge reads shard
         files from whatever ASH wrote them), so accepted waives the gate only
         together with kind "input": the writer never accepts a tool failure,
         and the reader does not either."""

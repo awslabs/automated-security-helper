@@ -768,7 +768,7 @@ class TestRunLocalModeChangedFiles:
     ):
         """Pins what dropping out-of-tree diff entries buys, now that it is subtle.
 
-        ``--source-dir`` and ``--changed-files-only`` are two scopings and the
+        The scan PATH and ``--changed-files-only`` are two scopings and the
         operator asked for both, so the reported set is their intersection. A
         scanner that escapes the scan root -- a ``../`` URI that
         ``sanitize_sarif_paths`` did not make source-relative -- must not be

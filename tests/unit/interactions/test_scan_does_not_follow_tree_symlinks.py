@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A whole ``ash scan`` over a tree whose converter inputs are symlinks to host files.
+"""A whole ``ash scan fs`` over a tree whose converter inputs are symlinks to host files.
 
 The unit tests next to each reader drive it in isolation. This one runs the real
 command, in a child process, over a tree built for it, and inspects everything the run
@@ -141,7 +141,7 @@ DRIVER = importing_this_checkout(
 
     from automated_security_helper.cli.main import app
 
-    sys.argv = ["ash", "scan", *sys.argv[1:]]
+    sys.argv = ["ash", "scan", "fs", *sys.argv[1:]]
     app()
     """
     )
@@ -221,7 +221,7 @@ def scan(tmp_path_factory):
     base = tmp_path_factory.mktemp("symlinked-inputs")
     tree, host = build(base)
     output = base / "out"
-    # Given relative and through a '..', as `--source-dir sub/../tree` would be. The
+    # Given relative and through a '..', as `ash scan fs sub/../tree` would be. The
     # root is made absolute without folding the '..', so every scan-set path carries
     # it; only a '..' below the root may be refused.
     (base / "sub").mkdir()
@@ -244,7 +244,6 @@ def scan(tmp_path_factory):
             "-I",
             "-c",
             DRIVER,
-            "--source-dir",
             str(source),
             "--output-dir",
             str(output),

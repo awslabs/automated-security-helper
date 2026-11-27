@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Every bundled report names a file whose name is not UTF-8, from a scan and from ``ash report``.
+"""Every bundled report names a file whose name is not UTF-8, from a scan and from ``ash results report``.
 
 A result records such a name in the record form, the surrogate as the six characters
 ``\\udcNN``. One scan with every bundled reporter enabled, over a file named so that
@@ -14,7 +14,7 @@ holds a finding, must write each report, and each must name the file:
   where a machine reads it, and with the backslash doubled where a human report
   shows it on one line, because the record form reads as an escape there.
 
-The same holds for each report ``ash report`` renders again from the saved results.
+The same holds for each report ``ash results report`` renders again from the saved results.
 
 These cells are a regression guard: they pin outputs that were already right
 before the record-form range, so they hold green across it. A source root whose
@@ -180,7 +180,7 @@ def _extensions() -> Dict[str, str]:
 
 
 def test_every_report_ash_report_renders_names_the_file(tmp_path):
-    """ash report writes the report to stdout, as UTF-8; each is read from there under
+    """ash results report writes the report to stdout, as UTF-8; each is read from there under
     the file name the scan gives it, so its format is decoded the same way."""
     odd_out, _ = _scanned(tmp_path, "odd", ODD_BYTES)
     plain_out, _ = _scanned(tmp_path, "plain", SAME_SHAPE.encode("utf-8"))
@@ -193,6 +193,7 @@ def test_every_report_ash_report_renders_names_the_file(tmp_path):
                 ran = names.ash(
                     tmp_path,
                     [
+                        "results",
                         "report",
                         "--output-dir",
                         str(output),

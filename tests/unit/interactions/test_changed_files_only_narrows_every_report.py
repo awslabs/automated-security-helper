@@ -430,7 +430,7 @@ def test_a_link_at_ash_sarif_is_never_read_as_this_runs(
     this run: ASH does not write a report through a link, so the run is refused
     with exit 1 and a message naming the link, not graded by the HIGH finding the
     link's target would show (exit 2). A link survives into the run only under
-    --use-existing, as here, or in ``ash merge`` into a reused output directory.
+    --use-existing, as here, or in ``ash results merge`` into a reused output directory.
     """
     source = tmp_path / "repo" / "src"
     source.mkdir(parents=True)

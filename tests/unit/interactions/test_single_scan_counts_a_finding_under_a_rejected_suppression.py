@@ -11,7 +11,7 @@ code's SARIF count (``_compute_exit_code``), the ``--min-severity`` gate
 (``ScannerStatisticsCalculator.extract_sarif_counts_for_scanner``) read any
 non-empty list as suppressed. So a finding whose only suppression a reviewer had
 rejected was hidden from the exit code and the summary table while the same scan's
-workspace verdict counted it, and ``ash --source-dir P`` exited 0 over it. A
+workspace verdict counted it, and ``ash scan fs P`` exited 0 over it. A
 rejected suppression was never an approval: the finding counts, the fail-closed
 side.
 """

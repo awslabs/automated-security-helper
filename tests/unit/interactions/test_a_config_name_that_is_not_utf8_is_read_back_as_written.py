@@ -13,8 +13,8 @@ repository's own ``.ash`` config is read that way too, so a pull request can add
 - A ``project_name`` holding one is refused at exit 3, before the scan, and the
   refusal does not quote the value.
 - The configuration a results file records reads back with the name the run was given,
-  the surrogate itself, so a run over those results (``ash report``,
-  ``--use-existing``, ``ash merge``) ignores the file the run ignored.
+  the surrogate itself, so a run over those results (``ash results report``,
+  ``--use-existing``, ``ash results merge``) ignores the file the run ignored.
 """
 
 from __future__ import annotations
@@ -200,7 +200,8 @@ def test_a_report_over_existing_results_reads_back_the_name(tmp_path):
     assert names.decision(found, KEEP) == REPORTED, (found, again)
 
     report = names.ash(
-        tmp_path, ["report", "--output-dir", str(output), "--format", "flat-json"]
+        tmp_path,
+        ["results", "report", "--output-dir", str(output), "--format", "flat-json"],
     )
     assert report.code == 0, report
     assert _recorded_ignore_paths(_loaded(output)) == sorted([ODD, CONTROL])
@@ -233,6 +234,7 @@ def test_a_merge_applies_the_recorded_config_to_the_name(tmp_path):
     ran = names.ash(
         tmp_path,
         [
+            "results",
             "merge",
             *[part for shard in shards for part in ("--results", str(shard))],
             "--output-dir",
@@ -288,6 +290,7 @@ def test_the_odd_name_and_its_spelled_twin_read_back_as_one_name_through_a_merge
     ran = names.ash(
         tmp_path,
         [
+            "results",
             "merge",
             *[part for shard in shards for part in ("--results", str(shard))],
             "--output-dir",

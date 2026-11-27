@@ -178,7 +178,7 @@ def test_the_scan_records_the_scanned_directory_within_its_repository(
     tmp_path, monkeypatch
 ):
     """Recorded while the directory exists, so a report made where it does not
-    (ash merge on a collector, ash report elsewhere) reads the scan's answer."""
+    (ash results merge on a collector, ash results report elsewhere) reads the scan's answer."""
     repo = _repository_at(tmp_path / "repo")
     source = repo / "services" / "api"
     source.mkdir(parents=True)

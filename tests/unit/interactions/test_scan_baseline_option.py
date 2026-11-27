@@ -16,11 +16,11 @@ def test_bad_baseline_with_nothing_staged_is_refused(tmp_path):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "precommit",
             "--staged",
-            "--source-dir",
-            str(source),
             "--baseline",
             str(baseline),
         ],
@@ -38,10 +38,10 @@ def test_baseline_inside_the_checkout_is_refused(tmp_path):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--baseline",
             str(baseline),
         ],
@@ -161,10 +161,10 @@ def test_use_existing_over_baseline_results_is_refused(tmp_path):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
             "--use-existing",
@@ -193,11 +193,11 @@ def test_wrong_project_with_nothing_staged_is_refused(tmp_path, monkeypatch):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "precommit",
             "--staged",
-            "--source-dir",
-            str(source),
             "--baseline",
             str(baseline),
         ],
@@ -231,10 +231,10 @@ def test_baseline_inside_the_output_dir_is_refused(tmp_path):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
             "--baseline",
@@ -259,10 +259,10 @@ def test_baseline_reached_through_a_link_in_the_checkout_is_refused(tmp_path):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--baseline",
             str(link),
         ],
@@ -294,10 +294,10 @@ def test_invalid_or_filtered_baseline_is_refused(tmp_path, metadata):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--baseline",
             str(baseline),
         ],
@@ -384,9 +384,9 @@ def test_explicit_express_with_baseline_is_refused(tmp_path):
         app,
         [
             "scan",
-            "--express",
-            "--source-dir",
+            "fs",
             str(source),
+            "--express",
             "--baseline",
             str(tmp_path / "baseline"),
         ],
@@ -401,10 +401,10 @@ def test_explicit_express_with_json_baseline_is_refused(tmp_path):
     source.mkdir()
     document = tmp_path / "args.json"
     document.write_text(
-        json.dumps({"baseline": str(tmp_path / "missing"), "source_dir": str(source)})
+        json.dumps({"baseline": str(tmp_path / "missing"), "path": str(source)})
     )
     response = CliRunner().invoke(
-        app, ["scan", "--express", "--cli-json-input", str(document)]
+        app, ["scan", "fs", "--express", "--cli-json-input", str(document)]
     )
     assert response.exit_code == 5
     assert "Error reading --baseline" in response.stderr
@@ -470,11 +470,11 @@ def test_empty_staged_baseline_scan_preserves_previous_results(tmp_path, monkeyp
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "precommit",
             "--staged",
-            "--source-dir",
-            str(source),
             "--output-dir",
             str(output),
             "--baseline",
@@ -493,10 +493,10 @@ def test_baseline_path_with_nul_is_usage_error(tmp_path):
         app,
         [
             "scan",
+            "fs",
+            str(source),
             "--mode",
             "local",
-            "--source-dir",
-            str(source),
             "--baseline",
             "bad\x00path",
         ],
@@ -609,10 +609,10 @@ def test_baseline_and_existing_results_are_refused_before_read(
     baseline = tmp_path / "baseline.json"
     args = [
         "scan",
+        "fs",
+        str(source),
         "--mode",
         "local",
-        "--source-dir",
-        str(source),
         "--output-dir",
         str(output),
         "--use-existing",
@@ -657,7 +657,7 @@ def test_baseline_reaching_an_express_child_is_refused(tmp_path, monkeypatch, ke
     monkeypatch.setenv(CHILD_ENV, "1")
     response = CliRunner().invoke(
         app,
-        ["scan", "--source-dir", str(source), "--cli-json-input", str(document)],
+        ["scan", "fs", str(source), "--cli-json-input", str(document)],
     )
     assert response.exit_code == 5
     assert "not supported by the express daemon" in response.output
