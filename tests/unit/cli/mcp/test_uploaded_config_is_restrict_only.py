@@ -492,3 +492,90 @@ def test_an_upload_that_leaves_out_an_off_host_scanner_the_profile_turns_off_doe
     # list says, so the scanner is loaded and only its section can stop it.
     assert SNYK in config.ash_plugin_modules
     assert section_enabled(config.get_plugin_config("scanner", "snyk-code")) is False
+
+
+# mcp-config's checks and prefix lists are on no denied list, so the judge accepts
+# an upload that writes them; they are floors the upload may not go below.
+
+MCP_PREFIX = "https://mcp.example.test/tools/"
+MCP_COMMANDS = "/opt/mcp/bin"
+
+MCP_PROFILE = (
+    "scanners:\n"
+    "  mcp-config:\n"
+    "    options:\n"
+    "      forbid_auto_approval: true\n"
+    "      require_local: true\n"
+    f"      remote_url_prefixes: ['{MCP_PREFIX}']\n"
+    f"      allowed_command_prefixes: ['{MCP_COMMANDS}']\n"
+)
+
+
+def _mcp_options(config: AshConfig) -> Dict[str, Any]:
+    return config.get_plugin_config("scanner", "mcp-config")["options"]
+
+
+def test_an_upload_cannot_lower_the_bound_profile_s_mcp_config_checks(_server) -> None:
+    _bind_profile(_server["tmp"], MCP_PROFILE)
+    within = _upload(
+        {
+            "ash.yaml": (
+                "project_name: uploaded\n"
+                "scanners:\n"
+                "  mcp-config:\n"
+                "    options:\n"
+                "      forbid_auto_approval: false\n"
+                "      require_local: false\n"
+                "      remote_url_prefixes: []\n"
+                "      allowed_command_prefixes: ['/usr/local/bin']\n"
+            )
+        }
+    )
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = _mcp_options(config)
+    assert options["forbid_auto_approval"] is True
+    assert options["require_local"] is True
+    assert options["remote_url_prefixes"] == [MCP_PREFIX]
+    assert options["allowed_command_prefixes"] == [MCP_COMMANDS]
+
+
+def test_an_upload_that_leaves_mcp_config_out_keeps_the_bound_profile_s(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], MCP_PROFILE)
+    within = _upload({"ash.yaml": "project_name: uploaded\n"})
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = _mcp_options(config)
+    assert options["require_local"] is True
+    assert options["remote_url_prefixes"] == [MCP_PREFIX]
+    assert options["allowed_command_prefixes"] == [MCP_COMMANDS]
+
+
+def test_control_an_upload_still_tightens_a_profile_with_no_mcp_config_values(
+    _server,
+) -> None:
+    _bind_profile(_server["tmp"], "project_name: profile\n")
+    within = _upload(
+        {
+            "ash.yaml": (
+                "project_name: uploaded\n"
+                "scanners:\n"
+                "  mcp-config:\n"
+                "    options:\n"
+                "      require_local: true\n"
+                f"      remote_url_prefixes: ['{MCP_PREFIX}']\n"
+                f"      allowed_command_prefixes: ['{MCP_COMMANDS}']\n"
+            )
+        }
+    )
+
+    config = _resolved_by_scan(_server["target"], str(within / "ash.yaml"))
+
+    options = _mcp_options(config)
+    assert options["require_local"] is True
+    assert options["remote_url_prefixes"] == [MCP_PREFIX]
+    assert options["allowed_command_prefixes"] == [MCP_COMMANDS]

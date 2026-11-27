@@ -1373,6 +1373,19 @@ def test_a_delivered_config_may_turn_on_more_cdk_nag_packs() -> None:
     assert isinstance(_scan_resolution(source), AshConfig)
 
 
+#: Why changing one of mcp-config's checks, or its two prefix lists, leaves no
+#: finding out: each is a floor (``config/restrictions_kept.keep_operator_floors``).
+_MCP_CONFIG_CHECK_FLOOR = (
+    "a floor: a config that is not the operator's may turn it on, never off the "
+    "operator's on, so changing it reports no fewer findings than the operator's "
+    "config"
+)
+_MCP_CONFIG_LIST_FLOOR = (
+    "a floor: such a config's list keeps only prefixes under the operator's, and an "
+    "empty list keeps the operator's, so it flags no fewer entries than the "
+    "operator's"
+)
+
 #: Every scanner option a delivered config may change that is neither denied
 #: by default nor re-applied as a marked suppression, and why changing it leaves
 #: no finding out. ``"*"`` stands for every scanner with the option. Each option
@@ -1428,6 +1441,13 @@ _REVIEWED_OPTIONS: Dict[tuple, str] = {
     ("guarddog", "verify_parallelism"): (
         "how many dependencies verify downloads at once; throughput, not findings"
     ),
+    ("mcp-config", "forbid_privilege_escalation"): _MCP_CONFIG_CHECK_FLOOR,
+    ("mcp-config", "forbid_unpinned_runners"): _MCP_CONFIG_CHECK_FLOOR,
+    ("mcp-config", "forbid_auto_approval"): _MCP_CONFIG_CHECK_FLOOR,
+    ("mcp-config", "flag_env_secrets"): _MCP_CONFIG_CHECK_FLOOR,
+    ("mcp-config", "require_local"): _MCP_CONFIG_CHECK_FLOOR,
+    ("mcp-config", "remote_url_prefixes"): _MCP_CONFIG_LIST_FLOOR,
+    ("mcp-config", "allowed_command_prefixes"): _MCP_CONFIG_LIST_FLOOR,
 }
 
 
@@ -1443,6 +1463,7 @@ def _scanner_option_models() -> Dict[str, Any]:
         detect_secrets_scanner,
         gitleaks_scanner,
         grype_scanner,
+        mcp_config_scanner,
         npm_audit_scanner,
         opengrep_scanner,
         semgrep_scanner,
@@ -1480,6 +1501,7 @@ def _scanner_option_models() -> Dict[str, Any]:
         "detect-secrets": detect_secrets_scanner.DetectSecretsScannerConfigOptions,
         "gitleaks": gitleaks_scanner.GitleaksScannerConfigOptions,
         "grype": grype_scanner.GrypeScannerConfigOptions,
+        "mcp-config": mcp_config_scanner.McpConfigScannerConfigOptions,
         "npm-audit": npm_audit_scanner.NpmAuditScannerConfigOptions,
         "opengrep": opengrep_scanner.OpengrepScannerConfigOptions,
         "semgrep": semgrep_scanner.SemgrepScannerConfigOptions,
