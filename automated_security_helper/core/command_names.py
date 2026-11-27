@@ -65,6 +65,11 @@ CONFIG_LINT = Command(
 #: command tree. A command added above is added here.
 REGISTERED = (CONFIG_LINT,)
 
+#: The command that rewrites a config file's old key spellings. None until the
+#: command line registers it: the unit that adds the command sets it here and adds
+#: it to REGISTERED, and every message that reads it then names it.
+CONFIG_UPGRADE: Command | None = None
+
 
 # The characters a value of a printed command may hold: ASCII letters and
 # digits, `_ . / : -`. No shell (POSIX shells, cmd.exe, PowerShell) reads any of
@@ -163,6 +168,25 @@ def command_argv(
     is this list.
     """
     return [*command.text.split(), *_words(command, positionals, options, flags)]
+
+
+def rewrite_sentence(*, by_hand: bool = False) -> str:
+    """The sentence a refusal of a removed key spelling ends with: it names the
+    command that rewrites the file. Empty while ``CONFIG_UPGRADE`` is None, so a
+    refusal names no command before the command line has one.
+
+    ``by_hand`` is for a file the command does not rewrite in place (a TOML one):
+    the sentence then says to edit the key, and names the command that prints the
+    edit. ``CONFIG_UPGRADE`` is read through the module when this runs, as every
+    caller reads the registry.
+    """
+    upgrade = CONFIG_UPGRADE
+    if upgrade is None:
+        return ""
+    command = render_command(upgrade)
+    if by_hand:
+        return f" Edit this key by hand: {command} prints the edit."
+    return f" Run {command} to rewrite this file."
 
 
 def terminal_text(value: str) -> str:

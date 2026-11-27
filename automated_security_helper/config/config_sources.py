@@ -5069,9 +5069,12 @@ def _resolve(
     # The deprecation is said once for the file and the spelling, naming the file.
     # A file past the release that removes the old spelling, or writing both
     # spellings with different values, is refused naming the file, the place in
-    # it and the keys, and no value.
+    # it and the keys, and no value. A TOML file is edited by hand, from the edit
+    # the rewrite command prints, so its refusal ends with that sentence.
     try:
-        folded = spellings.fold_spellings(data, state.shown(real))
+        folded = spellings.fold_spellings(
+            data, state.shown(real), by_hand=is_toml_file(parsed_as)
+        )
     except spellings.SpellingRefused as exc:
         raise ASHConfigSourceError(str(exc)) from None
     data = folded.document

@@ -64,6 +64,7 @@ from packaging.version import InvalidVersion, Version
 from pydantic import AliasChoices, AliasPath, BaseModel, Field, ValidationInfo
 from pydantic_core import PydanticUndefined
 
+from automated_security_helper.core import command_names
 from automated_security_helper.utils.unknown_keys import tolerated_notes, warned_notes
 
 #: The key a config file holds its ``patch`` operations under
@@ -193,15 +194,23 @@ def disagreement_message(row: SpellingRow, old: str) -> str:
     )
 
 
-def removal_message(row: SpellingRow, old: str) -> str:
-    """What a config says when it writes ``old`` at or after ``removed_in``."""
+def removal_message(row: SpellingRow, old: str, *, by_hand: bool = False) -> str:
+    """What a config says when it writes ``old`` at or after ``removed_in``.
+
+    It ends with the sentence the command registry gives for the command that
+    rewrites a config file (``command_names.rewrite_sentence``), which is empty
+    while the registry holds none. ``by_hand`` is for a file that command does not
+    rewrite in place, a TOML one: the sentence then says to edit the key.
+    """
     release = row.removed_in
     if release is None:
-        return f"The '{old}' key is no longer read; write '{row.canonical}'."
-    return (
-        f"The '{old}' key is no longer read as of ASH {release}; write "
-        f"'{row.canonical}'."
-    )
+        message = f"The '{old}' key is no longer read; write '{row.canonical}'."
+    else:
+        message = (
+            f"The '{old}' key is no longer read as of ASH {release}; write "
+            f"'{row.canonical}'."
+        )
+    return message + command_names.rewrite_sentence(by_hand=by_hand)
 
 
 def disagreement_note(row: SpellingRow, old: str) -> str:
@@ -554,11 +563,13 @@ class _Fold:
         source: Optional[str] = None,
         version: Optional[str] = None,
         removal_only: bool = False,
+        by_hand: bool = False,
     ) -> None:
         self.root = root
         self.source = source
         self.version = version
         self.removal_only = removal_only
+        self.by_hand = by_hand
         self.lines: Dict[Tuple[str, str, str], str] = {}
 
     # -- the document ------------------------------------------------------
@@ -635,7 +646,9 @@ class _Fold:
         if self.source is None:
             return
         if row.status(self.version) == "removed":
-            raise SpellingRefused(self.source, place, removal_message(row, old))
+            raise SpellingRefused(
+                self.source, place, removal_message(row, old, by_hand=self.by_hand)
+            )
         if self.removal_only:
             return
         message = deprecation_message(row, old)
@@ -738,6 +751,7 @@ def fold_spellings(
     *,
     model: Optional[type[BaseModel]] = None,
     version: Optional[str] = None,
+    by_hand: bool = False,
 ) -> FoldedDocument:
     """``document``, one config file's parsed mapping, with each old spelling a
     row of the table names written as the canonical one, keys in place.
@@ -755,9 +769,17 @@ def fold_spellings(
     release, the running one when None) and when a mapping writes both spellings
     with different values. Each old spelling met also emits the row's
     ``DeprecationWarning``, and the returned ``warnings`` hold one line for each
-    spelling the file uses, however many places use it.
+    spelling the file uses, however many places use it. A refusal at the removal
+    release ends with the registry's sentence about the command that rewrites the
+    file; ``by_hand`` is for a file that command does not rewrite in place (a TOML
+    one), whose sentence says to edit the key (``removal_message``).
     """
-    fold = _Fold(model if model is not None else _root_model(), source, version)
+    fold = _Fold(
+        model if model is not None else _root_model(),
+        source,
+        version,
+        by_hand=by_hand,
+    )
     folded = fold.document(document)
     return FoldedDocument(folded, tuple(fold.lines.values()))
 
