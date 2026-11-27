@@ -7502,8 +7502,12 @@ def _shown(value: Any, syntax: str = "yaml") -> str:
 
 
 #: Headers of a column that says whether each plugin a row names is on by default,
-#: compared with the plugin config's enabled default.
-ENABLED_HEADERS = frozenset({"enabled by default", "on by default"})
+#: compared with the plugin config's enabled default. The scanner reference calls it
+#: "On once loaded": the enabled default after the scanner's module is loaded.
+ENABLED_HEADERS = frozenset({"enabled by default", "on by default", "on once loaded"})
+#: Headers of a column that says whether each scanner's module loads without being
+#: named in ash_plugin_modules, compared with the scanner manifest's default_enabled.
+LOADS_HEADERS = frozenset({"loads by default"})
 
 
 def _header_cells(table: Table) -> list[str]:
@@ -7817,8 +7821,12 @@ def _marked_table_problems(
     enabled_column = next(
         (index for index, cell in enumerate(headers) if cell in ENABLED_HEADERS), None
     )
+    loads_column = next(
+        (index for index, cell in enumerate(headers) if cell in LOADS_HEADERS), None
+    )
+    compared = (default_column, enabled_column, loads_column)
     for index, cell in enumerate(headers):
-        if index in (default_column, enabled_column) or not _states_defaults(cell):
+        if index in compared or not _states_defaults(cell):
             continue
         problems.append(
             (
@@ -7843,6 +7851,18 @@ def _marked_table_problems(
             )
         )
         enabled_column = None
+    if loads_column is not None and of != "scanners":
+        problems.append(
+            (
+                line,
+                (
+                    f"column '{table.header[loads_column]}' states whether each "
+                    f"scanner's module loads by default, but of={of} names no "
+                    "scanners section"
+                ),
+            )
+        )
+        loads_column = None
     named: set[int] = set()
     for number, cells in table.rows:
         keys = _row_keys(cells[0]) if cells else [""]
@@ -7878,6 +7898,12 @@ def _marked_table_problems(
                     problems.append(
                         (number, f"'{key}' {headers[enabled_column]} {problem}")
                     )
+            if loads_column is not None and loads_column < len(cells):
+                problem = loads_problem(cells[loads_column], key)
+                if problem:
+                    problems.append(
+                        (number, f"'{key}' {headers[loads_column]} {problem}")
+                    )
     if complete:
         missing = {
             id(spec): spec
@@ -7895,6 +7921,23 @@ def _marked_table_problems(
                 )
             )
     return problems
+
+
+def loads_problem(cell: str, scanner: str) -> str | None:
+    """Why a loads-by-default cell (yes or no) does not state the scanner manifest's
+    ``default_enabled``, or None. A scanner with no manifest has nothing to state."""
+    from automated_security_helper.plugin_manifests import manifest_for
+
+    manifest = manifest_for(scanner)
+    if manifest is None:
+        return f"says {cell.strip()}, but no scanner manifest is named {scanner}"
+    expected = "yes" if manifest.default_enabled else "no"
+    if cell.strip().strip("`*").lower() == expected:
+        return None
+    return (
+        f"says {cell.strip()}, but its manifest's default_enabled is "
+        f"`{str(manifest.default_enabled).lower()}`"
+    )
 
 
 def enabled_problem(cell: str, config_cls: type) -> str | None:

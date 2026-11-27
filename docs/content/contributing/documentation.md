@@ -335,7 +335,7 @@ scanner need no row.
 |-------|--------------|
 | `scanners.bandit`, `reporters.sarif`, `converters.archive` | that plugin's options (the same as adding `.options`) |
 | `scanners.*` | the keys every scanner entry has (`name`, `enabled`, `options`) |
-| `scanners`, `reporters`, `converters` | the plugins of that section, by name, built-in and alpha ones; a column headed Enabled by default or On by default is compared with each plugin's `enabled` default |
+| `scanners`, `reporters`, `converters` | the plugins of that section, by name, built-in and alpha ones; a column headed Enabled by default, On by default or On once loaded is compared with each plugin's `enabled` default, and on `scanners` a column headed Loads by default is compared with the scanner manifest's `default_enabled` |
 | `config` | the top-level keys of an ASH config |
 | `global_settings`, `sandbox`, `global_settings.suppressions`, ... | the keys under that config path; a path through a list means one item of it |
 | `workspace-policy`, `workspace-policy.workspace`, ... | keys of the workspace policy file |
@@ -917,7 +917,7 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | has no key, ships no scanner named | a dotted config path in a code span does not exist |
 | needs of= / an options marker goes on the line directly above a table | fix the marker |
 | that no row names; the marker says the table is complete | add a row for the key, or drop `complete` |
-| states defaults, but it is not compared | head the column Default, or Enabled by default for whether each plugin is on |
+| states defaults, but it is not compared | head the column Default, or Enabled by default (On once loaded on the scanner reference) for whether each plugin is on, or Loads by default for whether a scanner's module loads without being named |
 
 ### `files`
 
