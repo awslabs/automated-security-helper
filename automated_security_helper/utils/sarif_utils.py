@@ -47,9 +47,11 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Kind1,
 )
 from automated_security_helper.utils.suppression_matcher import (
+    SHOWN_IGNORE_PATH_FIELDS,
     active_ignore_paths,
     file_path_matches,
     find_inline_suppressions,
+    recorded_ignore_paths,
     recorded_suppressions,
     should_suppress_finding,
     written_suppression_id,
@@ -1390,6 +1392,53 @@ def _is_install_location_uri(uri: str | None) -> bool:
     )
 
 
+def _written_entry_clause(
+    suppression: Any, recorded_fields: Dict[int, Dict[str, Any]] | None
+) -> str:
+    """The parenthetical a warning names ``suppression`` by, from its WRITTEN form.
+
+    A suppression's ``path`` can be read from the environment (``path: ${VAR}``),
+    and the model holds the value the server's environment gave it, not the
+    reference the file wrote. ``recorded_fields``
+    (``suppression_matcher.recorded_suppressions``) holds each shown field as the
+    file wrote it, so the entry is named by its written path; failing that, by its
+    written id (``written_suppression_id``); and when the record holds no entry for
+    it (a direct caller, a stand-in config) by neither, since the model's own
+    ``path`` and ``AshSuppression.id``, which is built from it, would quote the
+    value. The empty string then leaves the sentence without a parenthetical.
+
+    The text is escaped for the markup the warning is logged with.
+    """
+    written = (recorded_fields or {}).get(id(suppression))
+    if not written:
+        return ""
+    path = written.get("path")
+    if isinstance(path, str) and path:
+        return f" (path '{escape_markup(path)}')"
+    written_id = written_suppression_id(suppression, recorded_fields or {})
+    return f" (id '{escape_markup(written_id)}')"
+
+
+def _written_value(
+    entry: Any, name: str, recorded: Dict[int, Dict[str, Any]] | None
+) -> Any:
+    """``entry``'s field ``name`` as its config file wrote it.
+
+    ``recorded`` is ``suppression_matcher.recorded_ignore_paths`` over the list the
+    entry sits in: a field the file read from the environment is the reference the
+    file wrote, never the value, so a message that quotes an ignore path or an
+    exclusion quotes this. The model's own value is used only when the record holds
+    no entry for the object (a stand-in config, a direct caller), where there is no
+    written form to quote. A record that holds the entry but not the field says
+    ``None``: the field was left out of the record's ``fields``, and a message
+    printing "None" is noticed where one printing the environment's value is not.
+    """
+    written = (recorded or {}).get(id(entry))
+    if written is None:
+        return getattr(entry, name, None)
+    return written.get(name)
+
+
 def _apply_config_suppression(
     result: Result,
     suppressions: list,
@@ -1405,13 +1454,16 @@ def _apply_config_suppression(
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
-    ``warned_rule_less`` is the pass's warn-once set for a suppression that names
+    ``warned_rule_less`` is the run's warn-once set
+    (``PluginContext.warned_rule_less_suppressions``) for a suppression that names
     no rule and matches an npm-audit finding: npm-audit findings moved from
     ``node_modules/<package>/package.json`` locations into the audited lockfile,
     so a rule-less entry whose path scope matches a lockfile (``deploy/**``,
     ``**/package-lock.json``) can newly cover advisories it never covered when it
     was written, with no config change. The warning names the entry once so the
-    operator can audit it; ``None`` (a direct caller) warns nothing. An entry
+    operator can audit it, by the form its config file WROTE (``recorded_fields``;
+    see ``_written_entry_clause``), never by a path or id the model resolved from
+    the environment; ``None`` (a direct caller) warns nothing. An entry
     that names a ``package_name`` is scoped on purpose, which is exactly the
     acknowledgment the warning's remedy asks for, so it is not warned about.
     Neither is a match on a finding still located at
@@ -1444,8 +1496,8 @@ def _apply_config_suppression(
     ):
         warned_rule_less.add(id(matching_suppression))
         ASH_LOGGER.warning(
-            f"A suppression that names no rule_id (path "
-            f"'{escape_markup(getattr(matching_suppression, 'path', None) or '')}') "
+            f"A suppression that names no rule_id"
+            f"{_written_entry_clause(matching_suppression, recorded_fields)} "
             f"covers npm-audit findings, first at rule "
             f"'{escape_markup(result.ruleId)}' in "
             f"'{escape_markup(flat_finding.file_path)}'. npm-audit findings "
@@ -2294,6 +2346,24 @@ def _apply_suppressions_within_budget(
         getattr(plugin_context.config.global_settings, "exclusions", None),
         where="global_settings.exclusions",
     )
+    # The written form each of these entries is quoted by in the lines below
+    # (suppression_matcher.recorded_ignore_paths): a field the config file read
+    # from the environment is the reference the file wrote, never the value. Built
+    # once per call over the config's FULL lists, because the record maps a
+    # reference to its entry by list position; the filtered lists above hold the
+    # same objects, so a line looks its entry up by id(). An exclusion is quoted by
+    # its rule id too, which an ignore path's shown fields do not hold.
+    recorded_ignore = recorded_ignore_paths(
+        plugin_context.config,
+        plugin_context.config.global_settings.ignore_paths,
+        ("global_settings", "ignore_paths"),
+    )
+    recorded_exclusions = recorded_ignore_paths(
+        plugin_context.config,
+        getattr(plugin_context.config.global_settings, "exclusions", None),
+        ("global_settings", "exclusions"),
+        fields=("rule_id", *SHOWN_IGNORE_PATH_FIELDS),
+    )
 
     suppressions = plugin_context.config.global_settings.suppressions or []
     # The written form each used entry is recorded by (written_suppression_id),
@@ -2305,8 +2375,16 @@ def _apply_suppressions_within_budget(
     )
     written_ids: Dict[int, str] = {}
     # Warn once per rule-less entry that covers an npm-audit finding (see
-    # _apply_config_suppression): per pass, like the written ids above.
-    warned_rule_less: set = set()
+    # _apply_config_suppression), per RUN: the receipts are the context's, as the
+    # engine receipts are, because this pass runs once per scanner and again over
+    # the merged report, and a set built here warned about one entry once per pass.
+    # Keyed by the entry's id(): the run holds one config, whose entries live as
+    # long as the context does (nothing assigns the context a new config once the
+    # engine has built, and no pass copies the context). A context double with no
+    # set gets one for this pass alone, which is the behavior it always had.
+    warned_rule_less = getattr(plugin_context, "warned_rule_less_suppressions", None)
+    if not isinstance(warned_rule_less, set):
+        warned_rule_less = set()
 
     # Exclusions a delivered config gave one scanner in its options, moved out of
     # them before the scan so the files were scanned. Each finding of that scanner
@@ -2424,11 +2502,14 @@ def _apply_suppressions_within_budget(
                         else output_exclusion.ignore_path_for(raw_uri, ignore_paths)
                     )
                     if matched_ignore is not None:
+                        ignore_reason = _written_value(
+                            matched_ignore, "reason", recorded_ignore
+                        )
                         ASH_LOGGER.verbose(
                             f"Ignoring finding on rule '{escape_markup(result.ruleId)}' "
                             f"file location '{escape_markup(uri)}' based on ignore_path "
                             f"match with global reason: "
-                            f"[yellow]{escape_markup(matched_ignore.reason)}[/yellow]",
+                            f"[yellow]{escape_markup(ignore_reason)}[/yellow]",
                             extra=MARKUP,
                         )
                         matched_ignore_paths.append(matched_ignore)
@@ -2455,11 +2536,17 @@ def _apply_suppressions_within_budget(
                 continue
 
             if client_ignored is not None:
+                # Quoted by the written form, like every line that names an
+                # entry's fields: this justification is in the results file and
+                # every report.
+                ignored_path = _written_value(client_ignored, "path", recorded_ignore)
+                ignored_reason = _written_value(
+                    client_ignored, "reason", recorded_ignore
+                )
                 _add_client_suppression(
                     result,
                     "(ASH, client-supplied config) Ignoring finding under "
-                    f"ignore path '{client_ignored.path}' with reason: "
-                    f"{client_ignored.reason}",
+                    f"ignore path '{ignored_path}' with reason: {ignored_reason}",
                 )
                 updated_results.append(result)
                 continue
@@ -2489,12 +2576,21 @@ def _apply_suppressions_within_budget(
                     _suppression_scanner_identity(result, run, scanner_name),
                 )
                 if excluding is not None:
+                    exclusion_reason = _written_value(
+                        excluding, "reason", recorded_exclusions
+                    )
                     if getattr(excluding, "client_supplied", False) is True:
+                        exclusion_rule = _written_value(
+                            excluding, "rule_id", recorded_exclusions
+                        )
+                        exclusion_path = _written_value(
+                            excluding, "path", recorded_exclusions
+                        )
                         _add_client_suppression(
                             result,
                             "(ASH, client-supplied config) Excluding finding on "
-                            f"rule '{excluding.rule_id}' under path "
-                            f"'{excluding.path}' with reason: {excluding.reason}",
+                            f"rule '{exclusion_rule}' under path "
+                            f"'{exclusion_path}' with reason: {exclusion_reason}",
                         )
                         updated_results.append(result)
                         continue
@@ -2502,7 +2598,7 @@ def _apply_suppressions_within_budget(
                         f"Excluding finding on rule '{escape_markup(result.ruleId)}' "
                         f"file location '{escape_markup(located_uris[0])}' based on "
                         f"global_settings.exclusions match with reason: "
-                        f"[yellow]{escape_markup(excluding.reason)}[/yellow]",
+                        f"[yellow]{escape_markup(exclusion_reason)}[/yellow]",
                         extra=MARKUP,
                     )
                     continue

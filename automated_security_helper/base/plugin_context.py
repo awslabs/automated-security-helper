@@ -303,6 +303,26 @@ class PluginContext(BaseModel):
         """
         return self._warned_unmatched_engines
 
+    # Private, like _scan_id: per-run state no dump or schema carries.
+    _warned_rule_less_suppressions: Set[int] = PrivateAttr(default_factory=set)
+
+    @property
+    def warned_rule_less_suppressions(self) -> Set[int]:
+        """This run's warn-once receipts for a suppression that names no rule and
+        covers npm-audit findings (``sarif_utils._apply_config_suppression``), as
+        the ``id()`` of the entry in the config this context holds.
+
+        On the context for the reason ``warned_unmatched_engines`` is: the
+        suppression pass runs once per scanner and again over the merged report,
+        so a set built inside the pass warned about one entry once per pass, not
+        once per run. The context is the one object built per run and shared with
+        every pass. The ids name entries of the one config a run holds (the engine
+        builds its context with it and nothing replaces it afterwards), so within a
+        run an id is never another entry's. A context given a different config
+        starts with the receipts of the old one; build a new context instead.
+        """
+        return self._warned_rule_less_suppressions
+
     @field_validator("config")
     def validate_config(cls, value):
         from automated_security_helper.config.ash_config import AshConfig

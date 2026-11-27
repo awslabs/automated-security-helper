@@ -336,6 +336,16 @@ def _berry_deprecation_line(line: Any) -> bool:
     return isinstance(advisory_id, str) and advisory_id.endswith("(deprecation)")
 
 
+#: What a lockfile with no relative form costs its results, the sentence both
+#: warnings of ``_shown_lockfile`` end with.
+_UNPLACED_LOCKFILE_CONSEQUENCE = (
+    ", so its results keep the install-location URI "
+    "(node_modules/<package>/package.json): a node_modules ignore "
+    "path drops them, and copies of one package in two such "
+    "projects share one identity"
+)
+
+
 def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | None:
     """``lock_file`` relative to the scanned target as a POSIX path, or None.
 
@@ -352,6 +362,12 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
     lockfile that is a link to its target, so ``app/package-lock.json`` linked
     to ``shared/package-lock.json`` was reported as the target, and two projects
     sharing one linked lockfile collapsed into one identity.
+
+    None is never silent, and the warning says which of two things happened: the
+    lockfile is outside the scanned directory (the resolved compare raised
+    ``ValueError``), or one of the two places could not be resolved at all (an
+    ``OSError``: a link loop, a directory the process cannot search), which says
+    nothing about where the lockfile is.
     """
     if lock_file is None:
         return None
@@ -369,7 +385,7 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
         return (
             (lock.parent.resolve() / lock.name).relative_to(root.resolve()).as_posix()
         )
-    except (ValueError, OSError):
+    except ValueError:
         # Not silent: with no relative form the lockfile's results keep the
         # node_modules/<package>/package.json install location with no
         # identity fingerprints, so a node_modules ignore path drops them and
@@ -377,10 +393,20 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
         # shape). Seen only for a lockfile outside the scanned directory.
         ASH_LOGGER.warning(
             f"npm-audit: {lock_file} is not under the scanned directory "
-            f"{target_path}, so its results keep the install-location URI "
-            "(node_modules/<package>/package.json): a node_modules ignore "
-            "path drops them, and copies of one package in two such "
-            "projects share one identity",
+            f"{target_path}{_UNPLACED_LOCKFILE_CONSEQUENCE}",
+            extra=NO_MARKUP,
+        )
+        return None
+    except OSError as error:
+        # The same consequence, for another cause: a place could not be read, so
+        # the lockfile may well be under the scanned directory and the message
+        # must not say it is not. The error's own reason alone: its full text
+        # repeats the path, which this message already names.
+        reason = error.strerror or type(error).__name__
+        ASH_LOGGER.warning(
+            f"npm-audit: the place of {lock_file} relative to the scanned "
+            f"directory {target_path} could not be read ({reason})"
+            f"{_UNPLACED_LOCKFILE_CONSEQUENCE}",
             extra=NO_MARKUP,
         )
         return None
