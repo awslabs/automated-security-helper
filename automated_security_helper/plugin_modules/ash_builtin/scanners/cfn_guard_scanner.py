@@ -1364,32 +1364,26 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             report.runs[0].results = merged
             self._post_scan(target=target, target_type=target_type)
             self._say_what_the_ingest_repaired(target_type)
-            notifications = self._ingest_record.notifications(
-                self._ingest_source_name()
-            )
             report.runs[0].invocations = [
-                Invocation(
-                    commandLine="cfn-guard",
-                    arguments=[
-                        "validate",
-                        *self._recorded_rule_args(rules, source_dir),
-                        "--output-format=sarif",
-                    ],
-                    startTimeUtc=self.start_time,
-                    endTimeUtc=self.end_time,
-                    executionSuccessful=self.targets_failed == 0,
-                    exitCode=self.exit_code,
-                    exitCodeDescription="\n".join(self.errors),
-                    workingDirectory=ArtifactLocation(
-                        uri=get_shortest_name(input=target)
-                    ),
-                    # What was repaired in the templates' SARIF, said in the
-                    # report as a warning, which fails no run.
-                    **(
-                        {"toolExecutionNotifications": notifications}
-                        if notifications
-                        else {}
-                    ),
+                # What was repaired in the templates' SARIF is said in the report
+                # as a warning, which fails no run.
+                self._noting_the_ingest(
+                    Invocation(
+                        commandLine="cfn-guard",
+                        arguments=[
+                            "validate",
+                            *self._recorded_rule_args(rules, source_dir),
+                            "--output-format=sarif",
+                        ],
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=self.targets_failed == 0,
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors),
+                        workingDirectory=ArtifactLocation(
+                            uri=get_shortest_name(input=target)
+                        ),
+                    )
                 )
             ]
             with open_for_write(results_dir.joinpath("cfn-guard.sarif")) as handle:

@@ -2005,32 +2005,26 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 self.exit_code = _combined_exit_code(exit_codes)
             self._post_scan(target=target, target_type=target_type)
             self._say_what_the_ingest_repaired(target_type)
-            notifications = self._ingest_record.notifications(
-                self._ingest_source_name()
-            )
             report.runs[0].invocations = [
-                Invocation(
-                    commandLine="cfn-lint",
-                    arguments=[
-                        "--format",
-                        "sarif",
-                        *self._recorded_args(option_args, source_dir),
-                    ],
-                    startTimeUtc=self.start_time,
-                    endTimeUtc=self.end_time,
-                    executionSuccessful=self.targets_failed == 0,
-                    exitCode=self.exit_code,
-                    exitCodeDescription="\n".join(self.errors),
-                    workingDirectory=ArtifactLocation(
-                        uri=get_shortest_name(input=target)
-                    ),
-                    # What was repaired in the batches' SARIF, said in the report
-                    # as a warning, which fails no run.
-                    **(
-                        {"toolExecutionNotifications": notifications}
-                        if notifications
-                        else {}
-                    ),
+                # What was repaired in the batches' SARIF is said in the report as
+                # a warning, which fails no run.
+                self._noting_the_ingest(
+                    Invocation(
+                        commandLine="cfn-lint",
+                        arguments=[
+                            "--format",
+                            "sarif",
+                            *self._recorded_args(option_args, source_dir),
+                        ],
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=self.targets_failed == 0,
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors),
+                        workingDirectory=ArtifactLocation(
+                            uri=get_shortest_name(input=target)
+                        ),
+                    )
                 )
             ]
             with open_for_write(results_dir.joinpath("cfn-lint.sarif")) as handle:

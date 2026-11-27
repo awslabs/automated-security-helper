@@ -1573,9 +1573,6 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 target_type=target_type,
             )
             self._say_what_the_ingest_repaired(target_type)
-            notifications = self._ingest_record.notifications(
-                self._ingest_source_name()
-            )
 
             sarif_invocation: Invocation = Invocation(
                 commandLine="ash-CFN Nag-scanner",
@@ -1595,14 +1592,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 properties=PropertyBag(
                     tool=sarif_tool,
                 ),
-                # What was repaired in the templates' SARIF, said in the report
-                # as a warning, which fails no run.
-                **(
-                    {"toolExecutionNotifications": notifications}
-                    if notifications
-                    else {}
-                ),
             )
+            # What was repaired in the templates' SARIF is said in the report as a
+            # warning, which fails no run.
+            self._noting_the_ingest(sarif_invocation)
             if sarif_report.runs:
                 sarif_report.runs[0].invocations = [sarif_invocation]
             with open_for_write(sarif_output_file) as fp:

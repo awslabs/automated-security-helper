@@ -262,7 +262,7 @@ class IngestRecord:
         text = "/".join(parts) if parts else "(document)"
         return f"{self._scope}: {text}" if self._scope else text
 
-    def summary(self) -> dict | None:
+    def summary(self) -> dict[str, Any] | None:
         """The record as plain JSON, or ``None`` when nothing was noted."""
         if not self._counts:
             return None
@@ -321,7 +321,7 @@ class IngestRecord:
             phrases.append(f"and {len(ordered) - 3} more kinds")
         return ", ".join(phrases)
 
-    def notifications(self, source: str | None = None) -> list[dict]:
+    def notifications(self, source: str | None = None) -> list[dict[str, Any]]:
         """The record as SARIF notifications, level ``warning``.
 
         A ``warning`` is not read by the unevaluated-rules gate, which fails a
@@ -395,11 +395,18 @@ def read_json_text_tolerant(text: str, record: IngestRecord) -> Any:
 # --------------------------------------------------------------------------- #
 
 
+#: Where a node sits in a raw document: the keys and list indices down to it.
+_Path = tuple[str | int, ...]
+
+#: ``(depth, member)`` for each union a model loc passes through, outermost first.
+_Unions = tuple[tuple[int, str], ...]
+
+
 class _Change(NamedTuple):
     """One repair: ``drop`` the node at *path*, or ``set_text`` it to its text."""
 
     kind: str
-    path: tuple
+    path: _Path
     code: str
     #: What it gives up, to choose the smaller repair when a union offers two:
     #: 0 a rewrite, 1 a field or map entry, 2 a list element.
@@ -409,13 +416,13 @@ class _Change(NamedTuple):
 class _Error(NamedTuple):
     """One model error placed on the raw document."""
 
-    path: tuple
+    path: _Path
     #: Where the model's loc could not be followed: a required field that is
     #: missing, named last.
-    tail: tuple
+    tail: _Path
     #: ``(depth, member)`` for each union the loc passes through, outermost
     #: first; *depth* is how many resolved tokens precede the member.
-    unions: tuple
+    unions: _Unions
     change: _Change | None
 
 
@@ -423,7 +430,7 @@ def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _resolve(doc: Any, loc: Sequence[str | int]) -> tuple[tuple, tuple, tuple, Any]:
+def _resolve(doc: Any, loc: Sequence[str | int]) -> tuple[_Path, _Path, _Unions, Any]:
     """Follow the model's *loc* into the raw *doc*.
 
     A token that is a key of the current object, or an index of the current list,
@@ -462,7 +469,7 @@ def _get(doc: Any, path: Sequence[str | int]) -> Any:
     return node
 
 
-def _sort_key(path: tuple) -> tuple:
+def _sort_key(path: _Path) -> tuple[tuple[int, str | int], ...]:
     return tuple((0, token) if isinstance(token, int) else (1, token) for token in path)
 
 
@@ -570,11 +577,11 @@ _INDEXED_FIELDS = frozenset(
 )
 
 
-def _drop(path: tuple, length: int, code: str, rank: int = 1) -> _Change:
+def _drop(path: _Path, length: int, code: str, rank: int = 1) -> _Change:
     return _Change("drop", path[:length], code, rank)
 
 
-def _bag_change(path: tuple, bag: int, code: str = "property_unreadable") -> _Change:
+def _bag_change(path: _Path, bag: int, code: str = "property_unreadable") -> _Change:
     """A repair for an error under the property bag at ``path[bag]``.
 
     The bag itself when it is the error, a tag that is not text, or the one
@@ -590,7 +597,7 @@ def _bag_change(path: tuple, bag: int, code: str = "property_unreadable") -> _Ch
     return _drop(path, bag + 2, code)
 
 
-def _region_change(path: tuple) -> _Change | None:
+def _region_change(path: _Path) -> _Change | None:
     """An error inside a region: drop the region, or only the field."""
     for index in range(len(path) - 1, 0, -1):
         if path[index] in _REGION_KEYS and path[index - 1] == "physicalLocation":
@@ -602,7 +609,7 @@ def _region_change(path: tuple) -> _Change | None:
     return None
 
 
-def _fix_change(path: tuple) -> _Change | None:
+def _fix_change(path: _Path) -> _Change | None:
     """An error in a fix's ``deletedRegion``: the fix cannot be applied, so it goes."""
     if "deletedRegion" not in path or "fixes" not in path:
         return None
@@ -612,7 +619,7 @@ def _fix_change(path: tuple) -> _Change | None:
     return None
 
 
-def _result_change(path: tuple) -> _Change | None:
+def _result_change(path: _Path) -> _Change | None:
     if len(path) < 5 or not isinstance(path[3], int):
         return None
     field = path[4]
@@ -629,7 +636,7 @@ def _result_change(path: tuple) -> _Change | None:
     return None
 
 
-def _descriptor_change(path: tuple, element: int) -> _Change | None:
+def _descriptor_change(path: _Path, element: int) -> _Change | None:
     """A rule or notification descriptor: the field goes; never the id or the
     default configuration."""
     rest = path[element + 1 :]
@@ -643,7 +650,7 @@ def _descriptor_change(path: tuple, element: int) -> _Change | None:
     return _drop(path, element + 2, "rule_field_unreadable")
 
 
-def _tool_change(path: tuple) -> _Change | None:
+def _tool_change(path: _Path) -> _Change | None:
     if len(path) < 4:
         return None
     if path[3] == "driver":
@@ -667,7 +674,7 @@ def _tool_change(path: tuple) -> _Change | None:
     return _drop(path, component + 1, "tool_field_unreadable")
 
 
-def _invocation_change(path: tuple) -> _Change | None:
+def _invocation_change(path: _Path) -> _Change | None:
     """The tool's own invocation: ASH reads only whether it succeeded and what it
     reported; every other field may go."""
     if len(path) < 5 or not isinstance(path[3], int):
@@ -680,7 +687,7 @@ def _invocation_change(path: tuple) -> _Change | None:
     return _drop(path, 5, "invocation_field_unreadable")
 
 
-def _run_change(path: tuple) -> _Change | None:
+def _run_change(path: _Path) -> _Change | None:
     field = path[2]
     if field == "properties":
         return _bag_change(path, 2, "run_field_unreadable")
@@ -701,7 +708,7 @@ def _run_change(path: tuple) -> _Change | None:
     return None
 
 
-def _classify_sarif(path: tuple, tail: tuple, etype: str, value: Any) -> _Change | None:
+def _classify_sarif(path: _Path, tail: _Path, etype: str, value: Any) -> _Change | None:
     """The repair for one error at *path* in a SARIF document, or ``None``."""
     if etype == "string_type" and not tail and _is_number(value):
         return _Change("set_text", path, "number_as_text", 0)
@@ -744,7 +751,7 @@ _CDX_KEPT_FIELDS = frozenset({"bomFormat", "specVersion", "version", "components
 
 
 def _classify_cyclonedx(
-    path: tuple, tail: tuple, etype: str, value: Any
+    path: _Path, tail: _Path, etype: str, value: Any
 ) -> _Change | None:
     """The repair for one error at *path* in a CycloneDX document, or ``None``."""
     if etype == "string_type" and not tail and _is_number(value):
@@ -775,7 +782,7 @@ def _classify_cyclonedx(
 
 # --- choosing and applying repairs ------------------------------------------- #
 
-Classifier = Callable[[tuple, tuple, str, Any], "_Change | None"]
+Classifier = Callable[[_Path, _Path, str, Any], "_Change | None"]
 
 
 def _place(doc: Any, error: ValidationError, classify: Classifier) -> list[_Error]:
@@ -814,7 +821,7 @@ def _choose(errors: list[_Error], level: int, strict: bool) -> list[_Change] | N
     the model reports it again and the rest is still repaired.
     """
     changes: list[_Change] = []
-    groups: dict[tuple, dict[str, list[_Error]]] = {}
+    groups: dict[tuple[_Path, int], dict[str, list[_Error]]] = {}
     for error in errors:
         if len(error.unions) > level:
             depth, member = error.unions[level]
@@ -841,7 +848,7 @@ def _choose(errors: list[_Error], level: int, strict: bool) -> list[_Change] | N
 def _minimal(changes: list[_Change]) -> list[_Change]:
     """*changes* without duplicates and without any under a node that is dropped."""
     dropped = {change.path for change in changes if change.kind == "drop"}
-    kept: dict[tuple[str, tuple], _Change] = {}
+    kept: dict[tuple[str, _Path], _Change] = {}
     for change in changes:
         if not change.path:
             continue
@@ -853,7 +860,7 @@ def _minimal(changes: list[_Change]) -> list[_Change]:
     return sorted(kept.values(), key=lambda change: _sort_key(change.path))
 
 
-def _original(path: tuple, removed: dict[tuple, list[int]]) -> tuple:
+def _original(path: _Path, removed: dict[_Path, list[int]]) -> _Path:
     """*path* as it was in the tool's own document, before earlier rounds took
     elements out of lists."""
     original: list[str | int] = []
@@ -866,7 +873,7 @@ def _original(path: tuple, removed: dict[tuple, list[int]]) -> tuple:
     return tuple(original)
 
 
-def _rule_id_of(doc: Any, path: tuple) -> object:
+def _rule_id_of(doc: Any, path: _Path) -> object:
     """The rule id of the result *path* is inside, when it names one."""
     if len(path) >= 4 and path[0] == "runs" and path[2] == "results":
         try:
@@ -879,7 +886,7 @@ def _rule_id_of(doc: Any, path: tuple) -> object:
 def _apply(
     doc: Any,
     changes: list[_Change],
-    removed: dict[tuple, list[int]],
+    removed: dict[_Path, list[int]],
     record: IngestRecord,
 ) -> None:
     """Note and make *changes* on *doc*.
@@ -912,7 +919,9 @@ def _apply(
             parent[key] = str(parent[key])
     for change, original, _ in noted:
         if change.kind == "drop" and isinstance(change.path[-1], int):
-            removed.setdefault(original[:-1], []).append(original[-1])
+            gone = original[-1]
+            if isinstance(gone, int):
+                removed.setdefault(original[:-1], []).append(gone)
 
 
 def _ingest(
@@ -944,7 +953,7 @@ def _ingest(
     except RecursionError:
         # Too deeply nested to copy, so too deeply nested to repair.
         raise last from None
-    removed: dict[tuple, list[int]] = {}
+    removed: dict[_Path, list[int]] = {}
     spent = 0
     for _ in range(_MAX_ROUNDS):
         changes = _minimal(_choose(_place(doc, last, classify), 0, strict=False) or [])
