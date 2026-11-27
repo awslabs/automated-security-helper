@@ -575,10 +575,10 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/terraform/modules/ash-image-pipeline/files/ash-container-init
       reason: >-
-        The match is AUTH_SECRET_ENV = "ASH_MCP_AUTH_SECRET_ARN", the NAME of the
-        environment variable the entrypoint reads to find the secret, not a
-        secret. The value it names is an ARN resolved at runtime, and the header
-        it eventually fetches is never written to this file.
+        The match is the AUTH_SECRET_ENV constant. Its value is the NAME of the
+        environment variable the entrypoint reads to find the secret's ARN, not
+        a secret. The ARN is resolved at runtime, and the header it eventually
+        fetches is never written to this file.
     # === detect-secrets: the docs-CI-runner pin tables ===
     #
     # Three TOML fixtures under tests/integration/docs/ci_runners/ pin every
@@ -611,11 +611,12 @@ global_settings:
     # === detect-secrets: placeholder commit/run ids in tests (hex heuristic) ===
     #
     # The hex-high-entropy heuristic fires on 40- and 32-hex fixture constants.
-    # Nearly all are the deliberately sequential "0123456789abcdef..." (zero
-    # entropy to a reader, high entropy to the detector); two are a sample git
-    # commit id. Per-file entries, each describing the flagged value, per the bandit
-    # section's one-path precedent. The reasons below describe a flagged value
-    # where quoting it would make this file match the same rule it suppresses.
+    # Nearly all are the deliberately sequential placeholder (the hex digits 0-9
+    # then a-f, repeated to length), zero entropy to a reader and high entropy to
+    # the detector; two are a sample git commit id. Per-file entries, each
+    # describing the flagged value, per the bandit section's one-path precedent.
+    # No reason below quotes the value it describes: a quoted value puts the shape
+    # the secret scanners look for into this file, which the self-scan also reads.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/cdk-constructs/test/git-ref.test.ts
       reason: >-
@@ -630,16 +631,16 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/integration/test_install_hints_on_python310.py
       reason: >-
-        COMMIT = "0123456789abcdef0123456789abcdef01234567", the sequential
-        placeholder commit id the install-hint fixtures use.
+        The COMMIT constant holds the sequential 40-hex placeholder commit id
+        the install-hint fixtures use.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/interactions/test_run_ash_nix.py
       reason: >-
-        A sequential "0123456789abcdef..." placeholder id in a nix-run fixture.
+        The sequential hex placeholder id in a nix-run fixture.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/interactions/test_workspace_inner_run_records_its_outcome.py
       reason: >-
-        RUN = "0123456789abcdef0123456789abcdef", the placeholder run id the
+        The RUN constant holds the sequential 32-hex placeholder run id the
         outcome-record fixture uses.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/plugin_modules/ash_builtin/test_detect_secrets_scanner_behavior.py
@@ -649,8 +650,8 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_evidence.py
       reason: >-
-        HEAD = "0123456789abcdef0123456789abcdef01234567", the placeholder head
-        commit the docs-CI evidence fixtures use.
+        The HEAD constant holds the sequential 40-hex placeholder head commit
+        the docs-CI evidence fixtures use.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_judgments.py
       reason: >-
@@ -660,25 +661,24 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_launchers.py
       reason: >-
-        SHA = "0123456789abcdef0123456789abcdef01234567", the placeholder commit
-        id the launcher fixtures use.
+        The SHA constant holds the sequential 40-hex placeholder commit id the
+        launcher fixtures use.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_provenance.py
       reason: >-
-        HEAD = "0123456789abcdef0123456789abcdef01234567", the placeholder commit
-        id the provenance fixtures use.
+        The HEAD constant holds the sequential 40-hex placeholder commit id the
+        provenance fixtures use.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_ci_runner_rewrite.py
       reason: >-
-        HEAD and OTHER are the sequential placeholders
-        "0123456789abcdef0123456789abcdef01234567" and
-        "fedcba9876543210fedcba9876543210fedcba98", two distinguishable fake
-        commit ids the rewrite tests compare.
+        HEAD and OTHER are two distinguishable fake 40-hex commit ids the
+        rewrite tests compare: the sequential placeholder, and the same hex
+        digits in descending order.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_docs_install_commands_can_fail.py
       reason: >-
-        _SHA = "0123456789abcdef0123456789abcdef01234567", the placeholder commit
-        id in the install-command fixtures.
+        The _SHA constant holds the sequential 40-hex placeholder commit id in
+        the install-command fixtures.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/test_scan_workflow_pins_the_ash_ref.py
       reason: >-
@@ -692,12 +692,12 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_base_ref.py
       reason: >-
-        "a full commit id": "0123456789abcdef0123456789abcdef01234567" -- the
-        placeholder commit id in the base-ref parametrization.
+        The sequential 40-hex placeholder commit id, the "a full commit id"
+        case of the base-ref parametrization.
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: tests/unit/utils/test_inner_run_outcome.py
       reason: >-
-        RUN = "0123456789abcdef0123456789abcdef", the placeholder run id the
+        The RUN constant holds the sequential 32-hex placeholder run id the
         inner-run-outcome fixtures use.
     # === detect-secrets: fixture URLs and placeholder keywords in tests ===
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
@@ -760,14 +760,15 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/cli/mcp/test_list_scanners_scan_selection.py
       reason: >-
-        'password = "hunter2"' is the deliberately insecure sample source the
-        scan-selection test plants so the selected scanner has something to find.
-        The planted finding is the point of the fixture.
+        A deliberately insecure sample source line, a password-named variable
+        assigned a short placeholder string, that the scan-selection test plants
+        so the selected scanner has something to find. The planted finding is
+        the point of the fixture.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/cli/mcp/test_session_plugins_stay_in_their_session.py
       reason: >-
-        "AWS_SECRET_ACCESS_KEY": "fake-secret-access-key" is a fixture
-        environment whose value names itself fake; the test is about session
+        The match is a fixture environment entry for the AWS secret access key
+        variable, whose value names itself fake; the test is about session
         isolation, not credentials.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/converters/test_archive_plain_gzip_and_lfs_pointers.py
@@ -788,14 +789,15 @@ global_settings:
       path: tests/unit/docs/test_page_claims.py
       reason: >-
         Both matches are documentation examples the page-claims tests execute
-        verbatim: the docs' illustrative DATABASE_PASSWORD
-        ("correct-horse-battery-staple-1234") and moto's documented dummy
-        aws_secret_access_key="testing". Doc examples under test, not credentials.
+        verbatim: the docs' illustrative database password example (four words
+        and a number joined by hyphens) and moto's documented dummy value for the
+        AWS secret access key. Doc examples under test, not credentials.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/plugin_modules/ash_builtin/test_npm_audit_offline_not_audited.py
       reason: >-
-        The match is the assertion 'statuses["detect-secrets"] == "PASSED"' -- the
-        scanner's NAME in a status table. No value present.
+        The match is an assertion that a status table reports PASSED for the
+        detect-secrets scanner: the scanner's NAME in a status table. No value
+        present.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/test_python_children_import_nothing_from_their_cwd.py
       reason: >-
@@ -878,10 +880,10 @@ global_settings:
     - rule_id: B105
       path: tests/unit/test_release_workflow_token.py
       reason: >-
-        The flagged value is `TOKEN_ACTION = "actions/create-github-app-token"`,
-        the NAME of a GitHub Action the release workflow uses. The heuristic fires
-        on the variable name containing "TOKEN"; the string is an action
-        reference, and this test asserts the workflow pins that action.
+        The TOKEN_ACTION constant holds the NAME of the GitHub Action the release
+        workflow uses to create a GitHub App token. The heuristic fires on the
+        variable name containing "TOKEN"; the string is an action reference, and
+        this test asserts the workflow pins that action.
     - rule_id: B105
       path: tests/unit/interactions/test_gha_layer_cache_args.py
       reason: >-
@@ -892,10 +894,10 @@ global_settings:
     - rule_id: B105
       path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
       reason: >-
-        Two matches, neither a credential. `SECRET_MARKER = "get_secret_value"` is
-        the Secrets Manager API operation name the test greps for in a generated
-        entrypoint. `SECRET_VALUE` is an adversarial fixture,
-        "hdr-${not-expanded}-`not-run`-a1b2c3", built from shell metacharacters
+        Two matches, neither a credential. The SECRET_MARKER constant holds the
+        name of the Secrets Manager API operation the test greps for in a
+        generated entrypoint. SECRET_VALUE is an adversarial fixture built from
+        shell metacharacters (a parameter expansion and a command substitution)
         precisely to prove the entrypoint's heredoc quoting neither expands nor
         executes them; its own value spells out the expected outcome.
     - rule_id: B105
@@ -1344,8 +1346,8 @@ global_settings:
         implementation.
     # === checkov's own secret detector, same two lines as detect-secrets ===
     #
-    # CKV_SECRET_6 fires on the identical two `"SecretString": "ash-mcp-auth-
-    # disabled"` lines that SECRET-SECRET-KEYWORD does, above. Two scanners, one
+    # CKV_SECRET_6 fires on the same two placeholder SecretString lines that
+    # SECRET-SECRET-KEYWORD does, above. Two scanners, one
     # cause, so the justification is the same and is not restated at length here.
     # Listed separately because a suppression is keyed by rule id, and covering
     # the detect-secrets rule does nothing for the checkov one -- which is exactly
@@ -3103,15 +3105,16 @@ global_settings:
     # `"SecretString": {"Fn::If": [...]}` and escape this rule only because a `{`
     # follows the key rather than a literal. If a later change ever resolves
     # `McpAuthHeaderValue` to a literal — a `Default:` on the parameter would do
-    # it — synth would emit `"SecretString": "<literal>"` in exactly those two
-    # templates, which is this rule's signature. A subtree glob here would hide
+    # it — synth would emit the SecretString key with a quoted literal value in
+    # exactly those two templates, which is this rule's signature. A subtree glob
+    # here would hide
     # that. The IaC drift gate does not cover it either: it asserts that the
     # committed template equals synth output, so a synth that emits a credential
     # passes it green.
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
-        The two matches are `"SecretString": "ash-mcp-auth-disabled"`, which is
+        The two matches set SecretString to the auth-disabled placeholder, which is
         `SECRET_PLACEHOLDER` in deploy/cdk/lib/ash-runtime-config.ts — the value
         stored when ASH-level header auth is disabled. Both matches are in the
         two stacks that do not serve MCP at all (AshCodeCommitGate,
@@ -3123,7 +3126,7 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/cdk/templates/AshDistributedPipeline.template.json
       reason: >-
-        The second of the two `"SecretString": "ash-mcp-auth-disabled"` matches.
+        The second of the two matches setting SecretString to the placeholder.
         Same mechanism as the AshCodeCommitGate entry above: this stack runs the
         sharded executor and does not serve MCP, so it is built with
         `includeMcpParameters` off and gets the placeholder secret that nothing
@@ -3725,9 +3728,9 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/plugin_modules/ash_builtin/converters/test_mcp_config_converter.py
       reason: >-
-        Test code. A made-up secret-shaped value (the sk-test not-a-real-token
-        placeholder) is the input the converter under test must redact; the
-        test is about that value never surviving conversion.
+        Test code. A made-up secret-shaped value (a placeholder that names itself
+        a test value and not a real one) is the input the converter under test
+        must redact; the test is about that value never surviving conversion.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/plugin_modules/ash_builtin/scanners/test_mcp_config_scanner.py
       reason: >-
@@ -3737,27 +3740,27 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/mcp_config/test_json_spans.py
       reason: >-
-        Test code. A made-up token (the ghp_ notARealTokenValue placeholder)
-        planted in the
-        document so the test can assert a parse error never quotes it.
+        Test code. A made-up GitHub-style token placeholder that says it is not
+        real is planted in the document so the test can assert a parse error
+        never quotes it.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/mcp_config/test_toml_spans.py
       reason: >-
-        Test code. A made-up token (the ghp_ notARealTokenValue placeholder)
-        planted in the
-        document so the test can assert invalid TOML is refused without quoting
-        it.
+        Test code. A made-up GitHub-style token placeholder that says it is not
+        real is planted in the document so the test can assert invalid TOML is
+        refused without quoting it.
     - rule_id: SECRET-SECRET-KEYWORD
       path: tests/unit/utils/mcp_config/test_readers.py
       reason: >-
-        Test code. A made-up token (the ghp_ notARealTokenValue placeholder)
-        planted in the
-        document so the test can assert a parse error never quotes the file.
+        Test code. A made-up GitHub-style token placeholder that says it is not
+        real is planted in the document so the test can assert a parse error
+        never quotes the file.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: tests/unit/base/test_a_plugin_with_no_tool_or_directory_fails_closed.py
       reason: >-
-        Test code. A made-up npm error line holding user:secret@ in a URL is
-        the input the tool-text redaction under test must hide.
+        Test code. A made-up npm error line whose URL carries a placeholder user
+        and password in its userinfo is the input the tool-text redaction under
+        test must hide.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: tests/unit/plugin_modules/ash_builtin/scanners/test_opengrep_safe_directory_scope.py
       reason: >-
