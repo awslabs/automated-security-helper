@@ -1192,3 +1192,146 @@ def test_an_in_tree_config_cannot_turn_on_guarddog_verify(
     assert _option(config, "guarddog", "verify") is False
     named = [w for w in _warnings(ash_log) if "scanners.guarddog.options.verify" in w]
     assert len(named) == 1, _warnings(ash_log)
+
+
+# ---------------------------------------------------------------------------
+# The switches of the scanners and the converter that fetch when they run
+# ---------------------------------------------------------------------------
+#
+# checkov downloads policies, grype updates its database and syft checks for
+# updates when they run online. The sdist-lock-harvester converter downloads the
+# sdists a lockfile pins, and trivy-repo's vuln scanner opens the vulnerability
+# database. A config that is not the operator's replaces the operator's config, so
+# one the operator turned off came back on. Such a config may turn each of them off,
+# and may not turn one on.
+
+#: The scanners outside the eight off-host ones that fetch when they run online.
+FETCHING_SCANNERS = ["checkov", "grype", "syft"]
+HARVESTER = "sdist-lock-harvester"
+
+
+def _enabled(config: AshConfig, kind: str, name: str) -> bool:
+    """Whether the config runs the plugin, read as the run reads its section."""
+    from automated_security_helper.base.plugin_config import section_enabled
+
+    return section_enabled(config.get_plugin_config(kind, name))
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_a_fetching_scanner_the_operator_turns_off_stays_off(scanner: str) -> None:
+    trusted = _loaded({"scanners": {scanner: {"enabled": False}}})
+    config = _loaded({"scanners": {scanner: {"enabled": True}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is False
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_a_fetching_scanner_the_config_leaves_alone_stays_off(scanner: str) -> None:
+    trusted = _loaded({"scanners": {scanner: {"enabled": False}}})
+    # The section is there and does not write enabled, so it reads the typed
+    # default, on.
+    config = _loaded({"scanners": {scanner: {"options": {}}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is False
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_control_a_config_may_turn_off_a_fetching_scanner(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _loaded({"scanners": {scanner: {"enabled": False}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is False
+
+
+@pytest.mark.parametrize("scanner", FETCHING_SCANNERS)
+def test_control_a_fetching_scanner_neither_turns_off_stays_on(scanner: str) -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "scanner", scanner) is True
+
+
+def test_the_sdist_harvester_the_operator_turns_off_stays_off() -> None:
+    trusted = _loaded({"converters": {HARVESTER: {"enabled": False}}})
+    config = _loaded({"converters": {HARVESTER: {"enabled": True}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is False
+
+
+def test_the_sdist_harvester_the_config_leaves_out_stays_off() -> None:
+    trusted = _loaded({"converters": {HARVESTER: {"enabled": False}}})
+    # A plugin converter's section is missing altogether, which reads as on.
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is False
+
+
+def test_control_a_config_may_turn_off_the_sdist_harvester() -> None:
+    trusted = _loaded({})
+    config = _loaded({"converters": {HARVESTER: {"enabled": False}}})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is False
+
+
+def test_control_the_sdist_harvester_neither_turns_off_stays_on() -> None:
+    trusted = _loaded({})
+    config = _loaded({})
+
+    _floors(config, trusted)
+
+    assert _enabled(config, "converter", HARVESTER) is True
+
+
+def test_vuln_the_operator_leaves_out_stays_out() -> None:
+    trusted = _config_with("trivy-repo", "scanners", ["secret", "license"])
+    config = _config_with("trivy-repo", "scanners", ["vuln", "secret"])
+
+    _floors(config, trusted)
+
+    assert _option(config, "trivy-repo", "scanners") == ["secret"]
+
+
+GRYPE_OFF_OPERATOR = """\
+project_name: operator
+scanners:
+  grype:
+    enabled: false
+"""
+
+GRYPE_ON_REPOSITORY = """\
+project_name: repository
+scanners:
+  grype:
+    enabled: true
+"""
+
+
+def test_an_in_tree_config_cannot_turn_back_on_grype(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ash_log: List[logging.LogRecord]
+) -> None:
+    config = _resolve(
+        tmp_path,
+        monkeypatch,
+        "outside",
+        "trusted_config_path",
+        operator_text=GRYPE_OFF_OPERATOR,
+        repository_text=GRYPE_ON_REPOSITORY,
+    )
+
+    assert _enabled(config, "scanner", "grype") is False
+    named = [w for w in _warnings(ash_log) if "scanners.grype.enabled" in w]
+    assert len(named) == 1, _warnings(ash_log)
