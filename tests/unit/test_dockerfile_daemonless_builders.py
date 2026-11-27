@@ -263,7 +263,12 @@ def _reads_a_platform_argument_in_from_or_global_arg(item: Instruction) -> bool:
     return where_it_is_empty and bool(_PLATFORM_ARGUMENT.search(item.text))
 
 
-_WINDOWS_IMAGES = "mcr.microsoft.com/windows"
+# Images that only run on Windows: those under the registry's windows path, and the
+# .NET Framework images. Nano Server and Server Core are the Windows Server container
+# bases, so a name or tag on mcr.microsoft.com that holds either one is a Windows image
+# too ("windowsservercore" holds the second).
+_WINDOWS_IMAGES = ("mcr.microsoft.com/windows", "mcr.microsoft.com/dotnet/framework/")
+_WINDOWS_NAMES = ("nanoserver", "servercore")
 
 
 def _builds_a_windows_container(item: Instruction) -> bool:
@@ -271,7 +276,10 @@ def _builds_a_windows_container(item: Instruction) -> bool:
         return False
     platform = item.flags.get("--platform", "").strip("\"'").lower()
     image = (item.words[0] if item.words else "").strip("\"'").lower()
-    return platform.startswith("windows") or image.startswith(_WINDOWS_IMAGES)
+    if platform.startswith("windows") or image.startswith(_WINDOWS_IMAGES):
+        return True
+    on_the_registry = image.startswith("mcr.microsoft.com/")
+    return on_the_registry and any(name in image for name in _WINDOWS_NAMES)
 
 
 # Each entry: the form, the probe that finds it, why it is refused and the pages it was
