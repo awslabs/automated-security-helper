@@ -63,6 +63,7 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
 )
 from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
+from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     in_tree_refusal,
@@ -1061,10 +1062,14 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
             # No environment modifications are currently needed for Snyk Code.
             effective_timeout = self._effective_scan_timeout()
+            # The CLI reads a snyk.<ext> configuration file from its working
+            # directory, so it starts in a new empty directory outside the scanned
+            # tree. Its target is the absolute path in final_args, not ".".
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 timeout=effective_timeout,
+                cwd=empty_tool_directory("snyk-code-cwd", context=self.context),
             )
             # The run is over: its end time is recorded here, before the invocation
             # below reads it, so the first target's record carries this run's end

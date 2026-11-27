@@ -168,6 +168,9 @@
 
 ### Fixes
 
+- **The Snyk Code scanner starts the Snyk CLI in an empty directory outside the
+  scanned tree**, so the CLI reads no configuration file from the scanned
+  repository.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
