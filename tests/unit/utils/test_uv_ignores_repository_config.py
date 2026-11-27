@@ -2534,6 +2534,13 @@ def test_ash_dependencies_install_judges_its_tool_listing_against_its_directory(
         # as one.
         pytest.param("//proc/self/cwd/uv.toml", id="proc-self-two-leading-slashes"),
         pytest.param("/dev/fd/0/uv.toml", id="dev-fd"),
+        # A ``..`` after the link climbs from the opening process's own directory,
+        # so normpath, which takes ``cwd`` and ``self`` out, reads this as
+        # /proc/<tree>/uv.toml. ``{src}`` is the test's own tree.
+        pytest.param(
+            "/proc/self/cwd/../../{src}/uv.toml",
+            id="proc-self-with-a-dotdot-component",
+        ),
     ],
 )
 @pytest.mark.unit
@@ -2548,6 +2555,8 @@ def test_a_uv_path_through_a_link_to_the_reading_process_is_the_trees(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
+    # A ``{src}`` in a value stands for the tree's absolute path.
+    value = value.format(src=src)
     assert "UV_CONFIG_FILE" not in _judged({"UV_CONFIG_FILE": value}, (src,))
     # Control: the operator's file by its absolute path outside the tree stays.
     operators = {"UV_CONFIG_FILE": str(tmp_path / "operator" / "uv.toml")}
