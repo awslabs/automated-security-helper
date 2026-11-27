@@ -3864,11 +3864,11 @@ def test_a_container_workspace_scan_marks_or_refuses_its_config_by_where_it_is(
 ) -> None:
     """run-in-a-container.md (The config file), and scale-large-repos.md (Workspaces).
 
-    ``ash scan --mode container --workspace`` runs against a fake container runtime
-    that records each command it is given, for a workspace inside a git checkout and
-    a ``--config`` that grants. A config in another checkout is mounted with its base
-    and marked, so the scan inside limits it; one outside every checkout is mounted
-    and not marked.
+    ``ash scan workspace <file> --mode container``, with the file given as the older
+    ``--workspace`` option, runs against a fake container runtime that records each
+    command it is given, for a workspace inside a git checkout and a ``--config``
+    that grants. A config in another checkout is mounted with its base and marked, so
+    the scan inside limits it; one outside every checkout is mounted and not marked.
 
     These are refused with exit code 3 before the runtime is called at all, image build
     included: a config inside the workspace root, one in the checkout around the root,
