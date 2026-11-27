@@ -361,7 +361,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
     says), that the results are not a workspace's unified file, the Region, a
     ``findings_scope``, and ``GetCallerIdentity`` with the configured
     ``account_id`` compared against the caller's. ``report`` therefore enforces
-    them in a scan and in ``ash report``, which skips the dependency check.
+    them itself, whatever the caller ran before it: a scan's report phase and
+    ``ash results report`` (``ash report`` before ASH 3.9) both run the
+    dependency check first and then call ``report``.
 
     ``UpdatedAt`` is the scan's ``generated_at``. Security Hub ignores an import
     whose ``UpdatedAt`` is not later than the stored one, so re-reporting an older
@@ -483,8 +485,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             # Test Security Hub connectivity. DescribeHub needs
             # securityhub:DescribeHub, a permission the import itself does not:
             # a principal granted only BatchImportFindings (and GetFindings, to
-            # archive) imports with `ash report`, which skips this check, so a
-            # scan is not disabled on that one refusal. The refusal is named
+            # archive) can still import, so that one refusal is a warning and
+            # stops neither a scan nor `ash results report` (`ash report` before
+            # ASH 3.9), which runs this check first. The refusal is named
             # with its permission; the import's own errors say the rest. Both
             # calls are retried on the reporter's schedule, as the import is: a
             # throttled DescribeHub used to drop the reporter for the scan.
