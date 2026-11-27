@@ -40,11 +40,15 @@ def test_a_recorded_reference_is_kept_with_a_note():
 
 
 class _AlwaysContains:
-    """A resolver that finds every symbol, shaped like core.py's call
-    (``contains(file_path, line_start, line_end, symbol)``). With it, only the
-    guard on a kept reference can make ``matches`` answer False."""
+    """A resolver that finds every symbol, shaped like the frame's call
+    (``contains(file_path, line_start, line_end, symbol, rule_id=...)``). With
+    it, only the guard on a kept reference can make ``matches`` answer False."""
 
-    def contains(self, file_path, line_start, line_end, symbol):
+    def __init__(self) -> None:
+        self.rule_ids: list = []
+
+    def contains(self, file_path, line_start, line_end, symbol, *, rule_id=None):
+        self.rule_ids.append(rule_id)
         return True
 
 
@@ -64,16 +68,20 @@ def _finding() -> FlatVulnerability:
 
 def test_a_kept_reference_never_applies():
     kept = AshSuppression.model_validate(RECORDED, context={TOLERATE_STORED_CONFIG: []})
+    resolver = _AlwaysContains()
 
-    assert kept.matches(_finding(), symbol_resolver=_AlwaysContains()) is False
+    assert kept.matches(_finding(), symbol_resolver=resolver) is False
+    assert resolver.rule_ids == [], "the resolver is never asked"
 
 
 def test_an_ordinary_symbol_applies_through_the_same_resolver():
     """The positive control: the resolver would admit a real symbol, so the False
     above comes from the kept reference, not from the resolver or the entry."""
     ordinary = AshSuppression.model_validate({**RECORDED, "symbol": "handler"})
+    resolver = _AlwaysContains()
 
-    assert ordinary.matches(_finding(), symbol_resolver=_AlwaysContains()) is True
+    assert ordinary.matches(_finding(), symbol_resolver=resolver) is True
+    assert resolver.rule_ids == ["B101"], "the entry's rule id reaches the resolver"
 
 
 def test_a_config_file_still_refuses_the_reference_text():

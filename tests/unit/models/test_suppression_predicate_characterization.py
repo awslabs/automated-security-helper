@@ -95,14 +95,23 @@ def stored(**overrides) -> AshSuppression:
 
 
 class RecordingResolver:
-    """A symbol resolver double: records each ``contains`` call, answers a fixed bool."""
+    """A symbol resolver double: records each ``contains`` call, answers a fixed bool.
+
+    ``calls`` holds the four positional arguments. ``rule_ids`` holds the keyword
+    the frame adds to every call: the entry's own rule id, None for an entry with
+    none.
+    """
 
     def __init__(self, answer: bool) -> None:
         self.answer = answer
         self.calls: list[tuple] = []
+        self.rule_ids: list = []
 
-    def contains(self, file_path, line_start, line_end, symbol) -> bool:
+    def contains(
+        self, file_path, line_start, line_end, symbol, *, rule_id=None
+    ) -> bool:
         self.calls.append((file_path, line_start, line_end, symbol))
+        self.rule_ids.append(rule_id)
         return self.answer
 
 
@@ -847,6 +856,15 @@ class TestSymbol:
         resolver = RecordingResolver(True)
         supp(symbol="f").matches(finding(line_start=7, line_end=None), resolver)
         assert resolver.calls == [("src/app.py", 7, None, "f")]
+
+    def test_the_entrys_own_rule_id_goes_with_the_symbol(self):
+        """The resolver picks the entry's recorded lock scope by the entry's rule
+        id as written (a glob stays a glob), not by the finding's id."""
+        resolver = RecordingResolver(True)
+        assert supp(symbol="f", rule_id="B602").matches(finding(), resolver) is True
+        assert supp(symbol="f", rule_id="B6*").matches(finding(), resolver) is True
+        assert supp(symbol="f").matches(finding(), resolver) is True
+        assert resolver.rule_ids == ["B602", "B6*", None]
 
     def test_the_resolver_is_asked_last(self):
         resolver = RecordingResolver(True)
