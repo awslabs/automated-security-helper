@@ -19,7 +19,10 @@ those two rows were added.
 
 The second half pins the hints ASH prints, its help text and the markdown it ships in
 the package: each one names the spelling that does not warn, so following a hint never
-leads to a deprecation line. Each of those rows failed before the hint moved.
+leads to a deprecation line. Each of those rows failed before the hint moved. The
+markdown check also refuses a top-level ``ash diff`` or ``ash trend``: both live under
+``ash results`` and never had a top-level spelling, so the CLI answers those words with
+a usage error.
 
 Every scan row passes ``--shard-index 3`` without ``--shard-count``, which the engine
 refuses with the usage-error code right after the deprecation line would print, so no
@@ -764,6 +767,11 @@ _BARE_PROGRAM = re.compile(
 _MOVED_COMMAND = re.compile(
     r"(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:report|merge|inspect|build-image)\b"
 )
+#: Top-level names that are no command. ``ash diff`` and ``ash trend`` live under ``ash
+#: results`` and never had a top-level spelling, so the CLI answers each with its usage
+#: error ("No such command"): a page that gives one names a command that does not
+#: exist, which is worse than a spelling that only warns.
+_NOT_A_COMMAND = re.compile(r"(?<![\w./-])(?:\./)?(?:ash|ashv3) (?:diff|trend)\b")
 _SCAN_FS = re.compile(r"\b(?:ash|ashv3) scan fs\b")
 #: A scan of any subject, or of none: ``--scanners`` is an option of the scan alone.
 _ASH_SCAN = re.compile(r"\b(?:ash|ashv3) scan\b")
@@ -802,13 +810,17 @@ def _scans_with_the_deprecated_scanners_option(command: str) -> bool:
 
 
 def _is_legacy(command: str, fenced: bool = False) -> bool:
-    """Whether *command*, as a reader is shown it, runs a spelling that warns.
+    """Whether *command*, as a reader is shown it, runs a spelling that warns, or names
+    a top-level command that does not exist.
 
-    A help request never warns, whatever it follows. A scan with ``--workspace`` and
-    no subject warns too, naming ``ash scan workspace``, and so does ``--scanners`` on
-    any scan, which ``--only-scanners`` and ``--add-scanners`` replace. The program
-    alone is the bare scan only as a line of a fenced block.
+    A help request never warns, whatever it follows. ``ash diff`` and ``ash trend`` are
+    flagged even beside ``--help``: the CLI refuses the word whatever follows it. A scan
+    with ``--workspace`` and no subject warns too, naming ``ash scan workspace``, and so
+    does ``--scanners`` on any scan, which ``--only-scanners`` and ``--add-scanners``
+    replace. The program alone is the bare scan only as a line of a fenced block.
     """
+    if _NOT_A_COMMAND.search(command):
+        return True
     if _HELP.search(command):
         return False
     no_subject = _NO_SUBJECT.search(command) or (
@@ -891,6 +903,13 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
         ("ash scan --ash-plugin-modules x", True),
         ("uv run ash scan fs src --source-dir src", True),
         ("ash report --format text", True),
+        # ``ash diff`` and ``ash trend`` were never top-level commands: each is a usage
+        # error, with or without a program path, ``ashv3`` or a help request.
+        ("ash diff before.json after.json", True),
+        ("ash trend", True),
+        ("uv run ashv3 diff before.json after.json", True),
+        ("./ash trend runs/a.json runs/b.json", True),
+        ("ash diff --help", True),
         # No subject, a short option on the bare root, and a word that is no subject.
         ("ash scan", True),
         ("ash -c x.yaml", True),
@@ -931,6 +950,13 @@ def test_the_markdown_the_package_ships_shows_no_legacy_spelling_in_a_command():
         ("ash scan --workspace --help", False),
         ("ash --help", False),
         ("ash report --help", False),
+        # The two commands where they live, and words that only look like the program or
+        # the command.
+        ("ash results diff before.json after.json", False),
+        ("ash results trend runs/a.json runs/b.json", False),
+        ("ash results diff --help", False),
+        ("bash diff before after", False),
+        ("ash difference", False),
         # Every subject the scan group has is one a page may name.
         *[(f"ash scan {subject} src", False) for subject in _SCAN_SUBJECTS],
     ],
@@ -1004,6 +1030,26 @@ def _fenced(*lines: str) -> str:
             id="the-option-named-in-prose",
         ),
         pytest.param(
+            _fenced("ash diff before.json after.json"),
+            [(2, "ash diff before.json after.json")],
+            id="a-top-level-diff-in-a-fenced-line",
+        ),
+        pytest.param(
+            _fenced("$ ./ash trend runs/a.json runs/b.json"),
+            [(2, "$ ./ash trend runs/a.json runs/b.json")],
+            id="a-top-level-trend-with-the-wrapper-path",
+        ),
+        pytest.param(
+            "Compare two scans with `ashv3 diff before.json after.json`.",
+            [(1, "ashv3 diff before.json after.json")],
+            id="a-top-level-diff-inline",
+        ),
+        pytest.param(
+            _fenced("ash results diff before.json after.json"),
+            [],
+            id="diff-under-results",
+        ),
+        pytest.param(
             _fenced("ash scan \\", "    --workspace ws.yaml"),
             [(2, "ash scan --workspace ws.yaml")],
             id="a-workspace-scan-with-no-subject-continued",
@@ -1033,6 +1079,24 @@ def test_the_markdown_check_reads_a_command_as_its_reader_does(markdown, flagged
     """A command that goes on after a backslash is one command, and the program on
     a line by itself is the bare scan in a fenced block only."""
     assert _legacy_commands(markdown) == flagged
+
+
+@pytest.mark.parametrize("name", ["diff", "trend"])
+def test_a_top_level_diff_or_trend_is_a_usage_error(name):
+    """The premise of ``_NOT_A_COMMAND``: ``ash diff`` and ``ash trend`` are no
+    commands, they live under ``ash results``, and ASH answers each top-level word with
+    its usage-error code, so a page that gives one sends its reader to a failure, which
+    is worse than a spelling that only warns."""
+    from automated_security_helper.core.enums import AshExitCode
+
+    root = typer.main.get_command(app)
+    assert name not in root.commands
+    assert name in root.commands["results"].commands
+
+    result = _invoke([name, "before.json", "after.json"])
+
+    assert result.exit_code == AshExitCode.USAGE_ERROR, result.output
+    assert f"No such command '{name}'" in _one_line(result.output), result.output
 
 
 def test_the_subjects_the_markdown_check_admits_are_the_scan_groups():
