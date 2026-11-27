@@ -16,6 +16,8 @@ import sys
 
 import pytest
 
+from tests.utils.helpers import importing_this_checkout
+
 pytestmark = pytest.mark.unit
 
 _LOCK_PROBE = """
@@ -53,7 +55,7 @@ print(seen)
 
 def test_polars_is_loaded_before_the_registry_lock_is_entered():
     done = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", _LOCK_PROBE],
+        [sys.executable, "-I", "-B", "-c", importing_this_checkout(_LOCK_PROBE)],
         capture_output=True,
         text=True,
         timeout=120,

@@ -138,6 +138,28 @@ class TestSetSourceImage:
         with pytest.raises(ValueError, match="source scheme"):
             sd.set_source_image("docker-archive:x.tar", session_id=_SESSION)
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("docker:x", id="docker"),
+            pytest.param("purl:x", id="purl"),
+            pytest.param("cpe:2.3:a:x", id="cpe"),
+            pytest.param("PURL:x", id="purl-in-capitals"),
+        ],
+    )
+    def test_grypes_input_prefixes_are_refused_as_source_schemes(self, value):
+        """``purl:`` and ``cpe:``, grype's own input prefixes, are scheme words too.
+
+        grype reads these two prefixes as inputs of its own, not as an image, and
+        a declared remote daemon hands it the reference as written. ``purl:x`` is
+        a repository and a tag to the grammar, so only the scheme words refuse it.
+        The CPE string and the capitals are refused by the grammar on other
+        grounds, so what is checked is the reason: a source scheme. ``docker:x``
+        is the control that was refused before.
+        """
+        with pytest.raises(ValueError, match="source scheme"):
+            sd.validate_image_ref(value)
+
     def test_a_port_and_a_tag_still_read_as_references(self, workspace):
         # The refusals above must not eat real references: a registry with a
         # port, and a plain tag whose repository is no scheme word.
@@ -226,6 +248,97 @@ class TestTheRegistryAllowlist:
             "reg.example.com:5000"
         )
         assert sd.image_ref_registry("Reg.Example.com:443/app") == "reg.example.com"
+
+    @pytest.mark.parametrize(
+        ("ref", "registry"),
+        [
+            pytest.param("Intranet/app:1", "intranet", id="intranet"),
+            pytest.param("Metadata/x:1", "metadata", id="metadata"),
+            pytest.param("teamApp/app:1", "teamapp", id="capital-inside-the-word"),
+        ],
+    )
+    def test_an_uppercase_first_segment_is_a_registry_host(
+        self, workspace, monkeypatch, ref, registry
+    ):
+        """A first segment with a capital names a host, not a Docker Hub namespace.
+
+        A repository path is lowercase only, so the reference grammar can read a
+        first segment with a capital letter only as the registry's host name.
+        Read as Docker Hub, ``Intranet/app:1`` passed a list that names only Hub.
+        """
+        assert sd.image_ref_registry(ref) == registry
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "docker.io")
+        assert not sd.image_registry_allowed(ref)
+        with pytest.raises(sd.ImageRegistryRefused, match=registry):
+            sd.set_source_image(ref, session_id=_SESSION)
+        assert sd.get_session_image_locator(_SESSION) is None
+
+    @pytest.mark.parametrize("entry", ["intranet", "INTRANET", "Intranet:443"])
+    def test_a_listed_uppercase_host_is_admitted_without_regard_to_case(
+        self, workspace, monkeypatch, entry
+    ):
+        """Naming the host in the list, in any case, admits the reference."""
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", entry)
+        locator = sd.set_source_image("Intranet/app:1", session_id=_SESSION)
+        assert locator.ref == "Intranet/app:1"
+
+    @pytest.mark.parametrize(
+        "ref",
+        [
+            pytest.param("index.docker.io/library/alpine:3", id="plain"),
+            pytest.param("index.docker.io:443/library/alpine:3", id="default-port"),
+        ],
+    )
+    def test_the_legacy_hub_host_reads_as_docker_io(self, workspace, monkeypatch, ref):
+        """``index.docker.io`` is Docker Hub, so a list that names Hub admits it."""
+        assert sd.image_ref_registry(ref) == "docker.io"
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "docker.io")
+        assert sd.set_source_image(ref, session_id=_SESSION).ref == ref
+
+    def test_a_list_that_spells_hub_as_the_legacy_host_admits_that_spelling(
+        self, workspace, monkeypatch
+    ):
+        """An operator who listed ``index.docker.io`` keeps what that entry admitted."""
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "index.docker.io")
+        ref = "index.docker.io/library/alpine:3"
+        assert sd.set_source_image(ref, session_id=_SESSION).ref == ref
+
+    def test_a_list_that_spells_hub_as_the_legacy_host_names_hub(
+        self, workspace, monkeypatch
+    ):
+        """The two names are one registry, so either one in the list admits Hub."""
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "index.docker.io")
+        assert sd.set_source_image("alpine:3", session_id=_SESSION).ref == "alpine:3"
+
+    @pytest.mark.parametrize(
+        ("ref", "registry"),
+        [
+            pytest.param("alpine", "docker.io", id="bare-name"),
+            pytest.param("library/alpine:3", "docker.io", id="hub-namespace"),
+            pytest.param("docker.io/library/alpine:3", "docker.io", id="hub-spelled"),
+            pytest.param("ghcr.io/x/y:1", "ghcr.io", id="dotted-host"),
+            pytest.param("localhost:5000/x", "localhost:5000", id="localhost-port"),
+            pytest.param("LOCALHOST/x", "localhost", id="localhost-in-capitals"),
+            pytest.param(
+                "index.docker.io:5000/x", "index.docker.io:5000", id="legacy-other-port"
+            ),
+        ],
+    )
+    def test_the_readings_the_rule_leaves_alone(self, ref, registry):
+        """A bare name, a lowercase namespace and a dotted or ported host read as before.
+
+        ``localhost`` in capitals was a registry already, and the legacy Hub host
+        on another port is another registry, so neither moves to Docker Hub.
+        """
+        assert sd.image_ref_registry(ref) == registry
+
+    def test_a_lowercase_namespace_is_still_a_hub_reference(
+        self, workspace, monkeypatch
+    ):
+        """A lowercase namespace is Docker Hub's, so a list that names Hub admits it."""
+        monkeypatch.setenv("ASH_MCP_IMAGE_ALLOWED_REGISTRIES", "docker.io")
+        for ref in ("alpine", "library/alpine:3", "team/app:1"):
+            assert sd.set_source_image(ref, session_id=_SESSION).ref == ref
 
 
 class TestOneSubjectPerSession:
