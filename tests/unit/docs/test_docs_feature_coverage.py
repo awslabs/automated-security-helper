@@ -214,13 +214,25 @@ class Run:
         self, context: str, region_path: str, lines, *, measured: str | None = None
     ) -> None:
         """One data file in which ``context`` ran ``lines`` of ``region_path``."""
+        self._write(context, {measured or self.measured(region_path): lines})
+
+    def process(self, context: str, lines_by_path) -> None:
+        """One data file in which ``context`` ran, of each path of ``lines_by_path``,
+        its lines. coverage.py writes one data file per process, so this is one
+        process of the block; two calls are two of its processes, under one context."""
+        self._write(
+            context,
+            {self.measured(path): lines for path, lines in lines_by_path.items()},
+        )
+
+    def _write(self, context: str, lines_by_file) -> None:
         self._data_files += 1
         data = CoverageData(
             basename=str(self.data / "data" / ".coverage"),
             suffix=f"synthetic.{self._data_files}",
         )
         data.set_context(context)
-        data.add_lines({measured or self.measured(region_path): sorted(lines)})
+        data.add_lines({file: sorted(lines) for file, lines in lines_by_file.items()})
         data.write()
         data.close()
 
@@ -568,13 +580,59 @@ def _lines_of(statement) -> set:
     return set(range(statement.lineno, statement.end_lineno + 1))
 
 
+def _ways_out(node) -> list:
+    """Every ``if`` at any depth of ``node`` whose body ends in ``return`` or
+    ``raise``: each a way out of the function, whether a refusal or not."""
+    return [
+        statement
+        for statement in ast.walk(node)
+        if isinstance(statement, ast.If)
+        and isinstance(statement.body[-1], (ast.Return, ast.Raise))
+    ]
+
+
+def _a_call_that_ran_to(node, statement) -> set:
+    """The lines one call of ``node`` runs from its body's first statement to
+    ``statement``, where it leaves: every line in between except the bodies of the
+    other ways out it passed (the call ran their test and not their body) and the
+    handlers of its ``try`` statements. A call leaves by one way out, so data that ran
+    every line up to the last one would show refusals the call never made."""
+    body = _without_docstring(node.body)
+    ran = set(range(body[0].lineno, statement.end_lineno + 1))
+    for other in _ways_out(node):
+        if other is statement or (
+            other.body[0].lineno <= statement.lineno <= other.body[-1].end_lineno
+        ):
+            continue
+        ran -= set(range(other.body[0].lineno, other.body[-1].end_lineno + 1))
+    for other in ast.walk(node):
+        for handler in getattr(other, "handlers", ()):
+            if not handler.lineno <= statement.lineno <= handler.end_lineno:
+                ran -= set(range(handler.lineno, handler.end_lineno + 1))
+    return ran
+
+
+def _way_out_with(path: str, node, needle: str):
+    """The one way out of ``node``, at any depth, whose test's source holds
+    ``needle``."""
+    source = (REPO_ROOT / path).read_text(encoding="utf-8")
+    found = [
+        statement
+        for statement in _ways_out(node)
+        if needle in (ast.get_source_segment(source, statement.test) or "")
+    ]
+    assert len(found) == 1, (path, node.name, needle, [s.lineno for s in found])
+    return found[0]
+
+
 def _up_to_the_last_early_exit(node) -> set:
     """The lines a call runs when it leaves ``node`` at its last early exit: every
-    statement from the first through that exit."""
+    statement from the first through that exit, past the tests of the ways out before
+    it and into none of their bodies."""
     body = _without_docstring(node.body)
     guards = [statement for statement in body if _is_guard(statement)]
     assert guards, f"{node.name} (def at {node.lineno}) has no early exit"
-    return set(range(body[0].lineno, guards[-1].end_lineno + 1))
+    return _a_call_that_ran_to(node, guards[-1])
 
 
 def _source_path(obj) -> str:
@@ -2803,7 +2861,6 @@ def _a_block_left_at_the_last_early_exit(tmp_path, feature_id):
     "feature_id",
     [
         "command:ash express status",
-        "command:ash results report",
         "reporter:asff",
         "reporter:bedrock-summary-reporter",
         "reporter:csv",
@@ -2816,7 +2873,9 @@ def test_a_block_that_leaves_at_an_early_exit_after_the_work_covers_the_feature(
 ):
     """Each did its work before the exit it left at: ``ash express status`` asked the
     server for its status and printed it at its ``--json`` exit, and a reporter read
-    the findings before its empty-report exit."""
+    the findings before its empty-report exit. ``ash results report`` is not one of
+    them: its last early exit is the reporter's dependency check refusing, which a
+    block that counts must not end in (the refusal test below)."""
     feature, covered = _a_block_left_at_the_last_early_exit(tmp_path, feature_id)
 
     assert feature.id in covered
@@ -2829,6 +2888,162 @@ def test_a_block_whose_scan_stopped_at_a_skip_check_does_not_cover_the_plugin(
     feature, covered = _a_block_left_at_the_last_early_exit(tmp_path, feature_id)
 
     assert feature.id not in covered
+
+
+#: Refusals inside a feature's region, each the way out a block's call took although
+#: the block's marker expects an exit that counts (0 or 2): (feature id, a needle of
+#: the refusal's test, the block's command line or None for a python block, the exit
+#: the block expects, the option ids its command line gives).
+REFUSALS_IN_THE_REGION = [
+    pytest.param(
+        "command:ash plugin verify",
+        "root.is_dir()",
+        "ash plugin verify --all --transcripts-root missing-dir",
+        "2",
+        {
+            "option:ash plugin verify --all",
+            "option:ash plugin verify --transcripts-root",
+        },
+        id="plugin-verify-with-no-transcript-directory",
+    ),
+    pytest.param(
+        "command:ash plugin verify",
+        "discovery.files",
+        "ash plugin verify --all --transcripts-root empty-dir",
+        "2",
+        {
+            "option:ash plugin verify --all",
+            "option:ash plugin verify --transcripts-root",
+        },
+        id="plugin-verify-with-no-transcripts-in-the-directory",
+    ),
+    pytest.param(
+        "command:ash plugin verify",
+        "all_plugins == bool(names)",
+        "ash plugin verify bandit --all --transcripts-root transcripts",
+        "2",
+        {
+            "option:ash plugin verify --all",
+            "option:ash plugin verify --transcripts-root",
+        },
+        id="plugin-verify-given-names-and-all",
+    ),
+    pytest.param(
+        "command:ash plugin verify",
+        "manifest is None",
+        "ash plugin verify not-a-scanner --transcripts-root transcripts",
+        "2",
+        {"option:ash plugin verify --transcripts-root"},
+        id="plugin-verify-of-a-scanner-with-no-manifest",
+    ),
+    pytest.param(
+        "command:ash express stop",
+        "answer is None",
+        "ash express stop",
+        "0",
+        set(),
+        id="express-stop-with-no-daemon-answering",
+    ),
+    pytest.param(
+        "command:ash results report",
+        "dependencies_ok",
+        "ash results report --output-dir out --format aws-security-hub || true",
+        "0",
+        {
+            "option:ash results report --format",
+            "option:ash results report --output-dir",
+        },
+        id="results-report-refused-by-the-reporters-dependency-check",
+    ),
+    pytest.param(
+        "mcp-tool:cancel_scan",
+        "refusal is not None",
+        None,
+        "0",
+        set(),
+        id="an-mcp-tool-that-returns-its-refusal",
+    ),
+    pytest.param(
+        "reporter:asff",
+        "AsffReporterConfig",
+        None,
+        "0",
+        set(),
+        id="a-reporter-that-refuses-its-configuration",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("feature_id", "needle", "command_line", "expected", "options"),
+    REFUSALS_IN_THE_REGION,
+)
+def test_a_block_whose_call_took_a_refusal_inside_the_region_shows_nothing_of_it(
+    tmp_path, feature_id, needle, command_line, expected, options
+):
+    """Under the region rule an early exit after a function's first statement is
+    inside its region, and so is a refusal nested in it. A call that took one ran the
+    region up to the refusal and did none of the work the feature names, yet its block
+    can expect an exit that counts: ``ash plugin verify`` refuses with exit 2, the
+    number of the findings code; ``ash express stop`` with no daemon answering returns
+    and exits 0; a command whose exit 1 the block's own ``|| true`` drops; an MCP tool
+    returns its refusal as data and a reporter's refusal is caught by the scan around
+    it. A refusal counts as nothing, its command and the options the line gives
+    included. Each call is built from the syntax tree: through the refusal's test and
+    body, past the tests of the ways out before it and into none of their bodies."""
+    feature = _by_id()[feature_id]
+    path, node = _feature_node(feature)
+    lines = _a_call_that_ran_to(node, _way_out_with(path, node, needle))
+    assert lines & feature.regions[0].lines, (
+        f"{feature_id}: a call that refuses at {needle!r} no longer reaches the "
+        "region; this case is stale"
+    )
+    run = Run(tmp_path)
+    marker = f"<!-- doctest: run expect-exit={expected} -->"
+    if command_line is None:
+        (line,) = run.page(
+            "page.md", f"{marker}\n{FENCE}python\nprint('a call')\n{FENCE}\n"
+        )
+    else:
+        line = _one_command(run, command_line, marker=marker)
+    run.record("page.md", _block("page.md", line, expected=expected))
+    run.hit(f"page.md::{line}", path, lines)
+    features = [
+        f for f in _inventory() if f.kind in ("command", "option") or f.id == feature_id
+    ]
+
+    result = _covered(run, features)
+
+    _assert_absent({feature_id, *options}, result, features, sorted(result))
+
+
+def test_a_block_whose_call_ran_past_every_refusal_covers_the_command_and_its_options(
+    tmp_path,
+):
+    """The other half: ``ash plugin verify`` that judged the scanners and left at its
+    last statement, the exit that reports the verdicts, ran the command's work. It
+    passed the test of each refusal and took none of them, so the block covers the
+    command and the options its line gives. The last statement raises ``typer.Exit``
+    as the refusals do; what sets a refusal apart is that it is a way out the call
+    took before the work, not the exit it raises."""
+    feature = _by_id()["command:ash plugin verify"]
+    path, node = _feature_node(feature)
+    last = _without_docstring(node.body)[-1]
+    run = Run(tmp_path)
+    line = _one_command(
+        run, "ash plugin verify --all --transcripts-root tests/test_data/scanners"
+    )
+    run.record("page.md", _block("page.md", line))
+    run.hit(f"page.md::{line}", path, _a_call_that_ran_to(node, last))
+    shown = {
+        "command:ash plugin verify",
+        "option:ash plugin verify --all",
+        "option:ash plugin verify --transcripts-root",
+    }
+
+    result = _covered(run, _cli_features())
+
+    assert shown <= result, sorted(shown - result)
 
 
 def test_plugins_here_that_share_one_work_method_name_each_other():
@@ -3027,18 +3242,23 @@ def _results_write_node():
     return path, _function_node(path, "_write_results_file", cls="ASHScanOrchestrator")
 
 
-def _scan_wrote_its_results(run: Run, context: str) -> None:
-    """Coverage data in which ``context`` ran the results write past its early exits:
-    the first line past its last one, read from the syntax tree."""
+def _scan_wrote_its_results(run: Run, context: str, also=None) -> None:
+    """Coverage data of one process in which ``context`` ran the results write past
+    its early exits (the first line past its last one, read from the syntax tree) and
+    the lines ``also`` gives, by path: the scan's own code runs in the process that
+    writes its results."""
     path, node = _results_write_node()
-    run.hit(context, path, {min(_region_oracle(node, past_the_last_exit=True))})
+    written = {min(_region_oracle(node, past_the_last_exit=True))}
+    run.process(context, {**(also or {}), path: written})
 
 
-def _scan_left_the_results_write_at_an_early_exit(run: Run, context: str) -> None:
-    """Coverage data in which ``context`` ran the results write up to its last early
-    exit and no further."""
+def _scan_left_the_results_write_at_an_early_exit(
+    run: Run, context: str, also=None
+) -> None:
+    """Coverage data of one process in which ``context`` ran the results write up to
+    its last early exit and no further, and the lines ``also`` gives, by path."""
     path, node = _results_write_node()
-    run.hit(context, path, _up_to_the_last_early_exit(node))
+    run.process(context, {**(also or {}), path: _up_to_the_last_early_exit(node)})
 
 
 @pytest.mark.parametrize("results", RESULTS_WRITES)
@@ -3053,7 +3273,8 @@ def test_only_a_block_expected_to_succeed_or_to_report_findings_is_evidence(
     exits 1 both for a scan whose scanners failed and for many refusals, so a block
     that expects 1 is evidence only when its scan also wrote its results: it reached
     the results write past its early exits (no results file for this run; the engine
-    returned something else). The codes are read from AshExitCode."""
+    returned something else). The codes are read from AshExitCode. The planted
+    feature's code runs in the process whose results write is measured."""
     run = Run(tmp_path)
     (line,) = run.page(
         "page.md",
@@ -3061,11 +3282,15 @@ def test_only_a_block_expected_to_succeed_or_to_report_findings_is_evidence(
         f'{FENCE}python\nprint("an example")\n{FENCE}\n',
     )
     run.record("page.md", _block("page.md", line, expected=expected))
-    run.hit(f"page.md::{line}", PLANTED_PATH, {11})
+    planted_lines = {PLANTED_PATH: {11}}
     if results == "wrote-its-results":
-        _scan_wrote_its_results(run, f"page.md::{line}")
+        _scan_wrote_its_results(run, f"page.md::{line}", also=planted_lines)
     elif results == "an-early-exit-of-the-write":
-        _scan_left_the_results_write_at_an_early_exit(run, f"page.md::{line}")
+        _scan_left_the_results_write_at_an_early_exit(
+            run, f"page.md::{line}", also=planted_lines
+        )
+    else:
+        run.process(f"page.md::{line}", planted_lines)
     # A block expected to succeed passes too, so the measurement itself is sound.
     run.page("other.md", ONE_BLOCK)
     run.record("other.md", _block("other.md", 3))
@@ -3189,9 +3414,10 @@ def test_an_exit_1_example_on_these_pages_counts_only_when_its_scan_wrote_its_re
     )
     context = f"{rel}::{block.fence_line}"
     run.record(rel, _block(rel, block.fence_line, expected=_expected_exit(block)))
-    _reach(run, context, reached)
     if wrote_results:
-        _scan_wrote_its_results(run, context)
+        _scan_wrote_its_results(run, context, also=_first_line(reached))
+    else:
+        _reach(run, context, reached)
 
     result = _covered(run, _cli_features())
 
@@ -3235,6 +3461,64 @@ def test_check_exits_2_when_the_results_write_it_reads_exit_1_by_is_gone(
 
     assert code == 2
     assert "_write_results_file" in capsys.readouterr().err
+
+
+#: Blocks expecting exit 1 that run a scan which writes its results and then, as a
+#: process of its own, a command that refuses with exit 1: (the block's lines, the
+#: refusing command, a needle of its refusal's test, what the scan's process shows,
+#: what the refusing process does not).
+SCANS_SHARING_AN_EXIT_1_BLOCK_WITH_A_REFUSAL = [
+    pytest.param(
+        "ash --source-dir . --scanners detect-secrets --offline --no-progress || true\n"
+        "printf 'project_name: payments-api\\n' > .ashrc.yaml\n"
+        "ash config init",
+        "command:ash config init",
+        "config_exists and not force",
+        {
+            "command:ash scan",
+            "option:ash scan --source-dir",
+            "option:ash scan --scanners",
+            "option:ash scan --offline",
+            "option:ash scan --progress",
+        },
+        {"command:ash config init"},
+        id="a-scan-then-config-init-refusing-a-second-config-source",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "refused", "needle", "shown", "not_shown"),
+    SCANS_SHARING_AN_EXIT_1_BLOCK_WITH_A_REFUSAL,
+)
+def test_an_exit_1_block_is_evidence_only_through_a_process_that_wrote_the_results(
+    tmp_path, text, refused, needle, shown, not_shown
+):
+    """Whether an exit-1 block shows a scan or a refusal is a fact about each of its
+    processes, not about the block. Each ash command of a block is a process, and
+    coverage.py writes one data file per process, all under the block's one context.
+    A block can scan, write its results, and then run a command that refuses with
+    exit 1, which is the exit the block expects. The scan's process wrote the results
+    and shows the scan; the refusing process never reached the results write, so it
+    shows nothing of its command."""
+    run = Run(tmp_path)
+    (line,) = run.page(
+        "page.md",
+        f"<!-- doctest: run expect-exit=1 -->\n{FENCE}bash\n{text}\n{FENCE}\n",
+    )
+    context = f"page.md::{line}"
+    run.record("page.md", _block("page.md", line, expected="1"))
+    _scan_wrote_its_results(run, context, also=_first_line("command:ash scan"))
+    feature = _by_id()[refused]
+    path, node = _feature_node(feature)
+    lines = _a_call_that_ran_to(node, _way_out_with(path, node, needle))
+    assert lines & feature.regions[0].lines, f"{refused}: this case is stale"
+    run.hit(context, path, lines)
+
+    result = _covered(run, _cli_features())
+
+    assert shown <= result, sorted(shown - result)
+    _assert_absent(not_shown, result, _cli_features())
 
 
 @pytest.mark.parametrize(
@@ -3346,10 +3630,15 @@ def _cli_features():
     return [f for f in _inventory() if f.kind in ("command", "option")]
 
 
+def _first_line(feature_id: str) -> dict:
+    """{path: {line}}: the first line of a real feature's code."""
+    region = _by_id()[feature_id].regions[0]
+    return {region.path: {min(region.lines)}}
+
+
 def _reach(run: Run, context: str, feature_id: str) -> None:
     """Coverage data in which ``context`` ran the first line of a real feature's code."""
-    region = _by_id()[feature_id].regions[0]
-    run.hit(context, region.path, {min(region.lines)})
+    run.process(context, _first_line(feature_id))
 
 
 def _one_command(run: Run, command_line: str, *, marker: str = "") -> int:
@@ -4454,6 +4743,184 @@ def test_a_saved_config_still_counts_where_no_shell_block_of_its_session_before_
     assert SEVERITY_ROWS <= result, sorted(SEVERITY_ROWS - result)
 
 
+def _a_save_then(*blocks: str, save_as: str = ".ash.yaml") -> str:
+    """A page that saves SEVERITY under ``save_as`` and then has ``blocks``."""
+    return _join(_saved_config(SEVERITY, save_as=save_as), *blocks)
+
+
+#: The scan of the pages below that a block expecting findings runs.
+DETECT_SECRETS_SCAN = (
+    "ash --source-dir . --scanners detect-secrets --offline --no-progress"
+)
+#: What a shell block writes over a saved file: rows the check must never credit, as
+#: it cannot read what a block wrote.
+REWRITTEN = "project_name: rewritten"
+
+#: Pages on which a block after a save, at or before the block that loads it, may
+#: have written, replaced or removed the saved file: (page, the rows that must not
+#: count).
+SAVES_A_LATER_BLOCK_MAY_HAVE_CHANGED = [
+    pytest.param(
+        _a_save_then(
+            "<!-- doctest: run expect-exit=2 -->\n"
+            f"{FENCE}bash\ncat > .ash.yaml <<'EOF'\n{REWRITTEN}\nEOF\n"
+            f"{DETECT_SECRETS_SCAN}\n{FENCE}"
+        ),
+        SEVERITY_ROWS | {"config:project_name"},
+        id="rewritten-by-the-loading-block-before-its-scan",
+    ),
+    pytest.param(
+        _join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _saved_config("project_name: from-the-yml-file", save_as=".ash.yml"),
+            "<!-- doctest: run expect-exit=2 -->\n"
+            f"{FENCE}bash\nrm .ash.yaml\n{DETECT_SECRETS_SCAN}\n{FENCE}",
+        ),
+        SEVERITY_ROWS,
+        id="removed-by-the-loading-block-before-its-scan",
+    ),
+    pytest.param(
+        _a_save_then(
+            _scan_block(f"printf '{REWRITTEN}\\n' > .ash.yaml"), _scan_block()
+        ),
+        SEVERITY_ROWS | {"config:project_name"},
+        id="rewritten-by-an-earlier-block",
+    ),
+    pytest.param(
+        _a_save_then(_scan_block("rm .ash.yaml"), _scan_block()),
+        SEVERITY_ROWS,
+        id="removed-by-an-earlier-block",
+    ),
+    pytest.param(
+        _a_save_then(
+            _scan_block("printf 'global_settings: {}\\n' >> .ash.yaml"), _scan_block()
+        ),
+        SEVERITY_ROWS,
+        id="appended-to-so-a-later-key-replaces-the-saved-one",
+    ),
+    pytest.param(
+        _a_save_then(_scan_block("cp notes.txt .ash.yaml"), _scan_block()),
+        SEVERITY_ROWS,
+        id="copied-over",
+    ),
+    pytest.param(
+        _a_save_then(_scan_block("mv notes.txt .ash.yaml"), _scan_block()),
+        SEVERITY_ROWS,
+        id="moved-over",
+    ),
+    pytest.param(
+        _a_save_then(_scan_block("rm -f ./.ash.yaml"), _scan_block()),
+        SEVERITY_ROWS,
+        id="removed-through-a-dot-slash-path",
+    ),
+    pytest.param(
+        _a_save_then(_scan_block("rm -f .ash*"), _scan_block()),
+        SEVERITY_ROWS,
+        id="removed-through-a-glob",
+    ),
+    pytest.param(
+        _a_save_then(
+            _scan_block(f"printf '{REWRITTEN}\\n' > {TEAM}"),
+            _scan_block(f"ash scan --config {TEAM} --offline"),
+            save_as=TEAM,
+        ),
+        SEVERITY_ROWS | {"config:project_name"},
+        id="a-named-config-rewritten-before-the-scan-that-names-it",
+    ),
+]
+
+
+@pytest.mark.parametrize(("text", "absent"), SAVES_A_LATER_BLOCK_MAY_HAVE_CHANGED)
+def test_a_save_a_later_block_may_have_rewritten_or_removed_counts_for_nothing(
+    tmp_path, text, absent
+):
+    """A save's rows count only where the save's content was still in its file when
+    the scan read it. The runner writes a save at its place in the session, and a
+    block after it can write that file again: rewrite it, add to it, copy or move
+    another file over it, or remove it. Discovery then reads what the block left (the
+    rewritten file, or with the first name gone the next one down), and a scan that
+    names the file reads the new text. The check cannot read what a block wrote, so a
+    save that a block after it, up to and including the loading block, may have
+    written over or removed counts for nothing. What the block wrote never counts
+    either (docs/content/contributing/documentation.md: the check cannot see a file
+    that a shell block writes). A path written with ``./`` or matched by a glob names
+    the file as much as its own spelling does."""
+    run = _loading_run(tmp_path, text=text)
+
+    result = _covered(run, _config_features())
+
+    _assert_absent(absent, result, _config_features())
+
+
+#: Pages on which no block between the save and the loading block can have changed
+#: the saved file: (page, which runnable block loads it).
+SAVES_LEFT_IN_PLACE = [
+    pytest.param(
+        _a_save_then(_scan_block(), _scan_block("rm .ash.yaml")),
+        0,
+        id="removed-after-the-loading-block",
+    ),
+    pytest.param(
+        _join(
+            _scan_block("rm .ash.yaml"),
+            _scan_block("ls", fresh=True),
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _scan_block(),
+        ),
+        -1,
+        id="removed-in-an-earlier-session",
+    ),
+    pytest.param(
+        _a_save_then(_scan_block("printf 'a note\\n' > notes.txt"), _scan_block()),
+        -1,
+        id="a-block-between-them-wrote-another-file",
+    ),
+]
+
+
+@pytest.mark.parametrize(("text", "loading"), SAVES_LEFT_IN_PLACE)
+def test_a_save_no_block_before_the_scan_can_have_changed_still_counts(
+    tmp_path, text, loading
+):
+    """The other half: a block that removes the file after the loading block, one in
+    an earlier session (a new session starts from a fresh copy of its fixture), and a
+    block between them that writes a file the scan does not read as its configuration
+    leave the saved content in place when the scan reads it, so the save counts."""
+    run = _loading_run(tmp_path, text=text, loading=loading)
+
+    result = _covered(run, _config_features())
+
+    assert SEVERITY_ROWS <= result, sorted(SEVERITY_ROWS - result)
+
+
+def test_the_config_the_trust_model_page_saves_counts_for_its_passing_scan(tmp_path):
+    """concepts/trust-model.md saves ``.ash.yaml`` and then scans the directory twice:
+    once refused (exit 3, no evidence) and once passing. No block between the save
+    and the passing scan writes the file, so the rows the save sets count for that
+    scan: a rule that withholds the credit wherever a block may have changed the file
+    must leave this page's credit as it is."""
+    rel = "docs/content/concepts/trust-model.md"
+    run = Run(tmp_path)
+    run.real_page(rel)
+    page = _record_as_the_runner_does(run, rel)
+    save = _the_block(page, "project_name: delivered")
+    scan = next(
+        block
+        for block in page.blocks
+        if _checks().runner_runs(block)
+        and block.fence_line > save.fence_line
+        and _expected_exit(block) == "0"
+        and block.body.strip() == DETECT_SECRETS_SCAN
+    )
+    region = _anchor("load_config_file")
+    run.hit(f"{rel}::{scan.fence_line}", region.path, {min(region.lines)})
+    shown = {"config:project_name", "config:fail_on_findings"}
+
+    result = _covered(run, _config_features())
+
+    assert shown <= result, sorted(shown - result)
+
+
 def _discovery_order(tmp_path: Path, names) -> list[str]:
     """``names`` in the order config discovery ranks them, taken from discovery itself:
     each is written into a new directory and discover_config_source runs on it, so the
@@ -4680,6 +5147,58 @@ def test_of_two_saved_configs_in_the_directory_source_dir_names_only_the_one_dis
 
 #: A configuration saved under the name discovery reads first, and one only a command
 #: can name; each sets rows of its own.
+@pytest.mark.parametrize("fault", ["its-call-fails", "it-is-gone"])
+def test_a_config_discovery_the_check_cannot_call_stops_it_naming_discovery(
+    tmp_path, monkeypatch, capsys, fault
+):
+    """Discovery says which saved file a scan loaded. When calling it fails (here a
+    changed signature), the check must stop with exit 2 and name it, as it does when
+    the function is gone. Read as "discovery found nothing" instead, every save it
+    would have credited reads uncovered, and the check exits 1 naming features where
+    the measurement is broken. With the real discovery the same page's save counts."""
+    from automated_security_helper.config import config_sources
+
+    cov = _cov()
+    run = _loading_run(
+        tmp_path,
+        text=_join(
+            _saved_config(SEVERITY, save_as=".ash.yaml"),
+            _scan_block(DETECT_SECRETS_SCAN),
+        ),
+    )
+    assert SEVERITY_ROWS <= _covered(run, _config_features())
+    if fault == "its-call-fails":
+        real = config_sources.discover_config_source
+
+        def changed_signature(search_dir, *, permit):
+            return real(search_dir, permit)
+
+        monkeypatch.setattr(config_sources, "discover_config_source", changed_signature)
+    else:
+        monkeypatch.delattr(config_sources, "discover_config_source")
+    monkeypatch.setattr(cov, "inventory", lambda: list(_config_features()))
+    monkeypatch.setattr(cov, "corpus_pages", lambda docs_root: list(run.corpus))
+
+    code = cov.main(
+        [
+            "check",
+            "--data",
+            str(run.data),
+            "--baseline",
+            str(_baseline(tmp_path / "baseline.txt", [])),
+            "--docs-root",
+            str(run.docs),
+            "--out",
+            str(run.out),
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 2, err
+    assert "discover_config_source" in err
+    assert "measurement error" in err
+
+
 DISCOVERED = _saved_config(SEVERITY, save_as=".ash.yaml")
 NAMED = _saved_config("project_name: demo", save_as=TEAM)
 #: A second file a command can name, beside TEAM.
