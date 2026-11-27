@@ -664,17 +664,17 @@ class TestAppendOntoAnUntypedPluginOption:
     """
 
     @pytest.fixture(autouse=True)
-    def _each_test_starts_with_no_key_warned_of(self):
-        """The keys already warned of are the process's: each test sees none, and
-        the process's own are put back."""
-        warned = _resolve_config_module()._APPEND_TO_UNREAD_SECTION_WARNED
-        held = set(warned)
-        warned.clear()
-        try:
-            yield
-        finally:
-            warned.clear()
-            warned.update(held)
+    def _each_test_starts_with_no_key_warned_of(self, monkeypatch):
+        """Each test starts with no key warned of, and the module's own set is put
+        back after it. ``raising=False`` keeps setup independent of that attribute,
+        so a change that drops or renames it fails these tests on what they check
+        rather than at setup."""
+        monkeypatch.setattr(
+            _resolve_config_module(),
+            "_APPEND_TO_UNREAD_SECTION_WARNED",
+            set(),
+            raising=False,
+        )
 
     @pytest.mark.parametrize(
         ("segment", "kind", "plugin", "option", "value"), _NON_EMPTY_LIST_OPTIONS
