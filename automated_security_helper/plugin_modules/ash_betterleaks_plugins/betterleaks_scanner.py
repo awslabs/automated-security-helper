@@ -709,10 +709,18 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
                 if name.endswith("_TOML"):
                     refuse_relative_extend_path("Betterleaks", name, text=value)
                 else:
+                    # An absolute value is left to Betterleaks, which opens it as
+                    # given, so it is checked as given: os.path.abspath would drop
+                    # "link/.." by hand where the open follows the link first. Any
+                    # other value is checked where ASH anchors it, the file passed.
                     refuse_relative_extend_path(
                         "Betterleaks",
                         name,
-                        path=Path(os.path.abspath(os.path.expanduser(value))),
+                        path=(
+                            Path(value)
+                            if is_anchored(value)
+                            else Path(os.path.abspath(os.path.expanduser(value)))
+                        ),
                     )
             given = _config_env_value()
             if given is not None and not is_anchored(given[1]):
