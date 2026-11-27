@@ -322,9 +322,9 @@ def is_uv_form(command: Any) -> bool:
     be a binary found by name.
 
     The one reading of this for the scanners that take their route from the
-    resolver (bandit, checkov, cfn-lint, semgrep, zizmor). A string is one word;
-    None, an empty answer, or a first word that is not text or a path is not
-    the uv form.
+    resolver (bandit, checkov, cfn-lint, guarddog, semgrep, zizmor). A string is
+    one word; None, an empty answer, or a first word that is not text or a path
+    is not the uv form.
     """
     if command is None:
         return False
@@ -1985,18 +1985,18 @@ class UVToolMixin:
         WHO CONSULTS THIS (the roster test in
         tests/unit/plugin_modules/ash_builtin/scanners/ pins the set): the
         scanners whose validation, entered with ``use_uv_tool`` False, falls
-        into a ``get_uv_tool_command`` fallback -- checkov and cfn-lint, whose
-        fallback also re-points the route from the resolver's answer, and
-        bandit, whose ``_take_resolved_command`` keeps the route but still
-        pays the resolver's cold probe. Semgrep needs no consult: entered with
-        ``use_uv_tool`` False and uv available, its ``_validate_tool_dependencies``
-        returns satisfied with no probe (semgrep_scanner.py, the final
-        ``dependencies_satisfied = True`` arm). Zizmor re-decides from scratch
-        by design (zizmor_scanner.py sets ``use_uv_tool = True`` at the top of
-        its tool check, around its rejected-executable logic), and the jupyter
-        converter records its route in its own ``_nbconvert_route`` instead of
-        this flag; both re-verifications answer from the memoized or persisted
-        verdict.
+        into a ``get_uv_tool_command`` fallback -- checkov, cfn-lint and
+        guarddog, whose fallback also re-points the route from the resolver's
+        answer, and bandit, whose ``_take_resolved_command`` keeps the route
+        but still pays the resolver's cold probe. Semgrep needs no consult:
+        entered with ``use_uv_tool`` False and uv available, its
+        ``_validate_tool_dependencies`` returns satisfied with no probe
+        (semgrep_scanner.py, the final ``dependencies_satisfied = True`` arm).
+        Zizmor re-decides from scratch by design (zizmor_scanner.py sets
+        ``use_uv_tool = True`` at the top of its tool check, around its
+        rejected-executable logic), and the jupyter converter records its route
+        in its own ``_nbconvert_route`` instead of this flag; both
+        re-verifications answer from the memoized or persisted verdict.
         """
         executable = getattr(self, "_verified_pre_installed_executable", None)
         if executable is None:

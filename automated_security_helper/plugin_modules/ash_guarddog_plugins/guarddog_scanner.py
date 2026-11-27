@@ -133,6 +133,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.base.uv_tool_mixin import (
+    _record_direct_route_version,
+    _restore_uv_route,
+    is_uv_form,
+)
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -156,6 +161,7 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.package_identity import identity_properties
 from automated_security_helper.utils.pre_installed_tool import (
+    ToolInstallStatus,
     build_requirement,
     find_tool_interpreter,
     verify_pre_installed_tool,
@@ -1175,12 +1181,29 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         # First, while use_uv_tool still says what construction set: the
         # tool-version probe, which construction leaves to this point.
         self.resolve_deferred_tool_version()
+        # A copy on PATH an earlier validation of this instance verified and
+        # chose to run directly is honored while it still exists: re-running
+        # selection from here skipped the use_uv_tool branch (that decision set
+        # the flag False) and fell to the consolidated resolver, whose answer
+        # flipped the scan back through uv and spent a cold version probe doing
+        # it, so the verified copy never ran.
+        if self._honored_verified_pre_installed():
+            return True
         if not self._validate_uv_tool_availability():
-            if get_uv_tool_command(_COMMAND) is not None:
-                self.use_uv_tool = False
-                self.dependencies_satisfied = True
-                self._carry_pre_installed_version({})
-                return True
+            # The runner's availability check is False for a probe that failed as
+            # well as for a uv that is absent, and the resolver's own probe of
+            # GuardDog through uv can succeed in the same moment, so the route is
+            # read from its answer. It probes under this scanner's own spec and
+            # offline mode, as every uv call of the mixin does: without them it
+            # probed the bare tool name, an environment the scan never uses, and
+            # online for a scanner that is offline.
+            resolved = get_uv_tool_command(
+                _COMMAND,
+                from_spec=self._uv_probe_from_spec(),
+                offline=self._is_offline_mode(),
+            )
+            if resolved is not None:
+                return self._accept_binary_on_path(resolved)
             self._plugin_log(
                 "UV tool validation failed - UV is not available but required",
                 level=logging.ERROR,
@@ -1211,10 +1234,82 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 level=logging.WARNING,
             )
 
-        if get_uv_tool_command(_COMMAND) is not None:
+        # Final fallback: the consolidated uv-or-direct-binary resolver, asked
+        # under the same spec and offline mode. A binary it found on PATH has to
+        # run directly: with use_uv_tool left True every scan went through uv,
+        # whose install had just failed. And a dependency declared satisfied is
+        # recorded as such, as the branches above record it.
+        resolved = get_uv_tool_command(
+            _COMMAND,
+            from_spec=self._uv_probe_from_spec(),
+            offline=self._is_offline_mode(),
+        )
+        if resolved is None:
+            self._record_missing_reason()
+            return False
+        # The route is read from the answer's first word's file name
+        # (is_uv_form): uv named by its path, or as uv.exe, is the uv route too.
+        uses_uv = is_uv_form(resolved)
+        if uses_uv:
+            _restore_uv_route(self)
+        elif self.use_uv_tool:
+            # Off uv for the resolver's binary, which runs unverified and with no
+            # version read: the uv probe's answer names another environment. A
+            # re-validation already on a direct route keeps the record that route
+            # made.
+            _record_direct_route_version(self, None)
+        self.use_uv_tool = uses_uv
+        self.dependencies_satisfied = True
+        return True
+
+    def _accept_binary_on_path(self, resolved: List[str]) -> bool:
+        """Whether the answer the resolver gave with uv unavailable may run the scan.
+
+        A uv answer is the uv route, however uv is named: the resolver's own probe of
+        GuardDog through uv succeeded, whatever the runner's availability check
+        said. The route stays on, with what the uv probe recorded for it, and
+        ``_restore_uv_route`` makes that so whichever route the scanner entered
+        on. Anything else is a binary on PATH and the scan's GuardDog, with no
+        install to fall back on, so it is verified against the scan's
+        requirement as ``_select_tool_execution`` verifies one. Before this it
+        was declared satisfied unverified. One that falls short is MISSING with
+        the reason; one that cannot be verified runs, with a warning, since
+        nothing better is at hand. The copy that runs is the one whose version
+        is recorded: the uv probe's names another environment.
+        """
+        if is_uv_form(resolved):
+            _restore_uv_route(self)
+            self.dependencies_satisfied = True
             return True
-        self._record_missing_reason()
-        return False
+        executable = resolved[0]
+        checked = verify_pre_installed_tool(
+            executable,
+            _COMMAND,
+            self._get_tool_package_extras(),
+            self._get_tool_version_constraint(),
+            uv_executable=None,
+            values=self._values_to_redact(),
+        )
+        if checked.status == ToolInstallStatus.UNSATISFIED:
+            reason = (
+                f"uv is not available and the guarddog on PATH ({executable}) "
+                f"cannot be used: {checked.detail}"
+            )
+            self.dependency_unavailable_reason = reason
+            self._plugin_log(reason, level=logging.ERROR)
+            self.dependencies_satisfied = False
+            return False
+        if checked.status != ToolInstallStatus.SATISFIED:
+            self._plugin_log(
+                f"uv is not available and the guarddog on PATH ({executable}) "
+                f"could not be verified against the scan's requirement "
+                f"({checked.detail}); running it anyway.",
+                level=logging.WARNING,
+            )
+        _record_direct_route_version(self, getattr(checked, "version", None))
+        self.use_uv_tool = False
+        self.dependencies_satisfied = True
+        return True
 
     def _carry_pre_installed_version(self, installation_info: dict[str, Any]) -> None:
         """Carry the version of the pre-installed GuardDog the scan will run.
