@@ -234,6 +234,31 @@ updates:
           - "minor"
           - "patch"
 
+      # Members of the alpha extra: the PyPI distributions that
+      # automated_security_helper/base/plugin_provisioning.py marks as members of
+      # [project.optional-dependencies] alpha, and the requirements installed with them. The
+      # lines between the markers are written by scripts/sync_alpha_extra.py from that
+      # register, so a member is neither listed here by hand nor taken by the engine groups
+      # below. While no pin is a member the block is empty, which is no group at all.
+      #
+      # It sits before the engine groups for the reason in the group-order paragraph above: a
+      # dependency lands in the first group it matches, and the engine groups match `*`. The
+      # group declares no `update-types`, and a group with none includes updates for all
+      # semantic versions, so a member's major, minor and patch updates arrive together in
+      # one pull request and a major bump of a member is never batched into an engine group.
+      # Both facts are in GitHub's Dependabot options reference
+      # (docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference):
+      # "If a dependency matches more than one rule, it's included in the first group that it
+      # matches." and "By default, a group will include updates for all semantic versions
+      # (SemVer)."
+      #
+      # A bump edits pyproject.toml and uv.lock only, so the Alpha Extra Drift check goes red
+      # until the pin moves in the register. That red is the prompt to check the scanner
+      # against the new release. `ignore` stays off for members, for the reason given on this
+      # entry: it also suppresses security updates.
+      # BEGIN generated: alpha-extra-group (scripts/sync_alpha_extra.py)
+      # END generated: alpha-extra-group
+
       # polars is excluded from both engine groups as well as ignored above, so a group pull
       # request that was already open regenerates without it.
       engine-major-upgrade:

@@ -114,6 +114,7 @@ on:
     workflows:
       - "ASH - Action Pinning Check"
       - "Agent Plugins Drift"
+      - "Alpha Extra Drift"
       - "CDK Extra Drift"
       - "Docs CI Runners"
       - "ASH - IaC Drift"
