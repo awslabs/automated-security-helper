@@ -123,9 +123,13 @@ NAMED_ON_PURPOSE = {
         ),
     },
     "docs/content/reference/exit-codes.md": {
+        "ash --source-dir . results report": (
+            "the page's example of an option typed before a subcommand that does not "
+            "take it, which is a usage error"
+        ),
         "ash --source-dir . config get": (
-            "the page's example of an option typed before a subcommand, which is a "
-            "usage error when that command does not take it"
+            "the page's example of the same option typed before a subcommand that "
+            "takes it, which reaches that command"
         ),
     },
 }
