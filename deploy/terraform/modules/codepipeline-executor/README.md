@@ -166,10 +166,10 @@ only `ash scan --source-dir .` and `ash merge`, which 3.9 still runs with a
 deprecation line and v4.0 removes. So each buildspec first asks the image's ASH which
 it has: `ash scan fs --help` for a shard and `ash results merge --help` for the
 merge. Only an answer picks the older spelling: a help that does not name the
-command, or a usage error that refuses its first word. A probe that fails any other
-way, such as a crash or an out-of-memory kill, fails the action with the end of what
-it printed, and neither spelling runs. Each action prints the spelling it chose and
-why to stderr.
+command, or a usage error that refuses the word `fs` (`results` for the merge). A
+probe that fails any other way, such as a crash or an out-of-memory kill, fails the
+action with the end of what it printed, and neither spelling runs. Each action
+prints the spelling it chose and why to stderr.
 
 With `base_config_ssm_parameter_name` null, `ash-container-init` sets no
 `ASH_CONFIG`, so both buildspecs write `{}`, ASH's defaults, to a temporary

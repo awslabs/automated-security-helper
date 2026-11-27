@@ -793,7 +793,7 @@ const RESULTS_MERGE: NewAshCommand = { name: 'results merge', refused: 'results'
  * - exit 0 and a help that names the command: the ASH has it;
  * - exit 0 and a help that does not (an older ASH shows the subject-less scan's help
  *   for `ash scan fs --help`, since its help option is read before the extra argument
- *   is refused), or a usage error that refuses the command's first word: it does not;
+ *   is refused), or a usage error that refuses the word the command adds: it does not;
  * - anything else (a crash, an import error, an out-of-memory kill) says nothing about
  *   the ASH's commands. The lines print the end of what the probe printed and exit 1,
  *   so the build fails instead of running a spelling chosen by guess.

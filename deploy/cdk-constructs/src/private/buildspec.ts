@@ -64,20 +64,26 @@ function standaloneInstall(): string[] {
 
 /**
  * What a generated file says about the one ASH command it runs: the ASH 3.9
- * spelling, the older one, and how the file picks between them.
+ * spelling, the older one, the word an older ASH refuses, and how the file picks
+ * between them.
  *
  * A file names only the spellings of its own command. The scan and the shard
  * run `ash scan fs DIR` or `ash scan --source-dir DIR`, and the merge runs
  * `ash results merge` or `ash merge`, so a header that listed all of them told
  * a reader of the scan that it merges.
  */
-function spellingNote(command: string, current: string, older: string): string[] {
+function spellingNote(
+  command: string,
+  current: string,
+  older: string,
+  refused: string,
+): string[] {
   return [
     `The ${command} first asks the installed ASH whether it has the ASH 3.9`,
     `spelling (${current}) and runs the older one (${older})`,
     'when it does not, so an older ASH_VERSION keeps working. Only an answer',
     'picks the older spelling: a help that does not name the command, or a usage',
-    'error that refuses its first word. A probe that fails any other way stops',
+    `error that refuses the word ${refused}. A probe that fails any other way stops`,
     'the step with the end of its output instead of being read as an older ASH.',
   ];
 }
@@ -87,6 +93,7 @@ const SCAN_SPELLING_NOTE = spellingNote(
   'scan command',
   '`ash scan fs DIR`',
   '`ash scan --source-dir DIR`',
+  '`fs`',
 );
 
 /** The note for the file that merges. */
@@ -94,6 +101,7 @@ const MERGE_SPELLING_NOTE = spellingNote(
   'merge command',
   '`ash results merge`',
   '`ash merge`',
+  '`results`',
 );
 
 /**

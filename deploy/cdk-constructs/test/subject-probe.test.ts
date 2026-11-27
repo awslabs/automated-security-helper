@@ -13,10 +13,11 @@
  * has the new spelling and uses the old one when it does not.
  *
  * Only an answer picks the old spelling: a help that does not name the command, or
- * a usage error that refuses its first word. A probe that fails any other way (a
- * crash, an import error, an out-of-memory kill) says nothing about the ASH's
- * commands, so the step fails with the end of the probe's output and runs neither
- * spelling. Every run prints the spelling it chose and why to stderr.
+ * a usage error that refuses the word the command adds (`fs`, or `results`). A probe
+ * that fails any other way (a crash, an import error, an out-of-memory kill) says
+ * nothing about the ASH's commands, so the step fails with the end of the probe's
+ * output and runs neither spelling. Every run prints the spelling it chose and why to
+ * stderr.
  *
  * These tests run the rendered commands in a real shell against a stand-in `ash`
  * that answers the help probe as each kind of release would, and record the command
@@ -388,8 +389,11 @@ describe('a probe that does not answer is not read as an older ASH', () => {
   });
 
   test('the step\'s exit status is not the probe\'s, so ASH\'s own codes stay ASH\'s', () => {
-    // The merge's 1 and 2 and the scan's exit codes are verdicts. A probe that did
-    // not answer is reported as a plain failure and never as one of them.
+    // The probe exits 5 here, ASH's usage-error code, and the step does not pass that
+    // on: a probe that did not answer ends the step with status 1, a plain failure.
+    // One is also the code the merge gives for an incomplete result, so the status
+    // alone does not tell the two apart; the end of the probe's output, which the
+    // step prints, does.
     expect(run(MERGE, 'unexplained-exit').status).toBe(1);
   });
 });
