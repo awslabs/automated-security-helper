@@ -1809,6 +1809,21 @@ def test_a_token_wrapped_inside_a_middle_column_is_not_rejoined_so_recordings_mu
     assert "/home/builder" in cast.flatten_text(last)
 
 
+def test_a_token_wrapped_inside_a_table_drawn_with_ascii_bars_is_not_rejoined(cast):
+    """Another limit of the flat view, pinned as it is: only box-drawing characters
+    count as the borders of a table, so the bars of a table drawn with ``|`` stay
+    between the halves of a path that wraps inside it, even in a table of one column.
+    A recording must not wrap a table of this kind either.
+    """
+    tokens = [cast.ForbiddenToken("home", "/home/builder")]
+    ascii_table = "| /home/bu |\r\n| ilder/x |"
+    assert "/home/builder" not in cast.flatten_text(ascii_table)
+    assert cast.scan_text(ascii_table, tokens, "event 6") == []
+    # The same table drawn with box-drawing characters is found.
+    drawn = f"{BAR} /home/bu {BAR}\r\n{BAR} ilder/x {BAR}"
+    assert [hit.view for hit in cast.scan_text(drawn, tokens, "event 6")] == ["flat"]
+
+
 def test_a_hit_names_its_kind_and_never_the_value(cast):
     hits = cast.scan_text("at /home/builder/x", _tokens(cast), "event 3")
     assert len(hits) == 1
