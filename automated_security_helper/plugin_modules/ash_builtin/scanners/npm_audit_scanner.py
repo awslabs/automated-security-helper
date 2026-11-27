@@ -1,6 +1,7 @@
 """Module containing the NPM Audit security scanner implementation."""
 
 import copy
+import errno
 import hashlib
 import json
 import logging
@@ -365,9 +366,13 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
 
     None is never silent, and the warning says which of two things happened: the
     lockfile is outside the scanned directory (the resolved compare raised
-    ``ValueError``), or one of the two places could not be resolved at all (an
-    ``OSError``: a link loop, a directory the process cannot search), which says
-    nothing about where the lockfile is.
+    ``ValueError``), or one of the two places could not be resolved at all, which
+    says nothing about where the lockfile is. That is an ``OSError`` for a
+    directory the process cannot search; for a link loop, ``Path.resolve`` raises
+    ``RuntimeError`` before Python 3.13 and nothing from 3.13, where the loop
+    shows as the place not being under the directory. A ``RuntimeError`` is named
+    by the system's reason for a loop, never by its own text, which names the
+    looped path.
     """
     if lock_file is None:
         return None
@@ -397,12 +402,17 @@ def _shown_lockfile(lock_file: Path | None, target_path: Path | str) -> str | No
             extra=NO_MARKUP,
         )
         return None
-    except OSError as error:
+    except (OSError, RuntimeError) as error:
         # The same consequence, for another cause: a place could not be read, so
         # the lockfile may well be under the scanned directory and the message
         # must not say it is not. The error's own reason alone: its full text
-        # repeats the path, which this message already names.
-        reason = error.strerror or type(error).__name__
+        # repeats the path, which this message already names. A RuntimeError is
+        # Path.resolve()'s link loop before Python 3.13; its text names the
+        # looped path, so the loop's reason is the system's own.
+        if isinstance(error, RuntimeError):
+            reason = os.strerror(errno.ELOOP)
+        else:
+            reason = error.strerror or type(error).__name__
         ASH_LOGGER.warning(
             f"npm-audit: the place of {lock_file} relative to the scanned "
             f"directory {target_path} could not be read ({reason})"

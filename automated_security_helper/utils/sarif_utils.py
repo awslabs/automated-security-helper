@@ -1450,13 +1450,14 @@ def _apply_config_suppression(
     recorded_fields: Dict[int, Dict[str, Any]] | None = None,
     written_ids: Dict[int, str] | None = None,
     warned_engines: set | None = None,
-    warned_rule_less: set | None = None,
+    warned_rule_less: Dict[int, Any] | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
-    ``warned_rule_less`` is the run's warn-once set
-    (``PluginContext.warned_rule_less_suppressions``) for a suppression that names
+    ``warned_rule_less`` is the run's warn-once mapping of an entry's ``id()`` to
+    the entry (``PluginContext.warned_rule_less_suppressions``); an id is a receipt
+    only for the entry it maps to. It is for a suppression that names
     no rule and matches an npm-audit finding: npm-audit findings moved from
     ``node_modules/<package>/package.json`` locations into the audited lockfile,
     so a rule-less entry whose path scope matches a lockfile (``deploy/**``,
@@ -1493,9 +1494,9 @@ def _apply_config_suppression(
         and not (getattr(matching_suppression, "package_name", None) or "").strip()
         and flat_finding.scanner == "npm-audit"
         and not _is_install_location_uri(flat_finding.file_path)
-        and id(matching_suppression) not in warned_rule_less
+        and warned_rule_less.get(id(matching_suppression)) is not matching_suppression
     ):
-        warned_rule_less.add(id(matching_suppression))
+        warned_rule_less[id(matching_suppression)] = matching_suppression
         ASH_LOGGER.warning(
             f"A suppression that names no rule_id"
             f"{_written_entry_clause(matching_suppression, recorded_fields)} "
@@ -2394,13 +2395,13 @@ def _apply_suppressions_within_budget(
     written_ids: Dict[int, str] = {}
     # Warn once per rule-less entry that covers an npm-audit finding (see
     # _apply_config_suppression): once per RUN, the docs' "once per entry per
-    # run", so the set lives on the context like warned_unmatched_engines does
+    # run", so the receipts live on the context like warned_unmatched_engines does
     # and a second report pass of the same scan does not warn again. A stand-in
-    # context without the set (a test double, or one whose attribute is not a
-    # set) falls back to once per pass.
+    # context without the mapping (a test double, or one whose attribute is not a
+    # dict) falls back to once per pass.
     warned_rule_less = getattr(plugin_context, "warned_rule_less_suppressions", None)
-    if not isinstance(warned_rule_less, set):
-        warned_rule_less = set()
+    if not isinstance(warned_rule_less, dict):
+        warned_rule_less = {}
 
     # Exclusions a delivered config gave one scanner in its options, moved out of
     # them before the scan so the files were scanned. Each finding of that scanner
