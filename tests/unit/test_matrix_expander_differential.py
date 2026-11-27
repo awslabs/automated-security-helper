@@ -461,3 +461,126 @@ def test_the_cover_check_comparison_can_fail():
     ):
         assert _old_is_cover(value) is False
         assert _adapted_is_cover(value) is False
+
+
+# ---------------------------------------------------------------------------
+# The three places as they are now, held against the copies above.
+# ---------------------------------------------------------------------------
+
+CI_RUNNERS = REPO_ROOT / "tests" / "integration" / "docs" / "ci_runners"
+UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
+PRE_COMMIT_MANIFEST_TEST = (
+    REPO_ROOT / "tests" / "unit" / "test_pre_commit_hooks_manifest.py"
+)
+SHARDS_TEST = REPO_ROOT / "tests" / "unit" / "test_unit_test_shards.py"
+
+
+def _load_module(name, path):
+    """A file of the repository loaded by path under a name of its own."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader, f"cannot load {path}"
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _reports():
+    """tests/integration/docs/ci_runners/reports.py, loaded inside its package."""
+    package = "_f2b_ci_runners"
+    if package not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            package,
+            CI_RUNNERS / "__init__.py",
+            submodule_search_locations=[str(CI_RUNNERS)],
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[package] = module
+        spec.loader.exec_module(module)
+    return importlib.import_module(f"{package}.reports")
+
+
+def test_the_re_pointed_effective_cells_equal_the_old_ones(record_property):
+    manifest = _load_module("_f2b_pre_commit_hooks_manifest", PRE_COMMIT_MANIFEST_TEST)
+    assert manifest.ci_matrix is ci
+    compared = 0
+    for name, job_id in SURFACES:
+        job = _workflow(name)[0]["jobs"][job_id]
+        for method in job["strategy"]["matrix"]["method"]:
+            got = manifest._effective_cells(job, method)
+            assert got == _old_effective_cells(job, method), (name, job_id, method)
+            compared += 1
+    assert compared >= 15, compared
+    record_property("counts", f"site1 re-pointed function: methods compared={compared}")
+
+
+def test_the_re_pointed_matrix_entries_equal_the_old_ones(record_property):
+    reports = _reports()
+    assert sys.modules["_ash_ci_matrix"] is ci
+    compared = 0
+    for path in ALL_WORKFLOWS:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_id, job in document["jobs"].items():
+            matrix = _matrix_of(job)
+            if not isinstance(matrix, dict) or not matrix or _includes_only(matrix):
+                continue
+            got = reports.matrix_entries(copy.deepcopy(matrix))
+            expected = _old_matrix_entries(copy.deepcopy(matrix))
+            assert got == expected, (path.name, job_id)
+            assert reports.matrix_runs(job) == len(got), (path.name, job_id)
+            compared += 1
+    assert compared >= 15, compared
+    for matrix in PLANTED_MATRICES.values():
+        got = reports.matrix_entries(copy.deepcopy(matrix))
+        assert got == _old_matrix_entries(copy.deepcopy(matrix))
+    only = {"include": [{"x": 1}, {"x": 2}]}
+    assert reports.matrix_entries(only) == [{"x": 1}, {"x": 2}]
+    assert reports.matrix_runs({"strategy": {"matrix": only}}) == 2
+    record_property(
+        "counts", f"site2 re-pointed function: matrices compared={compared}"
+    )
+
+
+def test_the_re_pointed_matrix_runs_refuse_what_they_refused():
+    reports = _reports()
+    for matrix in (
+        {"os": "${{ fromJSON(inputs.os) }}"},
+        {"os": "ubuntu-latest"},
+        {"os": ["a"], "exclude": "x"},
+    ):
+        with pytest.raises(ValueError):
+            reports.matrix_entries(matrix)
+    with pytest.raises(ValueError, match="cannot be counted before the run"):
+        reports.matrix_runs(
+            {"strategy": {"matrix": "${{ fromJSON(needs.x.outputs.m) }}"}}
+        )
+    assert reports.matrix_runs({"runs-on": "x"}) == 1
+    assert reports.matrix_runs({"strategy": {"matrix": {}}}) == 1
+
+
+def test_the_re_pointed_cover_assertion_flags_what_is_not_a_cover(record_property):
+    shards = _load_module("_f2b_unit_test_shards", SHARDS_TEST)
+    assert shards.ci_matrix is ci
+    check = shards._assert_only_the_pull_request_cover
+    document = yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
+    checked = 0
+    for job_id in (*shards.SHARDED_TIER_JOB_IDS, *shards.E2E_TEST_JOB_IDS):
+        matrix = document["jobs"][job_id]["strategy"]["matrix"]
+        for entry in matrix.get("exclude") or []:
+            assert all(_old_is_cover(value) for value in entry.values())
+            checked += len(entry)
+        check(job_id, matrix)
+    assert checked >= 15, checked
+    check("planted", {"exclude": [{"os": _overlay("ubuntu-latest")}]})
+    check("planted", {"os": ["a"]})
+    for exclude in (
+        {"os": "windows-latest"},
+        {"os": None},
+        {"python-version": 3.11},
+        {"os": "${{ github.event_name == 'push' && 'a' || '' }}"},
+        {"os": "${{ github.event_name == 'pull_request' && 'a' && 'b' || '' }}"},
+    ):
+        with pytest.raises(AssertionError, match="static exclude"):
+            check("planted", {"exclude": [exclude]})
+    record_property("counts", f"site3 re-pointed assertion: cover entries={checked}")
