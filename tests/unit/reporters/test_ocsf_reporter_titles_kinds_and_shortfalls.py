@@ -12,8 +12,9 @@
   ``messageStrings``, else its ``shortDescription``, and the id is the last
   fallback. When two scanners declare one rule id, the rule is the one in the
   tool component of the result's own scanner.
-* A result whose kind says no problem (pass, notApplicable, informational) was
-  emitted as a New vulnerability finding.
+* A result whose kind says no problem (pass, notApplicable, informational) and
+  whose level reports none was emitted as a New vulnerability finding; one that
+  reports a problem by its level is a finding and is emitted.
 * One location value the schema refuses discarded every location, the CVE and
   the description of the finding.
 * Results dropped for a failed build or serialization left no mark in the array,
@@ -337,13 +338,34 @@ class TestNonFindingKinds:
     @pytest.mark.parametrize(
         "kind", [Kind.pass_, Kind.notApplicable, Kind.informational]
     )
-    @pytest.mark.parametrize("level", [Level.none, Level.error])
-    def test_a_result_that_states_no_problem_is_not_emitted(
+    def test_a_result_that_states_no_problem_is_not_emitted(self, reporter, kind):
+        """A result of such a kind at level ``none`` states no finding and is left
+        out."""
+        payload = json.loads(
+            reporter.report(
+                _model(
+                    Result(
+                        ruleId="CDK-1",
+                        kind=kind,
+                        level=Level.none,
+                        message=Message(text="x"),
+                    ),
+                    Result(ruleId="B102", level=Level.error, message=Message(text="y")),
+                )
+            )
+        )
+
+        assert [r["vulnerabilities"][0]["title"] for r in payload] == ["B102"]
+
+    @pytest.mark.parametrize(
+        "kind", [Kind.pass_, Kind.notApplicable, Kind.informational]
+    )
+    @pytest.mark.parametrize("level", [Level.warning, Level.error])
+    def test_a_result_whose_level_reports_a_problem_is_exported_with_an_identity(
         self, reporter, kind, level
     ):
-        """The kind decides, not the level: a ``pass`` result at level ``error``
-        is left out as well, which a fixture at level ``none`` alone cannot
-        tell from a filter on the level."""
+        """A result that contradicts its kind is a finding: the level decides, so
+        it is emitted beside the other finding, with a uid of its own."""
         payload = json.loads(
             reporter.report(
                 _model(
@@ -358,7 +380,9 @@ class TestNonFindingKinds:
             )
         )
 
-        assert [r["vulnerabilities"][0]["title"] for r in payload] == ["B102"]
+        titles = sorted(r["vulnerabilities"][0]["title"] for r in payload)
+        assert titles == ["B102", "CDK-1"]
+        assert all(r["finding_info"]["uid"] for r in payload)
 
     def test_a_document_of_only_non_findings_is_an_empty_array(self, reporter):
         """Nothing was a finding, so nothing failed: not the all-failed error

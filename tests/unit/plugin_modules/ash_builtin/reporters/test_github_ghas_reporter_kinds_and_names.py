@@ -5,8 +5,10 @@
 it leaves out by kind.
 
 * A result whose ``kind`` is ``open`` or ``review`` is left out of the file with
-  every other non-failing kind, while the OCSF report keeps it; the file now
-  logs a warning with the count per kind.
+  every result that states no finding, while the OCSF report keeps it; the file
+  logs a warning with the count per kind. A result of kind ``pass``,
+  ``notApplicable`` or ``informational`` that reports a problem by its level is a
+  finding and is uploaded.
 * The scanner a result names is read as the flattening reads it, so a result
   that carries ``scanner_details.tool_name`` and no ``scanner_name`` still finds
   the qualified rule of its scanner.
@@ -130,6 +132,38 @@ class TestUnjudgedKindsAreCounted:
 
         warned = [call.args[0] for call in logger.warning.call_args_list]
         assert not any("of kind" in message for message in warned)
+
+    @pytest.mark.parametrize(
+        "kind", [Kind.pass_, Kind.notApplicable, Kind.informational]
+    )
+    def test_a_result_whose_level_reports_a_problem_is_uploaded(self, reporter, kind):
+        """A result that contradicts its kind is a finding: it is uploaded, and the
+        warning about results code scanning cannot judge is not about it."""
+        results = [
+            Result(ruleId="A", level=Level.error, message=Message(text="a")),
+            Result(
+                ruleId="B", kind=kind, level=Level.warning, message=Message(text="b")
+            ),
+        ]
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=results)
+
+        doc = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        assert [r["ruleId"] for r in doc["results"]] == ["A", "B"]
+
+    @pytest.mark.parametrize("kind", [Kind.open, Kind.review])
+    def test_open_and_review_results_are_still_left_out(self, reporter, kind):
+        """Guard: code scanning cannot judge an ``open`` or ``review`` result, so
+        it is left out whatever its level says."""
+        results = [
+            Result(ruleId="A", level=Level.error, message=Message(text="a")),
+            Result(ruleId="B", kind=kind, level=Level.error, message=Message(text="b")),
+        ]
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=results)
+
+        doc = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        assert [r["ruleId"] for r in doc["results"]] == ["A"]
 
     def test_a_document_refused_for_its_base_ids_still_counts_the_kinds(
         self, reporter, monkeypatch

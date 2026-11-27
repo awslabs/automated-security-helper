@@ -4,12 +4,14 @@
 """Bedrock's ``actionable_only`` does not send a result whose kind states no finding.
 
 ``actionable_only`` sends the findings the exit-code gate counts, and the gate no
-longer counts a result of kind ``pass``, ``notApplicable`` or ``informational``
-(``sarif_utils.NON_FINDING_KINDS``). SARIF gives such a result level ``none``, which
-ASH grades INFO, and a threshold of ``ALL`` fails INFO, so the reporter sent the note a
-scanner records for a rule it did not evaluate to the model as a finding to analyze.
-The findings details name why each result was left out, and a result that is not a
-finding is not "below threshold".
+longer counts a result of kind ``pass``, ``notApplicable`` or ``informational`` whose
+level is ``none`` (or not stated) and whose declared severity is at most INFO. SARIF
+gives such a result level ``none``, which ASH grades INFO, and a threshold of ``ALL``
+fails INFO, so the reporter sent the note a scanner records for a rule it did not
+evaluate to the model as a finding to analyze. The findings details name why each
+result was left out, and a result that is not a finding is not "below threshold". A
+result of such a kind that reports a problem by its level is a finding and is sent
+when its grade reaches the threshold.
 
 Every test with a non-finding kind has a control that changes the kind and nothing
 else. With ``actionable_only`` off every result is sent, as the option says.
@@ -62,8 +64,14 @@ def no_aws(monkeypatch, tmp_path):
     monkeypatch.setattr("botocore.endpoint.Endpoint._send", refuse)
 
 
-def _model(kind: str | None, *, suppressed: bool = False) -> AshAggregatedResults:
-    """A HIGH finding and a note of *kind*, under a gate of ALL."""
+def _model(
+    kind: str | None,
+    *,
+    suppressed: bool = False,
+    note_level: str = "none",
+    threshold: str = "ALL",
+) -> AshAggregatedResults:
+    """A HIGH finding and a note of *kind* at *note_level*, under a gate of *threshold*."""
     high: dict[str, Any] = {
         "ruleId": "R-HIGH",
         "level": "error",
@@ -76,7 +84,7 @@ def _model(kind: str | None, *, suppressed: bool = False) -> AshAggregatedResult
     }
     note: dict[str, Any] = {
         "ruleId": "R-NOTE",
-        "level": "none",
+        "level": note_level,
         "message": {"text": "R-NOTE"},
         "properties": {"scanner_name": "bandit", "tags": []},
     }
@@ -86,7 +94,7 @@ def _model(kind: str | None, *, suppressed: bool = False) -> AshAggregatedResult
         note["suppressions"] = [{"kind": "external", "justification": "x"}]
     model = AshAggregatedResults()
     model.ash_config = AshConfig.model_validate(
-        {"project_name": "p", "global_settings": {"severity_threshold": "ALL"}}
+        {"project_name": "p", "global_settings": {"severity_threshold": threshold}}
     )
     model.sarif = SarifReport.model_validate(
         {
@@ -160,13 +168,30 @@ def test_the_findings_details_leave_out_nothing_that_asserts_a_finding(
 
 
 @pytest.mark.parametrize("kind", NON_FINDING)
-def test_a_suppressed_result_that_states_no_finding_is_left_out_as_suppressed(
+def test_a_suppressed_result_that_states_no_finding_is_left_out_as_not_a_finding(
     test_plugin_context, kind
 ):
-    """Must-not-regress control: a suppression in effect is the reason that is given.
-
-    Green at the base too.
-    """
+    """A result that states no finding is left out as not a finding, suppressed or
+    not: the finding rule is read before the suppression."""
     left_out = _left_out(_reporter(test_plugin_context), _model(kind, suppressed=True))
 
-    assert left_out == {"R-HIGH": None, "R-NOTE": "suppressed"}
+    assert left_out == {"R-HIGH": None, "R-NOTE": "not a finding"}
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_result_whose_level_reports_a_problem_is_sent(test_plugin_context, kind):
+    """A result that contradicts its kind is a finding, graded by its level: at
+    MEDIUM, a note at level warning reaches the model."""
+    model = _model(kind, note_level="warning", threshold="MEDIUM")
+
+    assert _sent(_reporter(test_plugin_context), model) == ["R-HIGH", "R-NOTE"]
+
+
+@pytest.mark.parametrize("kind", ["fail", "open", "review"])
+def test_the_same_result_that_asserts_a_finding_is_sent_at_medium(
+    test_plugin_context, kind
+):
+    """Control for the pair row: only the kind changes."""
+    model = _model(kind, note_level="warning", threshold="MEDIUM")
+
+    assert _sent(_reporter(test_plugin_context), model) == ["R-HIGH", "R-NOTE"]

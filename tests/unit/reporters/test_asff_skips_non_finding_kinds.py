@@ -3,20 +3,26 @@
 
 """The ASFF export carries a result that states a finding and no other.
 
-A SARIF result of kind ``pass``, ``notApplicable`` or ``informational`` says that a
-rule passed, did not apply, or reported information only
-(``sarif_utils.NON_FINDING_KINDS``). Exported as a Security Hub finding it is a
-record in a SIEM that nobody can act on, such as an INFORMATIONAL finding for a
-cdk-nag rule that was not evaluated. The OCSF, GitLab SAST and GitHub reporters
-already leave such a result out.
+A SARIF result of kind ``pass``, ``notApplicable`` or ``informational`` whose level
+is ``none`` (or not stated) and whose declared severity is at most INFO says that a
+rule passed, did not apply, or reported information only. Exported as a Security Hub
+finding it is a record in a SIEM that nobody can act on, such as an INFORMATIONAL
+finding for a cdk-nag rule that was not evaluated. The OCSF, GitLab SAST and GitHub
+reporters already leave such a result out.
+
+A result of such a kind that reports a problem anyway, by a level above ``none`` or
+by a declared severity above INFO, contradicts its kind and is a finding: it is
+exported, graded as any other result. A suppressed result that states no finding is
+still sent, as ARCHIVED, so that an earlier import of it is archived.
 
 The formatter pairs each result with its flattened finding by position, and the
 flattening holds every result of the run, so every result is still prepared and
 paired and only the findings it returns are filtered. The last test pins that.
 
 Every test with a non-finding kind has a control that changes the kind and nothing
-else. A failing result (the default kind), and the two kinds that assert a finding a
-reader still has to judge, ``open`` and ``review``, are exported as before.
+else. A failing result (the default kind, stated or absent), and the two kinds that
+assert a finding a reader still has to judge, ``open`` and ``review``, are exported
+as before.
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.asff_formatt
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Kind,
+    Kind1,
     Level,
     Location,
     Message,
@@ -44,6 +51,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Run,
     SarifReport,
+    Suppression,
     Tool,
     ToolComponent,
 )
@@ -65,28 +73,45 @@ CORRELATION_FIELD = "ash/correlationId"
 NON_FINDING = sorted(NON_FINDING_KINDS)
 # The kinds that assert a finding.
 FINDING = ["fail", "open", "review"]
+# The same, and a result that states no kind at all, which is a fail result.
+ANY_FINDING = [None, *FINDING]
 
 
 def _result(
     rule: str,
     *,
-    kind: str = "fail",
+    kind: str | None = "fail",
     level: str = "error",
     scanner: str = "cdk-nag",
     uri: str = "stack.template.json",
     start: int = 3,
     tags: list[str] | None = None,
+    issue_severity: str | None = None,
+    suppressed: bool = False,
 ) -> Result:
-    """A located result of *scanner* with *kind* and *level*."""
+    """A located result of *scanner* with *kind* and *level*.
+
+    A *kind* of None leaves the kind unstated; *suppressed* adds a suppression in
+    effect.
+    """
     properties: dict[str, Any] = {"scanner_name": scanner}
     if tags:
         properties["tags"] = tags
+    if issue_severity:
+        properties["issue_severity"] = issue_severity
+    stated: dict[str, Any] = {}
+    if kind is not None:
+        stated["kind"] = Kind(kind)
+    if suppressed:
+        stated["suppressions"] = [
+            Suppression(kind=Kind1.inSource, justification="reviewed")
+        ]
     return Result(
         ruleId=rule,
-        kind=Kind(kind),
         level=Level(level),
         message=Message(text=f"{rule} reported here"),
         properties=PropertyBag(**properties),
+        **stated,
         locations=[
             Location(
                 physicalLocation=PhysicalLocation(
@@ -149,7 +174,48 @@ def test_a_run_of_only_results_that_state_no_finding_exports_nothing(kind):
     assert _export(model) == []
 
 
-@pytest.mark.parametrize("kind", FINDING)
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_suppressed_result_that_states_no_finding_is_sent_archived(kind):
+    """The rule is read before the suppression: the note is no finding, so it is
+    not an active record, but it is still sent once as ARCHIVED so that an earlier
+    import of it is archived."""
+    model = _model(
+        _result("AwsSolutions-S1", kind=kind, level="none", start=3, suppressed=True),
+        _result("AwsSolutions-IAM4", start=9),
+    )
+
+    exported = _export(model)
+
+    assert _rules(exported) == ["AwsSolutions-S1", "AwsSolutions-IAM4"]
+    assert [finding["RecordState"] for finding in exported] == ["ARCHIVED", "ACTIVE"]
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_result_whose_level_reports_a_problem_is_exported(kind):
+    """A result that contradicts its kind is a finding, graded by its level."""
+    model = _model(_result("AwsSolutions-S1", kind=kind, level="warning"))
+
+    exported = _export(model)
+
+    assert _rules(exported) == ["AwsSolutions-S1"]
+    assert exported[0]["Severity"]["Label"] == "MEDIUM"
+    assert exported[0]["RecordState"] == "ACTIVE"
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_a_result_with_a_high_issue_severity_is_exported(kind):
+    """A declared severity above INFO reports a problem whatever the level says."""
+    model = _model(
+        _result("AwsSolutions-S1", kind=kind, level="none", issue_severity="HIGH")
+    )
+
+    exported = _export(model)
+
+    assert _rules(exported) == ["AwsSolutions-S1"]
+    assert exported[0]["Severity"]["Label"] == "HIGH"
+
+
+@pytest.mark.parametrize("kind", ANY_FINDING)
 def test_the_same_result_that_asserts_a_finding_is_exported(kind):
     model = _model(
         _result("AwsSolutions-S1", kind=kind, level="none", start=3),
