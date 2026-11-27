@@ -1071,9 +1071,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # No environment modifications are currently needed for Snyk Code.
             effective_timeout = self._effective_scan_timeout()
             # The CLI reads a snyk.<ext> configuration file from its working
-            # directory, so it starts in a new empty directory outside the scanned
-            # tree. The target and the SARIF output path in final_args are
-            # absolute (made so above), so they name the same files from there.
+            # directory, so it starts in a new, empty, private directory of its own
+            # (utils/tool_config_dir.py). That directory is outside the scanned tree
+            # unless no private directory is outside it, then inside it with a
+            # warning, and when none is private nothing starts: this scan fails. The
+            # target and the SARIF output path in final_args are absolute (made so
+            # above), so they name the same files from there.
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
