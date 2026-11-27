@@ -10,10 +10,15 @@ file: VALUE>``, because a scan of that checkout ignores them. VALUE shows every
 literal the client's file wrote exactly as written. A value the file wrote as a
 reference (``${VAR}``, ``${VAR:default}``, with or without text after it) is
 shown as ``<from ${VAR}>`` whether or not the variable is set, from the
-variable's name the loader's own mark carries, so the answer never depends on
+variable's name the loader's own mark carries, so the answer does not depend on
 what the server's environment holds: a literal that equals or contains a value
 the server read is shown as written, the same as one that does not, and a guess
-gets the same answer as a miss.
+gets the same answer as a miss. The one exception is a reference that resolves
+to nothing: with its variable unset and its default empty, blank or ``None``,
+or with its variable set to blank text, the loader gives the option no value
+and no mark, so it is shown as ``null``, and as ``<from ${VAR}>`` once the
+variable holds text. The answer then says whether the variable holds text,
+never what it holds.
 
 The one condition is where a value came from. A place that a file of the chain
 that is not the client's (the operator's own file, or a base outside every
@@ -29,10 +34,13 @@ unmarked), pin the refusal for a load that did not record exactly one set of
 settings, and call ``mark_operator_only_options`` directly with a record built
 from the data.
 
-Two more pin what the marker is made of. A value the operator's own file read
+More cells pin what the marker is made of. A value the operator's own file read
 from the environment is never replaced inside a marker written at the place its
 reference sits, because the display walk runs on the dump before the markers go
-in. And a default reference is shown by its reference, the variable set or not.
+in. A reference with a default is shown by its reference, the variable set or
+not. A reference that resolves to nothing is shown as null until its variable
+holds text, and one with no default still fails the load while its variable is
+unset.
 """
 
 import contextlib
@@ -575,6 +583,98 @@ def test_a_reference_with_a_default_is_shown_by_its_reference_whether_or_not_the
     assert set_value not in text, result
     if tail:
         assert tail not in _scope(result), result
+
+
+#: The variable the cells for a reference that resolves to nothing read, and the
+#: text the server's environment gives it where it holds text. The name starts
+#: with ASH_TEST_, which the loader reads, and does not end in _KEY, _TOKEN,
+#: _SECRET or _PASSWORD, which it refuses.
+_BLANK_VAR = "ASH_TEST_BLANK_SCOPE"
+_BLANK_REFERENCE = "<from ${ASH_TEST_BLANK_SCOPE}>"
+_SERVER_TEXT = "server-value-9c2d"
+
+_BOTH_ROUTES = pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param(_named_from_elsewhere, id="named-file"),
+        pytest.param(_found_by_ash_config, id="ash-config-no-file-named"),
+    ],
+)
+
+
+@_BOTH_ROUTES
+@pytest.mark.parametrize(
+    "written, held",
+    [
+        pytest.param("${ASH_TEST_BLANK_SCOPE:}", None, id="empty-default-unset"),
+        pytest.param("${ASH_TEST_BLANK_SCOPE:None}", None, id="none-default-unset"),
+        # A plain YAML scalar cannot hold ": " (a mapping indicator), so a
+        # default of blanks is written as an explicitly tagged quoted scalar.
+        pytest.param(
+            '!ENV "${ASH_TEST_BLANK_SCOPE:   }"', None, id="blank-default-unset"
+        ),
+        pytest.param("${ASH_TEST_BLANK_SCOPE}", "", id="set-to-empty-text"),
+        pytest.param("${ASH_TEST_BLANK_SCOPE}", "   ", id="set-to-blanks"),
+    ],
+)
+def test_a_reference_that_resolves_to_nothing_is_shown_as_null(
+    tmp_path, monkeypatch, answer, written, held
+):
+    """A reference that resolves to nothing gives the option no value: the
+    loader returns None for it (``resolve_env_references``), which carries no
+    mark and no variable name, so the marker shows ``null`` on both routes."""
+    if held is None:
+        monkeypatch.delenv(_BLANK_VAR, raising=False)
+    else:
+        monkeypatch.setenv(_BLANK_VAR, held)
+    body = _section(f"findings_scope: {written}\n")
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    assert _scope(result) == _IGNORED + "null>", result
+
+
+@_BOTH_ROUTES
+@pytest.mark.parametrize(
+    "written",
+    [
+        pytest.param("${ASH_TEST_BLANK_SCOPE:}", id="empty-default"),
+        pytest.param("${ASH_TEST_BLANK_SCOPE:None}", id="none-default"),
+        pytest.param('!ENV "${ASH_TEST_BLANK_SCOPE:   }"', id="blank-default"),
+        pytest.param("${ASH_TEST_BLANK_SCOPE}", id="no-default"),
+    ],
+)
+def test_the_same_reference_is_shown_by_its_reference_once_its_variable_holds_text(
+    tmp_path, monkeypatch, answer, written
+):
+    """The controls for the cell above: with the variable holding text, each
+    of the same references is marked by the loader and shown as
+    ``<from ${ASH_TEST_BLANK_SCOPE}>``, and the text is nowhere in the
+    answer."""
+    monkeypatch.setenv(_BLANK_VAR, _SERVER_TEXT)
+    body = _section(f"findings_scope: {written}\n")
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    assert not _wrong(
+        result, _scope(result), _IGNORED + _BLANK_REFERENCE + ">", _SERVER_TEXT
+    ), result
+
+
+def test_a_reference_with_no_default_still_fails_the_load_while_its_variable_is_unset(
+    tmp_path, monkeypatch
+):
+    """``${VAR}`` with VAR unset has no value to fall back to, so the load
+    refuses the file (``ASHConfigUnsetVariableError``) and the answer names the
+    variable instead of showing a marker."""
+    monkeypatch.delenv(_BLANK_VAR, raising=False)
+    body = _section("findings_scope: ${ASH_TEST_BLANK_SCOPE}\n")
+
+    result = _named_from_elsewhere(tmp_path, monkeypatch, body)
+
+    assert result.get("success") is False, result
+    assert result.get("error_category") == "invalid_format", result
+    assert _BLANK_VAR in json.dumps(result, default=str), result
 
 
 def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(

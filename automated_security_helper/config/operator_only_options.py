@@ -1344,6 +1344,15 @@ def _marker_value(value: Any) -> str:
        answer depends on a value the server read, so a guess at one gets the
        answer a miss gets.
 
+    A reference that resolves to nothing carries no mark and is not shown
+    under 1. With its variable unset and its default empty, blank or
+    ``None``, or with its variable set to blank text, and no text after the
+    reference, the loader gives the place no value (``None``; see
+    ``resolve_env_references``), shown here as ``null``. Once the variable
+    holds text, the same reference is shown as ``<from ${VAR}>``. For such a
+    reference the marker says whether the variable holds text, never what it
+    holds.
+
     A set or frozenset is shown as a JSON list of its members, in the order
     of their shown text, so one set always has one marker.
     """
@@ -1432,9 +1441,10 @@ def mark_operator_only_options(
 
     VALUE is the client's file's own text, shown as ``_marker_value`` shows
     it: every literal exactly as written, and a leaf or key written as a
-    reference as ``<from ${VAR}>``. Nothing in the answer depends on whether a
-    literal equals, or contains, a value the server read, so a guess gets the
-    answer a miss gets.
+    reference as ``<from ${VAR}>`` (one that resolves to nothing as ``null``,
+    which says whether its variable holds text; see ``_marker_value``).
+    Nothing in the answer depends on whether a literal equals, or contains, a
+    value the server read, so a guess gets the answer a miss gets.
 
     One condition decides whether VALUE is shown at all: whether the value
     came from the client's file. A place that ``written.withheld`` names (one

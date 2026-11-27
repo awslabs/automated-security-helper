@@ -5174,8 +5174,14 @@ def mcp_get_config(
         literal the client's file wrote exactly as written. A value the file
         wrote as a reference is the server's, so VALUE is never that value: it
         is ``<from ${VAR}>``, built from the variable's name alone, whether or
-        not the variable is set. Nothing in the answer depends on whether a
-        literal equals, or contains, a value the server read. The one
+        not the variable is set. A reference that resolves to nothing (its
+        variable unset and its default empty, blank or ``None``, or its
+        variable set to blank text, with no text after the reference) leaves
+        the option no value and so no reference to show: VALUE is ``null``
+        then, and ``<from ${VAR}>`` once the variable holds text, so for such
+        a reference the answer says whether the variable holds text, never
+        what it holds. Nothing in the answer depends on whether a literal
+        equals, or contains, a value the server read. The one
         condition is where a value came from: a place a file of the chain that
         is not the client's (the operator's, or a base outside every checkout)
         also writes is shown as ``<withheld>`` whatever it holds. A refused path returns ``success`` False with ``error_type``
@@ -5544,8 +5550,9 @@ def _answer_get_config(
         # place, so it never runs over a marker. The markers are built from the
         # record (settings), never from the dump: a literal the client's file
         # wrote is shown as written, a value it wrote as a reference is shown by
-        # the reference, and a place a file that is not the client's also
-        # writes is withheld.
+        # the reference (one that resolves to nothing as null: it leaves no
+        # value), and a place a file that is not the client's also writes is
+        # withheld.
         return mark_operator_only_options(
             shown_config(base, base.model_dump()),
             settings,
@@ -5889,8 +5896,8 @@ def _answer_get_config(
     # the operator's own ASH_CONFIG file, outside every checkout, can read such an
     # option from the environment while the named file writes it too. A walk
     # after the marking would edit a marker's text. The markers are built from
-    # the record (written) and from the references and values passed in, never
-    # from the dump, so nothing after the marking touches one.
+    # the record (written) alone, never from the dump, so nothing after the
+    # marking touches one.
     shown = shown_config(resolved, resolved.model_dump())
     # Marked when no chain file is inside the scanned trees -- judged against
     # the trees the resolution confined with (RepositorySettings.trees), with
@@ -5918,8 +5925,10 @@ def _answer_get_config(
         # the record's value (``EnvResolvedScalar.variable``) names the
         # variable, so both routes show the same ``<from ${VAR}>`` whether or
         # not the variable is set, and the option stays marked: the client
-        # reads that the file set an option a scan ignores. Every literal the
-        # client's file wrote is shown as written, whatever it equals or
+        # reads that the file set an option a scan ignores. A reference that
+        # resolves to nothing leaves the record no value and no mark, and is
+        # shown as null (_marker_value). Every literal the client's file wrote
+        # is shown as written, whatever it equals or
         # contains: nothing in the answer depends on a value the server read.
         # A place a chain file that is not the client's also writes, or that
         # the client's file wrote beside such a file, is withheld whatever its
