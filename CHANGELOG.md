@@ -250,12 +250,16 @@
   converter or a tool ASH could not stop, which has no scanner row, carried an empty
   gap. The registry refused to record an incomplete scan without one, and the entry
   stayed running, listed as active and blocking the next scan of the same directory.
-  The fallback now reads every field of the exit and reports every coverage key; a row
-  it cannot read is reported as `unknown`, and an exit with nothing readable as one
-  incomplete scanner named `unknown`. A close of an incomplete scan that fails is
-  retried with that gap instead of with no coverage, and a close that fails on the
-  incomplete-coverage path is recorded the way one on the completed path is, instead of
-  ending the scan's task with the entry still running.
+  The fallback now reads every field of the exit and reports every coverage key, with a
+  stale content database's full row; a row it cannot read is reported as `unknown`, and
+  an exit with nothing readable as one incomplete scanner named `unknown`. A severity
+  threshold that cannot be read or recorded now costs the scan only the threshold, not
+  its coverage: a failed close of an incomplete scan is retried with its own gap and no
+  threshold, then with the `unknown` gap instead of with no coverage, and a close that
+  fails on the incomplete-coverage path is recorded the way one on the completed path
+  is, instead of ending the scan's task with the entry still running. A history record
+  that cannot be removed when a scan is taken back no longer keeps the previous scan's
+  results set aside.
 
 ### Features
 
