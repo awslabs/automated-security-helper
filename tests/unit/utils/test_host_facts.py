@@ -1828,11 +1828,11 @@ def test_a_prefix_beats_the_records_beside_it(tmp_path):
 
 
 def test_a_symlinked_home_is_matched_after_resolving_the_links(tmp_path):
-    # HOME says /home/u, the interpreter says /local/home/u: only the real paths agree.
+    # HOME says /home/u, the interpreter says /data/home/u: only the real paths agree.
     def realpath(path: str) -> str:
-        return path.replace("/home/u", "/local/home/u", 1)
+        return path.replace("/home/u", "/data/home/u", 1)
 
-    prefix = "/local/home/u/.local/share/uv/tools/automated-security-helper"
+    prefix = "/data/home/u/.local/share/uv/tools/automated-security-helper"
     assert channel(tmp_path, prefix=prefix, realpath=realpath) == "uv-tool"
     assert channel(tmp_path / "other", prefix=prefix) != "uv-tool"
 
