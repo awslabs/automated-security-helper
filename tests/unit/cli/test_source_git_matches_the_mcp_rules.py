@@ -16,6 +16,7 @@ is replaced by a fake at the one seam each surface has.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -159,6 +160,29 @@ def _scan(*options: str):
     return CliRunner().invoke(app, ["scan", *options])
 
 
+def _scan_fs(tmp_path, values: dict, *options: str, clone=None):
+    """``ash scan fs`` with a --cli-json-input document of *values*; nothing is cloned.
+
+    Returns the result and the two stand-ins, for the clone and for the scan. A
+    document is passed only when *values* holds something; *clone* is what the clone
+    stand-in does when it is called.
+    """
+    arguments = ["scan", "fs", *options]
+    if values:
+        document = tmp_path / "scan.json"
+        document.write_text(json.dumps(values), encoding="utf-8")
+        arguments += ["--cli-json-input", str(document)]
+    with (
+        patch(
+            "automated_security_helper.cli.mcp.source_delivery.clone_remote_source",
+            side_effect=clone,
+        ) as cloned,
+        patch("automated_security_helper.cli.scan.run_ash_scan") as run,
+    ):
+        result = CliRunner().invoke(app, arguments)
+    return result, cloned, run
+
+
 class TestTheCommandLine:
     @pytest.mark.parametrize(
         "case",
@@ -200,6 +224,82 @@ class TestTheCommandLine:
         result = _scan("--source-git", URL, *other)
         assert result.exit_code == ASH_EXIT_USAGE_ERROR
         assert other[0] in result.output
+
+    @pytest.mark.parametrize(
+        ("values", "options"),
+        [
+            pytest.param(
+                {"source_git": URL, "source_dir": "svc-b"}, [], id="both-keys"
+            ),
+            pytest.param(
+                {"source_git": URL, "--source-dir": "svc-b"}, [], id="the-flag-key"
+            ),
+            pytest.param(
+                {"source_dir": "svc-b"}, ["--source-git", URL], id="a-typed-source-git"
+            ),
+        ],
+    )
+    def test_a_json_documents_source_dir_cannot_be_combined_with_it(
+        self, values, options, tmp_path
+    ):
+        # A --cli-json-input document is named on this command line, so the
+        # directory its `source_dir` names is given there, as --source-dir is. It is
+        # refused before any clone, and the clone never stands in for it.
+        result, clone, run = _scan_fs(tmp_path, values, *options)
+
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert "--source-git cannot be combined with --source-dir" in result.output
+        assert clone.call_count == 0
+        assert run.call_count == 0
+
+    @pytest.mark.parametrize(
+        ("values", "options"),
+        [
+            pytest.param({}, ["svc-b", "--source-git", URL], id="a-typed-path"),
+            pytest.param({"source_git": URL, "path": "svc-b"}, [], id="the-path-key"),
+        ],
+    )
+    def test_a_path_cannot_be_combined_with_it_either(self, values, options, tmp_path):
+        # The other place a document can name the directory, which the line for its
+        # `source_dir` key sends the reader to: refused as well, so neither key is
+        # the way round the refusal.
+        result, clone, run = _scan_fs(tmp_path, values, *options)
+
+        assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+        assert "--source-git cannot be combined with the PATH argument" in result.output
+        assert clone.call_count == 0
+        assert run.call_count == 0
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            pytest.param({}, id="no-document"),
+            pytest.param({"source_dir": None}, id="a-null-source_dir-key"),
+        ],
+    )
+    def test_the_source_dir_variable_is_not_a_second_directory(
+        self, values, tmp_path, monkeypatch
+    ):
+        # The control for the rows above: ASH_SOURCE_DIR is ambient, as every
+        # option's variable is, and a null key names nothing, so the clone is what is
+        # scanned.
+        monkeypatch.setenv("ASH_SOURCE_DIR", str(tmp_path / "from-env"))
+        made = []
+
+        def fake_clone(url, ref, *, depth, destination):
+            source = Path(destination) / "source"
+            source.mkdir()
+            made.append(source)
+            return source
+
+        result, clone, run = _scan_fs(
+            tmp_path, values, "--source-git", URL, clone=fake_clone
+        )
+
+        assert result.exit_code == 0, result.output
+        (source,) = made
+        assert clone.call_count == 1
+        assert run.call_args.kwargs["source_dir"] == source.as_posix()
 
     def test_a_ref_or_depth_alone_is_refused(self):
         for option in (("--git-ref", "main"), ("--git-depth", "2")):

@@ -12,6 +12,8 @@ What is pinned here:
   [options]`` with no subject, and ``--source-dir`` on ``fs``.
 * A subject may follow options, as ``ash --output-dir out scan fs .`` hands the
   root's option on in front of it.
+* Two different directories, one as the argument and one with ``--source-dir``,
+  are refused whether each was typed or given by a ``--cli-json-input`` document.
 * ``ash scan --help`` lists the subjects without importing the scan engine.
 
 Every case that reaches the engine passes ``--shard-index 3`` without
@@ -188,6 +190,116 @@ def test_the_same_directory_given_twice_is_not_a_conflict():
     result = _invoke(["scan", "fs", "a", "--source-dir", "a", *FAILS_FAST])
 
     assert "Name the directory once" not in result.output
+
+
+#: What the refusal adds when a --cli-json-input document gave one of the two names.
+DOCUMENT_KEYS = (
+    "In a --cli-json-input document they are the keys `path` and `source_dir`"
+)
+
+
+def _document(tmp_path, values: dict) -> str:
+    document = tmp_path / "scan.json"
+    document.write_text(json.dumps(values), encoding="utf-8")
+    return str(document)
+
+
+@pytest.mark.parametrize(
+    ("values", "before", "after"),
+    [
+        pytest.param(
+            {"path": "svc-a", "source_dir": "svc-b"},
+            ["scan", "fs"],
+            [],
+            id="both-keys-of-the-document",
+        ),
+        pytest.param(
+            {"path": "svc-a", "--source-dir": "svc-b"},
+            ["scan", "fs"],
+            [],
+            id="the-path-key-and-the-flag-key",
+        ),
+        pytest.param(
+            {"path": "svc-a", "source_dir": "svc-b"},
+            ["scan"],
+            [],
+            id="both-keys-without-a-subject",
+        ),
+        pytest.param(
+            {"source_dir": "svc-b"},
+            ["scan", "fs", "svc-a"],
+            [],
+            id="a-typed-path-and-the-source_dir-key",
+        ),
+        pytest.param(
+            {"path": "svc-a"},
+            ["scan", "fs"],
+            ["--source-dir", "svc-b"],
+            id="the-path-key-and-a-typed-source-dir",
+        ),
+    ],
+)
+def test_a_json_document_that_names_a_second_directory_is_refused(
+    engine, tmp_path, values, before, after
+):
+    # The document is named on this command line, so a directory it names is given
+    # there as much as a typed one is. Two names that differ are refused wherever each
+    # came from, and neither directory is scanned: only a typed --source-dir used to
+    # be compared, so the document's `source_dir` was dropped without a word.
+    result = _invoke([*before, "--cli-json-input", _document(tmp_path, values), *after])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "Name the directory once" in result.output
+    assert DOCUMENT_KEYS in result.output, result.output
+    assert engine.calls == []
+
+
+def test_a_typed_path_and_source_dir_are_not_told_about_document_keys(engine):
+    result = _invoke(["scan", "fs", "a", "--source-dir", "b"])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    assert "Name the directory once" in result.output
+    assert DOCUMENT_KEYS not in result.output
+    assert engine.calls == []
+
+
+def test_a_json_document_that_names_one_directory_twice_is_not_a_conflict(
+    engine, tmp_path
+):
+    document = _document(tmp_path, {"path": "svc", "source_dir": "svc"})
+
+    result = _invoke(["scan", "fs", "--cli-json-input", document])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["svc"]
+
+
+def test_a_null_key_in_a_json_document_names_no_directory(engine, tmp_path):
+    # The skeleton `--generate-cli-skeleton` prints lists `path` and `source_dir`
+    # side by side, both null, and a document reads null as not given: filling in
+    # `path` alone is one name.
+    skeleton = json.loads(_invoke(["scan", "fs", "--generate-cli-skeleton"]).stdout)
+    assert skeleton["path"] is None and skeleton["source_dir"] is None
+    document = _document(tmp_path, {"path": "svc", "source_dir": None})
+
+    result = _invoke(["scan", "fs", "--cli-json-input", document])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["svc"]
+
+
+def test_a_json_documents_path_is_not_a_second_name_beside_the_variable(
+    engine, tmp_path, monkeypatch
+):
+    # ASH_SOURCE_DIR is ambient, and the document outranks every variable
+    # (cli/json_input.py), so the document's `path` names the directory.
+    monkeypatch.setenv("ASH_SOURCE_DIR", "/from/env")
+    document = _document(tmp_path, {"path": "given"})
+
+    result = _invoke(["scan", "fs", "--cli-json-input", document])
+
+    assert result.exit_code == 0, result.output
+    assert [call["source_dir"] for call in engine.calls] == ["given"]
 
 
 class _EngineStub:

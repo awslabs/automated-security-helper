@@ -42,6 +42,16 @@ _PATH_HELP = (
     "--source-dir and ASH_SOURCE_DIR also name it."
 )
 
+#: The refusal for a directory named twice, as the PATH argument and with --source-dir.
+_NAMED_TWICE = (
+    "Name the directory once: as the PATH argument or with --source-dir, not both."
+)
+#: Added to it when a --cli-json-input document gave one of the two names.
+_NAMED_TWICE_IN_A_DOCUMENT = (
+    " In a --cli-json-input document they are the keys `path` and `source_dir` "
+    "(also written `--source-dir`)."
+)
+
 
 def _spellings(param: Any) -> set[str]:
     return {*param.opts, *param.secondary_opts}
@@ -206,10 +216,17 @@ def run_ash_scan_fs_cli_command(*args: Any, **kwargs: Any) -> Any:
         )
         if routed_without_subject and path_typed:
             ctx.fail(_not_a_subject(path, DEFAULT_SUBJECT))
-        if from_command_line and kwargs.get("source_dir") != path:
+        # The document is named on this command line, so a directory it names is
+        # given here as much as a typed one is (cli/json_input.py ranks it above the
+        # environment for that reason). Two names that differ are refused wherever
+        # each came from, so neither is dropped without a word. A key the document
+        # leaves null names nothing. ASH_SOURCE_DIR is ambient, and the PATH
+        # replaces it.
+        if (from_command_line or from_document) and kwargs.get("source_dir") != path:
             ctx.fail(
-                "Name the directory once: as the PATH argument or with --source-dir, "
-                "not both."
+                _NAMED_TWICE
+                if path_typed and from_command_line
+                else _NAMED_TWICE + _NAMED_TWICE_IN_A_DOCUMENT
             )
         kwargs["source_dir"] = path
     if not routed_without_subject:

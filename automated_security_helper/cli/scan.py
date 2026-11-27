@@ -1921,10 +1921,14 @@ def run_ash_scan_cli_command(
         if git_ref is not None or git_depth is not None:
             _fail_usage("--git-ref and --git-depth only apply with --source-git.")
     else:
-        source_dir_given = (
-            getattr(ctx.get_parameter_source("source_dir"), "name", None)
-            == "COMMANDLINE"
-        )
+        # A --cli-json-input document is named on this command line, and the
+        # directory its `source_dir` key names reaches click as a default
+        # (DEFAULT_MAP), so it is given here as much as a typed --source-dir is,
+        # and the clone does not replace it without a word. ASH_SOURCE_DIR is
+        # ambient, and the clone takes its place.
+        source_dir_given = getattr(
+            ctx.get_parameter_source("source_dir"), "name", None
+        ) in ("COMMANDLINE", "DEFAULT_MAP")
         for other_flag, other_given in (
             ("--source-dir", source_dir_given),
             ("--image", bool(images)),
