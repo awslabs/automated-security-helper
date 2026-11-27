@@ -993,11 +993,14 @@ def conditional_steps(
 
 
 def gating_step(workflow: Mapping[str, Any], command: str) -> tuple[str, str] | None:
-    """(job, step name) of the first step that runs ``ash <command>``."""
+    """(job, step name) of the first step that runs ``ash <command>`` or, as 3.9
+    spells the commands under it, ``ash results <command>``."""
     for job_id, job in (workflow.get("jobs") or {}).items():
         for step in (job or {}).get("steps") or []:
             run = str((step or {}).get("run", ""))
-            if re.search(rf"(?<![\w.-])ash{_ASH_SPACE}{command}\b", run):
+            if re.search(
+                rf"(?<![\w.-])ash{_ASH_SPACE}(?:results{_ASH_SPACE})?{command}\b", run
+            ):
                 return str(job_id), str(step.get("name") or "")
     return None
 

@@ -1229,6 +1229,9 @@ def test_a_github_job_that_runs_ash_with_options_gates_on_findings(command, gate
     [
         ("ash merge --output-dir out", True),
         ("ash \\\n  merge --output-dir out", True),
+        ("ash results merge --results a --output-dir out", True),
+        ("ash \\\n  results \\\n  merge --output-dir out", True),
+        ("ash results report --format sarif", False),
         ("cd ash\nmerge.sh out", False),
     ],
 )
