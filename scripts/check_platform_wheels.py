@@ -362,9 +362,10 @@ def load_register(path: Path) -> Any:
 
     The register is a Python file that is executed, so a broken one raises whatever
     Python raises for it: a syntax error, an import that fails, anything its own code
-    does. Each of those means the input cannot be read, so each is raised as a
-    ValueError that names the file, which ``main`` reports as a run that could not
-    measure (exit code 2) and not as a difference.
+    does, a call that leaves the interpreter included. Each of those means the input
+    cannot be read, so each is raised as a ValueError that names the file, which
+    ``main`` reports as a run that could not measure (exit code 2) and not as a
+    difference. A keyboard interrupt is the one error passed on as it is.
     """
     spec = importlib.util.spec_from_file_location(
         "ash_plugin_provisioning_for_platform_wheels", path
@@ -377,7 +378,7 @@ def load_register(path: Path) -> Any:
         spec.loader.exec_module(module)
     except BaseException as exc:
         sys.modules.pop(spec.name, None)
-        if not isinstance(exc, Exception):
+        if isinstance(exc, KeyboardInterrupt):
             raise
         raise ValueError(
             f"cannot read the plugin register {path}: {type(exc).__name__}: {exc}"
