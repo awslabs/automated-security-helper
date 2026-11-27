@@ -22,6 +22,7 @@ record:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import pytest
@@ -188,13 +189,17 @@ def test_an_interpreter_the_caller_named_in_env_is_kept(plugin_context, monkeypa
     monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
     seen = _capture_env(monkeypatch)
     plugin = _Plugin(context=plugin_context)
+    # Absolute on every platform: on Windows a path with no drive is relative
+    # (uv resolves it on the drive it starts on), and such a UV_PYTHON is not
+    # passed to uv.
+    caller = os.path.abspath(os.path.join(os.sep, "opt", "caller", "python"))
 
     plugin._run_subprocess(
         ["uv", "run", "probe"],
-        env={"PATH": "/usr/bin", "UV_PYTHON": "/opt/caller/python"},
+        env={"PATH": "/usr/bin", "UV_PYTHON": caller},
     )
 
-    assert seen["env"]["UV_PYTHON"] == "/opt/caller/python"
+    assert seen["env"]["UV_PYTHON"] == caller
     assert seen["env"]["UV_NO_PROJECT"] == "1"
 
 
