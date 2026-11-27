@@ -111,6 +111,23 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **A saved image or OCI layout scan keys its finding ids on the image's digest.**
+  `--image-archive` and `--image-layout` (and an image uploaded to the MCP server) name
+  the image by the digest its own index or manifest gives, so the same image delivered
+  from two paths has one set of finding ids and one recorded scan source
+  (`image:sha256:...`), and an `image:` suppression written for the digest matches it.
+  They used to key on the payload's path. A scan whose payload names no digest that its
+  bytes bear out still keys on the path. Finding ids and the scan source of such a scan
+  differ from those of an earlier build, so a saved results file from an earlier build
+  needs refreshing: comparing it with a new scan is refused because the two key their
+  ids on different bases.
+- **A tag-only image reference is not resolved through the registry when the daemon is
+  only declared.** With a `tcp://` or `ssh://` `DOCKER_HOST`, or a remote
+  `CONTAINER_HOST`, ASH has no local socket to ask, and the scanners read the image
+  through that daemon, so a digest read from the registry could name other bytes than
+  the ones scanned. The digest ladder stops there, the finding ids key on the reference
+  text, and the scan logs one warning that says so. Pin the reference by digest
+  (`repo@sha256:...`) for ids that do not change with the tag.
 
 ### Maintenance
 
@@ -437,6 +454,14 @@
 - A saved image archive whose `manifest.json` or `index.json` is a link, and a saved
   image or OCI layout whose record is JSON nested too deeply to parse, now name no digest
   instead of raising; their ids key on the payload path.
+- A saved image, OCI archive or OCI layout now names a digest only when the blob its
+  record points at is in the payload and has that digest. A record whose config or
+  manifest blob is missing, too large to check, or hashes to another digest names none,
+  and the ids key on the payload path. A record is read only from a regular member
+  named `manifest.json` or `index.json`, with at most one leading `./`, and a second
+  member of that name leaves no digest. A layout's `index.json` and blobs are opened
+  without following a link or waiting on a pipe, and one that is not a regular file
+  names no digest.
 - The `resource_id` of a checkov finding no longer changes when a check at the
   resource's other line range starts to fail. An id that a file gives at two line
   ranges is dropped from its findings, and the checks that passed now count as

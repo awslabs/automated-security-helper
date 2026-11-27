@@ -46,15 +46,21 @@ ladder and keys the same everywhere.
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
+import os
 import re
 import socket
-from typing import Callable, Optional, Tuple
+import stat
+from typing import IO, TYPE_CHECKING, Callable, Optional, Tuple
 from urllib.parse import quote
 
 from automated_security_helper.core.asset import ImageLocator
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    import tarfile
 
 #: The seconds ``crane digest`` may take: a registry round trip, not a transfer.
 RESOLVE_TIMEOUT_SECONDS = 60
@@ -175,6 +181,126 @@ def inspect_digest(ref: str, socket_path: str) -> "Tuple[Optional[str], str]":
 #: few hundred bytes of JSON naming blobs; a bigger one is refused unread.
 _MAX_PAYLOAD_RECORD_BYTES = 1024 * 1024
 
+#: The most of one blob (a docker-save config, an OCI manifest) that is hashed to
+#: check the digest a record names; a bigger one is not read, and names no digest.
+_MAX_PAYLOAD_BLOB_BYTES = 32 * 1024 * 1024
+
+#: How much of a blob is read at a time while it is hashed.
+_HASH_CHUNK_BYTES = 64 * 1024
+
+#: How a layout's index and blobs are opened: a link at the name is not followed
+#: and a FIFO does not wait for a writer (each flag is 0 where the platform has
+#: none, so there the name is checked with ``lstat`` first and the open is checked
+#: with ``fstat``).
+_READ_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_BINARY", 0)
+)
+
+#: The two member names a record is read from, once one leading ``./`` is gone.
+_RECORD_NAMES = ("manifest.json", "index.json")
+
+#: Why an archive names no digest when a member a tool reads as manifest.json is
+#: not the record read here (``reads_as_manifest_json``).
+_MISREAD_MANIFEST = (
+    "the archive holds a member that a tool reads as manifest.json but that is "
+    "not a regular file named exactly manifest.json"
+)
+
+
+class _NotRegularFile(Exception):
+    """A path that names a link, a pipe, a directory or any other non-file."""
+
+
+def _open_regular(path: "os.PathLike[str] | str") -> "IO[bytes]":
+    """The regular file at *path*, opened without following a link or waiting.
+
+    The name is looked at first (``lstat``: a link is not a regular file), then
+    opened with ``_READ_FLAGS``, and the descriptor is checked again with
+    ``fstat`` in case the name changed in between. Raises ``_NotRegularFile``
+    for anything else, and ``OSError`` as ``open`` does (``FileNotFoundError``
+    for a name that is not there).
+    """
+    if not stat.S_ISREG(os.lstat(path).st_mode):
+        raise _NotRegularFile(str(path))
+    descriptor = os.open(path, _READ_FLAGS)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise _NotRegularFile(str(path))
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _sha256_of_stream(handle: "IO[bytes]", limit: int) -> Optional[str]:
+    """The hex sha256 of what *handle* holds, or None when it holds over *limit*."""
+    hasher = hashlib.sha256()
+    total = 0
+    while True:
+        chunk = handle.read(_HASH_CHUNK_BYTES)
+        if not chunk:
+            return hasher.hexdigest()
+        total += len(chunk)
+        if total > limit:
+            return None
+        hasher.update(chunk)
+
+
+def _blob_reason(
+    record: str,
+    blob: str,
+    wanted: str,
+    open_blob: "Callable[[], Optional[IO[bytes]]]",
+) -> str:
+    """Why the blob *record* names is not the bytes of its digest, or "" if it is.
+
+    *wanted* is the hex digest the record names for *blob*; *open_blob* returns
+    the payload's own copy of it (None when the payload holds none) and raises
+    ``_NotRegularFile`` for one that is no regular file.
+    """
+    subject = f"the blob {blob} that its {record} names"
+    if any(part in ("", ".", "..") for part in blob.split("/")):
+        # A tool resolves "a/../b" to "b", a member the lookup below would not.
+        return f"{subject} is named by a path that is not a plain relative name"
+    try:
+        handle = open_blob()
+    except FileNotFoundError:
+        handle = None
+    except _NotRegularFile:
+        return f"{subject} is not a regular file"
+    except Exception as error:  # noqa: BLE001 - an unreadable blob is no digest
+        return f"{subject} could not be read ({type(error).__name__})"
+    if handle is None:
+        return f"{subject} is not in the payload"
+    try:
+        with handle:
+            found = _sha256_of_stream(handle, _MAX_PAYLOAD_BLOB_BYTES)
+    except Exception as error:  # noqa: BLE001 - an unreadable blob is no digest
+        return f"{subject} could not be read ({type(error).__name__})"
+    if found is None:
+        return f"{subject} is too large to check against its digest"
+    if found != wanted:
+        return f"the bytes of {subject} do not match its digest"
+    return ""
+
+
+def _archive_blob(saved: "tarfile.TarFile", name: str) -> "Optional[IO[bytes]]":
+    """The regular member of *saved* called *name* (the last one, as a tool reads
+    it), None when there is none; ``_NotRegularFile`` for a link or a directory."""
+    found = None
+    for member in saved:
+        if member.name.removeprefix("./") == name:
+            found = member
+    if found is None:
+        return None
+    handle = saved.extractfile(found) if found.isreg() else None
+    if handle is None:
+        raise _NotRegularFile(name)
+    return handle
+
 
 def _single_index_digest(document: object) -> Tuple[Optional[str], str]:
     """The one manifest digest an OCI index names, or why there is not one."""
@@ -245,39 +371,94 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
     of them the scan is about is not this module's guess to make.
 
     The payload is a client's file, so what its record holds is not this
-    module's to choose. A member that is not a regular file is skipped, never
-    read: the archive reader would follow a link to another member, and raises
-    on one the archive lacks. A record that cannot be read or parsed (JSON
-    nested past the parser's recursion limit included) answers nothing, with a
-    reason that names it. Nothing the payload holds raises out of this
-    function: a payload that names no digest is keyed on its path, and a
-    resolution failure never fails or skips the scan.
+    module's to choose, and a digest it names is taken only as a claim about
+    the bytes it points at:
+
+    - the record is a regular member (or, in a layout, a regular file) named
+      exactly ``manifest.json`` or ``index.json``, once one leading ``./`` is
+      removed; a member of any other spelling is not read, and two members
+      of the same record name leave no digest, because a tool may read the
+      other one;
+    - an archive with a member the tools read as ``manifest.json`` leaves no
+      digest unless that member is the record: ``archive_scheme`` hands an
+      archive to them as a docker archive for any member called
+      ``manifest.json`` once a leading run of ``.`` and ``/`` is dropped,
+      whatever its type (``reads_as_manifest_json`` is that one test), and
+      they read ``manifest.json`` from it. A link, or a name such as
+      ``.manifest.json`` or ``../manifest.json``, is such a member and not the
+      record, so the archive names no digest, even beside a regular
+      ``index.json``;
+    - the digest is accepted only when the blob the record names (the config
+      blob of a ``manifest.json`` entry, the manifest blob ``blobs/sha256/<hex>``
+      of an ``index.json``) is in the payload as a regular file, is within
+      ``_MAX_PAYLOAD_BLOB_BYTES``, and hashes to it with sha256. A layout's
+      index and blobs are opened without following a link or waiting on a pipe.
+
+    An ``index.json`` that is not a regular file is skipped, never read: the
+    archive reader would follow a link to another member, and raises on one the
+    archive lacks. A record or blob that cannot be read or parsed (JSON nested
+    past the parser's recursion limit included), is missing or does not match
+    answers nothing, with a reason that names the record. Nothing the payload
+    holds raises out of this function: a payload that names no digest is keyed
+    on its path, and a resolution failure never fails or skips the scan.
     """
     import tarfile
     from pathlib import Path
 
+    from automated_security_helper.utils.image_tool_targets import (
+        reads_as_manifest_json,
+    )
+
     if image.oci_layout is not None:
-        index = Path(image.oci_layout) / "index.json"
+        layout = Path(image.oci_layout)
         try:
             # Sized: an index is a few hundred bytes; read(cap + 1) so a
             # bigger file is seen as over the cap rather than truncated.
-            with open(index, "rb") as handle:
+            with _open_regular(layout / "index.json") as handle:
                 body = handle.read(_MAX_PAYLOAD_RECORD_BYTES + 1)
             if len(body) > _MAX_PAYLOAD_RECORD_BYTES:
                 return None, "its index.json is too large to be an image index"
-            return _single_index_digest(json.loads(body))
+            digest, why = _single_index_digest(json.loads(body))
+        except _NotRegularFile:
+            return None, "its index.json is not a regular file"
         except Exception as error:  # noqa: BLE001 - a bad index is no digest
             return None, f"its index.json could not be read ({type(error).__name__})"
+        if digest is None:
+            return None, why
+        wanted = digest.removeprefix("sha256:")
+        blob = layout / "blobs" / "sha256" / wanted
+        reason = _blob_reason(
+            "index.json",
+            f"blobs/sha256/{wanted}",
+            wanted,
+            lambda: _open_regular(blob),
+        )
+        return (None, reason) if reason else (digest, "")
     if image.oci_archive is None:
         return None, "not a direct payload"
     not_regular: list[str] = []
     try:
         with tarfile.open(image.oci_archive, "r:") as saved:
             records: dict = {}
+            seen: set = set()
             for member in saved:
-                name = member.name.lstrip("./")
-                if name not in ("manifest.json", "index.json"):
+                name = member.name.removeprefix("./")
+                if reads_as_manifest_json(member.name) and not (
+                    name == "manifest.json" and member.isreg()
+                ):
+                    # The tools read this archive through this member
+                    # (archive_scheme sends it to them as a docker archive for
+                    # it), and it is not the record read here: a link, or a name
+                    # that needs more than one leading ./ dropped. A digest from
+                    # any other record could name another image than the one
+                    # they scan.
+                    return None, _MISREAD_MANIFEST
+                if name not in _RECORD_NAMES:
                     continue
+                if name in seen:
+                    # A tool may read the other one of two same-named members.
+                    return None, f"the archive holds more than one {name}"
+                seen.add(name)
                 if not member.isreg():
                     # A record is a plain file: extractfile would follow a link
                     # to another member, and raises on one the archive lacks.
@@ -296,20 +477,37 @@ def payload_digest(image: ImageLocator) -> Tuple[Optional[str], str]:
                 except Exception as error:  # noqa: BLE001 - a bad record is no digest
                     kind = type(error).__name__
                     return None, f"its {name} could not be read ({kind})"
-                # manifest.json decides (a recent docker save writes BOTH, and
-                # is read as a docker archive, exactly as archive_scheme
-                # routes it); nothing later in the tar changes that.
-                if name == "manifest.json":
-                    break
+            # manifest.json decides when there is one: a recent docker save
+            # writes BOTH records, and archive_scheme sends such an archive to
+            # the tools as a docker archive, which they read through
+            # manifest.json. No other member archive_scheme reads as
+            # manifest.json got past the loop, so the one parsed here is the
+            # one they read.
+            if "manifest.json" in records:
+                record = "manifest.json"
+                digest, why = _single_config_digest(records[record])
+            elif "index.json" in records:
+                record = "index.json"
+                digest, why = _single_index_digest(records[record])
+            else:
+                if not_regular:
+                    return None, f"its {not_regular[0]} is not a regular file"
+                return None, "the archive holds no manifest.json or index.json"
+            if digest is None:
+                return None, why
+            wanted = digest.removeprefix("sha256:")
+            if record == "manifest.json":
+                # _single_config_digest accepted it: a one-entry list whose
+                # Config is a string, whose file-name stem is the digest.
+                blob = records[record][0]["Config"].removeprefix("./")
+            else:
+                blob = f"blobs/sha256/{wanted}"
+            reason = _blob_reason(
+                record, blob, wanted, lambda: _archive_blob(saved, blob)
+            )
+            return (None, reason) if reason else (digest, "")
     except Exception as error:  # noqa: BLE001 - a bad archive is no digest
         return None, f"the archive could not be read ({type(error).__name__})"
-    if "manifest.json" in records:
-        return _single_config_digest(records["manifest.json"])
-    if "index.json" in records:
-        return _single_index_digest(records["index.json"])
-    if not_regular:
-        return None, f"its {not_regular[0]} is not a regular file"
-    return None, "the archive holds no manifest.json or index.json"
 
 
 def _engine_inspector() -> "Optional[tuple[str, Optional[Inspector]]]":
@@ -341,7 +539,7 @@ def resolve_image_locator(
     offline: bool,
     runner: Optional[Runner] = None,
     crane: Optional[str] = None,
-    inspector: "Optional[tuple[str, Inspector]]" = None,
+    inspector: "Optional[tuple[str, Optional[Inspector]]]" = None,
     detect_engine: bool = True,
 ) -> ImageLocator:
     """*image* with ``resolved_digest`` filled where a rung can say it.
@@ -351,14 +549,16 @@ def resolve_image_locator(
     logged here, so a caller never has to count: this is called once per scan.
 
     *runner*, *crane* and *inspector* (an ``(engine name, inspect function)``
-    pair) are injectable for tests; in a scan they default to the
+    pair, whose function is None for a declared daemon with no local socket,
+    which ends the ladder) are injectable for tests; in a scan they default to the
     sandbox-routed spawn, the ``crane`` the pinned-tool install put on the
     search path, and the engine the detection found. ``detect_engine=False``
     leaves the engine rung out when no *inspector* is given.
 
     A direct payload takes its own one rung, :func:`payload_digest` (the
-    digest the payload itself names; no engine, no network), and never falls
-    through to the reference rungs.
+    digest the payload itself names, accepted only when the blob it names
+    hashes to it; no engine, no network), and never falls through to the
+    reference rungs.
     """
     if image.resolved_digest is not None:
         return image
