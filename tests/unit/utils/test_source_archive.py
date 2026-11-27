@@ -3086,21 +3086,37 @@ class TestWhatZipfileCannotReadIsRefusedAlikeByBothEntryPoints:
             assert extractions == [], "the finalize extracted from a refused archive"
 
 
-class _FailingHandle:
-    """A binary handle whose first seek raises ``error``, as the first read of an
-    archive does when it fails."""
+class _FailingHandle(io.BytesIO):
+    """A handle over a zip that raises ``error`` when zipfile seeks it, and for no
+    one else.
+
+    ``open_zip`` reads the handle itself before zipfile does, to judge the zip64
+    locator, and what that reading raises is not classified as what zipfile raises is.
+    So the seeks that ``source_archive`` makes are served from the bytes, and the first
+    seek made from zipfile's code fails. ``failed_in`` names the module of that seek,
+    and is ``None`` until one failed.
+    """
 
     def __init__(self, error: BaseException) -> None:
+        super().__init__(_zip({"a.py": b"x"}))
         self.error = error
+        self.failed_in: Optional[str] = None
 
-    def seek(self, *args: object) -> int:
-        raise self.error
+    def seek(self, offset, whence=0):
+        reader = sys._getframe(1).f_globals.get("__name__")
+        if reader == zipfile.__name__:
+            self.failed_in = reader
+            raise self.error
+        return super().seek(offset, whence)
 
 
 class TestOpeningAnArchive:
     """What zipfile raises as it opens a file, whichever it is, is refused by
     ``open_zip`` in the one set of words. Red at the base: ``open_zip`` did not exist,
-    and the finalize opened the file with zipfile itself."""
+    and the finalize opened the file with zipfile itself.
+
+    Each exception is raised by ``_FailingHandle`` for zipfile's first seek, so it
+    reaches ``open_zip`` from zipfile as one zipfile raises does."""
 
     @pytest.mark.parametrize(
         "error,kind,message",
@@ -3151,15 +3167,41 @@ class TestOpeningAnArchive:
         ],
     )
     def test_what_zipfile_raises_is_refused(self, error, kind, message):
+        handle = _FailingHandle(error)
+
         with pytest.raises(sa.SourceArchiveRefused) as refused:
-            sa.open_zip(_FailingHandle(error))
+            sa.open_zip(handle)
 
         assert (refused.value.kind, str(refused.value)) == (kind, message)
         assert isinstance(refused.value, zipfile.BadZipFile) is (kind is Kind.NOT_A_ZIP)
+        assert handle.failed_in == "zipfile", "the error was not raised for zipfile"
 
     def test_a_memory_error_is_raised_as_it_is(self):
+        handle = _FailingHandle(MemoryError())
+
         with pytest.raises(MemoryError):
-            sa.open_zip(_FailingHandle(MemoryError()))
+            sa.open_zip(handle)
+
+        assert handle.failed_in == "zipfile", "the error was not raised for zipfile"
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(OSError(errno.EIO, "Input/output error"), id="an-os-error"),
+            pytest.param(MemoryError(), id="a-memory-error"),
+        ],
+    )
+    def test_a_read_of_the_zip64_check_that_fails_is_raised_as_it_is(self, error):
+        """``open_zip`` reads the handle for the zip64 locator before zipfile does. A
+        failed read is the disk's or the process's, as it is when zipfile reads, so it
+        is raised as it is and not refused as an archive."""
+
+        class Failing(io.BytesIO):
+            def read(self, size=-1):
+                raise error
+
+        with pytest.raises(type(error)):
+            sa.open_zip(Failing(_zip({"a.py": b"x"})))
 
     def test_a_zip_is_opened(self):
         with sa.open_zip(io.BytesIO(_zip({"a.py": b"x"}))) as archive:
@@ -3214,11 +3256,20 @@ def _a_defect_of_ours(*args: object) -> None:
     raise _OurDefect("a defect of ours")
 
 
+#: What ``open_zip`` calls, before zipfile reads the file, to judge the zip64 locator.
+_READERS_OF_THE_ZIP64_CHECK = ["_end_record_position", "_read_at", "_zip64_end_record"]
+
+
 class TestADefectOfOursIsNotTheArchives:
     """Admission was wrapped in ``except Exception``, so a defect of this module's own
     code was refused as an unreadable archive. Only the read of a link's target, which
     is zipfile's, is classified now; what else is raised is raised as it is. Red at the
-    base for ``extract_source_archive``."""
+    base for ``extract_source_archive``.
+
+    The check of the zip64 locator that ``open_zip`` makes before zipfile reads the file
+    was inside the classification of what zipfile raises, so a defect in a reader it
+    calls was refused the same way, and the finalize removed the upload as refused.
+    Each reader it calls is planted with a defect, for both entry points."""
 
     def test_extraction_raises_it_as_it_is(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sa, "_refuse_shared_paths", _a_defect_of_ours)
@@ -3238,6 +3289,34 @@ class TestADefectOfOursIsNotTheArchives:
         payload = _zip({"a.py": b"x"})
         workspace = tmp_path / "workspace"
         _upload(payload, workspace)
+
+        with pytest.raises(_OurDefect):
+            _finalize(payload, workspace)
+
+        assert sd._final_zip_path(workspace / SESSION, UPLOAD).exists()
+
+    @pytest.mark.parametrize("reader", _READERS_OF_THE_ZIP64_CHECK)
+    def test_extraction_raises_a_zip64_check_defect_as_it_is(
+        self, monkeypatch, tmp_path, reader
+    ):
+        monkeypatch.setattr(sa, reader, _a_defect_of_ours)
+        destination = tmp_path / "tree"
+
+        with pytest.raises(_OurDefect):
+            sa.extract_source_archive(
+                _archive_file(tmp_path, _zip({"a.py": b"x"})), destination
+            )
+
+        assert not destination.exists()
+
+    @pytest.mark.parametrize("reader", _READERS_OF_THE_ZIP64_CHECK)
+    def test_the_finalize_raises_a_zip64_check_defect_as_it_is_and_keeps_the_upload(
+        self, monkeypatch, tmp_path, reader
+    ):
+        payload = _zip({"a.py": b"x"})
+        workspace = tmp_path / "workspace"
+        _upload(payload, workspace)
+        monkeypatch.setattr(sa, reader, _a_defect_of_ours)
 
         with pytest.raises(_OurDefect):
             _finalize(payload, workspace)
