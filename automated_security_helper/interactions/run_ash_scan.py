@@ -4793,6 +4793,8 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       ``--config`` is forwarded unless it is the file ``ASH_CONFIG`` names: the
       scan CLI reads the option from that variable when none is typed, and the
       shell keeps the variable, so the inner CLI reads it the same way.
+      ``scanners``, the legacy list, is spelled ``--add-scanners``: the scan CLI
+      reads that as it reads ``--scanners`` and does not deprecate it.
     * REFUSED before this point, in ``run_ash_scan``, because the scan CLI has
       no flag for them and the scan inside the shell cannot be given them:
       ``config_base_gate``, ``untrusted_config``, ``client_config_policy``,
@@ -4853,8 +4855,16 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
         argv.extend(["--config", str(opts.config)])
     for override in opts.config_overrides or []:
         argv.extend(["--config-overrides", override])
+    # The legacy list crosses as --add-scanners, not --scanners. The scan CLI folds
+    # the two into one additive layer (_selection_layers), so the inner scan selects
+    # what this process would. --scanners also prints a deprecation line: the host
+    # prints its own for the flag or ASH_SCANNERS that named the list, and the scan
+    # inside the shell shares its stderr, so the line would print twice.
+    # --only-scanners is no stand-in: it replaces the operator's default_scanners
+    # where --scanners adds to them, and the CLI refuses it beside --add-scanners.
+    # These names come before opts.add_scanners, the order this process folds them in.
     for scanner in opts.scanners or []:
-        argv.extend(["--scanners", scanner])
+        argv.extend(["--add-scanners", scanner])
     for scanner in opts.excluded_scanners or []:
         argv.extend(["--exclude-scanners", scanner])
     # None means not given (ScanOptions); an entry per name, as the other scanner
