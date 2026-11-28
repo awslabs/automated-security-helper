@@ -24,11 +24,12 @@ a recorder takes its place.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 from unittest.mock import MagicMock
 
 import pytest
@@ -1054,20 +1055,48 @@ class TestAshBuildArgs:
 # ---------------------------------------------------------------------------
 
 
+#: The exit code of ``handed_over``'s stand-in container run. A scan that stops with
+#: another code stopped before it handed the run anything.
+HAND_OVER_EXIT = 4
+
+
 @pytest.fixture
 def handed_over(monkeypatch) -> Dict[str, Any]:
-    """What a scan hands the container run; nothing is started."""
+    """What a scan hands the container run; nothing is started.
+
+    The host's user and group IDs are pinned to an ordinary user's. A non-root build
+    as ID 0, the default on a root host, is refused before the container run, and
+    that refusal ends the scan the way the stand-in does.
+    """
     seen: Dict[str, Any] = {}
 
     def fake_run_ash_container(**kwargs):
         seen.update(kwargs)
-        return rac._not_started(create_completed_process(args=[], returncode=4))
+        return rac._not_started(
+            create_completed_process(args=[], returncode=HAND_OVER_EXIT)
+        )
 
+    monkeypatch.setattr(subprocess_utils, "get_host_uid", lambda: 1000)
+    monkeypatch.setattr(subprocess_utils, "get_host_gid", lambda: 1000)
     monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
     monkeypatch.setattr(ras, "sweep_leftovers_before_run", lambda runner: [])
     monkeypatch.setattr(ras, "sweep_env_dirs", lambda *_args, **_kwargs: [])
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     return seen
+
+
+@contextlib.contextmanager
+def _stopped_by_the_hand_over() -> Iterator[None]:
+    """Run a scan that ends in ``handed_over``'s stand-in, and check where it ended.
+
+    The scan must stop with the stand-in's exit code. Any other ``SystemExit`` is a
+    refusal from earlier in the scan, which a test that only expects a ``SystemExit``
+    would take for the hand-over.
+    """
+    with pytest.raises(SystemExit) as stopped:
+        yield
+    code = stopped.value.code
+    assert code == HAND_OVER_EXIT, f"the scan stopped with {code!r} before the run"
 
 
 class TestTheOptionReachesTheContainerRun:
@@ -1106,7 +1135,7 @@ class TestTheOptionReachesTheContainerRun:
         # A value no member has: what the run is handed is then the options' own.
         options.build_engine = "named-by-this-test"
 
-        with pytest.raises(SystemExit):
+        with _stopped_by_the_hand_over():
             ras._run_container_mode(options, MagicMock())
 
         assert handed_over["build_engine"] == "named-by-this-test"
@@ -1114,7 +1143,7 @@ class TestTheOptionReachesTheContainerRun:
     def test_a_scan_with_no_engine_named_hands_the_runner(self, handed_over, tmp_path):
         (tmp_path / "src").mkdir()
 
-        with pytest.raises(SystemExit):
+        with _stopped_by_the_hand_over():
             ras.run_ash_scan(
                 source_dir=str(tmp_path / "src"),
                 output_dir=str(tmp_path / "out"),
@@ -1164,7 +1193,7 @@ def scan_options(monkeypatch, handed_over) -> List[Any]:
 def _scan_in_a_container(tmp_path: Path, **named: Any) -> None:
     """``run_ash_scan`` in container mode; the stand-in container run exits it."""
     (tmp_path / "src").mkdir(exist_ok=True)
-    with pytest.raises(SystemExit):
+    with _stopped_by_the_hand_over():
         ras.run_ash_scan(
             source_dir=str(tmp_path / "src"),
             output_dir=str(tmp_path / "out"),
