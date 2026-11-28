@@ -236,6 +236,51 @@ test('the typed tree keeps a float apart from an integer, and the value tree rea
   assert.deepStrictEqual(keyed.value.pairs, [[1.5, 'a'], [2, 'b']]);
 });
 
+test('an integer beyond 2**53 is read with every digit, and the integers either side of it stay apart', () => {
+  const doc = read(
+    [
+      'a: 9007199254740991',
+      'b: 9007199254740992',
+      'c: 9007199254740993',
+      'd: -9007199254740993',
+      'e: 9_007_199_254_740_993',
+      'f: 0x20000000000001',
+      'g: !!int 9007199254740993',
+      'h: 9007199254740992.0',
+      '',
+    ].join('\n'),
+  );
+  // 9007199254740991 is the largest integer a number holds exactly; every integer past
+  // it is a BigInt, in whatever way the file spells it.
+  assert.equal(doc.typed.a, 9007199254740991);
+  assert.equal(doc.typed.b, 9007199254740992n);
+  assert.equal(doc.typed.c, 9007199254740993n);
+  assert.equal(doc.typed.d, -9007199254740993n);
+  assert.equal(doc.typed.e, 9007199254740993n);
+  assert.equal(doc.typed.f, 9007199254740993n);
+  assert.equal(doc.typed.g, 9007199254740993n);
+  assert.notEqual(doc.typed.b, doc.typed.c);
+  // The float of the same value as b is a float, not that integer.
+  assert.ok(doc.typed.h instanceof Float);
+  assert.equal(doc.typed.h.value, 2 ** 53);
+  // What the page reads holds the same integers, never a rounded number.
+  for (const name of ['b', 'c', 'd', 'e', 'f', 'g']) {
+    assert.equal(typeof doc.value[name], 'bigint', name);
+    assert.equal(doc.value[name], doc.typed[name], name);
+  }
+});
+
+test('keys beyond 2**53 are two keys, and the integer key and the float key of one value are one key', () => {
+  const doc = read('9007199254740993: a\n9007199254740992: b\n9007199254740992.0: c\n');
+  assert.ok(doc.typed instanceof TypedMap);
+  // Python makes the third key the second one (an integer and a float of one value are
+  // one key), and keeps the first key's place and spelling with the last value.
+  assert.deepStrictEqual(doc.typed.pairs, [
+    [9007199254740993n, 'a'],
+    [9007199254740992n, 'c'],
+  ]);
+});
+
 test('the empty and comment-only documents have no root', () => {
   for (const text of ['', '# only a comment\n', '\n\n  \n', '---\n']) {
     const doc = read(text);

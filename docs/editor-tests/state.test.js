@@ -209,6 +209,46 @@ test('the gate refuses a rewrite that touches the lines of a neighbor of the ent
   assert.equal(real.droppedComments, 0);
 });
 
+test('the gate keeps every digit of an integer beyond 2**53', () => {
+  const text = 'limit: 9007199254740993\nother: 1\n';
+  const edit = { op: 'set', path: ['other'], value: 2 };
+  // A patch that rounds the integer to the one a double holds, and one that writes it as
+  // the float that a double holds.
+  for (const rounded of ['limit: 9007199254740992\nother: 2\n', 'limit: 9007199254740993.0\nother: 2\n']) {
+    const result = applyEdit(text, edit, { patch: writes(rounded) });
+    assert.equal(result.ok, true, result.message);
+    assert.equal(result.how, 'reemit', rounded);
+    assert.equal(result.text, 'limit: 9007199254740993\nother: 2\n', rounded);
+    const refused = applyEdit(text, edit, { patch: writes(rounded), reemit: writes(rounded) });
+    assert.equal(refused.ok, false, rounded);
+    assert.equal(refused.reason, 'gate', rounded);
+  }
+  const real = applyEdit(text, edit);
+  assert.equal(real.how, 'patch');
+  assert.equal(real.text, 'limit: 9007199254740993\nother: 2\n');
+});
+
+test('an edit of an integer beyond 2**53 writes every digit, and a plain number that large is refused', () => {
+  const text = 'limit: 9007199254740993 # cap\nother: 1\n';
+  const set = applyEdit(text, { op: 'set', path: ['limit'], value: 9007199254740995n });
+  assert.equal(set.ok, true, set.message);
+  assert.equal(set.how, 'patch');
+  assert.equal(set.text, 'limit: 9007199254740995 # cap\nother: 1\n');
+  // Its digits are gone before the edit arrives, so the editor does not write it.
+  const lossy = applyEdit(text, { op: 'set', path: ['limit'], value: 2 ** 53 + 2 });
+  assert.equal(lossy.ok, false);
+  assert.equal(lossy.how, 'refused');
+  assert.equal(lossy.reason, 'number');
+  assert.equal(typeof lossy.message, 'string');
+  assert.equal('text' in lossy, false);
+  // A patch that makes the same mistake, a rounded integer written where the edit meant
+  // the next one, fails the gate and is written again with every digit.
+  const edit = { op: 'set', path: ['limit'], value: 9007199254740995n };
+  const rounded = applyEdit(text, edit, { patch: writes('limit: 9007199254740994 # cap\nother: 1\n') });
+  assert.equal(rounded.how, 'reemit');
+  assert.equal(rounded.text, 'limit: 9007199254740995\nother: 1\n');
+});
+
 test('the state applies edits and steps back and forward through them', () => {
   const state = createState('a: 1\n');
   assert.equal(state.text, 'a: 1\n');

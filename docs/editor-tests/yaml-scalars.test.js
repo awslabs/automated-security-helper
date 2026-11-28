@@ -101,6 +101,12 @@ test('an integer past 2**53 keeps its digits as a BigInt', () => {
   assert.equal(found.value, 12345678901234567890123n);
   assert.equal(resolvePlain('9007199254740991').exact, true);
   assert.equal(resolvePlain('9007199254740992').exact, false);
+  // The integers either side of the first one a number cannot hold are three values.
+  assert.equal(resolvePlain('9007199254740991').value, 9007199254740991);
+  assert.equal(resolvePlain('9007199254740992').value, 9007199254740992n);
+  assert.equal(resolvePlain('9007199254740993').value, 9007199254740993n);
+  assert.equal(resolvePlain('-9007199254740993').value, -9007199254740993n);
+  assert.equal(resolvePlain('9007199254740993').digits, '9007199254740993');
 });
 
 test('dates and times keep the ISO text a Python reader gives', () => {

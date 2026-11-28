@@ -212,11 +212,12 @@ def edit_value(raw):
     """What an edit's value is once ASH's loader has read the text that holds it.
 
     A value is written in the corpus's own projection, so a float is
-    ``{"$float": "2.0"}`` and a mapping with keys that are not plain strings is
-    ``{"$map": [[key, value], ...]}``; both are what ``project`` gives for what the
-    loader builds, so they stand for themselves here. A float written as a bare
-    JSON number would read as an integer in JavaScript, which is why the corpus
-    never does that.
+    ``{"$float": "2.0"}``, an integer beyond 2**53 is ``{"$int": "9007199254740995"}``
+    and a mapping with keys that are not plain strings is
+    ``{"$map": [[key, value], ...]}``; all three are what ``project`` gives for what
+    the loader builds, so they stand for themselves here. A float written as a bare
+    JSON number would read as an integer in JavaScript, and an integer beyond 2**53
+    would be rounded by it, which is why the corpus never does either.
     """
     if isinstance(raw, dict) and "$ref" in raw:
         return ("!ENV " if raw.get("explicit") else "") + raw["$ref"]
@@ -438,3 +439,14 @@ def test_a_float_in_an_edit_is_written_in_the_projection_and_compares_as_a_float
     document = set_at(project(load("a: 1\n")), ["a"], value)
     assert same(document, project(load("a: 2.0\n")))
     assert not same(document, project(load("a: 2\n")))
+
+
+def test_an_integer_beyond_two_to_the_53_in_an_edit_keeps_every_digit_and_is_not_a_float():
+    value = edit_value({"$int": "9007199254740995"})
+    assert value == {"$int": "9007199254740995"}
+    document = set_at(project(load("limit: 9007199254740993\n")), ["limit"], value)
+    assert document == {"limit": {"$int": "9007199254740995"}}
+    assert same(document, project(load("limit: 9007199254740995\n")))
+    # The integer one below is another value, and so is the float a double would round to.
+    assert not same(document, project(load("limit: 9007199254740994\n")))
+    assert not same(document, project(load("limit: 9007199254740995.0\n")))

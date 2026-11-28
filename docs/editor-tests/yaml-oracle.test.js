@@ -451,6 +451,10 @@ function editValue(raw) {
   if (raw !== null && typeof raw === 'object' && '$float' in raw) {
     return new Float(floatFrom(raw.$float));
   }
+  if (raw !== null && typeof raw === 'object' && '$int' in raw) {
+    // An integer beyond 2**53 is the digits as text, since JSON would round the number.
+    return BigInt(raw.$int);
+  }
   if (raw !== null && typeof raw === 'object' && '$map' in raw) {
     return makeMap(raw.$map.map(([key, item]) => [editValue(key), editValue(item)]));
   }

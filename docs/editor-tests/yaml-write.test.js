@@ -36,6 +36,9 @@ function reemit(text, edit) {
   return planReemit(readYaml(text), edit);
 }
 
+// A number past 2**53 is spelled so that what it means is plain: a double as an exponent
+// or a power, an integer as a BigInt. An integer literal there would already have lost
+// digits before a test ran, so no case rests on one.
 test('a number is written so that ASH reads the same number back', () => {
   const cases = [
     [2, '2'],
@@ -53,12 +56,22 @@ test('a number is written so that ASH reads the same number back', () => {
     [-Infinity, '-.inf'],
     [-0, '-0.0'],
     [12345678901234567890123n, '12345678901234567890123'],
+    [9007199254740992n, '9007199254740992'],
+    [9007199254740993n, '9007199254740993'],
+    [-9007199254740993n, '-9007199254740993'],
   ];
   for (const [number, text] of cases) {
     assert.equal(formatNumber(number), text);
   }
   for (const number of [1.5, 1e-7, 1.5e300, 0.1, 123456.789, -3, 1e21]) {
     assert.equal(Number(resolvePlain(formatNumber(number)).value), number, String(number));
+  }
+  // An integer past 2**53 comes back as the same integer, digit for digit.
+  for (const big of [9007199254740992n, 9007199254740993n, -9007199254740993n, 12345678901234567890123n]) {
+    const read = resolvePlain(formatNumber(big));
+    assert.equal(read.type, 'int', String(big));
+    assert.equal(read.value, big, String(big));
+    assert.equal(read.digits, big.toString(), String(big));
   }
 });
 
@@ -73,7 +86,7 @@ test('a float is written with a dot, so that ASH reads a float and never an inte
     [1e-7, '1.0e-7'],
     [1.5e300, '1.5e+300'],
     [1e21, '1.0e+21'],
-    [123456789012345680000, '123456789012345680000.0'],
+    [1.2345678901234568e20, '123456789012345680000.0'],
     [2 ** 53, '9007199254740992.0'],
     [NaN, '.nan'],
     [Infinity, '.inf'],
@@ -86,6 +99,20 @@ test('a float is written with a dot, so that ASH reads a float and never an inte
     assert.equal(read.type, 'float', text);
     assert.ok(Object.is(read.value, number), text);
   }
+});
+
+test('an integer beyond 2**53 is written with every digit, as the integer it is', () => {
+  assert.equal(formatScalar(9007199254740993n), '9007199254740993');
+  assert.equal(formatScalar(-123456789012345678901234567890n), '-123456789012345678901234567890');
+  assert.equal(
+    emitBlock({
+      limit: 9007199254740993n,
+      floor: -9007199254740993n,
+      safe: 9007199254740991,
+      list: [9007199254740992n],
+    }),
+    'limit: 9007199254740993\nfloor: -9007199254740993\nsafe: 9007199254740991\nlist:\n  - 9007199254740992',
+  );
 });
 
 test('a string is written plain only where both readings agree, and keeps its quotes if it can', () => {
@@ -271,6 +298,25 @@ test('two value trees are told apart by the type of every number and every key',
   );
 });
 
+test('two integers a double cannot tell apart are two values', () => {
+  assert.equal(sameValue(9007199254740993n, 9007199254740992n), false);
+  assert.equal(sameValue(9007199254740993n, 9007199254740993n), true);
+  assert.equal(sameValue(-9007199254740993n, 9007199254740993n), false);
+  assert.equal(sameValue([9007199254740993n], [9007199254740992n]), false);
+  assert.equal(sameValue({ a: 9007199254740993n }, { a: 9007199254740992n }), false);
+  // An integer is never the float of its value, and a number that large is a float.
+  assert.equal(sameValue(9007199254740992n, 2 ** 53), false);
+  assert.equal(sameValue(9007199254740992n, new Float(2 ** 53)), false);
+  // The largest integer a number holds exactly is one value as a number and as a BigInt.
+  assert.equal(sameValue(9007199254740991n, 9007199254740991), true);
+  // As keys: two integer keys that differ by one are two keys, and the float key of an
+  // integer key's value is that key, as in Python.
+  assert.equal(sameValue(makeMap([[9007199254740993n, 'a']]), makeMap([[9007199254740992n, 'a']])), false);
+  const merged = makeMap([[9007199254740992n, 'a'], [new Float(2 ** 53), 'b']]);
+  assert.deepStrictEqual(merged.pairs, [[9007199254740992n, 'b']]);
+  assert.equal(sameValue(merged, makeMap([[9007199254740992n, 'b']])), true);
+});
+
 test('a path is written the way people write it', () => {
   assert.equal(formatPath(['scanners', 'bandit', 'options']), 'scanners.bandit.options');
   assert.equal(formatPath(['items', 0, 'name']), 'items[0].name');
@@ -283,6 +329,91 @@ test('a patch changes only the scalar it names and leaves the comment after it',
     text: 'a: x # why\nb: two\n',
     droppedComments: 0,
   });
+});
+
+test('an edit elsewhere leaves an integer beyond 2**53 as it was, and an edit of its own writes every digit', () => {
+  const text = 'limit: 9007199254740993 # cap\nother: 1\n';
+  assert.deepEqual(patch(text, { op: 'set', path: ['other'], value: 2 }), {
+    ok: true,
+    how: 'patch',
+    text: 'limit: 9007199254740993 # cap\nother: 2\n',
+    droppedComments: 0,
+  });
+  assert.equal(
+    patch(text, { op: 'set', path: ['limit'], value: 9007199254740995n }).text,
+    'limit: 9007199254740995 # cap\nother: 1\n',
+  );
+  assert.equal(patch(text, { op: 'set', path: ['limit'], value: 9007199254740993n }).how, 'none');
+  // The next integer down is another value, so it is a change.
+  assert.equal(
+    patch(text, { op: 'set', path: ['limit'], value: 9007199254740992n }).text,
+    'limit: 9007199254740992 # cap\nother: 1\n',
+  );
+  // Integers in a list are kept, and one is added with every digit.
+  assert.equal(
+    patch('l:\n  - 9007199254740993\n  - 9007199254740992\n', { op: 'set', path: ['l', 2], value: 9007199254740994n }).text,
+    'l:\n  - 9007199254740993\n  - 9007199254740992\n  - 9007199254740994\n',
+  );
+});
+
+test('writing an entry again keeps every digit of an integer beyond 2**53', () => {
+  const result = reemit('opts: {limit: 9007199254740993, list: [a]}\n', {
+    op: 'append',
+    path: ['opts', 'list'],
+    value: 'b',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'opts:\n  limit: 9007199254740993\n  list:\n    - a\n    - b\n');
+});
+
+test('a whole number beyond 2**53 given as a plain number is refused, because its digits are already gone', () => {
+  const text = 'a: 1\nlist: [x]\n';
+  const lossy = [
+    2 ** 53,
+    2 ** 53 + 2,
+    -(2 ** 60),
+    1e21,
+    [1, 2 ** 54],
+    { deep: { value: 1e30 } },
+    makeMap([['k', 2 ** 60]]),
+    makeMap([[2 ** 60, 'key']]),
+  ];
+  for (const value of lossy) {
+    for (const edit of [
+      { op: 'set', path: ['a'], value },
+      { op: 'append', path: ['list'], value },
+    ]) {
+      for (const result of [patch(text, edit), reemit(text, edit)]) {
+        assert.equal(result.ok, false);
+        assert.equal(result.final, true);
+        assert.equal(result.reason, 'number');
+        assert.match(result.message, /9007199254740991/);
+      }
+    }
+  }
+  // The message names the number, so the page can say which field it came from.
+  assert.match(patch(text, { op: 'set', path: ['a'], value: 1e21 }).message, /1e\+21/);
+  // A delete carries no value, so a lossy number in it means nothing.
+  assert.equal(patch(text, { op: 'delete', path: ['a'], value: 1e21 }).ok, true);
+});
+
+test('a BigInt, a Float, a fraction and a number a number holds exactly are written as they are given', () => {
+  const text = 'a: 1\n';
+  const values = [
+    [9007199254740993n, '9007199254740993'],
+    [new Float(2 ** 53), '9007199254740992.0'],
+    [new Float(1e21), '1.0e+21'],
+    [9007199254740991, '9007199254740991'],
+    [1.5, '1.5'],
+    [-0, '-0.0'],
+    [Infinity, '.inf'],
+    [NaN, '.nan'],
+  ];
+  for (const [value, written] of values) {
+    const result = patch(text, { op: 'set', path: ['a'], value });
+    assert.equal(result.ok, true, String(value));
+    assert.equal(result.text, `a: ${written}\n`, String(value));
+  }
 });
 
 test('an edit that changes nothing says so', () => {

@@ -183,6 +183,67 @@
         "column": 4,
         "line": 2
       }
+    },
+    {
+      "id": "int-values-around-two-to-the-53",
+      "lines": [
+        "a: 9007199254740991",
+        "b: 9007199254740992",
+        "c: 9007199254740993",
+        "d: -9007199254740993",
+        "e: 9_007_199_254_740_993",
+        "f: 0x20000000000001",
+        "g: !!int 9007199254740993",
+        "h: 9007199254740992.0"
+      ],
+      "value": {
+        "a": 9007199254740991,
+        "b": {
+          "$int": "9007199254740992"
+        },
+        "c": {
+          "$int": "9007199254740993"
+        },
+        "d": {
+          "$int": "-9007199254740993"
+        },
+        "e": {
+          "$int": "9007199254740993"
+        },
+        "f": {
+          "$int": "9007199254740993"
+        },
+        "g": {
+          "$int": "9007199254740993"
+        },
+        "h": {
+          "$float": "9007199254740992.0"
+        }
+      }
+    },
+    {
+      "id": "int-keys-around-two-to-the-53",
+      "lines": [
+        "9007199254740993: a",
+        "9007199254740992: b",
+        "9007199254740992.0: c"
+      ],
+      "value": {
+        "$map": [
+          [
+            {
+              "$int": "9007199254740993"
+            },
+            "a"
+          ],
+          [
+            {
+              "$int": "9007199254740992"
+            },
+            "c"
+          ]
+        ]
+      }
     }
   ],
   "edits": [
@@ -441,8 +502,85 @@
       },
       "how": "patch",
       "id": "set-a-string-key-beside-an-int-key-of-the-same-text"
+    },
+    {
+      "after": {
+        "lines": [
+          "limit: 9007199254740993 # cap",
+          "other: 2"
+        ]
+      },
+      "before": {
+        "lines": [
+          "limit: 9007199254740993 # cap",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "other"
+        ],
+        "value": 2
+      },
+      "how": "patch",
+      "id": "patch-beside-an-integer-beyond-two-to-the-53"
+    },
+    {
+      "after": {
+        "lines": [
+          "limit: 9007199254740995 # cap",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "limit: 9007199254740993 # cap",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "set",
+        "path": [
+          "limit"
+        ],
+        "value": {
+          "$int": "9007199254740995"
+        }
+      },
+      "how": "patch",
+      "id": "set-an-integer-beyond-two-to-the-53"
+    },
+    {
+      "after": {
+        "lines": [
+          "opts:",
+          "  limit: 9007199254740993",
+          "  list:",
+          "    - a",
+          "    - b"
+        ]
+      },
+      "before": {
+        "lines": [
+          "opts: {limit: 9007199254740993, list: [a]}"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "append",
+        "path": [
+          "opts",
+          "list"
+        ],
+        "value": "b"
+      },
+      "how": "reemit",
+      "id": "reemit-keeps-an-integer-beyond-two-to-the-53"
     }
   ],
   "format": "yaml-oracle/1",
-  "notes": "Cases for the typing of keys and numbers: mappings whose keys are not plain strings, the text an explicit float or integer tag accepts, an anchor written twice, and planted edits that make the editor write an entry again around floats and typed keys, or take the first key of a list item that shares its line with the dash. A float or a mapping with typed keys in an edit's value is written in the corpus's own projection ($float, $map)."
+  "notes": "Cases for the typing of keys and numbers: mappings whose keys are not plain strings, the text an explicit float or integer tag accepts, an anchor written twice, the integers either side of 2**53 as values and as keys, and planted edits that make the editor write an entry again around floats and typed keys, patch or write again beside an integer beyond 2**53, or take the first key of a list item that shares its line with the dash. A float, an integer beyond 2**53 or a mapping with typed keys in an edit's value is written in the corpus's own projection ($float, $int as its digits, $map)."
 }
