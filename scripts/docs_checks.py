@@ -5969,6 +5969,41 @@ UNREAD_RESPONSE_EXPLAINED = (
     ),
     (
         "get_config",
+        "automated_security_helper/config/environment_record.py",
+        "_Index._read_string",
+        "return self.mark(text.shown)",
+        "2026-12-31",
+        "a string-shaping helper of the same dump.",
+    ),
+    (
+        "get_config",
+        "automated_security_helper/config/environment_record.py",
+        "_Index._unreplaced",
+        "def _unreplaced(",
+        "2026-12-31",
+        "a string-shaping helper of the same dump.",
+    ),
+    (
+        "get_config",
+        "automated_security_helper/config/environment_record.py",
+        "_Index._unreplaced",
+        "return self.mark(text.shown)",
+        "2026-12-31",
+        "a string-shaping helper of the same dump.",
+    ),
+    (
+        "get_config",
+        "automated_security_helper/config/operator_only_options.py",
+        "mark_operator_only_options",
+        "marked = copy.deepcopy(data)",
+        "2026-12-31",
+        (
+            "returns a copy of the config dump it was given, with the"
+            " operator-only options marked."
+        ),
+    ),
+    (
+        "get_config",
         "automated_security_helper/cli/mcp_tools.py",
         "_config_as_written",
         'return _json.loads(contents().decode("utf-8-sig"))',
