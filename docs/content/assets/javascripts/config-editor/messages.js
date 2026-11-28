@@ -7,8 +7,8 @@
 // voice that ends with what a scan does with the file. The module reads no DOM and imports
 // only its two neighbors in this directory.
 
-import { asciiLower, declaredByFold, foldSectionKeys } from './spelling.js';
-import { resolveRef } from './validate.js';
+import { asciiLower, declaredByFold, foldSection, foldSectionKeys } from './spelling.js';
+import { resolveRef, validateField } from './validate.js';
 
 /** What a scan does with a file the schema refuses. */
 export const REFUSES = 'A scan refuses this file (exit 3).';
@@ -78,6 +78,13 @@ export const DEPARTURES = Object.freeze(
       reason:
         'The schema sees the text of a date, and ASH reads a date written without quotes as a date, not text, and refuses it where a string belongs.',
     },
+    {
+      row: 'variant-section-contents',
+      schema: 'valid',
+      editor: 'error',
+      reason:
+        "ASH reads what is inside a section spelled another way as the declared section's contents, and refuses the file when they are wrong; the schema admits any contents at a key it does not declare.",
+    },
   ].map((departure) => Object.freeze(departure)),
 );
 
@@ -117,6 +124,7 @@ const escapeToken = (part) => String(part).replace(/~/g, '~0').replace(/\//g, '~
 const unescapeToken = (token) => token.replace(/~1/g, '/').replace(/~0/g, '~');
 const pointerTokens = (pointer) =>
   pointer === '' ? [] : pointer.slice(1).split('/').map(unescapeToken);
+const pointerOf = (tokens) => tokens.map((token) => `/${escapeToken(token)}`).join('');
 const quoted = (names) => names.map((name) => `'${name}'`).join(', ');
 
 function valueAt(instance, tokens) {
@@ -415,6 +423,49 @@ function* valuesAtFields(block, path, instance) {
   }
 }
 
+// ASH folds the spellings of each plugin section onto the declared ones before it reads a
+// file, and merges a variant into the declared section key by key, so what ASH reads, and
+// refuses, is the folded value. Returns { instance, folded, written }: the value as ASH reads
+// it, whether any spelling was folded, and a function that gives the pointer, where the file
+// wrote it, of a value of that one. A section that holds two spellings of one plugin is left
+// as written, because ASH refuses the file for the clash before it reads what is inside.
+function foldPluginSections(block, path, instance) {
+  const unfolded = { instance, folded: false, written: (pointer) => pointer };
+  const declaredOf = (kind) => declaredByFold(block.spelling.canonical[kind] ?? []);
+  const foldOne = (kind, section) => {
+    const result = foldSection(declaredOf(kind), section);
+    return result.section === null || result.variants.length === 0 ? null : result;
+  };
+  if (SECTION_KINDS.includes(path) && isObject(instance)) {
+    const result = foldOne(path, instance);
+    return result === null
+      ? unfolded
+      : { instance: result.section, folded: true, written: result.written };
+  }
+  if (path !== '' || !isObject(instance)) {
+    return unfolded;
+  }
+  const folds = new Map();
+  for (const kind of SECTION_KINDS) {
+    const result = isObject(instance[kind]) ? foldOne(kind, instance[kind]) : null;
+    if (result !== null) {
+      folds.set(kind, result);
+    }
+  }
+  if (folds.size === 0) {
+    return unfolded;
+  }
+  const document = { ...instance };
+  for (const [kind, result] of folds) {
+    document[kind] = result.section;
+  }
+  const written = (pointer) => {
+    const [kind, ...rest] = pointerTokens(pointer);
+    return folds.has(kind) ? `/${kind}${folds.get(kind).written(pointerOf(rest))}` : pointer;
+  };
+  return { instance: document, folded: true, written };
+}
+
 /**
  * The editor's verdict for `instance`, the value at the field `path` of the data block (the
  * empty path is a whole document), given the schema's `failures` for it
@@ -426,6 +477,12 @@ function* valuesAtFields(block, path, instance) {
  * for, so a file is valid exactly when no finding is an error. Every row applies wherever its
  * input sits in `instance`, so a whole document and a section are judged as their fields are.
  *
+ * ASH reads a plugin section spelled another way as the declared section, so what is inside
+ * one is judged as the declared section's contents are: the judge folds the spellings, takes
+ * the schema's failures for the folded value, and reports every pointer where the file wrote
+ * it. A failure the `failures` given (those of `instance` as written) do not show is one only
+ * the fold finds, and carries the row 'variant-section-contents'.
+ *
  * `options.failOnUnknownKeys` is true when the file asks to fail on unknown keys.
  * `options.unquotedDates` lists the pointers, relative to `instance`, of the values the file
  * wrote as unquoted dates: the reader that knows them passes each date's text in `instance`.
@@ -434,11 +491,18 @@ export function judge(block, path, instance, failures, options = {}) {
   const rows = [];
   const replaced = new Set();
 
+  // What ASH reads is the file with each plugin section folded onto its declared spelling, so
+  // every row that looks inside the file looks at that value, and `read.written` turns each
+  // pointer it reports back into the pointer where the file wrote it.
+  const read = foldPluginSections(block, path, instance);
+  const seen = read.folded ? validateField(block, path, read.instance) : failures;
+
   // The rows that belong to one field apply to every value of the instance that sits at a
   // field, the instance itself or a value deep in a whole document.
   const dates = new Set(Array.isArray(options.unquotedDates) ? options.unquotedDates : []);
-  for (const { field, pointer, value } of valuesAtFields(block, path, instance)) {
-    const failed = failures.some((failure) => failure.pointer === pointer);
+  for (const { field, pointer, value } of valuesAtFields(block, path, read.instance)) {
+    const at = read.written(pointer);
+    const failed = seen.some((failure) => failure.pointer === pointer);
 
     // The schema admits a reference where ASH's loader refuses one.
     if (field.envRef && !field.envAccepted && !failed && isReference(block, value)) {
@@ -446,7 +510,7 @@ export function judge(block, path, instance, failures, options = {}) {
         finding(
           'reference-in-typed-field',
           'error',
-          pointer,
+          at,
           `The reference ${value} is not accepted in this ${field.kind} field. ${REFUSES}`,
         ),
       );
@@ -454,7 +518,7 @@ export function judge(block, path, instance, failures, options = {}) {
 
     // A string where a list of output formats belongs, which ASH reads as the list.
     if (field.kind === 'enumList' && typeof value === 'string') {
-      const index = failures.findIndex(
+      const index = seen.findIndex(
         (failure) => failure.pointer === pointer && failure.keyword === 'anyOf',
       );
       const pieces = readOutputFormats(value);
@@ -465,7 +529,7 @@ export function judge(block, path, instance, failures, options = {}) {
           finding(
             'comma-separated-output-formats',
             'warning',
-            pointer,
+            at,
             `Write as a list: ${field.key}: [${pieces.join(', ')}]. ASH reads the string as the same list.`,
           ),
         );
@@ -473,12 +537,12 @@ export function judge(block, path, instance, failures, options = {}) {
     }
 
     // A date written without quotes, which ASH reads as a date and refuses at a string.
-    if (field.kind === 'string' && typeof value === 'string' && !failed && dates.has(pointer)) {
+    if (field.kind === 'string' && typeof value === 'string' && !failed && dates.has(at)) {
       rows.push(
         finding(
           'unquoted-date',
           'error',
-          pointer,
+          at,
           `${field.key} must be quoted: an unquoted ${value} is read as a date, not text, so put it in quotes. ${REFUSES}`,
         ),
       );
@@ -487,7 +551,7 @@ export function judge(block, path, instance, failures, options = {}) {
 
   // An unknown key in an entry of a model ASH warns about instead of refusing, wherever the
   // entry sits.
-  failures.forEach((failure, index) => {
+  seen.forEach((failure, index) => {
     const entries = entryFailures(failure);
     if (entries === null) {
       return;
@@ -500,7 +564,7 @@ export function judge(block, path, instance, failures, options = {}) {
           finding(
             'unknown-key-in-list-entry',
             severity,
-            entry.pointer,
+            read.written(entry.pointer),
             unknownEntryKeyMessage(block, entry.definition, key, severity),
           ),
         );
@@ -567,12 +631,19 @@ export function judge(block, path, instance, failures, options = {}) {
     }
   }
 
+  // A failure of the folded value that the schema also shows for the file as written is a
+  // plain failure; one it does not show comes from the fold, and is the row's.
+  const shown = new Set(failures.map((failure) => JSON.stringify([failure.pointer, failure.keyword])));
   const findings = [];
-  failures.forEach((failure, index) => {
+  seen.forEach((failure, index) => {
     if (!replaced.has(index)) {
-      const value = valueAt(instance, pointerTokens(failure.pointer));
+      const pointer = read.written(failure.pointer);
+      const value = valueAt(read.instance, pointerTokens(failure.pointer));
+      const row = shown.has(JSON.stringify([pointer, failure.keyword]))
+        ? null
+        : 'variant-section-contents';
       findings.push(
-        finding(null, 'error', failure.pointer, describeFailure(failure, value), {
+        finding(row, 'error', pointer, describeFailure(failure, value), {
           keyword: failure.keyword,
         }),
       );
