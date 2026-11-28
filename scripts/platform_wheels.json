@@ -1,0 +1,330 @@
+{
+  "format": 1,
+  "metadata": {
+    "command": "uv pip compile --no-build --no-config --python-platform <triple> --python-version <python> --exclude-newer <exclude_newer> - (MACOSX_DEPLOYMENT_TARGET=14.0 for the macOS platforms)",
+    "cooldown": "P7D",
+    "exclude_newer": "2026-11-20T07:36:08Z",
+    "index": "https://pypi.org/simple",
+    "measured_at": "2026-11-27T07:36:08Z",
+    "origin": "recorded by scripts/check_platform_wheels.py --record",
+    "platforms": {
+      "linux-aarch64-glibc": "aarch64-unknown-linux-gnu",
+      "linux-aarch64-musl": "aarch64-unknown-linux-musl",
+      "linux-x86_64-glibc": "x86_64-unknown-linux-gnu",
+      "linux-x86_64-musl": "x86_64-unknown-linux-musl",
+      "macos-aarch64": "aarch64-apple-darwin",
+      "macos-x86_64": "x86_64-apple-darwin",
+      "windows-aarch64": "aarch64-pc-windows-msvc",
+      "windows-x86_64": "x86_64-pc-windows-msvc"
+    },
+    "pythons": [
+      "3.11",
+      "3.12",
+      "3.13",
+      "3.14"
+    ],
+    "uv_version": "0.13.0"
+  },
+  "sets": {
+    "core": {
+      "linux-aarch64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-aarch64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-aarch64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-x86_64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-aarch64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-x86_64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      }
+    },
+    "core+alpha": {
+      "linux-aarch64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-aarch64-musl": {
+        "3.11": "fail: nono-py",
+        "3.12": "fail: nono-py",
+        "3.13": "fail: nono-py",
+        "3.14": "ok"
+      },
+      "linux-x86_64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-musl": {
+        "3.11": "fail: nono-py",
+        "3.12": "fail: nono-py",
+        "3.13": "fail: nono-py",
+        "3.14": "ok"
+      },
+      "macos-aarch64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-x86_64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-aarch64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-x86_64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      }
+    },
+    "core+alpha:ferret-scan": {
+      "linux-aarch64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-aarch64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-aarch64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-x86_64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-aarch64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-x86_64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      }
+    },
+    "core+alpha:guarddog": {
+      "linux-aarch64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-aarch64-musl": {
+        "3.11": "fail: nono-py",
+        "3.12": "fail: nono-py",
+        "3.13": "fail: nono-py",
+        "3.14": "ok"
+      },
+      "linux-x86_64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-musl": {
+        "3.11": "fail: nono-py",
+        "3.12": "fail: nono-py",
+        "3.13": "fail: nono-py",
+        "3.14": "ok"
+      },
+      "macos-aarch64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-x86_64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-aarch64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-x86_64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      }
+    },
+    "core+cdk": {
+      "linux-aarch64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-aarch64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-aarch64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-x86_64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-aarch64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-x86_64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      }
+    },
+    "core+symbols": {
+      "linux-aarch64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-aarch64-musl": {
+        "3.11": "fail: tree-sitter",
+        "3.12": "fail: tree-sitter",
+        "3.13": "fail: tree-sitter",
+        "3.14": "fail: tree-sitter"
+      },
+      "linux-x86_64-glibc": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "linux-x86_64-musl": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-aarch64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      },
+      "macos-x86_64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-aarch64": {
+        "3.11": "fail: cryptography",
+        "3.12": "fail: cryptography",
+        "3.13": "fail: cryptography",
+        "3.14": "fail: cryptography"
+      },
+      "windows-x86_64": {
+        "3.11": "ok",
+        "3.12": "ok",
+        "3.13": "ok",
+        "3.14": "ok"
+      }
+    }
+  }
+}
