@@ -1700,14 +1700,31 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         verifier reports a ``--version`` probe that exits non-zero before it asks
         uv, uv found or not, and no constraint fixes that copy. Without a uv the
         verifier has no dry run, so a copy falls short only through such a probe,
-        and installing uv lets ASH install and run checkov itself. Guarddog's
-        remedy reads the same way.
+        and installing uv lets ASH install and run checkov itself. In offline mode
+        (``_is_offline_mode``) ASH installs nothing, so the remedy offers neither a
+        run through uv nor installing uv: it names a copy to install before going
+        offline, with the install command when a uv is found, and the
+        ``tool_version`` on the same terms. Guarddog's remedy reads the same way.
         """
         from automated_security_helper.utils.pre_installed_tool import (
             only_the_constraint_falls_short,
         )
 
         if uv_found:
+            if self._is_offline_mode():
+                constraint = (
+                    ", or set scanners.checkov.options.tool_version to a constraint "
+                    "this copy meets"
+                    if only_the_constraint_falls_short(checked)
+                    else ""
+                )
+                return (
+                    "It is the only copy ASH can run while uv's availability check "
+                    "does not pass, so checkov is missing, and ASH does not install "
+                    "tools in offline mode. Install a copy that satisfies "
+                    f"{requirement!r} before going offline "
+                    f"(`{self._install_command(requirement)}`){constraint}."
+                )
             constraint = (
                 "set scanners.checkov.options.tool_version to a constraint this "
                 "copy meets, "
@@ -1720,6 +1737,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 f"{requirement!r} (`{self._install_command(requirement)}`), "
                 f"{constraint}or run the scan again once uv's availability check "
                 "passes, so that uv runs checkov."
+            )
+        if self._is_offline_mode():
+            return (
+                "It is the only copy ASH can run without uv, so checkov is missing, "
+                "and ASH does not install tools in offline mode. Install a copy that "
+                f"satisfies {requirement!r} before going offline."
             )
         return (
             "It is the only copy ASH can run without uv, so checkov is missing. "

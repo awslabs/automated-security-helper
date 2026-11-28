@@ -196,6 +196,19 @@ CONSTRAINT_ONLY_SHORTFALL = (
     "the installed package does not satisfy the version constraint"
 )
 
+#: The verifier's summary part for a requirement that does not resolve in the copy's
+#: environment (``_judge``): alone, or beside the constraint's part when the copy's
+#: version falls short of the constraint too.
+_REQUIREMENT_DOES_NOT_RESOLVE = "the requirement does not resolve in its environment"
+
+#: The verifier's summary part for a requirement whose dry run without the constraint
+#: could not answer (``_judge``). Beside the constraint's part it says the version may
+#: not be all the copy fails, so ``only_the_constraint_falls_short`` answers False.
+_UNCONSTRAINED_UNVERIFIED = (
+    "uv could not verify the requirement without the version constraint in its "
+    "environment"
+)
+
 
 def only_the_constraint_falls_short(verdict: object) -> bool:
     """Whether ``verdict`` is UNSATISFIED for its version constraint alone.
@@ -1664,7 +1677,11 @@ def _judge(
     # Name the cause. One probe per extra, plus one for the bare package with the
     # constraint, only on this failure path. The constraint probe is --no-deps:
     # it asks about the package's own version, and with dependencies included a
-    # gap further down the tree would be misreported as a version mismatch.
+    # gap further down the tree would be misreported as a version mismatch. When
+    # that probe falls short and no extra is missing, one more run asks whether the
+    # requirement resolves without the constraint, with its dependencies: a copy
+    # that falls short of both is not offered a constraint it meets as the fix, nor
+    # is one whose run cannot answer, since its version may not be all it fails.
     # The extras are probed only when the bare package resolves: each extra's
     # probe resolves the whole tree, so a dependency the environment lacks (or
     # the package's own absence) read as every requested extra missing, and the
@@ -1712,9 +1729,21 @@ def _judge(
     ):
         reasons.append(f"installed {package} does not satisfy {version_constraint!r}")
         summary_parts.append(CONSTRAINT_ONLY_SHORTFALL)
+        if not missing:
+            unconstrained, unconstrained_output = _dry_run(
+                uv, interpreter, build_requirement(package, extras, None), target
+            )
+            if unconstrained == ToolInstallStatus.UNSATISFIED:
+                reasons.append(
+                    _first_cause(unconstrained_output, values, requirement, package)
+                )
+                summary_parts.append(_REQUIREMENT_DOES_NOT_RESOLVE)
+            elif unconstrained != ToolInstallStatus.SATISFIED:
+                reasons.append(_UNCONSTRAINED_UNVERIFIED)
+                summary_parts.append(_UNCONSTRAINED_UNVERIFIED)
     if not reasons:
         reasons.append(_first_cause(output, values, requirement, package))
-        summary_parts.append("the requirement does not resolve in its environment")
+        summary_parts.append(_REQUIREMENT_DOES_NOT_RESOLVE)
     return PreInstalledToolVerdict(
         ToolInstallStatus.UNSATISFIED,
         executable,

@@ -1201,7 +1201,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             # The runner's availability check is False for a probe that failed as
             # well as for a uv that is absent, and the resolver's own probe of
             # GuardDog through uv can succeed in the same moment. Every run of the
-            # scan passes that check, which refuses a uv run while it says no, so
+            # scan goes through that check, which refuses a uv run while it says no, so
             # the answer names the copy to check, not the route:
             # _accept_binary_on_path checks the binary the answer names, or for a
             # uv answer the guarddog the PATH lookup finds, and takes the direct
@@ -1281,9 +1281,9 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         """Whether the answer the resolver gave with uv unavailable may run the scan,
         and on which route.
 
-        Every run of the scan passes the runner's availability check, the one that
-        just said no, and while it says no that check refuses a uv run and starts
-        nothing in its place. It says no for a probe that timed out or died on a
+        Every run of the scan goes through the runner's availability check, the one
+        that just said no, and while it says no that check refuses a uv run and
+        starts nothing in its place. It says no for a probe that timed out or died on a
         signal, for the length of the runner's retry window, and the resolver's own
         probe of GuardDog through uv can succeed inside that window. So a uv answer,
         however uv is named, is not a route the scan can run now: the copy the PATH
@@ -1432,9 +1432,27 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         verifier reports a ``--version`` probe that exits non-zero before it asks
         uv, uv found or not, and no constraint fixes that copy. Without a uv the
         verifier has no dry run, so a copy falls short only through such a probe,
-        and installing uv lets ASH install and run guarddog itself.
+        and installing uv lets ASH install and run guarddog itself. In offline mode
+        (``_is_offline_mode``) ASH installs nothing, so the remedy offers neither a
+        run through uv nor installing uv: it names a copy to install before going
+        offline, with the install command when a uv is found, and the
+        ``tool_version`` on the same terms.
         """
         if uv_found:
+            if self._is_offline_mode():
+                constraint = (
+                    ", or set scanners.guarddog.options.tool_version to a constraint "
+                    "this copy meets"
+                    if only_the_constraint_falls_short(checked)
+                    else ""
+                )
+                return (
+                    "It is the only copy ASH can run while uv's availability check "
+                    "does not pass, so guarddog is missing, and ASH does not install "
+                    "tools in offline mode. Install a copy that satisfies "
+                    f"{requirement!r} before going offline "
+                    f"(`{self._install_command(requirement)}`){constraint}."
+                )
             constraint = (
                 "set scanners.guarddog.options.tool_version to a constraint this "
                 "copy meets, "
@@ -1447,6 +1465,12 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 f"{requirement!r} (`{self._install_command(requirement)}`), "
                 f"{constraint}or run the scan again once uv's availability check "
                 "passes, so that uv runs guarddog."
+            )
+        if self._is_offline_mode():
+            return (
+                "It is the only copy ASH can run without uv, so guarddog is missing, "
+                "and ASH does not install tools in offline mode. Install a copy that "
+                f"satisfies {requirement!r} before going offline."
             )
         return (
             "It is the only copy ASH can run without uv, so guarddog is missing. "

@@ -131,10 +131,18 @@
   copy's path or the check's detail, which could show an `options.tool_version` read
   from the environment in the spelling ASH stores it in, a spelling the redaction of
   that value in the results did not hide. The reason and the log lines no longer say
-  uv is not installed when it is and only its check failed. When a plugin's
-  overridable redaction-values hook raises or gives an unusable answer, the checks of
-  a copy on `PATH` in checkov, cfn-lint and bandit leave the copy unrun, with a reason
-  that names only the failure. Before, a raising hook's error escaped the check.
+  uv is not installed when it is and only its check failed. The reason offers a
+  `tool_version` that the copy meets only when the version constraint is all the copy
+  fails: when the copy falls short of the constraint, the check of a pre-installed
+  tool now also asks uv whether the requirement without the constraint resolves in
+  the copy's environment, and names that shortfall too when it does not. In an
+  offline scan, where ASH installs nothing, the reasons of checkov, cfn-lint and
+  GuardDog say to install a copy before going offline, instead of offering a run
+  through uv or the install of uv. When a plugin's overridable redaction-values hook
+  raises or gives an unusable answer, checkov's and cfn-lint's checks of a copy on
+  `PATH` while uv's availability check does not pass, and bandit's resolved-command
+  check, leave the copy unrun, with a reason that names only the failure. Before, a
+  raising hook's error escaped the check.
 
 ### Maintenance
 
