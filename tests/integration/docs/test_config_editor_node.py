@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,39 @@ def _count(report: str, name: str) -> int:
     return int(match.group(1))
 
 
+def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    """The finished run of ``command`` in ``cwd``, with its output as text."""
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+
+
+def test_a_report_with_non_ascii_names_and_stray_bytes_is_still_read(tmp_path):
+    """A run's report is read as UTF-8 on every host, and a stray byte costs nothing.
+
+    The stand-in prints a TAP summary, a fullwidth letter as UTF-8 (a test name in the
+    spelling tests has one) and a byte that is not UTF-8. A host that decodes the run's
+    output with its own code page, or that stops at the first byte it cannot decode,
+    loses the whole report, and the test below then has nothing to check.
+    """
+    letter = "\N{FULLWIDTH LATIN SMALL LETTER A}"
+    script = (
+        "import sys;"
+        "sys.stdout.buffer.write(b'# tests 1\\n# pass 1\\n# fail 0\\n'"
+        " + '\\N{FULLWIDTH LATIN SMALL LETTER A}'.encode('utf-8') + b'\\xff\\n')"
+    )
+    result = _run([sys.executable, "-c", script], tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout is not None
+    assert _count(result.stdout, "tests") == 1
+    assert letter in result.stdout
+
+
 def test_the_editor_node_tests_pass(docs_root):
     node = shutil.which("node")
     assert node, (
@@ -50,14 +84,7 @@ def test_the_editor_node_tests_pass(docs_root):
     package = docs_root / "docs" / "editor-tests"
     assert (package / "package.json").is_file(), f"{package} holds no package.json"
 
-    result = subprocess.run(
-        [node, "--test", "--test-reporter=tap"],
-        cwd=package,
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-    )
+    result = _run([node, "--test", "--test-reporter=tap"], package)
 
     report = result.stdout
     tail = (
