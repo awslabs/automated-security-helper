@@ -13,8 +13,8 @@ own file-load route over it: the loader every scan goes through (the file, its s
 folded, the model built under strict validation), and the config checker that reports
 what a scan tolerates. Then it requires ASH's outcome to be the one the row states, and
 the facts each row rests on: the field a refused reference names, the words of the
-clash, the warning ASH gives, the list a comma string reads as, the section a
-respelled name lands in, and the field its contents are refused at.
+clash, the warning ASH gives, the list a comma string or a padded list reads as, the
+section a respelled name lands in, and the field its contents are refused at.
 
 Two controls show that the comparison can fail: a row that claims a refusal ASH does not
 give, and a row that claims a tolerance ASH does not give.
@@ -235,10 +235,15 @@ def _facts(
         _, fatal = _load({**document, "fail_on_unknown_keys": True}, tmp_path, "f.yaml")
         assert fatal is not None and "ruleId" in fatal, fatal
     elif row == "comma-separated-output-formats":
-        text = instance if isinstance(instance, str) else instance["output_formats"]
+        value = instance["output_formats"] if isinstance(instance, dict) else instance
         formats = [getattr(item, "value", item) for item in config.output_formats]
-        # ASH splits on commas, strips each piece and drops the empty ones.
-        assert formats == [piece.strip() for piece in text.split(",") if piece.strip()]
+        if isinstance(value, str):
+            # ASH splits a string on commas, strips each piece and drops the empty ones.
+            expected = [piece.strip() for piece in value.split(",") if piece.strip()]
+        else:
+            # It strips each entry of a list, and neither splits nor drops an entry.
+            expected = [entry.strip() for entry in value]
+        assert formats == expected
     elif row == "unquoted-date":
         # ASH reads the date as a date and refuses it where text belongs, and its
         # refusal names the field that holds the date.
@@ -339,10 +344,10 @@ def test_a_row_that_claims_a_refusal_ash_does_not_give_is_caught(tmp_path, monke
 
 DATE_TEXT = "2030-01-01"
 
-#: Each place where ASH reads text and a date can be written without quotes: an item of a
-#: list of strings, a string where a path belongs, and an item of a list of paths. The
-#: corpus runs against the data block fixture, which holds one list of strings and not
-#: external_reports_to_include, so ASH is asked about every place here.
+#: Each place where ASH reads text and a date can be written without quotes: an item
+#: of a list of strings, a string where a path belongs, and an item of a list of paths.
+#: The corpus runs against the data block fixture, which holds one list of strings and
+#: not external_reports_to_include, so ASH is asked about every place here.
 DATE_PLACES = [
     pytest.param(
         "ash_plugin_modules",
@@ -401,6 +406,50 @@ def test_ash_reads_a_string_of_output_formats_as_the_vectors_say(
         assert error is None, error
         formats = [getattr(item, "value", item) for item in config.output_formats]
         assert formats == group["formats"]
+
+
+LIST_READINGS = [
+    pytest.param(group, code, id=f"{group['id']}-{code:x}")
+    for group in VECTORS["lists"]
+    for code in group["codePoints"]
+]
+
+
+@pytest.mark.parametrize(("group", "code"), LIST_READINGS)
+def test_ash_reads_a_list_of_output_formats_as_the_vectors_say(
+    group, code, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    items = [item.replace("{c}", chr(code)) for item in group["items"]]
+    config, error = _load({"output_formats": items}, tmp_path)
+    if group["formats"] is None:
+        assert error is not None, f"ASH loaded {items!r}"
+    else:
+        assert error is None, error
+        formats = [getattr(item, "value", item) for item in config.output_formats]
+        assert formats == group["formats"]
+
+
+#: Lists at output_formats that ASH refuses: an entry that is empty once stripped, one
+#: that is blank, one that names no format, one that holds a comma (a list is not
+#: split), one that is not text, and one in the wrong case.
+REFUSED_LISTS = [
+    pytest.param(["sarif", ""], id="empty-entry"),
+    pytest.param([" "], id="blank-entry"),
+    pytest.param([" nonsense"], id="no-format"),
+    pytest.param(["sarif,html"], id="comma-in-entry"),
+    pytest.param([" sarif", 5], id="entry-not-text"),
+    pytest.param(["SARIF "], id="wrong-case"),
+]
+
+
+@pytest.mark.parametrize("items", REFUSED_LISTS)
+def test_ash_refuses_a_list_of_output_formats_with_an_entry_that_is_no_format(
+    items, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _, error = _load({"output_formats": items}, tmp_path)
+    assert error is not None, f"ASH loaded {items!r}"
 
 
 ENTRY_TABLE = re.compile(

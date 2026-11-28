@@ -1,5 +1,5 @@
 {
-  "about": "How ASH reads a string at output_formats: it splits the string on commas, strips each piece the way Python's str.strip does, and drops the pieces that are empty. Each group names code points; the string is the group's template with {c} replaced by the character. formats is the list ASH reads, or null when ASH refuses the file because a piece is not a format. A Python test loads each string through ASH's file-load route, and a node test reads each one with the editor's reading.",
+  "about": "How ASH reads the value at output_formats. A string is split on commas, each piece is stripped the way Python's str.strip does, and the pieces that are empty are dropped. A list is not split: each entry is stripped the same way and has to be a format then, so an entry that is empty once stripped is refused. Each group names code points. The string of a group in groups is its template with {c} replaced by the character, and the list of a group in lists is its items with {c} replaced. formats is the list ASH reads, or null when ASH refuses the file because a piece or an entry is not a format. A Python test loads each string and each list through ASH's file-load route, and a node test reads each one with the editor's reading.",
   "groups": [
     {
       "codePoints": [
@@ -42,6 +42,55 @@
       "formats": null,
       "id": "not-separators",
       "template": "{c}sarif"
+    }
+  ],
+  "lists": [
+    {
+      "codePoints": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        28,
+        29,
+        30,
+        31,
+        32,
+        133,
+        160,
+        5760,
+        8192,
+        8195,
+        8202,
+        8232,
+        8233,
+        8239,
+        8287,
+        12288
+      ],
+      "formats": [
+        "sarif",
+        "html"
+      ],
+      "id": "list-separators",
+      "items": [
+        "{c}sarif{c}",
+        "{c}html"
+      ]
+    },
+    {
+      "codePoints": [
+        173,
+        6158,
+        8203,
+        65279
+      ],
+      "formats": null,
+      "id": "list-not-separators",
+      "items": [
+        "{c}sarif"
+      ]
     }
   ]
 }

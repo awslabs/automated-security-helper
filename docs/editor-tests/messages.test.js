@@ -465,6 +465,82 @@ test('a string of output formats that ASH reads as a list is a warning, however 
   assert.equal(judgeField('output_formats', `${String.fromCodePoint(0xfeff)}sarif`).valid, false);
 });
 
+// ASH strips each entry of a list at output_formats the way Python strips before it looks the
+// entry up, so a padded name in a list loads. It does not split an entry on commas, and an
+// entry that is empty once stripped is no format.
+
+test('a list of output formats whose names ASH strips is a warning, however the padding is written', () => {
+  const nbsp = String.fromCodePoint(0xa0);
+  const ideographicSpace = String.fromCodePoint(0x3000);
+  const padded = [
+    [' sarif'],
+    ['sarif ', 'html'],
+    [' sarif\t', '\nhtml '],
+    [`${nbsp}sarif`, `html${ideographicSpace}`],
+  ];
+  for (const items of padded) {
+    const label = JSON.stringify(items);
+    const result = judgeField('output_formats', items);
+    assert.equal(result.valid, true, label);
+    assert.deepEqual(projected(result), [{ row: 'comma-separated-output-formats', severity: 'warning' }], label);
+    assert.equal(result.findings[0].pointer, '', label);
+  }
+  const one = judgeField('output_formats', [' sarif']);
+  assert.equal(
+    one.findings[0].message,
+    'Write each name without the white space around it: output_formats: [sarif]. ASH strips each name, so it reads the same list.',
+  );
+  const two = judgeField('output_formats', ['sarif ', ' html']);
+  assert.match(two.findings[0].message, /output_formats: \[sarif, html\]\./);
+
+  const document = judgeField('', { output_formats: ['sarif ', 'html'] });
+  assert.equal(document.valid, true);
+  assert.deepEqual(projected(document), [{ row: 'comma-separated-output-formats', severity: 'warning' }]);
+  assert.equal(document.findings[0].pointer, '/output_formats');
+  assert.match(document.findings[0].message, /output_formats: \[sarif, html\]\./);
+});
+
+test('a list of output formats stays refused when an entry is no format once it is stripped', () => {
+  const refused = [
+    ['sarif', ''],
+    [' '],
+    [' nonsense'],
+    ['sarif,html'],
+    [' sarif', 5],
+    ['SARIF '],
+    [`${String.fromCodePoint(0xfeff)}sarif`],
+  ];
+  for (const items of refused) {
+    const label = JSON.stringify(items);
+    const result = judgeField('output_formats', items);
+    assert.equal(result.valid, false, label);
+    assert.deepEqual(projected(result), [{ row: null, severity: 'error' }], label);
+  }
+  // A list that needs no stripping is the schema's to pass, with nothing to say.
+  assert.deepEqual(judgeField('output_formats', ['sarif', 'html']).findings, []);
+  assert.deepEqual(judgeField('output_formats', []).findings, []);
+});
+
+test('the lists of the output format vectors read as ASH reads them', () => {
+  const vectors = fixture('output-format-vectors.json');
+  assert.ok(vectors.lists.length > 0);
+  for (const group of vectors.lists) {
+    for (const code of group.codePoints) {
+      const items = group.items.map((item) => item.replaceAll('{c}', String.fromCodePoint(code)));
+      const label = `${group.id} ${code.toString(16)}`;
+      const result = judgeField('output_formats', items);
+      if (group.formats === null) {
+        assert.equal(result.valid, false, label);
+        assert.deepEqual(projected(result), [{ row: null, severity: 'error' }], label);
+      } else {
+        assert.equal(result.valid, true, label);
+        assert.deepEqual(projected(result), [{ row: 'comma-separated-output-formats', severity: 'warning' }], label);
+        assert.ok(result.findings[0].message.includes(`output_formats: [${group.formats.join(', ')}].`), label);
+      }
+    }
+  }
+});
+
 test('an unquoted date where a string belongs is an error that says to quote it', () => {
   const entry = { path: 'a', reason: 'b', expires: '2030-01-01' };
   const document = { global_settings: { suppressions: [entry] } };

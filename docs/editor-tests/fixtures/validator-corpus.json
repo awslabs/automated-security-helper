@@ -364,9 +364,70 @@
         ],
         "valid": true
       },
+      "id": "output-formats-list-leading-space-bad",
+      "instance": [
+        " sarif"
+      ],
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-list-trailing-space-bad",
+      "instance": [
+        "sarif ",
+        "html"
+      ],
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
       "id": "document-comma-output-formats-bad",
       "instance": {
         "output_formats": "sarif,html"
+      },
+      "keyword": "anyOf",
+      "path": "",
+      "pointer": "/output_formats",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "document-list-output-formats-bad",
+      "instance": {
+        "output_formats": [
+          " sarif",
+          "html "
+        ]
       },
       "keyword": "anyOf",
       "path": "",
