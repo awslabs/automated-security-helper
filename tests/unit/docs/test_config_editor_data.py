@@ -62,10 +62,10 @@ NOT_FOUND_BY_THE_SCAN = {
     "scanners.semgrep.options.config": "named by a method the base class calls",
     "scanners.trivy.options.config_file": "a bare option name, the section added later",
     "scanners.trivy.options.ignore_file": "a bare option name, the section added later",
-    "scanners.trivy.options.secret_config_file": "a bare option name, the section added later",
+    "scanners.trivy.options.secret_config_file": "a bare option name, the section added later",  # pragma: allowlist secret
     "scanners.trivy-repo.options.config_file": "a bare option name, the section added later",
     "scanners.trivy-repo.options.ignore_file": "a bare option name, the section added later",
-    "scanners.trivy-repo.options.secret_config_file": "a bare option name, the section added later",
+    "scanners.trivy-repo.options.secret_config_file": "a bare option name, the section added later",  # pragma: allowlist secret
     "scanners.trivy-repo.options.module_dir": "a bare option name, the section added later",
 }
 
