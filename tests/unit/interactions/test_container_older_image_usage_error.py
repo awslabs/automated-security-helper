@@ -78,6 +78,10 @@ def container(monkeypatch, tmp_path) -> Dict[str, Any]:
     for name in ("CI", "IsCI", "ISCI", "CODEBUILD_BUILD_ID", "ASH_IMAGE_NAME"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside --add-scanners, and --only-scanners
+    # refuses it.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     return seen
 
 

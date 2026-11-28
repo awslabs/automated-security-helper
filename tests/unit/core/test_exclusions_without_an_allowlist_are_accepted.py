@@ -27,6 +27,10 @@ def project(tmp_path, monkeypatch):
     root = tmp_path / "demo"
     root.mkdir()
     (root / "app.py").write_text("x = 1\n", encoding="utf-8")
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would add scanners to the control's selection, so that it
+    # would no longer cancel itself.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     monkeypatch.chdir(root)
     return root
 

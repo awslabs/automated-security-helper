@@ -39,7 +39,13 @@ DEPENDENCY = "wsbrokendep_for_workspace"
 @pytest.fixture
 def workspace_with_broken_module(tmp_path, monkeypatch):
     """A one-project workspace whose project config names the broken module."""
-    for name in ("ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_CONFIG", "ASH_WORKSPACE"):
+    for name in (
+        "ASH_SOURCE_DIR",
+        "ASH_OUTPUT_DIR",
+        "ASH_CONFIG",
+        "ASH_WORKSPACE",
+        "ASH_SCANNERS",
+    ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("COLUMNS", "400")
     monkeypatch.setenv("NO_COLOR", "1")

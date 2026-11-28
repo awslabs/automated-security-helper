@@ -278,6 +278,9 @@ def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     }
     for name, value in env.items():
         monkeypatch.setenv(name, value)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach an in-process scan beside --add-scanners.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     (tmp_path / "src").mkdir()
     monkeypatch.chdir(tmp_path)
     yield {"env": env, "guard_log": guard_log}

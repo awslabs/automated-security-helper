@@ -311,6 +311,9 @@ def _ash(tmp_path: Path, args: List[str], cwd: Path) -> subprocess.CompletedProc
         "COLUMNS": "1000",
         "TERMINAL_WIDTH": "1000",
     }
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     return subprocess.run(  # nosec B603 - fixed interpreter and arguments
         [sys.executable, "-m", "automated_security_helper.cli.main", "scan", *args],
         cwd=cwd,

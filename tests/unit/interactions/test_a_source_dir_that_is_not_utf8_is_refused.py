@@ -194,6 +194,9 @@ def test_ash_scan_refuses_it_with_the_message_on_a_strict_stdout(tmp_path):
         "COLUMNS": "1000",
         "TERMINAL_WIDTH": "1000",
     }
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
 
     child = subprocess.run(  # nosec B603 - fixed interpreter and arguments
         [
