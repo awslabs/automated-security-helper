@@ -2611,6 +2611,13 @@ jobs:
           uv pip install 'cfn-lint[sarif]>=1.43.3,<2.0.0'
       - name: Install the scanners the docs examples run for real
         run: uv run ash dependencies install --tool bandit --tool actionlint --tool cfn-lint --tool cfn-guard --tool gitleaks --tool checkov --tool semgrep --tool zizmor
+      # tests/integration/docs/test_config_editor_node.py runs `node --test` over the
+      # docs site's editor modules. They are plain ES modules with no package.json above
+      # them, which Node reads as modules from 22.7.0 on, so the version comes from
+      # .nvmrc as it does in the other workflows that run node.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
       # PATH gains the two install directories for this step only, as on integration-test.
       #
       # ASH_REQUIRE_PREINSTALLED_TOOLS and ASH_CFN_GUARD_RULES_DIR, which

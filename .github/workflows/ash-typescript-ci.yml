@@ -135,6 +135,11 @@ on:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
       - ".nvmrc"
+      # The docs site's browser modules are tracked production JavaScript, and the
+      # completeness census fails a module that has neither a coverage report nor an
+      # entry in the exclusions file. Listed so a pull request that adds or changes
+      # one runs the census, instead of finding out in the merge queue.
+      - "docs/content/assets/javascripts/**"
   # THE MERGE QUEUE LEG, AND WHY IT CARRIES NO paths FILTER
   #
   # This repository runs a merge queue -- ash-unified-ci.yml declares merge_group

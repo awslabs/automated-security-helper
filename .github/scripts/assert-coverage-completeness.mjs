@@ -30,6 +30,14 @@
  * `zod_to_json_schema.mjs` is deleted or acquires a jest config, the entry that
  * excused it fails as stale rather than being carried silently forward.
  *
+ * A `node-test` entry says something different from the other two kinds. The file
+ * does have a harness, a `node --test` suite, but that suite is not a jest run and
+ * writes no coverage summary, so no report can measure it. The entry names the
+ * suite's test file in a `test` field, and its staleness test requires that file to
+ * be tracked, to be a test source and to import the module. An entry whose test
+ * was deleted, or whose test stopped loading the module, fails the census instead
+ * of excusing a module nothing exercises.
+ *
  * WHY SCOPES, RATHER THAN ONE WHOLE-REPO CHECK
  *
  * The workflow runs the packages as a parallel matrix, so no single job has both
@@ -104,7 +112,27 @@ const NOT_PRODUCTION =
 const HARNESS_CONFIG =
   /^(package\.json|tsconfig(\..+)?\.json|(jest|vitest)\.config\.([cm]?[jt]s|json))$/;
 
-const KINDS = new Set(['harness-config', 'no-harness']);
+const KINDS = new Set(['harness-config', 'no-harness', 'node-test']);
+
+/**
+ * Test sources as the census reads them: the shapes NOT_PRODUCTION leaves out
+ * that are tests, not declarations or scanner fixtures. The test file a
+ * `node-test` entry names has to be one. Otherwise a production file could stand
+ * in as the harness of another module, and the entry would claim a suite that
+ * nothing runs.
+ */
+const TEST_SOURCE = /(^|\/)test\/|\.test\.|\.spec\./;
+
+/**
+ * The module specifiers of the import forms the node test runner loads: static
+ * imports and re-exports (the name list may span lines), a side-effect import,
+ * and a dynamic import with a literal. Capture group 2 is the specifier.
+ */
+const IMPORT_SPECIFIERS = [
+  /(?:^|[\s;{}])(?:import|export)\s[^'"`;]*?\bfrom\s*(['"])([^'"\n]+)\1/g,
+  /(?:^|[\s;{}])import\s*(['"])([^'"\n]+)\1/g,
+  /\bimport\s*\(\s*(['"])([^'"\n]+)\1\s*\)/g,
+];
 
 function parseArgs(argv) {
   const opts = { exclusions: null, scope: null, summary: null, packages: [] };
@@ -245,12 +273,125 @@ function loadExclusions(file) {
     if (entry.path.startsWith('/') || entry.path.split('/').includes('..')) {
       throw new Error(`${where} path must be repository-relative: ${entry.path}`);
     }
+    if (entry.kind === 'node-test') {
+      if (typeof entry.test !== 'string' || entry.test === '') {
+        // Without the test file there is nothing for the staleness test to read.
+        throw new Error(
+          `${where} (${entry.path}) is a node-test entry and needs a non-empty "test"`,
+        );
+      }
+      if (entry.test.startsWith('/') || entry.test.split('/').includes('..')) {
+        throw new Error(`${where} test must be repository-relative: ${entry.test}`);
+      }
+    } else if (entry.test !== undefined) {
+      // A field no staleness test reads would look like a claim and check nothing.
+      throw new Error(
+        `${where} (${entry.path}) has a "test" field, which only a node-test entry uses`,
+      );
+    }
     if (seen.has(entry.path)) {
       throw new Error(`${where} duplicates an earlier entry: ${entry.path}`);
     }
     seen.add(entry.path);
     return entry;
   });
+}
+
+/**
+ * `source` with its comments blanked and its string and template literals left as
+ * written, so a `//` inside a string is not read as a comment and an import that
+ * is only commented out is not read as an import.
+ *
+ * Limit: a regular-expression literal that holds a quote or a comment marker can
+ * confuse this reader. The failure is loud, because an import after such a literal
+ * reads as missing and the entry is reported; it can never pass an entry.
+ */
+function withoutComments(source) {
+  let out = '';
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === '/' && next === '/') {
+      // Stop at the newline and leave it, so line structure survives.
+      while (i < source.length && source[i] !== '\n') i += 1;
+    } else if (ch === '/' && next === '*') {
+      const end = source.indexOf('*/', i + 2);
+      i = end === -1 ? source.length : end + 2;
+      out += ' ';
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1;
+      while (j < source.length && source[j] !== ch) {
+        j += source[j] === '\\' ? 2 : 1;
+      }
+      out += source.slice(i, j + 1);
+      i = j + 1;
+    } else {
+      out += ch;
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether the test file at `testPath` imports the module at `modulePath`, both
+ * repository-relative POSIX paths and `source` the test file's text.
+ *
+ * Only a relative specifier can name a file of this repository, so only those are
+ * resolved, against the importing file's directory, and compared with the module's
+ * whole path. A same-named file in another directory does not count, and neither
+ * does a bare package name. An extension is not guessed: the node test runner
+ * loads ES modules by their full file name, so a specifier without one would not
+ * run.
+ */
+function importsModule(source, testPath, modulePath) {
+  const code = withoutComments(source);
+  const baseDir = path.posix.dirname(testPath);
+  for (const pattern of IMPORT_SPECIFIERS) {
+    for (const match of code.matchAll(pattern)) {
+      const specifier = match[2];
+      if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
+      if (path.posix.join(baseDir, specifier) === modulePath) return true;
+    }
+  }
+  return false;
+}
+
+/** The staleness problems of one `node-test` entry; empty when it still holds. */
+function nodeTestProblems(entry, trackedSet, repoRoot) {
+  const { path: file, test } = entry;
+  if (!trackedSet.has(test)) {
+    return [
+      `exclusion ${file} (node-test) names the test file ${test}, which is not ` +
+        'tracked (deleted or renamed). Restore the test, point the entry at the ' +
+        'file that now holds it, or remove the entry and measure the module another way.',
+    ];
+  }
+  if (!TEST_SOURCE.test(test)) {
+    return [
+      `exclusion ${file} (node-test) names ${test} as its test, but the census does ` +
+        'not read that file as a test source (a name with .test. or .spec. in it, or ' +
+        'a file under a test/ directory). A production file cannot be the harness of ' +
+        'another module.',
+    ];
+  }
+  let source;
+  try {
+    source = readFileSync(path.resolve(repoRoot, test), 'utf8');
+  } catch (err) {
+    return [
+      `exclusion ${file} (node-test) names the test file ${test}, which cannot be read: ${err.message}`,
+    ];
+  }
+  if (!importsModule(source, test, file)) {
+    return [
+      `exclusion ${file} (node-test) names ${test}, which does not import it. A test ` +
+        'that never loads the module says nothing about it. Make the test import the ' +
+        'module by a relative path, or remove the entry.',
+    ];
+  }
+  return [];
 }
 
 function readSummary(file, repoRoot, problems) {
@@ -433,6 +574,10 @@ function main(argv) {
             'or change the entry to say why it still cannot be.',
         );
       }
+    }
+
+    if (kind === 'node-test') {
+      problems.push(...nodeTestProblems(entry, trackedSet, repoRoot));
     }
   }
 
