@@ -1,13 +1,20 @@
 """Page claims about the scan subjects that the command line decides.
 
-Each test follows the pattern of test_page_claims.py: ``assert_on_page`` checks that a
+Most tests follow the pattern of test_page_claims.py: ``assert_on_page`` checks that a
 sentence is still on its page, and the test then runs the real command to see that the
 sentence is true, so a change to either half fails here.
 
+The tests of scale-large-repos.md read their page the other way round. The page is
+rendered for the release it pins, and the render respells the commands in its code, so a
+sentence of the page can be about another command than the same sentence in its
+template. Those tests read every clause of the committed page that names a workspace
+scan and an option, and run the command line the clause names, spelled as the page
+spells it.
+
 What is pinned:
 
-- scale-large-repos.md: a sharded workspace scan is a usage error, with exit 5, in the
-  spelling 3.9 gives a workspace scan and in the deprecated one.
+- scale-large-repos.md: what the page says a workspace scan given ``--source-dir`` or a
+  shard option exits, and which of those options it says the command does not take.
 - reference/exit-codes.md: where an option typed before a subcommand goes, and the
   example the page gives of one that is refused; the options that belong to a workspace
   scan, which ``ash scan fs`` refuses; what ``ash scan workspace`` refuses; and the
@@ -19,7 +26,9 @@ What is pinned:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from typer.testing import CliRunner
@@ -31,6 +40,7 @@ from automated_security_helper.models.workspace import WorkspaceExitCode
 from tests.unit.docs.test_page_claims import (
     EXIT_CODES,
     SCALE_LARGE_REPOS,
+    _page_text,
     assert_on_page,
 )
 
@@ -38,17 +48,25 @@ pytestmark = pytest.mark.unit
 
 MIGRATE = "how-to/migrate-to-scan-subjects.md"
 
-#: scale-large-repos.md (What sharding does not do).
-_SHARDS_DO_NOT_COMBINE_WITH_A_WORKSPACE = (
-    "It does not combine with workspace scans: `ash scan workspace` takes no "
-    "`--shard-index` or `--shard-count`, and the scan exits 5."
-)
+#: How a page names a workspace scan, and the start of its command line: the deprecated
+#: option, alone or after ``ash scan``, and the subject 3.9 gives a workspace scan.
+_WORKSPACE_COMMANDS = {
+    "--workspace": ("scan", "--workspace"),
+    "ash scan --workspace": ("scan", "--workspace"),
+    "ash scan workspace": ("scan", "workspace"),
+}
+#: The options whose claims scale-large-repos.md is read for, each with the value a
+#: command line gives it.
+_DIRECTORY = {"--source-dir": "."}
+_SHARDS = {"--shard-index": "0", "--shard-count": "2"}
 
-#: scale-large-repos.md (Scan a multi-project workspace, the exit code).
-_A_DIRECTORY_AND_A_WORKSPACE = (
-    "The deprecated `--workspace` option and `--source-dir` together also exit 4; "
-    "`ash scan workspace` takes no `--source-dir`, so it exits 5 instead."
-)
+_FENCE_LINE = re.compile(r"^\s*(```|~~~)")
+_SPAN = re.compile(r"`([^`\n]+)`")
+#: Where a clause ends: a full stop, a semicolon or a colon, then the next sentence, a
+#: list item or a code span.
+_CLAUSE_END = re.compile(r"(?<=[.;:])\s+(?=[A-Z`-])")
+_STATED_EXIT = re.compile(r"\bexits?(?: code)? (\d)\b", re.IGNORECASE)
+_TAKES_NONE = re.compile(r"\b(?:takes no|does not take|has no)\b")
 
 #: exit-codes.md (the usage-error paragraph): where an option typed before a subcommand
 #: goes, and an example of one that is refused.
@@ -183,54 +201,215 @@ def _workspace(root: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize(
-    ("scan", "refusal"),
-    [
-        pytest.param(
-            ["scan", "workspace"],
-            "--shard-index",
-            id="the-workspace-subject",
-        ),
-        pytest.param(
-            ["scan", "--workspace"],
-            "cannot be combined with --workspace",
-            id="the-deprecated-option",
-        ),
-    ],
-)
-def test_a_sharded_workspace_scan_exits_5(tmp_path, scan, refusal):
+class _Claim(NamedTuple):
+    """One clause of a page about a workspace scan: the command line it names, the
+    options it names, the exits it states, and whether it says the command takes none
+    of the options."""
+
+    command: tuple[str, ...]
+    options: tuple[str, ...]
+    exits: frozenset[int]
+    takes_none: bool
+    clause: str
+
+
+def _prose_paragraphs(text: str) -> list[str]:
+    """The paragraphs of a page outside its fenced blocks, each on one line."""
+    paragraphs: list[str] = []
+    lines: list[str] = []
+    fenced = False
+    for line in [*text.splitlines(), ""]:
+        if _FENCE_LINE.match(line):
+            fenced = not fenced
+        elif fenced:
+            continue
+        elif line.strip():
+            lines.append(line)
+            continue
+        # A blank line or a fence ends the paragraph before it.
+        if lines:
+            paragraphs.append(_one_line(" ".join(lines)))
+            lines = []
+    return paragraphs
+
+
+def _clauses(paragraph: str) -> list[str]:
+    """``paragraph`` cut where each of its clauses ends, never inside a code span."""
+    masked = _SPAN.sub(lambda span: f"`{'x' * len(span[1])}`", paragraph)
+    cuts = list(_CLAUSE_END.finditer(masked))
+    starts = [0, *(cut.end() for cut in cuts)]
+    ends = [*(cut.start() for cut in cuts), len(paragraph)]
+    return [paragraph[start:end] for start, end in zip(starts, ends, strict=True)]
+
+
+def _paragraph_claims(paragraph: str, options: dict[str, str]) -> list[_Claim]:
+    """The claims ``paragraph`` makes about a workspace scan given one of ``options``.
+
+    A clause makes one for each workspace scan it names in a code span, when it names
+    one of the options in a code span too. Its exits are the codes its prose states
+    (``exit 4``, ``exits 5``), and it says that the command takes none of the options it
+    names when its prose says ``takes no``, ``does not take`` or ``has no``.
+    """
+    claims: list[_Claim] = []
+    for clause in _clauses(paragraph):
+        spans = _SPAN.findall(clause)
+        named = tuple(dict.fromkeys(span for span in spans if span in options))
+        commands = {_WORKSPACE_COMMANDS.get(span) for span in spans} - {None}
+        if not named:
+            continue
+        prose = _SPAN.sub("", clause)
+        exits = frozenset(int(code) for code in _STATED_EXIT.findall(prose))
+        takes_none = _TAKES_NONE.search(prose) is not None
+        for command in sorted(commands):
+            claims.append(_Claim(command, named, exits, takes_none, clause))
+    return claims
+
+
+def _page_claims(page: str, options: dict[str, str]) -> list[_Claim]:
+    """Every claim the committed ``docs/content/<page>`` makes about a workspace scan
+    given one of ``options``.
+
+    The page is read as it is committed, rendered for the release it pins, so each
+    command is named as that release spells it. The claims are not copied from its
+    template and respelled: a respelling can turn a sentence about one command into a
+    sentence about another, and the copy would be held to the first.
+    """
+    return [
+        claim
+        for paragraph in _prose_paragraphs(_page_text(page))
+        for claim in _paragraph_claims(paragraph, options)
+    ]
+
+
+def _held_to_the_cli(
+    claims: list[_Claim], options: dict[str, str], workspace: Path
+) -> list[str]:
+    """What is false in ``claims``, each run as the command lines it is about.
+
+    Those are the command line with each option the claim names, alone, and with all of
+    them, when it names more than one. Each has to exit with the code the claim states.
+    A claim that the command takes none of the options holds only when the command
+    refuses each of them, alone, as an option it does not define, with 5. No command
+    line may be given two exits, by one claim or by two.
+    """
+    problems: list[str] = []
+    stated: dict[tuple[str, ...], set[int]] = {}
+    for claim in claims:
+        command = " ".join(["ash", *claim.command])
+        option_sets = [(option,) for option in claim.options]
+        if len(claim.options) > 1:
+            option_sets.append(claim.options)
+        for given in option_sets:
+            argv = [*claim.command, str(workspace)]
+            for option in given:
+                argv += [option, options[option]]
+            stated.setdefault(tuple(argv), set()).update(claim.exits)
+            result = _invoke(argv)
+            output = _one_line(result.output)
+            for code in sorted(claim.exits - {result.exit_code}):
+                problems.append(
+                    f"{claim.clause!r}: `{command}` with {' '.join(given)} exits "
+                    f"{result.exit_code}, not {code}: {output}"
+                )
+            undefined = (
+                result.exit_code == ASH_EXIT_USAGE_ERROR
+                and "No such option" in output
+                and given[0] in output
+            )
+            if claim.takes_none and len(given) == 1 and not undefined:
+                problems.append(
+                    f"{claim.clause!r}: `{command}` takes {given[0]}, and with it "
+                    f"exits {result.exit_code}: {output}"
+                )
+    for argv, exits in stated.items():
+        if len(exits) > 1:
+            problems.append(
+                f"the page gives `ash {' '.join(argv)}` two exits, {sorted(exits)}"
+            )
+    return problems
+
+
+def test_the_page_says_what_a_sharded_workspace_scan_exits(tmp_path):
     """scale-large-repos.md (What sharding does not do).
 
-    ``ash scan workspace FILE --shard-index 0 --shard-count 2`` must exit 5, because the
-    subject has no shard options, and so must the deprecated ``ash scan --workspace FILE``
-    with the same options, which names the combination it refuses. The workspace holds a
-    project that a scan would read, so an exit of 5 is the refusal and not a scan.
+    Every clause of the page, as committed, that names a workspace scan and a shard
+    option is run as the command line it names. A workspace scan with ``--shard-index``
+    or ``--shard-count`` exits 5 in either spelling, for two reasons: the subject has no
+    shard options, while the deprecated ``--workspace`` has both and refuses either
+    beside it (``_validate_shard_options`` in cli/scan.py, in 3.8.0 as in this tree).
+    So a page that names the deprecated form cannot say that it takes neither. The
+    workspace holds a project that a scan would read, so an exit of 5 is the refusal and
+    not a scan.
     """
-    assert_on_page(SCALE_LARGE_REPOS, _SHARDS_DO_NOT_COMBINE_WITH_A_WORKSPACE)
+    claims = _page_claims(SCALE_LARGE_REPOS, _SHARDS)
     workspace = _workspace(tmp_path)
 
-    result = _invoke(
-        [*scan, str(workspace), "--shard-index", "0", "--shard-count", "2"]
-    )
+    problems = _held_to_the_cli(claims, _SHARDS, workspace)
 
-    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
-    assert refusal in _one_line(result.output), result.output
+    assert not problems, "\n".join(problems)
+    assert any(claim.exits for claim in claims), claims
 
 
-def test_a_directory_beside_a_workspace_exits_4_or_5_by_the_spelling(tmp_path):
+def test_the_page_says_what_a_workspace_scan_given_a_directory_exits(tmp_path):
     """scale-large-repos.md (Scan a multi-project workspace, the exit code).
 
-    The deprecated ``--workspace`` with ``--source-dir`` is the workspace error, 4. The
-    subject has no ``--source-dir``, so the same pair is a usage error, 5.
+    Every clause of the page, as committed, that names a workspace scan and
+    ``--source-dir`` is run as the command line it names. The deprecated ``--workspace``
+    takes ``--source-dir`` and refuses the pair as the workspace error, 4
+    (``_handle_workspace_mode`` in cli/scan.py, in 3.8.0 as in this tree), and the page
+    has to say that and give the command line no other exit. The subject has no
+    ``--source-dir`` and refuses it with 5, and a page that names the subject is held to
+    that instead.
     """
-    assert_on_page(SCALE_LARGE_REPOS, _A_DIRECTORY_AND_A_WORKSPACE)
+    claims = _page_claims(SCALE_LARGE_REPOS, _DIRECTORY)
     workspace = _workspace(tmp_path)
 
-    deprecated = _invoke(["scan", "--workspace", str(workspace), "--source-dir", "."])
-    subject = _invoke(["scan", "workspace", str(workspace), "--source-dir", "."])
+    problems = _held_to_the_cli(claims, _DIRECTORY, workspace)
 
-    assert deprecated.exit_code == WorkspaceExitCode.WORKSPACE_ERROR, deprecated.output
-    assert subject.exit_code == ASH_EXIT_USAGE_ERROR, subject.output
+    assert not problems, "\n".join(problems)
+    deprecated = {
+        code
+        for claim in claims
+        if claim.command == ("scan", "--workspace")
+        for code in claim.exits
+    }
+    assert deprecated == {WorkspaceExitCode.WORKSPACE_ERROR}, claims
+
+
+def test_the_page_reader_reads_one_claim_from_each_clause():
+    """The reader of the two tests above.
+
+    A paragraph is cut into its clauses outside its code spans, and a clause that names
+    a workspace scan and one of the options is a claim: its command line, the options,
+    the exits it states, and whether it says the command takes none of them. Read so, a
+    sentence that gives the deprecated option and ``--source-dir`` exit 4 and then says
+    that ``ash scan --workspace`` takes no ``--source-dir``, so it exits 5, gives one
+    command line two exits. The text of a fenced block is not read.
+    """
+    deprecated = ("scan", "--workspace")
+    first = (
+        "The deprecated `--workspace` option and `--source-dir` together also exit 4"
+    )
+    second = "`ash scan --workspace` takes no `--source-dir`, so it exits 5 instead."
+    sharded = "`ash scan workspace` with `--shard-index` or `--shard-count` exits 5."
+
+    def read(paragraph: str, options: dict[str, str]) -> list[tuple]:
+        return [
+            (claim.command, claim.options, claim.exits, claim.takes_none)
+            for claim in _paragraph_claims(paragraph, options)
+        ]
+
+    assert read(f"{first}; {second}", _DIRECTORY) == [
+        (deprecated, ("--source-dir",), {4}, False),
+        (deprecated, ("--source-dir",), {5}, True),
+    ]
+    assert read(f"{first}.", _DIRECTORY) == [
+        (deprecated, ("--source-dir",), {4}, False)
+    ]
+    assert read(sharded, _SHARDS) == [
+        (("scan", "workspace"), ("--shard-index", "--shard-count"), {5}, False)
+    ]
+    assert _prose_paragraphs(f"```text\n{second}\n```\n\n{first}.\n") == [f"{first}."]
 
 
 def test_an_option_before_a_subcommand_goes_to_the_command_it_names(tmp_path):
@@ -303,9 +482,9 @@ def test_a_workspace_file_that_does_not_exist_is_the_workspace_error():
 def test_the_workspace_subject_takes_no_directory(tmp_path, monkeypatch):
     """exit-codes.md (`ash scan`, code 0; Workspace mode, codes 4 and 5).
 
-    ``ash scan workspace`` refuses ``--source-dir`` and a missing file with 5. It does
-    not read ``ASH_SOURCE_DIR``, so a dry run with the variable set still exits 0, while
-    the deprecated ``--workspace`` refuses the same variable with 4.
+    ``ash scan workspace`` refuses ``--source-dir``, a shard option and a missing file
+    with 5. It does not read ``ASH_SOURCE_DIR``, so a dry run with the variable set
+    still exits 0, while the deprecated ``--workspace`` refuses the same variable with 4.
     """
     assert_on_page(EXIT_CODES, _A_WORKSPACE_DRY_RUN_EXITS_0)
     assert_on_page(EXIT_CODES, _THE_DIRECTORY_AND_THE_WORKSPACE)
@@ -313,6 +492,7 @@ def test_the_workspace_subject_takes_no_directory(tmp_path, monkeypatch):
     workspace = _workspace(tmp_path)
 
     refused = _invoke(["scan", "workspace", str(workspace), "--source-dir", "."])
+    sharded = _invoke(["scan", "workspace", str(workspace), "--shard-index", "0"])
     no_file = _invoke(["scan", "workspace"])
     monkeypatch.setenv("ASH_SOURCE_DIR", str(tmp_path))
     dry_run = _invoke(["scan", "workspace", str(workspace), "--dry-run"])
@@ -320,6 +500,9 @@ def test_the_workspace_subject_takes_no_directory(tmp_path, monkeypatch):
 
     assert refused.exit_code == ASH_EXIT_USAGE_ERROR, refused.output
     assert "--source-dir" in _one_line(refused.output), refused.output
+    assert sharded.exit_code == ASH_EXIT_USAGE_ERROR, sharded.output
+    assert "No such option" in _one_line(sharded.output), sharded.output
+    assert "--shard-index" in _one_line(sharded.output), sharded.output
     assert no_file.exit_code == ASH_EXIT_USAGE_ERROR, no_file.output
     assert dry_run.exit_code == WorkspaceExitCode.SUCCESS, dry_run.output
     assert deprecated.exit_code == WorkspaceExitCode.WORKSPACE_ERROR, deprecated.output
