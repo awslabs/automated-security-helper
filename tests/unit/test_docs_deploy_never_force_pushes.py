@@ -901,7 +901,7 @@ FORCE_CASES = {
         "sh -c 'cd site && git push origin +HEAD:gh-pages'"
     ),
     "in a quoted script over several lines": (
-        'bash -c "\n  cd site\n  git push --force origin gh-pages\n"'
+        'bash -c "\n  cd site\n  git push --force origin gh-pages"'
     ),
     "in a shell string inside a shell string": (
         "bash -c \"sh -c 'cd site && git push --force origin gh-pages'\""
