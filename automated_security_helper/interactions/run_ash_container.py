@@ -1122,6 +1122,57 @@ class ResolvedEngines(NamedTuple):
         return path
 
 
+def _resolve_runner_engine(
+    kind: BuildEngine,
+    oci_runner: str | None,
+    *,
+    build: bool,
+    run: bool,
+) -> ResolvedEngines:
+    """The programs of a call that takes the ``runner`` build engine.
+
+    The container runner builds the image and runs the scan in it, so one lookup
+    serves both steps. It is made for every call, as it always was: a host with no
+    runner fails with "Unable to resolve an OCI runner" even when the call neither
+    builds nor runs. A step the call does not take has no path.
+    """
+    runner = _resolve_oci_runner(oci_runner)
+    return ResolvedEngines(
+        build_path=runner if build else None,
+        build_kind=kind,
+        run_path=runner if run else None,
+    )
+
+
+#: Each build engine this module can start, with the function that finds the
+#: programs of a call that takes it. :class:`BuildEngine` names the engines and this
+#: table holds the ones that have code. A member with no entry is refused by name
+#: (:func:`build_engine_refusal`), never started as another engine.
+_ENGINE_RESOLVERS: Dict[BuildEngine, Callable[..., ResolvedEngines]] = {
+    BuildEngine.RUNNER: _resolve_runner_engine,
+}
+
+
+def build_engine_refusal(build_engine: BuildEngine | str) -> Tuple[int, str] | None:
+    """Why ``build_engine`` cannot be used: (exit code, message), or None when it can.
+
+    A value that names no :class:`BuildEngine`, and a member this module has no code
+    to start, are refused with exit 3, as the other inputs that cannot be used are.
+    The message names the value. ``run_ash_scan`` checks this before it clears the
+    previous run's output, so a refused scan leaves that output as it was.
+    ``run_ash_container`` refuses the same values for a caller that reaches it
+    directly (:func:`_resolve_engines`).
+    """
+    try:
+        kind = BuildEngine(build_engine)
+    except ValueError:
+        usable = ", ".join(engine.value for engine in _ENGINE_RESOLVERS)
+        return 3, f"Unknown build engine {build_engine!r}. Use one of: {usable}."
+    if kind not in _ENGINE_RESOLVERS:
+        return 3, f"Build engine {kind.value!r} is not available in this version."
+    return None
+
+
 def _resolve_engines(
     build_engine: BuildEngine | str,
     oci_runner: str | None,
@@ -1135,24 +1186,23 @@ def _resolve_engines(
     the container runner, or is None to look for one in the usual order
     (``_OCI_RUNNER_CANDIDATES``).
 
-    The ``runner`` build engine is the container runner itself, so one lookup
-    serves the build and the run. It is made for every call, as it always was: a
-    host with no runner fails with "Unable to resolve an OCI runner" even when the
-    call neither builds nor runs. ``build`` and ``run`` say which steps the call
-    takes; a step it does not take has no path, and asking the result for that
-    step's program is an error.
+    Each build engine has its own entry in ``_ENGINE_RESOLVERS``, which finds the
+    programs of a call that takes it. The ``runner`` build engine is the container
+    runner itself, so one lookup serves the build and the run. ``build`` and ``run``
+    say which steps the call takes; a step it does not take has no path, and asking
+    the result for that step's program is an error.
 
     Raises:
-        ValueError: When ``build_engine`` is not a build engine.
+        ValueError: When ``build_engine`` names no build engine, or one with no entry
+            in ``_ENGINE_RESOLVERS`` (:func:`build_engine_refusal`). It is raised
+            before any program is looked up.
         RuntimeError: When no container runner is found.
     """
+    refusal = build_engine_refusal(build_engine)
+    if refusal is not None:
+        raise ValueError(refusal[1])
     kind = BuildEngine(build_engine)
-    runner = _resolve_oci_runner(oci_runner)
-    return ResolvedEngines(
-        build_path=runner if build else None,
-        build_kind=kind,
-        run_path=runner if run else None,
-    )
+    return _ENGINE_RESOLVERS[kind](kind, oci_runner, build=build, run=run)
 
 
 def _is_relative_path(value: str) -> bool:
@@ -5506,8 +5556,9 @@ def run_ash_container(
         quiet: Don't print verbose text about the build process
         oci_runner: Use the specified OCI runner instead of docker to run the containerized tools
         build_engine: The program that builds the image. ``runner``, the default, is
-            the OCI runner, which also runs the scan in the image. A value that is not
-            a :class:`BuildEngine` raises ValueError.
+            the OCI runner, which also runs the scan in the image. A value that
+            names no :class:`BuildEngine` is refused with exit 3, before any program
+            is looked up (:func:`build_engine_refusal`).
         build_target: The image stage to build and run. None means ``non-root``;
             CI environment variables do not change it (see _resolve_build_target).
         offline: Build ASH for offline execution
@@ -5638,6 +5689,16 @@ def run_ash_container(
     # every refusal above that needs no program, and once for the whole call.
     try:
         engines = _resolve_engines(build_engine, oci_runner, build=build, run=run)
+    except ValueError as e:
+        # A build engine that names none, or none with code to start it, is refused
+        # like the inputs above, with exit 3, so that a caller that reaches this
+        # function directly gets a result rather than an exception.
+        # run_ash_scan refuses the same value earlier still, before it clears the
+        # previous run's output (build_engine_refusal).
+        secho(str(e), fg=typer.colors.RED)
+        return _not_started(
+            create_completed_process(args=[], returncode=3, stdout="", stderr=str(e))
+        )
     except RuntimeError as e:
         secho(str(e), fg=typer.colors.RED)
         return _not_started(

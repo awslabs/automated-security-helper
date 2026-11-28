@@ -124,6 +124,7 @@ from automated_security_helper.interactions.run_ash_container import (
     ContainerInputError,
     OperatorConfigReads,
     _require_mountable_directories,
+    build_engine_refusal,
     container_build_refusal,
     container_input_refusal,
     container_output_dir_refusal,
@@ -4421,6 +4422,15 @@ def _run_container_mode(
 
     container_selection = _container_selection(opts, image_may_differ, reads)
     if opts.run:
+        # A build engine that names none, or none with code to start it, is refused
+        # before anything below clears the previous run's output. It needs no host
+        # IDs, so it is checked ahead of the build inputs, which are skipped when the
+        # IDs cannot be read. run_ash_container refuses the same value for a caller
+        # that reaches it directly.
+        engine_refusal = build_engine_refusal(opts.build_engine)
+        if engine_refusal is not None:
+            secho(engine_refusal[1], fg=typer.colors.RED)
+            sys.exit(engine_refusal[0])
         # The scan inputs were checked once, above, before anything else of this
         # function ran; nothing between there and here changes them. The build
         # inputs too: IDs that are not numbers, a revision the build cannot take,
