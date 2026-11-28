@@ -23,6 +23,8 @@ from automated_security_helper.utils import symbol_spans
 from automated_security_helper.utils.ash_lock import (
     LOCK_RELATIVE_PATH,
     MAX_LOCKED_FILE_BYTES,
+    AshLock,
+    LockScope,
 )
 from tests.utils.optional_extras import require_symbols_extra
 
@@ -271,6 +273,37 @@ class TestAdd:
         assert "Already in" in result.output
         assert config.read_bytes() == config_before
         assert set(_lock(repo)["files"]) == {"src/app.py"}
+        after = _run("verify")
+        assert after.exit_code == 0, after.output
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_an_entry_under_a_links_spelling_does_not_lock_the_file_it_leads_to(
+        self, repo
+    ):
+        # With link -> src, a scan reads the entry of src/app.py, so an entry
+        # recorded under link/app.py does not lock the suppression: verify asks
+        # for the add that records src/app.py, and the add clears it.
+        (repo / "link").symlink_to(repo / "src", target_is_directory=True)
+        require_symbols_extra()
+        lock = AshLock(source_dir=repo)
+        lock.bind("link/app.py", LockScope("B602", "risky"))
+        lock.save()
+        (repo / ".ash.yaml").write_text(
+            CONFIG
+            + "    - rule_id: B602\n      path: link/app.py\n      symbol: risky\n"
+            "      reason: by hand\n",
+            encoding="utf-8",
+        )
+        before = _run("verify")
+        assert before.exit_code == 1, before.output
+        assert (
+            "ash suppress add B602 --symbol risky --file link/app.py" in before.output
+        )
+        added = _add(repo, file="link/app.py")
+        assert added.exit_code == 0, added.output
         after = _run("verify")
         assert after.exit_code == 0, after.output
 

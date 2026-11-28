@@ -391,6 +391,81 @@ class TestRefusalWithoutALockEntry:
         (root / "out").symlink_to(tmp_path, target_is_directory=True)
         assert resolved_lock_key(root, "out/x.py") is None
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_a_suppression_is_keyed_as_written_only_when_its_links_lead_out(
+        self, tmp_path
+    ):
+        # The key verify and the config check look a suppression's entry up
+        # under: the file's own, and the path as written only when the links
+        # lead out of the source directory. A path that is no key is none.
+        from automated_security_helper.utils.ash_lock import suppression_lock_key
+
+        root = _tree(tmp_path)
+        (root / "link").symlink_to(root / "src", target_is_directory=True)
+        (root / "out").symlink_to(tmp_path, target_is_directory=True)
+        assert suppression_lock_key(root, "link/app.py") == "src/app.py"
+        assert suppression_lock_key(root, "out/x.py") == "out/x.py"
+        assert suppression_lock_key(root, "./out\\x.py") == "out/x.py"
+        assert suppression_lock_key(root, "../outside.py") is None
+        assert suppression_lock_key(root, "") is None
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_the_kept_entry_of_a_file_linked_out_of_the_root_admits_it(
+        self, tmp_path, monkeypatch
+    ):
+        # refresh --drop-missing keeps the entry of a locked file replaced by a
+        # link that leads out of the source directory, since the link is not
+        # gone. Looked up with its links followed only, the suppression found no
+        # entry, and the scan refused the config with an `ash suppress add` that
+        # refuses the path. The entry is found under the path as written. The
+        # file still cannot be hashed, so the suppression does not apply.
+        monkeypatch.delenv("ASH_CONFIG", raising=False)
+        root = _tree(tmp_path)
+        _lock(root, LockScope("B602", "risky"))
+        outside = tmp_path / "outside" / "app.py"
+        outside.parent.mkdir()
+        outside.write_text(SOURCE, encoding="utf-8")
+        app = root / "src" / "app.py"
+        app.unlink()
+        app.symlink_to(outside)
+        refuse_unlocked_symbol_suppressions([_symbol_suppression()], root)
+        config = _config_text(root, SYMBOL_ENTRY)
+        resolved = resolve_scan_config(config_path=config, source_dir=root)
+        assert resolved.global_settings.suppressions[0].symbol == "risky"
+        line = _line("MARK risky")
+        assert _apply(root, tmp_path, [_symbol_suppression()], [line]) == [False]
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_an_entry_under_a_links_spelling_does_not_admit_the_file_it_leads_to(
+        self, tmp_path
+    ):
+        # A scan reads the entry of src/app.py, the file link/app.py leads to,
+        # so an entry recorded under link/app.py does not lock the suppression.
+        # The path as written is read only when the links lead out of the
+        # source directory.
+        require_symbols_extra()
+        root = _tree(tmp_path)
+        (root / "link").symlink_to(root / "src", target_is_directory=True)
+        lock = AshLock(source_dir=root)
+        lock.bind("link/app.py", LockScope("B602", "risky"))
+        lock.save()
+        with pytest.raises(ASHConfigValidationError) as caught:
+            refuse_unlocked_symbol_suppressions(
+                [_symbol_suppression(path="link/app.py")], root
+            )
+        assert "ash suppress add B602 --symbol risky --file link/app.py" in str(
+            caught.value
+        )
+
     def test_a_suppression_whose_file_is_gone_is_told_to_go_not_to_be_added(
         self, tmp_path
     ):
