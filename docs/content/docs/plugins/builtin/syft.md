@@ -54,6 +54,11 @@ tree -- a directory the scanned repository could commit content into is not
 used, whoever named it -- so a tree-shipped "cache" can never be served as a
 verified harvest.
 
+With the syft scanner disabled nothing is fetched. grype and trivy still read
+the harvested lockfiles, so while either of them runs, the packages missing from
+its input are named in an `ash-sbom-harvest-skipped` entry; with neither
+running, the harvest records nothing.
+
 ```yaml
 scanners:
   syft:

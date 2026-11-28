@@ -524,8 +524,10 @@ def harvest_options_of(config: object) -> Mapping[str, object]:
     surface (it owns SBOM configuration) while the harvest itself runs in the
     convert phase. Returns a plain mapping with every key defaulted, so the
     harvester behaves identically whether the section is typed, absent, or an
-    operator override. The syft scanner being DISABLED reads as harvest
-    disabled: the harvest exists to complete the SBOM that scanner produces.
+    operator override. The syft scanner being DISABLED (``syft_enabled``) means
+    nothing is fetched: the harvest exists to complete the SBOM that scanner
+    produces. The converter then only names what it did not harvest, for the
+    readers :func:`harvest_advisory_readers_enabled` finds.
     """
     defaults: Dict[str, object] = {
         "enabled": True,
@@ -570,3 +572,38 @@ def harvest_options_of(config: object) -> Mapping[str, object]:
             item for item in lockfiles if isinstance(item, str) and item
         ]
     return defaults
+
+
+#: The scanners besides syft that read the harvested lockfiles from the converted
+#: target, to match advisories against the packages they name. With the syft
+#: scanner disabled nothing is fetched, and the converter names the packages it
+#: did not harvest only for the ones of these that run.
+HARVEST_ADVISORY_READERS: Tuple[str, ...] = ("grype", "trivy")
+
+
+def harvest_advisory_readers_enabled(config: object) -> List[str]:
+    """The scanners of ``HARVEST_ADVISORY_READERS`` that ``config`` leaves enabled.
+
+    Each is read with ``section_enabled``, the one reading of ``enabled`` the
+    phases share, from the section ``get_plugin_config`` returns, or from the
+    ``scanners`` attribute of a config that has no such method. An absent
+    section, and a lookup that raises, read as enabled, as an absent syft
+    section does in :func:`harvest_options_of`: a record that names a gap no
+    reader has is noise, while a missing one hides a gap.
+    """
+    from automated_security_helper.base.plugin_config import section_enabled
+
+    lookup = getattr(config, "get_plugin_config", None)
+    scanners = getattr(config, "scanners", None)
+    enabled: List[str] = []
+    for name in HARVEST_ADVISORY_READERS:
+        if callable(lookup):
+            try:
+                section = lookup("scanner", name)
+            except Exception:
+                section = None
+        else:
+            section = getattr(scanners, name, None)
+        if section_enabled(section):
+            enabled.append(name)
+    return enabled

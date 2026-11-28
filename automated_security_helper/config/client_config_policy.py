@@ -634,9 +634,11 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):
-    """The ``(scanner, option) -> default`` table, which cannot be changed in place.
+    """A ``(plugin, name) -> default`` table, which cannot be changed in place.
 
-    The answer to "is this delivered value the default?" decides whether a
+    ``PLUGIN_OPTION_DEFAULTS`` keys it by ``(scanner, option)`` and
+    ``CONVERTER_SECTION_DEFAULTS`` by ``(converter, field)``. The answer to "is
+    this delivered value the default?" decides whether a
     client-delivered option is allowed, so a list default must not be reachable
     as a live object: one ``sort`` or ``append`` on it would change that answer
     for the whole process. The table keeps its own deep copies and hands out a
@@ -1199,10 +1201,13 @@ def _equals_as_json(value: Any, expected: Any) -> bool:
 
 
 def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
-    """Whether ``denial`` is a plugin option ``document`` sets to its default.
+    """Whether ``denial`` is a plugin setting ``document`` sets to its default.
 
-    Only for an option in ``PLUGIN_OPTION_DEFAULTS`` that the trusted ``base``
+    Only for a scanner option in ``PLUGIN_OPTION_DEFAULTS``, or a converter
+    section field in ``CONVERTER_SECTION_DEFAULTS``, that the trusted ``base``
     has no value for; where it has one, the denial already compared against it.
+    Both are compared as JSON values and found under every spelling of the
+    plugin's section.
     """
     from automated_security_helper.config.ash_config import (
         plugin_key_lookup_names,

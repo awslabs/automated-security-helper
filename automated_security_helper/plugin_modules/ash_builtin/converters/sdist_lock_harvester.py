@@ -8,7 +8,18 @@ import ntpath
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union, cast
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 from automated_security_helper.base.converter_plugin import (
     ConverterPluginBase,
@@ -38,12 +49,19 @@ from automated_security_helper.utils.sdist_harvest import (
     HarvestManifest,
     default_harvest_cache_root,
     flagged_packages_in_uv_lock,
+    harvest_advisory_readers_enabled,
     harvest_lockfiles_from_sdist,
     harvest_options_of,
 )
 from automated_security_helper.utils.suppression_matcher import (
     active_ignore_paths,
     ignore_path_matches,
+)
+
+#: Why an entry that pins no sdist by sha256 is not harvested: nothing authorizes
+#: a fetch of it, whatever the scanners' settings.
+NO_SHA256_PIN_CAUSE = (
+    "its lock entry pins no sdist by sha256, so no fetch is authorized"
 )
 
 
@@ -104,7 +122,9 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
     ``ash-sbom-harvest-skipped`` fact per cause, never a silent gap; a cache in
     the user-level cache directory -- outside the scanned tree, keyed by the
     sdist's sha256, each file re-verified against its recorded digest before it
-    is served -- serves warmed entries without network even offline.
+    is served -- serves warmed entries without network even offline. With the
+    syft scanner disabled nothing is fetched, and while grype or trivy runs the
+    packages it would have harvested are named in a skip record instead.
     """
 
     display_name = "Sdist lock harvester"
@@ -167,15 +187,25 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         return None
 
     def candidate_input_count(self) -> int | None:
-        """How many configured lockfiles the harvest would walk; see the base.
+        """How many configured lockfiles convert() walks; see the base.
 
-        Counted without network: the fetch decision is per package entry, but
-        coverage is asked per input file, the same denominator the scan set
-        gives the other converters.
+        Counted without network, by convert()'s own rules: none with the harvest
+        disabled, and none with the syft scanner disabled and neither grype nor
+        trivy enabled, since convert() then returns before the walk. Otherwise
+        every configured lockfile in the scan set that no ignore path skips,
+        whether or not syft is on: with it off, convert() still walks them to
+        name the packages it does not fetch. The fetch decision is per package
+        entry, but coverage is asked per input file, the same denominator the
+        scan set gives the other converters.
         """
         try:
-            options = harvest_options_of(getattr(self.context, "config", None))
-            if not (options["enabled"] and options["syft_enabled"]):
+            config = getattr(self.context, "config", None)
+            options = harvest_options_of(config)
+            if not options["enabled"]:
+                return 0
+            if not options["syft_enabled"] and not harvest_advisory_readers_enabled(
+                config
+            ):
                 return 0
             ignore_paths = self._ignore_paths_skipping_harvest()
             return len(
@@ -515,18 +545,34 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
         into one ``ash-sbom-harvest-skipped`` record per cause, each naming the
         packages it covers, so an SBOM's incompleteness is a visible fact and
         one cause does not scatter into a record per lockfile.
+
+        With the syft scanner disabled nothing is fetched. grype and trivy still
+        read the harvested lockfiles, so for those of them that run each flagged
+        package is named in a skip record, and a lockfile that cannot be read is
+        named itself: a refused one as it is with syft on, and one that does not
+        parse in a skip record that fails no gate, since nothing would have been
+        fetched from it. With neither of them running there is nothing to name,
+        and the tree is not walked.
         """
-        options = harvest_options_of(getattr(self.context, "config", None))
+        config = getattr(self.context, "config", None)
+        options = harvest_options_of(config)
         if not options["enabled"]:
             ASH_LOGGER.debug(
                 "sdist lockfile harvest is disabled "
                 "(scanners.syft.options.sdist_harvest.enabled)"
             )
             return []
-        # With syft off nothing is fetched, but each package the harvest would
-        # have covered is still named in a skip record: grype and trivy read the
-        # harvested lockfiles, so their input is incomplete and that is visible.
         syft_off = not options["syft_enabled"]
+        readers: List[str] = []
+        if syft_off:
+            readers = harvest_advisory_readers_enabled(config)
+            if not readers:
+                ASH_LOGGER.debug(
+                    "sdist lockfile harvest skipped: the syft scanner is disabled "
+                    "(scanners.syft.enabled) and neither grype nor trivy reads "
+                    "the harvested lockfiles"
+                )
+                return []
         lockfile_names = list(cast(Iterable[str], options["lockfiles"]))
         lock_files = self._lockfiles_in_scan_set(lockfile_names)
         if not lock_files:
@@ -536,25 +582,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             )
             return []
 
-        ecosystems = list(cast(Iterable[str], options["ecosystems"]))
-        max_sdist_bytes = (
-            int(cast(Union[int, str], options["max_sdist_mb"])) * 1024 * 1024
-        )
-        offline = is_offline_mode() or bool(options["syft_offline"])
-        cache_root = None if syft_off else self._cache_root(options["cache_dir"])
-        run_private_cache: Optional[tempfile.TemporaryDirectory] = None
-        if cache_root is None and not syft_off:
-            # No usable persistent root (_cache_root said why): cache in a
-            # private directory of this run alone, which no repository content
-            # can pre-fill, and remove it with the run.
-            run_private_cache = tempfile.TemporaryDirectory(prefix="ash-sdist-harvest-")
-            cache_root = Path(run_private_cache.name)
         ignore_paths = self._ignore_paths_skipping_harvest()
-
-        if not syft_off:
-            self.results_dir.mkdir(parents=True, exist_ok=True)
-        results: List[Path] = []
-        sources: Dict[Path, str] = {}
         # cause -> [(lock display, "name version (sha prefix)"), ...]; one
         # grouped record per cause below.
         skips: Dict[str, List[Tuple[str, str]]] = {}
@@ -569,54 +597,123 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
                 (package.lock_display, f"{package.name} {package.version} ({prefix})")
             )
 
-        try:
-            for lock_file in lock_files:
-                if Path(lock_file).is_dir():
-                    continue
-                ignored_by = self._ignored_by(lock_file, ignore_paths)
-                if ignored_by is not None:
-                    ASH_LOGGER.debug(
-                        f"Skipping harvest of ignored path: {lock_file} due to "
-                        f"global ignore_path '{ignored_by.path}' with reason "
-                        f"'{ignored_by.reason}'",
-                        extra=NO_MARKUP,
+        results: List[Path] = []
+        sources: Dict[Path, str] = {}
+        if syft_off:
+            readers_named = " and ".join(readers)
+
+            def not_parsed(_lock_file: str, display: str, error: str) -> None:
+                # Nothing would have been fetched from it, so it fails no gate: a
+                # skip record with no limit, not a failed input.
+                self.record_refused_input(
+                    TreeInputRefused(
+                        path=display,
+                        reason=(
+                            f"{HARVEST_SKIPPED_RULE}: {error}, so the packages it "
+                            "pins are not named; the syft scanner is disabled "
+                            "(scanners.syft.enabled), and the packages they embed "
+                            f"are missing from the input of {readers_named}"
+                        ),
                     )
-                    continue
-                try:
-                    handle = self.open_source_file(lock_file)
-                except TreeInputRefused as refused:
-                    if not syft_off:
-                        self.record_refused_input(refused)
-                    continue
-                from automated_security_helper.utils.scanned_tree import (
-                    relative_display,
                 )
 
-                display = relative_display(lock_file, self.context.source_dir)
-                with handle:
-                    lock_bytes = handle.read()
-                try:
-                    flagged = flagged_packages_in_uv_lock(lock_bytes, display)
-                except ValueError as error:
-                    if not syft_off:
-                        self.record_failed_input(lock_file, str(error), kind="input")
-                    continue
-                if not flagged:
-                    ASH_LOGGER.debug(
-                        f"{display}: no resolved package names a platform wheel; "
-                        "nothing to harvest",
-                        extra=NO_MARKUP,
-                    )
-                    continue
-                for package in flagged:
-                    if syft_off or cache_root is None:
-                        skip(
-                            package,
-                            "the syft scanner is disabled (scanners.syft.enabled), "
-                            "so its pinned sdist was not fetched and grype and "
-                            "trivy do not see the packages it embeds",
-                        )
-                        continue
+            for lock_file in lock_files:
+                for package in self._flagged_in(lock_file, ignore_paths, not_parsed):
+                    skip(package, self._unfetched_cause(package, readers_named))
+        else:
+            self._harvest(lock_files, ignore_paths, options, results, sources, skip)
+        self._record_skips(skips, syft_off=syft_off)
+        if sources:
+            record_converted_sources(self.results_dir, self.context.work_dir, sources)
+        return results
+
+    def _flagged_in(
+        self,
+        lock_file: str,
+        ignore_paths: List[IgnorePathWithReason],
+        not_parsed: Callable[[str, str, str], None],
+    ) -> List[FlaggedPackage]:
+        """The flagged packages of one configured lockfile, or none.
+
+        A directory or an ignored path gives none, an ignored one with a debug
+        line. A lockfile the tree refuses to open is recorded as a refused input
+        with no limit, whatever syft says: the tree's refusal is the same fact
+        either way. One that does not parse as a uv lock is handed to
+        ``not_parsed`` with its scan-set path, its display path and the parse
+        error, which quotes none of its content; the caller decides how it counts.
+        """
+        if Path(lock_file).is_dir():
+            return []
+        ignored_by = self._ignored_by(lock_file, ignore_paths)
+        if ignored_by is not None:
+            ASH_LOGGER.debug(
+                f"Skipping harvest of ignored path: {lock_file} due to "
+                f"global ignore_path '{ignored_by.path}' with reason "
+                f"'{ignored_by.reason}'",
+                extra=NO_MARKUP,
+            )
+            return []
+        try:
+            handle = self.open_source_file(lock_file)
+        except TreeInputRefused as refused:
+            self.record_refused_input(refused)
+            return []
+        from automated_security_helper.utils.scanned_tree import relative_display
+
+        display = relative_display(lock_file, self.context.source_dir)
+        with handle:
+            lock_bytes = handle.read()
+        try:
+            flagged = flagged_packages_in_uv_lock(lock_bytes, display)
+        except ValueError as error:
+            not_parsed(lock_file, display, str(error))
+            return []
+        if not flagged:
+            ASH_LOGGER.debug(
+                f"{display}: no resolved package names a platform wheel; "
+                "nothing to harvest",
+                extra=NO_MARKUP,
+            )
+        return flagged
+
+    def _harvest(
+        self,
+        lock_files: List[str],
+        ignore_paths: List[IgnorePathWithReason],
+        options: Mapping[str, object],
+        results: List[Path],
+        sources: Dict[Path, str],
+        skip: Callable[[FlaggedPackage, str], None],
+    ) -> None:
+        """Fetch, verify and materialize the flagged packages of ``lock_files``.
+
+        The syft-on half of convert(), and the only part that sets anything up
+        for a fetch: a cache root, a per-run staging directory when no
+        persistent root is usable, and the results directory. A lockfile that
+        does not parse is lost coverage here, since the harvest set out to
+        fetch from it.
+        """
+        ecosystems = list(cast(Iterable[str], options["ecosystems"]))
+        max_sdist_bytes = (
+            int(cast(Union[int, str], options["max_sdist_mb"])) * 1024 * 1024
+        )
+        offline = is_offline_mode() or bool(options["syft_offline"])
+        run_private_cache: Optional[tempfile.TemporaryDirectory] = None
+        cache_root = self._cache_root(options["cache_dir"])
+        if cache_root is None:
+            # No usable persistent root (_cache_root said why): cache in a
+            # private directory of this run alone, which no repository content
+            # can pre-fill, and remove it with the run.
+            run_private_cache = tempfile.TemporaryDirectory(prefix="ash-sdist-harvest-")
+            cache_root = Path(run_private_cache.name)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        def not_parsed(lock_file: str, _display: str, error: str) -> None:
+            self.record_failed_input(lock_file, error, kind="input")
+
+        try:
+            for lock_file in lock_files:
+                for package in self._flagged_in(lock_file, ignore_paths, not_parsed):
                     try:
                         self._harvest_one(
                             package,
@@ -637,22 +734,45 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             if run_private_cache is not None:
                 run_private_cache.cleanup()
 
+    @staticmethod
+    def _unfetched_cause(package: FlaggedPackage, readers_named: str) -> str:
+        """Why a flagged package was not harvested while the syft scanner is off.
+
+        A rejected entry, and one that pins no sdist by sha256, would not be
+        fetched with syft on either, so each keeps the cause it has there.
+        """
+        if package.rejected_reason is not None:
+            return package.rejected_reason
+        if package.sdist_url is None or package.sdist_sha256 is None:
+            return NO_SHA256_PIN_CAUSE
+        return (
+            "the syft scanner is disabled (scanners.syft.enabled), so its pinned "
+            "sdist was not fetched and the packages it embeds are missing from "
+            f"the input of {readers_named}"
+        )
+
+    def _record_skips(
+        self, skips: Dict[str, List[Tuple[str, str]]], *, syft_off: bool
+    ) -> None:
+        """One ``ash-sbom-harvest-skipped`` record per cause, with no limit.
+
+        With syft on the record names what the SBOM does not cover. With it off
+        there is no SBOM, and the record names the packages not harvested.
+        """
         for cause, entries in sorted(skips.items()):
             lock_display = entries[0][0]
             named = ", ".join(detail for _lock, detail in entries)
+            covered = (
+                f"not harvested: {named}"
+                if syft_off
+                else f"the SBOM does not cover the embedded lockfiles of: {named}"
+            )
             self.record_refused_input(
                 TreeInputRefused(
                     path=lock_display,
-                    reason=(
-                        f"{HARVEST_SKIPPED_RULE}: {cause}; the SBOM does not "
-                        f"cover the embedded lockfiles of: {named}"
-                    ),
+                    reason=f"{HARVEST_SKIPPED_RULE}: {cause}; {covered}",
                 )
             )
-
-        if sources:
-            record_converted_sources(self.results_dir, self.context.work_dir, sources)
-        return results
 
     def _harvest_one(
         self,
@@ -671,10 +791,7 @@ class SdistLockHarvester(ConverterPluginBase[SdistLockHarvesterConverterConfig])
             skip(package, package.rejected_reason)
             return
         if package.sdist_url is None or package.sdist_sha256 is None:
-            skip(
-                package,
-                "its lock entry pins no sdist by sha256, so no fetch is authorized",
-            )
+            skip(package, NO_SHA256_PIN_CAUSE)
             return
         cached = self._cached_lockfiles(cache_root, package, ecosystems)
         if cached is not None:
