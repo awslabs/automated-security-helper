@@ -601,6 +601,49 @@ def test_discard_never_removes_a_record_git_tracks(tmp_path):
     assert scan_history.discard_run_record(tmp_path, report_id(2)) is True
 
 
+class _TextThatCannotBeShown:
+    """An argument whose own ``__str__`` raises: an OSError built from it keeps
+    Python's own text, which renders it, so the error's text cannot be made."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("a planted failure making the text")
+
+
+def test_discard_logs_an_os_error_that_cannot_be_rendered_and_never_raises(
+    tmp_path, monkeypatch, caplog
+):
+    # Red before the fix: the removal's handler formatted the error with a plain
+    # f-string, which raised what the argument's __str__ raised, out of a function
+    # that runs while a cancel or a failure propagates.
+    scan_history.write_run_record(
+        results(finding("B101"), rid=report_id(1)), tmp_path, keep_runs=50
+    )
+    path = scan_history.history_dir(tmp_path) / f"{report_id(1)}.json"
+    real_unlink = Path.unlink
+    unlinks = []
+
+    def an_unlink_that_fails(self, *args, **kwargs):
+        if self == path:
+            unlinks.append(self)
+            raise OSError(_TextThatCannotBeShown())
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", an_unlink_that_fails)
+    # ASH_LOGGER does not propagate, so caplog is attached to it by name.
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert scan_history.discard_run_record(tmp_path, report_id(1)) is False
+
+    assert unlinks == [path], unlinks
+    assert path.exists()
+    said = [
+        record.getMessage()
+        for record in caplog.records
+        if "Could not remove the taken-back run's record" in record.getMessage()
+    ]
+    assert len(said) == 1, [record.getMessage() for record in caplog.records]
+    assert "<OSError: its message could not be rendered>" in said[0], said
+
+
 def _tying_record(**row_overrides):
     """A record whose two rows tie on every sort key but the overridden one."""
     run = results(finding("B101"), rid=report_id(1))

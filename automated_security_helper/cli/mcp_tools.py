@@ -42,6 +42,7 @@ from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    coverage_has_gap,
     get_scan_results_with_error_handling,
     resolves_to_directory_inside,
     restored_results_refusal,
@@ -2718,30 +2719,164 @@ def _judged_threshold(results: Any) -> Optional[str]:
     return threshold if isinstance(threshold, str) else None
 
 
-def _gap_named_by_the_exit(ended: BaseException) -> Dict[str, Any]:
-    """The coverage gap an exit for incomplete coverage names, from its plain rows.
+def _an_unnamed_gap() -> Dict[str, Any]:
+    """The gap an incomplete scan is closed with when nothing names its own.
 
-    For a scan that exited with ``ScanIncompleteExit`` when its close could not be
-    worked out in full (``to_payload()`` or the judged threshold raised). The
-    registry refuses to close a scan as incomplete with no gap attached, so the
-    close needs one, and the exit's scanner rows are what its exit code was decided
-    on. The shape is the payload's, minus the reason tokens. Never raises: a row
-    that cannot be read is left out.
+    The registry refuses to close a scan as incomplete with no gap attached
+    (``ScanRegistry.finish_scan``), and a scan that exited for incomplete coverage
+    has one even when none of it can be read: the exit is raised only when a field of
+    it is set (``ScanIncompleteness.__bool__``). This gap is one incomplete scanner
+    named ``unknown``, as ``_coverage_without_reasons`` names a row that names no
+    scanner, so the gap is still counted. Its reason is the token
+    ``incomplete_scanner_reason`` gives a status it does not recognize, which an empty
+    status is; it is written out rather than looked up, so building this gap cannot
+    fail. Every key of the payload is there, so a progress response reads the same
+    keys whichever close recorded it, and each call returns a new dict, since the
+    caller stores it.
     """
-    incompleteness = getattr(ended, "incompleteness", None)
-    rows: List[Dict[str, Any]] = []
-    try:
-        raw_status = dict(getattr(incompleteness, "observed", ()) or ())
-        for name, detail in getattr(incompleteness, "scanners", ()) or ():
-            rows.append(
-                {"scanner": name, "status": raw_status.get(name, ""), "detail": detail}
-            )
-    except Exception:  # noqa: BLE001
-        pass
     return {
-        "incomplete_scanners": rows,
-        "no_scanner_ran": bool(getattr(incompleteness, "no_scanner_ran", False)),
+        "incomplete_scanners": [
+            {
+                "scanner": "unknown",
+                "status": "",
+                "reason": "unrecognized_status",
+                "detail": "",
+            }
+        ],
+        "no_scanner_ran": False,
+        "incomplete_converters": [],
+        "unevaluated_rules": [],
+        "stale_content_databases": [],
+        "could_not_stop": [],
     }
+
+
+def _gap_named_by_the_exit(ended: BaseException) -> Dict[str, Any]:
+    """The coverage gap an exit for incomplete coverage names, from its own fields.
+
+    For a scan that exited with ``ScanIncompleteExit`` whose payload could not be
+    built (``to_payload()`` raised), or whose close could not be worked out at all
+    (``_close_for``). The registry refuses to close a scan
+    as incomplete with no gap attached, so the close needs one, and the exit's fields
+    are what its exit code was decided on. Any one of them makes the exit
+    (``ScanIncompleteness.__bool__``), so the gap is read from all of them: an exit for
+    a stale content database, an unevaluated rule, a converter or a tool that could not
+    be stopped carries no scanner row.
+
+    The shape is the payload's, with every key ``to_payload()`` emits. Each field and
+    each row is read on its own, so one that cannot be read costs nothing else: a
+    field that cannot be read is left empty, and a row that cannot be read is stored
+    as ``unknown``, so the gap is still counted. A stale content database is its
+    record's ``to_dict()``, the payload's own row, and is named by the record's name
+    and scanner only when ``to_dict()`` raises or returns something other than a
+    dict. When nothing read names a gap, the gap is the one no field names
+    (``_an_unnamed_gap``). Never raises.
+    """
+    try:
+        incompleteness = getattr(ended, "incompleteness", None)
+    except Exception:  # noqa: BLE001
+        incompleteness = None
+
+    def rows_of(field: str) -> Tuple[Any, ...]:
+        """The exit's ``field``, or nothing when it cannot be read."""
+        try:
+            return tuple(getattr(incompleteness, field, ()) or ())
+        except Exception:  # noqa: BLE001
+            return ()
+
+    def text_of(value: Any, attribute: str) -> str:
+        """``value.attribute`` as text, or ``unknown`` when it cannot be read."""
+        try:
+            return str(getattr(value, attribute))
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    raw_status: Dict[Any, Any] = {}
+    for pair in rows_of("observed"):
+        try:
+            observed_name, observed_status = pair
+            raw_status[observed_name] = observed_status
+        except Exception:  # noqa: BLE001
+            continue
+    partial = rows_of("partial_coverage")
+
+    scanners: List[Dict[str, Any]] = []
+    for row in rows_of("scanners"):
+        try:
+            name, detail = row
+            status = str(raw_status.get(name, ""))
+            name, detail = str(name), str(detail)
+        except Exception:  # noqa: BLE001
+            name, status, detail = "unknown", "", ""
+        try:
+            from automated_security_helper.utils.scan_completeness import (
+                incomplete_scanner_reason,
+            )
+
+            reason = incomplete_scanner_reason(status, partial=name in partial)
+        except Exception:  # noqa: BLE001
+            reason = "unrecognized_status"
+        scanners.append(
+            {"scanner": name, "status": status, "reason": reason, "detail": detail}
+        )
+
+    converters: List[Dict[str, Any]] = []
+    for row in rows_of("converters"):
+        try:
+            kinds = getattr(row, "kinds", ()) or ()
+            converters.append(
+                {
+                    "converter": str(row[0]),
+                    "reason": str(row[1]),
+                    "failed_input_kinds": [str(kind) for kind in kinds],
+                }
+            )
+        except Exception:  # noqa: BLE001
+            converters.append(
+                {"converter": "unknown", "reason": "", "failed_input_kinds": []}
+            )
+
+    rules: List[str] = []
+    for rule in rows_of("unevaluated_rules"):
+        try:
+            rules.append(str(rule))
+        except Exception:  # noqa: BLE001
+            rules.append("unknown")
+
+    def stale_row(record: Any) -> Dict[str, Any]:
+        """The payload's row for ``record`` (its ``to_dict()``), else its name and scanner."""
+        try:
+            row = record.to_dict()
+        except Exception:  # noqa: BLE001
+            row = None
+        if isinstance(row, dict):
+            return row
+        return {"name": text_of(record, "name"), "scanner": text_of(record, "scanner")}
+
+    stale = [stale_row(record) for record in rows_of("stale_content_databases")]
+
+    could_not_stop: List[Dict[str, str]] = []
+    for row in rows_of("could_not_stop"):
+        try:
+            stopped, stop_reason = row
+            could_not_stop.append({"scanner": str(stopped), "reason": str(stop_reason)})
+        except Exception:  # noqa: BLE001
+            could_not_stop.append({"scanner": "unknown", "reason": ""})
+
+    try:
+        no_scanner_ran = bool(getattr(incompleteness, "no_scanner_ran", False))
+    except Exception:  # noqa: BLE001
+        no_scanner_ran = False
+
+    gap: Dict[str, Any] = {
+        "incomplete_scanners": scanners,
+        "no_scanner_ran": no_scanner_ran,
+        "incomplete_converters": converters,
+        "unevaluated_rules": rules,
+        "stale_content_databases": stale,
+        "could_not_stop": could_not_stop,
+    }
+    return gap if coverage_has_gap(gap) else _an_unnamed_gap()
 
 
 def _scan_timeout_reason(scan_timeout_seconds: Any, environment_values: Any) -> str:
@@ -2940,6 +3075,24 @@ async def _run_scan(
     # down: a free variable read before its assignment raises.
     remote_client = caller_is_remote(session_id)
 
+    def _threshold_or_none(results: Any) -> Optional[str]:
+        """The judged threshold of ``results``, or None when it cannot be read.
+
+        Read on its own, so a threshold that cannot be read costs the close only the
+        threshold: the coverage worked out beside it is kept, and the entry keeps the
+        threshold it was registered with (``finish_scan`` replaces that only with a
+        threshold it is given).
+        """
+        try:
+            return _judged_threshold(results)
+        except Exception as threshold_error:  # noqa: BLE001
+            _logger.warning(
+                f"Scan {scan_id}: could not read the severity threshold its findings "
+                "were judged by, so it keeps the threshold it was registered with: "
+                f"{error_text(threshold_error, environment_values)}"
+            )
+            return None
+
     def _work_out_the_close(
         ended: Optional[BaseException], results: Any
     ) -> Tuple[MCScanStatus, Optional[Dict[str, Any]], Optional[str]]:
@@ -2950,15 +3103,31 @@ async def _run_scan(
         anything else a test double returns). The coverage of an incomplete scan
         is the facts assessed from its results when they name a gap, and the
         exit's own reasons otherwise; the coverage of a completed one is the
-        assessed facts, whatever the gate says. It reads the exit's payload and the
-        judged threshold without a guard of their own, so it can raise: call
-        ``_close_for``, which cannot.
+        assessed facts, whatever the gate says. The exit's payload and the judged
+        threshold are each read on their own, so one that cannot be read costs the
+        close only itself: a payload that cannot be built is replaced by the gap the
+        exit's own fields name (``_gap_named_by_the_exit``, which never raises), and a
+        threshold that cannot be read is left out (``_threshold_or_none``). Every
+        caller still goes through ``_close_for``, which guards what nothing here
+        foresaw.
         """
         if isinstance(ended, ScanIncompleteExit):
             # The gap reported is the facts whatever the gate says, as for a
             # completed scan. The exception's own reasons are the fallback: they
             # are what the exit code was decided on, so they are never empty.
-            coverage: Optional[Dict[str, Any]] = ended.incompleteness.to_payload()
+            coverage: Optional[Dict[str, Any]]
+            try:
+                coverage = ended.incompleteness.to_payload()
+            except Exception as payload_error:  # noqa: BLE001
+                # Read on its own, as the threshold is: a payload that cannot be
+                # built costs the close only the payload, so the facts assessed
+                # below and the judged threshold are still recorded.
+                _logger.warning(
+                    f"Scan {scan_id}: could not build its exit's coverage payload; "
+                    "the gap the exit's own fields name stands in for it: "
+                    f"{error_text(payload_error, environment_values)}"
+                )
+                coverage = _gap_named_by_the_exit(ended)
             try:
                 _, facts = assess_coverage(ended.results)
                 if coverage_has_gap(facts):
@@ -2968,7 +3137,11 @@ async def _run_scan(
                     f"Scan {scan_id}: could not assess coverage, reporting the exit "
                     f"code's reasons instead: {error_text(assess_error, environment_values)}"
                 )
-            return MCScanStatus.INCOMPLETE, coverage, _judged_threshold(ended.results)
+            return (
+                MCScanStatus.INCOMPLETE,
+                coverage,
+                _threshold_or_none(ended.results),
+            )
         coverage = None
         if isinstance(results, AshAggregatedResults):
             try:
@@ -2981,7 +3154,7 @@ async def _run_scan(
                     f"Scan {scan_id}: could not assess coverage: "
                     f"{error_text(assess_error, environment_values)}"
                 )
-        return MCScanStatus.COMPLETED, coverage, _judged_threshold(results)
+        return MCScanStatus.COMPLETED, coverage, _threshold_or_none(results)
 
     def _close_for(
         ended: Optional[BaseException], results: Any
@@ -2992,11 +3165,14 @@ async def _run_scan(
         runner calls this from its return arm and from its incomplete-coverage arm
         for a scan whose thread recorded no close (its cancel event was set), where
         an error would leave the task, which nothing awaits, with the entry still
-        running, or close a scan that ended normally as failed. The scan has results,
-        so on an error it is closed as what it ended as, with no threshold:
-        ``COMPLETED`` with no coverage, or, for the exit for incomplete coverage,
-        ``INCOMPLETE`` with the gap its own scanner rows name, because the registry
-        refuses to close a scan as incomplete with no gap attached.
+        running, or close a scan that ended normally as failed. An exit payload that
+        cannot be built and a threshold that cannot be read each cost only themselves
+        (``_work_out_the_close``), so what reaches the guard here is an error nothing
+        foresaw. The scan has results, so on an error it is closed as what it ended
+        as, with no threshold: ``COMPLETED`` with no coverage, or, for the exit for
+        incomplete coverage, ``INCOMPLETE`` with the gap the exit's own fields name
+        (``_gap_named_by_the_exit``), because the registry refuses to close a scan as
+        incomplete with no gap attached.
         """
         try:
             status, coverage, threshold = _work_out_the_close(ended, results)
@@ -3144,11 +3320,27 @@ async def _run_scan(
                 # cancelled run as a completed one. The results carry the
                 # record's id; ``ScanIncompleteExit`` carries them on the exit,
                 # and an ending with neither names no record, so nothing is
-                # removed. Never raises (discard_history_record).
-                discard_history_record(
-                    results if results is not None else getattr(ended, "results", None),
-                    Path(output_dir),
-                )
+                # removed. The removal is best effort. The helper logs a removal
+                # that fails rather than raise, and the call is guarded here too,
+                # as a backstop: a record left behind costs a point in
+                # ``ash trend``, and a raise here would skip putting the previous
+                # results back below.
+                # history/ is not among the entries the restore moves
+                # (core/previous_results.RESULT_ENTRIES), so the order of the two
+                # matters to neither.
+                try:
+                    discard_history_record(
+                        results
+                        if results is not None
+                        else getattr(ended, "results", None),
+                        Path(output_dir),
+                    )
+                except Exception as discard_error:  # noqa: BLE001
+                    _logger.debug(
+                        f"Scan {scan_id}: could not discard the history record of a "
+                        "scan taken back; its previous results are put back all "
+                        f"the same: {error_text(discard_error, environment_values)}"
+                    )
                 previous_results.restore()
                 entry.output_holds_previous_results = holds_restored_results(
                     Path(output_dir)
@@ -3176,12 +3368,17 @@ async def _run_scan(
         result: the entry is closed with what the thread worked out for it
         (``settled_close``): the status, coverage and severity threshold the
         runner's own close would have recorded. When that close raises too (the
-        runner's own close failed on the same values), the entry is closed with the
-        status alone and the line says what was left out. Any other failure closes it
-        FAILED with ``reason``, and with ``stop_the_scan`` sets the cancel
-        event under the same lock, so the thread's decision reads the entry
-        closed and the event set, or has been made first and the entry is
-        closed after it.
+        runner's own close failed on the same values), it is made again with the
+        status alone, or for an incomplete scan with the status and the gap that
+        names nothing (``_an_unnamed_gap``), since the registry refuses an incomplete
+        scan with no gap. ``ScanRegistry.finish_scan`` refuses a close only for its
+        coverage, before it writes anything, and stores the threshold with a plain
+        assignment, so a close made again without the threshold alone would fail the
+        same way. The line says what was left out. Any other failure closes it FAILED
+        with ``reason``, and with
+        ``stop_the_scan`` sets the cancel event under the same lock, so the thread's
+        decision reads the entry closed and the event set, or has been made first
+        and the entry is closed after it.
         """
         from automated_security_helper.utils.terminal_text import shown_on_one_line
 
@@ -3194,7 +3391,17 @@ async def _run_scan(
                     None,
                     None,
                 )
+                # The close through the mark, then a lighter one. When the runner's
+                # own close failed, it carried these same values, and a failure that
+                # comes from them comes again; an exception out of this arm leaves the
+                # entry running, which this arm exists to prevent. So a close that
+                # raises is made again with the status alone, or for an incomplete
+                # scan with the gap that names nothing (``_an_unnamed_gap``), since the
+                # registry refuses one with no gap attached. Neither of those values
+                # can be what failed, so that last close is not guarded.
+                recorded: Optional[bool] = None
                 dropped: Optional[Exception] = None
+                left_out = ""
                 try:
                     recorded = registry.finish_scan(
                         scan_id,
@@ -3203,14 +3410,19 @@ async def _run_scan(
                         severity_threshold=threshold,
                     )
                 except Exception as close_error:  # noqa: BLE001
-                    # The runner's own close of this scan carried the same coverage
-                    # and threshold, and its failure is what brought the runner here.
-                    # A failure that comes from them comes again, and an exception
-                    # out of this arm leaves the entry running, which this arm
-                    # exists to prevent. The status alone is what the entry must end
-                    # with, so it is recorded without the two values.
                     dropped = close_error
-                    recorded = registry.finish_scan(scan_id, status)
+                if recorded is None:
+                    left_out = (
+                        " without its coverage and severity threshold, which "
+                        "could not be recorded"
+                    )
+                    if status == MCScanStatus.INCOMPLETE:
+                        recorded = registry.finish_scan(
+                            scan_id, status, coverage=_an_unnamed_gap()
+                        )
+                        left_out += "; its gap is recorded as one unknown scanner"
+                    else:
+                        recorded = registry.finish_scan(scan_id, status)
                 # Only an entry this call closed: one already closed (cancelled
                 # by the client, say) keeps its status, and the line would
                 # report a record that was not made.
@@ -3218,11 +3430,7 @@ async def _run_scan(
                     without = (
                         ""
                         if dropped is None
-                        else (
-                            " without its coverage and severity threshold, which "
-                            "could not be recorded: "
-                            f"{error_text(dropped, environment_values)}"
-                        )
+                        else f"{left_out}: {error_text(dropped, environment_values)}"
                     )
                     _logger.warning(
                         shown_on_one_line(
@@ -3812,15 +4020,30 @@ async def _run_scan(
         # completed scan. The exception's own reasons are the fallback: they are
         # what the exit code was decided on, so they are never empty, and an
         # exception raised from this handler would escape the task and leave the
-        # entry RUNNING. Worked out by _close_for, on the scan's thread when it
-        # decided (settled_close), or here when it did not keep the results.
+        # entry RUNNING, so the close below hands a failure to the failure arm. Worked
+        # out by _close_for, on the scan's thread when it decided (settled_close), or
+        # here when it did not keep the results.
         status, coverage, threshold = (
             settled_close if settled_close is not None else _close_for(e, e.results)
         )
-        registry.finish_scan(
-            scan_id, status, coverage=coverage, severity_threshold=threshold
-        )
-        _logger.warning(f"Scan {scan_id} finished with incomplete coverage: {coverage}")
+        try:
+            registry.finish_scan(
+                scan_id, status, coverage=coverage, severity_threshold=threshold
+            )
+        except Exception as close_error:  # noqa: BLE001
+            # Not left to propagate: raised from this handler it escapes the task,
+            # since the arms below do not catch what a sibling handler raises, and
+            # the entry stays RUNNING. The failure arm closes it as it closes a failed
+            # close of a scan that returned (the error arm below): with what the
+            # thread worked out when it kept the results, or as failed when it did not.
+            _close_after_the_runner_failed(
+                f"Error executing scan: {error_text(close_error, environment_values)}",
+                exit_code=REFUSED_INTERNAL_EXIT_CODE,
+            )
+        else:
+            _logger.warning(
+                f"Scan {scan_id} finished with incomplete coverage: {coverage}"
+            )
 
     except SystemExit as e:
         # run_ash_scan ends with sys.exit on a non-zero verdict and on every error

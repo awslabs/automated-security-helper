@@ -286,9 +286,13 @@ def test_a_new_clone_replaces_a_previous_one_whose_pack_files_are_read_only(
     sd._set_session_source_dir(session, previous)
 
     def clone_that_works(cmd, *, env, grows_in=None):
-        target = Path(cmd[-1])
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "cloned.txt").write_text("new delivery\n")
+        # Only the clone writes into its last word. The delivery then runs
+        # ``rev-parse --verify --quiet HEAD^{commit}``, whose last word is a revision,
+        # not a directory: made as a path it would sit in the working directory.
+        if "clone" in cmd:
+            target = Path(cmd[-1])
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "cloned.txt").write_text("new delivery\n")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(sd, "_git_executable", lambda: "git")

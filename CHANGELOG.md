@@ -272,6 +272,30 @@
   or a reference that carries its digest, even when an engine is detected, and a time
   budget it cannot work out no longer fails the scan.
 
+- **An MCP scan that exits for incomplete coverage is no longer left running when its
+  coverage cannot be worked out.** The server's fallback built the scan's gap from its
+  scanner rows alone, so an exit for a stale content database, an unevaluated rule, a
+  converter or a tool ASH could not stop, which has no scanner row, carried an empty
+  gap. The registry refused to record an incomplete scan without one, and the entry
+  stayed running, listed as active and blocking the next scan of the same directory.
+  The fallback now reads every field of the exit and reports every coverage key, with a
+  stale content database's full row; a row it cannot read is reported as `unknown`, and
+  an exit with nothing readable as one incomplete scanner named `unknown`. A severity
+  threshold that cannot be read now costs the scan only the threshold, not its
+  coverage. An exit's coverage payload that cannot be built costs it only the payload:
+  the scan keeps its judged threshold and the coverage assessed from its results, and
+  reports the gap the exit's own fields name when the assessed coverage names none or
+  cannot be worked out. A failed close of an incomplete scan is retried with the
+  `unknown` gap instead of with no coverage, and a close that fails on the
+  incomplete-coverage path is recorded the way one on the completed path is, instead
+  of ending the scan's task with the entry still running. A history record that cannot
+  be removed when a scan is taken back no longer keeps the previous scan's results set
+  aside, and a removal that fails with an error whose message cannot be rendered is
+  logged instead of raising in place of the cancel. `error_text`, which renders the
+  errors ASH logs and reports, now names an `OSError` whose own text cannot be made by
+  its type, as it already named any other error whose message cannot be rendered,
+  instead of raising.
+
 ### Features
 
 - **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**

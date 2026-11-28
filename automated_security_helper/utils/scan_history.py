@@ -68,6 +68,7 @@ import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
 
+from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.finding_diff import (
     ComparabilityRefusal,
     _evaluated_scanners,
@@ -614,8 +615,11 @@ def discard_run_record(output_dir: str | os.PathLike[str], report_id: Any) -> bo
     except FileNotFoundError:
         return False
     except OSError as exc:
+        # Rendered with error_text: a plain f-string calls the error's __str__,
+        # which can raise, and a raise here would replace the cancel or the
+        # failure this runs under (see the docstring).
         ASH_LOGGER.warning(
-            f"Could not remove the taken-back run's record {path}: {exc}"
+            f"Could not remove the taken-back run's record {path}: {error_text(exc)}"
         )
         return False
     ASH_LOGGER.info(f"Removed the taken-back run's record {path}")

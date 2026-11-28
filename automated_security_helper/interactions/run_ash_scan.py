@@ -1086,8 +1086,12 @@ def discard_history_record(results: Any, output_dir: Path) -> None:
     except Exception as exc:  # noqa: BLE001 - the cancel is what the caller must see
         # At debug, not swallowed without a word: when a cancelled run still
         # shows in ``ash trend``, this line is the trace of why its record stayed.
+        # The error is rendered with error_text, which falls back to the error's
+        # type when its own message cannot be made: a plain f-string calls its
+        # __str__, which can raise, and a raise here would replace the cancel.
         ASH_LOGGER.debug(
-            f"Could not discard the taken-back run's record in {output_dir}: {exc}"
+            f"Could not discard the taken-back run's record in {output_dir}: "
+            f"{error_text(exc)}"
         )
 
 
