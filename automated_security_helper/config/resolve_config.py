@@ -1021,7 +1021,9 @@ def _items_as_the_list_holds(
     """
     if list(resolved_keys) != ["output_formats"]:
         return items
-    adapter = TypeAdapter(AshConfig.model_fields["output_formats"].annotation)
+    adapter: TypeAdapter[Any] = TypeAdapter(
+        AshConfig.model_fields["output_formats"].annotation
+    )
     spelled: List[Any] = []
     for item in items:
         try:

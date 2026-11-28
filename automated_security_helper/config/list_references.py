@@ -87,7 +87,9 @@ def _placed_at(item: Any, path: Tuple[Any, ...], width: int, length: int) -> Any
     two (``environment_record._Index._moved``) reads it as in place; one written
     in a list inside the entry keeps its own. An ``EnvironmentRewrite`` has no
     length."""
-    if is_dataclass(item):
+    # ``is_dataclass`` is true of a dataclass type too, and ``replace`` takes an
+    # instance: every record here is one.
+    if is_dataclass(item) and not isinstance(item, type):
         if getattr(item, "index_at", None) == width:
             return replace(item, path=path, length=length)
         return replace(item, path=path)
