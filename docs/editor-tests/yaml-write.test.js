@@ -161,7 +161,7 @@ test('what the emitter writes reads back as the same value, type for type', () =
   assert.equal(sameValue(value, doc.typed), true);
   assert.equal(
     emitBlock(value.keys),
-    '1: int\n"1": text\nnull: null\n1.5: float\n2026-12-31: date\n${KEY}: reference\n"${KEY}": quoted reference',
+    '1: int\n"1": text\nnull: "null"\n1.5: float\n2026-12-31: date\n${KEY}: reference\n"${KEY}": quoted reference',
   );
   assert.equal(emitBlock(value.flags), 'true: a\nfalse: b');
   // An integer where a float was is a different value, and so is text where a key was.
