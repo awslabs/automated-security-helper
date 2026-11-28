@@ -509,7 +509,7 @@ Ranges are written in the grammar native to the runtime: `python` uses PEP 440 s
 | `line_range` | `mapped` | results[].locations[].physicalLocation.region.startLine/endLine |  |
 | `column` | `mapped` | results[].locations[].physicalLocation.region.startColumn/endColumn |  |
 | `message` | `mapped` | results[].message.text |  |
-| `resource_id` | `n/a` |  | locator-only: logicalLocations[].properties.symbolic.route (jobs/greet/steps/0) is a position inside one workflow file, not a resource; locators never enter the key (design D1) |
+| `resource_id` | `n/a` |  | locator-only: logicalLocations[].properties.symbolic.route (jobs/greet/steps/0) is a position inside one workflow file, not a resource; locators never enter the key |
 | `resource_type` | `n/a` |  | locator-only: a workflow position has no resource type |
 | `package_name` | `n/a` |  | workflow findings name a file position, not a package |
 | `package_version` | `n/a` |  | workflow findings name a file position, not a package |

@@ -755,7 +755,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
     #: The facets register row (base/scanner_facets.py). Declaration only, zero
     #: behavior change; native fields are those of zizmor's own SARIF (fixture
     #: tests/test_data/scanners/zizmor/zizmor-1.30.1.sarif). Resource identity
-    #: is a LOCATOR-ONLY N/A (design D1 default, overturnable): zizmor's logical
+    #: is a LOCATOR-ONLY N/A: zizmor's logical
     #: locations carry ``properties.symbolic.route`` (``jobs/greet/steps/0``)
     #: and ``key.Local.verbatim_path``, a position inside one file's document
     #: and not a name with a lifecycle independent of the file. The route stays
@@ -792,7 +792,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
             state=FacetState.NA,
             reason="locator-only: logicalLocations[].properties.symbolic.route "
             "(jobs/greet/steps/0) is a position inside one workflow file, not "
-            "a resource; locators never enter the key (design D1)",
+            "a resource; locators never enter the key",
         ),
         resource_type=FacetDecl(
             state=FacetState.NA,
@@ -896,7 +896,7 @@ class ZizmorScanner(ScannerPluginBase[ZizmorScannerConfig]):
                     "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
                     "split is defensible (linting versus security analysis) and changing "
                     "either moves reporter-side type exclusions, so it is recorded here "
-                    "and changed in neither (design E3)"
+                    "and changed in neither"
                 ),
             ),
             runtime=opsf.RuntimeFacet(

@@ -1167,7 +1167,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     "--skip-download; utils/content_databases.py "
                     "SCANNERS_WITHOUT_CONTENT_DATABASE['checkov']"
                 ),
-                #: Design E5, measured 2026-11-24: checkov 3.4.7 (the pinned version)
+                #: Measured 2026-11-24: checkov 3.4.7 (the pinned version)
                 #: on one two-resource Terraform fixture, both runs unsandboxed under
                 #: env -i, with network access and no platform API key. With
                 #: --skip-download and without it, both runs reported the same 10
@@ -1180,7 +1180,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                 unconfirmed=(
                     "with a platform API key set, whether a sandboxed and an "
                     "unsandboxed online run differ; one differential run with a key "
-                    "settles it (design E5)"
+                    "settles it"
                 ),
             ),
             output=opsf.OutputFacet(
