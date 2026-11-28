@@ -77,6 +77,13 @@ MATRIX_NAME = "scanners"
 #: supported scanners first, then the ones being retired, then the alpha ones.
 TIER_ORDER = {"supported": 0, "deprecated": 1, "alpha": 2}
 
+#: How the note for ``loads only when its module is listed`` words a scanner of each
+#: tier. The manifest model keeps maturity (the tier) apart from loading
+#: (``default_enabled``): a maintained scanner that is opt-in is ``supported``, and
+#: calling it alpha would misstate its maturity. So an alpha scanner keeps the alpha
+#: wording, and a scanner of any other tier is described as opt-in.
+LOADING_WORDING = {"supported": "opt-in", "deprecated": "opt-in", "alpha": "alpha"}
+
 #: How a scanner's tool reaches the machine, by runtime kind (the ``RuntimeKind`` values).
 RUNTIME_ROUTES = {
     "uv_python": "Python tool run with uv",
@@ -183,8 +190,9 @@ COLUMNS = (
         kind=VALUE,
         pattern=_MODULE_PATTERN,
         source=(
-            "The manifest's plugin module, which ash_plugin_modules names to load an "
-            "alpha scanner; a scanner that loads on its own is built in."
+            "The manifest's plugin module, which ash_plugin_modules names to load a "
+            "scanner that does not load on its own; a scanner that loads on its own is "
+            "built in."
         ),
     ),
     Column(
@@ -225,17 +233,20 @@ COLUMNS = (
 INTRO = (
     "One row for every scanner manifest: supported scanners first, then deprecated "
     "ones, then alpha ones, each group by name. A scanner that loads on its own needs "
-    "no setting. An alpha scanner loads only when `ash_plugin_modules` lists its "
+    "no setting. Any other scanner loads only when `ash_plugin_modules` lists its "
     "module. The platform columns say what ASH declares about running the scanner on "
     "each operating system and CPU."
 )
 
 #: What each phrase of a state column means, in the order the notes list them. A phrase
 #: a row uses with no entry here is refused, so the notes explain every phrase shown.
+#: The entry for ``loads only when its module is listed`` is the opt-in wording, which
+#: is true of a scanner of any tier; ``_loading_note`` swaps in the alpha wording when
+#: every scanner that carries the phrase is alpha.
 _PHRASE_NOTES = {
     LOADS: "the scanner's module loads on every scan.",
     LOADS_WHEN_LISTED: (
-        "the scanner is in an alpha module, which a scan loads only when "
+        "the scanner is opt-in: a scan loads its module only when "
         "`ash_plugin_modules` names the module shown under Module to list."
     ),
     "provisioned": (
@@ -263,6 +274,13 @@ _PHRASE_NOTES = {
         "guess it."
     ),
 }
+
+#: The note for ``loads only when its module is listed`` in a table where every scanner
+#: that carries the phrase is alpha.
+_ALPHA_LOADING_NOTE = (
+    "the scanner is in an alpha module, which a scan loads only when "
+    "`ash_plugin_modules` names the module shown under Module to list."
+)
 
 _PRECEDENCE_NOTE = (
     "A platform cell shows the first reading that applies, in this order: the "
@@ -431,7 +449,33 @@ def _phrase(cell: str) -> str:
     return "refused: <reason>" if cell.startswith("refused: ") else cell
 
 
-def _notes(rows: Sequence[Row]) -> tuple[str, ...]:
+def _loading_note(scanners: Sequence[ScannerInput]) -> str:
+    """The note for ``loads only when its module is listed``, worded by tier.
+
+    The alpha wording stays when every scanner that carries the phrase is alpha. In any
+    other table the note is the opt-in one, which is true of a scanner of every tier and
+    says nothing about its maturity. A tier with no entry in ``LOADING_WORDING`` is
+    refused, so a tier the manifest model gains is worded on purpose and never by
+    default.
+    """
+    wordings = set()
+    for scanner in scanners:
+        if scanner.default_enabled:
+            continue
+        try:
+            wordings.add(LOADING_WORDING[scanner.tier])
+        except KeyError:
+            raise ModelError(
+                f"scanner {scanner.name!r}: its tier {scanner.tier!r} has no wording "
+                "for the note on loading; the tiers with one are "
+                f"{sorted(LOADING_WORDING)}"
+            ) from None
+    if wordings == {"alpha"}:
+        return _ALPHA_LOADING_NOTE
+    return _PHRASE_NOTES[LOADS_WHEN_LISTED]
+
+
+def _notes(rows: Sequence[Row], scanners: Sequence[ScannerInput]) -> tuple[str, ...]:
     """The precedence sentence, then one sentence for each phrase the rows use."""
     state_keys = [column.key for column in COLUMNS if column.kind == STATE]
     used = {_phrase(row.cells[key]) for row in rows for key in state_keys}
@@ -441,13 +485,10 @@ def _notes(rows: Sequence[Row]) -> tuple[str, ...]:
             f"the scanners matrix uses {unexplained}, which _PHRASE_NOTES does not "
             "explain; add a sentence for each"
         )
+    notes = {**_PHRASE_NOTES, LOADS_WHEN_LISTED: _loading_note(scanners)}
     return (
         _PRECEDENCE_NOTE,
-        *(
-            f"`{phrase}`: {note}"
-            for phrase, note in _PHRASE_NOTES.items()
-            if phrase in used
-        ),
+        *(f"`{phrase}`: {note}" for phrase, note in notes.items() if phrase in used),
     )
 
 
@@ -465,7 +506,7 @@ def scanner_matrix(inputs: Sequence[ScannerInput]) -> Matrix:
         rows=rows,
         members=names,
         intro=INTRO,
-        notes=_notes(rows),
+        notes=_notes(rows, ordered),
     )
 
 
