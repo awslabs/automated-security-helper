@@ -290,6 +290,17 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             scanner_name="syft",
             network=opsf.NetworkFacet(
                 fetch_kind=opsf.FetchKind.TOOL_UPDATES_ONLY,
+                # An IMAGE scan by reference pulls manifests and layers (the
+                # engine's store where one is present, else syft's own
+                # registry client) -- network use this row owns in its source
+                # text below. Not Fetched.IMAGE_DIGEST: syft reports no
+                # findings, so no id keys on the digest ladder and the scan
+                # phase must not count syft as a reason to ask a registry.
+                # The vocabulary has no member yet for the image pull itself
+                # (grype's and trivy's rows carry the same gap); adding one to
+                # all three rows together is the register owner's edit. A
+                # reference is skipped offline (the base template's skip), so
+                # offline_outcome stays UNCHANGED for what actually runs.
                 fetches=(),
                 prefetch=(),
                 offline_outcome=opsf.OfflineOutcome.UNCHANGED,
@@ -300,7 +311,8 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                     "utils/content_databases.py SCANNERS_WITHOUT_CONTENT_DATABASE['syft']: "
                     "it catalogs packages and matches nothing against advisories; the "
                     "remote license, maven and vcpkg lookups are forced off by "
-                    "OFFLINE_TOOL_ENVIRONMENT"
+                    "OFFLINE_TOOL_ENVIRONMENT; scan_image with a reference pulls the "
+                    "image through the engine or syft's own registry client"
                 ),
             ),
             output=opsf.OutputFacet(
@@ -318,8 +330,9 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 selection=(
                     "the whole directory, cataloged into an SBOM; a "
                     "container-image asset through a stereoscope target "
-                    "(scan_image: docker-archive:/oci-archive:/oci-dir: for a "
-                    "payload, docker:/podman:/registry: for a reference by the "
+                    "(scan_image: oci-archive:/docker-archive: by the tar's "
+                    "own format, oci-dir: for a layout, "
+                    "docker:/podman:/registry: for a reference by the "
                     "detected engine), with the ignore paths as --exclude globs"
                 ),
             ),
@@ -367,7 +380,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             ),
             prerequisites=opsf.PrerequisitesFacet(
                 kinds=(opsf.Prerequisite.NONE,),
-                note="a directory",
+                note=(
+                    "a directory; or a container image (a reference needs an "
+                    "engine or the registry, a saved archive or OCI layout "
+                    "needs neither)"
+                ),
             ),
         )
     )
@@ -910,6 +927,11 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         self._nothing_scanned_reason = None
         self._image_ignore_paths = list(global_ignore_paths or [])
 
+        # One engine reading for the whole target, as the base template takes
+        # it: the skip decision and the stereoscope target must agree. The
+        # socket half says whether the daemon is local or only DECLARED.
+        self._image_engine, self._image_engine_socket = self._detect_image_engine()
+
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
             self._nothing_scanned_reason = not_scanned
@@ -937,9 +959,15 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
         flagged_refusal: ScannerError | None = None
         try:
             from automated_security_helper.utils.image_tool_targets import (
+                stereoscope_sources,
                 stereoscope_target,
             )
 
+            # Declared in the environment with no local socket: the
+            # schemeless target keeps a source fallback. Only read when the
+            # engine is docker or podman, so the always-socketless NONE case
+            # is unaffected.
+            remote_daemon = self._image_engine_socket is None
             target_results_dir = Path(os.path.abspath(self.results_dir)).joinpath(
                 image_target_type
             )
@@ -956,6 +984,27 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             # Re-apply config options (config file, additional outputs) that
             # the ToolArgs rebuild above dropped, as scan() re-applies them.
             self._process_config_options()
+            # ... except the exclude set: options.exclude globs are paths
+            # relative to the scanned DIRECTORY, and handing them to syft here
+            # would filter in-image paths that happen to match a source-tree
+            # glob. This is what makes the docstring's "no exclude set" true.
+            # The in-image excludes are added below, from the ignore paths.
+            # Said here because _process_config_options just logged each
+            # entry as "excluded from syft scan", which this removal makes
+            # untrue for THIS scan.
+            removed_excludes = sum(
+                1 for arg in self.args.extra_args if arg.key == "--exclude"
+            )
+            if removed_excludes:
+                self._plugin_log(
+                    f"The {removed_excludes} configured exclude pattern(s) are "
+                    "directory-relative and do not apply to an image scan; the "
+                    "image's ignore paths are passed instead.",
+                    level=logging.DEBUG,
+                )
+            self.args.extra_args = [
+                arg for arg in self.args.extra_args if arg.key != "--exclude"
+            ]
             if not any(arg.key == "--config" for arg in self.args.extra_args):
                 empty = empty_tool_config(
                     "syft-empty.yaml", "{}\n", context=self.context
@@ -984,8 +1033,19 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
                 ToolExtraArg(key="--exclude", value=glob)
                 for glob in self._image_exclude_globs()
             )
+            # A schemeless target names its sources (the declared daemon, then
+            # the registry): left to itself syft reads a local path that
+            # spells the reference first (utils/image_tool_targets).
+            self.args.extra_args.extend(
+                ToolExtraArg(key="--from", value=source)
+                for source in stereoscope_sources(
+                    image, engine=self._image_engine, remote_daemon=remote_daemon
+                )
+            )
             final_args = self._resolve_arguments(
-                target=stereoscope_target(image),
+                target=stereoscope_target(
+                    image, engine=self._image_engine, remote_daemon=remote_daemon
+                ),
             )
             subprocess_env = (
                 {**snapshot_environ(), **self.extra_env} if self.extra_env else None

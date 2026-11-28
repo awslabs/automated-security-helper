@@ -250,21 +250,26 @@ def _rule_exception_lines(stderr: str) -> List[str]:
     return raised
 
 
-#: One known cause of the unrenderable failure above, named so the error is
-#: actionable. cfn-nag 0.8.10 pins ``psych ~> 3``; on a Homebrew portable-ruby
-#: build (3.3.8 and 3.4.5 measured) the interpreter's own Psych is linked into
-#: ``ruby``, cfn-nag's template parse raises "undefined method `parse' for an
-#: instance of Psych::Parser", and cfn_nag emits a FATAL violation that its SARIF
-#: format drops (tests/test_data/scanners/M0-FINDINGS.md item b). The same gem
-#: scans cleanly on source-built Ruby 3.1.7, 3.3.8 and 3.4.5, so this is a build
-#: constraint, not a Ruby-version one. ASH does not read the Ruby version here:
-#: the SARIF run carries neither the message nor the interpreter, and a hint is
-#: all the stdout and stderr of that run can honestly support.
+#: One known cause of the run :meth:`CfnNagScanner._evaluated_no_rule` detects (a
+#: non-zero exit with no SARIF result), named so the error :meth:`CfnNagScanner.scan`
+#: reports for it is actionable. cfn-nag 0.8.10 pins ``psych ~> 3``; on a Homebrew
+#: portable-ruby build (3.3.8 and 3.4.5 measured) the interpreter's own Psych is
+#: linked into ``ruby``, cfn-nag's template parse raises a NoMethodError, and
+#: cfn_nag emits a FATAL violation that its SARIF format drops
+#: (tests/test_data/scanners/M0-FINDINGS.md item b). The violation's message ends
+#: "for an instance of Psych::Parser>" on both Rubies, which quote the method name
+#: before it differently (Ruby 3.3 writes `parse', Ruby 3.4 'parse'), so the hint
+#: quotes that shared tail. The same gem scans cleanly on source-built Ruby 3.1.7,
+#: 3.3.8 and 3.4.5, so this is a build constraint, not a Ruby-version one. ASH does
+#: not read the Ruby version here: the SARIF run carries neither the message nor
+#: the interpreter, and a hint is all the stdout and stderr of that run can
+#: honestly support. The hint names the gem version ASH installs
+#: (``CFN_NAG_GEM_VERSION``); 0.8.10 is the version measured.
 _PSYCH_FATAL_HINT = (
-    "If it reads `undefined method 'parse' for an instance of Psych::Parser`, "
-    "cfn-nag 0.8.10 is running on a Ruby whose built-in Psych conflicts with its "
-    "psych 3 pin (seen on Homebrew portable-ruby builds); use a Ruby built from "
-    "source or from your distribution's package."
+    "If that violation's message ends `for an instance of Psych::Parser>`, "
+    f"cfn-nag {CFN_NAG_GEM_VERSION} is running on a Ruby whose built-in Psych "
+    "conflicts with its psych 3 pin (seen on Homebrew portable-ruby builds); use a "
+    "Ruby built from source, or run ASH with `--mode container`."
 )
 
 #: Where macOS keeps a real compiler: the Command Line Tools, Xcode, or the
@@ -476,15 +481,16 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
     #: field, so it is recorded here): the row holds only where cfn-nag 0.8.10
     #: runs. It runs on source-built Ruby 3.1.7, 3.3.8 and 3.4.5 and FATALs on
     #: Homebrew portable-ruby builds (3.3.8 and 3.4.5; its psych 3 pin collides
-    #: with the interpreter's built-in Psych). The first M0 run read that FATAL
-    #: as "Ruby 3.4 only"; the recapture shows the Ruby version is not the
+    #: with the interpreter's built-in Psych), so the Ruby version is not the
     #: variable, the build is. The FATAL shape: exit 1, SARIF with 0 results and
-    #: an empty stderr, JSON violation id FATAL with message
-    #: "undefined method 'parse' for an instance of Psych::Parser".
+    #: an empty stderr, JSON violation id FATAL with a NoMethodError message
+    #: ending "for an instance of Psych::Parser>" (Ruby 3.3 quotes the method as
+    #: `parse', Ruby 3.4 as 'parse'; _PSYCH_FATAL_HINT quotes the shared tail).
     facets: ClassVar[ScannerFacets] = ScannerFacets(
         rule_id=FacetDecl(
             state=FacetState.MAPPED,
-            native_field='violation "id" (e.g. W51), the SARIF ruleId',
+            native_field="SARIF result ruleId, CFN_NAG_<id> (e.g. CFN_NAG_W51); "
+            'the JSON violation "id" is the bare <id> (e.g. W51)',
         ),
         severity=FacetDecl(
             state=FacetState.MAPPED,
@@ -577,8 +583,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         ),
         extras=FacetDecl(
             state=FacetState.NA,
-            reason="the adapter writes no result property bag (its only "
-            "PropertyBag is on the Invocation)",
+            reason="the captured SARIF results carry no property bag (M0 item b); "
+            "the one result property the adapter writes is ash_resource_id, "
+            "which the resource_id cell declares",
         ),
     )
 

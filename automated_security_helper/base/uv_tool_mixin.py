@@ -279,16 +279,59 @@ def _without_whitespace(requirement: str) -> str:
         return requirement
 
 
-def _tool_name(plugin: Any) -> str:
+def tool_name(plugin: Any) -> str:
     """The tool's executable name, ``""`` for a plugin that sets none.
 
     ``command`` is ``None`` on a plugin that has no tool to run; every uv arm
     in this module is reached only for a plugin that names one, so the empty
     string is the type-level stand-in, never a name that gets looked up. A
     function rather than a method because the arms are also run against
-    duck-typed stand-ins that carry only the plugin's fields.
+    duck-typed stand-ins that carry only the plugin's fields. It lives here,
+    not on ``plugin_base`` (which re-exports it), because ``plugin_base``
+    imports from this module, so this module cannot import it back.
     """
     return plugin.command or ""
+
+
+def _tool_name(plugin: Any) -> str:
+    """Deprecated alias for :func:`tool_name`; use the public name."""
+    return tool_name(plugin)
+
+
+def _record_direct_route_version(plugin: Any, version: Optional[str]) -> None:
+    """Record the version of the copy on PATH that the scan now runs directly.
+
+    ``version`` is that copy's own answer (its verdict's version, read from its
+    ``--version``), or None when it gave none. The deferred uv probe reads the
+    version of uv's environment, which is not what runs on this route, so a value
+    it wrote earlier is replaced -- with None when the copy answered nothing (an
+    earlier probe resolved 3.4.5 while the copy on PATH was 3.3.15) -- and a probe
+    still owed is dropped unasked. ``_select_tool_execution`` and the PATH
+    fallbacks of the bandit, checkov, cfn-lint and semgrep scanners record through
+    here, so on those routes the record follows the route.
+    """
+    plugin.tool_version = version or None
+    plugin._deferred_tool_version_probe = None
+
+
+def _restore_uv_route(plugin: Any) -> None:
+    """Put the uv route back after a decision to run a copy directly is dropped.
+
+    The version recorded for that copy names a binary that no longer runs, so it
+    goes with the decision, and the uv probe is owed again: the next
+    ``resolve_deferred_tool_version`` (the dependency check, the SARIF step, the
+    inventory) records the version of the environment uv runs. The probe is
+    re-armed with no ``--from`` spec, which ``_get_uv_tool_version`` resolves when
+    it runs, so it reads the requirement of the config in place then. A probe
+    already owed is kept as it is. A plugin that is not on a direct route
+    (``use_uv_tool`` is not False) is left untouched.
+    """
+    if getattr(plugin, "use_uv_tool", None) is not False:
+        return
+    plugin.use_uv_tool = True
+    plugin.tool_version = None
+    if getattr(plugin, "_deferred_tool_version_probe", None) is None:
+        plugin._deferred_tool_version_probe = (tool_name(plugin), None)
 
 
 class UVToolMixin:
@@ -368,10 +411,10 @@ class UVToolMixin:
         package = self._uv_package()
         if not package:
             # A plugin with no tool and no package has no spec: the empty
-            # stand-in ``_tool_name`` gives is never handed on as one.
+            # stand-in ``tool_name`` gives is never handed on as one.
             return None
         if not extras and not constraint:
-            return package if package != _tool_name(self) else None
+            return package if package != tool_name(self) else None
         base = f"{package}[{','.join(extras)}]" if extras else package
         return f"{base}{constraint}" if constraint else base
 
@@ -381,7 +424,7 @@ class UVToolMixin:
         built around, and the ``package`` the runner's requirement check holds
         each spec to, so a constraint glued onto the name cannot name another
         package (``checked_requirement``)."""
-        return self.uv_tool_package_name or _tool_name(self)
+        return self.uv_tool_package_name or tool_name(self)
 
     def _uv_probe_from_spec(self) -> Optional[str]:
         """:meth:`_uv_from_spec` as the dependency check hands it to the probe.
@@ -484,7 +527,7 @@ class UVToolMixin:
         ``uv_tool_runner.uv_install_inputs``, instead of this one.
         """
         return (
-            self._uv_from_spec() or _tool_name(self),
+            self._uv_from_spec() or tool_name(self),
             *(self._get_tool_with_dependencies() or []),
         )
 
@@ -798,7 +841,7 @@ class UVToolMixin:
                     f"Executing {self.command} via UV tool run with args: {tool_args}",
                     record_values,
                     plugin_inputs=record_inputs,
-                    tool_name=_tool_name(self),
+                    tool_name=tool_name(self),
                     limit=None,
                 ),
                 level=logging.DEBUG,
@@ -822,10 +865,10 @@ class UVToolMixin:
             # is.
             with (
                 launch.watching(),
-                uv_record_inputs(record_values, record_inputs, _tool_name(self)),
+                uv_record_inputs(record_values, record_inputs, tool_name(self)),
             ):
                 result = uv_runner.run_tool(
-                    tool_name=_tool_name(self),
+                    tool_name=tool_name(self),
                     # The package that provides the command, when it is named
                     # apart from it: the --from spec is built on it, so the
                     # run resolves the package the install named, not one
@@ -969,7 +1012,7 @@ class UVToolMixin:
             text,
             record_values,
             plugin_inputs=record_inputs,
-            tool_name=_tool_name(self),
+            tool_name=tool_name(self),
             limit=None,
         )
 
@@ -1413,7 +1456,7 @@ class UVToolMixin:
             repr(requirement),
             values,
             plugin_inputs=inputs,
-            tool_name=_tool_name(self),
+            tool_name=tool_name(self),
             limit=None,
         )
         # Stripped only AFTER the redaction: a whole-text strip first eats
@@ -1423,7 +1466,7 @@ class UVToolMixin:
             stderr,
             values,
             plugin_inputs=inputs,
-            tool_name=_tool_name(self),
+            tool_name=tool_name(self),
             limit=None,
         ).strip()
         head_keep, tail_keep = 500, 300
@@ -1707,7 +1750,7 @@ class UVToolMixin:
             return True
 
         executable = installation_info.get("pre_installed_path") or find_executable(
-            _tool_name(self)
+            tool_name(self)
         )
         if executable is None:
             # Only reachable for source == "uv" offline with nothing on PATH.
@@ -1722,7 +1765,7 @@ class UVToolMixin:
         # The package that provides the command, when named apart from it: the
         # requirement verified against the copy's environment is the one the
         # scan runs under, not one named after the executable.
-        package = self.uv_tool_package_name or _tool_name(self)
+        package = self.uv_tool_package_name or tool_name(self)
         requirement = build_requirement(package, extras, constraint)
         # The values hook is read ONCE, guarded, for the verify and every
         # record below: it is overridable, two reads can disagree with each
@@ -1764,7 +1807,7 @@ class UVToolMixin:
                 text,
                 values,
                 plugin_inputs=self._uv_run_inputs_for_records(),
-                tool_name=_tool_name(self),
+                tool_name=tool_name(self),
                 limit=None,
             )
 
@@ -1793,10 +1836,7 @@ class UVToolMixin:
             # value an earlier uv probe wrote names an environment the scan
             # does not run (#955, the probe resolved 3.4.5 while the PATH copy
             # was 3.3.15), and the uv probe is no longer owed on this route.
-            # mypy reads this mixin's tool_version as the str the first assignment above
-            # gave it; PluginBase declares it ``str | None``, which is what this holds.
-            self.tool_version = getattr(verdict, "version", None) or None  # type: ignore[assignment]
-            self._deferred_tool_version_probe = None
+            _record_direct_route_version(self, getattr(verdict, "version", None))
             return True
 
         # A tool from the Nix store is the pinned one `--mode nix` exists to run.
@@ -1894,7 +1934,8 @@ class UVToolMixin:
         False, with nothing changed, when no such decision was made; False
         with the record cleared -- and ``use_uv_tool`` put back on the uv
         route, so the next selection runs afresh instead of skipping into the
-        fallback -- when the verified copy is gone or no longer executable, so
+        fallback, the copy's recorded version dropped and the uv version probe
+        owed again -- when the verified copy is gone or no longer executable, so
         a genuinely unusable tool still fails loudly. A decision something
         re-pointed at uv (``use_uv_tool`` True again) is not honored either:
         whatever flipped it knew more recent facts than the record here.
@@ -1925,9 +1966,10 @@ class UVToolMixin:
             # The dropped decision is what turned the uv route off; put the
             # flag back so the next selection starts where construction left
             # it, instead of skipping its own `if use_uv_tool` branch into the
-            # consolidated resolver's cold probe and flip.
-            if getattr(self, "use_uv_tool", None) is False:
-                self.use_uv_tool = True
+            # consolidated resolver's cold probe and flip. The copy's version
+            # goes with the decision, and the uv probe is owed again: the scan
+            # runs through uv now, and the reports name uv's environment.
+            _restore_uv_route(self)
             return False
         self.dependencies_satisfied = True
         return True

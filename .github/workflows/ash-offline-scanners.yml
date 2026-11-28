@@ -3,15 +3,20 @@
 
 name: ASH - Offline-capable scanners (non-blocking)
 # Runs the scanners the operational register declares as needing no network
-# (sandbox network "none", offline outcome "unchanged") with `--offline` and every
-# proxy pointed at a closed port, and requires each of them to complete.
+# (sandbox network "none", offline outcome "unchanged") with `--offline`, once
+# under `--sandbox bwrap` and once unsandboxed, and requires each of them to
+# complete.
 #
 # WHY THIS WORKFLOW EXISTS
 #
 # The register (automated_security_helper/base/scanner_operational_facets.py) says
 # these scanners do not need the network. A declaration nothing exercises is a
-# claim, so this job is the exercise: if one of them quietly reaches for the
-# network, or refuses to run offline, the run says so.
+# claim, so this job is the exercise. It fails when a required scanner does not run
+# unsandboxed (it is missing, errors or is skipped), when mcp-config reports no
+# finding from the fixture's MCP config file, and when any scanner's status or
+# findings differ between the sandboxed and the unsandboxed run. It does not see
+# every network attempt: a scanner that tries the network, has the attempt refused,
+# swallows the error and still reports the same findings passes.
 #
 # WHAT IT MIRRORS
 #
@@ -20,28 +25,48 @@ name: ASH - Offline-capable scanners (non-blocking)
 #   scripts/verify_sandbox_scanner_parity.py's fixture. This job runs only that
 #   script's offline pair (no `--online`), so the sandbox-parity comparison is
 #   reused as written and only the scanner list and the network posture differ.
-# * The no-network posture is the one ash-package.yml uses for `ash
-#   get-genai-guide`: every proxy variable points at a closed local port. That is
-#   not a network namespace; it makes a scanner that honors proxy settings fail
-#   fast, and `--offline` is ASH's own switch. A scanner that opens a socket
-#   directly is not caught by this job, which is a stated limit.
+# * The required list is read from the register at run time, not copied here: the
+#   "Read the required scanners from the register" step takes every scanner whose
+#   sandbox network is "none" and whose offline outcome is "unchanged", less the
+#   exclusions it names, each with its reason.
+#
+# HOW THE NETWORK IS CLOSED
+#
+# * The sandboxed run is isolated by its network namespace: under `--sandbox bwrap`
+#   a scanner whose sandbox declaration grants no network runs in a namespace of
+#   its own (bwrap --unshare-net), and ASH passes it no proxy variable.
+# * Only the unsandboxed run relies on the proxies. The scan step sets all eight
+#   proxy variables ASH's sandbox environment lists: HTTP_PROXY, HTTPS_PROXY,
+#   ALL_PROXY and their lowercase forms point at a closed local port, and NO_PROXY
+#   and no_proxy are empty. A scanner that honors proxy settings fails fast, and
+#   `--offline` is ASH's own switch. A scanner that opens a socket directly in the
+#   unsandboxed run still reaches the network, and this job sees that only when
+#   its findings then differ from the sandboxed run's.
 #
 # WHY IT CANNOT BLOCK
 #
 # The job carries `continue-on-error: true` and this workflow is not listed in
 # ash-unified-ci.yml's required-checks `needs`. It reports; it never gates a merge.
 # Scanners are installed with the network ON (the install step), and only the scan
-# step runs with the proxies closed.
+# step runs with the proxies closed. It runs on pull requests that change the
+# scanner plugin modules, the register module, the scanner enumeration, the parity
+# script or this workflow (the `paths` filter), and on demand.
 #
-# NOT COVERED: the scanners whose offline outcome is degraded or not-run (grype,
-# trivy, semgrep, opengrep, detect-secrets, checkov, guarddog, npm-audit, snyk) and
-# the alpha scanners that need extra module loading (betterleaks, hadolint,
-# ferret-scan); syft is left to the real-scanner offline tests in ash-unified-ci.yml.
+# NOT COVERED: the scanners the register gives a network grant or a degraded or
+# not-run offline outcome, and the scanners the register step excludes by name.
 
 on:
   pull_request:
     branches:
       - "**"
+    paths:
+      - "automated_security_helper/plugin_modules/ash_builtin/scanners/**"
+      - "automated_security_helper/plugin_modules/*/__init__.py"
+      - "automated_security_helper/plugin_modules/*/*_scanner.py"
+      - "automated_security_helper/base/scanner_operational_facets.py"
+      - "scripts/verify_sandbox_scanner_parity.py"
+      - "tests/utils/scanner_enumeration.py"
+      - ".github/workflows/ash-offline-scanners.yml"
   workflow_dispatch: {}
 
 permissions:
@@ -71,17 +96,14 @@ jobs:
           python-version: "3.12"
           install-ash: "false"
       - name: Set up Ruby for cfn-nag
-        uses: ruby/setup-ruby@20eb24b0d509e2b9ed9b6d42ddfeb992915e0564 # v1.341.0
+        uses: ruby/setup-ruby@f9c4492e86def3e644ab32a0ef185eda5b0c20d0 # v1.342.0
         with:
           ruby-version: "3.3"
       - name: Install ASH with the cdk extra, and every scanner
         run: |
           pip install ".[cdk]"
           ash dependencies install
-      # Offline pair only, with every proxy at a closed port. --require makes a
-      # scanner that is MISSING, ERROR or SKIPPED unsandboxed a failure, so
-      # "completed" means it ran, not that it was absent. --sandbox bwrap needs
-      # user namespaces, as in the sandbox jobs.
+      # --sandbox bwrap needs user namespaces, as in the sandbox jobs.
       - name: Install bubblewrap
         uses: ./.github/actions/apt-retry
         with:
@@ -93,17 +115,98 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
             bwrap --unshare-all --ro-bind / / --proc /proc --dev /dev true
           fi
+      # The --require list, read from the register (the same scanner enumeration
+      # the register tests use) rather than copied here. Every scanner whose sandbox
+      # network is "none" and whose offline outcome is "unchanged" is required,
+      # less the names in EXCLUDED. The step fails when the register cannot be read
+      # whole, when an exclusion no longer names such a scanner, or when nothing is
+      # left to require, so the list cannot go stale or empty without a red run.
+      - name: Read the required scanners from the register
+        id: required
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import os
+          import sys
+
+          from automated_security_helper.base.scanner_operational_facets import (
+              OPERATIONAL_FACETS_ATTR,
+              OfflineOutcome,
+              SandboxNetwork,
+          )
+
+          # Scanners the register would require that this job does not, and why.
+          EXCLUDED = {
+              "betterleaks": "an alpha plugin; this job loads no alpha plugin modules",
+              "ferret-scan": "an alpha plugin; this job loads no alpha plugin modules",
+              "hadolint": "an alpha plugin; this job loads no alpha plugin modules",
+              "syft": "left to the real-scanner offline tests in ash-unified-ci.yml",
+          }
+
+          # Loaded by path, as the parity script loads its gitleaks fixture, so a
+          # `tests` package installed in the environment cannot shadow it.
+          spec = importlib.util.spec_from_file_location(
+              "_ash_scanner_enumeration", "tests/utils/scanner_enumeration.py"
+          )
+          enumeration = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(enumeration)
+          classes, load_errors = enumeration.load_scanner_universe()
+          if load_errors:
+              sys.exit(f"plugin groups failed to import; the register is incomplete: {load_errors}")
+
+          candidates = set()
+          for cls in classes:
+              row = vars(cls).get(OPERATIONAL_FACETS_ATTR)
+              if row is None:
+                  sys.exit(f"{cls.__qualname__} declares no operational register row")
+              if (
+                  row.network.sandbox_network is SandboxNetwork.NONE
+                  and row.network.offline_outcome is OfflineOutcome.UNCHANGED
+              ):
+                  candidates.add(row.scanner_name)
+
+          stale = sorted(set(EXCLUDED) - candidates)
+          if stale:
+              sys.exit(f"excluded, but not offline-capable in the register: {stale}")
+          required = sorted(candidates - set(EXCLUDED))
+          if not required:
+              sys.exit("the register names no offline-capable scanner to require")
+          print(f"scanners read from the register: {len(classes)}")
+          print(f"offline-capable in the register: {','.join(sorted(candidates))}")
+          for name in sorted(EXCLUDED):
+              print(f"not required: {name} ({EXCLUDED[name]})")
+          print(f"required: {','.join(required)}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"scanners={','.join(required)}\n")
+          PY
+      # Offline pair only. --require makes a required scanner that is absent,
+      # MISSING, ERROR or SKIPPED unsandboxed a failure, so "completed" means it ran,
+      # not that it was absent. mcp-config reads only MCP config files and is PASSED
+      # on a tree that has none, so "ran" says nothing about it: the parity fixture
+      # carries a .mcp.json, and --require-findings fails the job unless mcp-config
+      # reports findings from it. The proxy variables reach only the unsandboxed run's
+      # scanners; see the header. GitHub reads `env:` keys without regard to case, so
+      # the lowercase proxy variables cannot sit beside the uppercase ones there (the
+      # workflow file is refused as defining each twice); the script exports them.
       - name: Scan offline with no network
         env:
           TMPDIR: ${{ runner.temp }}
           PARITY_REPORT: ${{ runner.temp }}/offline-scanners.json
+          REQUIRED_SCANNERS: ${{ steps.required.outputs.scanners }}
           HTTP_PROXY: http://127.0.0.1:9
           HTTPS_PROXY: http://127.0.0.1:9
+          ALL_PROXY: http://127.0.0.1:9
           NO_PROXY: ""
         run: |
+          : "${REQUIRED_SCANNERS:?the register step wrote no required list}"
+          export http_proxy=http://127.0.0.1:9
+          export https_proxy=http://127.0.0.1:9
+          export all_proxy=http://127.0.0.1:9
+          export no_proxy=
           python scripts/verify_sandbox_scanner_parity.py \
             --sandbox bwrap --ash ash \
-            --require bandit,cdk-nag,cfn-nag,cfn-lint,cfn-guard,actionlint,gitleaks,zizmor \
+            --require "$REQUIRED_SCANNERS" \
+            --require-findings mcp-config \
             --report "$PARITY_REPORT"
       - name: Collect the report and scan output
         if: failure()

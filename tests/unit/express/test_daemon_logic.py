@@ -236,8 +236,12 @@ class TestRetiresWhenWarmImportsLeaveThreads:
         self, daemon, monkeypatch, tmp_path
     ):
         """socket_path() reads os.environ, which a warm import may have
-        changed: recomputed at retirement time it would name a different
-        socket, and the client's backoff would never see the marker."""
+        changed, and re-checks the runtime directory, which can refuse.
+        Recomputed while the daemon retires, it would name a different socket
+        (the client's backoff would never see the marker) or raise out of
+        run(). A daemon that bound keeps its path, so neither the serving log
+        line nor the retirement asks socket_path() at all: the stand-in fails
+        the test if it is asked."""
         from automated_security_helper.express import daemon as daemon_module
 
         bound = tmp_path / "bound.sock"
@@ -245,30 +249,72 @@ class TestRetiresWhenWarmImportsLeaveThreads:
         monkeypatch.setattr(daemon_module, "_thread_count", lambda: 2)
         monkeypatch.setattr(daemon_module, "_log", lambda _m: None)
         monkeypatch.setattr(
-            runtime, "socket_path", lambda *a, **k: tmp_path / "other.sock"
+            runtime,
+            "socket_path",
+            lambda *a, **k: pytest.fail("a bound daemon never recomputes its path"),
         )
         monkeypatch.setattr(daemon, "_shutdown", lambda: None)
         daemon._path = bound
         daemon.run()
         assert runtime.recent_retirement(bound) == "threads"
-        assert runtime.recent_retirement(tmp_path / "other.sock") is None
 
-    def test_a_refusing_socket_path_at_retirement_does_not_escape_run(
+
+@needs_posix
+class TestStatusNamesTheBoundSocket:
+    """The status answer names the socket this daemon bound, as run() and
+    _shutdown() do. socket_path() would re-read os.environ, which a warm import
+    may have changed, and re-check the runtime directory, which can refuse. A
+    refusal there dropped the status connection, and `ash express status` then
+    reported a healthy daemon as a wedged socket."""
+
+    def test_the_status_names_the_bound_path_not_a_recomputed_one(
         self, daemon, monkeypatch, tmp_path
     ):
+        bound = tmp_path / "bound.sock"
+        monkeypatch.setattr(
+            runtime, "socket_path", lambda *a, **k: tmp_path / "other.sock"
+        )
+        daemon._path = bound
+        assert daemon._status()["socket"] == os.fspath(bound)
+
+    def test_a_refusing_runtime_directory_still_gets_its_status_answer(
+        self, daemon, monkeypatch, tmp_path
+    ):
+        """Driven through the accept path: the request goes in on one end of a
+        socket pair, and the answer must come back on it, not a dropped
+        connection."""
+        import socket as socket_module
+
         from automated_security_helper.express import daemon as daemon_module
 
         def refuse(*_a, **_k):
             raise runtime.ExpressUnavailable("the runtime directory changed")
 
-        monkeypatch.setattr(daemon_module, "warm_imports", list)
-        monkeypatch.setattr(daemon_module, "_thread_count", lambda: 2)
-        monkeypatch.setattr(daemon_module, "_log", lambda _m: None)
+        lines = []
+        bound = tmp_path / "bound.sock"
         monkeypatch.setattr(runtime, "socket_path", refuse)
-        monkeypatch.setattr(daemon, "_shutdown", lambda: None)
-        daemon._path = tmp_path / "bound.sock"
-        daemon.run()  # must return, not raise
-        assert runtime.recent_retirement(tmp_path / "bound.sock") == "threads"
+        monkeypatch.setattr(runtime, "peer_is_this_user", lambda _s: True)
+        monkeypatch.setattr(daemon_module, "_log", lines.append)
+        daemon._path = bound
+        served, client_end = socket_module.socketpair()
+        try:
+
+            class _Listener:
+                def accept(self):
+                    return served, None
+
+            client_end.settimeout(5.0)
+            client_end.sendall(b"\x01")
+            runtime.send_frame(client_end, runtime.status_frame())
+            daemon._accept(_Listener())
+            answer = runtime.FrameReader(client_end).read_frame()
+        finally:
+            client_end.close()
+            served.close()
+        assert answer is not None, lines
+        assert answer["ok"] is True
+        assert answer["socket"] == os.fspath(bound)
+        assert not any("connection dropped" in line for line in lines), lines
 
 
 class _TickingClock:

@@ -279,6 +279,142 @@ def test_a_scanner_name_with_a_lone_surrogate_is_counted_under_itself():
 
 
 # --------------------------------------------------------------------------
+# The names the SARIF holds, and the counts read for every name of the union.
+# --------------------------------------------------------------------------
+
+
+def oracle_sarif_names(model):
+    # ``_get_scanner_names_from_sarif`` as it stood (its debug logging dropped):
+    # a set of the exact spellings, listed in the set's order.
+    names = set()
+    if model.sarif and model.sarif.runs:
+        for run in model.sarif.runs:
+            if not run.results:
+                continue
+            for result in run.results:
+                name = ScannerStatisticsCalculator._get_scanner_name_from_result(result)
+                if name:
+                    names.add(name)
+    return list(names)
+
+
+def oracle_union_counts(model):
+    # The union loop of ``extract_scanner_statistics`` over a model whose names come
+    # from the SARIF alone, one name per case-folded spelling, each counted by the
+    # per-name walk. Keyed by the folded name: which spelling of two the set listed
+    # first follows string hashing, so it is not part of what is pinned here.
+    counts = {}
+    for name in oracle_sarif_names(model):
+        folded = name.lower()
+        if folded in counts:
+            continue
+        counts[folded] = oracle_sarif_counts(model, name)
+    return counts
+
+
+def _stats_counts(model):
+    stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+    return {
+        name.lower(): tuple(
+            row[field]
+            for field in ("suppressed", "critical", "high", "medium", "low", "info")
+        )
+        for name, row in stats.items()
+    }
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_every_union_name_reads_the_counts_the_per_name_walk_gives(seed):
+    results = _corpus(seed)
+    expected = _outcome(lambda: oracle_union_counts(_model(results)))
+    actual = _outcome(lambda: _stats_counts(_model(results)))
+    assert actual == expected, seed
+
+
+def _batch_counts(model, name):
+    batch = ScannerStatisticsCalculator.sarif_counts_by_scanner(model)
+    return ScannerStatisticsCalculator._with_dict_counts(
+        model, name, batch.for_name(name)
+    )
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_batch_counts_of_every_name_equal_the_per_name_loop(seed):
+    results = _corpus(seed)
+    names = {n for n in _SCANNERS if n} | {"missing", "BANDIT", ""}
+    for name in sorted(names):
+        model = _model(results)
+        expected = _outcome(lambda: oracle_sarif_counts(model, name))
+        actual = _outcome(lambda: _batch_counts(model, name))
+        assert actual == expected, (seed, name)
+
+
+def test_the_batch_names_the_scanners_of_named_results_only():
+    results = [
+        {
+            "ruleId": "R",
+            "level": "error",
+            "message": {"text": "m"},
+            "properties": {},
+        },
+        {
+            "ruleId": "R",
+            "level": "note",
+            "message": {"text": "m"},
+            "properties": {"scanner_name": "bandit"},
+        },
+    ]
+    model = _model(results)
+    batch = ScannerStatisticsCalculator.sarif_counts_by_scanner(model)
+    assert batch.names == ["bandit"]
+    assert batch.for_name("") == ScannerSeverityCount()
+    assert "" not in ScannerStatisticsCalculator.extract_scanner_statistics(model)
+
+
+@pytest.mark.parametrize("first,second", [("Bandit", "bandit"), ("bandit", "Bandit")])
+def test_a_scanner_named_only_in_the_sarif_keeps_the_spelling_it_was_first_named_by(
+    first, second
+):
+    results = [
+        {
+            "ruleId": "R",
+            "level": "error",
+            "message": {"text": "m"},
+            "properties": {"scanner_name": name},
+        }
+        for name in (first, second, first)
+    ]
+    model = _model(results)
+    assert ScannerStatisticsCalculator._get_scanner_names_from_sarif(model) == [
+        first,
+        second,
+    ]
+    stats = ScannerStatisticsCalculator.extract_scanner_statistics(model)
+    assert list(stats) == [first]
+    assert stats[first]["critical"] == 3
+
+
+def test_a_name_that_is_not_text_is_folded_only_when_a_result_names_a_scanner():
+    empty = _model([])
+    named = _model(_corpus(0))
+    for model in (empty, named):
+        assert _outcome(lambda: _batch_counts(model, 5)) == _outcome(
+            lambda: oracle_sarif_counts(model, 5)
+        )
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_the_names_found_in_the_sarif_equal_the_old_names_as_a_set(seed):
+    model = _model(_corpus(seed))
+    assert set(ScannerStatisticsCalculator._get_scanner_names_from_sarif(model)) == set(
+        oracle_sarif_names(model)
+    )
+    assert len(ScannerStatisticsCalculator._get_scanner_names_from_sarif(model)) == len(
+        oracle_sarif_names(model)
+    )
+
+
+# --------------------------------------------------------------------------
 # get_severity_metrics_from_sarif.
 # --------------------------------------------------------------------------
 

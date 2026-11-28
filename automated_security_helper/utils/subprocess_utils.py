@@ -874,21 +874,46 @@ def _bin_path() -> Optional[Path]:
     The module-level constant remains the fallback, so tests that patch
     ``subprocess_utils.ASH_BIN_PATH`` keep working.
 
-    A relative value is not used: the first time each one is seen, one warning
-    names it, and ``~/.ash/bin`` is the bin directory instead. None when there is
-    no bin directory: ASH_BIN_PATH is unset (or relative) and there is no usable
-    home for ``~/.ash/bin`` (``core.constants.home_bin_path``), and one warning
-    says that too.
+    A relative value is not used (:func:`usable_bin_path`): the first time each one
+    is seen, one warning names it, and ``~/.ash/bin`` is the bin directory instead.
+    None when there is no bin directory: ASH_BIN_PATH is unset (or relative) and
+    there is no usable home for ``~/.ash/bin`` (``core.constants.home_bin_path``),
+    and one warning says that too.
     """
     from_env = ash_bin_path_from_environment()
-    path = Path(from_env) if from_env else ASH_BIN_PATH
-    if path is not None and not _is_anchored(str(path)):
-        _warn_relative_bin_path(str(path))
-        path = home_bin_path()
+    path = usable_bin_path(Path(from_env) if from_env else ASH_BIN_PATH)
     if path is None:
         warn_if_home_unusable()
         return None
     return path
+
+
+def usable_bin_path(value: "str | os.PathLike[str] | None") -> Optional[Path]:
+    """The bin directory *value* names, or ``~/.ash/bin`` when *value* is relative.
+
+    A relative ASH bin directory names a directory under the working directory,
+    usually the repository being scanned. Installing into it, downloading into it or
+    building a rules directory beside it would write into that repository, so it is
+    not used: one warning names the value, once per value per process, and the bin
+    directory is ``~/.ash/bin`` (``core.constants.home_bin_path``) instead. That is
+    None when there is no usable home. A *value* of None gives None.
+
+    A leading ``~`` is expanded before a value gets here, by
+    ``core.constants.ash_bin_path_from_environment`` and by the install's own tilde
+    branch. This function expands none, so an unexpanded ``~`` would read as
+    relative.
+
+    Every reader that turns ASH_BIN_PATH into a directory goes through this: tool
+    lookup (:func:`_bin_path`), ``download_utils.current_bin_path`` (so every
+    install command, download and rules directory built from it), and ``ash
+    dependencies install``.
+    """
+    if value is None:
+        return None
+    if not _is_anchored(str(value)):
+        _warn_relative_bin_path(str(value))
+        return home_bin_path()
+    return Path(value)
 
 
 def ignored_relative_bin_path() -> Optional[str]:

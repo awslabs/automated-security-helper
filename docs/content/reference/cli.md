@@ -758,7 +758,9 @@ platform, pinned provisioning, and docs generated from the manifest. A row that 
 be evaluated here reads not-run, which is not a pass.
 
 Exit status: 0 when every named plugin passes, 1 when any row is red, 3 when none is red
-but some row was not run, 2 for a usage error (an unknown plugin, no transcript root).
+but some row was not run, 2 for a usage error (an unknown plugin, no transcript root, a
+plugin that cannot be loaded). A red row outranks a load error: a run that found both
+exits 1, so a red verdict is never masked by an unrelated plugin's import failure.
 
 ```text
 ash plugin verify [OPTIONS] [names]...
@@ -1049,7 +1051,7 @@ ash scan [OPTIONS]
 | <a id="scan--custom-containerfile"></a>`--custom-containerfile` | text | not set |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build \*after\* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | <a id="scan--custom-build-arg"></a>`--custom-build-arg` | text, repeatable | not set |  | Custom build arguments to pass to the container build |
 | <a id="scan--baseline"></a>`--baseline` | text | not set | `ASH_BASELINE` | Leave out findings already present in this saved ash_aggregated_results.json from a full scan (for example the default branch's), so the reports, the summary and the exit code count only new findings. Matching tolerates findings that only moved lines. The file must be outside the scanned checkout and the output directory. Supported with --mode local and precommit only (exit 5 otherwise). |
-| <a id="scan--image"></a>`--image` | text, repeatable | not set |  | Scan a container image named by reference (registry/repo[:tag]) instead of a source directory. ASH fetches nothing itself: the image is prepared by a container engine or the scanner tools' own registry clients. Repeat it, or give a comma list, to scan several images: each is its own scan, with its own reports under &lt;output-dir&gt;/&lt;NN&gt;-&lt;image&gt;-&lt;hash&gt;/, and the exit code is the worst of theirs. Exclusive with --source-dir, --image-archive and --image-layout; scanners that do not declare container_image targets are reported SKIPPED. |
+| <a id="scan--image"></a>`--image` | text, repeatable | not set |  | Scan a container image named by reference (registry/repo, optionally followed by :tag, @sha256:digest or both) instead of a source directory. ASH fetches nothing itself: the image is prepared by a container engine or the scanner tools' own registry clients. Repeat it, or give a comma list, to scan several images: each is its own scan, with its own reports under &lt;output-dir&gt;/&lt;NN&gt;-&lt;image&gt;-&lt;hash&gt;/, and the exit code is the worst of theirs. Exclusive with --source-dir, --image-archive and --image-layout; scanners that do not declare container_image targets are reported SKIPPED. |
 | <a id="scan--image-archive"></a>`--image-archive` | text | not set |  | Scan a saved container image (an uncompressed docker save / OCI archive tarball) instead of a source directory. Needs no container engine. Exclusive with --source-dir, --image and --image-layout. |
 | <a id="scan--image-layout"></a>`--image-layout` | text | not set |  | Scan a container image from an OCI image-layout directory (the directory holding the oci-layout marker file) instead of a source directory. Needs no container engine. Exclusive with --source-dir, --image and --image-archive. |
 | <a id="scan--cli-json-input"></a>`--cli-json-input` | text | not set |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
@@ -1111,7 +1113,8 @@ Record a new review: re-hash locked files whose bytes changed.
 
 Run it after reading what changed in a file and confirming its suppressions
 still hold. It prints each file whose hash changed. A locked file that no
-longer exists is reported and left as it was; exit code 1 then.
+longer exists is reported and left as it was (exit code 1), unless
+--drop-missing removes its dead entry.
 
 ```text
 ash suppress refresh [OPTIONS] [paths]...
@@ -1120,11 +1123,13 @@ ash suppress refresh [OPTIONS] [paths]...
 <!-- doctest: options of=cli.suppress.refresh -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Every locked file when none is named. |
+| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Pass --all for every locked file. |
 
 <!-- doctest: options of=cli.suppress.refresh -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
+| <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Re-hash every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
+| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-verify"></a>`ash suppress verify`
@@ -1132,8 +1137,12 @@ ash suppress refresh [OPTIONS] [paths]...
 Check the lock against the tree. Exits 1 when anything is out of date.
 
 Lists every locked file whose bytes changed or that is gone, and every
-symbol suppression in the named configs whose file has no lock entry. Exit
-code 0 means a scan applies every symbol suppression.
+symbol suppression in the checked configs that the lock does not record
+(no entry for its file, or no recorded (rule_id, symbol) scope). It checks
+the named --config files, or the one config file a scan of the source
+directory discovers, and prints which; suppressions an `extends` base
+contributes are not read, so exit code 0 covers the checked files, not
+every config a scan could merge.
 
 ```text
 ash suppress verify [OPTIONS]

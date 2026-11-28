@@ -69,7 +69,7 @@ from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.utils.config_trust import record_provenance
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.utils.scan_output_dirs import mark_converted_results
-from automated_security_helper.utils import subprocess_utils
+from automated_security_helper.utils import install_providers, subprocess_utils
 from automated_security_helper.utils.subprocess_utils import COULD_NOT_STOP_REASON
 from automated_security_helper.utils.tool_config_dir import TOOL_CONFIG_DIR_PREFIX
 
@@ -3909,6 +3909,57 @@ def test_an_integration_that_no_longer_resolves_at_scan_time_is_missing(
     assert answers == []
     assert "shellcheck" in scanner.dependency_unavailable_reason
     assert scanner.dependencies_satisfied is False
+
+
+@pytest.mark.unit
+def test_a_dependency_check_answers_from_its_own_lookup_never_an_earlier_checks(
+    repo, monkeypatch
+):
+    """A check's verdict comes from the integration lookup that check made.
+
+    The ``--binary-path`` read that opens every dependency check resolves the
+    integrations, and the check's own route uses that resolution instead of
+    looking again. A forced actionlint is recorded here, so the read satisfies
+    the explicit check and the one scan() runs, and neither reaches its own
+    route. scan()'s own lookup then finds shellcheck gone and records the
+    reason, so the next check's read stops before resolving anything and that
+    check looks shellcheck up itself. Answering from the resolution the scan's
+    check made instead would report a scanner whose integration is gone as
+    ready to run."""
+    answers = ["/usr/bin/shellcheck", "/usr/bin/shellcheck"]
+    looked_up: list = []
+
+    def find(name):
+        if name == "actionlint":
+            return FAKE_ACTIONLINT
+        if name == "shellcheck":
+            looked_up.append(name)
+            return answers.pop(0) if answers else None
+        return None
+
+    def recorded(scanner_key):
+        if scanner_key != "actionlint":
+            return None
+        return install_providers.ForcedBinary(
+            scanner_key=scanner_key, path=Path(FAKE_ACTIONLINT), sha256="0" * 64
+        )
+
+    monkeypatch.setattr(module, "find_absolute_executable", find)
+    monkeypatch.setattr(install_providers, "recorded_forced_binary", recorded)
+    scanner = _scanner(repo, shellcheck="shellcheck")
+    fake = _run(scanner, monkeypatch, _EMPTY_RUN, 0)
+
+    assert scanner.validate_plugin_dependencies() is True
+    assert looked_up == ["shellcheck"]
+
+    assert scanner.scan(target=repo, target_type="source") is False
+    assert fake.calls == []
+    assert looked_up == ["shellcheck"] * 3
+    assert answers == []
+
+    assert scanner.validate_plugin_dependencies() is False
+    assert looked_up == ["shellcheck"] * 4
+    assert "shellcheck" in scanner.dependency_unavailable_reason
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute bit")
