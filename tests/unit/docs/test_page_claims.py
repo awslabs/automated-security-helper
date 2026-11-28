@@ -10720,6 +10720,10 @@ _GET_CONFIG_SHOWS_NO_ENV_VALUE = (
     "the server's environment is not the client's. The resolved config shows such a "
     "value as `<from ${VAR}>`, and with `raw` the reference appears as the file wrote it."
 )
+#: mcp-server.md on the text a file wrote after a reference, which the marker keeps.
+_GET_CONFIG_SHOWS_THE_TEXT_AFTER_THE_REFERENCE = (
+    "Text the file wrote after the reference follows the marker: `<from ${VAR}>-api`."
+)
 _PROFILE_COPY_HOLDS_THE_REFERENCE = (
     "The copy of a profile the server writes into a session's workspace holds each "
     "value the profile read from the environment as the profile's file wrote it, not "
@@ -10733,19 +10737,31 @@ _ENV_PROBE_VALUE = "page-claims-environment-value-7d41"
 
 
 @pytest.mark.parametrize(
-    "written, resolved, raw",
+    "written, resolved, raw, control_value, also_pinned",
     [
         pytest.param(
             f"${{{_ENV_PROBE}:unset}}",
             f"<from ${{{_ENV_PROBE}:unset}}>",
             f"!ENV ${{{_ENV_PROBE}:unset}}",
+            _ENV_PROBE_VALUE,
+            (),
             id="a-reference-with-a-default",
         ),
         pytest.param(
             f"!ENV ${{{_ENV_PROBE}}}",
             f"<from ${{{_ENV_PROBE}}}>",
             f"!ENV ${{{_ENV_PROBE}}}",
+            _ENV_PROBE_VALUE,
+            (),
             id="an-env-tag",
+        ),
+        pytest.param(
+            f"${{{_ENV_PROBE}}}-tail",
+            f"<from ${{{_ENV_PROBE}}}>-tail",
+            f"!ENV ${{{_ENV_PROBE}}}-tail",
+            f"{_ENV_PROBE_VALUE}-tail",
+            (_GET_CONFIG_SHOWS_THE_TEXT_AFTER_THE_REFERENCE,),
+            id="a-reference-with-text-after-it",
         ),
     ],
 )
@@ -10756,17 +10772,22 @@ def test_get_config_shows_a_value_read_from_the_environment_as_its_reference(
     written: str,
     resolved: str,
     raw: str,
+    control_value: str,
+    also_pinned: Tuple[str, ...],
 ) -> None:
     """mcp-server.md (What a delivered config cannot set).
 
     A repository's config sets ``project_name`` from a variable that the server's
     environment holds. A stdio server's ``get_config`` of that file must show the
-    resolved ``project_name`` as ``<from ${VAR}>`` and, with ``raw``, as the reference
-    the file wrote, and neither answer may hold the value. The control is the same
-    file resolved as a scan resolves it, with the variable set: ``project_name`` is
-    the value, so the config does read it.
+    resolved ``project_name`` as ``<from ${VAR}>``, followed by any text the file wrote
+    after the reference, and, with ``raw``, as the reference the file wrote, and
+    neither answer may hold the value. The control is the same file resolved as a scan
+    resolves it, with the variable set: ``project_name`` is the value and that text,
+    so the config does read it.
     """
     assert_on_page(MCP_SERVER, _GET_CONFIG_SHOWS_NO_ENV_VALUE)
+    for sentence in also_pinned:
+        assert_on_page(MCP_SERVER, sentence)
     from automated_security_helper.config.resolve_config import resolve_config
 
     repo = tmp_path / "repo"
@@ -10776,7 +10797,7 @@ def test_get_config_shows_a_value_read_from_the_environment_as_its_reference(
     config.write_text(f"project_name: {written}\n", encoding="utf-8")
     monkeypatch.setenv(_ENV_PROBE, _ENV_PROBE_VALUE)
     control = resolve_config(config_path=config, source_dir=repo)
-    assert control.project_name == _ENV_PROBE_VALUE, control.project_name
+    assert control.project_name == control_value, control.project_name
 
     env = {**_mcp_child_env(tmp_path), _ENV_PROBE: _ENV_PROBE_VALUE}
     client = _McpStdioClient([*_ASH_MODULE, "mcp", "--quiet"], repo, env)

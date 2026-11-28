@@ -648,15 +648,35 @@ refuses such a config too, with exit code 3. The refusal covers the file a clien
 `ASH_MCP_ALLOWED_CONFIG_ROOTS` names keeps its references.
 
 `get_config` never returns a value that a config read from the environment, since the server's
-environment is not the client's. The resolved config shows such a value as `<from ${VAR}>`,
-followed by any text the file wrote after the reference, and with `raw` the reference appears as
-the file wrote it. Where the variable gives no text, the answer shows the file's own text
-instead: the default followed by any text after the reference, when the variable is not set, or
-that text alone, when the variable is set to blank text. When that text is blank too, with a
-default of `None` counted as blank, the reference has no value: the resolved config shows `null`
-at a field that can be empty, and a field that needs text, such as `project_name`, refuses the
-config. So the answer can show whether a variable is set and whether it holds text, but never
-what it holds. For how a scan's results record such a value, see
+environment is not the client's. The resolved config shows such a value as `<from ${VAR}>`, and
+with `raw` the reference appears as the file wrote it. How each case is shown:
+
+- Text the file wrote after the reference follows the marker: `<from ${VAR}>-api`.
+- A list the load makes of the variable's text, such as `output_formats: ${VAR}`, shows the marker
+  for each entry.
+- A relative path the load anchors at its file's directory shows that directory and the marker,
+  also where a `patch` operation sets the path or moves it.
+- Where the variable gives no text, the answer shows the file's own text: the default followed by
+  any text after the reference, when the variable is not set, or that text alone, when the
+  variable is set to blank text. In a section the config does not declare, such as an external
+  plugin's, a variable set to blank text keeps the marker in front of that text.
+- When that text is blank too, with a default of `None` counted as blank, the place has no value:
+  `null` at a field that can be empty, unless the field supplies a value of its own, as
+  `output_formats` does with `[]`, and a field that needs text, such as `project_name`, refuses
+  the config.
+- None of these rules applies inside `<operator only; ignored from this file: VALUE>`, which is
+  how the answer shows an option only the operator may set when a file in a git checkout writes
+  it. A reference in VALUE is shown as `<from ${VAR}>`, with no default and no text after it,
+  whatever text it resolves to, and as `null` where it resolves to nothing.
+- A reference with no default refuses the config while its variable is not set.
+
+So the answer never prints the text a variable holds, but it can tell whether the variable is set,
+whether it holds text, whether the load took that text for a relative path, how many entries a
+list made of it has, and whether the field it fills accepts it, since a field that checks its
+text, such as one that takes a fixed choice, refuses text it does not accept. A mapping key read
+from a variable is shown as the marker, so where the key names a shipped plugin's section, that
+section's own name is missing from the answer, which tells which section the key names. For how a
+scan's results record such a value, see
 [Read values from the environment](configure.md#environment).
 
 Suppressions and ignore paths in a delivered config are applied, and marked as coming from the
