@@ -728,7 +728,7 @@ def test_a_bare_name_matches_as_written_and_a_path_matches_normalized(row) -> No
 # ---------------------------------------------------------------------------
 
 #: An env that sets the PATH a client looks a bare command up on.
-PATH_SET = {"PATH": "/tmp/shims:/usr/bin"}
+PATH_SET = {"PATH": "/opt/shims:/usr/bin"}
 
 LISTED_COMMANDS_WITH_ENV = [
     ListedCommand("path-in-env", stdio("npx", env=PATH_SET), BARE_NAME, False),
@@ -739,7 +739,7 @@ LISTED_COMMANDS_WITH_ENV = [
         "path-spelled-Path", stdio("npx", env={"Path": r"C:\shims"}), BARE_NAME, False
     ),
     ListedCommand(
-        "path-in-lower-case", stdio("npx", env={"path": "/tmp/shims"}), BARE_NAME, False
+        "path-in-lower-case", stdio("npx", env={"path": "/opt/shims"}), BARE_NAME, False
     ),
     ListedCommand(
         "pathext-spelled-PathExt",
@@ -749,13 +749,13 @@ LISTED_COMMANDS_WITH_ENV = [
     ),
     ListedCommand(
         "path-beside-other-names",
-        stdio("npx", env={"LOG_LEVEL": "debug", "PATH": "/tmp/shims"}),
+        stdio("npx", env={"LOG_LEVEL": "debug", "PATH": "/opt/shims"}),
         BARE_NAME,
         False,
     ),
     ListedCommand(
         "path-and-pathext",
-        stdio("npx", env={"PATH": "/tmp/shims", "PATHEXT": ".CMD"}),
+        stdio("npx", env={"PATH": "/opt/shims", "PATHEXT": ".CMD"}),
         BARE_NAME,
         False,
     ),
@@ -897,7 +897,7 @@ TOML_ENTRIES = [
     TomlEntry(
         "a-date-time-value", "[mcp_servers.s.env]\nPATH = 1979-05-27T07:32:00Z\n", False
     ),
-    TomlEntry("a-string-value", 'env = { PATH = "/tmp/shims" }\n', False),
+    TomlEntry("a-string-value", 'env = { PATH = "/opt/shims" }\n', False),
     TomlEntry("no-env-table", "", True),
     TomlEntry(
         "a-date-time-under-another-name",
