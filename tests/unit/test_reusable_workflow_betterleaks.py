@@ -76,14 +76,7 @@ def run_step(tmp_path, name, env):
         text=True,
         check=False,
     )
-    if not argv.exists():
-        return result, None
-    # Without uv's --no-config, which every uvx call of the workflow carries
-    # (tests/unit/test_reusable_workflow_scan_subject.py holds it there): the rows
-    # here read the install's own words.
-    words = argv.read_text().splitlines()
-    command = words.index("ash") if "ash" in words else len(words)
-    return result, [w for w in words[:command] if w != "--no-config"] + words[command:]
+    return result, argv.read_text().splitlines() if argv.exists() else None
 
 
 def test_input_and_install_selection():

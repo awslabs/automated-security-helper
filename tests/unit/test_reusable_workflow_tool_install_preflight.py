@@ -167,10 +167,6 @@ def _run(
         return result
     # Bytes, decoded by hand: read_text would turn a carriage return into a line feed.
     argv = argv_file.read_bytes().decode("utf-8").split("\0")[:-1]
-    # Without uv's --no-config, which every uvx call of the workflow carries
-    # (tests/unit/test_reusable_workflow_scan_subject.py holds it there).
-    command = argv.index("ash") if "ash" in argv else len(argv)
-    argv = [word for word in argv[:command] if word != "--no-config"] + argv[command:]
     assert argv == ["--from", source, "ash", "dependencies", "install", "--help"]
     return result
 
