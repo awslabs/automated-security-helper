@@ -30,7 +30,7 @@ from automated_security_helper.core.exceptions import ASHConfigValidationError
 pytestmark = pytest.mark.unit
 
 CHECKOV = "scanners.checkov.options.frameworks"
-DETECT_SECRETS = "scanners.detect-secrets.options.scan_settings.plugins_used"
+PLUGINS_USED = "scanners.detect-secrets.options.scan_settings.plugins_used"
 TRIVY_REPO = "scanners.trivy-repo.options.scanners"
 #: An entry of detect-secrets' ``plugins_used``: a detector named by its class.
 DETECTOR = {"name": "AWSKeyDetector"}
@@ -109,13 +109,13 @@ def test_an_append_to_detect_secrets_every_plugin_value_is_refused():
     with pytest.raises(ASHConfigValidationError) as refused:
         apply_config_overrides(
             AshConfig(),
-            [f"{DETECT_SECRETS}+={json.dumps([DETECTOR])}"],
+            [f"{PLUGINS_USED}+={json.dumps([DETECTOR])}"],
             warn_unread_appends=True,
         )
 
     text = str(refused.value)
     assert "which means every item" in text, text
-    assert f"'{DETECT_SECRETS}=[...]'" in text, text
+    assert f"'{PLUGINS_USED}=[...]'" in text, text
     assert DETECTOR["name"] not in text, text
 
 
@@ -163,7 +163,7 @@ def test_a_removal_that_would_leave_every_item_is_refused():
         ),
         pytest.param(
             AshConfig,
-            f"{DETECT_SECRETS}={json.dumps([DETECTOR])}",
+            f"{PLUGINS_USED}={json.dumps([DETECTOR])}",
             _detect_secrets_detectors,
             [DETECTOR["name"]],
             id="detect-secrets",
