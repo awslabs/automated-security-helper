@@ -22,6 +22,10 @@ import pytest
 from automated_security_helper.utils import install_providers as ip
 from automated_security_helper.utils.download_utils import (
     create_pinned_tool_install_command,
+    refusing_install_command,
+)
+from automated_security_helper.utils.rules_bundles import (
+    create_rules_bundle_install_command,
 )
 from tests.utils.stand_ins import write_stand_in
 
@@ -305,6 +309,115 @@ def test_the_release_download_provider_serves_a_downloadable_tool_from_a_uv_decl
     assert route.commands[0][0] == sys.executable
     assert route.commands[0][1] == "-c"
     assert route.commands[0][3] == "opengrep"
+
+
+#: cfn-guard's rules-bundle install, as ``rules_bundles`` builds it.
+_RULES_BUNDLE_ARGV = list(
+    create_rules_bundle_install_command("aws-guard-rules-registry").args
+)
+
+
+def test_the_rules_bundle_install_is_recognized_as_a_release_download():
+    """cfn-guard's rules-bundle install is a pinned release download of its own.
+
+    Recognized by its exact script, it belongs to release-download, which runs it
+    as declared, the way it runs the pinned binary download beside it.
+    """
+    request = ip.classify_install_command(_RULES_BUNDLE_ARGV, False, "cfn-guard")
+
+    assert request.kind == ip.CommandKind.RELEASE_DOWNLOAD, request
+    assert request.native_provider == "release-download", request
+    assert request.tool == "cfn-guard", request
+
+
+@pytest.mark.parametrize(
+    "argv, shell",
+    [
+        (_RULES_BUNDLE_ARGV, True),
+        ([*_RULES_BUNDLE_ARGV, "more"], False),
+        (["/not/the/interpreter", *_RULES_BUNDLE_ARGV[1:]], False),
+        ([_RULES_BUNDLE_ARGV[0], "-u", *_RULES_BUNDLE_ARGV[2:]], False),
+        (
+            [
+                *_RULES_BUNDLE_ARGV[:2],
+                _RULES_BUNDLE_ARGV[2] + "; print()",
+                _RULES_BUNDLE_ARGV[3],
+            ],
+            False,
+        ),
+    ],
+    ids=[
+        "shell",
+        "extra-argument",
+        "other-interpreter",
+        "other-flag",
+        "longer-script",
+    ],
+)
+def test_a_command_that_only_resembles_the_rules_bundle_install_stays_custom(
+    argv, shell
+):
+    """Recognition checks every part of the command's shape.
+
+    The shell flag, length, interpreter, flag and script must all match.
+    """
+    request = ip.classify_install_command(argv, shell, "cfn-guard")
+
+    assert request.kind == ip.CommandKind.CUSTOM, request
+
+
+@pytest.mark.parametrize(
+    "argv, shell",
+    [
+        (list(refusing_install_command("why").args), True),
+        ([*refusing_install_command("why").args, "more"], False),
+        (["/not/the/interpreter", *refusing_install_command("why").args[1:]], False),
+        ([sys.executable, "-u", *refusing_install_command("why").args[2:]], False),
+        (
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.exit(sys.argv[1]); print()",
+                "why",
+            ],
+            False,
+        ),
+    ],
+    ids=[
+        "shell",
+        "extra-argument",
+        "other-interpreter",
+        "other-flag",
+        "longer-script",
+    ],
+)
+def test_release_download_refuses_a_command_that_only_resembles_the_refusal(
+    argv, shell
+):
+    """Only the exact refusal runs as declared under release-download.
+
+    The command a plugin declares when it cannot install its tool installs
+    nothing, so release-download runs it as declared. A custom command that
+    differs from it in its shell flag, length, interpreter, flag or script is the
+    plugin's own, which only custom runs: release-download refuses it, naming custom.
+    """
+    request = ip.classify_install_command(argv, shell, "grype")
+
+    refused = ip.route_install(
+        request, ip.EnvOptions(), providers=["release-download"], context=EXPLICIT
+    )
+
+    assert isinstance(refused, ip.Refused), refused
+    assert refused.tried == (
+        (
+            "release-download",
+            (
+                "release-download does not support custom install commands (the "
+                "declared command is the plugin's own, not a pinned release download; "
+                "list custom to run it as declared)"
+            ),
+        ),
+    )
 
 
 def test_pip_installs_into_the_named_venv_and_refuses_an_interpreter_request_without_one():

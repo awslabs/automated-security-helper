@@ -10,8 +10,9 @@ equivalent when the operator asks for it with ``--providers``:
 
 - ``uv`` and ``pipx`` install Python tools into per-tool environments, ``pip`` installs
   into one interpreter, ``release-download`` is the pinned-release downloader
-  (``utils/download_utils``), ``nix`` realizes the repository flake's pinned
-  toolchain, and ``apt``, ``dnf``, ``yum``, ``zypper``, ``brew``, ``npm``, ``pnpm``,
+  (``utils/download_utils``, and ``utils/rules_bundles`` for a pinned rules bundle),
+  ``nix`` realizes the repository flake's pinned toolchain, and ``apt``, ``dnf``,
+  ``yum``, ``zypper``, ``brew``, ``npm``, ``pnpm``,
   ``conda``, ``choco`` and ``gem`` are one generic system-package shape
   (:class:`PackageManagerProvider`) parameterized by the manager: nothing is special
   cased per manager. ``go`` and ``cargo`` are declared stubs that refuse with "not
@@ -118,6 +119,8 @@ class InstallRequest:
     requirements: Tuple[str, ...] = ()
     #: The interpreter an environment install targets.
     target_python: Optional[str] = None
+    #: True when the plugin declared the command with ``shell=True``.
+    declared_with_shell: bool = False
 
     @property
     def subject(self) -> str:
@@ -154,7 +157,7 @@ class Route:
     caveats: Tuple[str, ...] = ()
     #: Providers tried before this one, with the reason each was skipped.
     skipped: Tuple[Tuple[str, str], ...] = ()
-    #: A route with a key is built once per run (nix realizes the whole toolchain).
+    #: A keyed route is built once per plugin, not again in the run once it exits 0.
     run_once_key: Optional[str] = None
 
 
@@ -208,6 +211,10 @@ _DOWNLOAD_SCRIPT_MARKER = (
     "automated_security_helper.utils.download_utils import install_"
 )
 _PINNED_SCRIPT_MARKER = "import install_pinned_tool"
+#: The whole ``-c`` script of the command a plugin declares when it cannot install
+#: its tool (``download_utils.refusing_install_command``, and opengrep's refusals of
+#: a version ASH cannot verify): it writes its one argument to stderr and exits 1.
+_REFUSING_SCRIPT = "import sys; sys.exit(sys.argv[1])"
 
 
 def _parse_uv_tool_install(
@@ -267,13 +274,24 @@ def classify_install_command(
     Recognition is by exact shape, the way the installer already recognizes the pinned
     download script and the two environment installs. A shape that is not recognized is
     CUSTOM (run as declared, by the ``custom`` provider) or OPAQUE (a ``uv`` command
-    this parser does not understand: run as declared, by ``uv``).
+    this parser does not understand: run as declared, by ``uv``). The pinned
+    rules-bundle script (``rules_bundles.RULES_BUNDLE_INSTALL_SCRIPT``) is recognized
+    the same way, as a release download.
     """
+    from automated_security_helper.utils.rules_bundles import (
+        RULES_BUNDLE_INSTALL_SCRIPT,
+    )
     from automated_security_helper.utils.uv_tool_runner import UV_NO_CONFIG
 
     parts = tuple(argv)
     if shell or not parts:
-        return InstallRequest(CommandKind.CUSTOM, parts, "custom", tool=tool_key)
+        return InstallRequest(
+            CommandKind.CUSTOM,
+            parts,
+            "custom",
+            tool=tool_key,
+            declared_with_shell=bool(shell),
+        )
 
     if parts[:3] == ("uv", "tool", "install"):
         parsed = _parse_uv_tool_install(parts[3:])
@@ -320,6 +338,20 @@ def classify_install_command(
             tool = parts[3]
         return InstallRequest(
             CommandKind.RELEASE_DOWNLOAD, parts, "release-download", tool=tool
+        )
+
+    if (
+        len(parts) == 4
+        and parts[0] == sys.executable
+        and parts[1] == "-c"
+        and parts[2] == RULES_BUNDLE_INSTALL_SCRIPT
+    ):
+        # A pinned rules bundle (cfn-guard's rules registry) is a release download
+        # too: its archive is pinned by SHA-256 in utils/tool_downloads.py beside the
+        # binary pins. Matched by its exact script, so release-download runs it as
+        # declared; release-download refuses a custom command it does not recognize.
+        return InstallRequest(
+            CommandKind.RELEASE_DOWNLOAD, parts, "release-download", tool=tool_key
         )
 
     owner = _NATIVE_MANAGERS.get(os.path.basename(parts[0]))
@@ -679,6 +711,30 @@ class ReleaseDownloadProvider(InstallProvider):
                 Capability.RELEASE_DOWNLOADS,
                 f"{tool or request.subject} has no pinned release asset "
                 "(tool_downloads)",
+            )
+        if request.kind == CommandKind.CUSTOM:
+            # A custom command is not rebuilt from its tool's name: rebuilt, it was
+            # one more download of the binary, and the command it stood for never
+            # ran. The one ASH declares when a plugin cannot install its tool
+            # installs nothing (it writes why and exits 1), so it runs as declared
+            # and the run fails with its reason. Any other custom command is the
+            # plugin's own shell or download command, which only the custom provider
+            # runs as declared: refused here; custom, when listed, runs it. (A pinned
+            # rules bundle is a release download, served above.)
+            argv = request.argv
+            if (
+                not request.declared_with_shell
+                and len(argv) == 4
+                and argv[0] == sys.executable
+                and argv[1] == "-c"
+                and argv[2] == _REFUSING_SCRIPT
+            ):
+                return self._identity(request)
+            return Refusal(
+                self.name,
+                Capability.CUSTOM_COMMANDS,
+                "the declared command is the plugin's own, not a pinned release "
+                "download; list custom to run it as declared",
             )
         pairs = [tuple(p) for p in supported_platforms(tool)]
         if (context.platform_name, context.arch) not in pairs:
@@ -1170,12 +1226,28 @@ def in_tree_path_refusal(
     is untrusted: a flag that points the installer at a file the tree can supply
     (a forced binary, a virtualenv whose interpreter the install commands
     execute) must refuse it, or the flag becomes the way around that refusal.
-    Judged on realpaths, the way the scan-time in-tree refusal judges a lookup.
+
+    A path is inside when its real path is the tree's real path or below it,
+    compared as text, or when the tree is that real path or one of its parents
+    by device and inode (``scanned_tree._has_ancestor_file``, the identity test a
+    scan applies to the real path of a path it finds). So, where the filesystem
+    reports inode numbers, the tree named in another letter case on a
+    case-insensitive volume, or reached through a bind mount of the tree or of a
+    directory above it, is inside; where it reports none, the text compare alone
+    decides. A path that does not exist yet is judged by its nearest parent that
+    does. A path through either of two mounts at a place outside the tree is
+    still outside, here as for a scan: a mount of a directory below the tree (a
+    bind mount of one of its subdirectories), and a mount of the tree or of a
+    directory above it that reports its own device number (a network or FUSE
+    mount). A path written inside the tree through a link whose target is
+    outside it is judged by that target, while a scan (``is_inside_tree``) also
+    judges it as written.
     """
     from automated_security_helper.utils.subprocess_utils import (
         ALLOW_IN_TREE_TOOLS_ENV,
         parse_allow_in_tree_tools,
     )
+    from automated_security_helper.utils.scanned_tree import _has_ancestor_file
 
     if source_dir is None:
         return None
@@ -1185,6 +1257,18 @@ def in_tree_path_refusal(
         ) == os.path.realpath(source_dir)
     except ValueError:
         inside = False
+    if not inside:
+        # Another spelling of the tree: on POSIX a real path keeps the letter case
+        # of every component that is not a link, so the tree named in another case
+        # on a case-insensitive volume, or reached through a bind mount of the tree
+        # or of a directory above it, has a real path that is not under the tree's
+        # as text. A scan also asks whether the tree is the path or one of its
+        # parents by device and inode, and so does this. Here a path no operating
+        # system call takes (a NUL character) reads as outside.
+        try:
+            inside = _has_ancestor_file(Path(os.path.realpath(path)), source_dir)
+        except ValueError:
+            inside = False
     if not inside:
         return None
     # The ONE reading of the opt-in (``parse_allow_in_tree_tools``), shared with

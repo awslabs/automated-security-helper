@@ -9,7 +9,6 @@ import logging
 import os
 import platform
 import shlex
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
@@ -513,11 +512,19 @@ class PluginInstallOutcome:
     # Pinned installs not run because a byte-identical copy of the pinned binary was
     # already present; see download_utils.find_verified_pinned_executable.
     commands_satisfied: int = 0
+    # Counted once per plugin and run-once key, for the plugin's first command on a
+    # key whose realization (nix) already ran and exited 0 for an earlier plugin in
+    # this run; see _routed_commands. The plugin's later commands on that key are
+    # left out and not counted. No digest is checked for it, so it is not
+    # commands_satisfied: the row reads one of the INSTALLED statuses, and the
+    # summary names the plugin on a line of its own.
+    commands_realized_earlier: int = 0
     # Commands no permitted ``--providers`` entry could serve; each is also in
     # ``errors`` with the refusal text, so the run fails and says why.
     commands_refused: int = 0
-    # Install commands not run because ``--binary-path`` forced this scanner's
-    # binary; ``forced_binary`` is the path it forced.
+    # Marks a plugin whose install ``--binary-path`` replaced with a force of this
+    # scanner's binary (1 when it did): its install commands are neither asked for
+    # nor run. ``forced_binary`` is the path it forced.
     commands_forced: int = 0
     forced_binary: Optional[str] = None
     # The force came from the record an earlier --binary-path run wrote, not from
@@ -582,6 +589,7 @@ class PluginInstallOutcome:
         return (
             self.commands_attempted == 0
             and self.commands_satisfied == 0
+            and self.commands_realized_earlier == 0
             and self.commands_forced == 0
             and not self.errors
         )
@@ -635,7 +643,9 @@ class PluginInstallOutcome:
                     return "FORCED (recorded --binary-path)"
                 return "FORCED (--binary-path)"
             return "FORCED (binary not usable)"
-        if self.commands_succeeded:
+        # A command a realization served (commands_realized_earlier) was installed by
+        # this run too, by the command an earlier plugin ran, which exited 0.
+        if self.commands_succeeded or self.commands_realized_earlier:
             if not self.needs_external_tool:
                 # Nothing to look for on PATH: the install put a Python package
                 # in place, and "not on PATH" said something was missing.
@@ -1920,15 +1930,32 @@ def install_dependencies(
     recorded_forces = _recorded_forces(selected, forced_by_plugin, forced_erase)
     all_forced = {**recorded_forces, **forced_by_plugin}
 
+    # --create-virtualenv is decided here too, before this command writes anything
+    # that outlasts it (the bin directory, the forced-binary record): the interpreter
+    # requests of the tools to install must join into one, and the provider that
+    # creates the virtualenv must be able to honor it. A refusal exits 2 with
+    # nothing made and nothing recorded. The virtualenv itself is made in the install
+    # below.
+    venv_plan: Optional[_VirtualenvPlan] = None
+    if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
+        joined_request, join_error = joined_runtime_request(
+            _plugin_runtime_requests(selected, platform_name, arch, all_forced)
+        )
+        if join_error is not None:
+            _refuse_flags(f"--create-virtualenv: {join_error}")
+        venv_plan = _plan_virtualenv(virtualenv_target, provider_names, joined_request)
+
     # The bin directory is made here, after every refusal above (a --config that is
     # not there, a configuration a scan refuses, a plugin module that does not
-    # load, an unknown --tool or --plugin-type): made first, a refused run that
-    # printed "Nothing installed" had still created it. What this can refuse is
-    # what the read before the first build (refuse_an_unmakable_bin_directory)
-    # could not see or that changed since: a run that built no plugin, a
-    # directory removed or made unwritable in between, a failure only mkdir
-    # reports. It is the same refusal, with the invalid-configuration code as an
-    # unusable --config is, where it was a traceback with the failed-install code.
+    # load, an unknown --tool or --plugin-type, a --create-virtualenv whose
+    # interpreter requests cannot be joined or whose provider cannot honor them):
+    # made first, a refused run that printed "Nothing installed" had still created
+    # it. What this can refuse is what the read before the first build
+    # (refuse_an_unmakable_bin_directory) could not see or that changed since: a
+    # run that built no plugin, a directory removed or made unwritable in between,
+    # a failure only mkdir reports. It is the same refusal, with the
+    # invalid-configuration code as an unusable --config is, where it was a
+    # traceback with the failed-install code.
     try:
         absolute_bin_path.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -1975,13 +2002,6 @@ def install_dependencies(
         if virtualenv_target is not None and is_virtualenv(virtualenv_target)
         else None
     )
-    joined_request: Optional[str] = None
-    if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
-        joined_request, join_error = joined_runtime_request(
-            _plugin_runtime_requests(selected, platform_name, arch, all_forced)
-        )
-        if join_error is not None:
-            _refuse_flags(f"--create-virtualenv: {join_error}")
 
     realized_once: set = set()
     ash_environment_requirements: List[str] = []
@@ -1990,9 +2010,9 @@ def install_dependencies(
     # string is one value, never its characters.
     install_values = _INSTALL_VALUES.set(value_tuple(environment_values))
     try:
-        if virtualenv_target is not None and not is_virtualenv(virtualenv_target):
-            _create_virtualenv(virtualenv_target, provider_names, joined_request)
-            venv_version = pyvenv_cfg_version(virtualenv_target)
+        if venv_plan is not None:
+            _create_virtualenv(venv_plan)
+            venv_version = pyvenv_cfg_version(venv_plan.path)
         for plugin_type, plugin_name, plugin_instance in selected:
             outcome = PluginInstallOutcome(
                 name=plugin_name,
@@ -2028,6 +2048,30 @@ def install_dependencies(
                     f"{escape(error_text(e, environment_values))}[/bold red]"
                 )
                 outcome.errors.append(error_text(e, environment_values))
+
+            # --binary-path forces this scanner's binary -- from this run's flag,
+            # or from the record an earlier run wrote: nothing is installed for
+            # it, and the sweep below resolves it to the forced file by a file
+            # check. The forced binary is never run. Decided before the plugin is
+            # asked what to install, as _plugin_runtime_requests does: its install
+            # commands are not run, so a plugin that cannot produce them has no
+            # failure to report.
+            forced = all_forced.get(plugin_name)
+            if forced is not None:
+                outcome.commands_forced = 1
+                outcome.forced_binary = str(forced.path)
+                outcome.forced_recorded = plugin_name not in forced_by_plugin
+                recorded_note = (
+                    " (recorded by an earlier --binary-path run)"
+                    if outcome.forced_recorded
+                    else ""
+                )
+                print(
+                    f"Forced binary for {escape(plugin_name)}{recorded_note}: "
+                    f"{escape(str(forced.path))}; its install commands are not run"
+                )
+                continue
+
             try:
                 # Read whole, and checked, inside the try: a list that is None, an
                 # iterable that raises while iterated, or an argv with an element
@@ -2045,28 +2089,7 @@ def install_dependencies(
                 outcome.errors.append(error_text(e, environment_values))
                 continue
 
-            # --binary-path forces this scanner's binary -- from this run's flag,
-            # or from the record an earlier run wrote: nothing is installed for
-            # it, and the sweep below resolves it to the forced file by a file
-            # check. The forced binary is never run.
-            forced = all_forced.get(plugin_name)
-            if forced is not None:
-                outcome.commands_forced = len(commands) or 1
-                outcome.forced_binary = str(forced.path)
-                outcome.forced_recorded = plugin_name not in forced_by_plugin
-                recorded_note = (
-                    " (recorded by an earlier --binary-path run)"
-                    if outcome.forced_recorded
-                    else ""
-                )
-                print(
-                    f"Forced binary for {escape(plugin_name)}{recorded_note}: "
-                    f"{escape(str(forced.path))}; its {outcome.commands_forced} "
-                    "install command(s) are not run"
-                )
-                continue
-
-            commands = _routed_commands(
+            routed = _routed_commands(
                 commands,
                 plugin_name=plugin_name,
                 tool_key=getattr(plugin_instance, "command", None),
@@ -2078,7 +2101,19 @@ def install_dependencies(
                 venv_version=venv_version,
             )
 
-            for cmd, shell in commands:
+            # A run-once key (nix realizes the whole toolchain with one command) is
+            # realized for the plugins after this one only when the last command
+            # built for it has run and exited 0. One that failed is built again by
+            # the next plugin that routes to it, and each plugin reports its own
+            # result.
+            unfinished_for_key: Dict[str, int] = {}
+            for _argv, _shell, once_key in routed:
+                if once_key is not None:
+                    unfinished_for_key[once_key] = (
+                        unfinished_for_key.get(once_key, 0) + 1
+                    )
+
+            for cmd, shell, once_key in routed:
                 # An empty argv is not a command. These reached run_command before
                 # this change, failed, and pushed the run's exit code to 1 -- which
                 # then went nowhere, because the returned code was discarded.
@@ -2146,6 +2181,10 @@ def install_dependencies(
                     print(f"Command succeeded with exit code: {cmd_exit_code}")
                     outcome.commands_succeeded += 1
                     ash_environment_requirements.extend(_ash_environment_install(cmd))
+                    if once_key is not None:
+                        unfinished_for_key[once_key] -= 1
+                        if unfinished_for_key[once_key] == 0:
+                            realized_once.add(once_key)
     finally:
         # Whatever escapes the loop (a plugin helper raising, an interrupt), the
         # values are reset: an in-process caller (a test runner, an embedding
@@ -2189,14 +2228,18 @@ def install_dependencies(
         elif outcome.needs_external_tool and not inherit_system_tools:
             # Only what ASH or its providers manage counts; a copy on PATH or in a
             # system directory is named and set aside, so the operator sees what
-            # the flag excluded. The plugin's own check is not asked either: its
-            # base answer is the same PATH probe.
+            # the flag excluded. The copy that was counted is not one of them,
+            # however the scan spells its path, so the two are compared as files.
+            # The plugin's own check is not asked either: its base answer is the
+            # same PATH probe.
             outcome.executable = _managed_executable(
-                outcome, virtualenv_target, absolute_bin_path
+                outcome, virtualenv_target, absolute_bin_path, source_dir
             )
             if outcome.command is not None:
                 system_copy = find_executable_for_scan(outcome.command, source_dir)
-                if system_copy and system_copy != outcome.executable:
+                if system_copy and not _names_the_same_file(
+                    system_copy, outcome.executable
+                ):
                     print(
                         f"Ignoring {escape(system_copy)}: --no-inherit-system-tools "
                         "(a system tool does not satisfy this dependency)"
@@ -2653,15 +2696,28 @@ def _plugin_runtime_requests(
     return requests
 
 
-def _create_virtualenv(
+@dataclass(frozen=True)
+class _VirtualenvPlan:
+    """A virtualenv this run will create, as decided before anything was written."""
+
+    path: Path
+    provider_name: str
+    command: List[str]
+    #: The providers passed over for the one that can create it, each with its reason.
+    skipped: List[Tuple[str, str]]
+
+
+def _plan_virtualenv(
     path: Path,
     provider_names: Optional[List[str]],
     runtime_request: Optional[str],
-) -> None:
-    """Create the virtualenv with the first permitted provider that can, or exit.
+) -> _VirtualenvPlan:
+    """How the first permitted provider that can creates the virtualenv, or exit.
 
-    Run first, as one counted command, before any tool install. A refusal exits 2
-    (nothing was created); a failed or incomplete creation exits 1.
+    Every refusal of --create-virtualenv that rests on the providers is made here
+    (exit 2), before the bin directory is made or a forced binary is recorded: no
+    permitted provider can create a virtualenv, or the one that can cannot honor the
+    tools' interpreter request. Nothing is created or run here.
     """
     provider, skipped = venue_for_virtualenv(provider_names)
     if provider is None:
@@ -2672,22 +2728,33 @@ def _create_virtualenv(
     built = provider.venv_create_command(path, runtime_request)
     if isinstance(built, Refusal):
         _refuse_flags(f"--create-virtualenv: {built.text}")
-    for name, reason in skipped:
+    return _VirtualenvPlan(path, provider.name, list(built), skipped)
+
+
+def _create_virtualenv(plan: _VirtualenvPlan) -> None:
+    """Create the virtualenv ``plan`` describes, or exit.
+
+    Run first, as one counted command, before any tool install. A failed or
+    incomplete creation exits 1; the refusals were made when the plan was
+    (``_plan_virtualenv``), before anything was written.
+    """
+    for name, reason in plan.skipped:
         print(
             f"[yellow]Skipped {escape(name)} to create the virtualenv:[/yellow] {escape(reason)}"
         )
     print(
-        f"Creating the virtualenv at {escape(str(path))} with {escape(provider.name)}"
+        f"Creating the virtualenv at {escape(str(plan.path))} with "
+        f"{escape(plan.provider_name)}"
     )
     console.print(
-        f"Running command: {escape(_shown_command(built, _INSTALL_VALUES.get()))}",
+        f"Running command: {escape(_shown_command(plan.command, _INSTALL_VALUES.get()))}",
         soft_wrap=True,
     )
-    code = _run_install_command(list(built))
-    if code != 0 or not is_virtualenv(path):
+    code = _run_install_command(list(plan.command))
+    if code != 0 or not is_virtualenv(plan.path):
         print(
             "[bold red]The virtualenv at "
-            f"{escape(str(path))} was not created (exit code {code}); nothing was "
+            f"{escape(str(plan.path))} was not created (exit code {code}); nothing was "
             "installed.[/bold red]"
         )
         raise typer.Exit(EXIT_INSTALL_FAILED)
@@ -2705,7 +2772,7 @@ def _routed_commands(
     context: RouteContext,
     realized: set,
     venv_version: Optional[str],
-) -> List[Tuple[List[str], bool]]:
+) -> List[Tuple[List[str], bool, Optional[str]]]:
     """Each declared command mapped through its provider, refusals counted.
 
     With ``--providers`` absent and no virtualenv, every command is built by the
@@ -2713,11 +2780,30 @@ def _routed_commands(
     exactly what the plugins declared. A command no permitted provider can serve is
     not run: it is counted in ``outcome.commands_refused`` with the refusal text in
     ``outcome.errors``, and nothing is substituted.
+
+    Each command comes back as ``(argv, shell, run_once_key)``. A provider that
+    realizes everything with one command (nix) gives its commands a key, and a key
+    is served once for the plugin: its first command on a key is built, or, when
+    the key is in ``realized``, is not run at all because an earlier plugin's
+    realization already did the work. A later command of the plugin on a key it
+    already routed is left out of the commands to run, with no "Already realized"
+    line and no count, and is served by whatever served the plugin's first command
+    on that key: the one command built for the key in this plugin, or the
+    realization an earlier plugin ran. The route's own notes (skipped providers,
+    the provider's caveat) still print for it, as for every command, because they
+    print before the key is checked. ``realized`` holds the keys whose command
+    already ran and succeeded earlier in the run, and is only read here: the
+    caller adds a key once the commands built for it have exited 0, so a
+    realization that failed is built again for the next plugin that routes to it.
+    A plugin whose first command on a key finds it in ``realized`` is told so once
+    and counted once in ``outcome.commands_realized_earlier``, apart from the
+    pinned binaries a digest check found in place (``commands_satisfied``).
     """
-    routed: List[Tuple[List[str], bool]] = []
+    routed: List[Tuple[List[str], bool, Optional[str]]] = []
+    built_keys: set = set()
     for cmd, shell in commands:
         if not cmd:
-            routed.append((cmd, shell))
+            routed.append((cmd, shell, None))
             continue
         request = classify_install_command(cmd, shell, tool_key)
         venv = env_options.virtualenv_path
@@ -2759,22 +2845,102 @@ def _routed_commands(
         for caveat in route.caveats:
             print(f"[yellow]Note ({escape(route.provider)}):[/yellow] {escape(caveat)}")
         if route.run_once_key is not None:
+            if route.run_once_key in built_keys:
+                # An earlier command of this plugin routes to the same key, so this
+                # one is served by whatever served that one: the command built for
+                # the key in this plugin, whose result is the plugin's, or the
+                # realization an earlier plugin ran. It gets no "Already realized"
+                # line and no count; the route's own notes above have printed, as
+                # for every command.
+                continue
+            built_keys.add(route.run_once_key)
             if route.run_once_key in realized:
+                # Said and counted once for the plugin: its later commands on this
+                # key take the branch above.
                 print(
                     f"Already realized by {escape(route.provider)} earlier in this "
                     f"run: {escape(plugin_name)}"
                 )
-                outcome.commands_satisfied += 1
+                outcome.commands_realized_earlier += 1
                 continue
-            realized.add(route.run_once_key)
         for built in route.commands:
             built_argv = list(built)
-            routed.append((built_argv, shell and built_argv == list(cmd)))
+            routed.append(
+                (built_argv, shell and built_argv == list(cmd), route.run_once_key)
+            )
     return routed
 
 
+def _on_search_path(directory: Path) -> bool:
+    """Whether ``directory`` is one of PATH's anchored entries.
+
+    A scan searches the directories PATH names and never the working directory, so
+    a relative entry (``.``, ``bin``, an empty one) names nothing a scan looks in.
+
+    An entry is the directory when the two real paths agree, once case is folded where
+    the platform folds it. A real path replaces symbolic links and keeps every other
+    component as written, so two spellings of one directory can still differ: another
+    letter case on a case-insensitive volume (the macOS default), or a bind mount at
+    another path. A scan reads such an entry as it is spelled and finds the tool
+    there. So when the real paths differ, the entry is the directory when its device
+    and inode are, as ``os.stat`` reads them through a link too. A filesystem that
+    reports no inode numbers (inode 0) is compared by real path alone, so it does not
+    match every directory.
+    """
+    wanted = os.path.normcase(os.path.realpath(directory))
+    try:
+        target: Optional[os.stat_result] = os.stat(directory)
+    except OSError:
+        target = None
+    identity = (
+        (target.st_dev, target.st_ino) if target is not None and target.st_ino else None
+    )
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not is_anchored(entry):
+            continue
+        if os.path.normcase(os.path.realpath(entry)) == wanted:
+            return True
+        if identity is None:
+            continue
+        try:
+            found = os.stat(entry)
+        except OSError:
+            continue
+        if (found.st_dev, found.st_ino) == identity:
+            return True
+    return False
+
+
+def _names_the_same_file(first: str, second: Optional[str]) -> bool:
+    """Whether two paths name one file, however each is spelled.
+
+    The sweep and a scan reach a file by different routes and spell it differently:
+    the sweep as the virtualenv or the bin directory names it, a scan as PATH names the
+    directory (through a link, in another case) or, for the bin directory and ASH's
+    own environment, with forward slashes. One file then has two strings, which is no
+    reason to say a run set aside the copy it counted.
+
+    The same file when the real paths agree once case is folded where the platform
+    folds it, or, when both can be read, when ``os.path.samefile`` says so. A path that
+    cannot be read is not the same file as another: an ``OSError`` is no answer.
+    """
+    if second is None:
+        return False
+    if os.path.normcase(os.path.realpath(first)) == os.path.normcase(
+        os.path.realpath(second)
+    ):
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
 def _managed_executable(
-    outcome: "PluginInstallOutcome", virtualenv: Optional[Path], bin_dir: Path
+    outcome: "PluginInstallOutcome",
+    virtualenv: Optional[Path],
+    bin_dir: Path,
+    source_dir: Path,
 ) -> Optional[str]:
     """What runs ``outcome.command`` among the locations ASH or its providers manage.
 
@@ -2783,8 +2949,39 @@ def _managed_executable(
     directory, ASH's own environment directories, and the ASH bin directory. Never a
     bare PATH search and never ``/usr/local/bin``: a system copy does not stand in
     for what this run was asked to install.
+
+    A tool counts where a scan of ``source_dir`` would find it. A copy inside that
+    tree is passed over, as a scan passes over one it refuses, unless the operator
+    allowed in-tree tools (``in_tree_path_refusal``), and the search goes on to the
+    next directory. Each directory is read as a scan reads it:
+
+    * The virtualenv's scripts directory is searched only when PATH names it, which is
+      the one way a scan reaches it. An anchored entry names it when its real path is
+      the directory's or, when the real paths differ, its device and inode are
+      (``_on_search_path``), so an entry that spells the directory in another letter
+      case on a case-insensitive volume, or reaches it through a bind mount, names it,
+      as it does for a scan. It is searched as a PATH entry (``_which_in_path_entry``,
+      which the scan's own PATH search calls): each file name a scan tries for the
+      command, read through ``shutil.which``. On Windows with Python 3.12 or later that
+      reads a name with each suffix of PATHEXT, and the bare name only when it already
+      ends in one, so a file with no extension there is not the tool and ``<tool>.com``
+      is. ``which`` is given a command with a directory part, so it looks in that
+      directory alone and never in the working directory, which is the scanned tree.
+      That is why ``shutil.which(command, path=directory)`` is not used: on Windows it
+      searches the working directory first whatever ``path`` says, so a same-named
+      file at the root of the tree, which is refused here, would answer for every
+      directory in turn and hide the managed copy.
+    * ASH's own environment directories and the bin directory are probed as a scan
+      probes them (``_executable_candidates``): each file name a scan tries, joined
+      onto the directory and checked as a file. A scan searches them whether or not
+      PATH names them.
     """
-    from automated_security_helper.utils.subprocess_utils import own_environment_dirs
+    from automated_security_helper.utils.subprocess_utils import (
+        _executable_candidate_names,
+        _is_executable_file,
+        _which_in_path_entry,
+        own_environment_dirs,
+    )
 
     if outcome.runs_in_ash_interpreter and os.path.isabs(sys.executable or ""):
         return sys.executable
@@ -2794,12 +2991,28 @@ def _managed_executable(
         listed = _uv_tool_executable(outcome.command)
         if listed is not None:
             return listed
-    directories: List[str] = []
-    if virtualenv is not None:
-        directories.append(str(venv_scripts_dir(virtualenv)))
-    directories.extend(str(d) for d in own_environment_dirs())
-    directories.append(str(bin_dir))
-    return shutil.which(outcome.command, path=os.pathsep.join(directories))
+    names = _executable_candidate_names(outcome.command)
+
+    def candidates() -> Iterable[str]:
+        if virtualenv is not None and _on_search_path(venv_scripts_dir(virtualenv)):
+            scripts = str(venv_scripts_dir(virtualenv))
+            for name in names:
+                found = _which_in_path_entry(scripts, name)
+                if found:
+                    yield found
+        for directory in [*own_environment_dirs(), bin_dir]:
+            for name in names:
+                candidate = str(directory / name)
+                if _is_executable_file(candidate):
+                    yield candidate
+
+    for candidate in candidates():
+        refusal = in_tree_path_refusal(
+            f"{outcome.command} at {candidate}", Path(candidate), source_dir
+        )
+        if refusal is None:
+            return candidate
+    return None
 
 
 def _uv_tool_executable(command: str) -> Optional[str]:
@@ -3102,9 +3315,12 @@ def _report_and_exit(
         if o.needs_external_tool
         and not o.executable
         and not o.runnable_by_scan
-        and (o.commands_attempted or o.commands_satisfied)
+        and (
+            o.commands_attempted or o.commands_satisfied or o.commands_realized_earlier
+        )
     )
     already_verified = sorted(o.name for o in outcomes if o.commands_satisfied)
+    realized_earlier = sorted(o.name for o in outcomes if o.commands_realized_earlier)
     # Informational, never a failure: off PATH, and started by the resolution a
     # scan uses.
     runnable_off_path = sorted(
@@ -3193,6 +3409,15 @@ def _report_and_exit(
         summary.append(
             f"[cyan]Already present, verified against the pinned digest:[/cyan] "
             f"{len(already_verified)} -- {escape(', '.join(already_verified))}"
+        )
+    # Plugins a run-once realization served, run for an earlier plugin (nix): this
+    # run installed them, and no digest was checked for them. A plugin is on the
+    # pinned-digest line above only for a pinned binary that a digest check found,
+    # so a plugin with both kinds of command can be on both lines.
+    if realized_earlier:
+        summary.append(
+            f"[cyan]Served by a realization earlier in this run:[/cyan] "
+            f"{len(realized_earlier)} -- {escape(', '.join(realized_earlier))}"
         )
     if unprovisionable:
         summary.append(

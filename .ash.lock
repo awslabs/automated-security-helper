@@ -26,7 +26,7 @@
           "symbol": "_run_declared_install_command"
         }
       ],
-      "sha256": "bf8b6c50a9d0c0c39309916be5ef9a6b903f558a9197c6ddfba219cadf4df013"
+      "sha256": "266cd66b9d9a6b94ad8234375d8c26be088cb9579d8066ae2f6341fc042eaadc"
     },
     "automated_security_helper/cli/mcp/__init__.py": {
       "created": "2026-11-25T17:03:33Z",

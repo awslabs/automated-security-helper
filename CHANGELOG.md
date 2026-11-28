@@ -168,6 +168,20 @@
 
 ### Fixes
 
+- **`ash dependencies install` also asks by device and inode whether a path is inside
+  the scanned tree.** A `--virtualenv-path` or `--binary-path` that the check finds
+  inside the scanned source tree is refused unless `ASH_ALLOW_IN_TREE_TOOLS` admits it.
+  Besides comparing real paths as text, the check now asks whether the tree is the
+  path's real path or one of its parents by device and inode, as a scan does. So, where
+  the filesystem reports inode numbers, a path that names the tree in another letter
+  case on a case-insensitive volume, or through a bind mount of the tree or of a
+  directory above it, is refused; where it reports none, the real path alone decides. A
+  path that does not exist yet is judged by its nearest parent that does. A path
+  through either of two mounts at a place outside the tree still reads as outside, for
+  this check as for a scan: a mount of a directory below the tree, such as a bind mount
+  of one of its subdirectories, and a mount of the tree, or of a directory above it,
+  that reports its own device number, such as a network or FUSE mount.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
@@ -438,6 +452,12 @@
   written. They still warn about an absolute path under the scan root, one that names
   something in it, one with a `.` or `..` component, and `/`, and the warning now says
   the path matches nothing in the scan root.
+- `ash dependencies install --providers release-download` installs cfn-guard's rules
+  bundle, which it had replaced with the cfn-guard binary's download (then skipped
+  as already present), and an opengrep version that ASH cannot verify fails the
+  install instead of being replaced by the pinned one. A plugin's own shell or
+  download command for a tool with a pinned download is refused by release-download
+  and runs only when `custom` is listed too.
 
 ## v3.8.0 (2026-11-12)
 

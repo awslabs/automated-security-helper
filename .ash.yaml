@@ -3305,8 +3305,8 @@ global_settings:
       reason: "'.env' is the example file name a docs graphic row shows for the secrets category; display data, not a read."
     - rule_id: threat-process-download-exec
       path: automated_security_helper/utils/install_providers.py
-      line_start: 293
-      line_end: 293
+      line_start: 311
+      line_end: 311
       reason: "A tuple comparison in classify_install_command that recognizes a declared install command of the shape <interpreter> -m pip install, so the command is classed as a Python environment install; nothing is downloaded or run here. Pinned to its line, not scoped to the function as the GuardDog entries that name a definition are: the function is the whole install-command parser, longer than the line budget a symbol scope is held to (tests/unit/config/test_symbol_migration_record.py), and a scope over all of it would excuse a download-and-run shape added anywhere in the parser."
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
