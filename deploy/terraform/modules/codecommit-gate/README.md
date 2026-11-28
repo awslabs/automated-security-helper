@@ -210,9 +210,9 @@ One setting makes that more reachable, and the other is the fallback:
 a pull request, so the handler decides every option that changes what is scanned
 or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
 
-- `--changed-files-only` and `--base-ref`, which drop findings outside the diff
-  before the exit code is computed, and `--baseline`, which drops findings a saved
-  results file already holds;
+- `--changed-files-only` and `--base-ref`, refused because they drop findings
+  outside the diff before the exit code is computed, and `--baseline`, which
+  drops findings a saved results file already holds;
 - the scanner selection, the shard options, `--phases` and `--use-existing`;
 - `--config`, `--config-overrides`, `--cli-json-input` and `--ash-config-from-host`,
   which decide the configuration the scan reads;
