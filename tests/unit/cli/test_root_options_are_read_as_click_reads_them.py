@@ -146,6 +146,8 @@ def test_the_scans_environment_variables_are_not_parsed_for_a_subcommand(
 
 
 def test_the_control_a_scan_still_reads_them(monkeypatch, tmp_path):
+    """A subcommand reads its own variables: `ash scan fs` refuses ASH_MODE=bogus
+    through its own --mode, which the root's strip does not touch."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ASH_MODE", "bogus")
 
@@ -157,6 +159,27 @@ def test_the_control_a_scan_still_reads_them(monkeypatch, tmp_path):
     # choice for --mode and names it. A usage error from anything else would
     # have passed the exit-code check alone.
     assert "bogus" in result.output, result.output
+
+
+def test_the_control_a_bare_ash_still_reads_them(monkeypatch, tmp_path):
+    """With no subcommand the root's callback runs the scan, so the root reads the
+    scan's variables itself: its strip of them applies only when a subcommand is
+    named.
+
+    The row above runs `ash scan fs`, which reads ASH_MODE through its own option,
+    so it stays green if the root stops reading its own variables too.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ASH_MODE", "bogus")
+
+    with patch(ORCHESTRATOR_CREATE) as create:
+        result = CliRunner().invoke(app, ["--source-dir", str(tmp_path)])
+
+    assert result.exit_code == ASH_EXIT_USAGE_ERROR, result.output
+    # The root's own --mode refused the environment's value. Unread, the scan
+    # would have started in the default mode, with no word of "bogus".
+    assert "bogus" in result.output, result.output
+    create.assert_not_called()
 
 
 # --- get-genai-guide ---
