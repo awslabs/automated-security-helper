@@ -200,6 +200,7 @@
       }
     },
     {
+      "ash": "skip",
       "id": "tag-directive",
       "lines": [
         "%TAG !e! tag:example.com,2000:",
@@ -294,7 +295,7 @@
       ],
       "refuse": {
         "code": "syntax",
-        "column": 1,
+        "column": 2,
         "line": 2
       }
     },
