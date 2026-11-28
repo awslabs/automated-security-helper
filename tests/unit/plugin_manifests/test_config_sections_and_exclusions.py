@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import types
 import typing
 
 import pytest
@@ -475,3 +476,64 @@ def test_every_row_of_the_untyped_list_option_table_names_an_untyped_plugin():
                 f"{segment}.{plugin} is a typed section of the config, whose "
                 "default the document already holds"
             )
+
+
+def _arms(annotation: typing.Any) -> list:
+    """The types *annotation* admits: each arm of a union, any ``Annotated``
+    metadata taken off."""
+    origin = typing.get_origin(annotation)
+    if origin is typing.Annotated:
+        return _arms(typing.get_args(annotation)[0])
+    if origin in (typing.Union, types.UnionType):
+        return [arm for part in typing.get_args(annotation) for arm in _arms(part)]
+    return [annotation]
+
+
+def _is_a_collection(arm: typing.Any) -> bool:
+    collections = (list, tuple, set, frozenset)
+    return arm in collections or typing.get_origin(arm) in collections
+
+
+def _list_typed_paths(
+    model: type[BaseModel], path: tuple[str, ...]
+) -> typing.Iterator[tuple[str, ...]]:
+    """The path of each field of *model* typed as a list, a tuple or a set, keyed by
+    alias as a config file spells it, descending into a field typed as a model."""
+    for name, field in model.model_fields.items():
+        key = (*path, field.alias or name)
+        arms = _arms(field.annotation)
+        if any(_is_a_collection(arm) for arm in arms):
+            yield key
+            continue
+        for arm in arms:
+            if isinstance(arm, type) and issubclass(arm, BaseModel):
+                yield from _list_typed_paths(arm, key)
+
+
+def test_every_list_option_of_an_untyped_plugin_has_a_row_default():
+    """``--config-overrides`` refuses a ``-=`` at an option of an untyped shipped
+    plugin that the plugin's row of ``UNTYPED_LIST_OPTION_DEFAULTS`` does not name,
+    as no list option of the plugin (config/resolve_config.py,
+    ``_removed_from_a_list``). The row holds the options whose default is a list
+    (``_list_defaults``), so this holds every field of the plugin's section that is
+    typed as a list to a row entry: an option typed as a list whose default is not
+    one, or under a model field whose default is not a model, would be missing from
+    the row, and its removal refused as of no list option."""
+    table = _table_rows(_untyped_list_option_table())
+    typed: set[_Row] = set()
+    for segment, plugin, plugin_class in _untyped_plugin_classes():
+        config_class = _config_class(plugin_class)
+        if config_class is None:
+            continue
+        typed.update(
+            (segment, plugin, path) for path in _list_typed_paths(config_class, ())
+        )
+
+    assert ("scanners", "trivy-repo", ("options", "scanners")) in typed, (
+        "control: the walk reads trivy-repo's list option"
+    )
+    missing = sorted(typed - table.keys())
+    assert missing == [], (
+        "options typed as a list that UNTYPED_LIST_OPTION_DEFAULTS has no row for "
+        f"(give each a list default, so the row holds it): {missing}"
+    )

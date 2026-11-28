@@ -10,10 +10,12 @@ wrote adds to that list, with no word.
 ``-=`` takes a format out of a list a file wrote. The empty list means every format,
 so there is no list to take one out of, and a removal that would leave the list
 empty would turn the reports the file chose into every report: both are refused,
-naming the replace form to write instead.
+naming the replace form to write instead. A removal of a name that is no format is
+refused as well, as ``=`` and ``+=`` of it are.
 
 Each configuration is built as a scan builds it, with ``build_config``, which
-applies the overrides as the run's own configuration.
+applies the overrides as the run's own configuration; the one test that replays
+them instead, as a view does, says so.
 """
 
 from __future__ import annotations
@@ -25,7 +27,10 @@ from typing import Any
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.config.resolve_config import build_config
+from automated_security_helper.config.resolve_config import (
+    apply_config_overrides,
+    build_config,
+)
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import current_run_log_scope, run_log_scope
@@ -159,3 +164,30 @@ def test_a_removal_that_would_empty_output_formats_is_refused():
     text = str(refused.value)
     assert "would leave" in text, text
     assert "which means every item" in text, text
+
+
+def test_a_removal_of_a_name_that_is_no_format_is_refused():
+    """A format is one of a fixed set of names. A removal that names none of them
+    would take nothing out and say nothing, and the run would write every report the
+    file chose. The run's own build refuses it, as ``=`` and ``+=`` of the same name
+    are refused, naming the key and the valid formats, not the name, which may have
+    been read from the environment."""
+    with pytest.raises(ASHConfigValidationError) as refused:
+        _built({FIELD: ["sarif", "markdown"]}, f'{FIELD}-=["sarfi"]')
+
+    text = str(refused.value)
+    assert f"'{FIELD}-='" in text, text
+    assert "Valid formats are:" in text, text
+    assert "sarfi" not in text, text
+
+
+def test_a_replayed_removal_of_a_name_that_is_no_format_changes_nothing():
+    """Control: a view or a gate replays the overrides onto a base that is not the
+    run's own configuration and refuses nothing there, as for every removal. The
+    name matches no format, so the list is as the file wrote it."""
+    config = apply_config_overrides(
+        AshConfig.model_validate({**_FILE, FIELD: ["sarif", "markdown"]}),
+        [f'{FIELD}-=["sarfi"]'],
+    )
+
+    assert config.output_formats == [ExportFormat.SARIF, ExportFormat.MARKDOWN]

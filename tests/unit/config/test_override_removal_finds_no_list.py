@@ -11,6 +11,9 @@ does not find. Where the key holds no list, what happens depends on why:
 - an option no file wrote, of a section a shipped plugin reads, starts from the
   option's default, as ``+=`` does, so the removal reaches the list the plugin
   reads;
+- an option of such a section that the plugin's row of defaults does not name is
+  no list option of the plugin (it is misspelled, or holds a single value), so the
+  run's own application refuses the removal, naming the key;
 - a key the configuration has no setting for is refused, naming the key.
 
 Only the application that builds the run's own configuration refuses or warns. A
@@ -40,6 +43,15 @@ NETWORK_SCANNERS = "sandbox.network_scanners"
 #: An option of trivy-repo, a plugin ASH ships whose section the configuration does
 #: not type.
 TRIVY_REPO_SCANNERS = "scanners.trivy-repo.options.scanners"
+#: An option of bedrock-summary-reporter, a reporter ASH ships whose section the
+#: configuration does not type either: the scanner types its summary leaves out.
+BEDROCK_EXCLUDED_TYPES = (
+    "reporters.bedrock-summary-reporter.options.exclude_scanner_types"
+)
+#: trivy-repo's ``scanners`` misspelled, and an option of trivy-repo that holds a
+#: single value: the plugin has no list option at either key.
+TRIVY_REPO_MISSPELLED = "scanners.trivy-repo.options.scaners"
+TRIVY_REPO_SCALAR = "scanners.trivy-repo.options.license_full"
 #: A key whose ``+=`` lands in a section no plugin ASH ships reads, which the run's
 #: own application warns of. A test that finds no warning for its own key applies it
 #: in the same capture, so the empty result is a measurement.
@@ -127,32 +139,43 @@ def test_a_removal_in_a_section_no_shipped_plugin_reads_removes_nothing_and_says
 
 
 @pytest.mark.parametrize(
-    "own_configuration", [True, False], ids=["own-build", "replay"]
+    ("key", "kind", "item", "own_configuration"),
+    [
+        pytest.param(TRIVY_REPO_SCANNERS, "scanner", "secret", True, id="own-build"),
+        pytest.param(TRIVY_REPO_SCANNERS, "scanner", "secret", False, id="replay"),
+        pytest.param(
+            BEDROCK_EXCLUDED_TYPES, "reporter", "SECRET", True, id="reporter-own-build"
+        ),
+        pytest.param(
+            BEDROCK_EXCLUDED_TYPES, "reporter", "SECRET", False, id="reporter-replay"
+        ),
+    ],
 )
 def test_a_removal_from_an_untyped_option_starts_from_its_shipped_default(
-    own_configuration,
+    key, kind, item, own_configuration
 ):
-    """trivy-repo's section is not a typed field of the configuration, so the
-    document holds only what a file wrote, and no file wrote this option. trivy-repo
-    ships with ASH and its option's default is a row of the table ``+=`` starts
-    from: the removal takes ``secret`` out of that default, and the list lands where
-    the plugin reads it, in the run's own build and in a replay alike."""
-    default = list(
-        UNTYPED_LIST_OPTION_DEFAULTS["scanners"]["trivy-repo"][("options", "scanners")]
-    )
-    kept = [item for item in default if item != "secret"]
+    """Neither trivy-repo's section nor bedrock-summary-reporter's is a typed field
+    of the configuration, so the document holds only what a file wrote, and no file
+    wrote these options. Both plugins ship with ASH and each option's default is a
+    row of the table ``+=`` starts from: the removal takes the item out of that
+    default (``secret`` out of trivy-repo's scanners; ``SECRET`` out of the scanner
+    types the reporter leaves out of its summary, so it leaves out none), and the
+    list lands where the plugin reads it, in the run's own build and in a replay
+    alike."""
+    segment, plugin, *option = key.split(".")
+    default = list(UNTYPED_LIST_OPTION_DEFAULTS[segment][plugin][tuple(option)])
+    kept = [entry for entry in default if entry != item]
     assert len(kept) < len(default), "control: the default holds the item removed"
-    assert kept, "control: the removal leaves the list some items"
 
     config = apply_config_overrides(
         AshConfig(),
-        [f'{TRIVY_REPO_SCANNERS}-=["secret"]'],
+        [f'{key}-=["{item}"]'],
         warn_unread_appends=own_configuration,
     )
 
-    written = {"options": {"scanners": kept}}
-    assert config.model_dump()["scanners"]["trivy-repo"] == written
-    assert config.get_plugin_config("scanner", "trivy-repo") == written
+    written = {"options": {option[-1]: kept}}
+    assert config.model_dump()[segment][plugin] == written
+    assert config.get_plugin_config(kind, plugin) == written
 
 
 @pytest.mark.parametrize(
@@ -177,6 +200,38 @@ def test_a_removal_at_a_key_the_configuration_lacks_is_refused(key):
     assert key in text, text
 
 
+@pytest.mark.parametrize(
+    ("written", "key"),
+    [
+        pytest.param([], TRIVY_REPO_MISSPELLED, id="misspelled-option"),
+        pytest.param(
+            ["scanners.trivy-repo.enabled=true"],
+            TRIVY_REPO_MISSPELLED,
+            id="misspelled-option-in-a-written-section",
+        ),
+        pytest.param([], TRIVY_REPO_SCALAR, id="option-that-is-no-list"),
+    ],
+)
+def test_a_removal_at_an_option_its_shipped_plugin_has_no_list_at_is_refused(
+    written, key
+):
+    """trivy-repo ships with ASH, and its row of the table ``+=`` starts from names
+    every list option the plugin has. An option the row does not name is no list
+    option of it: misspelled (``scaners``), or holding a single value
+    (``license_full``). The run's own application refuses the removal, naming the
+    key and never the items, where it would otherwise remove nothing and say
+    nothing, whether or not an earlier override wrote the plugin's section."""
+    with pytest.raises(ASHConfigValidationError) as refused:
+        apply_config_overrides(
+            AshConfig(), [*written, f'{key}-=["vuln"]'], warn_unread_appends=True
+        )
+
+    text = str(refused.value)
+    assert f"'{key}-='" in text, text
+    assert "has no list option" in text, text
+    assert "vuln" not in text, text
+
+
 def _network_scanners(config: AshConfig) -> Any:
     return config.sandbox.network_scanners
 
@@ -188,6 +243,10 @@ def _the_replayed_section(config: AshConfig) -> Any:
 def _trivy_options(config: AshConfig) -> Any:
     options = config.scanners.trivy.options
     return sorted(options.model_extra or {}), list(options.scanners)
+
+
+def _the_trivy_repo_section(config: AshConfig) -> Any:
+    return (config.scanners.model_extra or {}).get("trivy-repo")
 
 
 @pytest.mark.parametrize(
@@ -205,6 +264,12 @@ def _trivy_options(config: AshConfig) -> Any:
             '["vuln"]',
             _trivy_options,
             id="absent-option",
+        ),
+        pytest.param(
+            TRIVY_REPO_MISSPELLED,
+            '["vuln"]',
+            _the_trivy_repo_section,
+            id="option-its-shipped-plugin-has-no-list-at",
         ),
     ],
 )
