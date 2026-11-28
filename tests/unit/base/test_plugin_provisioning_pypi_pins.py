@@ -5,7 +5,7 @@ It now also records the PyPI distribution an alpha scanner installs (``PypiPin``
 reason a distribution is held out of the alpha extra (``Exclusion``), and, for a content
 database, the environment variable that moves its cache (``ContentDatabase.cache_env``).
 
-The registry refuses six contradictions in pins, and each refusal here has a planted
+The registry refuses contradictions in pins, and each refusal here has a planted
 input that must be refused and a sibling input, differing only in the flagged property,
 that must be accepted. Without the sibling a pass could mean the check refuses
 everything.
@@ -63,6 +63,14 @@ def _exclusion(reason="OWNER_HOLD", **changes):
         "detail": "a detail",
         "measured": "a measurement",
     }
+    fields.update(changes)
+    return prov.Exclusion(**fields)
+
+
+def _text_exclusion(reason, **changes):
+    """An exclusion whose reason is the text a table could spell it with. A dataclass
+    annotation does not stop that text, so it reaches the register as it was written."""
+    fields = {"reason": reason, "detail": "a detail", "measured": "a measurement"}
     fields.update(changes)
     return prov.Exclusion(**fields)
 
@@ -135,7 +143,7 @@ def test_a_distribution_name_is_compared_the_way_pep_503_normalizes_it(
 
 
 # ---------------------------------------------------------------------------
-# The six refusals, each with a planted input and an accepted sibling
+# The refusals, each with a planted input and an accepted sibling
 # ---------------------------------------------------------------------------
 
 
@@ -182,12 +190,70 @@ def _a_member_of_an_extra_nothing_names():
     return {"a": _block(_pin(extra="alhpa"))}
 
 
+def _a_cooldown_written_as_text_with_no_date():
+    return {"a": _block(_pin(extra="", excluded=_text_exclusion("cooldown")))}
+
+
+def _a_cooldown_ending(until):
+    def build():
+        excluded = _exclusion("COOLDOWN", until=until)
+        return {"a": _block(_pin(extra="", excluded=excluded))}
+
+    return build
+
+
+def _an_exclusion_with_a_date(reason, until="2026-12-01"):
+    def build():
+        excluded = _exclusion(reason, until=until)
+        return {"a": _block(_pin(extra="", excluded=excluded))}
+
+    return build
+
+
+def _an_exclusion_written_as_text_with_a_date():
+    excluded = _text_exclusion("owner_hold", until="2026-12-01")
+    return {"a": _block(_pin(extra="", excluded=excluded))}
+
+
+def _a_pin_with_the_runtime(runtime):
+    def build():
+        return {"a": _block(_pin(runtime=runtime))}
+
+    return build
+
+
 _DUPLICATE = "is pinned twice"
 _BOTH = "as a member of the 'alpha' extra and also excludes it"
 _NEITHER = "as neither a member of an extra nor excluded from one"
 _UNKNOWN_EXTRA = "as a member of the unknown extra 'alhpa'"
 _SPECIFIER = "must be non-empty and hold no ';'"
 _COOLDOWN = "cooldown exclusion of 'alpha-tool' carries no 'until' date"
+_ONLY_A_COOLDOWN = "carries an 'until' date; only a cooldown exclusion has one"
+
+#: What ``date.fromisoformat`` does not read as a date, by what is wrong with it.
+_NOT_A_DATE = {
+    "soon": "soon",
+    "in month thirteen": "2026-13-01",
+    "on february thirty": "2026-02-30",
+    "day first": "01-12-2026",
+    "with a trailing space": "2026-12-01 ",
+}
+#: Every reason but ``COOLDOWN``, which is the one that carries a date.
+_REASONS_WITHOUT_A_DATE = (
+    "CORE_PIN_CONFLICT",
+    "EXTRA_CONFLICT",
+    "NEEDS_BUILD",
+    "NO_WHEELS",
+    "OWNER_HOLD",
+)
+#: A runtime is ``uv-tool`` or ``ash-environment``; each of these is neither.
+_NOT_A_RUNTIME = {
+    "pip": "pip",
+    "empty": "",
+    "written with an underscore": "uv_tool",
+    "written in capitals": "UV-TOOL",
+    "written with a space": "ash environment",
+}
 
 _REFUSED = {
     "a distribution pinned by two scanners": (
@@ -215,6 +281,39 @@ _REFUSED = {
     "an empty specifier": (_an_empty_specifier, _SPECIFIER),
     "a blank specifier": (_a_blank_specifier, _SPECIFIER),
     "a cooldown with no date": (_a_cooldown_with_no_date, _COOLDOWN),
+    "a cooldown written as text with no date": (
+        _a_cooldown_written_as_text_with_no_date,
+        _COOLDOWN,
+    ),
+    **{
+        f"a cooldown ending {name}": (
+            _a_cooldown_ending(until),
+            f"carries the 'until' value {until!r}, which is not an ISO 8601 date",
+        )
+        for name, until in _NOT_A_DATE.items()
+    },
+    **{
+        f"a {reason.lower()} exclusion with a date": (
+            _an_exclusion_with_a_date(reason),
+            _ONLY_A_COOLDOWN,
+        )
+        for reason in _REASONS_WITHOUT_A_DATE
+    },
+    "an owner hold with an until that is no date": (
+        _an_exclusion_with_a_date("OWNER_HOLD", until="soon"),
+        _ONLY_A_COOLDOWN,
+    ),
+    "an exclusion written as text with a date": (
+        _an_exclusion_written_as_text_with_a_date,
+        _ONLY_A_COOLDOWN,
+    ),
+    **{
+        f"a runtime that is {name}": (
+            _a_pin_with_the_runtime(runtime),
+            f"with the unknown runtime {runtime!r}",
+        )
+        for name, runtime in _NOT_A_RUNTIME.items()
+    },
 }
 
 
@@ -265,6 +364,28 @@ def _an_exclusion_that_needs_no_date():
     }
 
 
+def _a_cooldown_written_as_text_with_a_date():
+    excluded = _text_exclusion("cooldown", until="2026-12-01")
+    return {"a": _block(_pin(extra="", excluded=excluded))}
+
+
+def _an_exclusion_written_as_text_that_needs_no_date():
+    return {"a": _block(_pin(extra="", excluded=_text_exclusion("owner_hold")))}
+
+
+def _a_cooldown_ending_on_a_leap_day():
+    return _a_cooldown_ending("2028-02-29")()
+
+
+def _each_runtime_the_class_names():
+    return {
+        "a": _block(
+            _pin(runtime="uv-tool"),
+            _pin(distribution="other-tool", runtime="ash-environment"),
+        )
+    }
+
+
 _ACCEPTED = {
     "two different distributions": _two_different_distributions,
     "two distributions that only look alike": _two_distributions_that_only_look_alike,
@@ -275,6 +396,12 @@ _ACCEPTED = {
     ),
     "a cooldown with a date": _a_cooldown_with_a_date,
     "an exclusion that needs no date": _an_exclusion_that_needs_no_date,
+    "a cooldown written as text with a date": _a_cooldown_written_as_text_with_a_date,
+    "an exclusion written as text that needs no date": (
+        _an_exclusion_written_as_text_that_needs_no_date
+    ),
+    "a cooldown ending on a leap day": _a_cooldown_ending_on_a_leap_day,
+    "each runtime the class names": _each_runtime_the_class_names,
 }
 
 
@@ -299,6 +426,63 @@ def test_a_refusal_names_the_scanners_and_the_distribution() -> None:
     message = str(excinfo.value)
     assert "'alpha-tool'" in message
     assert "'a'" in message and "'b'" in message
+
+
+def test_a_cooldown_written_as_text_is_refused_as_the_member_is() -> None:
+    """The message is the one the member's spelling gets, so the two spellings are one
+    rule and not two."""
+    with pytest.raises(prov.ProvisioningRegistryError) as as_member:
+        prov.check_registry(_a_cooldown_with_no_date())
+    with pytest.raises(prov.ProvisioningRegistryError) as as_text:
+        prov.check_registry(_a_cooldown_written_as_text_with_no_date())
+
+    assert str(as_text.value) == str(as_member.value)
+    assert _COOLDOWN in str(as_text.value)
+
+
+@pytest.mark.parametrize(
+    "member", list(prov.ExclusionReason), ids=lambda member: member.name
+)
+def test_an_exclusion_reason_written_as_text_is_the_member_it_names(member) -> None:
+    exclusion = prov.Exclusion(
+        reason=member.value, detail="a detail", measured="a measurement"
+    )
+
+    assert exclusion.reason is member
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        pytest.param("cool-down", id="a hyphen"),
+        pytest.param("Cooldown", id="a capital"),
+        pytest.param("COOLDOWN", id="the member name"),
+        pytest.param(" cooldown", id="a leading space"),
+        pytest.param("", id="an empty string"),
+        pytest.param(None, id="none"),
+    ],
+)
+def test_an_exclusion_reason_that_names_no_member_is_refused_when_it_is_built(
+    spelling,
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(repr(spelling))):
+        prov.Exclusion(reason=spelling, detail="a detail", measured="a measurement")
+
+
+def test_a_refused_runtime_names_the_two_runtimes() -> None:
+    with pytest.raises(prov.ProvisioningRegistryError) as excinfo:
+        prov.check_registry(_a_pin_with_the_runtime("pip")())
+
+    message = str(excinfo.value)
+    assert "'a'" in message and "'alpha-tool'" in message and "'pip'" in message
+    assert "uv-tool" in message and "ash-environment" in message
+
+
+def test_a_refused_date_on_another_reason_names_the_reason() -> None:
+    with pytest.raises(prov.ProvisioningRegistryError) as excinfo:
+        prov.check_registry(_an_exclusion_with_a_date("NEEDS_BUILD")())
+
+    assert "the 'needs_build' exclusion of 'alpha-tool'" in str(excinfo.value)
 
 
 def test_the_shipped_pins_pass_the_rules() -> None:
