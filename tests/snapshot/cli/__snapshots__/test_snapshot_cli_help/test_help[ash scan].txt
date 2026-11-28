@@ -294,8 +294,9 @@
 │                                    [env var: ASH_PLUGIN_MODULES]                                 │
 │ --config-overrides          <str>  Configuration overrides specified as key-value pairs (e.g.,   │
 │                                    'reporters.cloudwatch-logs.options.aws_region=us-west-2').    │
-│                                    Supports lists with , append mode with key+=, and JSON        │
-│                                    syntax. See                                                   │
+│                                    Supports lists with ["item1","item2"], append mode with       │
+│                                    key+=["value"], remove mode with key-=["value"], which        │
+│                                    removes every occurrence of each item, and JSON syntax. See   │
 │                                    https://awslabs.github.io/automated-security-helper/latest/h… │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Execution ──────────────────────────────────────────────────────────────────────────────────────╮

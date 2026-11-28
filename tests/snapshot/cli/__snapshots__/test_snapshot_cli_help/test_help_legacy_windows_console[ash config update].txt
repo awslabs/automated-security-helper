@@ -32,7 +32,10 @@
 │ --set                             <str>  Configuration modifications specified as key-value     │
 │                                          pairs (e.g.,                                           │
 │                                          'global_settings.severity_threshold=LOW'). Supports    │
-│                                          lists with , append mode with key+=, and JSON syntax.  │
+│                                          lists with ["item1","item2"], append mode with         │
+│                                          key+=["value"], remove mode with key-=["value"], which │
+│                                          removes every occurrence of each item, and JSON        │
+│                                          syntax.                                                │
 │ --source-dir                      <str>  The directory a scan would scan, as `ash scan          │
 │                                          --source-dir`: the config is discovered there unless   │
 │                                          --config names one, and a config inside it may only    │
