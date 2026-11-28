@@ -163,6 +163,47 @@ def test_the_flat_json_report_keeps_both_findings_and_names_the_kind(
     ]
 
 
+def test_the_csv_and_flat_json_rows_of_the_note_keep_its_severity(
+    test_plugin_context,
+):
+    """Control, green before and after: the two flat reports keep the note's
+    severity beside its kind."""
+    csv_rows = list(
+        csv.DictReader(
+            io.StringIO(CsvReporter(context=test_plugin_context).report(_model()))
+        )
+    )
+    flat_rows = json.loads(
+        FlatJSONReporter(context=test_plugin_context).report(_model())
+    )["findings"]
+
+    (csv_note,) = [row for row in csv_rows if row["rule_id"] == NOTE]
+    (flat_note,) = [row for row in flat_rows if row["rule_id"] == NOTE]
+    for note in (csv_note, flat_note):
+        assert (note["severity"], note["result_kind"]) == ("INFO", "informational")
+
+
+def test_the_changelog_gives_no_severity_only_to_the_human_listings():
+    """The entry gives the columns of the HTML, Markdown and text listings, which
+    show no severity, to those listings alone, and says that the CSV and flat JSON
+    rows keep their severity."""
+    changelog = " ".join(
+        (Path(__file__).resolve().parents[3] / "CHANGELOG.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+
+    assert "`result_kind` and no severity: the HTML report" not in changelog
+    assert (
+        "each with its scanner, rule, message, file and `result_kind` and no "
+        "severity." in changelog
+    )
+    assert (
+        "The CSV and flat JSON rows keep it, with its severity, and gain a "
+        "`result_kind` field." in changelog
+    )
+
+
 # --- the emitter ----------------------------------------------------------------
 
 
