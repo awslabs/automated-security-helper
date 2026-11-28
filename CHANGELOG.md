@@ -168,6 +168,18 @@
 
 ### Fixes
 
+- **ASH no longer raises while it logs a failure whose error message cannot be
+  rendered.** Recording a scan in the history, removing the restore marker after a
+  set aside failed, removing what a stopped discard left, and moving staged results
+  back after a set aside stopped each log their failure with the error's own text;
+  an error whose message could not be rendered made that line raise instead, which
+  stopped the scan or, for a stopped set aside, replaced the error it reports. Such
+  an error is now named by its type, and every other error is logged in the same
+  words as before. A refusal that names the file it could not read names such an
+  error by its type too, and leaves out a second file whose name cannot be
+  rendered, instead of raising; and the check that decides how an unexpected
+  `OSError` is logged no longer raises on a file name that cannot be rendered.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

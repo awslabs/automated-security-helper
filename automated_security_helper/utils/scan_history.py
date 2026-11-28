@@ -402,10 +402,14 @@ def record_run(
     keep_runs: int = DEFAULT_KEEP_RUNS,
 ) -> Path | None:
     """:func:`write_run_record` for a scan: a failure is logged, never raised."""
+    from automated_security_helper.utils.error_text import own_error_text
+
     try:
         path = write_run_record(results, output_dir, keep_runs)
     except Exception as exc:  # noqa: BLE001 - recording must not fail a scan
-        ASH_LOGGER.warning(f"Could not record this scan in the history: {exc}")
+        ASH_LOGGER.warning(
+            f"Could not record this scan in the history: {own_error_text(exc)}"
+        )
         return None
     if path is None:
         # Warning, not info: the operator turned the history on, and a CI whose

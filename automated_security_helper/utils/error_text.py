@@ -118,7 +118,27 @@ def _own_text(error: BaseException) -> str:
     try:
         return str(error)
     except Exception:  # noqa: BLE001 -- whatever the error's __str__ raised
-        return f"<{type(error).__name__}: its message could not be rendered>"
+        return _unrendered(error)
+
+
+def _unrendered(error: BaseException) -> str:
+    """The line naming *error* by its type, for a message that cannot be rendered.
+
+    It reads only the type, so it asks nothing more of *error*.
+    """
+    return f"<{type(error).__name__}: its message could not be rendered>"
+
+
+def own_error_text(error: BaseException) -> str:
+    """``str(error)``, or the line naming its type when its own ``__str__`` raises.
+
+    For a handler that logs an error it caught on a path that must not raise: a
+    plain f-string calls the error's ``__str__``, and a raise there replaces the
+    error being handled. Unlike error_text it changes nothing else (no file named
+    as given, no escape code removed, no value redacted), so an error whose text
+    renders reads exactly as ``str(error)`` reads.
+    """
+    return _own_text(error)
 
 
 def _with_carried_values(error: BaseException, values: Iterable[str]) -> List[str]:
@@ -300,6 +320,11 @@ def os_error_without_named_file(e: OSError, named: "os.PathLike[str] | str") -> 
     otherwise) and the second file of a two-file error (``-> 'other'``), as given.
     An error whose filename is a file descriptor (an int) names no path, so its
     text is ``error_text(e)`` as it is.
+
+    An error whose message cannot be rendered (its own ``__str__`` raises) is
+    named by its type, as error_text names such an error, and a second file whose
+    name cannot be rendered is left out: the caller is reporting a failure, and a
+    raise here would replace it.
     """
     from pathlib import Path
 
@@ -319,13 +344,18 @@ def os_error_without_named_file(e: OSError, named: "os.PathLike[str] | str") -> 
         code = f"[Errno {e.errno}] "
     else:
         code = ""
-    text = f"{code}{e.strerror}"
+    try:
+        text = f"{code}{e.strerror}"
+    except Exception:  # noqa: BLE001 -- whatever the message's __str__ raised
+        return _unrendered(e)
     other = e.filename2
     if isinstance(other, (str, bytes, os.PathLike)):
         try:
-            text = f"{text} -> {_quoted_as_given(os.fsdecode(other))}"
-        except TypeError:
-            pass
+            second: Optional[str] = _quoted_as_given(os.fsdecode(other))
+        except Exception:  # noqa: BLE001 -- whatever the second name's text raised
+            second = None
+        if second is not None:
+            text = f"{text} -> {second}"
     return text
 
 
@@ -946,14 +976,22 @@ def log_unexpected_error(
 
 def _names_a_file_by_repr(error: BaseException) -> bool:
     """Whether an OSError in ``error``'s chain has Python's own text quote a file
-    whose repr differs from the name as given (a backslash, a control)."""
+    whose repr differs from the name as given (a backslash, a control).
+
+    A member whose files cannot be rendered (a name's own ``__str__`` or
+    ``__repr__`` raises) is not one: log_unexpected_error asks this while it logs
+    an error, and a raise here would replace that error.
+    """
     for current in _chain(error):
         if (
             not isinstance(current, OSError)
             or type(current).__str__ is not OSError.__str__
         ):
             continue
-        quoted = _files_quoted(current)
+        try:
+            quoted = _files_quoted(current)
+        except Exception:  # noqa: BLE001 -- whatever its files' text raised
+            quoted = None
         if quoted is not None and quoted[0] != quoted[1]:
             return True
     return False
