@@ -1460,6 +1460,20 @@ def test_a_profiles_list_over_its_bases_reference_is_written_to_a_session_as_the
 # ---------------------------------------------------------------------------
 
 
+def _a_checkout_under_the_operators_config(
+    tmp_path: Path, probe_env, operators_text: str
+) -> Tuple[Path, Path]:
+    """The operator's file holds ``operators_text``, and ASH_CONFIG names it.
+    ``tree/.ash.yaml`` sets nothing of it, so its config is given the operator's
+    values for the options the operator decides. Returns the operator's file and
+    the checkout's."""
+    operator = _operator_config(tmp_path, operators_text)
+    own = tmp_path / "tree" / ".ash.yaml"
+    own.write_text("project_name: tree-own-3c8e\n", encoding="utf-8")
+    probe_env.setenv("ASH_CONFIG", str(operator))
+    return operator, own
+
+
 def _a_checkout_given_the_operators_path(
     tmp_path: Path, probe_env, held: str
 ) -> Tuple[Path, Path]:
@@ -1468,11 +1482,7 @@ def _a_checkout_given_the_operators_path(
     its config is given the operator's for that option. Returns the operator's
     file and the checkout's."""
     probe_env.setenv("ASH_PROBE_RELATIVE", held)
-    operator = _operator_config(tmp_path, RELATIVE_CONFIG)
-    own = tmp_path / "tree" / ".ash.yaml"
-    own.write_text("project_name: tree-own-3c8e\n", encoding="utf-8")
-    probe_env.setenv("ASH_CONFIG", str(operator))
-    return operator, own
+    return _a_checkout_under_the_operators_config(tmp_path, probe_env, RELATIVE_CONFIG)
 
 
 def test_ash_config_get_shows_a_relative_path_the_trusted_base_gives_by_its_reference(
@@ -1529,3 +1539,94 @@ def test_a_relative_path_the_trusted_base_gives_a_checkouts_config_is_recorded_a
         == f"{directory}{os.sep}${{ASH_PROBE_RELATIVE}}"
     )
     assert "cfg-7a3d" not in json.dumps(recorded)
+
+
+# ---------------------------------------------------------------------------
+# A checkout's config that the operator's file gave a tool version, or a choice
+# in a plugin's section, it read from a variable
+# ---------------------------------------------------------------------------
+
+
+def _operators_tool_version(section: str) -> str:
+    """The operator's file, which reads ``tool_version`` of ``scanners.<section>``
+    from a variable."""
+    return (
+        f"scanners:\n  {section}:\n    options:\n"
+        "      tool_version: ${ASH_PROBE_TOOL_RANGE}\n"
+    )
+
+
+@pytest.mark.parametrize("section", ["bandit", "ferret-scan"])
+def test_ash_config_get_shows_a_tool_version_the_trusted_base_gives_by_its_reference(
+    tmp_path, probe_env, section
+):
+    """The file in the scanned tree sets no ``tool_version``, and the operator's
+    file, which ASH_CONFIG names, reads it from a variable: for a built-in section
+    (``bandit``) and for a plugin's (``ferret-scan``). The load gives the tree's
+    config the operator's value, so ``ash config get`` prints the reference, and
+    none of the specifier set the variable held."""
+    probe_env.setenv("ASH_PROBE_TOOL_RANGE", ">=1.7.8,<1.7.97")
+    _, own = _a_checkout_under_the_operators_config(
+        tmp_path, probe_env, _operators_tool_version(section)
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["config", "get", str(own), "--source-dir", str(tmp_path / "tree")],
+        env={"COLUMNS": "300"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "1.7.97" not in result.output
+    assert "${ASH_PROBE_TOOL_RANGE}" in result.output
+
+
+def test_a_tool_version_the_trusted_base_gives_a_checkouts_config_is_recorded_as_written(
+    tmp_path, probe_env
+):
+    """The record of the tree's config holds the operator's reference where the
+    operator's file read ``tool_version``, and none of the specifier set the
+    variable held."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_TOOL_RANGE", ">=1.7.8,<1.7.97")
+    _, own = _a_checkout_under_the_operators_config(
+        tmp_path, probe_env, _operators_tool_version("bandit")
+    )
+
+    config = resolve_config(config_path=own, source_dir=tmp_path / "tree")
+
+    # The control: the load gave the tree's config the operator's value.
+    assert config.scanners.bandit.options.tool_version == ">=1.7.8,<1.7.97"
+    recorded = _recorded(config)
+    assert (
+        recorded["scanners"]["bandit"]["options"]["tool_version"]
+        == "${ASH_PROBE_TOOL_RANGE}"
+    )
+    assert "1.7.97" not in json.dumps(recorded)
+
+
+def test_ash_config_get_shows_a_choice_the_trusted_base_gives_a_plugin_section_by_its_reference(
+    tmp_path, probe_env
+):
+    """The operator's file reads ferret-scan's ``use_default_config`` from a
+    variable, and the file in the scanned tree writes nothing for ferret-scan. The
+    load makes the tree's config a ferret-scan section that holds the operator's
+    value, so ``ash config get`` prints the reference, where the dump of a
+    plugin's section has no mark to show it by."""
+    probe_env.setenv("ASH_PROBE_FERRET_DEFAULT", "false")
+    _, own = _a_checkout_under_the_operators_config(
+        tmp_path,
+        probe_env,
+        "scanners:\n  ferret-scan:\n    options:\n"
+        "      use_default_config: ${ASH_PROBE_FERRET_DEFAULT}\n",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["config", "get", str(own), "--source-dir", str(tmp_path / "tree")],
+        env={"COLUMNS": "300"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "${ASH_PROBE_FERRET_DEFAULT}" in result.output

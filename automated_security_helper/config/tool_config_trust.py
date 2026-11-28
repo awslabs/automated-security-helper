@@ -549,6 +549,48 @@ def _trusted_option(options: Any, name: str) -> Any:
     return options.get(_resolve_dict_key(options, name), _MISSING)
 
 
+#: A place a confinement step gave the trusted base's value: its path in the
+#: configuration's dump, and the path of the trusted base's section option the
+#: value came from (None where the step read no section of the trusted base).
+ConfinedPlace = Tuple[Tuple[str, str, str, str], Optional[Tuple[str, str, str, str]]]
+
+
+def _trusted_key(trusted_config: "AshConfig", segment: str, key: str) -> Optional[str]:
+    """The key of ``trusted_config``'s ``segment`` that ``get_plugin_config(kind, key)``
+    reads: ``key`` when the dump holds it, else the key ``plugin_section_key`` picks
+    for its reduced name, which is how ``plugin_section_lookup`` chooses a section
+    when the caller's own spelling is not a key."""
+    from automated_security_helper.config.ash_config import (
+        plugin_section_key,
+        reduced_plugin_name,
+    )
+
+    keys = list(getattr(trusted_config, segment).model_dump(by_alias=True))
+    if key in keys:
+        return key
+    return plugin_section_key(keys, reduced_plugin_name(key))
+
+
+def _confined_place(
+    segment: str,
+    key: str,
+    name: str,
+    trusted_key: Optional[str],
+    trusted_name: Optional[str] = None,
+) -> ConfinedPlace:
+    """The place of option *name* in the configuration's section *key*, paired with
+    the place of the trusted base's option it was given from.
+
+    *trusted_key* is the section of the trusted base the value was read from
+    (``_trusted_key``), and *trusted_name* the option's name there when the
+    configuration spells it another way (``tool-version`` for ``tool_version``).
+    """
+    theirs: Optional[Tuple[str, str, str, str]] = None
+    if trusted_key is not None:
+        theirs = (segment, trusted_key, "options", trusted_name or name)
+    return (segment, key, "options", name), theirs
+
+
 def _or_default(value: Any, default: Any) -> Any:
     return default if value is _MISSING or value is None else value
 
@@ -638,7 +680,7 @@ def confine_scanner_config_files(
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
-) -> List[Tuple[str, str, str]]:
+) -> List[ConfinedPlace]:
     """Replace the tool config choices an in-tree or delivered file made with the trusted base's.
 
     A plugin scanner's section the file leaves out (or holds without an options
@@ -646,15 +688,17 @@ def confine_scanner_config_files(
     file replaces the operator's config rather than adding to it. The warning
     names only an option the file wrote.
 
-    Returns the ``(scanner, key, name)`` of each option the trusted base decided:
-    the scanner, the key of the section in ``config`` that holds it, and the
-    option's name. That is every option whose value came from the trusted base,
-    and every one the file wrote the same value for, so that what a caller
-    does with the list (``resolve_config._take_confined_references`` takes the
-    trusted base's references there) does not depend on whether the file's value
-    equals the trusted one. An option an override set, and a tightening value
-    the file wrote, are not decided by the trusted base and are not in it, nor
-    are the detect-secrets entries ``_confine_settings_files`` drops.
+    Returns a ``ConfinedPlace`` for each option the trusted base decided: its
+    place in ``config`` (``scanners``, the key of the section that holds it,
+    ``options`` and the option's name) and the place of the trusted base's
+    option it was given from. That is every option whose value came from the
+    trusted base, and every one the file wrote the same value for, so that what
+    a caller does with the list (``resolve_config._take_confined_references``
+    takes the trusted base's references there) does not depend on whether the
+    file's value equals the trusted one. An option an override set, and a
+    tightening value the file wrote, are not decided by the trusted base and
+    are not in it, nor are the detect-secrets entries ``_confine_settings_files``
+    drops.
 
     An override the trusted base cannot take (``replay_overrides_onto``) leaves
     the value it set on the resolved config alone, at the one section it
@@ -709,11 +753,14 @@ def confine_scanner_config_files(
         warn_dropped(trusted_config, replay.dropped)
 
     ignored: List[str] = []
-    decided: List[Tuple[str, str, str]] = []
+    decided: List[ConfinedPlace] = []
     extra = getattr(config.scanners, "__pydantic_extra__", None)
     for scanner, option_defaults in _confined_options().items():
         trusted_section = trusted_config.get_plugin_config(PluginKind.SCANNER, scanner)
         trusted_options = _options_mapping(trusted_section)
+        # The key of the section the lookup read, which holds the value a place
+        # in ``decided`` was given from.
+        trusted_key = _trusted_key(trusted_config, "scanners", scanner)
         # A plugin scanner's section the config leaves out, or holds with no
         # options mapping, is given the trusted base's confined values whole:
         # a file inside the tree replaces the operator's config, so leaving
@@ -725,7 +772,10 @@ def confine_scanner_config_files(
         if not sections:
             if trusted_values and isinstance(extra, dict):
                 extra[scanner] = {"options": dict(trusted_values)}
-                decided += [(scanner, scanner, name) for name in trusted_values]
+                decided += [
+                    _confined_place("scanners", scanner, name, trusted_key)
+                    for name in trusted_values
+                ]
             continue
         for key, section in sections:
             # A value an override the trusted base could not take set is the
@@ -740,7 +790,10 @@ def confine_scanner_config_files(
                     and section.get("options") is None
                 ):
                     section["options"] = dict(trusted_values)
-                    decided += [(scanner, key, name) for name in trusted_values]
+                    decided += [
+                        _confined_place("scanners", key, name, trusted_key)
+                        for name in trusted_values
+                    ]
                 continue
             for name, default in option_defaults.items():
                 path = ("scanners", key, "options", name)
@@ -762,7 +815,7 @@ def confine_scanner_config_files(
                 # From here the trusted base decides the value, whether or not
                 # the file wrote the same one, so the answer to a guess does
                 # not depend on which (the returned list).
-                decided.append((scanner, key, name))
+                decided.append(_confined_place("scanners", key, name, trusted_key))
                 if _same_option_value(current, _or_default(wanted, default)):
                     if written is None and default is not None:
                         # An explicit null reads as the default here, but the
@@ -851,7 +904,7 @@ def confine_tool_versions(
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
-) -> None:
+) -> List[ConfinedPlace]:
     """Replace the ``tool_version`` a config that is not the operator's set, in place.
 
     ``tool_version`` chooses which release of a scanner's or converter's tool uv
@@ -873,6 +926,14 @@ def confine_tool_versions(
     such a ``scanners`` override is ``confine_scanner_config_files``'s, which
     replays the same entries first on every route; the ones under
     ``converters`` are reported here.
+
+    Returns a ``ConfinedPlace`` for each ``tool_version`` the trusted base
+    decided: the place in ``config`` and the place in the trusted base the value
+    came from. That is every one given from the trusted base, and every one the
+    config holds the same value for, so that what a caller does with the list
+    (``resolve_config._take_confined_references`` takes the trusted base's
+    references there) does not depend on whether the config's value equals the
+    trusted one. A section or option an override set is not in it.
 
     Args:
         config: The resolved AshConfig, changed in place.
@@ -924,6 +985,7 @@ def confine_tool_versions(
         )
 
     ignored: List[str] = []
+    decided: List[ConfinedPlace] = []
     for segment, kind in _PLUGIN_SEGMENTS:
         config_segment = getattr(config, segment)
         # Sections seen, by the identity their spellings fold under: the base
@@ -938,6 +1000,9 @@ def confine_tool_versions(
             options = _options_of(section)
             trusted_section = trusted_config.get_plugin_config(kind, key)
             trusted_options = _options_mapping(trusted_section)
+            # The key of the section the lookup read, which holds the value a
+            # place in ``decided`` was given from.
+            trusted_key = _trusted_key(trusted_config, segment, key)
             if options is None:
                 # A plugin section with no options mapping (or one that is not
                 # a mapping): the operator's pin still applies, so the mapping
@@ -956,6 +1021,9 @@ def confine_tool_versions(
                             section["options"] = {}
                         if isinstance(section["options"], dict):
                             section["options"][name] = wanted
+                            decided.append(
+                                _confined_place(segment, key, name, trusted_key)
+                            )
                         else:
                             # A value that is not a mapping cannot hold the
                             # pin; the plugin will refuse it when it reads its
@@ -989,8 +1057,14 @@ def confine_tool_versions(
                     # omitted tool_version left the plugin on its default
                     # constraint in place of the operator's pin.
                     _set(options, name, wanted, default)
+                    decided.append(_confined_place(segment, key, name, trusted_key))
                     continue
                 for spelling in spellings:
+                    # The trusted base decides the value whether or not the
+                    # config holds the same one (the returned list).
+                    decided.append(
+                        _confined_place(segment, key, spelling, trusted_key, name)
+                    )
                     written = _get(options, spelling)
                     current = _or_default(written, default)
                     if _same_option_value(current, _or_default(wanted, default)):
@@ -1020,6 +1094,11 @@ def confine_tool_versions(
                         pins[name] = wanted
                 if pins:
                     extra[key] = {"options": pins}
+                    # The section is the trusted base's own, so its place there
+                    # is the same.
+                    decided += [
+                        _confined_place(segment, key, name, key) for name in pins
+                    ]
     if ignored:
         from automated_security_helper.config.config_sources import (
             describe_config_path,
@@ -1032,6 +1111,7 @@ def confine_tool_versions(
             f"operator's choice, and {source.reason}. The operator's value, or the "
             f"tool's default constraint, applies instead. {source.remedy}"
         )
+    return decided
 
 
 def _entry_path(entry: Any) -> Any:

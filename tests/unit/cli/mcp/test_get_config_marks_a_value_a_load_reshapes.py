@@ -21,6 +21,11 @@ file. The answer shows the operator's reference at that place too, with the
 operator's directory, whether or not the checkout's own value equals the
 operator's. Those cells run the checkout the server searches and a file named in
 another checkout.
+
+``tool_version`` is the operator's choice the same way, for every scanner and
+converter section, so the config of a file in a checkout takes the operator's
+value there too, and the answer shows the operator's reference at that place, in a
+built-in section and in a plugin's, whether or not the checkout wrote a value.
 """
 
 import json
@@ -398,3 +403,93 @@ def test_a_literal_relative_path_the_operators_file_writes_is_shown_anchored_in_
     assert shown == os.path.normpath(
         os.path.join(directory, "conf-lit-5e2a/bandit.yaml")
     )
+
+
+#: A checkout's file that writes bandit's ``tool_version`` itself, as a quoted string.
+_CHECKOUT_WRITES_TOOL_VERSION = (
+    "scanners:\n  bandit:\n    options:\n      tool_version: '{}'\n"
+)
+
+
+def _operators_tool_version(section: str, written: str) -> str:
+    """The operator's file, which gives the ``scanners`` section *section* the
+    ``tool_version`` *written*: a reference, or a quoted specifier set."""
+    return f"scanners:\n  {section}:\n    options:\n      tool_version: {written}\n"
+
+
+@_CONFINED_ROUTES
+@pytest.mark.parametrize(
+    "own",
+    [
+        pytest.param("project_name: checkout-own-4b1e\n", id="written-nowhere"),
+        pytest.param(
+            _CHECKOUT_WRITES_TOOL_VERSION.format(">=1.7.8,<1.7.97"),
+            id="the-operators-value",
+        ),
+        pytest.param(
+            _CHECKOUT_WRITES_TOOL_VERSION.format(">=1.7.8,<1.7.95"),
+            id="another-value",
+        ),
+    ],
+)
+def test_a_tool_version_the_operators_file_reads_is_shown_by_its_reference_in_a_checkouts_config(
+    tmp_path, monkeypatch, confined, own
+):
+    """The operator's file reads bandit's ``tool_version`` from a variable. The
+    load gives the checkout's config the operator's value, whether the checkout
+    wrote none, the operator's value or another, so the answer shows the
+    operator's reference in all three, and none of the text the variable held or
+    the checkout wrote."""
+    monkeypatch.setenv("ASH_TEST_TOOL_RANGE", ">=1.7.8,<1.7.97")
+
+    result = confined(
+        tmp_path,
+        monkeypatch,
+        _operators_tool_version("bandit", "${ASH_TEST_TOOL_RANGE}"),
+        own,
+    )
+
+    shown = result["scanners"]["bandit"]["options"]["tool_version"]
+    assert shown == "<from ${ASH_TEST_TOOL_RANGE}>", shown
+    dumped = json.dumps(result, default=str)
+    assert "1.7.97" not in dumped
+    assert "1.7.95" not in dumped
+
+
+@_CONFINED_ROUTES
+def test_a_literal_tool_version_the_operators_file_writes_is_shown_as_written_in_a_checkouts_config(
+    tmp_path, monkeypatch, confined
+):
+    """The control: where the operator's file writes the specifier set itself,
+    there is no reference to show, and the answer is that set."""
+    result = confined(
+        tmp_path,
+        monkeypatch,
+        _operators_tool_version("bandit", "'>=1.7.8,<1.7.96'"),
+        "project_name: checkout-own-4b1e\n",
+    )
+
+    shown = result["scanners"]["bandit"]["options"]["tool_version"]
+    assert shown == ">=1.7.8,<1.7.96", shown
+
+
+@_CONFINED_ROUTES
+def test_a_tool_version_an_operators_plugin_section_reads_is_shown_by_its_reference_in_a_checkouts_config(
+    tmp_path, monkeypatch, confined
+):
+    """The control: ferret-scan's section is a plugin's, which the configuration
+    holds as an extra that keeps the loader's mark, so its ``tool_version`` read
+    from a variable is shown by the reference whether the answer takes it from the
+    operator's reference or from the mark."""
+    monkeypatch.setenv("ASH_TEST_TOOL_RANGE", ">=1.7.8,<1.7.97")
+
+    result = confined(
+        tmp_path,
+        monkeypatch,
+        _operators_tool_version("ferret-scan", "${ASH_TEST_TOOL_RANGE}"),
+        "project_name: checkout-own-4b1e\n",
+    )
+
+    shown = result["scanners"]["ferret-scan"]["options"]["tool_version"]
+    assert shown == "<from ${ASH_TEST_TOOL_RANGE}>", shown
+    assert "1.7.97" not in json.dumps(result, default=str)

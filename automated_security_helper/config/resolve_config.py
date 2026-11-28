@@ -117,6 +117,7 @@ from automated_security_helper.config.staleness_trust import (
     confine_content_db_staleness,
 )
 from automated_security_helper.config.tool_config_trust import (
+    ConfinedPlace,
     confine_scanner_config_files,
     confine_tool_versions,
 )
@@ -3061,12 +3062,12 @@ def resolve_config(
     # the overrides alone.
     if config._operator_paths is not None and not untrusted_config:
         config._operator_paths.documents.append(trusted.model_dump())
-    # The scanner options the trusted base decided, for the references taken at
-    # the end (_take_confined_references).
-    confined_options = confine_scanner_config_files(
+    # The scanner options and tool versions the trusted base decided, for the
+    # references taken at the end (_take_confined_references).
+    scanner_places = confine_scanner_config_files(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
-    confine_tool_versions(
+    tool_places = confine_tool_versions(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     confine_content_db_staleness(
@@ -3255,7 +3256,9 @@ def resolve_config(
             outside=outside_membership,
         ),
     )
-    _take_confined_references(config, trusted, settled, in_tree, confined_options)
+    _take_confined_references(
+        config, trusted, settled, in_tree, [*scanner_places, *tool_places]
+    )
     return config
 
 
@@ -3281,7 +3284,7 @@ def _take_confined_references(
     trusted: AshConfig,
     settled: Collection[SettledOption],
     repository_files: Collection[Path],
-    confined_options: Collection[Tuple[str, str, str]] = (),
+    confined_places: Collection[ConfinedPlace] = (),
 ) -> None:
     """Record the trusted base's references for the settings confinement gave
     ``config`` from it, and drop the references to values it left out.
@@ -3289,10 +3292,11 @@ def _take_confined_references(
     confine_sandbox_grants puts the trusted base's values in place of the
     in-tree file's at every setting in ``_CONFINED_SANDBOX_SETTINGS``, and
     confine_operator_only_options at the operator-only options it returned,
-    *settled* (``settled_locations``), and confine_scanner_config_files at the
-    scanner options it returned, *confined_options* (the ``(scanner, key,
-    name)`` of each it decided from the trusted base, the options whose value
-    the file wrote the same as the trusted one included). A reference the
+    *settled* (``settled_locations``), and confine_scanner_config_files and
+    confine_tool_versions at the options they returned, *confined_places* (a
+    ``ConfinedPlace`` for each they decided from the trusted base: its place in
+    ``config`` and in the trusted base, the options whose value the file wrote
+    the same as the trusted one included). A reference the
     in-tree file wrote there named a value ``config`` no longer holds, and the
     value it does hold may be one the operator's file read from the
     environment. Each value is marked where its file wrote the reference, in
@@ -3310,21 +3314,22 @@ def _take_confined_references(
     does not, so one is dropped there when only such a reference matches it.
 
     The trusted base's references are taken at the sandbox settings, the
-    settled options and the scanner options in *confined_options*, where they
-    were written. The settle and the scanner step write the trusted value under
-    the configuration's own spelling of the section, which can differ from the
-    one the trusted base's file wrote, so a reference at a scanner option is
-    moved to that spelling (``EnvironmentReference.rebase``), and taken only
-    where the configuration still holds the trusted base's value (an override
-    the step replayed onto a copy of the base set another). The copies at those
-    scanner options carry no mark: the anchoring builds a new string, and
-    validating a built-in section drops the loader's mark. The trusted base's
+    settled options and the options in *confined_places*, where they were
+    written. The settle and the scanner and tool version steps write the trusted
+    value under the configuration's own spelling of the section, which can
+    differ from the one the trusted base's file wrote, so a reference at such an
+    option is moved to that spelling (``EnvironmentReference.rebase``), and
+    taken only where the configuration still holds the trusted base's value (an
+    override the step replayed onto a copy of the base set another). A copy at
+    those options carries no mark (the anchoring builds a new string, and
+    validating a built-in section drops the loader's mark) or one that the
+    JSON dumps of ``ash config get`` and the record drop. The trusted base's
     references describe them instead. The destination values the reporter
     confinement copies are described by their own marks, in the step that ends
     this one.
 
-    At the sandbox settings, the settled options and the scanner options in
-    *confined_options* every reference and rewrite of ``config``'s own is
+    At the sandbox settings, the settled options and the options in
+    *confined_places* every reference and rewrite of ``config``'s own is
     dropped whatever its origin, and the comparison reads a list index and the
     unknown index alike, so an entry at the unknown index (a set member the
     load described, made from a mark and naming no file) goes with the rest.
@@ -3345,9 +3350,6 @@ def _take_confined_references(
     described.
     """
     from automated_security_helper.config import reporter_trust
-    from automated_security_helper.config.client_scanner_exclusions import (
-        _scanner_sections,
-    )
     from automated_security_helper.config.config_sources import _node_at
     from automated_security_helper.config.config_validator import dumped_path
     from automated_security_helper.config.operator_only_options import (
@@ -3381,26 +3383,19 @@ def _take_confined_references(
     theirs_settled = {
         normal(location) for location in settled_locations(trusted, settled)
     }
-    # The scanner options the trusted base decided, at the configuration's
-    # spelling of the section and at the trusted base's. The trusted base's
-    # section can be spelled another way (a plugin scanner's), so each of its
-    # spellings names the configuration's places it was copied to.
-    decided_options = tuple(dict.fromkeys(confined_options))
-    mine_confined = {
-        normal(("scanners", key, "options", name)) for _, key, name in decided_options
-    }
+    # The options the trusted base decided, at the configuration's spelling of
+    # the section and at the trusted base's. The trusted base's section can be
+    # spelled another way (a plugin's), so a place of the trusted base names the
+    # configuration's places it was given to.
+    decided_places = tuple(dict.fromkeys(confined_places))
+    mine_confined = {normal(at_config) for at_config, _ in decided_places}
     mine_decided = mine_settled | mine_confined
     theirs_confined: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = {}
-    trusted_keys: Dict[str, List[str]] = {}
-    for scanner, key, name in decided_options:
-        if scanner not in trusted_keys:
-            trusted_keys[scanner] = [k for k, _ in _scanner_sections(trusted, scanner)]
-        for trusted_key in trusted_keys[scanner]:
-            theirs_confined.setdefault(
-                normal(("scanners", trusted_key, "options", name)), []
-            ).append(("scanners", key, "options", name))
-    config_dump = config.model_dump() if decided_options else {}
-    trusted_dump = trusted.model_dump() if decided_options else {}
+    for at_config, at_trusted in decided_places:
+        if at_trusted is not None:
+            theirs_confined.setdefault(normal(at_trusted), []).append(at_config)
+    config_dump = config.model_dump() if decided_places else {}
+    trusted_dump = trusted.model_dump() if decided_places else {}
 
     def same_value(trusted_path: Any, config_path: Any) -> bool:
         # The configuration still holds the trusted base's value there. An
@@ -6852,7 +6847,11 @@ def confine_to_trusted_base(
     value from ``trusted`` with the
     operator's overrides replayed onto it, and names what it ignored in one
     warning. ``ash merge`` runs the same steps on the config a shard recorded,
-    with its own ``source``, so a step added here applies to both.
+    with its own ``source``, so a step added here applies to both. After them,
+    ``_take_confined_references`` takes the references and rewrites the trusted
+    base holds for the values the sandbox, scanner and tool version steps copied
+    from it, so the record shows a value the operator's file read from the
+    environment as that file wrote it.
 
     The sandbox and plugin-module steps take the membership wording flags their
     superset signatures demand; they are computed here from the fail-closed
@@ -6958,10 +6957,17 @@ def confine_to_trusted_base(
         source=source,
         in_tree_documents=in_tree_documents,
     )
-    confine_scanner_config_files(
-        config, trusted, operator_overrides, files, source=source
-    )
-    confine_tool_versions(config, trusted, operator_overrides, files, source=source)
+    decided = [
+        *confine_scanner_config_files(
+            config, trusted, operator_overrides, files, source=source
+        ),
+        *confine_tool_versions(
+            config, trusted, operator_overrides, files, source=source
+        ),
+    ]
+    # What the two steps above copied from the trusted base is described by the
+    # trusted base's references and rewrites there, as resolve_config does.
+    _take_confined_references(config, trusted, (), files, decided)
 
 
 def _operator_paths(
