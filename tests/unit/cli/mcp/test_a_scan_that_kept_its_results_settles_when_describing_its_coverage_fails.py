@@ -91,6 +91,9 @@ HOLD_SECONDS = 30.0
 # judged threshold, so a close that carries none leaves this one in place; it is not
 # the registry's default, so a close that wrote a threshold of its own shows.
 REGISTERED_THRESHOLD = "LOW"
+#: The threshold a planted judge returns: not the registered one, so a close that
+#: kept the judged threshold shows.
+JUDGED_THRESHOLD = "HIGH"
 
 EXIT_REASONS = ras.ScanIncompleteness(
     scanners=(("bandit", "ERROR"),), observed=(("bandit", "ERROR"),)
@@ -329,6 +332,24 @@ class _AnErrorWhoseMessageCannotBeShown(Exception):
         raise RuntimeError("a planted failure making the message")
 
 
+class _AnExitWhoseResultsCannotBeRead(ras.ScanIncompleteExit):
+    """An exit for incomplete coverage whose ``results`` raises when it is read; each
+    read is recorded in ``reads``."""
+
+    def __init__(self, incompleteness: Any, reads: List[str]) -> None:
+        self._reads = reads
+        super().__init__(incompleteness, AshAggregatedResults())
+
+    @property
+    def results(self) -> Any:
+        self._reads.append("results")
+        raise RuntimeError("a planted failure reading the exit's results")
+
+    @results.setter
+    def results(self, value: Any) -> None:
+        return None
+
+
 #: Exit reasons with one row that cannot be read between rows that can, each with the
 #: payload key the rows are reported under and what the fallback must name there. The
 #: row costs only itself: it is stored as ``unknown`` (an observed status that is not a
@@ -540,6 +561,140 @@ async def test_an_exit_whose_threshold_alone_cannot_be_judged_keeps_its_assessed
 
 
 @pytest.mark.asyncio
+async def test_an_exit_whose_payload_alone_cannot_be_built_keeps_its_assessed_coverage(
+    tmp_path, monkeypatch
+):
+    """The exit's ``to_payload`` raises; the coverage assessed from the results names a
+    gap (checkov) and the judged threshold can be read. The payload is read on its own,
+    so the entry keeps the assessed coverage and the judged threshold. Fails before the
+    fix: the whole close fell back to the gap built from the exit's fields (bandit) with
+    no threshold, so the entry kept the one it was registered with."""
+    assessed = _an_assessed_gap()
+    exit_results = AshAggregatedResults()
+    payload_reads: List[Any] = []
+    assessments: List[Any] = []
+    judged: List[Any] = []
+
+    def a_payload_that_cannot_be_built(this: Any) -> Any:
+        payload_reads.append(this)
+        raise RuntimeError("a planted failure while describing the coverage")
+
+    def an_assessment_that_names_a_gap(results: Any) -> Any:
+        assessments.append(results)
+        return True, assessed
+
+    def a_judge(results: Any) -> str:
+        judged.append(results)
+        return JUDGED_THRESHOLD
+
+    monkeypatch.setattr(
+        ras.ScanIncompleteness, "to_payload", a_payload_that_cannot_be_built
+    )
+    monkeypatch.setattr(
+        "automated_security_helper.core.resource_management.scan_tracking.assess_coverage",
+        an_assessment_that_names_a_gap,
+    )
+    monkeypatch.setattr(mcp_tools, "_judged_threshold", a_judge)
+
+    def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
+        raise ras.ScanIncompleteExit(EXIT_REASONS, exit_results)
+
+    entry, drops, restores = await _run(
+        tmp_path, monkeypatch, a_scan_that_exits_incomplete
+    )
+
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    assert entry.coverage == assessed, entry.coverage
+    assert entry.severity_threshold == JUDGED_THRESHOLD, entry.severity_threshold
+    assert payload_reads == [EXIT_REASONS], payload_reads
+    assert len(assessments) == 1 and assessments[0] is exit_results, assessments
+    assert len(judged) == 1 and judged[0] is exit_results, judged
+    assert len(drops) == 1 and restores == [], (drops, restores)
+
+
+@pytest.mark.asyncio
+async def test_an_exit_whose_payload_cannot_be_built_keeps_its_judged_threshold(
+    tmp_path, monkeypatch
+):
+    """The exit's ``to_payload`` raises and the coverage assessed from the results names
+    no gap, so the gap is the one the exit's own fields name (bandit), and the judged
+    threshold, which can be read, is kept. Fails before the fix on the threshold: the
+    whole close fell back to that gap with no threshold, so the entry kept the one it
+    was registered with."""
+    no_gap = ras.ScanIncompleteness().to_payload()
+    assert not coverage_has_gap(no_gap), "control: the assessed coverage names a gap"
+    exit_results = AshAggregatedResults()
+    named_by_the_exit = mcp_tools._gap_named_by_the_exit(
+        ras.ScanIncompleteExit(EXIT_REASONS, exit_results)
+    )
+    payload_reads: List[Any] = []
+    assessments: List[Any] = []
+    judged: List[Any] = []
+
+    def a_payload_that_cannot_be_built(this: Any) -> Any:
+        payload_reads.append(this)
+        raise RuntimeError("a planted failure while describing the coverage")
+
+    def an_assessment_that_names_no_gap(results: Any) -> Any:
+        assessments.append(results)
+        return False, no_gap
+
+    def a_judge(results: Any) -> str:
+        judged.append(results)
+        return JUDGED_THRESHOLD
+
+    monkeypatch.setattr(
+        ras.ScanIncompleteness, "to_payload", a_payload_that_cannot_be_built
+    )
+    monkeypatch.setattr(
+        "automated_security_helper.core.resource_management.scan_tracking.assess_coverage",
+        an_assessment_that_names_no_gap,
+    )
+    monkeypatch.setattr(mcp_tools, "_judged_threshold", a_judge)
+
+    def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
+        raise ras.ScanIncompleteExit(EXIT_REASONS, exit_results)
+
+    entry, drops, restores = await _run(
+        tmp_path, monkeypatch, a_scan_that_exits_incomplete
+    )
+
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    assert entry.coverage == named_by_the_exit, entry.coverage
+    assert entry.severity_threshold == JUDGED_THRESHOLD, entry.severity_threshold
+    assert payload_reads == [EXIT_REASONS], payload_reads
+    assert len(assessments) == 1 and assessments[0] is exit_results, assessments
+    assert len(judged) == 1 and judged[0] is exit_results, judged
+    assert len(drops) == 1 and restores == [], (drops, restores)
+
+
+@pytest.mark.asyncio
+async def test_an_exit_whose_results_cannot_be_read_is_closed_through_the_fallback(
+    tmp_path, monkeypatch
+):
+    """The exit's ``results`` raises when it is read. The assessment reads it under its
+    own guard, and the read made to judge the threshold reaches the guard of
+    ``_close_for``, which closes the scan as incomplete with the gap the exit's own
+    fields name and no threshold, so the entry keeps the one it was registered with,
+    and the previous results are dropped."""
+    reads: List[str] = []
+
+    def a_scan_that_exits_incomplete(*args: Any, **kwargs: Any) -> Any:
+        raise _AnExitWhoseResultsCannotBeRead(EXIT_REASONS, reads)
+
+    entry, drops, restores = await _run(
+        tmp_path, monkeypatch, a_scan_that_exits_incomplete
+    )
+
+    assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
+    _assert_the_gap_is_the_exits_rows(entry.coverage)
+    assert entry.severity_threshold == REGISTERED_THRESHOLD, entry.severity_threshold
+    # Read twice: by the assessment, whose guard catches it, and for the threshold.
+    assert reads == ["results", "results"], reads
+    assert len(drops) == 1 and restores == [], (drops, restores)
+
+
+@pytest.mark.asyncio
 async def test_a_return_whose_severity_threshold_cannot_be_judged(
     tmp_path, monkeypatch
 ):
@@ -682,17 +837,28 @@ async def test_a_history_discard_that_raises_still_puts_the_previous_results_bac
 ):
     """A scan whose thread did not keep its results (its cancel event was set) has its
     history record discarded and its previous results put back. The record's removal
-    fails with an error whose message cannot be made, so the history helper's own
-    handler, which formats that message, raises out of the helper. The discard is
-    guarded on its own, so the previous results are put back all the same. Fails before
-    the fix: the raise skipped the restore, which shared the discard's ``try``, and the
-    previous results stayed set aside."""
+    fails with an error whose message cannot be made. The history helper renders that
+    message with ``error_text``, so it returns instead of raising, and the previous
+    results are put back. Fails before the fix: the helper's own handler formatted the
+    message with a plain f-string, which raised out of the helper; the guard at the call
+    put the previous results back all the same."""
     from automated_security_helper.utils import scan_history
 
+    removals: List[Tuple[Any, Any]] = []
+    discards: List[str] = []
+    real_discard_history_record = ras.discard_history_record
+
     def a_removal_that_fails(*args: Any, **kwargs: Any) -> bool:
+        removals.append((args, kwargs))
         raise _AnErrorWhoseMessageCannotBeShown
 
+    def a_discard_that_is_recorded(results: Any, output_dir: Path) -> None:
+        discards.append("called")
+        real_discard_history_record(results, output_dir)
+        discards.append("returned")
+
     monkeypatch.setattr(scan_history, "discard_run_record", a_removal_that_fails)
+    monkeypatch.setattr(ras, "discard_history_record", a_discard_that_is_recorded)
 
     def a_scan_that_returns_its_results(*args: Any, **kwargs: Any) -> Any:
         return AshAggregatedResults()
@@ -705,6 +871,43 @@ async def test_a_history_discard_that_raises_still_puts_the_previous_results_bac
     )
 
     assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
+    assert len(removals) == 1, removals
+    assert discards == ["called", "returned"], discards
+    assert drops == [] and len(restores) == 1, (drops, restores)
+
+
+@pytest.mark.asyncio
+async def test_a_history_helper_that_raises_still_puts_the_previous_results_back(
+    tmp_path, monkeypatch
+):
+    """The call that discards a taken-back scan's history record is guarded on its own,
+    as a backstop for a helper that raises after all: the helper raises here, and the
+    previous results are put back all the same. Fails without that guard: the raise
+    skipped the restore, which shared the discard's ``try``, and the previous results
+    stayed set aside."""
+    discards: List[Tuple[Any, Any]] = []
+
+    def a_discard_that_raises(results: Any, output_dir: Path) -> None:
+        discards.append((results, output_dir))
+        raise RuntimeError("a planted failure of the history discard")
+
+    monkeypatch.setattr(ras, "discard_history_record", a_discard_that_raises)
+
+    def a_scan_that_returns_its_results(*args: Any, **kwargs: Any) -> Any:
+        return AshAggregatedResults()
+
+    entry, drops, restores = await _run(
+        tmp_path,
+        monkeypatch,
+        a_scan_that_returns_its_results,
+        cancel_during_the_scan=True,
+    )
+
+    assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
+    assert len(discards) == 1, discards
+    results, output_dir = discards[0]
+    assert isinstance(results, AshAggregatedResults), discards
+    assert output_dir == tmp_path / "project" / ".ash" / "ash_output", discards
     assert drops == [] and len(restores) == 1, (drops, restores)
 
 

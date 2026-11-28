@@ -50,7 +50,6 @@ from automated_security_helper.core.resource_management.scan_registry import (
     ScanRegistry,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
-    assess_coverage,
     coverage_has_gap,
 )
 from automated_security_helper.interactions import run_ash_scan as ras
@@ -524,20 +523,24 @@ async def test_an_incomplete_close_that_fails_with_its_gap_is_made_again_with_th
 
 
 @pytest.mark.asyncio
-async def test_an_incomplete_close_that_fails_with_its_threshold_keeps_its_own_gap(
+async def test_an_incomplete_close_that_fails_with_its_threshold_is_made_again_with_the_unknown_gap(
     tmp_path, monkeypatch, caplog
 ):
-    """The registry refuses the judged threshold of a scan that exited for incomplete
-    coverage, not its gap: the runner's close and the close through the mark both
-    carry the threshold and raise. The next close keeps the scan's own gap (bandit)
-    and leaves the threshold out, so a client still reads what was incomplete, and the
-    entry keeps the threshold it was registered with. Fails before the fix: that close
-    carried the gap that names nothing, one unknown scanner, in place of the scan's
-    own."""
+    """The runner's close of a scan that exited for incomplete coverage and the close
+    through the mark both carry the judged severity threshold and raise. The close
+    after them is the one every failed close of an incomplete scan gets: the gap that
+    names nothing, and no threshold, so the entry ends incomplete and keeps the
+    threshold it was registered with. Fails before the fix: a close with the scan's own
+    gap and no threshold came first, and the stand-in, which refuses only a close that
+    carries a threshold, recorded it."""
     monkeypatch.setattr(_LAUNCHER, _a_scan_that_exits_incomplete)
-    monkeypatch.setattr(
-        mcp_tools, "_judged_threshold", lambda results: JUDGED_THRESHOLD
-    )
+    judged: list = []
+
+    def a_judge(results: Any) -> str:
+        judged.append(results)
+        return JUDGED_THRESHOLD
+
+    monkeypatch.setattr(mcp_tools, "_judged_threshold", a_judge)
     closes: list = []
     _refuse_every_close_that_carries_a_threshold(monkeypatch, closes)
     project = _project(tmp_path)
@@ -552,42 +555,46 @@ async def test_an_incomplete_close_that_fails_with_its_threshold_keeps_its_own_g
     entry = scan_registry.get_scan_registry().get_scan(scan_id)
 
     # The runner's close and the close through the mark carry the threshold; the one
-    # after them carries the scan's own gap and no threshold.
+    # after them carries the gap that names nothing and no threshold.
     assert closes == [
         (MCScanStatus.INCOMPLETE, True, JUDGED_THRESHOLD),
         (MCScanStatus.INCOMPLETE, True, JUDGED_THRESHOLD),
-        (MCScanStatus.INCOMPLETE, True, None),
+        (MCScanStatus.INCOMPLETE, False, None),
     ], closes
+    assert len(judged) == 1, judged
     assert entry is not None
     assert entry.status == MCScanStatus.INCOMPLETE, (entry.status, entry.error_message)
     assert entry.error_message is None, entry.error_message
-    assert entry.coverage == INCOMPLETE_REASONS.to_payload(), entry.coverage
+    assert _is_the_unknown_gap(entry.coverage), entry.coverage
     assert entry.severity_threshold != JUDGED_THRESHOLD, entry.severity_threshold
     said = [
         record.getMessage()
         for record in caplog.records
         if scan_id in record.getMessage()
     ]
-    assert any(
-        "without its severity threshold, which could not be recorded" in line
-        for line in said
-    ), said
-    assert not any("one unknown scanner" in line for line in said), said
+    assert any("one unknown scanner" in line for line in said), said
+    assert not any("without its severity threshold" in line for line in said), said
 
 
 @pytest.mark.asyncio
-async def test_a_completed_close_that_fails_with_its_threshold_keeps_its_coverage(
+async def test_a_completed_close_that_fails_with_its_threshold_is_made_again_with_the_status_alone(
     tmp_path, monkeypatch
 ):
-    """The completed counterpart: the registry refuses the judged threshold of a scan
-    that returned its results. The close after the two that carried the threshold
-    keeps the coverage assessed from the results and leaves the threshold out. Fails
-    before the fix: that close carried the status alone, so the entry had no
-    coverage."""
+    """The completed counterpart: the runner's close and the close through the mark of a
+    scan that returned its results both carry the judged severity threshold and raise.
+    The close after them is the one every failed close of a completed scan gets, with
+    the status alone, so the entry records no coverage and keeps the threshold it was
+    registered with. Fails before the fix: a close with the coverage and no threshold
+    came first, and the stand-in, which refuses only a close that carries a threshold,
+    recorded the coverage."""
     monkeypatch.setattr(_LAUNCHER, _a_scan_that_returns_its_results)
-    monkeypatch.setattr(
-        mcp_tools, "_judged_threshold", lambda results: JUDGED_THRESHOLD
-    )
+    judged: list = []
+
+    def a_judge(results: Any) -> str:
+        judged.append(results)
+        return JUDGED_THRESHOLD
+
+    monkeypatch.setattr(mcp_tools, "_judged_threshold", a_judge)
     closes: list = []
     _refuse_every_close_that_carries_a_threshold(monkeypatch, closes)
     project = _project(tmp_path)
@@ -604,7 +611,9 @@ async def test_a_completed_close_that_fails_with_its_threshold_keeps_its_coverag
         JUDGED_THRESHOLD,
         None,
     ], closes
+    assert len(judged) == 1, judged
     assert entry is not None
     assert entry.status == MCScanStatus.COMPLETED, (entry.status, entry.error_message)
     assert entry.error_message is None, entry.error_message
-    assert entry.coverage == assess_coverage(AshAggregatedResults())[1], entry.coverage
+    assert entry.coverage is None, entry.coverage
+    assert entry.severity_threshold != JUDGED_THRESHOLD, entry.severity_threshold
