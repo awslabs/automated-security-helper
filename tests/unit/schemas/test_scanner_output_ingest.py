@@ -1184,7 +1184,7 @@ def test_a_record_pickles_and_its_notification_is_a_warning_the_model_reads():
     _region(doc)["startLine"] = 0
     ingest_sarif(doc, record)
 
-    assert pickle.loads(pickle.dumps(record)).summary() == record.summary()
+    assert pickle.loads(pickle.dumps(record)).summary() == record.summary()  # nosec B301
     invocation = Invocation.model_validate(
         {
             "executionSuccessful": True,
