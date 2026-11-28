@@ -36,6 +36,11 @@ For every file under ``.github/workflows/``, read with ``tests/utils/github_acti
 Rules 1 and 2 also read the steps of the local composite actions under
 ``.github/actions/``, since a workflow can call one.
 
+A step's script is read as a shell reads it. Quotes come first, so a separator inside
+quotes ends no command; comments, backslash continuations and here-documents are read
+too. The script a shell runs with ``-c`` and the text of a here-document are read as
+scripts of their own, up to ``MAX_SHELL_DEPTH`` of them inside one another.
+
 How each rule is shown to fail
 ------------------------------
 * ``OLD_COPY`` is the workflow file as it was at the v3.7.1 release commit, its git
@@ -89,6 +94,9 @@ TAG_PROBES = ("v3", "v3.8.0", "v4.0.0-rc.1", "docs-preview", "release/1.0", "lat
 
 #: How many calls of local reusable workflows are followed.
 MAX_CALL_DEPTH = 4
+
+#: How many shell strings and here-documents are read inside one another.
+MAX_SHELL_DEPTH = 4
 
 #: ``.github/workflows/ash-repo-docs.yml`` as it was at the v3.7.1 release commit
 #: (af1206aff596f1288ad066828058b3011de2a998), and the git blob id of that file. A
@@ -227,8 +235,6 @@ class ReachedJob:
 
 # --------------------------------------------------------------------------- shell
 
-_SEPARATOR = re.compile(r"&&|\|\||[;|&]")
-_GROUPING = re.compile(r"[()`]")
 _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
 _GIT_OPTIONS_WITH_A_VALUE = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
@@ -284,26 +290,192 @@ def _logical_lines(script: str) -> list[str]:
     return lines
 
 
-def _words(segment: str) -> list[str]:
-    try:
-        return shlex.split(segment)
-    except ValueError:
-        return segment.split()
+#: A script reads as a list of tokens, in the order a shell meets them: a word with its
+#: quotes taken off, the end of a command, or the text of a here-document.
+_WORD = "word"
+_END = "end"
+_BODY = "body"
+_Token = tuple[str, str]
+_DOUBLE_QUOTE_ESCAPES = ('"', "\\", "$", "`", "\n")
 
 
-def _commands(script: str) -> list[list[str]]:
-    """Every command of a script as its words. A script a shell runs with -c is read too."""
+def _redirects(text: str, position: int) -> bool:
+    """Whether the ``&`` at ``position`` belongs to a redirection, as in ``2>&1``."""
+    following = text[position + 1 : position + 2]
+    previous = text[position - 1] if position else ""
+    return following != "&" and (previous in ("<", ">") or following == ">")
+
+
+def _is_separator(text: str, position: int) -> bool:
+    """Whether the character at ``position``, outside quotes, ends a command."""
+    char = text[position]
+    return char in ";|()`" or (char == "&" and not _redirects(text, position))
+
+
+def _read_word(
+    text: str, start: int, literal: frozenset[int]
+) -> tuple[str, int, int | None]:
+    """The word at ``start`` with its quotes taken off, and the position after it.
+
+    The third value is the position of a quote the text never closes, or None. A quote
+    at a position in ``literal`` is an ordinary character.
+    """
+    chars: list[str] = []
+    position = start
+    while position < len(text):
+        char = text[position]
+        if char in " \t\r\n" or _is_separator(text, position):
+            break
+        if char == "\\":
+            escaped = text[position + 1 : position + 2]
+            if escaped != "\n":
+                chars.append(escaped or char)
+            position += 2
+        elif char == "'" and position not in literal:
+            end = text.find("'", position + 1)
+            if end == -1:
+                return "".join(chars), len(text), position
+            chars.append(text[position + 1 : end])
+            position = end + 1
+        elif char == '"' and position not in literal:
+            opened = position
+            position += 1
+            while position < len(text) and text[position] != '"':
+                escaped = text[position + 1 : position + 2]
+                if text[position] == "\\" and escaped in _DOUBLE_QUOTE_ESCAPES:
+                    position += 1
+                    if escaped != "\n":
+                        chars.append(escaped)
+                else:
+                    chars.append(text[position])
+                position += 1
+            if position >= len(text):
+                return "".join(chars), position, opened
+            position += 1
+        else:
+            chars.append(char)
+            position += 1
+    return "".join(chars), position, None
+
+
+def _read_body(
+    text: str, start: int, delimiter: str, strip_tabs: bool
+) -> tuple[str, int]:
+    """The lines of a here-document from ``start``, up to the line of its delimiter."""
+    lines: list[str] = []
+    position = start
+    while position < len(text):
+        end = text.find("\n", position)
+        if end == -1:
+            end = len(text)
+        line = text[position:end]
+        position = end + 1
+        compared = line.rstrip("\r")
+        if (compared.lstrip("\t") if strip_tabs else compared) == delimiter:
+            break
+        lines.append(line)
+    return "\n".join(lines), min(position, len(text))
+
+
+def _scan(text: str, literal: frozenset[int]) -> tuple[list[_Token], int | None]:
+    """The tokens of ``text``, reading each quote before anything else.
+
+    The second value is the position of a quote the text never closes, or None.
+    """
+    tokens: list[_Token] = []
+    here_documents: list[tuple[str, bool]] = []
+    position = 0
+    while position < len(text):
+        char = text[position]
+        if char in " \t\r":
+            position += 1
+        elif text.startswith("\\\n", position):
+            position += 2
+        elif char == "\n":
+            tokens.append((_END, ""))
+            position += 1
+            for delimiter, strip_tabs in here_documents:
+                body, position = _read_body(text, position, delimiter, strip_tabs)
+                tokens.append((_BODY, body))
+            here_documents = []
+        elif char == "#":
+            end = text.find("\n", position)
+            position = len(text) if end == -1 else end
+        elif _is_separator(text, position):
+            tokens.append((_END, ""))
+            position += 1
+        elif text.startswith("<<", position) and not text.startswith("<<<", position):
+            strip_tabs = text.startswith("<<-", position)
+            position += 3 if strip_tabs else 2
+            while text[position : position + 1] in (" ", "\t"):
+                position += 1
+            delimiter, position, opened = _read_word(text, position, literal)
+            if opened is not None:
+                return tokens, opened
+            if delimiter:
+                here_documents.append((delimiter, strip_tabs))
+        else:
+            word, position, opened = _read_word(text, position, literal)
+            if opened is not None:
+                return tokens, opened
+            tokens.append((_WORD, word))
+    return tokens, None
+
+
+def _tokens(text: str) -> list[_Token]:
+    """The tokens of ``text``. A quote it never closes is an ordinary character."""
+    literal: frozenset[int] = frozenset()
+    while True:
+        tokens, opened = _scan(text, literal)
+        if opened is None:
+            return tokens
+        literal |= {opened}
+
+
+def _shell_script(words: list[str]) -> str | None:
+    """The script a command hands to a shell with ``-c``, or None.
+
+    It is the first word after the shell's options, when one of them is ``-c`` or a
+    cluster such as ``-ec``.
+    """
+    for index, word in enumerate(words):
+        if Path(word).name not in _SHELLS:
+            continue
+        position = index + 1
+        takes_a_script = False
+        while position < len(words) and words[position][:1] in ("-", "+"):
+            option = words[position]
+            takes_a_script = takes_a_script or _short_options_include(option, "c")
+            position += 2 if option in ("-o", "+o") else 1
+        if takes_a_script and position < len(words):
+            return words[position]
+    return None
+
+
+def _commands(script: str, depth: int = 0) -> list[list[str]]:
+    """Every command of a script as its words.
+
+    Quotes are read before separators, so a separator inside quotes ends nothing. The
+    script a shell runs with -c and the text of a here-document are read as scripts of
+    their own, up to MAX_SHELL_DEPTH of them inside one another.
+    """
     commands: list[list[str]] = []
-    for line in _logical_lines(script):
-        for segment in _SEPARATOR.split(line):
-            words = _words(_GROUPING.sub(" ", segment))
-            if not words:
-                continue
+    scripts: list[str] = []
+    words: list[str] = []
+    for kind, text in [*_tokens(script), (_END, "")]:
+        if kind == _WORD:
+            words.append(text)
+        elif kind == _BODY:
+            scripts.append(text)
+        elif words:
             commands.append(words)
-            if "-c" in words and any(Path(word).name in _SHELLS for word in words):
-                position = words.index("-c") + 1
-                if position < len(words):
-                    commands.extend(_commands(words[position]))
+            handed_over = _shell_script(words)
+            if handed_over is not None:
+                scripts.append(handed_over)
+            words = []
+    if depth < MAX_SHELL_DEPTH:
+        for nested in scripts:
+            commands += _commands(nested, depth + 1)
     return commands
 
 
@@ -843,6 +1015,13 @@ TAG_UNREACHABLE_CASES = {
 }
 
 
+def _nested(depth: int, script: str) -> str:
+    """``script`` handed to a shell with -c, ``depth`` times over, each time quoted."""
+    for _ in range(depth):
+        script = f"sh -c {shlex.quote(script)}"
+    return script
+
+
 def _call_tree(
     root: Path,
     caller_on: dict[str, Any],
@@ -934,6 +1113,12 @@ class TestEachRuleFlagsItsOwnShape:
 
     @pytest.mark.parametrize("command", _cases(FORCE_CASES))
     def test_a_forced_push_of_gh_pages_breaks_that_rule_alone(self, tmp_path, command):
+        workflow = _plant(tmp_path, _workflow(ON_MAIN, command, permissions=READ))
+        assert _rules_broken(workflow, tmp_path) == {NO_FORCE_PUSH}
+
+    @pytest.mark.parametrize("depth", range(1, MAX_SHELL_DEPTH + 1))
+    def test_a_script_inside_nested_shell_strings_is_read(self, tmp_path, depth):
+        command = _nested(depth, "cd site && git push --force origin gh-pages")
         workflow = _plant(tmp_path, _workflow(ON_MAIN, command, permissions=READ))
         assert _rules_broken(workflow, tmp_path) == {NO_FORCE_PUSH}
 
