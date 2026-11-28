@@ -1571,6 +1571,10 @@ def refusal_text(
     not a file. That is the state ``refresh --drop-missing`` leaves: the entry
     dropped, the suppressions still in the config. Without ``source_dir``
     every suppression that names one file gets the command.
+
+    A path is quoted as written, ``'...'``. The sink that prints the message
+    escapes a control character in it (``utils/terminal_text``); a repr had
+    escaped it already, and the sink then doubled that escape's backslash.
     """
     lines = [
         (
@@ -1589,7 +1593,7 @@ def refusal_text(
         # command it names cannot work for one; say what can.
         if any(character in path for character in "*?[") or path.endswith("/"):
             lines.append(
-                f"  a symbol suppression must name one file; {path!r} is a "
+                f"  a symbol suppression must name one file; '{path}' is a "
                 "pattern or a directory. Name the file that holds the "
                 "definition, locking each such file with its own entry."
             )
@@ -1597,7 +1601,7 @@ def refusal_text(
         if source_dir is not None and file_is_gone(source_dir, path):
             rule = getattr(suppression, "rule_id", None) or "(any rule)"
             lines.append(
-                f"  {path!r} no longer exists, so its suppression ({rule} in "
+                f"  '{path}' no longer exists, so its suppression ({rule} in "
                 f"{suppression.symbol}) cannot be locked: remove it from the config."
             )
             continue

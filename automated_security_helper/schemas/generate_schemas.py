@@ -158,7 +158,10 @@ class ConfigFileJsonSchema(ShippedDefaultsJsonSchema):
     constraint (a pattern, a length) does not, because the reference is not the
     value the constraint describes, so it admits the reference beside the
     constrained string. A ``Decimal`` field is described as a number or a numeric
-    string, so it takes the reference beside that.
+    string, so it takes the reference beside that. The numeric string's pattern is
+    pydantic's own (``build_decimal_pattern``): from pydantic 2.14 its decimal
+    schema carries no pattern by default, and the string branch then accepted any
+    text, which the loader refuses.
 
     The workspace policy file resolves no reference (``ash_workspace_config``),
     so its schema is pydantic's own.
@@ -187,6 +190,9 @@ class ConfigFileJsonSchema(ShippedDefaultsJsonSchema):
 
     def decimal_schema(self, schema: Any) -> Any:
         return _with_env_reference(super().decimal_schema(schema))
+
+    def get_decimal_pattern(self, schema: Any) -> str | None:
+        return self.build_decimal_pattern(schema)
 
     def dict_schema(self, schema: Any) -> Any:
         return _keep_property_names(self, schema, super().dict_schema(schema))

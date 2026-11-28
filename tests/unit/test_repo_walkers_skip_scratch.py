@@ -292,6 +292,15 @@ _EXEMPT = {
         "a directory of ASH's copies under the scanner's results directory, which "
         "the test puts under tmp_path."
     ),
+    (
+        "tests/unit/utils/test_ast_digest.py",
+        "test_the_binding_exposes_what_the_digest_reads",
+        "tree.root_node",
+    ): (
+        "A tree-sitter Node.walk(): a cursor over the syntax tree that "
+        "symbol_spans._parse built in memory from a byte literal. It reads no "
+        "directory."
+    ),
 }
 
 _CONVERTER_OUTPUT = (
