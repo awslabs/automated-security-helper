@@ -352,17 +352,18 @@ def _rescan_key(result: Any) -> Optional[Tuple[Any, ...]]:
     The whole region, not the fingerprint's line: one fingerprint hides every
     match of its rule on the line, and each match is a finding.
 
-    This reads the tool's raw document, before the shared reading step. A result
-    that is not an object, or whose locations, region or uri has a type that
-    cannot be read (or hashed), has no key; it is neither compared nor dropped
-    here, and the reading step reads it as it reads any result when there is no
+    This reads the tool's raw document, before the shared reading step. The
+    locations, the region and the artifact location are read as absent when they
+    are empty, of whatever type (null, ``""``, ``[]``, ``{}``, ``0``, ``false``),
+    so a finding both runs report with such a part has the same key in both. A
+    result that is not an object, or whose locations, region or uri has a type
+    that cannot be read (or hashed), has no key; it is neither compared nor
+    dropped here, and the reading step reads it as it reads any result without a
     ``.gitleaksignore``.
     """
     if not isinstance(result, dict):
         return None
-    locations = result.get("locations")
-    if locations is None:
-        locations = []
+    locations = result.get("locations") or []
     if not isinstance(locations, list):
         return None
     first = locations[0] if locations else {}
@@ -372,10 +373,8 @@ def _rescan_key(result: Any) -> Optional[Tuple[Any, ...]]:
     physical = {} if physical is None else physical
     if not isinstance(physical, dict):
         return None
-    region = physical.get("region")
-    region = {} if region is None else region
-    artifact = physical.get("artifactLocation")
-    artifact = {} if artifact is None else artifact
+    region = physical.get("region") or {}
+    artifact = physical.get("artifactLocation") or {}
     if not isinstance(region, dict) or not isinstance(artifact, dict):
         return None
     key = (
@@ -1440,7 +1439,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         # This reads the tool's raw document, before the reading step. A document
         # of another shape is left to that step, which refuses it, and a result
         # that cannot be keyed is not compared: the step reads it as it reads any
-        # result when there is no .gitleaksignore.
+        # other result.
         if not isinstance(raw, dict):
             return
         runs = raw.get("runs")
@@ -1496,8 +1495,8 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
                         self._respell_rescan_result(result, scan_path)
                         result_key = key(result)
                         if result_key is None:
-                            # Not comparable: kept, for the reading step to read
-                            # as it reads any result.
+                            # No key to compare: the result is appended, and the
+                            # reading step reads it as it reads any other result.
                             results.append(result)
                         elif result_key not in seen:
                             seen.add(result_key)
