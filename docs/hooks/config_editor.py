@@ -539,6 +539,7 @@ BLOCK_SCHEMA: dict[str, Any] = {
                 "prefix",
                 "allowlist",
                 "refusedNames",
+                "readableNames",
                 "secretSuffixes",
                 "vectors",
                 "referencePattern",
@@ -548,6 +549,7 @@ BLOCK_SCHEMA: dict[str, Any] = {
                 "prefix": _NON_EMPTY,
                 "allowlist": {"type": "array", "items": _NON_EMPTY},
                 "refusedNames": {"type": "array", "items": _NON_EMPTY},
+                "readableNames": {"type": "array", "items": _NON_EMPTY},
                 "secretSuffixes": {"type": "array", "items": _NON_EMPTY},
                 "vectors": {
                     "type": "array",
@@ -1399,6 +1401,7 @@ def environment_rule() -> dict[str, Any]:
         "prefix": constants.ASH_CONFIG_ENV_VAR_PREFIX,
         "allowlist": list(constants.ASH_CONFIG_ENV_VAR_ALLOWLIST),
         "refusedNames": list(constants.ASH_CONFIG_ENV_VAR_SECRET_NAMES),
+        "readableNames": list(constants.ASH_CONFIG_ENV_VAR_READABLE_NAMES),
         "secretSuffixes": list(constants.ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES),
         "vectors": [
             [name, bool(constants.is_refused_config_environment_name(name))]
