@@ -6,11 +6,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  Float,
   Reference,
   ScalarError,
   Timestamp,
+  TypedMap,
   constructTagged,
+  keyIdentity,
+  keyKind,
+  makeMap,
   matchReference,
+  numberKind,
   plainSafe,
   plainSyntaxOk,
   quoteDouble,
@@ -283,6 +289,79 @@ test('the length of a text in UTF-8 bytes is counted without encoding it', () =>
   assert.equal(utf8Length('é'), 2);
   assert.equal(utf8Length('€'), 3);
   assert.equal(utf8Length(String.fromCodePoint(0x1f600)), 4);
+});
+
+test('a number is an integer or a float as the writer writes it', () => {
+  assert.equal(numberKind(5), 'int');
+  assert.equal(numberKind(-3), 'int');
+  assert.equal(numberKind(10n), 'int');
+  assert.equal(numberKind(1.5), 'float');
+  assert.equal(numberKind(-0), 'float');
+  assert.equal(numberKind(NaN), 'float');
+  assert.equal(numberKind(Infinity), 'float');
+  assert.equal(numberKind(2 ** 53), 'float');
+  assert.equal(numberKind(new Float(1)), 'float');
+  assert.equal(numberKind('1'), null);
+  assert.equal(numberKind(true), null);
+  assert.equal(numberKind(null), null);
+  assert.equal(String(new Float(1.5)), '1.5');
+  assert.throws(() => {
+    new Float(1).value = 2;
+  }, TypeError);
+});
+
+test('a key has the type ASH gives it, and two keys are one when Python makes them one', () => {
+  const kinds = [
+    ['a', 'str'],
+    [null, 'null'],
+    [true, 'bool'],
+    [1, 'int'],
+    [10n, 'int'],
+    [new Float(1), 'float'],
+    [1.5, 'float'],
+    [new Timestamp('date', '2026-12-31'), 'timestamp'],
+    [new Reference('${A}', false), 'reference'],
+  ];
+  for (const [key, kind] of kinds) {
+    assert.equal(keyKind(key), kind, String(key));
+  }
+  assert.throws(() => keyKind({}), TypeError);
+  // True is 1 is 1.0, and a whole float is the integer of that value.
+  assert.equal(keyIdentity(true), keyIdentity(1));
+  assert.equal(keyIdentity(1), keyIdentity(new Float(1)));
+  assert.equal(keyIdentity(new Float(-0)), keyIdentity(0));
+  assert.equal(keyIdentity(10n ** 22n), keyIdentity(new Float(1e22)));
+  assert.equal(keyIdentity(false), keyIdentity(0));
+  // A string is never a number, a boolean or null, and a reference is not its text.
+  const apart = ['1', 1.5, 2, null, 'null', 'true', new Reference('${A}', false), '${A}'];
+  assert.equal(new Set(apart.map(keyIdentity)).size, apart.length);
+  assert.equal(keyIdentity(new Reference('${A}', true)), keyIdentity(new Reference('${A}', false)));
+  assert.equal(keyIdentity(new Timestamp('date', '2026-12-31')), keyIdentity(new Timestamp('date', '2026-12-31')));
+  assert.notEqual(
+    keyIdentity(new Timestamp('date', '2026-12-31')),
+    keyIdentity(new Timestamp('datetime', '2026-12-31T00:00:00')),
+  );
+});
+
+test('a mapping is a plain object when every key is a string, and a typed map when one is not', () => {
+  const plain = makeMap([['a', 1], ['b', 2]]);
+  assert.deepStrictEqual(plain, { a: 1, b: 2 });
+  assert.equal(Object.getPrototypeOf(plain), Object.prototype);
+  const typed = makeMap([[1, 'x'], ['1', 'y']]);
+  assert.ok(typed instanceof TypedMap);
+  assert.deepStrictEqual(typed.pairs, [[1, 'x'], ['1', 'y']]);
+  assert.ok(makeMap([[null, 'x']]) instanceof TypedMap);
+  assert.deepStrictEqual(makeMap([]), {});
+  // A key written again keeps its place and takes the last value; yes and true are one key.
+  assert.deepStrictEqual(makeMap([['a', 1], ['b', 2], ['a', 3]]), { a: 3, b: 2 });
+  assert.deepStrictEqual(makeMap([[true, 'a'], ['k', 'x'], [1, 'b']]).pairs, [[true, 'b'], ['k', 'x']]);
+  assert.deepStrictEqual(makeMap([[1, 'a'], [new Float(1), 'b']]).pairs, [[1, 'b']]);
+  const proto = makeMap([['__proto__', 1], ['b', 2]]);
+  assert.equal(Object.keys(proto).length, 2);
+  assert.equal(Object.getPrototypeOf(proto), Object.prototype);
+  assert.throws(() => {
+    makeMap([[1, 'x']]).pairs = [];
+  }, TypeError);
 });
 
 test('a reference and a date are values that cannot be changed', () => {

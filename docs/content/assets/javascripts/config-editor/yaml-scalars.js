@@ -34,8 +34,149 @@ export class Timestamp {
   }
 }
 
+/**
+ * A YAML float. A JavaScript number cannot tell 1.0 from the integer 1, so the typed
+ * tree the reader builds (`typed` of a reading) keeps every float in one of these,
+ * and the writer writes one with a dot.
+ */
+export class Float {
+  constructor(value) {
+    this.value = value;
+    Object.freeze(this);
+  }
+
+  toString() {
+    return String(this.value);
+  }
+}
+
+/**
+ * A mapping with a key that is not a plain string, as its pairs `[key, value]` in
+ * the order written. A key is whatever ASH's loader builds for it: a string, an
+ * integer (a number or a BigInt), a Float, a boolean, null, a Timestamp or a
+ * Reference. The key 1 and the key "1" are two keys, and `yes` and `true` are one.
+ * A mapping whose keys are all strings is a plain object, never one of these.
+ */
+export class TypedMap {
+  constructor(pairs) {
+    this.pairs = pairs;
+    Object.freeze(this);
+  }
+}
+
 /** A scalar the loader cannot build, such as a date that does not exist. */
 export class ScalarError extends Error {}
+
+/**
+ * "int" or "float" for a number as the writer writes it: a safe integer is an
+ * integer, and anything else (a fraction, -0, a number beyond 2**53, NaN, an
+ * infinity) is a float; a BigInt is an integer and a Float is a float. Null for
+ * what is not a number.
+ */
+export function numberKind(value) {
+  if (value instanceof Float) {
+    return "float";
+  }
+  if (typeof value === "bigint") {
+    return "int";
+  }
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && !Object.is(value, -0) ? "int" : "float";
+  }
+  return null;
+}
+
+/** The type of a mapping key: str, null, bool, int, float, timestamp or reference. */
+export function keyKind(key) {
+  if (key === null) {
+    return "null";
+  }
+  if (typeof key === "string") {
+    return "str";
+  }
+  if (typeof key === "boolean") {
+    return "bool";
+  }
+  const number = numberKind(key);
+  if (number !== null) {
+    return number;
+  }
+  if (key instanceof Timestamp) {
+    return "timestamp";
+  }
+  if (key instanceof Reference) {
+    return "reference";
+  }
+  throw new TypeError("the value is not a mapping key");
+}
+
+function numberText(key) {
+  const number = key instanceof Float ? key.value : key;
+  if (typeof number === "bigint") {
+    return number.toString();
+  }
+  if (Number.isNaN(number)) {
+    return "NaN";
+  }
+  // A whole float is the same key as the integer of that value, as in Python.
+  return Number.isInteger(number) ? BigInt(number).toString() : String(number);
+}
+
+/**
+ * What makes two keys one key to ASH's loader, which builds Python dictionaries:
+ * True is 1 is 1.0, a string is never a number, and a reference is not the text
+ * it is written with.
+ */
+export function keyIdentity(key) {
+  switch (keyKind(key)) {
+    case "null":
+      return "null";
+    case "bool":
+      return `n:${key ? 1 : 0}`;
+    case "int":
+    case "float":
+      return `n:${numberText(key)}`;
+    case "timestamp":
+      return `t:${key.iso}`;
+    case "reference":
+      return `r:${key.text}`;
+    default:
+      return `s:${key}`;
+  }
+}
+
+/**
+ * The mapping for these pairs, as ASH's loader builds it: a key written again keeps
+ * its first place and gets the last value, and the mapping is a plain object when
+ * every key is a string and a TypedMap when one is not.
+ */
+export function makeMap(pairs) {
+  const places = new Map();
+  const merged = [];
+  for (const [key, value] of pairs) {
+    const identity = keyIdentity(key);
+    const at = places.get(identity);
+    if (at === undefined) {
+      places.set(identity, merged.length);
+      merged.push([key, value]);
+    } else {
+      merged[at] = [merged[at][0], value];
+    }
+  }
+  if (merged.every(([key]) => typeof key === "string")) {
+    const object = {};
+    for (const [key, value] of merged) {
+      Object.defineProperty(object, key, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return object;
+  }
+  return new TypedMap(merged);
+}
 
 const RESOLVERS = {
   bool: /^(?:yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$/,
@@ -94,20 +235,89 @@ export function matchReference(text) {
   return { name: match[1], colon: match[2] === ":", head: match[0] };
 }
 
-function parseDigits(digits, radix) {
-  if (digits === "") {
+// What Python's int() and float() take, which is what PyYAML's constructors call for
+// text that an explicit !!int or !!float tag names. Both drop the whitespace Python's
+// str.isspace() knows (Unicode White_Space and U+001C to U+001F) from each end of the
+// text, and read any Unicode decimal digit as the digit it stands for. A decimal digit
+// of a Unicode version newer than the Python that runs ASH is a limit of this port.
+const PYTHON_SPACE_ENDS = /^[\p{White_Space}\x1c-\x1f]+|[\p{White_Space}\x1c-\x1f]+$/gu;
+const DECIMAL_DIGIT = /\p{Nd}/u;
+const DECIMAL_DIGITS = /\p{Nd}/gu;
+const INT_PREFIXES = { 2: "b", 8: "o", 16: "x" };
+
+// Decimal digits are encoded in runs of ten that start at zero, so the value of one is
+// its distance from the start of its run, modulo ten.
+function decimalDigitValue(character) {
+  const code = character.codePointAt(0);
+  let start = code;
+  while (start > 0 && DECIMAL_DIGIT.test(String.fromCodePoint(start - 1))) {
+    start -= 1;
+  }
+  return (code - start) % 10;
+}
+
+function pythonText(text) {
+  return text
+    .replace(PYTHON_SPACE_ENDS, "")
+    .replace(DECIMAL_DIGITS, (character) =>
+      character.codePointAt(0) < 0x80 ? character : String(decimalDigitValue(character)),
+    );
+}
+
+function digitValue(character) {
+  const code = character.charCodeAt(0);
+  if (code >= 0x30 && code <= 0x39) {
+    return code - 0x30;
+  }
+  if (code >= 0x61 && code <= 0x7a) {
+    return code - 0x61 + 10;
+  }
+  return code >= 0x41 && code <= 0x5a ? code - 0x41 + 10 : -1;
+}
+
+// Python's int(text, base): spaces round the text, an optional sign, and for the bases
+// 2, 8 and 16 an optional 0b, 0o or 0x before the digits.
+function pythonInt(text, base) {
+  let rest = pythonText(text);
+  let negative = false;
+  if (rest[0] === "+" || rest[0] === "-") {
+    negative = rest[0] === "-";
+    rest = rest.slice(1);
+  }
+  const prefix = INT_PREFIXES[base];
+  if (prefix !== undefined && rest[0] === "0" && rest.length > 1 && rest[1].toLowerCase() === prefix) {
+    rest = rest.slice(2);
+  }
+  if (rest === "") {
     throw new ScalarError("an integer needs at least one digit");
   }
   let result = 0n;
-  const big = BigInt(radix);
-  for (const character of digits) {
-    const digit = parseInt(character, 36);
-    if (Number.isNaN(digit) || digit >= radix) {
-      throw new ScalarError(`"${character}" is not a base ${radix} digit`);
+  const big = BigInt(base);
+  for (const character of rest) {
+    const digit = digitValue(character);
+    if (digit < 0 || digit >= base) {
+      throw new ScalarError(`"${character}" is not a base ${base} digit`);
     }
     result = result * big + BigInt(digit);
   }
-  return result;
+  return negative ? -result : result;
+}
+
+const PYTHON_FLOAT =
+  /^([+-]?)(?:(inf(?:inity)?)|(nan)|((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?))$/i;
+
+// Python's float(text): spaces round the text, an optional sign, then a decimal number
+// with an optional dot and exponent, or inf, infinity or nan in any letter case.
+function pythonFloat(text) {
+  const match = PYTHON_FLOAT.exec(pythonText(text));
+  if (match === null) {
+    throw new ScalarError(`could not convert "${text}" to a float`);
+  }
+  const sign = match[1] === "-" ? -1 : 1;
+  if (match[2] !== undefined) {
+    return sign * Infinity;
+  }
+  return match[3] !== undefined ? NaN : sign * Number(match[4]);
 }
 
 function integerResult(big) {
@@ -117,15 +327,13 @@ function integerResult(big) {
   return { type: "int", value: exact ? number : big, digits: big.toString(), exact };
 }
 
+// PyYAML's construct_yaml_int, which an implicit integer and an explicit !!int share.
 function constructInt(text) {
   let value = text.replace(/_/g, "");
   if (value === "") {
     throw new ScalarError("an integer needs at least one digit");
   }
-  let negative = false;
-  if (value[0] === "-") {
-    negative = true;
-  }
+  const negative = value[0] === "-";
   if (value[0] === "+" || value[0] === "-") {
     value = value.slice(1);
   }
@@ -133,30 +341,31 @@ function constructInt(text) {
   if (value === "0") {
     big = 0n;
   } else if (value.startsWith("0b")) {
-    big = parseDigits(value.slice(2), 2);
+    big = pythonInt(value.slice(2), 2);
   } else if (value.startsWith("0x")) {
-    big = parseDigits(value.slice(2).toLowerCase(), 16);
+    big = pythonInt(value.slice(2), 16);
   } else if (value[0] === "0") {
-    big = parseDigits(value, 8);
+    big = pythonInt(value, 8);
   } else if (value.includes(":")) {
     let base = 1n;
     big = 0n;
     for (const part of value.split(":").reverse()) {
-      big += parseDigits(part, 10) * base;
+      big += pythonInt(part, 10) * base;
       base *= 60n;
     }
   } else {
-    big = parseDigits(value, 10);
+    big = pythonInt(value, 10);
   }
   return integerResult(negative ? -big : big);
 }
 
+// PyYAML's construct_yaml_float, which an implicit float and an explicit !!float share.
 function constructFloat(text) {
   let value = text.replace(/_/g, "").toLowerCase();
-  let sign = 1;
-  if (value[0] === "-") {
-    sign = -1;
+  if (value === "") {
+    throw new ScalarError("a float needs at least one character");
   }
+  const sign = value[0] === "-" ? -1 : 1;
   if (value[0] === "+" || value[0] === "-") {
     value = value.slice(1);
   }
@@ -171,14 +380,11 @@ function constructFloat(text) {
     let base = 1;
     number = 0;
     for (const part of value.split(":").reverse()) {
-      number += Number(part) * base;
+      number += pythonFloat(part) * base;
       base *= 60;
     }
   } else {
-    number = Number(value);
-  }
-  if (Number.isNaN(number)) {
-    throw new ScalarError(`could not convert "${text}" to a float`);
+    number = pythonFloat(value);
   }
   return { type: "float", value: sign * number };
 }
@@ -370,7 +576,9 @@ export function readingsDiffer(text) {
 }
 
 const INDICATORS = "-?:,[]{}#&*!|>'\"%@`";
-const FLOW_INDICATORS = ",[]{}";
+// Inside a flow collection PyYAML ends a plain scalar at a comma, a question mark and a
+// bracket or brace; in a block collection none of them ends one.
+const FLOW_INDICATORS = ",?[]{}";
 
 function isHighSurrogate(code) {
   return code >= 0xd800 && code <= 0xdbff;
