@@ -719,6 +719,36 @@ FORCE_CASES = {
     "over continued lines": "git push \\\n  --force \\\n  origin gh-pages",
     "in a subshell": "(cd site && git push --force origin gh-pages)",
     "in a shell string": "sh -c 'git push --force origin gh-pages'",
+    "two commands in a shell string": (
+        'bash -c "cd site && git push -f origin gh-pages"'
+    ),
+    "three commands in a shell string": (
+        "sh -c 'git add -A; git commit -m deploy; git push --force origin gh-pages'"
+    ),
+    "a + refspec in a shell string of two commands": (
+        "sh -c 'cd site && git push origin +HEAD:gh-pages'"
+    ),
+    "in a quoted script over several lines": (
+        'bash -c "\n  cd site\n  git push --force origin gh-pages\n"'
+    ),
+    "in a shell string inside a shell string": (
+        "bash -c \"sh -c 'cd site && git push --force origin gh-pages'\""
+    ),
+    "in a shell string run with combined options": (
+        'bash -ec "cd site && git push --force origin gh-pages"'
+    ),
+    "after a here-document with an apostrophe": (
+        "cat <<EOF > note.txt\ndon't panic\nEOF\ngit push --force origin 'gh-pages'"
+    ),
+    "in a script a shell reads from a here-document": (
+        "bash <<EOF\ncd site && git push --force origin gh-pages\nEOF"
+    ),
+    "beside comments with an apostrophe": (
+        "# don't wait\ngit push --force origin gh-pages  # it's the deploy"
+    ),
+    "with its output redirected": (
+        "git push --force origin gh-pages > push.log 2>&1 && echo done"
+    ),
     "to a destination the text does not name": (
         'git push --force origin "HEAD:${TARGET}"'
     ),
@@ -734,7 +764,8 @@ FORCING_PUBLISHER_CASES = {
     "ghp-import with clustered options": "ghp-import -pf site",
 }
 
-#: Each of these breaks no rule. The last two show that a comment is not a command.
+#: Each of these breaks no rule. The two comment cases show that a comment is not a
+#: command, and the last three that text inside quotes is not one either.
 CLEAN_CASES = {
     "the versioned deploy": DEPLOY,
     "a strict build": "uv run mkdocs build --clean --strict",
@@ -748,6 +779,13 @@ CLEAN_CASES = {
         "# never run mkdocs gh-deploy --force\nuv run mkdocs build"
     ),
     "a trailing comment naming it": "uv run mkdocs build  # not mkdocs gh-deploy --force",
+    "a quoted separator in an ordinary command": 'echo "a && b"',
+    "a quoted separator before the text of a forced push": (
+        'echo "ok; git push --force origin gh-pages; done"'
+    ),
+    "a quoted message over several lines": (
+        'echo "Do not run:\n  git push --force origin gh-pages\nit replaces the branch"'
+    ),
 }
 
 #: Each of these starts a job that publishes the site on a tag push.
@@ -769,6 +807,16 @@ TAG_REACHABLE_CASES = {
         "condition": "startsWith(github.ref, 'refs/tags/')",
     },
     "no permissions declared": {"on": ON_ANY_TAG, "permissions": None},
+    "a read token, and a plain push of gh-pages": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "git push origin gh-pages",
+    },
+    "a read token, and a push of gh-pages in a shell string of two commands": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "sh -c 'cd site && git push origin gh-pages'",
+    },
 }
 
 #: Each of these publishes the site and is reached by no tag push, or is reached by
@@ -786,6 +834,11 @@ TAG_UNREACHABLE_CASES = {
         "on": ON_ANY_TAG,
         "permissions": READ,
         "run": "uv run mkdocs build --strict",
+    },
+    "a tag trigger, a read token, and a push of another branch in a shell string": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "sh -c 'cd site && git push origin preview'",
     },
 }
 
