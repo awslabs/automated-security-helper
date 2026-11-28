@@ -309,6 +309,77 @@ REFUSED = {
         _page(head='<script src="//cdn.example.com/x.js"></script>\n'),
         "external script",
     ),
+    "a script from a host written with two backslashes": (
+        _page(head='<script src="\\\\cdn.example.com/x.js"></script>\n'),
+        "external script",
+    ),
+    "a script from a host written with a slash and a backslash": (
+        _page(head='<script src="/\\cdn.example.com/x.js"></script>\n'),
+        "external script",
+    ),
+    "a script from a host split by a tab": (
+        _page(head='<script src="/\t/cdn.example.com/x.js"></script>\n'),
+        "external script",
+    ),
+    "a script from a host split by a character reference to a tab": (
+        _page(head='<script src="/&#9;/cdn.example.com/x.js"></script>\n'),
+        "external script",
+    ),
+    "a script from a host split by a line break": (
+        _page(head='<script src="/\n/cdn.example.com/x.js"></script>\n'),
+        "external script",
+    ),
+    "an SVG script that loads from href": (
+        _page(
+            body='<svg><script href="https://cdn.example.com/x.js"></script></svg>\n'
+        ),
+        "external script",
+    ),
+    "an SVG script that loads from xlink:href": (
+        _page(
+            body='<svg xmlns:xlink="http://www.w3.org/1999/xlink">'
+            '<script xlink:href="//cdn.example.com/x.js"/></svg>\n'
+        ),
+        "external script",
+    ),
+    "a script that repeats src, the first value naming another host": (
+        _page(
+            head='<script src="https://cdn.example.com/x.js" src="/x.js"></script>\n'
+        ),
+        "external script",
+    ),
+    "a script that repeats an attribute": (
+        _page(head='<script src="/a.js" src="/b.js"></script>\n'),
+        "repeats the attribute 'src'",
+    ),
+    "a meta that repeats an attribute": (
+        _page(head='<meta name="a" name="b" content="c">\n'),
+        "repeats the attribute 'name'",
+    ),
+    "markup in an SVG style": (
+        _page(body='<svg><style><img src="x" onerror="go()"></style></svg>\n'),
+        "inline event handler",
+    ),
+    "a javascript: URL in an SVG style": (
+        _page(body='<svg><style><a href="javascript:go()">x</a></style></svg>\n'),
+        "javascript: URL",
+    ),
+    "markup in a MathML style": (
+        _page(body='<math><style><img src="x" onerror="go()"></style></math>\n'),
+        "inline event handler",
+    ),
+    "markup in an SVG script": (
+        _page(body='<svg><script><img src="x" onerror="go()"></script></svg>\n'),
+        "inline event handler",
+    ),
+    "an external script in the markup of an SVG style": (
+        _page(
+            body="<svg><style>"
+            '<script src="https://cdn.example.com/x.js"></script>'
+            "</style></svg>\n"
+        ),
+        "external script",
+    ),
     "a second policy meta": (
         _page(
             head='<meta http-equiv="Content-Security-Policy" content="default-src *">\n'
@@ -334,6 +405,55 @@ def test_the_build_refuses_the_page(hook, defect):
 
 def test_the_page_without_any_of_those_defects_is_built(hook):
     assert "Content-Security-Policy" in hook.apply_page_policy(_page())
+
+
+#: Pages that look like the refused ones and are not. Each is the twin of a refused
+#: page above, so a refusal that grows too wide fails here.
+BUILT = {
+    "a script from this site": '<script src="/assets/x.js"></script>\n',
+    "a script from a relative path": '<script src="../assets/x.js"></script>\n',
+    "a script path with a colon after a slash": '<script src="/a/b:c.js"></script>\n',
+    "a script path with a backslash in it": '<script src="/assets\\x.js"></script>\n',
+    "a script path that only starts like a host": (
+        '<script src="/./\\cdn.example.com/x.js"></script>\n'
+    ),
+    "an SVG script from this site": '<svg><script href="/assets/x.js"></script></svg>\n',
+    "an SVG style of plain css": (
+        '<svg><style type="text/css">.a{fill:#fff}\n.b > .c{fill-rule:evenodd}'
+        "</style></svg>\n"
+    ),
+    "an SVG style in a character data section": (
+        "<svg><style><![CDATA[ .a{fill:red} ]]></style></svg>\n"
+    ),
+    "a style outside SVG that mentions markup": (
+        '<style>/* <img src="x" onerror="go()"> */</style>\n'
+    ),
+    "markup text in a style after the SVG closed": (
+        '<svg></svg><style>/* <img src="x" onerror="go()"> */</style>\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(BUILT))
+def test_a_page_that_only_looks_like_a_refused_one_is_built(hook, name):
+    assert "Content-Security-Policy" in hook.apply_page_policy(_page(body=BUILT[name]))
+
+
+LOGO = REPO_ROOT / "docs" / "overrides" / ".icons" / "aws-logo-light.svg"
+
+
+def test_the_sites_own_logo_and_its_svg_style_are_built(hook):
+    logo = LOGO.read_text(encoding="utf-8")
+    assert "<style" in logo
+    assert "Content-Security-Policy" in hook.apply_page_policy(_page(body=logo + "\n"))
+
+
+def test_the_same_logo_with_a_handler_in_its_style_is_refused(hook):
+    logo = LOGO.read_text(encoding="utf-8")
+    planted = logo.replace(".st0{fill:#FFFFFF;}", '<img src="x" onerror="go()">', 1)
+    assert planted != logo
+    with pytest.raises(hook.ProjectionError, match="inline event handler"):
+        hook.apply_page_policy(_page(body=planted + "\n"))
 
 
 def test_the_refusal_names_every_problem_of_the_page(hook):

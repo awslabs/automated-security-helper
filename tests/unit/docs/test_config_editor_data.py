@@ -76,6 +76,26 @@ NOT_DESCRIBED_THAT_WAY = {
     "scanners.semgrep.options.config": "the description names the path rule",
 }
 
+#: The published settings the probe plants no value for: a list of objects, a map, a
+#: raw mapping, or a list whose first value is its default. The probe's report lists
+#: them, and a new one fails the test that compares the two, so that someone decides
+#: whether ASH confines it. Two have a row of the table (the detect-secrets scan
+#: settings and trivy's scanners); the others have no rule.
+UNPLANTED = [
+    "global_settings.exclusions",
+    "global_settings.ignore_paths",
+    "global_settings.mcp.runtime_overrides.denied_value_patterns",
+    "global_settings.suppressions",
+    "scanners.bandit.options.excluded_paths",
+    "scanners.checkov.options.frameworks",
+    "scanners.checkov.options.skip_path",
+    "scanners.detect-secrets.options.scan_settings",
+    "scanners.opengrep.options.sha256",
+    "scanners.syft.options.exclude",
+    "scanners.syft.options.sdist_harvest.lockfiles",
+    "scanners.trivy.options.scanners",
+]
+
 
 # -- Loading the hook and building the real block ------------------------------------
 
@@ -756,6 +776,8 @@ def _env_problems(env):
         problems.append("the refused names differ")
     if env["secretSuffixes"] != list(constants.ASH_CONFIG_ENV_VAR_SECRET_SUFFIXES):
         problems.append("the secret suffixes differ")
+    if env["readableNames"] != list(constants.ASH_CONFIG_ENV_VAR_READABLE_NAMES):
+        problems.append("the readable names differ")
     names = {name for name, _ in env["vectors"]}
     exported = [
         *constants.ASH_CONFIG_ENV_VAR_ALLOWLIST,
@@ -790,6 +812,8 @@ def test_the_environment_rule_and_its_vectors_equal_ashs_own(built):
         lambda env: env.update(
             vectors=[v for v in env["vectors"] if v[0] != "ASH_BEDROCK_MAX_TOKENS"]
         ),
+        lambda env: env["readableNames"].append("ASH_X_MAX_TOKENS"),
+        lambda env: env["readableNames"].clear(),
     ],
     ids=[
         "a flipped vector",
@@ -797,6 +821,8 @@ def test_the_environment_rule_and_its_vectors_equal_ashs_own(built):
         "an extra name",
         "another prefix",
         "a vector lost",
+        "an extra readable name",
+        "the readable names lost",
     ],
 )
 def test_an_environment_rule_that_differs_from_ash_is_reported(built, plant):
@@ -805,19 +831,36 @@ def test_an_environment_rule_that_differs_from_ash_is_reported(built, plant):
     assert _env_problems(planted)
 
 
+def test_the_readable_names_are_admitted_before_a_suffix_refuses_them(built):
+    env = built.block["env"]
+    assert env["readableNames"], "ASH lists no readable name"
+    refused_by_suffix = [
+        name
+        for name in env["readableNames"]
+        if name.endswith(tuple(env["secretSuffixes"]))
+    ]
+    assert refused_by_suffix, (
+        "no readable name ends in a refused suffix, so it needs no list"
+    )
+    vectors = dict(env["vectors"])
+    for name in env["readableNames"]:
+        assert vectors[name] is False, f"{name} is readable and its vector says refused"
+
+
 # -- A reference is judged on the route that loads a config file ----------------------------
 
 SCAN_TIMEOUT = "scanners.actionlint.options.scan_timeout"
 
 
 def _lax_load(path):
-    """What a plain ``AshConfig(**data)`` does with the file: the model alone, with
-    none of the steps the file-load route takes first."""
-    import yaml
-
+    """The lax route: ASH resolves the file's references as it does for any load, and
+    the model is then validated without the context that makes a config file refuse a
+    reference in a typed field. ``scan_timeout`` opted in to keeping one there and
+    types its text (``ScannerOptionsBase._env_scalar_typed_fields``)."""
     from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.config_sources import resolve_config_document
 
-    return AshConfig(**yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+    return AshConfig.model_validate(resolve_config_document(Path(path)).data)
 
 
 def _takes_everything(path):
@@ -829,9 +872,33 @@ def _refuses_a_reference(path):
         raise ValueError("a reference is refused")
 
 
-def test_a_reference_in_scan_timeout_is_reported_refused(hook, fields, tmp_path):
+def _route_check(hook, fields, workdir, load=None):
+    """The check the brief names: a reference in ``scan_timeout`` is refused on the
+    route that loads a config file. ``load`` plants another route in the probe."""
     assert fields[SCAN_TIMEOUT]["kind"] == "integer"
-    assert hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path) is False
+    extra = {} if load is None else {"load": load}
+    assert hook.reference_accepted(fields, SCAN_TIMEOUT, workdir, **extra) is False, (
+        "the probe's route accepts a reference in scan_timeout"
+    )
+
+
+def test_a_reference_in_scan_timeout_is_reported_refused(hook, fields, tmp_path):
+    _route_check(hook, fields, tmp_path)
+
+
+def test_the_lax_route_reports_a_reference_in_scan_timeout_accepted(
+    hook, fields, tmp_path
+):
+    assert (
+        hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path, load=_lax_load) is True
+    )
+
+
+def test_the_route_check_fails_when_the_probe_loads_on_the_lax_route(
+    hook, fields, tmp_path
+):
+    with pytest.raises(AssertionError, match="accepts a reference in scan_timeout"):
+        _route_check(hook, fields, tmp_path, load=_lax_load)
 
 
 def test_a_load_that_takes_a_reference_reads_as_accepted(hook, fields, tmp_path):
@@ -850,26 +917,6 @@ def test_a_load_that_refuses_only_the_reference_reads_as_refused(
         )
         is False
     )
-
-
-def test_the_answer_of_a_plain_model_load_for_scan_timeout_is_recorded(
-    hook, fields, tmp_path, record_property
-):
-    seen = []
-
-    def recording(path):
-        try:
-            _lax_load(path)
-        except Exception as error:
-            seen.append(f"{type(error).__name__}: {str(error)[:120]}")
-            raise
-        seen.append("accepted")
-
-    try:
-        answer = hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path, load=recording)
-    except hook.ControlRefused:
-        answer = "the plain value was refused"
-    record_property("plain_model_load_scan_timeout", f"{answer}; {' | '.join(seen)}")
 
 
 def test_the_probe_reports_each_class_on_the_file_load_route(built):
@@ -999,7 +1046,15 @@ def test_a_trust_rule_that_breaks_the_rules_is_reported(hook, built, plant):
 
 
 def _rows(hook):
-    return [row for row in hook.trust_table() if row.applies_at == "scanner"]
+    """The rows that name a scanner's option: a row with no path is about settings no
+    published key names (a baseline file's own content, a plugin's declarations)."""
+    return [
+        row for row in hook.trust_table() if row.applies_at == "scanner" and row.paths
+    ]
+
+
+def _row(hook, ident):
+    return next(row for row in hook.trust_table() if row.ident == ident)
 
 
 def _call_site_keys(root):
@@ -1307,6 +1362,230 @@ def test_a_planted_file_is_read_back_as_kept_replaced_or_ignored(hook, built, fi
     assert result["converters.archive.options.max_members"] == "replaced"
     assert result["scanners.detect-secrets.options.max_worker_output_mib"] == "ignored"
     assert result["fail_on_findings"] == "kept"
+
+
+# -- Rules a load shows in a way no planted value can: scan settings, a baseline, plugins ---
+
+SCAN_SETTINGS = "scanners.detect-secrets.options.scan_settings"
+VERIFICATION_FILTER = (
+    "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
+)
+SEQUENTIAL_FILTER = "detect_secrets.filters.heuristic.is_sequential_string"
+FILE_PLUGIN = "file:///probe/plugin.py"
+FILE_FILTER = "file:///probe/filter.py::is_planted"
+
+
+def _load_as_operator(hook, built, document):
+    """Load a planted document as an operator's own file: outside the scanned root and
+    every checkout, so none of the repository-file rules is applied to it."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    operator = built.workdir / "operator"
+    operator.mkdir(exist_ok=True)
+    (built.workdir / "repository").mkdir(exist_ok=True)
+    (operator / "ash.yaml").write_text(hook.yaml_text(document), encoding="utf-8")
+    return resolve_config(
+        config_path=operator / "ash.yaml",
+        source_dir=operator,
+        scanned_root=built.workdir / "repository",
+        fallback_to_default=False,
+    )
+
+
+def _scan_settings_document():
+    settings = {
+        "plugins_used": [
+            {"name": "KeywordDetector"},
+            {"name": "PlantedPlugin", "path": FILE_PLUGIN},
+        ],
+        "filters_used": [
+            {"path": SEQUENTIAL_FILTER},
+            {"path": VERIFICATION_FILTER},
+            {"path": FILE_FILTER},
+        ],
+    }
+    return {"scanners": {"detect-secrets": {"options": {"scan_settings": settings}}}}
+
+
+def test_the_scan_settings_of_detect_secrets_carry_the_rule_a_load_applies(
+    hook, built, fields
+):
+    row = _row(hook, "detect-secrets-scan-settings")
+    assert fields[SCAN_SETTINGS]["kind"] == "raw"
+    rule = {r["id"]: r for r in built.block["trust"]}[fields[SCAN_SETTINGS]["trust"]]
+    assert (rule["id"], rule["rule"], rule["via"], rule["appliesAt"]) == (
+        row.ident,
+        "limited",
+        "table",
+        "load",
+    )
+    assert rule["source"].startswith(
+        "automated_security_helper/config/secret_verification_trust.py:"
+    )
+
+
+def test_a_repository_file_loses_the_verification_filter_and_the_file_entries(
+    hook, built
+):
+    document = _scan_settings_document()
+    config, _ = hook.load_repository_file(built.workdir, document)
+    kept = config.scanners.detect_secrets.options.scan_settings
+    assert [p.name for p in kept.plugins_used] == ["KeywordDetector"]
+    assert [f.path for f in kept.filters_used] == [SEQUENTIAL_FILTER]
+
+
+def test_an_operators_file_keeps_every_entry_a_repository_file_loses(hook, built):
+    config = _load_as_operator(hook, built, _scan_settings_document())
+    kept = config.scanners.detect_secrets.options.scan_settings
+    assert [p.name for p in kept.plugins_used] == ["KeywordDetector", "PlantedPlugin"]
+    assert [f.path for f in kept.filters_used] == [
+        SEQUENTIAL_FILTER,
+        VERIFICATION_FILTER,
+        FILE_FILTER,
+    ]
+
+
+def _baseline_settings():
+    from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+        DetectSecretsScanSettings,
+    )
+
+    return DetectSecretsScanSettings(
+        plugins_used=[
+            {"name": "KeywordDetector"},
+            {"name": "PlantedPlugin", "path": FILE_PLUGIN},
+        ],
+        filters_used=[
+            {"path": SEQUENTIAL_FILTER},
+            {"path": VERIFICATION_FILTER},
+            {"path": FILE_FILTER},
+        ],
+    )
+
+
+def test_a_baseline_files_own_settings_are_held_to_the_same_rule(hook):
+    from automated_security_helper.config.secret_verification_trust import (
+        UntrustedDetectSecretsSettings,
+        drop_untrusted_entries,
+    )
+
+    row = _row(hook, "detect-secrets-baseline-settings")
+    assert (row.applies_at, row.paths) == ("scanner", ())
+    other = UntrustedDetectSecretsSettings(
+        reason="a baseline that is not the operator's"
+    )
+    settings = _baseline_settings()
+    removed = drop_untrusted_entries(settings, other, keep_verification=False)
+    assert removed == [FILE_PLUGIN, VERIFICATION_FILTER, FILE_FILTER]
+    assert [f.path for f in settings.filters_used] == [SEQUENTIAL_FILTER]
+    named = UntrustedDetectSecretsSettings(
+        reason="a baseline the operator names",
+        operator_verifies=True,
+        operator_paths=frozenset({FILE_PLUGIN, FILE_FILTER}),
+    )
+    kept = _baseline_settings()
+    assert drop_untrusted_entries(kept, named) == []
+    assert len(kept.plugins_used) == 2 and len(kept.filters_used) == 3
+
+
+def test_a_reporter_a_plugin_module_adds_is_read_by_what_it_declares(hook):
+    from automated_security_helper.config import reporter_trust
+
+    row = _row(hook, "plugin-reporter-destinations")
+    assert (row.applies_at, row.paths) == ("plugin", ())
+
+    class Planted:
+        destination_options = ("endpoint",)
+        sends_off_host = True
+
+    class Local:
+        pass
+
+    assert reporter_trust.declared_destination_options([Planted, Local]) == {
+        "planted": ("endpoint",)
+    }
+    assert reporter_trust.declared_off_host_reporters([Planted, Local]) == ("planted",)
+    assert reporter_trust.declared_enabled_defaults([Planted, Local]) == {
+        "planted": True
+    }
+
+
+# -- A setting is a repository-file rule only if an operator's file keeps its value ---------
+
+OPENGREP_VERSION = "scanners.opengrep.options.version"
+
+
+def test_a_release_tag_for_the_opengrep_version_is_kept_in_a_repository_file(
+    hook, built, fields
+):
+    assert "trust" not in fields[OPENGREP_VERSION], (
+        "the editor would badge a setting a repository's file keeps"
+    )
+    document = hook.plant(fields, OPENGREP_VERSION, "v1.9.0")
+    config, _ = hook.load_repository_file(built.workdir, document)
+    assert config.scanners.opengrep.options.version == "v1.9.0"
+
+
+def test_a_value_that_is_no_release_tag_is_replaced_whoever_wrote_it(
+    hook, built, fields
+):
+    document = hook.plant(fields, OPENGREP_VERSION, "probe-name")
+    default = fields[OPENGREP_VERSION]["default"]
+    repository, _ = hook.load_repository_file(built.workdir, document)
+    operator = _load_as_operator(hook, built, document)
+    assert repository.scanners.opengrep.options.version == default
+    assert operator.scanners.opengrep.options.version == default
+
+
+def test_no_setting_is_a_rule_only_because_its_validator_resets_the_value(
+    hook, built, fields
+):
+    """A value a repository's file loses is a trust rule only when an operator's file
+    keeps it: a validator that resets what it does not accept does that for any file."""
+    from automated_security_helper.config.ash_config import AshConfig
+
+    leaves = hook.probe_leaves(fields)
+    rounds: dict[int, dict] = {}
+    for path, seen in built.report["probe"]["outcomes"].items():
+        for step, outcome in enumerate(seen):
+            if outcome != "kept":
+                rounds.setdefault(step, {})[path] = leaves[path][step]
+    assert rounds, "the probe found no rule at all"
+    defaults = AshConfig()
+
+    def outcomes_of(batch):
+        document: dict = {}
+        for path, value in batch.items():
+            hook.merge_documents(document, hook.plant(fields, path, value) or {})
+        config = _load_as_operator(hook, built, document)
+        return hook.read_back(config, [], batch, defaults)
+
+    lost = {}
+    for batch in rounds.values():
+        try:
+            found = outcomes_of(batch)
+        except Exception:
+            found = {}
+            for path, value in batch.items():
+                try:
+                    found.update(outcomes_of({path: value}))
+                except Exception:
+                    found[path] = "inconclusive"
+        lost.update({p: o for p, o in found.items() if o in ("replaced", "ignored")})
+    assert lost == {}, lost
+
+
+# -- What the probe does not plant -------------------------------------------------------------
+
+
+def test_the_settings_the_probe_plants_no_value_for_are_listed(hook, built, fields):
+    unplanted = built.report["probe"]["unplanted"]
+    assert unplanted == UNPLANTED
+    assert "trust" in fields[SCAN_SETTINGS], (
+        "an unplanted setting ASH confines has no rule"
+    )
+    planted = set(hook.probe_leaves(fields))
+    assert not planted & set(unplanted)
 
 
 def test_every_setting_ash_checks_against_a_vocabulary_of_its_own_is_probed(
