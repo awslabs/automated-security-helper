@@ -100,6 +100,12 @@ The runner treats a page as one session, the way a reader follows a tutorial:
   must be `illustrative`. This is not a sandbox: a program that ignores the proxy
   variables can still connect, and blocks run as you, so run the examples only on docs
   you trust.
+- A block leaves nothing running. When the block's own process exits (its shell, or the
+  interpreter of a Python block), the runner kills whatever still runs in that process's
+  group and fails the block, naming each process by its pid and command. A block that
+  starts a process in the background waits for it, or stops it and waits for it to end.
+  A process that leaves the group, such as a daemon that detaches into a session of its
+  own, is not seen.
 
 This block runs in CI. The default fixture has one finding, so the scan exits with 2:
 
@@ -572,13 +578,14 @@ online that used to install the tools into the home directory.
 ## Feature coverage of the examples
 
 The `docs-examples` job also measures which of ASH's features the passing examples
-reach. While the examples run, coverage.py measures every Python process a block
-starts: the `ash` command, a Python block, and the processes ASH itself starts. Each
-block is measured on its own, and the runner records whether it passed. After the
-examples, `scripts/docs_feature_coverage.py` reads the features from the code, so no
-list of them exists to fall out of date, and checks which of them a passing block
-reached. The features are the commands and options of the `ash` CLI, the scanners,
-reporters, and converters ASH registers, the rows of the
+reach. While the examples run, coverage.py measures the Python processes a block starts:
+the `ash` command, a Python block, and the Python processes ASH itself starts. A process
+that saves no data, such as one that ends in `os._exit`, is not measured; the end of the
+next section lists those. Each block is measured on its own, and the runner records
+whether it passed. After the examples, `scripts/docs_feature_coverage.py` reads the
+features from the code, so no list of them exists to fall out of date, and checks which
+of them a passing block reached. The features are the commands and options of the `ash`
+CLI, the scanners, reporters, and converters ASH registers, the rows of the
 [configuration reference](../reference/configuration.md), and the tools of the MCP
 server.
 
@@ -729,7 +736,12 @@ is shut down by its `with` block ends the workers still alive with SIGTERM, one 
 perhaps in the middle of that save, and the data file it leaves cannot be read, which
 stops the check. A pool worker and the forked scans of ASH's express daemon end there,
 so a feature that only such a process reaches can only read as not reached, never as
-reached.
+reached. That holds for a pool that forks its workers, as pools do on Linux, where the
+`docs-examples` job runs. On macOS a pool starts its workers with the `spawn` method by
+default: each one is a new interpreter that exits normally and saves its data, so it is
+measured, and a pool shut down while one of them saves can still leave a data file the
+check cannot read. A run of the examples with coverage on macOS can therefore stop the
+check with exit 2.
 
 ### Read the report
 
