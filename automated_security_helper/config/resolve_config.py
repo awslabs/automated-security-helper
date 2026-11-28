@@ -1121,7 +1121,9 @@ def _removed_from_a_list(
         resolved_keys, items, logged_path, own_configuration
     )
     held = current.get(final_key) if isinstance(current, dict) else None
-    if isinstance(held, list):
+    # held is a list only when current is a mapping; testing both lets the type
+    # checker see the mapping the kept entries are written back into.
+    if isinstance(current, dict) and isinstance(held, list):
         kept_at = tuple(
             index
             for index, entry in enumerate(held)
