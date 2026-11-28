@@ -2625,6 +2625,10 @@ jobs:
       # 132228975054). Add both here if a page starts to depend on the bundle.
       - name: Run the docs examples
         timeout-minutes: 10
+        # The runner measures the product code each block reaches and records every
+        # block it ran, into this directory (scripts/docs_feature_coverage.py reads it).
+        env:
+          ASH_DOCS_COVERAGE_DIR: ${{ runner.temp }}/docs-coverage
         run: |
           export PATH="$HOME/.ash/bin:$HOME/.local/bin:$PATH"
           uv run pytest \
@@ -2632,6 +2636,47 @@ jobs:
             --run-integration \
             --no-cov -p no:randomly -n 4 \
             --junit-xml=test-results/docs-examples.junit.xml
+      # The base branch's baseline, so the check can refuse a pull request that adds a
+      # line to it or leaves a line for a feature an example now reaches. A base without
+      # the file (the pull request that introduces it) gives none, and the check then
+      # prints those lines as warnings. The base commit comes through env, and is
+      # fetched as a 40-hex SHA that cannot be read as an option.
+      - name: Read the base branch's docs feature coverage baseline
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
+        timeout-minutes: 2
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: |
+          case "${BASE_SHA}" in
+            *[!0-9a-f]* | "") echo "the base commit is not a SHA"; exit 1 ;;
+          esac
+          git fetch --no-tags --no-recurse-submodules --depth=1 origin "${BASE_SHA}"
+          if git cat-file -e "${BASE_SHA}:scripts/docs_feature_coverage_baseline.txt" 2>/dev/null; then
+            git show "${BASE_SHA}:scripts/docs_feature_coverage_baseline.txt" > "${RUNNER_TEMP}/docs-feature-coverage-base-baseline.txt"
+          fi
+      # Reports after a red examples step too. A skipped examples step leaves no data,
+      # which this step reports as a second red step in an already red job.
+      - name: Check the docs feature coverage
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: |
+          BASE_ARGS=()
+          if [ -f "${RUNNER_TEMP}/docs-feature-coverage-base-baseline.txt" ]; then
+            BASE_ARGS=(--base-baseline "${RUNNER_TEMP}/docs-feature-coverage-base-baseline.txt")
+          fi
+          uv run python scripts/docs_feature_coverage.py check \
+            --data "${RUNNER_TEMP}/docs-coverage" \
+            --out test-results/docs-feature-coverage \
+            --summary "${GITHUB_STEP_SUMMARY}" \
+            "${BASE_ARGS[@]}"
+      - name: Upload the docs feature coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-feature-coverage
+          path: test-results/docs-feature-coverage
+          retention-days: 7
+          if-no-files-found: error
       # A red run leaves per-test evidence rather than only the summary line.
       - name: Collect the docs examples report
         if: failure()

@@ -14,7 +14,8 @@ There are three layers:
   paths that ASH's own source names. They run in about ten seconds.
 - The docs-example runner, in the `docs-examples` job. It runs every runnable
   shell and Python block, page by page, and fails when a block exits with the wrong
-  code.
+  code. It also measures which of ASH's features the passing blocks reach (see
+  [Feature coverage of the examples](#feature-coverage-of-the-examples)).
 - The site build, in the `build-docs` job. It runs `mkdocs build --strict` with link
   and anchor validation, then publishes the site as versions to a throwaway branch with
   the network blocked, and checks what readers of each version would see (see
@@ -99,6 +100,12 @@ The runner treats a page as one session, the way a reader follows a tutorial:
   must be `illustrative`. This is not a sandbox: a program that ignores the proxy
   variables can still connect, and blocks run as you, so run the examples only on docs
   you trust.
+- A block leaves nothing running. When the block's own process exits (its shell, or the
+  interpreter of a Python block), the runner kills whatever still runs in that process's
+  group and fails the block, naming each process by its pid and command. A block that
+  starts a process in the background waits for it, or stops it and waits for it to end.
+  A process that leaves the group, such as a daemon that detaches into a session of its
+  own, is not seen.
 
 This block runs in CI. The default fixture has one finding, so the scan exits with 2:
 
@@ -567,6 +574,240 @@ reach an index, every proxy variable points at a local port that refuses connect
 and uv's and the XDG cache, data, and config directories are temporary ones that are
 removed when it exits. Building the scanner plugins asks each tool for its version, and
 online that used to install the tools into the home directory.
+
+## Feature coverage of the examples
+
+The `docs-examples` job also measures which of ASH's features the passing examples
+reach. While the examples run, coverage.py measures the Python processes a block starts:
+the `ash` command, a Python block, and the Python processes ASH itself starts. A process
+that saves no data, such as one that ends in `os._exit`, is not measured; the end of the
+next section lists those. Each block is measured on its own, and the runner records
+whether it passed. After the examples, `scripts/docs_feature_coverage.py` reads the
+features from the code, so no list of them exists to fall out of date, and checks which
+of them a passing block reached. The features are the commands and options of the `ash`
+CLI, the scanners, reporters, and converters ASH registers, the rows of the
+[configuration reference](../reference/configuration.md), and the tools of the MCP
+server.
+
+When a case is doubtful, the check reads the feature as not reached. A feature that is
+wrongly read as not reached costs one line in the baseline, which the change that fixes
+the reading then deletes. A feature that is wrongly read as reached stays out of the
+baseline for good.
+
+### What counts as reaching a feature
+
+Only a block that passed counts, and only when its marker expects exit 0 or 2, or exit 1
+from a scan that wrote its results (see [Exit codes](../reference/exit-codes.md)). ASH
+exits 1 when a scan's scanners fail, and also when it refuses a command, as it does for
+`--use-existing` with no results to use. A block that shows ASH refusing something
+reaches code without showing that the feature works, so an exit 1 counts only through a
+process of the block that itself ran the part of the scan that writes its results. A
+block's processes share its exit, so a block that runs a scan and then a command that
+refuses with exit 1 shows the scan and nothing of the command. A block marked
+`expect-exit=nonzero` or `expect-exit=any` never counts, and neither does one that shows
+`ash dependencies install` refusing a tool it cannot select. The check goes by the
+command a line runs, not by its first word: an option typed before `dependencies` does
+not hide that command, and the word `dependencies` as an option's value is not it.
+
+A block counts only if it leaves nothing running. When a block's shell exits, the runner
+ends whatever still runs in the block's process group and fails the block, and its
+report names each process by its pid and command. A process left behind keeps the
+coverage context of the block that started it, so what it ran after the block ended
+would be credited to that block, though nothing in the block shows it. A reader's shell
+returns when the example's commands do, so such an example behaves differently for the
+reader too. A block that starts a process in the background ends with `wait`, or stops
+the process and waits for it to end; a block that cannot is marked `illustrative`. A
+process that leaves the group, such as a daemon that detaches into a session of its own,
+is not seen. ASH's express daemon is one, and it is not measured either: a daemon
+started on its own begins without the coverage variables, and one a scan starts for
+itself ends in `os._exit`, so it gives no credit.
+
+A command, scanner, reporter, converter, or MCP tool counts when a passing block runs its
+code. The code that counts starts after the function's leading guards, the early exits
+it opens with (an `if` with no `else` that ends in `return` or `raise`). Those run on
+calls that do none of the function's work: the scan runs before every other
+subcommand and returns at once, so a block that ran any other command would otherwise
+reach it. An early exit after a statement that does work lies inside that code as well,
+because a reporter that builds its report and then returns early on an empty one has
+run; the paragraphs below say which exits count. A scanner's or converter's work
+method is the exception: it counts past its last
+early exit. It opens with resets and then the checks that end a scan that has nothing
+for it to do, and every scan runs every enabled scanner and every converter, so a scan
+that skipped one would otherwise count as running it.
+
+A call that left a function by a refusal shows nothing of it. In the code that counts, an
+`if` whose body ends in `return` or `raise` is a way out, and the check reads each one as
+a refusal. A block can pass after one: `ash plugin verify` exits 2 for a transcript
+directory that is missing, and 2 is also the exit for findings; `ash express stop`
+returns and exits 0 when no daemon answers; a `|| true` after a command hides its exit
+1; an MCP tool returns its refusal as data. So a feature counts only when no process of
+the block ran the body of one of its refusals, and a block that ran one refused call and
+one completed call of a command shows nothing of it.
+
+A way out that follows the work is not a refusal. `ash express status --json` asks the
+server for its status, prints it, and returns; a reporter that reads the findings returns
+early on an empty report; `ash config validate` returns when a scan accepts the file. The
+script lists these exits in `LATE_EXITS` and reads every other way out as a refusal, so
+a feature whose normal exit is missing from the list reads as not reached, and the change
+that finds one adds it. The check does not see an exit written as a call, such as
+`sys.exit(1)`, one in an `except` block or on the same line as its `if`, or one that a
+function it calls takes for it.
+
+Two plugins that share one work method, as `opengrep` and `semgrep` share the scan
+method of one base class, cannot be told apart by that method alone. Each also has
+methods of its own, defined in its own class, that the shared method calls, and it
+counts only when a passing block ran the shared method and every one of them: a run that
+reached one of two may have stopped between them. A plugin that shares its work method
+and has no such method makes the check exit 2 and names the plugin.
+
+An option counts when a passing block gives it on its command line and also runs the
+code that reads it: the command's code, the option's own callback, or the body of an
+`if` in the command's code whose test reads the option. `ash --version` prints the
+version and leaves before the scan's own code, so that branch is what it reaches. A
+branch that runs because an option was not given shows nothing about the option, since
+the block must give it. An option typed before a subcommand counts for the subcommand
+when ASH passes it on.
+
+A row of the configuration reference counts in one of two ways, and in both the block
+must also run the code that applies the config:
+
+- A passing block sets it with `--config-overrides`. The key before `=` or `+=` counts,
+  and so do the keys inside a JSON value: the keys of a mapping, or of each mapping in a
+  list, as rows under the key's items. A value that is not JSON, such as the YAML form
+  `{key: value}`, counts only the key before it.
+- A passing block loads a config that an earlier block of the same session saved with
+  `save-as`, and the saved config sets the key.
+
+A block that loads a config read one file, not every config its page saved. A saved
+config counts for it only where the page shows the block can have read that file, and
+that the file still held what the page saved:
+
+- It is the latest save of its path in the session, at or before the block. A later save
+  of the same path replaced it, and a save after the block changed nothing the block read.
+- It is a full ASH config, of kind `ash` or `pyproject`. A config fragment never counts:
+  loaded as a file, its keys sit at the root of the file, not under its `at=` prefix.
+- The block names the file with `--config`, or with a literal `ASH_CONFIG` assignment in
+  the block itself. Or the block names no config, and the file is the one config
+  discovery picks. Discovery picks one file in the directory it searches (the
+  `--source-dir` the command gives, otherwise the working directory) and never merges two,
+  so when a page saves two files that discovery reads, only the first in discovery's own
+  order counts, whatever order the page saved them in. A fragment saved under that name
+  hides the files below it. Only the scan and the `ash config` commands that read a
+  config discover (`get`, `update`, `lint`, `validate`, and `validate-plugin-dependencies`).
+  `ash report` does not.
+- A file does not count through discovery when the block gives `--config`, or when
+  `ASH_CONFIG` or `ASH_SOURCE_DIR` appears in a shell block of the session up to the
+  block: a named file replaces discovery, and the directory a variable names cannot be
+  read from the page.
+- Nothing counts once a shell block of the session, at or before the block, holds one of
+  the words `cd`, `pushd`, `popd`, `eval`, or `source`, or a `.` followed by a file to
+  read. The runner carries the directory a block ends in into the next block of the
+  session, while saved files stay in the page's project, so after a change of directory
+  the file a scan read cannot be told. The check reads the word wherever it stands, in
+  quotes and comments too, so an example that only mentions `cd` stops the credit.
+- The block does not start its scan in another directory with `env -C DIR` or
+  `env --chdir=DIR`, and its marker does not set `ASH_CONFIG` or `ASH_SOURCE_DIR` in its
+  `env` list. Neither shows in the text of the block, and each moves the scan to a file
+  the page did not save under that name.
+- The file still held what the page saved. A save counts for nothing when a block of the
+  session after it, up to and including the block that loads it, may have changed what
+  the scan reads in its place. The check reads those blocks as text and decides toward
+  "may have": a redirection, `rm`, `mv`, `cp`, or `tee` that names the file, a directory
+  that holds it, a glob that matches it, or any name config discovery reads (a file
+  written under a higher name outranks the save); an `ash config` command that writes,
+  such as `ash config init` or `ash config update`; a program the check does not know to
+  leave files alone, such as `sed -i` or a script; and every Python block, which the
+  check does not read. A block that only reads the file (`cat`) or writes another one
+  (`> notes.txt`) leaves the save in place. So does a loading block that is one
+  `ash config update` or one `ash config lint` and nothing else: the command reads the
+  file before it writes anything.
+
+To make a config count, save it with `save-as` under a name the command reads, after any
+block that writes files of the project, and run the scan in the same session without
+changing directory. The check cannot see a file that a shell block writes, so it never
+counts one.
+
+The measurement sees only what coverage.py records. A process that is not Python, or
+that does not start coverage.py (a scanner's own tool, a container), is not measured,
+nor is the Python of a sandboxed scanner, nor a process that is killed before it saves
+its data. A process that ends in `os._exit` is not measured either: the runner has
+coverage.py re-arm itself in a forked child, but not save inside `os._exit`. A pool that
+is shut down by its `with` block ends the workers still alive with SIGTERM, one of them
+perhaps in the middle of that save, and the data file it leaves cannot be read, which
+stops the check. A pool worker and the forked scans of ASH's express daemon end there,
+so a feature that only such a process reaches can only read as not reached, never as
+reached. That holds for a pool that forks its workers, as pools do on Linux, where the
+`docs-examples` job runs. On macOS a pool starts its workers with the `spawn` method by
+default: each one is a new interpreter that exits normally and saves its data, so it is
+measured, and a pool shut down while one of them saves can still leave a data file the
+check cannot read. A run of the examples with coverage on macOS can therefore stop the
+check with exit 2.
+
+### Read the report
+
+The check prints its report to the job summary, and writes `docs-feature-coverage.md`
+and `docs-feature-coverage.json` to the job's `docs-feature-coverage` artifact, with the
+baseline file the run would write. The report starts with the figure, how many features
+an executed example reached out of how many, and a table with the same count for each
+kind of feature. A list says what the run read: the pages with a record, the pages the
+runner selected, the blocks that ran and passed, the coverage data files, and the
+contexts in them. A page the runner selected that left no record, or a block that never
+ran, shows there as a gap.
+
+Then comes the verdict of the gate. A failing class lists up to fifty feature ids and
+counts the rest. The last line counts the features that the docs present but no executed
+example reaches. For a feature that is presented, the fix is to make its example run;
+for one that is not, the docs need an example first.
+
+The JSON report lists every feature with its id and kind, whether a passing example
+reached it, whether any block shows it, the pages of the examples that reached it, where
+its code is, and a note. The note says when a plugin shares its code with another one.
+
+### The baseline only shrinks
+
+`scripts/docs_feature_coverage_baseline.txt` lists the features that no example
+reaches, one id per line in sorted order, so the check can pass while examples are
+still missing. It may only shrink. A feature that no passing block reaches fails the job
+unless the file lists it, and a feature is never added to it: a new command, option,
+plugin, or config key ships with an example that reaches it. The check fails when:
+
+- a feature that no passing example reaches is missing from the file, because it is new
+  or because its examples stopped reaching it;
+- a line names no feature, because the feature was renamed or removed. Delete the line
+  with it.
+
+On a pull request and in the merge queue, the check also gets the base branch's file, and
+fails when:
+
+- a line names a feature an example now reaches. Delete the line in the same pull
+  request;
+- a line is one the base branch's file lacks. A pull request may not add one.
+
+Without the base branch's file, as on a push or on the pull request that adds the file,
+those two are not checked, and a line for a feature an example reached is printed as a
+warning that says to delete it.
+
+The check exits 1 when the gate fails, and 2 when the run cannot show anything: no block
+records, no readable coverage data (one data file that is empty or damaged is enough,
+and the check leaves every data file as it found it), no passing block, records from
+another version of the docs, an inventory that cannot be built the same way everywhere,
+or a function the check reads a block's reach from, such as config discovery, that it
+can no longer find or call. To measure the examples in a checkout, start from an empty
+data directory: a run adds to the data files already there under the same block names,
+so a block that no longer reaches a feature would still be credited with it by the
+earlier run.
+
+<!-- doctest: illustrative reason="runs in a checkout of this repository" -->
+```bash
+# Start from an empty data directory, since a run adds to the one it finds
+rm -rf .docs-coverage
+
+# The examples, measured into a directory given as an absolute path
+ASH_DOCS_COVERAGE_DIR="$PWD/.docs-coverage" uv run pytest tests/integration/docs/test_docs_examples.py --run-integration
+
+# The report and the gate, as the job runs them
+uv run python scripts/docs_feature_coverage.py check --data .docs-coverage --out .docs-coverage/report
+```
 
 ## Run the CI examples with their runners
 

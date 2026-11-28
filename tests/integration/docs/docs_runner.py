@@ -19,6 +19,18 @@ every variable the block exported or assigned (blocks run under ``set -a``, so a
 ``FOO=bar`` is exported too). A python block runs in a fresh interpreter, in the
 session's directory and environment, and changes neither.
 
+A block that leaves a process running past its shell fails. Each block starts in a
+session of its own, so the shell's pid is the id of the block's process group. When the
+shell has exited the runner reads that group, ends whatever still runs in it with
+SIGKILL, and fails the block: its report names each process by pid and command, and the
+block counts for nothing. A reader's shell returns when the example's commands do, so an
+example that starts something and never waits for it behaves differently for the reader
+too, and a process left running keeps the coverage context of the block that started it:
+what it runs after that block ended would be credited to the block, though nothing of
+the block shows it. A block that starts a process in the background waits for it, or
+stops it and waits for it to end. A process that leaves the group (``setsid``, a daemon
+that detaches into a session of its own) is not seen.
+
 What a block can reach is narrowed, not sandboxed. HOME and the XDG directories are
 private to the session. PATH is the interpreter's bin directory, the directories ASH
 installs scanner tools into for the invoking user, and the system's (session_path),
@@ -49,7 +61,10 @@ POSIX.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import importlib.util
+import json
 import os
 import shutil
 import signal
@@ -103,10 +118,20 @@ class BlockResult:
     mismatch: str | None = None
     #: The session's directories and what an output comparison reads them as.
     paths: tuple[tuple[str, str], ...] = ()
+    #: What the block left running when its shell exited, each as ``<pid> <command>``:
+    #: the processes of its process group that the runner then ended. A block that left
+    #: one fails whatever its exit code was.
+    left_running: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        if self.refused or self.mismatch or self.timed_out or self.exit_code is None:
+        if (
+            self.refused
+            or self.mismatch
+            or self.timed_out
+            or self.left_running
+            or self.exit_code is None
+        ):
             return False
         if self.expected == "any":
             return True
@@ -129,6 +154,11 @@ class BlockResult:
             verdict = self.mismatch
         elif self.timed_out:
             verdict = f"timed out after {self.seconds:.0f} s"
+        elif self.left_running:
+            verdict = (
+                "left a process running after its shell exited, which the runner "
+                f"ended (exit code {self.exit_code}, expected {self.expected})"
+            )
         elif self.exit_code in COULD_NOT_RUN:
             verdict = (
                 f"exit code {self.exit_code}: a command was not found or not "
@@ -136,9 +166,15 @@ class BlockResult:
             )
         else:
             verdict = f"exit code {self.exit_code}, expected {self.expected}"
+        left = ""
+        if self.left_running:
+            left = "  left running, ended by the runner:\n" + "".join(
+                f"    {member}\n" for member in self.left_running
+            )
         return (
             f"{self.page}:{self.line}: {self.lang} block failed: {verdict}\n"
             f"  command:\n{command}\n"
+            f"{left}"
             f"  output (last {OUTPUT_TAIL_LINES} lines):\n"
             + "\n".join("    " + line for line in tail.splitlines())
         )
@@ -430,6 +466,126 @@ class Session:
     project: Path | None = None
 
 
+#: Set in the pytest process to switch the docs feature coverage collection on: the
+#: directory the coverage data and the runner's per-page records are written to.
+COVERAGE_DIR_VARIABLE = "ASH_DOCS_COVERAGE_DIR"
+#: Given to each block's own processes: the coverage context its lines are recorded
+#: under. Not an ``ASH_`` name, which ASH's own namespace and the scanner sandbox's
+#: environment allowlist use.
+COVERAGE_CONTEXT_VARIABLE = "DOCS_COVERAGE_CONTEXT"
+#: The version of the per-page record ``DocsCoverage.write_record`` writes.
+RECORD_SCHEMA = 1
+
+#: What every measured process reads (coverage.py starts in each Python process of a
+#: session through its ``a1_coverage.pth`` when COVERAGE_PROCESS_START names a file).
+#: ``source_pkgs`` names the package, where ``source`` would be read as a directory
+#: relative to the process's own working directory, which is the page's fixture copy.
+#: The data file is an absolute path, so a process that lost a variable cannot write
+#: to ``/data``. ``patch = fork`` re-arms coverage in a forked child, and nothing is
+#: saved inside ``os._exit``: multiprocessing's fork workers end there, and a pool shut
+#: down by its ``with`` block (detect-secrets' ``scan_files``) sends SIGTERM to every
+#: worker still alive, one in the middle of that save included, which left a data file
+#: the check cannot read. A process that ends in ``os._exit`` (a pool worker, the
+#: express daemon's forked scans) is therefore not measured. ``core = sysmon`` is the
+#: cheapest line tracer; branch, concurrency and dynamic contexts would each make
+#: coverage fall back from it. The warnings are off because a measured process's
+#: stderr is the block's output, which an output sample is compared against.
+_COVERAGE_RC = """\
+[run]
+source_pkgs = automated_security_helper
+parallel = True
+data_file = {data_file}
+context = ${{{context}-unattributed}}
+core = sysmon
+patch = fork
+disable_warnings = no-data-collected, module-not-imported, module-not-measured,
+    no-sysmon, already-imported, couldnt-parse
+"""
+
+
+@dataclass(frozen=True)
+class DocsCoverage:
+    """Where a docs examples run collects coverage and its per-page records.
+
+    ``directory`` holds ``coverage.rc`` (written per run), ``data/`` (one coverage data
+    file per measured process, each line labelled with the context of the block that ran
+    it) and ``blocks/`` (one record per page of what the runner ran or saved).
+    scripts/docs_feature_coverage.py reads the last two.
+    """
+
+    directory: Path
+
+    @property
+    def rcfile(self) -> Path:
+        return self.directory / "coverage.rc"
+
+    @classmethod
+    def from_environment(cls, environ=None) -> DocsCoverage | None:
+        """The collection the environment asks for, or None when it asks for none.
+
+        A relative directory is refused: each session would resolve it in its own
+        working directory.
+        """
+        value = (os.environ if environ is None else environ).get(
+            COVERAGE_DIR_VARIABLE, ""
+        )
+        if not value.strip():
+            return None
+        directory = Path(value.strip())
+        if not directory.is_absolute():
+            raise ValueError(
+                f"{COVERAGE_DIR_VARIABLE} must be an absolute path, not {value!r}"
+            )
+        return cls(directory)
+
+    def session_environment(self) -> dict[str, str]:
+        """What a session needs to be measured: the rc file, which this writes.
+
+        Every session of every xdist worker asks for the file while processes that
+        start meanwhile read it, and coverage.py started on an empty read measures
+        with its defaults: the lines are lost and a stray data file lands in the
+        page's project. So the file is never rewritten in place. The text is rendered
+        once and written only when the file is missing or holds other text, to a
+        temporary name beside it that is renamed over it, so a reader sees the old
+        text or the whole new one.
+        """
+        (self.directory / "data").mkdir(parents=True, exist_ok=True)
+        (self.directory / "blocks").mkdir(parents=True, exist_ok=True)
+        text = _COVERAGE_RC.format(
+            data_file=self.directory / "data" / ".coverage",
+            context=COVERAGE_CONTEXT_VARIABLE,
+        )
+        try:
+            current = self.rcfile.read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError):
+            current = None
+        if current != text:
+            pending = self.rcfile.with_name(f".{self.rcfile.name}.{os.getpid()}.tmp")
+            pending.write_text(text, encoding="utf-8")
+            os.replace(pending, self.rcfile)
+        return {"COVERAGE_PROCESS_START": str(self.rcfile)}
+
+    @staticmethod
+    def context(page_rel: str, line: int) -> str:
+        """The coverage context of the block whose fence is on ``line`` of a page."""
+        return f"{page_rel}::{line}"
+
+    def write_record(self, page_rel: str, blocks: list[dict]) -> Path:
+        """Write a page's record whole: to a temporary name beside it, then renamed, so
+        a reader never sees half of one. Named from the page, so parallel workers
+        running different pages never share a file."""
+        name = hashlib.sha256(page_rel.encode("utf-8")).hexdigest()[:16] + ".json"
+        target = self.directory / "blocks" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        pending = target.with_name(f".{name}.{os.getpid()}.tmp")
+        pending.write_text(
+            json.dumps({"schema": RECORD_SCHEMA, "page": page_rel, "blocks": blocks}),
+            encoding="utf-8",
+        )
+        os.replace(pending, target)
+        return target
+
+
 _SHELL_PRELUDE = """\
 __ash_docs_state=$1
 __ash_docs_cwd=$2
@@ -445,6 +601,101 @@ set -e
 (set -o pipefail) 2>/dev/null && set -o pipefail
 """
 
+#: What a block's report says of a process left running that this host cannot name.
+_UNNAMED_PROCESS = "a process this host could not name (no /proc, and ps failed)"
+#: How much of a left process's command line a block's report shows.
+_COMMAND_CHARS = 240
+
+
+def _members_from_proc(group: int) -> list[tuple[int, str]] | None:
+    """(pid, command line) of each running process of process group ``group``, read
+    from /proc; None where there is no /proc to read."""
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return None
+    members = []
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            stat = Path(f"/proc/{name}/stat").read_bytes().decode(errors="replace")
+        except OSError:  # it ended while /proc was read
+            continue
+        # After the command name, which sits in parentheses and may hold ")": the
+        # state, the parent's pid and the process group.
+        called, _, rest = stat.rpartition(")")
+        fields = rest.split()
+        if len(fields) < 3 or fields[0] == "Z" or fields[2] != str(group):
+            continue
+        try:
+            argv = Path(f"/proc/{name}/cmdline").read_bytes()
+        except OSError:
+            argv = b""
+        command = argv.replace(b"\0", b" ").decode(errors="replace")
+        members.append((int(name), command or f"[{called.partition('(')[2]}]"))
+    return members
+
+
+def _members_from_ps(group: int) -> list[tuple[int, str]] | None:
+    """The same, from ``ps``, for a host with no /proc (macOS); None where ``ps``
+    cannot be run or fails."""
+    try:
+        listed = subprocess.run(
+            ["ps", "-A", "-ww", "-o", "pid=,pgid=,stat=,command="],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if listed.returncode != 0:
+        return None
+    members = []
+    for row in listed.stdout.splitlines():
+        fields = row.split(None, 3)
+        if (
+            len(fields) >= 3
+            and fields[0].isdigit()
+            and fields[1] == str(group)
+            and not fields[2].startswith("Z")
+        ):
+            members.append((int(fields[0]), fields[3] if len(fields) > 3 else ""))
+    return members
+
+
+def _end_the_process_group(group: int) -> tuple[str, ...]:
+    """End whatever still runs in a block's process group once its shell has exited.
+
+    Each block starts in a session of its own, so the shell's pid is the group's id.
+    The result names each process that was running, as ``<pid> <command line>``, and
+    is empty when the group holds none: a zombie (a process that ended and is not
+    reaped yet) is none. What ran is ended with SIGKILL, as the timeout path ends a
+    block's processes. There is no grace period: a process a block starts and does not
+    wait for is a process the block left.
+    """
+    try:
+        os.killpg(group, 0)
+    except ProcessLookupError:
+        return ()
+    except PermissionError:
+        pass  # a member this user may not signal is still there
+    members = _members_from_proc(group)
+    if members is None:
+        members = _members_from_ps(group)
+    if members == []:
+        return ()
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(group, signal.SIGKILL)
+    if members is None:
+        return (_UNNAMED_PROCESS,)
+    return tuple(
+        f"{pid} {' '.join(command.split())[:_COMMAND_CHARS]}"
+        for pid, command in sorted(members)
+    )
+
 
 class PageRunner:
     """Runs one page's blocks in one session and returns a result per block."""
@@ -455,9 +706,15 @@ class PageRunner:
         scratch: Path,
         default_timeout: float | None = None,
         docs_root: Path | None = None,
+        coverage: DocsCoverage | None = None,
     ):
         self.checks = load_docs_checks()
         self.page = page
+        #: When set, every session is measured by coverage.py, each block under its
+        #: own context, and ``run`` writes the page's record. Only the docs examples
+        #: test sets it: the twins and the runner's own failure proofs do not, so
+        #: their deliberately failing or synthetic blocks never reach the data.
+        self.coverage = coverage
         # Fixtures are docs data, so they come from the docs tree; the commands run
         # with the ASH in this interpreter's environment, whichever tree that is.
         self.docs_root = docs_root or REPO_ROOT
@@ -489,6 +746,8 @@ class PageRunner:
                 shutil.copy2(path, target)
         port, port_number = _refusing_port()
         env = self._base_env(root, port_number)
+        if self.coverage is not None:
+            env.update(self.coverage.session_environment())
         for args in (
             ["init", "-q", "-b", "main"],
             ["add", "-A"],
@@ -521,7 +780,13 @@ class PageRunner:
 
     def _run_process(
         self, argv: list[str], cwd: Path, env: dict[str, str], timeout: float
-    ) -> tuple[int | None, str, bool]:
+    ) -> tuple[int | None, str, bool, tuple[str, ...]]:
+        """(exit code, output, whether it timed out, what it left running).
+
+        What a block left running is what its process group still held when its shell
+        had exited (``_end_the_process_group``); a block that timed out has had its
+        whole group ended already and leaves none.
+        """
         process = subprocess.Popen(
             argv,
             cwd=cwd,
@@ -533,12 +798,17 @@ class PageRunner:
         )
         try:
             output, _ = process.communicate(timeout=timeout)
-            return process.returncode, output.decode("utf-8", errors="replace"), False
         except subprocess.TimeoutExpired:
             # The block's own children share its session; end all of them.
             os.killpg(process.pid, signal.SIGKILL)
             output, _ = process.communicate()
-            return None, output.decode("utf-8", errors="replace"), True
+            return None, output.decode("utf-8", errors="replace"), True, ()
+        return (
+            process.returncode,
+            output.decode("utf-8", errors="replace"),
+            False,
+            _end_the_process_group(process.pid),
+        )
 
     def _save(self, block, session: Session) -> tuple[Path | None, str | None]:
         """Write a save-as block into the session's project: (path, or why it was refused).
@@ -595,6 +865,11 @@ class PageRunner:
         timeout = float(self._marker_value(block, "timeout", self.default_timeout))
         expected = str(self._marker_value(block, "expect-exit", "0"))
         block_env = marker_env(block)
+        if self.coverage is not None:
+            # Like a marker's env=, for this block only (_carry_state drops it).
+            block_env[COVERAGE_CONTEXT_VARIABLE] = self.coverage.context(
+                self.page.rel, block.fence_line
+            )
         env = {**session.env, **block_env}
         started = time.monotonic()
 
@@ -608,7 +883,7 @@ class PageRunner:
                 env["PYTHONPATH"] = os.pathsep.join(
                     p for p in (str(session.cwd), env.get("PYTHONPATH", "")) if p
                 )
-            code, output, timed_out = self._run_process(
+            code, output, timed_out, left = self._run_process(
                 [sys.executable, str(script)], session.cwd, env, timeout
             )
             command = block.body
@@ -632,7 +907,7 @@ class PageRunner:
                 git_bash = git_for_windows_bash()
                 if git_bash:
                     interpreter = git_bash
-            code, output, timed_out = self._run_process(
+            code, output, timed_out, left = self._run_process(
                 [interpreter, str(script), str(state), str(cwd_file)],
                 session.cwd,
                 env,
@@ -660,6 +935,7 @@ class PageRunner:
             seconds=time.monotonic() - started,
             timed_out=timed_out,
             paths=tuple(sorted(paths)),
+            left_running=left,
         )
 
     def compare_sample(self, block, shown: BlockResult) -> BlockResult:
@@ -717,18 +993,54 @@ class PageRunner:
     def run(self) -> list[BlockResult]:
         samples = compared_samples(self.page)
         results: dict[int, BlockResult] = {}
+        sample_ok: dict[int, bool] = {}
         try:
             ordered = []
             for block in session_blocks(self.page):
                 shown = samples.get(id(block))
                 if shown is not None:
-                    ordered.append(self.compare_sample(block, results[id(shown)]))
+                    compared = self.compare_sample(block, results[id(shown)])
+                    sample_ok[id(shown)] = compared.ok
+                    ordered.append(compared)
                     continue
                 results[id(block)] = self.run_block(block)
                 ordered.append(results[id(block)])
+            if self.coverage is not None:
+                self._write_record(results, sample_ok)
             return ordered
         finally:
             self.close()
+
+    def _write_record(
+        self, results: dict[int, BlockResult], sample_ok: dict[int, bool]
+    ) -> None:
+        """Record every block the page ran or saved, for the docs feature coverage gate.
+
+        A block's ``ok`` is its own verdict together with its output sample's: an
+        example whose sample no longer matches claims something it does not show.
+        ``expected`` is the exit the block's marker names, which the gate reads to
+        tell an example of ASH working from one of ASH refusing something. A run that
+        raised never gets here, so that page leaves no record and gives no evidence.
+        """
+        assert self.coverage is not None
+        sessions = {id(block): number for number, _, block in page_sessions(self.page)}
+        blocks = []
+        for block in session_blocks(self.page):
+            result = results.get(id(block))
+            if result is None:  # an output sample: compared, not run
+                continue
+            blocks.append(
+                {
+                    "line": block.fence_line,
+                    "context": self.coverage.context(self.page.rel, block.fence_line),
+                    "session": sessions[id(block)],
+                    "runs": self.checks.runner_runs(block),
+                    "save_as": block.save_as or None,
+                    "expected": result.expected,
+                    "ok": bool(result.ok and sample_ok.get(id(block), True)),
+                }
+            )
+        self.coverage.write_record(self.page.rel, blocks)
 
 
 def failure_report(results: list[BlockResult]) -> str:

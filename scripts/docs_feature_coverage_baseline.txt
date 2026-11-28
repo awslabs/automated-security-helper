@@ -1,0 +1,409 @@
+# Product features that no executed docs example reaches yet.
+#
+# This file may only shrink. scripts/docs_feature_coverage.py check fails on an
+# uncovered feature that is not listed here and on a listed line that names no feature,
+# and, in a pull request, on a line the base branch's file lacks and on a line for a
+# feature an executed example now reaches: delete that line then.
+#
+# Never add a feature. A new command, option, plugin or configuration key ships with an
+# executed docs example that reaches it. A feature that is renamed or removed leaves
+# nothing to allow, so its line is deleted with it.
+#
+# One feature id per line, `<kind>:<name>`, in sorted order.
+command:ash config update
+command:ash config validate-plugin-dependencies
+command:ash config wizard
+command:ash container build
+command:ash dependencies check
+command:ash dependencies install
+command:ash express start
+command:ash express status
+command:ash express stop
+command:ash mcp
+command:ash plugin verify
+command:ash results diff
+command:ash results inspect findings
+command:ash results trend
+command:ash suppress add
+command:ash suppress refresh
+command:ash suppress verify
+config:build
+config:build.build_mode
+config:build.custom_scanners
+config:build.tool_install_scripts
+config:content_db_staleness
+config:content_db_staleness_offline_image_default
+config:content_db_staleness_overrides
+config:content_db_staleness_overrides[].database
+config:content_db_staleness_overrides[].expiration
+config:content_db_staleness_overrides[].policy
+config:content_db_staleness_overrides[].reason
+config:converters
+config:converters.archive
+config:converters.jupyter
+config:converters.mcp_config
+config:default_scanners
+config:default_scanners.add
+config:default_scanners.only
+config:extends
+config:external_reports_to_include
+config:fail_on_incomplete_scanners
+config:fail_on_unknown_keys
+config:global_settings.deduplication
+config:global_settings.deduplication.annotate
+config:global_settings.deduplication.fold
+config:global_settings.exclusions
+config:global_settings.exclusions[].client_supplied
+config:global_settings.exclusions[].expires
+config:global_settings.exclusions[].path
+config:global_settings.exclusions[].reason
+config:global_settings.exclusions[].rule_id
+config:global_settings.exclusions[].scanner
+config:global_settings.history
+config:global_settings.history.enabled
+config:global_settings.history.keep_runs
+config:global_settings.ignore_paths[].client_supplied
+config:global_settings.mcp
+config:global_settings.mcp.runtime_overrides
+config:global_settings.mcp.runtime_overrides.allowed_paths
+config:global_settings.mcp.runtime_overrides.denied_paths
+config:global_settings.mcp.runtime_overrides.denied_value_patterns
+config:global_settings.mcp.runtime_overrides.enabled
+config:global_settings.mcp.runtime_overrides.replace_default_denied_paths
+config:global_settings.suppressions[].client_supplied
+config:global_settings.suppressions[].image
+config:global_settings.suppressions[].package_name
+config:global_settings.suppressions[].package_path
+config:global_settings.suppressions[].package_version
+config:global_settings.suppressions[].resource_id
+config:global_settings.suppressions[].scope
+config:global_settings.suppressions[].scope.engines
+config:global_settings.suppressions[].scope.resource_id
+config:global_settings.suppressions[].scope.resource_type
+config:global_settings.suppressions[].symbol
+config:honor_ignore_files
+config:mcp-resource-management
+config:mcp-resource-management.enable_health_checks
+config:mcp-resource-management.enable_resource_logging
+config:mcp-resource-management.health_check_interval_seconds
+config:mcp-resource-management.log_resource_operations
+config:mcp-resource-management.max_concurrent_scans
+config:mcp-resource-management.max_concurrent_scans_per_session
+config:mcp-resource-management.max_concurrent_tasks
+config:mcp-resource-management.max_directory_size_mb
+config:mcp-resource-management.max_message_size_bytes
+config:mcp-resource-management.max_path_length
+config:mcp-resource-management.memory_critical_threshold_mb
+config:mcp-resource-management.memory_warning_threshold_mb
+config:mcp-resource-management.operation_timeout_seconds
+config:mcp-resource-management.scan_timeout_seconds
+config:mcp-resource-management.shutdown_timeout_seconds
+config:mcp-resource-management.task_count_warning_threshold
+config:mcp-resource-management.thread_pool_max_workers
+config:output_formats
+config:patch
+config:precommit
+config:precommit.add_scanners
+config:precommit.only_scanners
+config:reporters
+config:reporters.asff
+config:reporters.csv
+config:reporters.cyclonedx
+config:reporters.flat-json
+config:reporters.github-ghas
+config:reporters.gitlab-cyclonedx
+config:reporters.gitlab-sast
+config:reporters.html
+config:reporters.junitxml
+config:reporters.markdown
+config:reporters.ocsf
+config:reporters.sarif
+config:reporters.spdx
+config:reporters.text
+config:reporters.unused-suppressions
+config:reporters.yaml
+config:sandbox
+config:sandbox.env_scanners
+config:sandbox.environment
+config:sandbox.extra_read_paths
+config:sandbox.mode
+config:sandbox.network_scanners
+config:sandbox.read_path_scanners
+config:scanners
+config:scanners.actionlint
+config:scanners.bandit
+config:scanners.cdk-nag
+config:scanners.cfn-guard
+config:scanners.cfn-lint
+config:scanners.cfn-nag
+config:scanners.checkov
+config:scanners.detect-secrets
+config:scanners.gitleaks
+config:scanners.grype
+config:scanners.mcp-config
+config:scanners.npm-audit
+config:scanners.opengrep
+config:scanners.semgrep
+config:scanners.syft
+config:scanners.trivy
+config:scanners.zizmor
+config:workspace
+config:workspace.max_parallel_projects
+config:workspace.project_timeout
+converter:archive
+converter:jupyter
+converter:sdist-lock-harvester
+mcp-tool:cancel_scan
+mcp-tool:check_installation
+mcp-tool:clear_source
+mcp-tool:diff_scan_results
+mcp-tool:explain_finding
+mcp-tool:get_config
+mcp-tool:get_scan_progress
+mcp-tool:get_scan_result_paths
+mcp-tool:get_scan_results
+mcp-tool:get_scan_summary
+mcp-tool:list_active_scans
+mcp-tool:list_profiles
+mcp-tool:list_scanners
+mcp-tool:resolve_ash_workspace
+mcp-tool:run_ash_scan
+mcp-tool:run_ash_workspace_scan
+mcp-tool:select_profile
+mcp-tool:set_source_git
+mcp-tool:set_source_image
+mcp-tool:set_source_image_archive_chunk
+mcp-tool:set_source_image_archive_finalize
+mcp-tool:set_source_zip_chunk
+mcp-tool:set_source_zip_finalize
+mcp-tool:suggest_suppression
+mcp-tool:validate_config
+option:ash config get --color
+option:ash config get --config-overrides
+option:ash config get --debug
+option:ash config get --verbose
+option:ash config init --color
+option:ash config init --config
+option:ash config init --debug
+option:ash config init --force
+option:ash config init --verbose
+option:ash config lint --color
+option:ash config lint --config
+option:ash config lint --debug
+option:ash config lint --fix
+option:ash config lint --fix-unused
+option:ash config lint --non-interactive
+option:ash config lint --output-dir
+option:ash config lint --source-dir
+option:ash config lint --verbose
+option:ash config update --color
+option:ash config update --config
+option:ash config update --debug
+option:ash config update --dry-run
+option:ash config update --set
+option:ash config update --source-dir
+option:ash config update --verbose
+option:ash config validate --color
+option:ash config validate --config-overrides
+option:ash config validate --debug
+option:ash config validate --source-dir
+option:ash config validate --verbose
+option:ash config validate-plugin-dependencies --color
+option:ash config validate-plugin-dependencies --config
+option:ash config validate-plugin-dependencies --config-overrides
+option:ash config validate-plugin-dependencies --debug
+option:ash config validate-plugin-dependencies --source-dir
+option:ash config validate-plugin-dependencies --verbose
+option:ash config wizard --color
+option:ash config wizard --config
+option:ash config wizard --debug
+option:ash config wizard --source-dir
+option:ash config wizard --verbose
+option:ash container build --ash-revision-to-install
+option:ash container build --build-target
+option:ash container build --cli-json-input
+option:ash container build --color
+option:ash container build --config
+option:ash container build --config-overrides
+option:ash container build --container-gid
+option:ash container build --container-network
+option:ash container build --container-uid
+option:ash container build --custom-build-arg
+option:ash container build --custom-containerfile
+option:ash container build --debug
+option:ash container build --force
+option:ash container build --generate-cli-skeleton
+option:ash container build --log-level
+option:ash container build --no-build
+option:ash container build --no-run
+option:ash container build --oci-runner
+option:ash container build --offline
+option:ash container build --offline-semgrep-rulesets
+option:ash container build --quiet
+option:ash container build --verbose
+option:ash dependencies check --allow-stale-content-db
+option:ash dependencies check --config
+option:ash dependencies check --offline
+option:ash dependencies check --source-dir
+option:ash dependencies check --tool
+option:ash dependencies install --bin-path
+option:ash dependencies install --binary-path
+option:ash dependencies install --color
+option:ash dependencies install --config
+option:ash dependencies install --config-overrides
+option:ash dependencies install --create-virtualenv
+option:ash dependencies install --debug
+option:ash dependencies install --inherit-system-tools
+option:ash dependencies install --plugin-type
+option:ash dependencies install --providers
+option:ash dependencies install --tool
+option:ash dependencies install --verbose
+option:ash dependencies install --virtualenv-path
+option:ash express start --foreground
+option:ash express start --idle-seconds
+option:ash express status --json
+option:ash get-genai-guide --branch
+option:ash get-genai-guide --from-github
+option:ash mcp --allowed-host
+option:ash mcp --auth-header-name
+option:ash mcp --auth-header-value
+option:ash mcp --auth-header-value-fd
+option:ash mcp --auth-header-value-file
+option:ash mcp --color
+option:ash mcp --debug
+option:ash mcp --host
+option:ash mcp --log-level
+option:ash mcp --mount-path
+option:ash mcp --port
+option:ash mcp --profile
+option:ash mcp --quiet
+option:ash mcp --session-workspace-ttl
+option:ash mcp --stateless-http
+option:ash mcp --transport
+option:ash mcp --trust-upstream-host-check
+option:ash mcp --trust-upstream-session-id
+option:ash mcp --verbose
+option:ash plugin list --color
+option:ash plugin list --config
+option:ash plugin list --config-overrides
+option:ash plugin list --debug
+option:ash plugin list --include-plugin-config
+option:ash plugin list --show-versions
+option:ash plugin list --verbose
+option:ash plugin verify --all
+option:ash plugin verify --json
+option:ash plugin verify --live-result
+option:ash plugin verify --transcripts-root
+option:ash results diff --cli-json-input
+option:ash results diff --format
+option:ash results diff --generate-cli-skeleton
+option:ash results inspect findings --config
+option:ash results inspect findings --output-dir
+option:ash results inspect findings --report-file
+option:ash results merge --cli-json-input
+option:ash results merge --color
+option:ash results merge --config
+option:ash results merge --config-overrides
+option:ash results merge --debug
+option:ash results merge --fail-on-incomplete-scanners
+option:ash results merge --generate-cli-skeleton
+option:ash results merge --ignore-suppressions
+option:ash results merge --log-level
+option:ash results merge --min-severity
+option:ash results merge --output-formats
+option:ash results merge --verbose
+option:ash results report --annotate-duplicates
+option:ash results report --cli-json-input
+option:ash results report --config
+option:ash results report --debug
+option:ash results report --fold-duplicates
+option:ash results report --generate-cli-skeleton
+option:ash results report --log-level
+option:ash results report --verbose
+option:ash results trend --cli-json-input
+option:ash results trend --format
+option:ash results trend --generate-cli-skeleton
+option:ash results trend --history
+option:ash scan --add-scanners
+option:ash scan --allow-in-tree-tools
+option:ash scan --allow-missing-projects
+option:ash scan --annotate-duplicates
+option:ash scan --ash-revision-to-install
+option:ash scan --baseline
+option:ash scan --build
+option:ash scan --build-target
+option:ash scan --cleanup
+option:ash scan --cli-json-input
+option:ash scan --color
+option:ash scan --compact-report
+option:ash scan --container-gid
+option:ash scan --container-uid
+option:ash scan --custom-build-arg
+option:ash scan --custom-containerfile
+option:ash scan --debug
+option:ash scan --exclude-scanners
+option:ash scan --express
+option:ash scan --fold-duplicates
+option:ash scan --force
+option:ash scan --generate-cli-skeleton
+option:ash scan --git-depth
+option:ash scan --git-ref
+option:ash scan --honor-ignore-files
+option:ash scan --image
+option:ash scan --image-archive
+option:ash scan --image-layout
+option:ash scan --inspect
+option:ash scan --log-level
+option:ash scan --min-severity
+option:ash scan --oci-runner
+option:ash scan --offline-semgrep-rulesets
+option:ash scan --only-scanners
+option:ash scan --phases
+option:ash scan --python-only
+option:ash scan --quiet
+option:ash scan --run
+option:ash scan --sandbox
+option:ash scan --show-summary
+option:ash scan --simple
+option:ash scan --source-git
+option:ash scan --staged
+option:ash scan --strategy
+option:ash scan --use-existing
+option:ash scan --workspace-config
+option:ash suppress add --config
+option:ash suppress add --file
+option:ash suppress add --reason
+option:ash suppress add --source-dir
+option:ash suppress add --symbol
+option:ash suppress refresh --all
+option:ash suppress refresh --drop-missing
+option:ash suppress refresh --source-dir
+option:ash suppress verify --config
+option:ash suppress verify --source-dir
+reporter:asff
+reporter:aws-security-hub
+reporter:bedrock-summary-reporter
+reporter:cloudwatch-logs
+reporter:s3
+reporter:spdx
+reporter:yaml
+scanner:actionlint
+scanner:betterleaks
+scanner:cdk-nag
+scanner:cfn-guard
+scanner:cfn-lint
+scanner:cfn-nag
+scanner:checkov
+scanner:ferret-scan
+scanner:gitleaks
+scanner:grype
+scanner:guarddog
+scanner:hadolint
+scanner:npm-audit
+scanner:opengrep
+scanner:semgrep
+scanner:snyk-code
+scanner:syft
+scanner:trivy
+scanner:trivy-repo
+scanner:zizmor
