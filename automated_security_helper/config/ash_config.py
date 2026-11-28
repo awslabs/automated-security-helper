@@ -2732,6 +2732,19 @@ class AshConfig(RedactedSection):
     # environment. Redaction state only: nothing records or serializes it, and
     # the refusals built from _environment_values do not read it.
     _override_values: Tuple[str, ...] = PrivateAttr(default=())
+    # The list options a ``+=`` override started from its appended items in a
+    # section no plugin ASH ships reads, so with no default added, set by
+    # resolve_config.apply_config_overrides: each as (the keys the append landed
+    # on, the key as logged, the section as logged), redacted. The model
+    # apply_config_overrides rebuilds from this one and a copy of it keep them; a
+    # model validated from a dump does not. A later application of overrides keeps
+    # them too, except an entry that one of its replacing overrides lands on or
+    # above. reporter_section reads them to name such a list when it gives a
+    # reporter that sends findings off the host its section. Nothing records or
+    # serializes it.
+    _lists_started_from_appended_items: Tuple[Tuple[Tuple[str, ...], str, str], ...] = (
+        PrivateAttr(default=())
+    )
     # How the files wrote each of those values and keys
     # (config_validator.EnvironmentRewrite). The record of this config, in a
     # results file and anything sent from it, keeps the reference as the file

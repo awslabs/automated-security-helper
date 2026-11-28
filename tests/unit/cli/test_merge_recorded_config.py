@@ -28,6 +28,7 @@ kept, so a test can read what it was built with whether or not it ran.
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
 import shlex
@@ -144,6 +145,76 @@ class _EndpointReporter(ReporterPluginBase[_EndpointConfig]):
 
     def report(self, model):
         return json.dumps({"endpoint": self.config.options.endpoint})
+
+
+FILE_ENDPOINT = "https://file.invalid/"
+OVERRIDE_ENDPOINT = "https://override.invalid/"
+DEFAULT_TITLE = "default title"
+FILE_TITLE = "file-title-5d2f"
+OVERRIDE_TITLE = "override-title-8a41"
+DEFAULT_TAG = "default-tag-3c7e"
+OPERATOR_TAG = "operator-tag-91b6"
+SHARD_TAG = "shard-tag-4e0d"
+FILE_TAG = "file-tag-62af"
+APPENDED_TAG = "appended-tag-b8c3"
+
+
+class _RelayOptions(ReporterOptionsBase):
+    endpoint: str = ENDPOINT_DEFAULT
+    title: str = DEFAULT_TITLE
+    tags: List[str] = [DEFAULT_TAG]
+
+
+class _SectionRelayConfig(ReporterPluginConfigBase):
+    name: Literal["section-relay"] = "section-relay"
+    extension: str = "section-relay.json"
+    enabled: bool = False
+    options: _RelayOptions = _RelayOptions()
+
+
+class _SectionRelayReporter(ReporterPluginBase[_SectionRelayConfig]):
+    """Sends findings off the host, and declares no destination options.
+
+    Not decorated with ``@ash_reporter_plugin``, so it is never registered for the
+    rest of the process; the harness hands it to the merge directly. Its report is
+    the options it was built with, as JSON.
+    """
+
+    sends_off_host: ClassVar[bool] = True
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _SectionRelayConfig()
+        return super().model_post_init(context)
+
+    def report(self, model):
+        return json.dumps(self.config.options.model_dump())
+
+
+class _DeclaringRelayConfig(ReporterPluginConfigBase):
+    name: Literal["declaring-relay"] = "declaring-relay"
+    extension: str = "declaring-relay.json"
+    enabled: bool = False
+    options: _RelayOptions = _RelayOptions()
+
+
+class _DeclaringRelayReporter(ReporterPluginBase[_DeclaringRelayConfig]):
+    """Sends findings off the host, and declares ``endpoint`` as a destination option.
+
+    Its ``title`` and ``tags`` options are not declared. Not decorated either, and
+    its report is the options it was built with, as JSON.
+    """
+
+    sends_off_host: ClassVar[bool] = True
+    destination_options: ClassVar[Tuple[str, ...]] = ("endpoint",)
+
+    def model_post_init(self, context):
+        if self.config is None:
+            self.config = _DeclaringRelayConfig()
+        return super().model_post_init(context)
+
+    def report(self, model):
+        return json.dumps(self.config.options.model_dump())
 
 
 def _write_yaml(path: Path, document: Dict[str, Any]) -> Path:
@@ -758,6 +829,265 @@ class TestTheOperatorsBase:
         assert list(merged.ash_plugin_modules) == list(scanned.ash_plugin_modules)
         assert harness.ignored_keys() == scan_ignored
         assert set(SHARD_DESTINATION_KEYS) <= scan_ignored
+
+
+_DECLARING_TAGS = "reporters.declaring-relay.options.tags"
+_UNREAD_SECTION_KEY = "reporters.declaring-capture.options.destinations"
+
+
+def _overrides(*overrides: str) -> List[str]:
+    """``overrides`` as ``--config-overrides`` arguments, flag included."""
+    args: List[str] = []
+    for override in overrides:
+        args += ["--config-overrides", override]
+    return args
+
+
+def _assert_a_reporters_view_was_recorded(harness: _Harness) -> None:
+    """Precondition: ``ash merge`` recorded a reporters view for its config file.
+
+    A reporter that sends findings off the host is built from that view when one
+    is recorded. With none, it is built from the merge's own configuration, which
+    holds the overrides once, and a test of the view would pass without it.
+    """
+    built_with = harness.report_config
+    assert built_with is not None, "no report phase ran"
+    assert built_with._operator_reporters is not None, "no reporters view recorded"
+
+
+def _start_with_no_key_named(harness: _Harness) -> None:
+    """Forget the ``+=`` keys a warning has named earlier in this process.
+
+    A run names each key once, and the set of keys named outlives the test that
+    named one, so a test that checks which warning names a key starts with none.
+    """
+    harness.monkeypatch.setattr(
+        importlib.import_module("automated_security_helper.config.resolve_config"),
+        "_APPEND_TO_UNREAD_SECTION_WARNED",
+        set(),
+        raising=False,
+    )
+
+
+@pytest.mark.unit
+class TestAnOffHostReporterGivenAConfigWithAView:
+    """``ash merge`` builds an off-host reporter from a view that holds the overrides.
+
+    An off-host reporter is one that sends findings off the host. A ``--config``
+    file inside the working directory or a git checkout, or one outside both that
+    extends such a file, is a file the scanned repository could write, so
+    ``resolve_config`` records a reporters view for it: the operator's own settings
+    for such a reporter, which the merge builds the reporter from. ``ash merge``
+    reads that file without the overrides, since it applies them to each base once
+    and a second application would repeat an appending override, so the view holds
+    them only if the merge puts them there. A reporter that declares no destination
+    options takes its whole section from ASH's defaults and the overrides. One that
+    declares some takes those options and ``enabled`` from them, and its other
+    options from the view. Each test checks first that the merge recorded a view.
+    """
+
+    def test_an_override_turns_on_a_reporter_that_declares_no_destinations(
+        self, harness
+    ):
+        """An override enables a reporter that declares no destination options.
+
+        Its whole section is ASH's defaults and the overrides, so the override turns
+        it on and sets its endpoint, and nothing the config file wrote reaches it.
+        """
+        harness.reporters.append(_SectionRelayReporter)
+        config_file = _write_yaml(
+            Path.cwd() / "ash.yaml",
+            {
+                "reporters": {
+                    "section-relay": {
+                        "enabled": True,
+                        "options": {"endpoint": FILE_ENDPOINT, "title": FILE_TITLE},
+                    }
+                }
+            },
+        )
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(config_file),
+            *_overrides(
+                "reporters.section-relay.enabled=true",
+                f"reporters.section-relay.options.endpoint={OVERRIDE_ENDPOINT}",
+            ),
+        )
+
+        _assert_merged(result, harness)
+        _assert_a_reporters_view_was_recorded(harness)
+        section = _section(harness.instance(_SectionRelayReporter).config)
+        assert section["enabled"] is True
+        assert section["options"]["endpoint"] == OVERRIDE_ENDPOINT
+        assert section["options"]["title"] == DEFAULT_TITLE
+        dumped = json.dumps(section)
+        assert FILE_ENDPOINT not in dumped
+        assert FILE_TITLE not in dumped
+
+    def test_an_override_reaches_an_option_a_declaring_reporter_does_not_declare(
+        self, harness
+    ):
+        """An override sets an option the reporter does not declare as a destination.
+
+        The reporter declares ``endpoint``. Its ``enabled`` and that option come from
+        ASH's defaults and the overrides, and its other options from the view, which
+        holds the overrides too: the override's title is used, not the file's.
+        """
+        harness.reporters.append(_DeclaringRelayReporter)
+        config_file = _write_yaml(
+            Path.cwd() / "ash.yaml",
+            {"reporters": {"declaring-relay": {"options": {"title": FILE_TITLE}}}},
+        )
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(config_file),
+            *_overrides(
+                "reporters.declaring-relay.enabled=true",
+                f"reporters.declaring-relay.options.title={OVERRIDE_TITLE}",
+            ),
+        )
+
+        _assert_merged(result, harness)
+        _assert_a_reporters_view_was_recorded(harness)
+        section = _section(harness.instance(_DeclaringRelayReporter).config)
+        assert section["enabled"] is True
+        assert section["options"]["title"] == OVERRIDE_TITLE
+        assert FILE_TITLE not in json.dumps(section)
+
+    def test_an_append_extends_a_list_the_operators_own_file_writes_once(self, harness):
+        """An appending override adds its item to the operator's own list, once.
+
+        The operator's file is outside every tree and extends the config file in the
+        working directory, so the view holds the list it writes. The reporter is
+        built with that list and the appended item, each once: an override applied
+        to the view twice would append the item twice.
+        """
+        harness.reporters.append(_DeclaringRelayReporter)
+        _write_yaml(Path.cwd() / "ash.yaml", {"project_name": "from-the-repository"})
+        operator_file = _write_yaml(
+            harness.tmp_path / "operator.yaml",
+            {
+                "extends": ["collector/ash.yaml"],
+                "reporters": {"declaring-relay": {"options": {"tags": [OPERATOR_TAG]}}},
+            },
+        )
+        shard_paths = harness.write_shards({"project_name": "test-merge"})
+
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(operator_file),
+            *_overrides(
+                "reporters.declaring-relay.enabled=true",
+                f"{_DECLARING_TAGS}+={json.dumps([APPENDED_TAG])}",
+            ),
+        )
+
+        _assert_merged(result, harness)
+        _assert_a_reporters_view_was_recorded(harness)
+        section = _section(harness.instance(_DeclaringRelayReporter).config)
+        assert section["options"]["tags"] == [OPERATOR_TAG, APPENDED_TAG]
+
+    def test_a_list_the_view_started_is_named_as_the_operators_configuration_and_the_overrides(
+        self, harness
+    ):
+        """The warning for a list an append started in the view says where it came from.
+
+        The config file in the working directory writes ``tags``, and the shards'
+        record does too, but the view holds neither: the repository's file is not the
+        operator's. So the append starts the list in the view, the reporter is built
+        with that list alone, and the warning says its options other than its
+        destination options come from the operator's configuration and the overrides.
+        """
+        _start_with_no_key_named(harness)
+        harness.reporters.append(_DeclaringRelayReporter)
+        config_file = _write_yaml(
+            Path.cwd() / "ash.yaml",
+            {"reporters": {"declaring-relay": {"options": {"tags": [FILE_TAG]}}}},
+        )
+        shard_paths = harness.write_shards(
+            {"reporters": {"declaring-relay": {"options": {"tags": [SHARD_TAG]}}}}
+        )
+
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(config_file),
+            *_overrides(
+                "reporters.declaring-relay.enabled=true",
+                f"{_DECLARING_TAGS}+={json.dumps([APPENDED_TAG])}",
+            ),
+        )
+
+        _assert_merged(result, harness)
+        _assert_a_reporters_view_was_recorded(harness)
+        section = _section(harness.instance(_DeclaringRelayReporter).config)
+        assert section["options"]["tags"] == [APPENDED_TAG]
+        named = [text for text in harness.warnings if f"{_DECLARING_TAGS}+=" in text]
+        assert len(named) == 1, harness.warnings
+        assert (
+            "its options other than its destination options come from the operator's "
+            "configuration and the overrides, not from a config file the scanned "
+            "repository could write" in named[0]
+        )
+        assert "ASH's defaults" not in named[0]
+
+    def test_a_list_the_operators_own_file_wrote_is_not_named_as_one_an_append_started(
+        self, harness
+    ):
+        """A list the operator's own file wrote is extended, and no warning names it.
+
+        The operator's file writes the one item the override appends. An append that
+        started a list from nothing would give the same list, so a check that
+        compares the two would take the file's list for one the append started. The
+        append extends the file's list: the reporter is built with the file's item
+        and then the appended one, and no warning says an append started the list.
+        A warning for another key, given first, shows that warnings are captured.
+        """
+        _start_with_no_key_named(harness)
+        harness.reporters.append(_DeclaringRelayReporter)
+        apply_config_overrides(
+            AshConfig(),
+            [f'{_UNREAD_SECTION_KEY}+=["control-item"]'],
+            warn_unread_appends=True,
+        )
+        _write_yaml(Path.cwd() / "ash.yaml", {"project_name": "from-the-repository"})
+        operator_file = _write_yaml(
+            harness.tmp_path / "operator.yaml",
+            {
+                "extends": ["collector/ash.yaml"],
+                "reporters": {"declaring-relay": {"options": {"tags": [APPENDED_TAG]}}},
+            },
+        )
+        shard_paths = harness.write_shards(
+            {"reporters": {"declaring-relay": {"options": {"tags": [SHARD_TAG]}}}}
+        )
+
+        result = harness.merge(
+            shard_paths,
+            "--config",
+            str(operator_file),
+            *_overrides(
+                "reporters.declaring-relay.enabled=true",
+                f"{_DECLARING_TAGS}+={json.dumps([APPENDED_TAG])}",
+            ),
+        )
+
+        _assert_merged(result, harness)
+        _assert_a_reporters_view_was_recorded(harness)
+        named = [text for text in harness.warnings if f"{_DECLARING_TAGS}+=" in text]
+        assert named == [], named
+        control = [text for text in harness.warnings if _UNREAD_SECTION_KEY in text]
+        assert len(control) == 1, harness.warnings
+        section = _section(harness.instance(_DeclaringRelayReporter).config)
+        assert section["options"]["tags"] == [APPENDED_TAG, APPENDED_TAG]
 
 
 @pytest.mark.unit

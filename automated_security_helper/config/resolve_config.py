@@ -37,6 +37,8 @@ from automated_security_helper.config.ash_config import (
     SandboxConfig,
     fold_document_scanner_aliases,
     plugin_key_lookup_names,
+    plugin_section_claims,
+    plugin_section_key,
     reduced_plugin_name,
     sandbox_mode_in_document,
 )
@@ -45,10 +47,14 @@ from automated_security_helper.config.patch_ops import (
     VALUE_WRITING_OPS,
 )
 from automated_security_helper.models.vocab import PluginKind
+from automated_security_helper.plugin_manifests import UNTYPED_LIST_OPTION_DEFAULTS
 from automated_security_helper.utils import unknown_keys as _unknown_keys
 from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
+    PLUGIN_SEGMENT_KEYS,
+    declared_section_names,
     fold_known_plugin_sections,
+    folded_section_name,
 )
 from automated_security_helper.config.config_sources import (
     EXTENDS_KEY,
@@ -105,6 +111,8 @@ from automated_security_helper.config.path_trust import (
 )
 from automated_security_helper.config.reporter_trust import (
     confine_reporter_destinations,
+    declared_destination_options,
+    declared_off_host_sections,
 )
 from automated_security_helper.config.restrictions_kept import keep_restrictions
 from automated_security_helper.config.secret_verification_trust import (
@@ -201,7 +209,11 @@ from automated_security_helper.utils.error_text import (
     error_text,
     os_error_without_named_file,
 )
-from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.log import (
+    ASH_LOGGER,
+    NO_MARKUP,
+    current_run_log_scope,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 
@@ -457,11 +469,311 @@ def _sets_network_scanners(override: str) -> bool:
     return parts[0] == "sandbox" and (len(parts) == 1 or parts[1] == "network_scanners")
 
 
+def _is_in_an_untyped_plugin_section(resolved_keys: Sequence[str]) -> bool:
+    """Whether an override landed at a key inside the section of a plugin the
+    configuration does not type: three or more segments, the first a plugin
+    segment (``scanners``, ``reporters``, ``converters``) and the second none of
+    that segment's declared sections. An override of such a section as a whole
+    (two segments), of a typed section, and of a key outside the plugin segments
+    is not."""
+    return (
+        len(resolved_keys) >= 3
+        and resolved_keys[0] in PLUGIN_SEGMENT_KEYS
+        and folded_section_name(resolved_keys[1])
+        not in declared_section_names(resolved_keys[0])
+    )
+
+
+def _section_key_a_plugin_reads(
+    keys: Iterable[str],
+    plugin: str,
+    claims: Optional[Dict[str, List[str]]] = None,
+) -> Optional[str]:
+    """The key of a plugin segment's sections that ``AshConfig.get_plugin_config``
+    reads for *plugin*: the key spelled as the plugin's own name when there is one,
+    else the first key that claims the plugin's reduced name
+    (``plugin_section_key``). *claims* is ``plugin_section_claims`` of the same keys,
+    for a caller that asks about several plugins."""
+    names = list(keys)
+    if plugin in names:
+        return plugin
+    return plugin_section_key(
+        names,
+        reduced_plugin_name(plugin),
+        claims if claims is not None else plugin_section_claims(names),
+    )
+
+
+def _row_of_the_shipped_plugin_reading(
+    segment: Dict[str, Any], resolved_keys: Sequence[str]
+) -> Optional[Mapping[Tuple[str, ...], Tuple[Any, ...]]]:
+    """The row of ``UNTYPED_LIST_OPTION_DEFAULTS`` for the plugin ASH ships that
+    reads the section an override landed in, or None when no such plugin does.
+
+    *segment* is the document's plugin segment the override landed in
+    (``config_dict["reporters"]``), *resolved_keys* the override's key as
+    ``_apply_config_override`` resolved it. A plugin reads a section as
+    ``AshConfig.get_plugin_config`` finds it: the key spelled as the plugin's own
+    name when the segment holds one, else the first key that claims the plugin's
+    reduced name (``plugin_section_key``), the choice
+    ``refuse_unknown_plugin_options`` makes when it checks the same section.
+
+    The document here is ``config.model_dump()`` without aliases, which spells a
+    typed section by its field name (``gitlab_sast``); ``get_plugin_config`` reads
+    ``model_dump(by_alias=True)`` (``gitlab-sast``). The two lookups choose alike
+    today, because no typed key claims the reduced name of an untyped plugin ASH
+    ships.
+
+    Only the plugins ASH ships are asked: a plugin from a module outside ASH is
+    known when that module loads, after the overrides are applied. A shipped plugin
+    with no list option has an empty row, so a ``+=`` on one of its options gets no
+    warning and is left to the plugin's own options model.
+    """
+    claims = plugin_section_claims(segment)
+    for plugin, row in UNTYPED_LIST_OPTION_DEFAULTS.get(resolved_keys[0], {}).items():
+        read = _section_key_a_plugin_reads(segment, plugin, claims)
+        if read == resolved_keys[1]:
+            return row
+    return None
+
+
+#: The keys of a ``+=`` that ``_warn_that_no_shipped_plugin_reads`` or
+#: ``_warn_that_an_off_host_reporter_runs_with_the_appended_items`` has named, each
+#: as (the run log scope it was named in, the key as logged, redacted). A run names
+#: a key once however often its own overrides are applied, and a later run in the
+#: same process (the MCP server runs every scan in one) names it again, as the path
+#: refusals do (``path_trust._WARNED``); None is the scope outside every run. Only
+#: the application that builds a command's own configuration asks for the warning
+#: (``apply_config_overrides(..., warn_unread_appends=True)``): the one
+#: ``build_config`` makes when a command resolves its configuration (a scan's,
+#: ``ash report``'s), the one ``resolve_config`` makes over the defaults when it finds
+#: no config file, the record of the lowest-indexed shard in ``ash merge`` (or the
+#: merge's own over the defaults when no shard recorded one), and the one
+#: ``ash config update --set`` makes for the file it writes.
+#: The same overrides are applied again to other bases (the trusted reporter view,
+#: the scanner views, the other shards' records, the configuration the off-host
+#: reporters of ``ash merge`` and ``ash report`` run with, the MCP workspace gate),
+#: where a key the real document holds can be missing, and those applications never
+#: warn. A reporter that sends findings off the host is built from such a base's
+#: section, so ``reporter_section`` names a list that started from the appended
+#: items there, through this set (``warn_of_appends_an_off_host_reporter_runs_with``).
+_APPEND_TO_UNREAD_SECTION_WARNED: Set[Tuple[Optional[str], str]] = set()
+_APPEND_TO_UNREAD_SECTION_LOCK = threading.Lock()
+#: Past this many (run, key) entries the set starts over, so a long-lived process
+#: (the MCP server) stays bounded; a key can then be named again.
+_APPEND_TO_UNREAD_SECTION_BOUND = 1024
+
+
+def _warn_that_no_shipped_plugin_reads(
+    key_path: str, logged_path: str, environment_values: Sequence[str]
+) -> None:
+    """Say, once per key in each run, that a ``+=`` landed in a section that no
+    plugin ASH ships reads, so there is no default for it to add to.
+
+    Only the application that builds a command's own configuration calls this
+    (``warn_unread_appends``). It shares the run's named keys with
+    ``_warn_that_an_off_host_reporter_runs_with_the_appended_items``
+    (``_first_naming_in_this_run``). A replay or a view of the same overrides
+    applies them to a base that can lack a key the real document holds, and would
+    say the list starts from the appended items for a list the file wrote.
+
+    *key_path* is the override's key as typed, without its ``+``; *logged_path* is
+    the same key redacted, the text every log line of ``_apply_config_override``
+    names it by and, with the run's log scope (``current_run_log_scope``), the key
+    this remembers. The text names the key and the section and never the value,
+    which can be a credential.
+    """
+    if not _first_naming_in_this_run(logged_path):
+        return
+    section = redact_values(".".join(key_path.split(".")[:2]), environment_values)
+    ASH_LOGGER.warning(
+        f"No plugin ASH ships reads {section} (a plugin from a module outside ASH "
+        "is read after the overrides are applied), so "
+        f"'{logged_path}+=' cannot add to that option's default: the list starts "
+        "from the appended items and replaces any default the plugin gives it. "
+        "Check the section name, or set the whole list with "
+        f"'{logged_path}=[...]'.",
+        extra=NO_MARKUP,
+    )
+
+
+def _first_naming_in_this_run(logged_path: str) -> bool:
+    """Whether *logged_path* is named for the first time in this run
+    (``current_run_log_scope``), remembering it if so. Both warnings about a list
+    that started from the appended items share it, so a run names a key once
+    whichever of them names it first."""
+    named = (current_run_log_scope(), logged_path)
+    with _APPEND_TO_UNREAD_SECTION_LOCK:
+        if named in _APPEND_TO_UNREAD_SECTION_WARNED:
+            return False
+        if len(_APPEND_TO_UNREAD_SECTION_WARNED) >= _APPEND_TO_UNREAD_SECTION_BOUND:
+            _APPEND_TO_UNREAD_SECTION_WARNED.clear()
+        _APPEND_TO_UNREAD_SECTION_WARNED.add(named)
+    return True
+
+
+#: What ``_value_at`` gives where a section holds no value at a path.
+_NO_VALUE = object()
+
+
+def _value_at(section: Any, path: Sequence[str]) -> Any:
+    """The value at *path* under *section*, a section as ``get_plugin_config`` gives
+    it, or ``_NO_VALUE``."""
+    value = section
+    for step in path:
+        if not isinstance(value, dict) or step not in value:
+            return _NO_VALUE
+        value = value[step]
+    return value
+
+
+#: Where the part of an off-host reporter's section that holds a warned list came
+#: from, as the warning below says it. ``_where_the_warned_list_came_from`` chooses
+#: one for each list ``warn_of_appends_an_off_host_reporter_runs_with`` names.
+_BUILT_FROM_THE_OPERATOR_VIEW = (
+    "it is built from the operator's configuration and the overrides, not from a "
+    "config file the scanned repository could write"
+)
+_BUILT_FROM_ASH_DEFAULTS = (
+    "ash report and ash merge take its section from ASH's defaults and the "
+    "overrides, not from the config files they read"
+)
+_DESTINATIONS_FROM_ASH_DEFAULTS = (
+    "ash report and ash merge take its destination options and enabled from "
+    "ASH's defaults and the overrides, not from the config files they read"
+)
+_OTHER_OPTIONS_FROM_THE_OPERATOR_VIEW = (
+    "its options other than its destination options come from the operator's "
+    "configuration and the overrides, not from a config file the scanned "
+    "repository could write"
+)
+_OTHER_OPTIONS_FROM_THE_FILES_READ = (
+    "ash report and ash merge take its options other than its destination "
+    "options from the config files they read and the overrides"
+)
+_BUILT_FROM_ITS_OWN_CONFIGURATION = (
+    "ash merge given no config file takes its section from ASH's defaults and "
+    "the overrides (another command, from its own configuration and the "
+    "overrides)"
+)
+
+
+def _where_the_warned_list_came_from(
+    rest: Sequence[str],
+    from_overrides: bool,
+    viewed: bool,
+    declared: Collection[str],
+    whole: bool,
+) -> str:
+    """The clause the warning gives for a list at *rest*, its keys under the
+    reporter's section, saying where the part of the section that holds it came
+    from. When the command took such a reporter's settings from the defaults and
+    the overrides (*from_overrides*: ``ash report`` and ``ash merge`` given a config
+    file), the confinement gave it ASH's defaults and the overrides for its whole
+    section when it declares no destination options (*whole*), and for its declared
+    destination options (*declared*, ``-`` and ``_`` read as one) and ``enabled``
+    when it does. Its other options come from the view when one is recorded
+    (*viewed*), and otherwise from the config files the command read. Without that,
+    the section is the view's when one is recorded, and otherwise the
+    configuration's own."""
+    if from_overrides and whole:
+        return _BUILT_FROM_ASH_DEFAULTS
+    if from_overrides:
+        if rest and rest[0] == "enabled":
+            return _DESTINATIONS_FROM_ASH_DEFAULTS
+        if len(rest) >= 2 and rest[0] == "options":
+            folded = {name.replace("-", "_") for name in declared}
+            if rest[1].replace("-", "_") in folded:
+                return _DESTINATIONS_FROM_ASH_DEFAULTS
+        if viewed:
+            return _OTHER_OPTIONS_FROM_THE_OPERATOR_VIEW
+        return _OTHER_OPTIONS_FROM_THE_FILES_READ
+    if viewed:
+        return _BUILT_FROM_THE_OPERATOR_VIEW
+    return _BUILT_FROM_ITS_OWN_CONFIGURATION
+
+
+def _warn_that_an_off_host_reporter_runs_with_the_appended_items(
+    section: str, logged_path: str, built_from: str
+) -> None:
+    """Say, once per key in each run, that a reporter that sends findings off the
+    host is built from a list a ``+=`` started from its appended items, with no
+    default added. *built_from* says where the part of its section that holds the
+    list came from (one of the clauses above). *section* and *logged_path* are
+    redacted, and the text never names a value."""
+    if not _first_naming_in_this_run(logged_path):
+        return
+    ASH_LOGGER.warning(
+        f"{section} sends findings off the host; {built_from}, and there "
+        f"'{logged_path}+=' starts the list from the appended items: the plugin's "
+        "default for that option is not added. Set the whole list with "
+        f"'{logged_path}=[...]'.",
+        extra=NO_MARKUP,
+    )
+
+
+def warn_of_appends_an_off_host_reporter_runs_with(
+    config: Any, operator: Any, key: str, section: Any, reporter_class: type
+) -> None:
+    """Name each list of *section*, the section ``reporter_section`` gives a reporter
+    that sends findings off the host (*key* is its config key), that a ``+=`` started
+    from its appended items with no default added. The section comes from
+    *operator*, the view recorded on *config*, or from *config* when none is
+    recorded, and each records the lists its own applications started
+    (``_lists_started_from_appended_items``). When the command took such a
+    reporter's settings from the defaults and the overrides (``ash report``,
+    ``ash merge``), the confinement copied sections from the trusted base
+    (``config._trusted_reporter_base``), so that base's record counts too, for a
+    list the reporter's section holds as the base does.
+
+    The warning says, for each list, where the part of the section that holds it came
+    from (``_where_the_warned_list_came_from``). *reporter_class* is the reporter's
+    class: what it declares (``declared_destination_options``,
+    ``declared_off_host_sections``) is what the confinement took from ASH's defaults
+    and the overrides when the command took such a reporter's settings from them
+    (``_reporters_from_overrides``)."""
+    from_overrides = getattr(config, "_reporters_from_overrides", False) is True
+    declared = declared_destination_options([reporter_class]).get(key, ())
+    whole = key in declared_off_host_sections([reporter_class])
+    sources = [config if operator is None else operator]
+    if from_overrides:
+        sources.append(getattr(config, "_trusted_reporter_base", None))
+    for index, source in enumerate(sources):
+        if not isinstance(source, AshConfig):
+            continue
+        entries = getattr(source, "_lists_started_from_appended_items", None) or ()
+        if not entries:
+            continue
+        read = _section_key_a_plugin_reads(
+            source.reporters.model_dump(by_alias=True), key
+        )
+        held = section
+        if index > 0:
+            held = source.get_plugin_config(
+                plugin_type=PluginKind.REPORTER, plugin_name=key
+            )
+        for path, logged_path, logged_section in entries:
+            if len(path) < 3 or path[0] != "reporters" or path[1] != read:
+                continue
+            started = _value_at(held, path[2:])
+            if isinstance(started, list) and started == _value_at(section, path[2:]):
+                _warn_that_an_off_host_reporter_runs_with_the_appended_items(
+                    logged_section,
+                    logged_path,
+                    _where_the_warned_list_came_from(
+                        path[2:], from_overrides, operator is not None, declared, whole
+                    ),
+                )
+
+
 def _apply_config_override(
     config_dict: Dict[str, Any],
     key_path: str,
     value: str,
     environment_values: Sequence[str] = (),
+    *,
+    warn_unread_appends: bool = False,
+    started_lists: Optional[List[Tuple[Tuple[str, ...], str, str]]] = None,
 ) -> Tuple[List[str], Any, bool]:
     """
     Apply a single config override to a configuration dictionary.
@@ -475,6 +787,14 @@ def _apply_config_override(
             (resolve_override_segment reads them at each segment, and refuses
             a single-use iterator: a caller reusing an exhausted one across
             calls would print an env-read key unredacted).
+        warn_unread_appends: Log the warning for an append that lands in a
+            section no plugin ASH ships reads (``_warn_that_no_shipped_plugin_reads``),
+            where the list starts from the appended items. Set only for the
+            application that builds a command's own configuration.
+        started_lists: When given, each append that starts a list in a section no
+            plugin ASH ships reads is added to it as (the keys it landed on, the key
+            as logged, the section as logged); ``apply_config_overrides`` records
+            them on the model it returns.
 
     Returns:
         The key segments the override landed on, as this apply resolved them
@@ -538,10 +858,68 @@ def _apply_config_override(
         # None, starts the list: as a plain set, a scalar appended stored a
         # bare string a list field refuses, and a list appended replaced the
         # field's None with no word of the append.
-        current[final_key] = (
-            list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
-        )
-        ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
+        #
+        # Inside the section of a plugin the configuration does not type (an
+        # alpha scanner, an AWS reporter, a plugin a module outside ASH adds) the
+        # document holds only what a file wrote, so an option the file left out
+        # is absent though the plugin's model gives it a default, and starting
+        # the list from the items alone would drop that default. When a plugin
+        # ASH ships reads the section and its row of UNTYPED_LIST_OPTION_DEFAULTS
+        # has the option, the list starts from that default and takes the items
+        # after it. Anywhere else the list starts from the items, as it does
+        # outside such a section. A shipped plugin whose row has no such option
+        # (it is no list option, or the plugin has none of that name) is checked
+        # by the plugin's own options model when the plugin loads, with its own
+        # message. For a section no shipped plugin reads (a plugin from a module
+        # outside ASH, which is imported after the overrides are applied, or a
+        # misspelled section name) no default can be known, so the list starts
+        # from the items, and the application that builds the command's own
+        # configuration (``warn_unread_appends``) names the key in one warning for
+        # each run. Every application records such a list (``started_lists``) on
+        # the model it returns. Nothing refuses: this function applies the same
+        # overrides to other bases as well (the trusted reporter view, the scanner
+        # views, the other shards' records in ``ash merge``, the configuration the
+        # off-host reporters of ``ash merge`` and ``ash report`` run with, the MCP
+        # workspace gate), and a base that lacks a key the real document holds
+        # would refuse what the operator's own application accepts, dropping an
+        # external reporter's whole section from the trusted view or refusing a
+        # call each project would accept. Those applications say nothing either:
+        # the operator's own application extends a list the file wrote with no
+        # word, and the replay onto a base without the section would say that the
+        # list starts from the items, which the command's own configuration does
+        # not do. A reporter that sends findings off the host is built from such a
+        # base's section, so ``reporter_section`` names the list when it gives that
+        # reporter its section. A typed section holds every default already, and an
+        # override of a section as a whole has no option to read one for, so both
+        # keep the rule above.
+        items = list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
+        default: Optional[Tuple[Any, ...]] = None
+        if _is_in_an_untyped_plugin_section(resolved_keys):
+            row = _row_of_the_shipped_plugin_reading(
+                config_dict[resolved_keys[0]], resolved_keys
+            )
+            if row is None:
+                if warn_unread_appends:
+                    _warn_that_no_shipped_plugin_reads(
+                        key_path, logged_path, environment_values
+                    )
+                if started_lists is not None:
+                    section = redact_values(
+                        ".".join(key_path.split(".")[:2]), environment_values
+                    )
+                    started_lists.append((tuple(resolved_keys), logged_path, section))
+            else:
+                default = row.get(tuple(resolved_keys[2:]))
+        if default is not None:
+            # Copied, so no item of the table is ever shared with the document.
+            current[final_key] = [*copy.deepcopy(list(default)), *items]
+            ASH_LOGGER.debug(
+                f"Appended to the list at {logged_path}, after the option's default",
+                extra=NO_MARKUP,
+            )
+        else:
+            current[final_key] = items
+            ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
         return resolved_keys, parsed_value, True
     else:
         # Set the value
@@ -715,13 +1093,32 @@ def _validated_with_overrides(
         return AshConfig.model_validate(config_dict, context=context)
 
 
-def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> AshConfig:
+def apply_config_overrides(
+    config: AshConfig,
+    config_overrides: List[str],
+    *,
+    warn_unread_appends: bool = False,
+) -> AshConfig:
     """
     Apply configuration overrides to an AshConfig object.
 
     Args:
         config: The AshConfig object to modify
         config_overrides: List of strings in the format 'key.path=value'
+        warn_unread_appends: Log one warning for each key, in each run (the run
+            log scope), for a ``+=`` on a plugin option in a section no plugin ASH
+            ships reads, where the list starts from the appended items
+            (``_warn_that_no_shipped_plugin_reads``). For the application that
+            builds the document a command uses as its own configuration (in
+            ``ash merge``, the record of the lowest-indexed shard), or the file
+            ``ash config update --set`` writes. A view, a replay, a gate or a
+            reconstruction of the same overrides leaves it off: it applies them to
+            a base that can lack a key the real document holds, and a warning there
+            would name a list the command's own configuration extends. With the
+            flag or without it, the application records on the model it returns the
+            lists it started that way (``_lists_started_from_appended_items``), and
+            ``reporter_section`` names one when the section it gives a reporter that
+            sends findings off the host holds it.
 
     Returns:
         The modified AshConfig object
@@ -787,6 +1184,11 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     environment_values = config_environment_values(config)
     keys: List[str] = []
     applied: List[Tuple[List[str], Any, bool]] = []
+    # The lists this application starts from an append's items in a section no
+    # plugin ASH ships reads, and the keys its replacing overrides land on, for the
+    # record set on the rebuilt model below.
+    started: List[Tuple[Tuple[str, ...], str, str]] = []
+    replaced_paths: List[Tuple[str, ...]] = []
     raw_values: List[str] = []
     for override in config_overrides:
         key_path, separator, value = override.partition("=")
@@ -818,7 +1220,14 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
             )
         try:
             applied.append(
-                _apply_config_override(config_dict, key_path, value, environment_values)
+                _apply_config_override(
+                    config_dict,
+                    key_path,
+                    value,
+                    environment_values,
+                    warn_unread_appends=warn_unread_appends,
+                    started_lists=started,
+                )
             )
             raw_values.append(value)
         except ASHConfigValidationError:
@@ -831,6 +1240,13 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
                 f"Failed to apply the config override for '{key_path}': "
                 f"{type(e).__name__}"
             ) from e
+        # A replacing override sets the value itself: a list an earlier append
+        # started at or under the key it landed on is gone.
+        landed, _, appended = applied[-1]
+        if not appended:
+            path = tuple(landed)
+            replaced_paths.append(path)
+            started[:] = [entry for entry in started if entry[0][: len(path)] != path]
 
     # Convert back to AshConfig. An entry warn mode kept at load (an unknown
     # suppression key under fail_on_unknown_keys: false) still carries its key
@@ -900,6 +1316,18 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
                 ),
             )
         )
+    )
+    # The lists an append started with no default to add to: those the model it was
+    # given carried, less any a replacing override of this application set, then
+    # this application's. A later application, a rebuild and a copy keep them
+    # (reporter_section reads them).
+    rebuilt._lists_started_from_appended_items = (
+        *(
+            entry
+            for entry in getattr(rebuilt, "_lists_started_from_appended_items", ())
+            if not any(entry[0][: len(path)] == path for path in replaced_paths)
+        ),
+        *started,
     )
     # A model that already carries references (a second application) can
     # have its module list shortened here: the references it carried then
@@ -1094,7 +1522,16 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
         # applied, so the rebuilt model's deep-copied private state keeps them.
         config._resolution_warnings.extend(warned)
     if config_overrides:
-        config = apply_config_overrides(config, config_overrides)
+        # The one application of the overrides to the document the command uses as
+        # its own configuration (a scan's, ``ash report``'s), so the one that says
+        # an append had no default to add to; the replays and views of the same
+        # overrides onto other bases (resolve_config's trusted views, the off-host
+        # reporters' configuration of ``ash merge`` and ``ash report``) do not, and
+        # reporter_section names such a list where a reporter that sends findings
+        # off the host is built from one.
+        config = apply_config_overrides(
+            config, config_overrides, warn_unread_appends=True
+        )
     return config
 
 
@@ -5230,9 +5667,13 @@ def _resolve_config(
                 "source_dir and config_path are both null, returning the default config"
             )
             config = overlaid_fallback(config)
-            # Apply overrides to default config if provided
+            # Apply overrides to default config if provided. This is the run's
+            # own configuration, so an append with no default to add to is named
+            # (build_config's rule).
             if config_overrides:
-                return apply_config_overrides(config, config_overrides)
+                return apply_config_overrides(
+                    config, config_overrides, warn_unread_appends=True
+                )
             return config
 
         # Only a source_dir the caller passed may widen where `extends` bases
@@ -5311,9 +5752,13 @@ def _resolve_config(
                     "Configuration file not found or provided, using default config"
                 )
                 config = overlaid_fallback(config)
-                # Apply overrides to default config if provided
+                # Apply overrides to default config if provided. This is the
+                # run's own configuration, so an append with no default to add to
+                # is named (build_config's rule).
                 if config_overrides:
-                    return apply_config_overrides(config, config_overrides)
+                    return apply_config_overrides(
+                        config, config_overrides, warn_unread_appends=True
+                    )
                 return config  # Return default config if no config file found
             else:
                 raise ValueError("Configuration file not found or provided")

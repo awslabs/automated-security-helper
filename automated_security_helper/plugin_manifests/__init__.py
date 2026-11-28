@@ -35,7 +35,8 @@ from __future__ import annotations
 import functools
 import importlib
 import pkgutil
-from typing import Dict, Literal, Mapping, Optional
+from types import MappingProxyType
+from typing import Any, Dict, Literal, Mapping, Optional
 
 from automated_security_helper.base.plugin_manifest import (
     ConfigSection,
@@ -192,6 +193,98 @@ def plugin_config_sections(
         if manifest.config_section is not None
     ]
     return tuple(sorted(rows, key=lambda row: row[0].replace("-", "_")))
+
+
+#: The list defaults of the options of the plugins ASH ships whose section is not a
+#: typed field of the configuration (``plugin_config_sections`` lists the typed
+#: ones): by config segment, then plugin name, then the option's path under the
+#: section, the items of its default as JSON values.
+#:
+#: ``--config-overrides KEY+=VALUE`` reads it when KEY is such an option that no
+#: config file wrote. For a section the configuration does not type, the document
+#: the overrides are applied to holds only what a file wrote, so a ``+=`` has no
+#: default to add to; the plugin's own options model has it, and cannot be imported
+#: there, because importing a plugin package registers its plugins for the whole
+#: process and the overrides are applied before any is imported. The defaults are
+#: mirrored here as data, as ``alpha._DENIED_OPTION_DEFAULTS`` and
+#: ``config.reporter_trust.REPORTER_DESTINATION_OPTIONS`` mirror theirs.
+#: ``tests/unit/plugin_manifests/test_config_sections_and_exclusions.py`` walks the
+#: shipped plugin packages and holds this table equal to their options models, so a
+#: list option added to one of them, or a default changed, fails that test until
+#: the table follows.
+#:
+#: Every shipped plugin whose section is untyped has a row, and an empty row means
+#: the plugin has no list option. The row is also how ``--config-overrides`` knows
+#: that a plugin ASH ships reads a section: a ``+=`` on an option of a section with
+#: no row warns that no plugin reads it, which would be false for a shipped plugin
+#: that has no list option. The same test holds the plugins named here equal to the
+#: shipped plugins whose section is untyped, so a plugin added without a row fails
+#: it as well.
+UNTYPED_LIST_OPTION_DEFAULTS: Mapping[
+    str, Mapping[str, Mapping[tuple[str, ...], tuple[Any, ...]]]
+] = MappingProxyType(
+    {
+        "converters": MappingProxyType(
+            {
+                "sdist-lock-harvester": MappingProxyType({}),
+            }
+        ),
+        "reporters": MappingProxyType(
+            {
+                "aws-security-hub": MappingProxyType({}),
+                "bedrock-summary-reporter": MappingProxyType(
+                    {
+                        ("options", "compliance_frameworks"): (),
+                        ("options", "exclude_scanner_types"): ("SECRET",),
+                        ("options", "exclude_sections"): (),
+                        ("options", "include_sections"): (
+                            "executive_summary",
+                            "risk_assessment",
+                            "technical_analysis",
+                            "remediation_guide",
+                            "compliance_impact",
+                        ),
+                    }
+                ),
+                "cloudwatch-logs": MappingProxyType({}),
+                "s3": MappingProxyType({}),
+            }
+        ),
+        "scanners": MappingProxyType(
+            {
+                "betterleaks": MappingProxyType({}),
+                "ferret-scan": MappingProxyType({("options", "exclude_patterns"): ()}),
+                "guarddog": MappingProxyType(
+                    {
+                        ("options", "ecosystems"): (
+                            "pypi",
+                            "npm",
+                            "go",
+                            "github_action",
+                            "rubygems",
+                            "crates",
+                        ),
+                        ("options", "exclude_rules"): (),
+                        ("options", "excluded_paths"): (),
+                        ("options", "rules"): (),
+                    }
+                ),
+                "hadolint": MappingProxyType({}),
+                "snyk-code": MappingProxyType({}),
+                "trivy-repo": MappingProxyType(
+                    {
+                        ("options", "scanners"): (
+                            "vuln",
+                            "secret",
+                            "misconfig",
+                            "license",
+                        )
+                    }
+                ),
+            }
+        ),
+    }
+)
 
 
 @functools.lru_cache(maxsize=1)

@@ -112,6 +112,24 @@ async def test_an_allowed_override_is_applied(tmp_path, monkeypatch):
     assert result["success"] is True, result
 
 
+def test_an_append_to_an_option_the_session_config_does_not_hold_is_accepted(
+    tmp_path, monkeypatch
+):
+    """The gate applies the client's overrides to the session's config, which holds
+    no section for a plugin from a module outside ASH, though each project's own
+    config can. A ``+=`` on such a plugin's option starts the list from the items
+    there, as it does for each project, so the call is not refused over a key the
+    session's config lacks."""
+    _with_profile(monkeypatch, tmp_path, ["/converters/**"])
+    override = 'converters.acme-converter.options.destinations+=["ops"]'
+
+    kept = workspace_module._gate_client_overrides(
+        [override], str(tmp_path / "profile.yaml"), profile="op"
+    )
+
+    assert kept == [override]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "override",

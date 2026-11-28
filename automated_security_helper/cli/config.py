@@ -1643,7 +1643,11 @@ def _update_config_file(
             if separator and key_path.strip():
                 _refuse_an_unknown_top_level_key(key_path)
                 _refuse_a_reference_shaped_value(key_path, value)
-        updated_config = apply_config_overrides(config, list(modifications))
+        # The file this command writes: a `+=` with no default to add to is named
+        # here, as it is for the configuration a scan runs with.
+        updated_config = apply_config_overrides(
+            config, list(modifications), warn_unread_appends=True
+        )
     except ASHConfigValidationError as e:
         secho(
             shown_on_one_line(f"Not updating {config_path}: {e}"),

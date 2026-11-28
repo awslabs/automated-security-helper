@@ -2631,15 +2631,25 @@ def apply_operator_overrides(
     recorded no config is left without one, so
     :func:`_resolve_require_scanner_completion` still passes over it.
 
+    The lowest-indexed shard's record is the one :func:`merge_shard_results` takes
+    the merged report's config from, so its application is the merge's own
+    configuration and the one that names a ``+=`` with no default to add to
+    (``warn_unread_appends``). Another shard's record is not the configuration the
+    merge runs with, and a list it lacks can be one the merged config holds, so its
+    application says nothing.
+
     Raises:
         ASHConfigValidationError: If an override cannot be applied.
     """
     if not config_overrides:
         return
+    merged_from = _in_index_order(loaded)[0][1] if loaded else None
     for _, results in loaded:
         if results.ash_config is not None:
             results.ash_config = apply_config_overrides(
-                results.ash_config, list(config_overrides)
+                results.ash_config,
+                list(config_overrides),
+                warn_unread_appends=results is merged_from,
             )
 
 
@@ -2745,6 +2755,36 @@ def confine_recorded_config(
         Path.cwd(),
         [results_file],
         source=SHARD_RECORDED,
+    )
+
+
+def replay_reporter_overrides_onto_the_view(
+    operator_config: AshConfig, config_overrides: Sequence[str]
+) -> None:
+    """Replay ``--config-overrides`` under ``reporters`` onto the reporters view
+    recorded on *operator_config*, once.
+
+    ``resolve_operator_config`` reads ``--config`` without the overrides, so that
+    applying them to the trusted base later does not repeat an appending override.
+    A file in the working directory's tree or in a git checkout, or one that extends
+    such a file, still records a reporters view (``record_operator_reporters``), and
+    ``reporter_section`` builds a reporter that sends findings off the host from that
+    view. This makes the replay ``resolve_config`` makes for a command that passes
+    it the overrides (``_with_reporter_overrides``), on the view *operator_config*
+    carries, which ``apply_config_overrides`` copied unchanged, so an override turns
+    such a reporter on and sets its options. With no view recorded it does nothing,
+    and a view that is not an ``AshConfig`` is left for
+    ``confine_off_host_reporters_to_overrides`` to refuse.
+    """
+    from automated_security_helper.config.resolve_config import (
+        _with_reporter_overrides,
+    )
+
+    view = operator_config._operator_reporters
+    if not isinstance(view, AshConfig):
+        return
+    operator_config._operator_reporters = _with_reporter_overrides(
+        view, list(config_overrides), operator_config
     )
 
 
@@ -3373,6 +3413,9 @@ def merge_command(
         # not applied to it here: the confinement below replays them onto it, as
         # resolve_config does for a scan, and applying them twice would repeat an
         # appending override.
+        # A reporters view resolve_config recorded on it holds none of them either;
+        # the off-host reporters' configuration below gets them once
+        # (replay_reporter_overrides_onto_the_view).
         trusted_config = (
             operator_config
             if operator_config is not None
@@ -3405,7 +3448,12 @@ def merge_command(
             loaded, require_scanner_completion=require_completion
         )
         if merged.ash_config is None:
-            merged.ash_config = apply_config_overrides(AshConfig(), overrides)
+            # The merge's own configuration when no shard recorded one, so it names
+            # an append with no default to add to, as the lowest-indexed shard's
+            # application does; merge_shard_results refuses such a shard today.
+            merged.ash_config = apply_config_overrides(
+                AshConfig(), overrides, warn_unread_appends=True
+            )
         warn_on_ignored_operator_verdict_settings(
             trusted_config, merged.ash_config, cli_verdict
         )
@@ -3642,6 +3690,10 @@ def merge_command(
                 MERGE_CONFIG_FILE,
             )
 
+            # The view resolve_operator_config recorded for a file in the working
+            # directory's tree holds none of the overrides; it gets them here,
+            # once, before the confinement below copies it.
+            replay_reporter_overrides_onto_the_view(operator_config, overrides)
             confine_off_host_reporters_to_overrides(
                 operator_config, [Path(config)], overrides, MERGE_CONFIG_FILE
             )
