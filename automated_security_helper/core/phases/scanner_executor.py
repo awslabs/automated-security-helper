@@ -2618,7 +2618,7 @@ class ScannerExecutor:
                             scanner_plugin
                         )
                         described = error_text(grading_error, environment_values)
-                        refusal = text_without_values(
+                        grading_refusal = text_without_values(
                             f"{scanner_config_name} returned a result on "
                             f"{target_type} that could not be graded: {described}",
                             environment_values,
@@ -2632,7 +2632,7 @@ class ScannerExecutor:
                         # result held.
                         _refuse_to_grade(
                             container,
-                            refusal,
+                            grading_refusal,
                             reason=_recorded_reason(grading_error, environment_values)
                             or FailureReason(ReasonCode.RESULT_UNGRADABLE),
                         )
@@ -2651,7 +2651,7 @@ class ScannerExecutor:
                             # results. Written as the failure handlers write
                             # theirs, so the processor files it the same way.
                             container.raw_results = {
-                                "errors": [home_as_tilde(refusal)],
+                                "errors": [home_as_tilde(grading_refusal)],
                                 "status": "failed",
                                 "exception": home_as_tilde(described),
                             }
