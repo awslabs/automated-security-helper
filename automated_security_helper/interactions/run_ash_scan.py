@@ -75,6 +75,7 @@ from automated_security_helper.core.enums import (
     DEFAULT_EXECUTION_PHASES,
     AshExitCode,
     AshLogLevel,
+    BuildEngine,
     BuildTarget,
     ExecutionPhase,
     ExecutionStrategy,
@@ -123,6 +124,7 @@ from automated_security_helper.interactions.run_ash_container import (
     ContainerInputError,
     OperatorConfigReads,
     _require_mountable_directories,
+    build_engine_refusal,
     container_build_refusal,
     container_input_refusal,
     container_output_dir_refusal,
@@ -381,6 +383,7 @@ class ScanOptions(BaseModel):
     run: bool = True
     force: bool = False
     oci_runner: Optional[str] = None
+    build_engine: BuildEngine = BuildEngine.RUNNER
     build_target: Optional[BuildTarget] = None
     offline_semgrep_rulesets: str = "p/ci"
     container_uid: Optional[str] = None
@@ -4419,6 +4422,15 @@ def _run_container_mode(
 
     container_selection = _container_selection(opts, image_may_differ, reads)
     if opts.run:
+        # A build engine that names none, or none with code to start it, is refused
+        # before anything below clears the previous run's output. It needs no host
+        # IDs, so it is checked ahead of the build inputs, which are skipped when the
+        # IDs cannot be read. run_ash_container refuses the same value for a caller
+        # that reaches it directly.
+        engine_refusal = build_engine_refusal(opts.build_engine)
+        if engine_refusal is not None:
+            secho(engine_refusal[1], fg=typer.colors.RED)
+            sys.exit(engine_refusal[0])
         # The scan inputs were checked once, above, before anything else of this
         # function ran; nothing between there and here changes them. The build
         # inputs too: IDs that are not numbers, a revision the build cannot take,
@@ -4487,6 +4499,7 @@ def _run_container_mode(
         run=opts.run,
         force=opts.force,
         oci_runner=opts.oci_runner,
+        build_engine=opts.build_engine,
         build_target=opts.build_target,
         offline_semgrep_rulesets=opts.offline_semgrep_rulesets,
         container_uid=opts.container_uid,
@@ -4813,7 +4826,7 @@ def _nix_inner_argv(opts: ScanOptions) -> List[str]:
       resolved path), ``client_overrides`` and ``selection_origin`` (who gave
       the options on this side; the inner scan's own are the CLI's), and the
       container-only fields (``build``, ``run``, ``force``, ``oci_runner``,
-      ``build_target``, ``container_uid``, ``container_gid``,
+      ``build_engine``, ``build_target``, ``container_uid``, ``container_gid``,
       ``container_network``, ``ash_revision_to_install``,
       ``custom_containerfile``, ``custom_build_arg``), which no shell reads.
 
@@ -7400,6 +7413,7 @@ def run_ash_scan(
     run: bool = True,
     force: bool = False,
     oci_runner: str | None = None,
+    build_engine: BuildEngine = BuildEngine.RUNNER,
     build_target: BuildTarget | None = None,
     offline_semgrep_rulesets: str = "p/ci",
     container_uid: str | None = None,
@@ -7586,6 +7600,7 @@ def run_ash_scan(
         run=run,
         force=force,
         oci_runner=oci_runner,
+        build_engine=build_engine,
         build_target=build_target,
         offline_semgrep_rulesets=offline_semgrep_rulesets,
         container_uid=container_uid,
