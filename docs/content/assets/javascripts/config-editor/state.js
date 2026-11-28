@@ -22,7 +22,16 @@
 // DOM-free. Imports only its siblings.
 
 import { readYaml } from "./yaml-read.js";
-import { applyToValue, editBound, formatPath, patchBound, planPatch, planReemit, sameValue } from "./yaml-write.js";
+import {
+  applyToValue,
+  editBound,
+  formatPath,
+  lineBreakProblem,
+  patchBound,
+  planPatch,
+  planReemit,
+  sameValue,
+} from "./yaml-write.js";
 
 // Whether the new text differs from the old one only inside the windows: the spans
 // `[from, to]` of the old text that the edit may change, in order. The text before the
@@ -74,11 +83,20 @@ function refused(reason, message) {
  *
  * `options.doc` is the text already read; `options.patch` and `options.reemit`
  * replace the writer's two planners, which is how the tests plant a wrong patch.
+ *
+ * A file whose lines break at a character the writer's line arithmetic does not see
+ * (a lone carriage return, a next-line, line-separator or paragraph-separator character)
+ * is refused for every edit, before either planner runs: what an edit may reach is
+ * measured in lines, and there the file would count as one.
  */
 export function applyEdit(text, edit, options = {}) {
   const patch = options.patch ?? planPatch;
   const reemit = options.reemit ?? planReemit;
   const doc = options.doc ?? readYaml(text);
+  const lineBreaks = lineBreakProblem(doc);
+  if (lineBreaks !== null) {
+    return refused(lineBreaks.reason, lineBreaks.message);
+  }
   const first = patch(doc, edit);
   if (!first.ok && first.final) {
     return refused(first.reason, first.message);

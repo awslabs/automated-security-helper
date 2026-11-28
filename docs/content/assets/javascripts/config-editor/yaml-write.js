@@ -596,6 +596,24 @@ function refusal(reason, message) {
   return { ok: false, final: true, reason, message };
 }
 
+/**
+ * The refusal for a text whose line breaks this module cannot see, or null. The reader,
+ * like PyYAML, ends a line at a lone carriage return, a next-line character, a line
+ * separator and a paragraph separator, and accepts a file that breaks its lines there.
+ * The line arithmetic of this module knows only "\n" and "\r\n", so in such a file it
+ * would take several lines for one, and what an edit may reach would widen to the whole
+ * file. Every edit to such a file is refused (`doc.plainBreaks` is false for it).
+ */
+export function lineBreakProblem(doc) {
+  if (!doc.ok || doc.plainBreaks !== false) {
+    return null;
+  }
+  return refusal(
+    "line-breaks",
+    "The line breaks in this file are ones the editor cannot patch (a carriage return on its own, or a next-line, line-separator or paragraph-separator character), so the form leaves it alone. Change it in the YAML.",
+  );
+}
+
 const UNSUPPORTED = { ok: false, final: false, reason: "unsupported" };
 
 function lockProblem(loc, path) {
@@ -643,6 +661,10 @@ function check(doc, edit) {
         `The YAML cannot be read (line ${line}, column ${column}: ${message}), so the form leaves it alone.`,
       ),
     };
+  }
+  const lineBreaks = lineBreakProblem(doc);
+  if (lineBreaks !== null) {
+    return { problem: lineBreaks };
   }
   const path = edit.path;
   const valid =

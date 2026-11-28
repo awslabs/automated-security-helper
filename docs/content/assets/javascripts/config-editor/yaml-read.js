@@ -1892,13 +1892,15 @@ function collectStyle(root) {
 /**
  * Reads YAML text the way ASH's loader does and returns the document:
  * `{ok, text, root, typed, value, refusal, warnings, comments, lineStarts, newline,
- * style}`. `root` is the node tree (null for an empty document). `typed` is the
- * loaded value, type for type: a mapping is a plain object when its keys are all
- * strings and a TypedMap otherwise, a float is a Float, an integer beyond 2**53 a
- * BigInt, a reference a Reference and a date a Timestamp. `value` is that tree with
- * each Float turned into a plain number, which is what the page reads. When the text
- * cannot be read, ok is false and `refusal` holds `{code, message, line, column,
- * offset}` with 1-based line and column.
+ * plainBreaks, style}`. `plainBreaks` is false when the text breaks a line at a lone
+ * carriage return or at a next-line, line-separator or paragraph-separator character,
+ * which the writer's line arithmetic does not see. `root` is the node tree (null for an
+ * empty document). `typed` is the loaded value, type for type: a mapping is a plain
+ * object when its keys are all strings and a TypedMap otherwise, a float is a Float, an
+ * integer beyond 2**53 a BigInt, a reference a Reference and a date a Timestamp.
+ * `value` is that tree with each Float turned into a plain number, which is what the
+ * page reads. When the text cannot be read, ok is false and `refusal` holds `{code,
+ * message, line, column, offset}` with 1-based line and column.
  */
 export function readYaml(text) {
   const doc = {
