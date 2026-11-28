@@ -241,6 +241,13 @@ _ALLOWED_SIZED_READS = {
     ): "the operator's config file in 1 MiB chunks, the total bounded by "
     "ASH_CONFIG_MAX_FILE_BYTES + 1 and refused over it",
     (
+        "config/tool_config_trust.py",
+        "_read_tool_config",
+    ): "a gitleaks or betterleaks config file (the operator's, or one an [extend] "
+    "path names) in 1 MiB chunks over a checked regular-file descriptor, the total "
+    "bounded by TOOL_CONFIG_MAX_BYTES + 1 and refused over it; parsed as TOML for "
+    "its [extend] path, never shown",
+    (
         "plugin_modules/ash_builtin/converters/archive_converter.py",
         "_first_decompressed_block",
     ): "one decompressed block of up to tarfile.BLOCKSIZE (512) bytes, compared "
@@ -309,6 +316,12 @@ _ALLOWED_SIZED_READS = {
         "CfnGuardScanner._read_rule",
     ): "one operator rules file through open_in_scanned_tree, bound+1, "
     "RulesBundleUnavailable over the cap; operator input, not tool output",
+    (
+        "plugin_modules/ash_builtin/scanners/checkov_scanner.py",
+        "_read_for_module_sources",
+    ): "a .tf or .hcl file of the scanned tree at _MODULE_SOURCE_READ_LIMIT + 1, "
+    "parsed for module sources, the target refused over the cap; operator "
+    "input, not tool output",
     (
         "plugin_modules/ash_builtin/scanners/gitleaks_scanner.py",
         "GitleaksScanner._read_tree_ignore_file",

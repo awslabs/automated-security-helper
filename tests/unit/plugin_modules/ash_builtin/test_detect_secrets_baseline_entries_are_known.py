@@ -53,7 +53,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanSettingsFiltersUsed,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 SECRET_TYPE = "AWS Access Key"  # pragma: allowlist secret
 # The filter detect-secrets writes into every baseline it generates; it sends
@@ -73,26 +76,6 @@ def _hash(secret: str) -> str:
     from detect_secrets.core.potential_secret import PotentialSecret
 
     return PotentialSecret.hash_secret(secret)
-
-
-@pytest.fixture(autouse=True)
-def _checkouts_below_the_temporary_directory(monkeypatch, tmp_path):
-    """Let the trust rules see only the git checkouts at or below ``tmp_path``.
-
-    They walk EVERY checkout at or above the scanned directory, not the nearest
-    (``path_trust._checkouts_holding``), so a temporary directory placed inside
-    a work tree (a pytest base temp under a clone) would make the operator's
-    baseline in ``tmp_path`` the repository's and flip the trusted cases here.
-    The checkouts these tests are about are the ones they make."""
-    from automated_security_helper.config import path_trust
-    from automated_security_helper.config.sandbox_grants import is_within
-
-    real = path_trust._checkouts_holding
-    monkeypatch.setattr(
-        path_trust,
-        "_checkouts_holding",
-        lambda scan_root: [c for c in real(scan_root) if is_within(c, tmp_path)],
-    )
 
 
 def _context(tmp_path: Path) -> PluginContext:
@@ -602,8 +585,9 @@ def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directo
     wrote from ``repo``: its result keys read ``service/settings.py`` and its
     ``should_exclude_file`` pattern ``^service/tests/``. Matched relative to the
     scanned subdirectory, no key met a finding (the listed candidate was
-    reported unsuppressed) and no pattern met a file (``service/tests`` was
-    scanned). Both are now matched relative to the baseline's own directory."""
+    reported unsuppressed). The keys are now matched relative to the baseline's
+    own directory. The pattern is no longer read at all: a baseline found in the
+    tree sets no filters, so ``service/tests`` is scanned."""
     from detect_secrets.core.potential_secret import PotentialSecret
 
     from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
@@ -673,11 +657,10 @@ def test_a_baseline_in_an_enclosing_checkout_is_read_relative_to_its_own_directo
     # The listed candidate is known: kept, suppressed, under the scan's URI.
     assert _findings(report) == [("settings.py", 1)]
     assert len(_suppressed(report)["settings.py"]) == 1
-    # The checkout-relative exclude pattern took the tests directory out.
+    # The baseline is the repository's, so its exclude pattern is not applied:
+    # the tests directory is scanned.
     assert seen["paths"], seen
-    assert not any(Path(path).name == "fixture.py" for path in seen["paths"]), seen[
-        "paths"
-    ]
+    assert any(Path(path).name == "fixture.py" for path in seen["paths"]), seen["paths"]
     assert any(Path(path).name == "settings.py" for path in seen["paths"]), seen[
         "paths"
     ]
@@ -802,15 +785,13 @@ def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchor
     tmp_path, monkeypatch
 ):
     """The monorepo above, with the operator's own ``^tests/`` and the
-    baseline's ``^service/docs/``. The operator's ``should_exclude_file`` entry
-    takes precedence over the baseline's for that path (the baseline's entry is
-    not loaded beside it; test_detect_secrets_operator_filters_keep_precedence),
-    so the one pattern in play is the operator's, written relative to the
-    scanned directory, and it is matched there. Matched against the checkout,
-    the anchor of the baseline's keys, ``^tests/`` was tested against
+    baseline's ``^service/docs/``. The baseline is the tree's own, so it sets no
+    filters and the one pattern in play is the operator's, written relative to
+    the scanned directory, and it is matched there. Matched against the
+    checkout, the anchor of the baseline's keys, ``^tests/`` was tested against
     ``service/tests/fixture.py``, stopped matching, and that file was scanned
-    with no warning. ``docs/notes.py`` stays scanned: the baseline's pattern
-    yielded to the operator's entry by the precedence rule, not by the anchor."""
+    with no warning. ``docs/notes.py`` stays scanned: the baseline's pattern is
+    not read."""
     monkeypatch.chdir(tmp_path)
     service, context = _monorepo_service(
         tmp_path, json.dumps(_shared_baseline_excluding("^service/docs/"))
@@ -825,11 +806,9 @@ def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchor
         for item in scanner.config.options.scan_settings.filters_used
         if item.path == SHOULD_EXCLUDE_FILE_FILTER
     ] == [["^tests/"]], "the operator's exclude entry should be the only one in play"
-    # The precedence is per path: the baseline's filter under another path is
-    # loaded beside the operator's entry. The pinned-settings test below drops
-    # it, which tells "the baseline's filters were not loaded" from "the
-    # baseline had none".
-    assert any(
+    # The baseline is the repository's, so none of its filters is loaded, the
+    # one under another path included.
+    assert not any(
         item.path == HEURISTIC_FILTER
         for item in scanner.config.options.scan_settings.filters_used
     )
@@ -846,14 +825,17 @@ def test_the_operators_own_exclude_patterns_keep_the_scan_root_under_a_re_anchor
 def test_an_operators_pinned_scan_settings_keep_their_patterns_at_the_scan_root(
     tmp_path, monkeypatch
 ):
-    """The operator named detectors (``scan_settings.plugins_used``), so the
-    baseline's own filters are never loaded (the settings gate takes the
-    baseline's settings only for an empty plugin list; ``version`` alone does
-    not gate) and every pattern in play is the operator's. The anchor still
+    """The operator named detectors (``scan_settings.plugins_used``) beside the
+    ``^tests/`` pattern. The baseline is the tree's own, so it sets no filters
+    whether or not detectors are named, and every pattern in play is the
+    operator's. (That named detectors keep a baseline the operator names from
+    outside the tree from replacing them is asserted in
+    test_detect_secrets_scanner_behavior and in
+    test_detect_secrets_tree_baseline_settings_are_not_applied.) The anchor still
     moves for the baseline's KEYS, which the baseline wrote from the checkout;
     the operator's ``^tests/`` must not move with it. It did: ``tests/fixture.py``
     was scanned, and ``docs/notes.py`` stays scanned because the baseline's
-    pattern was never loaded."""
+    pattern is never loaded."""
     monkeypatch.chdir(tmp_path)
     service, context = _monorepo_service(
         tmp_path, json.dumps(_shared_baseline_excluding("^service/docs/"))
@@ -869,11 +851,11 @@ def test_an_operators_pinned_scan_settings_keep_their_patterns_at_the_scan_root(
     assert not any(
         item.pattern == ["^service/docs/"]
         for item in scanner.config.options.scan_settings.filters_used
-    ), "the baseline's filters were loaded past the operator's pinned settings"
+    ), "the baseline's filters were loaded from a baseline found in the tree"
     assert not any(
         item.path == HEURISTIC_FILTER
         for item in scanner.config.options.scan_settings.filters_used
-    ), "the baseline's filter under another path was loaded past the pin"
+    ), "the baseline's filter under another path was loaded from the tree"
     seen = _recording_known_worker(scanner, monkeypatch)
 
     report = scanner.scan(target=service, target_type="source")

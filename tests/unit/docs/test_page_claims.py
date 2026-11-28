@@ -22536,6 +22536,10 @@ def test_betterleaks_config_variables_are_anchored_where_the_page_says(
     run_dir.mkdir()
     monkeypatch.chdir(run_dir)
     anchored = os.path.abspath(os.path.join("cfg", "rules.toml"))
+    # ASH reads each file a variable names to check its [extend] path.
+    Path(anchored).parent.mkdir()
+    Path(anchored).write_text("title = 'operator'\n")
+    (tmp_path / "rules.toml").write_text("title = 'operator'\n")
 
     for variable in ("BETTERLEAKS_CONFIG", "GITLEAKS_CONFIG"):
         argv = _betterleaks_argv(

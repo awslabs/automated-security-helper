@@ -22,7 +22,9 @@ from __future__ import annotations
 import copy
 import errno
 import json
+import ntpath
 import os
+import re
 import stat
 import sys
 import threading
@@ -32,7 +34,9 @@ from pathlib import Path
 import pytest
 
 from automated_security_helper.base.plugin_context import PluginContext
+from automated_security_helper.config import tool_config_trust
 from automated_security_helper.config.ash_config import AshConfig
+from automated_security_helper.core import constants
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner import (
@@ -330,14 +334,14 @@ def test_a_gitleaks_config_in_the_scanned_tree_is_not_read(
 
 @pytest.mark.parametrize("variable", ["GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"])
 @pytest.mark.unit
-def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, variable):
-    """The operator's environment, not the tree: gitleaks resolves it.
+def test_a_gitleaks_config_env_var_is_passed_as_config(tmp_path, monkeypatch, variable):
+    """The operator's environment, not the tree, chooses the config.
 
-    An absolute ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML`` (the config's
-    text), needs nothing from ASH. A RELATIVE ``GITLEAKS_CONFIG`` is the one
-    value gitleaks would resolve against its working directory, the scanned
-    tree, so ASH anchors that one where the operator set it and passes it as
-    ``--config`` (the test below)."""
+    An absolute ``GITLEAKS_CONFIG`` is passed as ``--config``, and so is
+    ``GITLEAKS_CONFIG_TOML`` (the config's text), written outside the tree: with
+    no ``--config`` gitleaks sets its config path to ``<source>/.gitleaks.toml``.
+    A RELATIVE ``GITLEAKS_CONFIG`` is anchored where the operator set it (the
+    test below)."""
     value = (
         str(tmp_path / "operator.toml")
         if variable == "GITLEAKS_CONFIG"
@@ -348,10 +352,19 @@ def test_a_gitleaks_config_env_var_is_left_to_gitleaks(tmp_path, monkeypatch, va
     monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv(variable, value)
+    # ASH reads the file the variable names to check its [extend] path.
+    (tmp_path / "operator.toml").write_text('title = "operator"\n')
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text("")
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
-    assert not any(a.startswith("--config") for a in args)
+    configs = [a for a in args if a.startswith("--config")]
+    assert len(configs) == 1 and configs[0].startswith("--config=")
+    passed = Path(configs[0].split("=", 1)[1])
+    if variable == "GITLEAKS_CONFIG":
+        assert passed == tmp_path / "operator.toml"
+    else:
+        assert _ashs_own(passed, scanner.context.source_dir)
+        assert passed.read_text() == value
 
 
 @pytest.mark.unit
@@ -904,14 +917,16 @@ def test_post_processing_with_a_context_finds_the_output_dir_in_the_base(tmp_pat
 
 
 @pytest.mark.unit
-def test_gitleaks_config_variables_are_left_to_gitleaks_outside_a_sandbox(
+def test_gitleaks_config_variables_are_passed_as_config_outside_a_sandbox(
     tmp_path, monkeypatch
 ):
     scanner = _scanner(tmp_path)
     (scanner.context.source_dir / ".gitleaks.toml").write_text('title = "repo"\n')
+    (tmp_path / "operator.toml").write_text('title = "operator"\n')
+    monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
 
-    assert scanner._resolve_config_file() is None
+    assert scanner._resolve_config_file() == tmp_path / "operator.toml"
 
 
 @pytest.mark.unit
@@ -1361,7 +1376,8 @@ def test_a_relative_gitleaks_config_variable_is_anchored_where_the_operator_set_
     the scanned source directory, so the repository would supply the file the
     operator named in ASH's own directory. The scanner anchors the value to the
     directory ASH runs in and passes it as ``--config`` to the first run and the
-    re-scans alike; the scanned tree's file of the same name is never read."""
+    re-scans alike. With ASH run from a directory outside the tree, as here, the
+    scanned tree's file of the same name is never read."""
     operator_dir = tmp_path / "operator"
     (operator_dir / "rules").mkdir(parents=True)
     (operator_dir / "rules" / "gl.toml").write_text('title = "operator"\n')
@@ -1948,13 +1964,19 @@ def test_an_operator_path_in_the_tree_cannot_link_out_of_it(tmp_path, option, sh
     assert "symbolic link" in message and MARKER not in message
 
 
+#: What the operator's file holds for each option. gitleaks reads a config as TOML,
+#: and ASH parses it the same way to check its [extend] path; a baseline is a JSON
+#: report, which ASH does not parse.
+_OPERATOR_FILE_TEXT = {"config_file": "title = 'operator'\n", "baseline_path": "[]"}
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks")
 @pytest.mark.parametrize("option", ["config_file", "baseline_path"])
 @pytest.mark.unit
 def test_a_link_inside_the_tree_to_a_file_inside_it_is_still_honored(tmp_path, option):
     scanner = _scanner(tmp_path, operator=True, **{option: "named.json"})
     source = Path(scanner.context.source_dir)
-    _write(source, "real/file.json", "[]")
+    _write(source, "real/file.json", _OPERATOR_FILE_TEXT[option])
     (source / "named.json").symlink_to(source / "real" / "file.json")
     args = scanner._build_arguments(source, tmp_path / "o.sarif")
     flag = "--config=" if option == "config_file" else "--baseline-path="
@@ -1972,7 +1994,7 @@ def test_an_operator_path_that_leaves_the_tree_by_dot_dot_is_honored(
     source = tmp_path / "src"
     value = "../shared.toml" if written == "relative" else f"{source}/../shared.toml"
     scanner = _scanner(tmp_path, operator=True, **{option: value})
-    (tmp_path / "shared.toml").write_text("[]")
+    (tmp_path / "shared.toml").write_text(_OPERATOR_FILE_TEXT[option])
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     flag = "--config=" if option == "config_file" else "--baseline-path="
     assert f"{flag}{(tmp_path / 'shared.toml').resolve().as_posix()}" in args
@@ -1987,3 +2009,745 @@ def test_an_operator_path_outside_the_tree_may_be_a_link(tmp_path):
     (tmp_path / "b.json").symlink_to(tmp_path / "real.json")
     args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
     assert f"--baseline-path={(tmp_path / 'real.json').resolve().as_posix()}" in args
+
+
+# --- a config's [extend] path reads nothing from the scanned tree -----------------
+
+_RELATIVE_EXTEND = "[extend]\npath = 'common.toml'\n"
+_TREE_COMMON = "[[allowlists]]\npaths = ['''.*''']\n"
+
+
+def _extend_scanner(tmp_path, monkeypatch, how: str, extend_text: str):
+    """A scanner whose config is chosen as ``how``, holding ``extend_text``.
+
+    The scanned tree holds ``common.toml``: the file a relative extend path
+    would open from gitleaks' working directory.
+    """
+    for name in ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"):
+        monkeypatch.delenv(name, raising=False)
+    operator_dir = tmp_path / "op"
+    operator_dir.mkdir()
+    options = {}
+    if how == "config_file":
+        (operator_dir / "gitleaks.toml").write_text(extend_text)
+        options["config_file"] = str(operator_dir / "gitleaks.toml")
+    elif how == "env_path":
+        (operator_dir / "gitleaks.toml").write_text(extend_text)
+        monkeypatch.setenv("GITLEAKS_CONFIG", str(operator_dir / "gitleaks.toml"))
+    elif how == "env_toml":
+        monkeypatch.setenv("GITLEAKS_CONFIG_TOML", extend_text)
+    elif how == "chain":
+        (operator_dir / "mid.toml").write_text(extend_text)
+        (operator_dir / "gitleaks.toml").write_text(
+            f"[extend]\npath = '{(operator_dir / 'mid.toml').as_posix()}'\n"
+        )
+        options["config_file"] = str(operator_dir / "gitleaks.toml")
+    else:
+        raise AssertionError(how)
+    scanner = _scanner(tmp_path, operator=True, **options)
+    (scanner.context.source_dir / "common.toml").write_text(_TREE_COMMON)
+    return scanner
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_relative_extend_path_is_refused(tmp_path, monkeypatch, how):
+    """Matched on the refusal's own words, not on "extend", which a refusal for
+    another reason can hold too: the refusal of a config ASH cannot parse names
+    ``[extend]``, and the refusal of a file names it under pytest's ``tmp_path``,
+    whose directory carries this test's name."""
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, _RELATIVE_EXTEND)
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+def _passed_config(args: list) -> Path:
+    """The one config ``args`` give gitleaks."""
+    configs = [a for a in args if a.startswith("--config")]
+    assert len(configs) == 1 and configs[0].startswith("--config="), configs
+    return Path(configs[0].split("=", 1)[1])
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_an_absolute_extend_path_is_passed_as_config(tmp_path, monkeypatch, how):
+    """The control: the same shape with an absolute extend path passes the
+    operator's own config. Some ``--config`` is not enough: ASH passes its own
+    default-rules config whenever it chooses none, so the value is compared."""
+    common = tmp_path / "op" / "common.toml"
+    absolute = f"[extend]\npath = '{common.as_posix()}'\n"
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, absolute)
+    common.write_text(_TREE_COMMON)
+    source = scanner.context.source_dir
+    passed = _passed_config(scanner._build_arguments(source, tmp_path / "o.sarif"))
+    if how == "env_toml":
+        assert _ashs_own(passed, source)
+        assert passed.read_text() == absolute
+    else:
+        assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
+
+
+@pytest.mark.unit
+def test_an_env_config_is_passed_as_config_outside_the_tree(tmp_path, monkeypatch):
+    """With the config in the environment gitleaks would otherwise set its own
+    config path to ``<source>/.gitleaks.toml``; ASH passes ``--config``."""
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "env_toml", "[extend]\nuseDefault = true\n"
+    )
+    source = scanner.context.source_dir
+    args = scanner._build_arguments(source, tmp_path / "o.sarif")
+    configs = [a for a in args if a.startswith("--config=")]
+    assert len(configs) == 1
+    written = Path(configs[0].split("=", 1)[1])
+    assert not written.resolve().is_relative_to(Path(source).resolve())
+    assert written.read_text() == "[extend]\nuseDefault = true\n"
+
+
+@pytest.mark.unit
+def test_an_absolute_env_path_is_passed_as_config(tmp_path, monkeypatch):
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "env_path", "[extend]\nuseDefault = true\n"
+    )
+    args = scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert f"--config={(tmp_path / 'op' / 'gitleaks.toml').as_posix()}" in args
+
+
+# --- the keys, as gitleaks reads them ----------------------------------------------
+
+#: The refusal of a relative ``common.toml``, in the words every route gives it.
+_RELATIVE_REFUSAL = re.escape("'common.toml', which is not an absolute path")
+
+#: Spellings gitleaks reads as ``extend.path``. viper lower-cases every key of the
+#: config and splits a key on ".", so a table or key in any case, and one quoted
+#: key naming both, are the same setting.
+_RELATIVE_SPELLINGS = {
+    "mixed-case-table": "[Extend]\nPath = 'common.toml'\n",
+    "upper-case-key": "[extend]\nPATH = 'common.toml'\n",
+    "upper-case-table": "[EXTEND]\npath = 'common.toml'\n",
+    "quoted-dotted-key": "\"extend.path\" = 'common.toml'\n",
+    "quoted-dotted-mixed-case-key": "\"Extend.Path\" = 'common.toml'\n",
+}
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_toml"])
+@pytest.mark.parametrize("spelling", sorted(_RELATIVE_SPELLINGS))
+@pytest.mark.unit
+def test_a_relative_extend_path_in_any_key_spelling_is_refused(
+    tmp_path, monkeypatch, spelling, how
+):
+    """Each spelling has gitleaks open ``common.toml`` from the scanned tree."""
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, _RELATIVE_SPELLINGS[spelling])
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+#: The UTF-8 byte order mark some editors save at the start of a file.
+_BYTE_ORDER_MARK = chr(0xFEFF)
+
+
+def _with_config_text(tmp_path, monkeypatch, how: str, text: str):
+    """``_extend_scanner`` with the config ``how`` names holding ``text`` as written.
+
+    For ``chain`` the text is the extended file's, which ASH reads the same way.
+    Files are written as UTF-8 bytes: ``write_text`` uses the locale's encoding,
+    which on Windows cannot encode a byte order mark.
+    """
+    scanner = _extend_scanner(tmp_path, monkeypatch, how, "")
+    if how == "env_toml":
+        monkeypatch.setenv("GITLEAKS_CONFIG_TOML", text)
+    else:
+        name = "mid.toml" if how == "chain" else "gitleaks.toml"
+        (tmp_path / "op" / name).write_bytes(text.encode("utf-8"))
+    return scanner
+
+
+def _with_byte_order_mark(tmp_path, monkeypatch, how: str, text: str):
+    """``_with_config_text`` with ``text`` saved behind a byte order mark."""
+    return _with_config_text(tmp_path, monkeypatch, how, _BYTE_ORDER_MARK + text)
+
+
+#: The words of the refusal of a config that starts with the mark.
+_MARK_REFUSAL = re.escape(
+    "starts with a UTF-8 byte order mark, which gitleaks cannot read"
+)
+
+
+def _marked(tmp_path, how: str) -> str:
+    """How the refusal names the config of ``how`` that starts with the mark: the
+    file (for ``chain``, the extended one), or the variable that holds the text."""
+    if how == "env_toml":
+        return "the config text in GITLEAKS_CONFIG_TOML"
+    return repr(
+        str(tmp_path / "op" / ("mid.toml" if how == "chain" else "gitleaks.toml"))
+    )
+
+
+#: What the ``[extend]`` of the texts the mark tests save holds.
+_EXTEND_SHAPES = ["relative", "absolute", "empty", "none"]
+
+
+def _extend_text(tmp_path, extend: str) -> str:
+    """The config text for ``extend``: a relative path, an absolute one to the
+    operator's ``common.toml``, an empty one, or no ``[extend]`` at all."""
+    if extend == "relative":
+        return _RELATIVE_EXTEND
+    if extend == "absolute":
+        return f"[extend]\npath = '{(tmp_path / 'op' / 'common.toml').as_posix()}'\n"
+    if extend == "empty":
+        return "[extend]\npath = ''\n"
+    return "title = 'operator'\n"
+
+
+@pytest.mark.parametrize("extend", _EXTEND_SHAPES)
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_config_behind_a_byte_order_mark_is_refused_for_the_mark(
+    tmp_path, monkeypatch, how, extend
+):
+    """gitleaks 8.30.1 cannot read a config that starts with a UTF-8 byte order
+    mark. Given such a file with ``--config``, through ASH and on its own, it stops
+    at the mark ("toml: invalid character at start of key") and exits 1, and it
+    reads the same text without the mark. ASH gives gitleaks every config that way,
+    the text of ``GITLEAKS_CONFIG_TOML`` included, and gitleaks stops the same way at
+    a mark in a file a config extends, which it opens itself. So ASH refuses the
+    config before gitleaks runs, naming it, whatever its ``[extend]`` holds: a relative
+    path, an absolute or an empty one, or none, so the refusal does not wait for an
+    extend path. The same texts without the mark are the controls: the relative one
+    is refused for its path and the others are passed."""
+    scanner = _with_byte_order_mark(
+        tmp_path, monkeypatch, how, _extend_text(tmp_path, extend)
+    )
+    (tmp_path / "op" / "common.toml").write_text(_TREE_COMMON)
+    with pytest.raises(ScannerError, match=_MARK_REFUSAL) as refused:
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    assert _marked(tmp_path, how) in str(refused.value)
+
+
+@pytest.mark.parametrize("extend", ["empty", "none"])
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_config_with_no_extend_path_is_passed_as_config(
+    tmp_path, monkeypatch, how, extend
+):
+    """The control for the marked configs with an empty extend path or none: the
+    same text without the mark is passed, as the absolute one is."""
+    text = _extend_text(tmp_path, extend)
+    scanner = _with_config_text(tmp_path, monkeypatch, how, text)
+    source = scanner.context.source_dir
+    passed = _passed_config(scanner._build_arguments(source, tmp_path / "o.sarif"))
+    if how == "env_toml":
+        assert _ashs_own(passed, source)
+        assert passed.read_text() == text
+    else:
+        assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
+
+
+@pytest.mark.parametrize("how", ["config_file", "env_path", "env_toml", "chain"])
+@pytest.mark.unit
+def test_a_byte_order_mark_inside_an_extend_path_is_part_of_the_path(
+    tmp_path, monkeypatch, how
+):
+    """A mark at the start of the path value, not of the text, is part of the path,
+    which then does not start at a root, so gitleaks would open it from the scanned
+    tree. It is refused as written, although the path with the mark removed names a
+    file outside the tree."""
+    common = tmp_path / "op" / "common.toml"
+    value = _BYTE_ORDER_MARK + common.as_posix()
+    scanner = _with_config_text(
+        tmp_path, monkeypatch, how, f"[extend]\npath = '{value}'\n"
+    )
+    common.write_text(_TREE_COMMON)
+    with pytest.raises(
+        ScannerError, match=re.escape(f"{value!r}, which is not an absolute path")
+    ):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.parametrize("tool", ["GitLeaks", "betterleaks", "another-tool"])
+@pytest.mark.unit
+def test_the_mark_is_refused_for_whatever_tool_reads_the_config(tool):
+    """The refusal is made for the tool named, not for a list of names: no scanner
+    passes these spellings, and each is refused all the same."""
+    words = f"starts with a UTF-8 byte order mark, which {tool} cannot read"
+    with pytest.raises(ScannerError, match=re.escape(words)):
+        tool_config_trust.refuse_relative_extend_path(
+            tool, "TOOL_CONFIG_TOML", text=_BYTE_ORDER_MARK + "title = 'operator'\n"
+        )
+
+
+@pytest.mark.parametrize("tool", ["GitLeaks", "betterleaks", "another-tool"])
+@pytest.mark.unit
+def test_the_mark_is_refused_for_whatever_tool_reads_the_config_file(tmp_path, tool):
+    """The same for a config file, which the refusal names."""
+    config = tmp_path / "tool.toml"
+    config.write_bytes((_BYTE_ORDER_MARK + "title = 'operator'\n").encode("utf-8"))
+    words = f"starts with a UTF-8 byte order mark, which {tool} cannot read"
+    with pytest.raises(ScannerError, match=re.escape(words)) as refused:
+        tool_config_trust.refuse_relative_extend_path(tool, "TOOL_CONFIG", path=config)
+    assert f"TOOL_CONFIG: {str(config)!r} starts with" in str(refused.value)
+
+
+@pytest.mark.parametrize("mark", ["", _BYTE_ORDER_MARK], ids=["no-mark", "mark"])
+@pytest.mark.unit
+def test_a_relative_gitleaks_config_is_checked_where_ash_anchors_it(
+    tmp_path, monkeypatch, mark
+):
+    """ASH passes a relative ``GITLEAKS_CONFIG`` to gitleaks as ``--config``, anchored
+    where ASH runs, so that file is the config gitleaks reads. A mark at its start is
+    refused, naming the anchored file; without the mark the file is passed."""
+    for name in ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"):
+        monkeypatch.delenv(name, raising=False)
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "rules.toml").write_bytes((mark + "title = 'operator'\n").encode("utf-8"))
+    monkeypatch.chdir(run)
+    monkeypatch.setenv("GITLEAKS_CONFIG", "rules.toml")
+    anchored = Path(os.path.abspath("rules.toml"))
+    scanner = _scanner(tmp_path, operator=True)
+    source = scanner.context.source_dir
+    if not mark:
+        args = scanner._build_arguments(source, tmp_path / "o.sarif")
+        assert f"--config={anchored.as_posix()}" in args
+        return
+    with pytest.raises(ScannerError, match=_MARK_REFUSAL) as refused:
+        scanner._build_arguments(source, tmp_path / "o.sarif")
+    assert f"GITLEAKS_CONFIG: {str(anchored)!r} starts with" in str(refused.value)
+
+
+#: Values under ``extend`` that ASH cannot read the way gitleaks does, with the
+#: words of the refusal. viper decodes with weak typing, so ``path = 42`` opens a
+#: file named ``42`` in the scanned tree; what the others would open is not ASH's
+#: to guess.
+_UNREADABLE_EXTEND = {
+    "path-is-an-integer": ("[extend]\npath = 42\n", "not a string"),
+    "path-is-a-boolean": ("[extend]\npath = true\n", "not a string"),
+    "path-is-an-array": ("[extend]\npath = ['common.toml']\n", "not a string"),
+    "path-is-a-table": ("[extend.path]\nfile = 'common.toml'\n", "not a string"),
+    "extend-is-a-string": ("extend = 'common.toml'\n", "not a table"),
+    "extend-is-an-array-of-tables": (
+        "[[extend]]\npath = 'common.toml'\n",
+        "not a table",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_UNREADABLE_EXTEND))
+@pytest.mark.unit
+def test_an_extend_value_ash_cannot_read_as_gitleaks_does_is_refused(
+    tmp_path, monkeypatch, shape
+):
+    text, words = _UNREADABLE_EXTEND[shape]
+    scanner = _extend_scanner(tmp_path, monkeypatch, "config_file", text)
+    with pytest.raises(ScannerError, match=words):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+#: Two keys that fold to one setting. Both values are absolute and outside the
+#: tree, and still ASH cannot tell which one gitleaks uses: viper keeps one of two
+#: keys that fold together, and a dotted key wins over the table. Two tables that
+#: fold together are refused even when only one of them sets the path.
+_DUPLICATE_EXTEND = {
+    "two-tables": "[extend]\npath = '<common>'\n[Extend]\nPath = '<other>'\n",
+    "two-tables-one-path": "[extend]\npath = '<common>'\n[Extend]\nuseDefault = true\n",
+    "two-keys": "[extend]\npath = '<common>'\nPath = '<other>'\n",
+    "dotted-key-and-table": (
+        "\"extend.path\" = '<other>'\n[extend]\npath = '<common>'\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_DUPLICATE_EXTEND))
+@pytest.mark.unit
+def test_an_extend_path_set_twice_once_keys_are_folded_is_refused(
+    tmp_path, monkeypatch, shape
+):
+    common = tmp_path / "op" / "common.toml"
+    other = tmp_path / "op" / "other.toml"
+    text = (
+        _DUPLICATE_EXTEND[shape]
+        .replace("<common>", common.as_posix())
+        .replace("<other>", other.as_posix())
+    )
+    scanner = _extend_scanner(tmp_path, monkeypatch, "config_file", text)
+    common.write_text('title = "common"\n')
+    other.write_text('title = "other"\n')
+    with pytest.raises(ScannerError, match="more than once"):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.unit
+def test_a_mixed_case_extend_path_is_followed_into_the_file_it_names(
+    tmp_path, monkeypatch
+):
+    """gitleaks opens the file ``[Extend] Path`` names, so that file's own extend
+    path is checked too."""
+    mid = tmp_path / "op" / "mid.toml"
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "config_file", f"[Extend]\nPath = '{mid.as_posix()}'\n"
+    )
+    mid.write_text(_RELATIVE_EXTEND)
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+#: The same setting, absolute, in the spellings a config may use.
+_ABSOLUTE_SPELLINGS = {
+    "mixed-case-table": "[Extend]\nPath = '<common>'\n",
+    "inline-table": "extend = { path = '<common>' }\n",
+    "dotted-key": "extend.path = '<common>'\n",
+    "quoted-dotted-key": "\"extend.path\" = '<common>'\n",
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(_ABSOLUTE_SPELLINGS))
+@pytest.mark.unit
+def test_an_absolute_extend_path_in_any_key_spelling_is_passed(
+    tmp_path, monkeypatch, spelling
+):
+    """The control for the spellings: an absolute path outside the tree passes the
+    operator's config, however its keys are spelled."""
+    common = tmp_path / "op" / "common.toml"
+    text = _ABSOLUTE_SPELLINGS[spelling].replace("<common>", common.as_posix())
+    scanner = _extend_scanner(tmp_path, monkeypatch, "config_file", text)
+    common.write_text('title = "common"\n')
+    passed = _passed_config(
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    )
+    assert passed.resolve() == (tmp_path / "op" / "gitleaks.toml").resolve()
+
+
+# --- the path gitleaks opens --------------------------------------------------------
+
+
+def _home(tmp_path: Path, monkeypatch) -> Path:
+    """A home directory for ``~`` to expand to, on every platform's spelling."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
+@pytest.mark.unit
+def test_a_home_relative_extend_path_is_refused(tmp_path, monkeypatch):
+    """gitleaks does not expand ``~`` in an extend path, so ``~/common.toml`` names
+    ``<tree>/~/common.toml``. It is refused although the operator's home holds a
+    file of that name."""
+    home = _home(tmp_path, monkeypatch)
+    (home / "common.toml").write_text('title = "home"\n')
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "config_file", "[extend]\npath = '~/common.toml'\n"
+    )
+    tree_tilde = scanner.context.source_dir / "~"
+    tree_tilde.mkdir()
+    (tree_tilde / "common.toml").write_text(_TREE_COMMON)
+    with pytest.raises(
+        ScannerError, match=re.escape("'~/common.toml', which is not an absolute path")
+    ):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+def _home_config_scanner(tmp_path: Path, monkeypatch, home_text: str):
+    """A scanner given ``GITLEAKS_CONFIG=~/gitleaks.toml``, whose home file holds
+    ``home_text``, run from a directory that holds a ``~`` directory."""
+    home = _home(tmp_path, monkeypatch)
+    (home / "gitleaks.toml").write_text(home_text)
+    run = tmp_path / "run"
+    (run / "~").mkdir(parents=True)
+    monkeypatch.chdir(run)
+    for name in ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GITLEAKS_CONFIG", "~/gitleaks.toml")
+    scanner = _scanner(tmp_path, operator=True)
+    (scanner.context.source_dir / "common.toml").write_text(_TREE_COMMON)
+    return scanner, home, run
+
+
+@pytest.mark.unit
+def test_a_home_relative_config_variable_is_checked_where_gitleaks_reads_it(
+    tmp_path, monkeypatch
+):
+    """ASH anchors ``~/gitleaks.toml`` to the operator's home and passes that file,
+    so that is the file it checks: the home's extends a relative path and is
+    refused, although a file of the literal spelling under the directory ASH runs
+    in extends nothing."""
+    scanner, _, run = _home_config_scanner(tmp_path, monkeypatch, _RELATIVE_EXTEND)
+    (run / "~" / "gitleaks.toml").write_text('title = "literal"\n')
+    with pytest.raises(ScannerError, match=_RELATIVE_REFUSAL):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.unit
+def test_a_home_relative_config_variable_extending_an_absolute_path_is_passed(
+    tmp_path, monkeypatch
+):
+    """The control: the home's file extends an absolute path outside the tree, so
+    it is passed, and the file passed is the home's."""
+    common = tmp_path / "op" / "common.toml"
+    common.parent.mkdir()
+    common.write_text('title = "common"\n')
+    scanner, home, _ = _home_config_scanner(
+        tmp_path, monkeypatch, f"[extend]\npath = '{common.as_posix()}'\n"
+    )
+    passed = _passed_config(
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+    )
+    assert passed.resolve() == (home / "gitleaks.toml").resolve()
+
+
+def _windows_anchoring(monkeypatch) -> None:
+    """Give the extend check Windows' rule for an anchored path: absolute, with a
+    drive or a share (``core.constants.is_anchored`` with ``ntpath``)."""
+    real = constants.is_anchored
+    monkeypatch.setattr(
+        tool_config_trust,
+        "is_anchored",
+        lambda path, pathmod=None: real(path, ntpath),
+        raising=False,
+    )
+
+
+@pytest.mark.unit
+def test_the_windows_rule_is_built_from_the_function_the_checks_call():
+    """``core.constants`` names ``utils.path_stat.is_anchored`` again for the modules
+    that import it from there, and ``_windows_anchoring`` builds its patch from that
+    name. A second definition in ``core.constants`` would have the patch run a copy
+    that no check calls, so every name is pinned to the one function."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        gitleaks_scanner as module,
+    )
+    from automated_security_helper.utils import path_stat
+
+    assert constants.is_anchored is path_stat.is_anchored
+    assert tool_config_trust.is_anchored is path_stat.is_anchored
+    assert module.is_anchored is path_stat.is_anchored
+
+
+@pytest.mark.unit
+def test_a_rooted_extend_path_with_no_drive_is_refused_under_the_windows_rule(
+    monkeypatch,
+):
+    """On Windows ``/common.toml`` has a root and no drive, so gitleaks opens it on
+    the drive of its working directory, the scanned tree's, while ASH would read
+    it on its own. Measured on every platform under Windows' rule for an anchored
+    path; the test below measures the same on Windows itself."""
+    _windows_anchoring(monkeypatch)
+    with pytest.raises(
+        ScannerError, match=re.escape("'/common.toml', which is not an absolute path")
+    ):
+        tool_config_trust.refuse_relative_extend_path(
+            "gitleaks",
+            "GITLEAKS_CONFIG_TOML",
+            text="[extend]\npath = '/common.toml'\n",
+        )
+
+
+_WINDOWS_ONLY = pytest.mark.skipif(
+    os.name != "nt", reason="a rooted path with no drive is a Windows spelling"
+)
+
+
+@_WINDOWS_ONLY
+@pytest.mark.unit
+def test_a_rooted_extend_path_with_no_drive_is_refused_on_windows(
+    tmp_path, monkeypatch
+):
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "config_file", "[extend]\npath = '\\common.toml'\n"
+    )
+    with pytest.raises(ScannerError, match="which is not an absolute path"):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@_WINDOWS_ONLY
+@pytest.mark.unit
+def test_a_rooted_config_variable_with_no_drive_is_anchored_on_windows(
+    tmp_path, monkeypatch
+):
+    """gitleaks would open ``\\...\\gitleaks.toml`` on the scanned tree's drive.
+    ASH anchors it where it runs, so the path it checks and passes names a
+    drive."""
+    operator = tmp_path / "op" / "gitleaks.toml"
+    operator.parent.mkdir()
+    operator.write_text('title = "operator"\n')
+    monkeypatch.chdir(tmp_path)
+    for name in ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GITLEAKS_CONFIG", ntpath.splitdrive(str(operator))[1])
+    chosen = _scanner(tmp_path, operator=True)._resolve_config_file()
+    assert chosen is not None and ntpath.splitdrive(str(chosen))[0], chosen
+    assert chosen.resolve() == operator.resolve()
+
+
+# --- what ASH reads to check a config -----------------------------------------------
+
+
+def _check(**config) -> None:
+    tool_config_trust.refuse_relative_extend_path(
+        "gitleaks", "scanners.gitleaks.options.config_file", **config
+    )
+
+
+@pytest.mark.unit
+def test_a_config_file_that_does_not_exist_is_refused(tmp_path):
+    """gitleaks cannot open it either; ASH says so before gitleaks runs, naming the
+    file, where it used to pass it on unchecked."""
+    with pytest.raises(ScannerError, match="could not be read"):
+        _check(path=tmp_path / "absent.toml")
+
+
+@pytest.mark.unit
+def test_an_extend_path_naming_a_file_that_does_not_exist_is_refused(tmp_path):
+    absent = tmp_path / "absent.toml"
+    with pytest.raises(ScannerError, match="could not be read"):
+        _check(text=f"[extend]\npath = '{absent.as_posix()}'\n")
+
+
+@pytest.mark.unit
+def test_an_extend_path_naming_a_directory_is_refused(tmp_path):
+    """Only a regular file is read."""
+    with pytest.raises(ScannerError, match="could not be read"):
+        _check(text=f"[extend]\npath = '{tmp_path.as_posix()}'\n")
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX")
+@pytest.mark.unit
+def test_an_extend_path_naming_a_fifo_is_refused_without_waiting_for_a_writer(
+    tmp_path,
+):
+    """A plain open of a FIFO with no writer blocks, and ASH reads the config in
+    its own process, outside the scan timeout that bounds gitleaks. The check runs
+    in a thread so that this test ends either way."""
+    fifo = tmp_path / "common.toml"
+    os.mkfifo(fifo)
+    outcome: dict = {}
+
+    def check() -> None:
+        try:
+            _check(text=f"[extend]\npath = '{fifo.as_posix()}'\n")
+            outcome["returned"] = True
+        except ScannerError as error:
+            outcome["refused"] = str(error)
+        except Exception as error:
+            outcome["raised"] = repr(error)
+
+    worker = threading.Thread(target=check, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+    blocked = worker.is_alive()
+    if blocked:
+        # Open the write end, so that the blocked open returns and the thread ends.
+        for _ in range(100):
+            try:
+                os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+                break
+            except OSError:
+                time.sleep(0.05)
+        worker.join(timeout=10)
+    assert not blocked, "the check blocked opening a FIFO the config names"
+    assert "could not be read" in outcome.get("refused", ""), outcome
+
+
+@pytest.mark.unit
+def test_a_config_file_past_the_read_bound_is_refused(tmp_path, monkeypatch):
+    """A file of exactly the bound is read, and one byte more is refused."""
+    monkeypatch.setattr(tool_config_trust, "TOOL_CONFIG_MAX_BYTES", 64, raising=False)
+    body = 'title = "x"\n'
+    exact = tmp_path / "exact.toml"
+    exact.write_bytes(("#" * (63 - len(body)) + "\n" + body).encode())
+    assert len(exact.read_bytes()) == 64
+    _check(path=exact)
+    over = tmp_path / "over.toml"
+    over.write_bytes(("#" * (64 - len(body)) + "\n" + body).encode())
+    assert len(over.read_bytes()) == 65
+    with pytest.raises(ScannerError, match="larger than 64 bytes"):
+        _check(path=over)
+
+
+@pytest.mark.unit
+def test_a_config_file_that_is_not_utf8_is_refused(tmp_path):
+    """The refusal quotes none of the file, and not the decoder's report either,
+    which names the byte it could not read."""
+    config = tmp_path / "latin1.toml"
+    config.write_bytes(b"title = '\xe9t\xe9'\n")
+    with pytest.raises(ScannerError, match="not UTF-8") as refused:
+        _check(path=config)
+    message = str(refused.value)
+    assert "title" not in message
+    assert "0xe9" not in message.lower()
+
+
+_UNPARSED_MARKER = "ash-unparsed-7f3c"
+
+#: Configs tomllib cannot read. tomllib stops the first before the marker; its
+#: report on the second names the table, so a refusal that quoted the parser's
+#: report would quote the marker.
+_UNPARSED = {
+    "an-unclosed-table": f"[extend\npath = '{_UNPARSED_MARKER}'\n",
+    "a-table-declared-twice": f"[{_UNPARSED_MARKER}]\n[{_UNPARSED_MARKER}]\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_UNPARSED))
+@pytest.mark.parametrize("route", ["path", "text"])
+@pytest.mark.unit
+def test_a_config_that_does_not_parse_is_refused_quoting_none_of_it(
+    tmp_path, route, shape
+):
+    """A config tomllib cannot read is refused, not handed on unchecked: what
+    gitleaks' parser makes of it is not measured here. The refusal names where the
+    config came from and quotes none of its text, nor tomllib's report of it."""
+    text = _UNPARSED[shape]
+    if route == "path":
+        broken = tmp_path / "broken.toml"
+        broken.write_text(text)
+        config = {"path": broken}
+    else:
+        config = {"text": text}
+    with pytest.raises(ScannerError, match="could not be parsed") as refused:
+        _check(**config)
+    assert _UNPARSED_MARKER not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("n = " + "1" * 5000 + "\n", id="an-integer-past-the-digit-limit"),
+        pytest.param(
+            "a = " + "[" * 5000 + "]" * 5000 + "\n",
+            id="arrays-past-the-recursion-limit",
+        ),
+    ],
+)
+@pytest.mark.unit
+def test_a_config_tomllib_raises_on_is_refused_as_unparsed(text):
+    """Neither is a TOMLDecodeError: the scan failed with a raw exception that named
+    no config."""
+    limit = sys.get_int_max_str_digits()
+    if text.startswith("n = ") and not 0 < limit < 5000:
+        pytest.skip(f"the interpreter's integer digit limit is {limit}")
+    with pytest.raises(ScannerError, match="could not be parsed"):
+        tool_config_trust.refuse_relative_extend_path(
+            "gitleaks", "GITLEAKS_CONFIG_TOML", text=text
+        )
+
+
+@pytest.mark.unit
+def test_an_operator_config_that_does_not_parse_is_refused_before_gitleaks_runs(
+    tmp_path, monkeypatch
+):
+    scanner = _extend_scanner(
+        tmp_path, monkeypatch, "config_file", "this is [ not toml\n"
+    )
+    with pytest.raises(ScannerError, match="could not be parsed"):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")
+
+
+@pytest.mark.unit
+def test_a_config_variable_naming_no_file_is_refused_before_gitleaks_runs(
+    tmp_path, monkeypatch
+):
+    scanner = _extend_scanner(tmp_path, monkeypatch, "env_path", "")
+    (tmp_path / "op" / "gitleaks.toml").unlink()
+    with pytest.raises(ScannerError, match="could not be read"):
+        scanner._build_arguments(scanner.context.source_dir, tmp_path / "o.sarif")

@@ -569,6 +569,46 @@ def test_an_operator_config_file_still_applies(tmp_path, path_with_gitleaks):
     assert ("github-pat", "app/settings.py", 4) in _findings(report)
 
 
+#: A config whose first table turns on gitleaks' default rules and whose allowlist
+#: hides docs/, so a reader that lost the first table would report nothing.
+_DEFAULT_RULES_HIDING_DOCS = (
+    "[extend]\nuseDefault = true\n\n[[allowlists]]\npaths = ['''^docs/''']\n"
+)
+
+
+def test_an_operator_config_saved_with_a_byte_order_mark_is_refused_before_gitleaks(
+    tmp_path, path_with_gitleaks
+):
+    """gitleaks cannot read a config whose first bytes are a UTF-8 byte order mark:
+    its TOML reader stops there ("invalid character at start of key") and it exits
+    1. ASH refuses such a config itself, naming the file, before gitleaks runs."""
+    from automated_security_helper.core.exceptions import ScannerError
+
+    source = _copy_fixture(tmp_path)
+    operator_config = tmp_path / "operator.toml"
+    operator_config.write_bytes(
+        (chr(0xFEFF) + _DEFAULT_RULES_HIDING_DOCS).encode("utf-8")
+    )
+    with pytest.raises(
+        ScannerError, match="starts with a UTF-8 byte order mark"
+    ) as refused:
+        _scan_direct(source, tmp_path / "out", config_file=str(operator_config))
+    assert repr(str(operator_config)) in str(refused.value)
+
+
+def test_the_same_operator_config_without_the_mark_applies(
+    tmp_path, path_with_gitleaks
+):
+    """The control: the same text without the mark turns on the default rules, and
+    its allowlist hides docs/."""
+    source = _copy_fixture(tmp_path)
+    operator_config = tmp_path / "operator.toml"
+    operator_config.write_bytes(_DEFAULT_RULES_HIDING_DOCS.encode("utf-8"))
+    _, report = _scan_direct(source, tmp_path / "out", config_file=str(operator_config))
+    assert ("github-pat", "app/settings.py", 4) in _findings(report)
+    assert ("github-pat", "docs/example.md", 5) not in _findings(report)
+
+
 def test_an_inline_allow_comment_hides_nothing_by_default(tmp_path, path_with_gitleaks):
     """ASH passes --ignore-gitleaks-allow: the comment is the tree's to write."""
     source = _copy_fixture(tmp_path)
@@ -598,8 +638,9 @@ def test_an_unparseable_operator_config_fails_rather_than_reports_clean(
     source = _copy_fixture(tmp_path)
     broken = tmp_path / "broken.toml"
     broken.write_text("this is [ not toml\n", encoding="utf-8")
-    # The scanner template refuses the run before gitleaks' own results reader.
-    with pytest.raises(ScannerError, match="exited with code 1"):
+    # ASH reads the operator's config to check its [extend] path, so it refuses
+    # one it cannot parse before gitleaks runs, rather than handing it on.
+    with pytest.raises(ScannerError, match="could not be parsed"):
         _scan_direct(source, tmp_path / "out", config_file=str(broken))
 
 

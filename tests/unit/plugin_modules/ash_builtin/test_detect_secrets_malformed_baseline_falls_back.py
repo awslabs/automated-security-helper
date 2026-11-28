@@ -33,9 +33,13 @@ from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
     DetectSecretsScanner,
     DetectSecretsScannerConfig,
+    DetectSecretsScannerConfigOptions,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 
 def _context(tmp_path: Path) -> PluginContext:
@@ -113,17 +117,35 @@ def _scanned(seen: dict) -> set[str]:
     return {Path(item).name for item in seen["scan_paths"]}
 
 
-@pytest.mark.parametrize("content", list(MALFORMED.values()), ids=list(MALFORMED))
+# The shapes only the settings load reads. A baseline in the scanned tree sets
+# no plugins or filters, so its settings entries are never parsed; the same
+# files named by the operator from outside the tree are.
+SETTINGS_SHAPES = {
+    "a plugin entry not a mapping",
+    "a plugin name of the wrong type",
+    "a filter entry not a mapping",
+}
+
+
+@pytest.mark.parametrize("case", list(MALFORMED))
 def test_a_malformed_baseline_warns_and_the_scan_runs_without_it(
-    tmp_path, monkeypatch, caplog, content
+    tmp_path, monkeypatch, caplog, case
 ):
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
-    (context.source_dir / ".secrets.baseline").write_bytes(content)
+    options = DetectSecretsScannerConfigOptions()
+    named = case in SETTINGS_SHAPES
+    if named:
+        baseline = tmp_path / "operator" / "shared.baseline"
+        baseline.parent.mkdir()
+        baseline.write_bytes(MALFORMED[case])
+        options = DetectSecretsScannerConfigOptions(baseline_file=str(baseline))
+    else:
+        (context.source_dir / ".secrets.baseline").write_bytes(MALFORMED[case])
 
     with caplog.at_level(logging.WARNING):
         scanner = DetectSecretsScanner(
-            context=context, config=DetectSecretsScannerConfig()
+            context=context, config=DetectSecretsScannerConfig(options=options)
         )
 
     assert any(
@@ -141,7 +163,8 @@ def test_a_malformed_baseline_warns_and_the_scan_runs_without_it(
     assert seen["baseline"] is None
     assert report.runs[0].results == []
     # Not in use, so scanned like any other file.
-    assert ".secrets.baseline" in _scanned(seen)
+    if not named:
+        assert ".secrets.baseline" in _scanned(seen)
     assert "settings.py" in _scanned(seen)
 
 
@@ -163,9 +186,10 @@ def test_a_well_formed_baseline_is_the_scans(tmp_path, monkeypatch):
     )
     scanner = DetectSecretsScanner(context=context, config=DetectSecretsScannerConfig())
     assert scanner._baseline_document == document
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
-        "AWSKeyDetector"
-    ]
+    # The tree's own baseline sets no plugins or filters: the scan keeps the
+    # default plugin set.
+    assert len(scanner.config.options.scan_settings.plugins_used) > 10
+    assert scanner.config.options.scan_settings.filters_used == []
     seen = _record_worker(scanner, monkeypatch)
 
     scanner.scan(target=context.source_dir, target_type="source")

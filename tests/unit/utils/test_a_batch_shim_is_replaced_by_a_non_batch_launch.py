@@ -24,11 +24,16 @@ Two guarantees hold it closed, each pinned here:
   macOS never resolve a batch file (``_starts_through_cmd_exe``), so nothing
   changes there. Every spawn helper applies this, the uv argv's own program
   included.
-* The values the scanner builds (``_known_ignore_skip_pattern``) hold no
-  character cmd.exe acts on: ``/[.]venv/`` and its siblings, which a batch
-  interpreter anywhere in a launch chain -- ASH's own, or one below
+* The known-directory values the scanner builds
+  (``_known_directory_skip_values``) hold no character cmd.exe acts on beyond the
+  scanned directory's own path: ``<root>/[.]venv/`` and its siblings, which a
+  batch interpreter anywhere in a launch chain -- ASH's own, or one below
   ``uv tool run`` that ASH neither sees nor controls -- passes through as
-  written.
+  written. The scanner sends them on POSIX only: on Windows checkov's walked
+  paths are not ``/``-joined and none could match, so it sends none
+  (``_known_directory_skip_patterns``), and no value of this kind reaches the
+  launch the CI failure came from. The values are pinned all the same, as the
+  regex-shaped arguments the tests below carry through.
 
 The platform is patched the way ``test_batch_program_arguments.py`` patches it.
 """
@@ -41,16 +46,16 @@ from unittest.mock import patch
 import pytest
 
 import automated_security_helper.utils.subprocess_utils as spu
-from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
-    _known_ignore_skip_pattern,
+    _known_directory_skip_values,
 )
 
 pytestmark = pytest.mark.unit
 
-#: The values the scanner builds, through its own constructor: the real inputs
-#: of the measured failure, not a re-spelling of them.
-_SKIP_PATHS = [_known_ignore_skip_pattern(entry) for entry in KNOWN_IGNORE_PATHS]
+#: The values the scanner builds for a scanned directory ``/repo``, through its
+#: own builder: the successors of the inputs of the measured failure, not a
+#: re-spelling of them.
+_SKIP_PATHS = _known_directory_skip_values("/repo")
 
 
 def _skip_path_arguments():
@@ -69,13 +74,14 @@ def _write_shim(tmp_path):
 def test_the_scanners_skip_paths_no_longer_carry_what_cmd_exe_acts_on():
     # The control for every test below, inverted from the measured failure:
     # no value carries the vertical bar, parenthesis or caret that a cmd.exe
-    # re-read splits, groups or consumes, and the value standing where the CI
-    # failure's "(^|/)[.]venv/" stood anchors with a leading slash instead.
-    # The pair of anchors the alternation spelled is covered as one: "/NAME/"
-    # matches a nested component, and the root-level case under ASH's always
-    # absolute target starts with "/" too (the anchored-values test file pins
-    # both path shapes against checkov's matching).
-    assert "/[.]venv/" in _SKIP_PATHS
+    # re-read splits, groups or consumes, and the values standing where the CI
+    # failure's "(^|/)[.]venv/" stood anchor at the scanned directory instead:
+    # "/repo/[.]venv/" for the directory directly below it and
+    # "/repo/.{0,}/[.]venv/" for one deeper, in place of the two anchors the
+    # alternation spelled (the anchored-values test file pins both path shapes
+    # against checkov's matching).
+    assert "/repo/[.]venv/" in _SKIP_PATHS
+    assert "/repo/.{0,}/[.]venv/" in _SKIP_PATHS
     assert all(
         "|" not in value and "(" not in value and ")" not in value
         for value in _SKIP_PATHS
@@ -149,7 +155,10 @@ def test_with_no_substitute_the_scanners_own_values_pass_through_a_batch_launch(
     # The route the value redesign exists for: a batch interpreter that DOES
     # re-read the line (here, a shim with no substitute; on CI, whatever sits
     # below uv tool run) gets values it passes through as written, so the
-    # launch proceeds instead of being refused or split.
+    # launch proceeds instead of being refused or split. The scanner sends no
+    # known-directory value on Windows now, so these arguments stand for the
+    # values it builds for a POSIX root: what is pinned is that the argument
+    # check refuses none of them.
     shim = _write_shim(tmp_path)
     monkeypatch.setattr(spu, "find_executable", lambda name: str(shim))
     monkeypatch.setattr(importlib.util, "find_spec", lambda name, *args, **kwargs: None)

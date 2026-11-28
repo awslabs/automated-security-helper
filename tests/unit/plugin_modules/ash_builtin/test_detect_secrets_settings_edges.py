@@ -70,7 +70,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 
 def _context(tmp_path: Path) -> PluginContext:
@@ -219,7 +222,11 @@ def test_naming_a_version_still_loads_the_baselines_plugins_and_filters(
 ):
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
-    (context.source_dir / ".secrets.baseline").write_text(
+    # The operator's baseline, named from outside the scanned tree: a baseline
+    # found in the tree sets no plugins or filters.
+    (tmp_path / "ops").mkdir()
+    baseline = tmp_path / "ops" / "baseline.json"
+    baseline.write_text(
         json.dumps(
             _baseline(
                 plugins_used=[{"name": "AWSKeyDetector"}],
@@ -231,7 +238,9 @@ def test_naming_a_version_still_loads_the_baselines_plugins_and_filters(
         encoding="utf-8",
     )
     scanner = _scanner(
-        context, scan_settings=DetectSecretsScanSettings(version="1.5.0")
+        context,
+        baseline_file=str(baseline),
+        scan_settings=DetectSecretsScanSettings(version="1.5.0"),
     )
     settings = scanner.config.options.scan_settings
     assert [plugin.name for plugin in settings.plugins_used] == ["AWSKeyDetector"]
@@ -321,21 +330,22 @@ def test_an_untrusted_baselines_word_list_is_refused_before_it_is_read(
 ):
     """The tree's own baseline named a list of values to drop from the report;
     the entry was anchored at the baseline, admitted on the file being there,
-    and handed to the worker. It is refused as the verification filter is."""
+    and handed to the worker. Its filters are not applied at all now, and the
+    warning names the filter, not the list."""
     with caplog.at_level(logging.WARNING):
         scanner = _wordlist_scanner(
             tmp_path, monkeypatch, words=True, importable=True, trusted=False
         )
     assert _wordlist_entries(scanner) == []
-    assert "Ignoring the detect-secrets wordlist filter" in caplog.text
-    assert "inside the scanned directory" in caplog.text
+    assert "filters that do not apply: " + WORDLIST_FILTER in caplog.text
     assert "words.txt" not in caplog.text
     assert _handed_wordlists(scanner, monkeypatch) == []
 
 
 def _configured_wordlist_scanner(tmp_path, monkeypatch, *, config_file: bool):
     """A config-written wordlist entry beside the tree's own baseline, whose
-    filters are loaded beside it. With ``config_file`` the config was read from
+    filters are not loaded, so the entry is the config's alone. With
+    ``config_file`` the config was read from
     ``<tmp>/cfg/ash.yaml`` and the list sits beside that file; otherwise the
     config has no file and the list sits in the source directory."""
     monkeypatch.chdir(tmp_path)
