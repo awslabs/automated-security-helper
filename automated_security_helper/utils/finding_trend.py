@@ -55,7 +55,9 @@ A boundary carries the same coverage warnings ``ash diff`` prints
 markers a run record keeps; a test holds the two equal) and the scanners that
 entered or left the expected set. A step in which a scanner disappeared and twenty
 findings are "fixed" is labeled ``like_for_like: false`` with the reason, never
-presented as progress.
+presented as progress. So is a step between a record written before ASH stored each
+row's ``result_kind`` and one written after it, in either order: the older record
+counts the results that state no finding and the newer one does not.
 
 Engine
 ------
@@ -541,10 +543,37 @@ def _run_entry(run: TrendRun, rows: list[_Row]) -> dict[str, Any]:
     }
 
 
+#: The warning of a boundary between a record whose rows name their result's kind
+#: and one whose rows do not, which was written before ASH stored the kind: the
+#: older record counts the results that state no finding and the newer one does
+#: not, so they read as fixed or as new at that boundary.
+RESULT_KIND_BOUNDARY_WARNING = (
+    "One scan's history record names the result kind of its findings and the "
+    "other's does not, so results that state no finding are counted in one and "
+    "not in the other, and can read as fixed or new."
+)
+
+
+def _names_result_kinds(record: dict[str, Any]) -> bool | None:
+    """Whether *record*'s rows name their result's kind; None when it has no rows.
+
+    A record written before ASH stored ``result_kind`` names none. A record with no
+    rows cannot say, so a boundary beside it gets no warning from this.
+    """
+    rows = record["findings"]
+    if not rows:
+        return None
+    return any("result_kind" in row for row in rows)
+
+
 def _boundary(k: int, earlier: TrendRun, later: TrendRun) -> dict[str, Any]:
     warnings = coverage_warnings_from_records(
         earlier.record, later.record, ("Earlier", "Later")
     )
+    earlier_names = _names_result_kinds(earlier.record)
+    later_names = _names_result_kinds(later.record)
+    if None not in (earlier_names, later_names) and earlier_names != later_names:
+        warnings.append(RESULT_KIND_BOUNDARY_WARNING)
     before = set(earlier.record["coverage"]["expected_scanners"])
     after = set(later.record["coverage"]["expected_scanners"])
     return {

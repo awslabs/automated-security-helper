@@ -121,7 +121,10 @@ whether that result states a finding. A result states no finding when its kind i
 `is_finding` and counts a row that states no finding in no total. A record written before
 ASH stored `is_finding` falls back to the row's kind and severity, so a row of one of
 those kinds with severity INFO counts in no total. A record written before ASH stored the
-kind has neither, so the trend reads every row of it as a finding.
+kind has neither, so the trend reads every row of it as a finding. At a boundary between
+such a record and a newer one, those results are counted on one side and not on the
+other, so they can read as fixed or new; the boundary carries a warning that says so,
+and its `like_for_like` is false.
 
 A record ASH cannot read is skipped: a corrupt file, one in a record format this version
 of ASH does not read, or one whose report ID is not its file name. The output says how
