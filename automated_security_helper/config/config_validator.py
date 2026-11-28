@@ -3286,7 +3286,10 @@ def record_of_config(
     (``recorded_config``) and never the names, and a scalar would split at a
     comma in a default and leave pieces that are not references. A JSON file
     written to be loaded again (config_writer) is not recorded this way: it is
-    not interpolated, and that list would not load.
+    not interpolated, and that list would not load. The document a runtime
+    patch's ``test`` op compares against is recorded this way (``runtime_patch``):
+    it is never loaded or validated, and the reference in the list answers every
+    guess of the names alike.
 
     ``mark``, for a file written to be loaded again (config_writer), is applied
     to each string a rewrite puts in the record, value or key, and to each

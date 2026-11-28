@@ -534,3 +534,79 @@ def test_a_test_op_at_a_relative_path_a_chosen_base_writes_answers_the_same_for_
         assert select(ops_for(wrong))["success"] is False, (
             "the control: the wrong guess was not refused"
         )
+
+
+@pytest.mark.parametrize(
+    "path, as_op_value, right, wrong",
+    [
+        pytest.param(
+            "/output_formats",
+            lambda guess: guess.split(","),
+            "sarif,html",
+            "sarif,xml",
+            id="list",
+        ),
+        pytest.param(
+            "/output_formats/0",
+            lambda guess: guess,
+            "sarif",
+            "html",
+            id="entry",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "written, from_the_environment",
+    [
+        pytest.param("${ASH_PROBE_FMT}", True, id="from-the-environment"),
+        pytest.param("[sarif, html]", False, id="literal-control"),
+    ],
+)
+def test_a_test_op_at_a_list_made_of_one_reference_answers_the_same_for_any_guess(
+    select_for,
+    monkeypatch,
+    written,
+    from_the_environment,
+    path,
+    as_op_value,
+    right,
+    wrong,
+):
+    """A profile reads ``output_formats`` from a variable that holds ``sarif,html``,
+    which the field makes a list of two names. A ``test`` op reads the
+    configuration as its file wrote it, which is the reference where the field made
+    its entries of the variable's text, so an op at the list (``list``) or at its
+    first entry (``entry``) names the setting the same way for the names the list
+    holds (the right guess) and for others (the wrong one), and the two answers are
+    alike. The control is the profile that writes the list itself: a right guess
+    binds it and a wrong one is refused."""
+    monkeypatch.setenv("ASH_PROBE_FMT", "sarif,html")
+    select = select_for(
+        f"output_formats: {written}\n"
+        + _runtime_overrides_block("/output_formats", "/output_formats/**")
+    )
+
+    def ops_for(guess: str) -> List[Dict[str, Any]]:
+        return [{"op": "test", "path": path, "value": as_op_value(guess)}]
+
+    # A boolean, so a failure does not print the value.
+    same = _answers_the_same(select, ops_for, right, wrong)
+    if from_the_environment:
+        assert same, "the response tells a right guess from a wrong one"
+        # The uniform answer is the pipeline's own: the patch's refusal, for
+        # both, and not a refusal made before the op is read.
+        assert _is_a_patch_answer(select(ops_for(right))), (
+            "the right guess got no patch answer"
+        )
+        assert _is_a_patch_answer(select(ops_for(wrong))), (
+            "the wrong guess got no patch answer"
+        )
+        assert select(ops_for(right))["success"] is False
+    else:
+        assert not same, "the control: the answer does not depend on the guess"
+        assert select(ops_for(right))["success"] is True, (
+            "the control: the right guess did not bind the profile"
+        )
+        assert select(ops_for(wrong))["success"] is False, (
+            "the control: the wrong guess was not refused"
+        )

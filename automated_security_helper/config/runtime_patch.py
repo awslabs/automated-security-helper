@@ -1693,14 +1693,20 @@ def _goes_into_text(path: str, document: Any) -> bool:
 def _as_written(base: AshConfig, rewrites: Any, document: Any) -> Any:
     """``document`` with each value and key the base read from the environment
     as its file wrote it (record_of_config), at the locations ``rewrites``, the
-    base's references as the ops so far moved them, name."""
+    base's references as the ops so far moved them, name.
+
+    The document is compared and never loaded or validated, so a list a field
+    made of one reference's text (``output_formats: ${VAR}``) is recorded as the
+    reference, as the results file records it (``for_results``): a ``test`` op
+    at the list, or at one of its entries, then answers every guess of the names
+    alike. Recorded as the names, it told a right guess from a wrong one."""
     from automated_security_helper.config.config_validator import record_of_config
 
     if not rewrites:
         return document
     shim = base.model_copy()
     shim._written_references = list(rewrites)
-    return record_of_config(shim, document)
+    return record_of_config(shim, document, for_results=True)
 
 
 class _ReferencesThroughPatch:
