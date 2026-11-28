@@ -50,9 +50,9 @@ module "ash_scan_pipeline" {
   base_config_ssm_parameter_name = module.ash_image.base_config_ssm_parameter_name
   base_config_ssm_parameter_arn  = module.ash_image.base_config_ssm_parameter_arn
 
-  # Handed to `ash merge --min-severity`. ASH computes the verdict and this module
-  # propagates its exit code, so the pipeline can never disagree with what
-  # `ash scan` would say about the same findings.
+  # Handed to `--min-severity` of `ash results merge` (`ash merge` before ASH 3.9).
+  # ASH computes the verdict and this module propagates its exit code, so the pipeline
+  # can never disagree with what `ash scan` would say about the same findings.
   #
   # This is a floor on what counts as actionable, so "low" is the STRICTEST
   # setting -- every severity fails the pipeline. "high" would be the laxest,
