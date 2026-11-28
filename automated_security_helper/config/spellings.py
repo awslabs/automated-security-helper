@@ -32,13 +32,18 @@ on (:func:`is_removed`), by the loader's fold of a file and by
 every release and refuse none: an entry built in code keeps loading, and so does
 a stored results file, a record of the run that wrote it.
 
-A plugin's section that the configuration does not declare is walked only for a
-scanner ASH ships whose manifest gives it no typed section, read as that scanner's
-own config class (:func:`field_at`, :func:`entry_places`). Any other (no shipped
-manifest, an off-host package, classes that do not import or disagree, a key with a
-type word or other punctuation) is not walked: an old spelling in it is not
-respelled, said or refused here, the plugin's model renames it (silently from the
-removal release), and lint does not report it.
+The walk reads a key as the field it names the way the loader reads it
+(:func:`field_at`): under the field's name or another spelling of it, under the
+``-``/``_`` twin of one (a file that extends a base writing ``global_settings``
+can write ``global-settings``, which the merge reads as the same key), and, in a
+plugin's segment, under another spelling of a section's name. A message names the
+key as the file wrote it. A plugin's section that the configuration does not
+declare is walked only for a scanner ASH ships whose manifest gives it no typed
+section, read as that scanner's own config class (:func:`field_at`,
+:func:`entry_places`). Any other (no shipped manifest, an off-host package, classes
+that do not import or disagree, a key with a type word or other punctuation) is not
+walked: an old spelling in it is not respelled, said or refused here, the plugin's
+model renames it (silently from the removal release), and lint does not report it.
 
 No message here carries a value. A value can be read from the environment, so
 every message names files, places in the document, and keys.
@@ -450,19 +455,6 @@ def _known_plugin_at(wanted: Tuple[str, str]) -> Optional[Tuple[_Field, str]]:
     return None if field is None else (field, names[0])
 
 
-def _plugin_section_field(model: type[BaseModel], key: str) -> Optional[_Field]:
-    """The field a key of a plugin's segment names that ``_field_map`` does not:
-    another spelling of a plugin's section, or the section of a shipped scanner
-    with no typed one. None for a key of any other model."""
-    # Imported here: ash_config imports this module as it loads.
-    from automated_security_helper.config.ash_config import _PluginConfigSegment
-
-    if not issubclass(model, _PluginConfigSegment):
-        return None
-    found = field_at(model, key, known_plugins=True)
-    return None if found is None else found[0]
-
-
 def key_in(model: type[BaseModel], mapping: Dict[Any, Any], key: str) -> Optional[str]:
     """The key of ``mapping``, a mapping read as ``model``, that is the field
     ``key`` names: ``key`` itself when ``mapping`` holds it, else the one other key
@@ -682,21 +674,25 @@ class _Fold:
         """``mapping`` read as ``model``: its own old keys renamed, then the
         values of the fields it holds. ``place`` names the mapping in a message
         and ``path`` is where it stands in the document, under which a rename is
-        recorded. A key of a plugin's segment that is no declared field's spelling
-        is read as the section it names under another spelling, or as the section
-        of a shipped scanner that has no typed one (``field_at``). The same object
-        when nothing changes."""
+        recorded. A key is read as the field it names the way the loader reads it
+        (``field_at``): under the field's name or another spelling of it, under the
+        ``-``/``_`` twin of one, which the merge reads as the same key, and, in a
+        plugin's segment, as the section it names under another spelling or as the
+        section of a shipped scanner that has no typed one. ``place`` and ``path``
+        keep the key as the file wrote it. The same object when nothing changes."""
         folded = mapping
         for row in rows_for(model):
             for old in row.old:
                 if old in folded:
                     folded = self._respell(folded, row, old, place, path)
-        fields = _field_map(model)
         updated: Optional[Dict[Any, Any]] = None
         for key, value in folded.items():
-            field = fields.get(key) if isinstance(key, str) else None
-            if field is None and isinstance(key, str):
-                field = _plugin_section_field(model, key)
+            found = (
+                field_at(model, key, known_plugins=True)
+                if isinstance(key, str)
+                else None
+            )
+            field = None if found is None else found[0]
             if field is None or field.shape is None:
                 continue
             respelled = self.value(value, field.shape, _join(place, key), (*path, key))
