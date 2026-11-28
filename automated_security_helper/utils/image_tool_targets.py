@@ -40,6 +40,32 @@ if TYPE_CHECKING:
     from automated_security_helper.core.asset import ImageLocator
 
 
+def _routing_name(member_name: str) -> str:
+    """*member_name* as :func:`archive_scheme` compares it.
+
+    Any leading run of ``.`` and ``/`` is dropped, so ``./manifest.json``,
+    ``.manifest.json``, ``../manifest.json`` and ``/manifest.json`` all compare
+    as ``manifest.json``.
+    """
+    return member_name.lstrip("./")
+
+
+def reads_as_manifest_json(member_name: str) -> bool:
+    """Whether :func:`archive_scheme` reads the member *member_name* as manifest.json.
+
+    The scheme looks at the name alone, through :func:`_routing_name`, and not at
+    the member's type, so ``manifest.json``, ``./manifest.json``,
+    ``.manifest.json``, ``../manifest.json`` and ``/manifest.json`` are all
+    manifest.json here, and so is a link or a directory with one of those names.
+    An archive with such a member is handed to grype and syft as a docker
+    archive. Which member a tool then reads as manifest.json is up to the tool
+    and is not checked here. The digest reader (``utils/image_digest_resolver``)
+    asks this same question of every member: when one matches, it takes a digest
+    only from that member, and only when it is the regular record.
+    """
+    return _routing_name(member_name) == "manifest.json"
+
+
 def archive_scheme(archive: Path) -> str:
     """The stereoscope scheme that reads the saved image at *archive*.
 
@@ -61,10 +87,9 @@ def archive_scheme(archive: Path) -> str:
         with tarfile.open(archive, "r:") as saved:
             names = set()
             for member in saved:
-                name = member.name.lstrip("./")
-                if name == "manifest.json":
+                if reads_as_manifest_json(member.name):
                     return "docker-archive"
-                names.add(name)
+                names.add(_routing_name(member.name))
     except (tarfile.TarError, OSError):
         return "docker-archive"
     return "oci-archive" if names & {"oci-layout", "index.json"} else "docker-archive"

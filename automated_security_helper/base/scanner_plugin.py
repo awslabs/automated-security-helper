@@ -1475,7 +1475,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ``options.offline`` (and the subclass shape hooks read their own
         options), so deciding the skip against the config being replaced
         could run the tool -- and its registry fetches -- for a caller whose
-        config said offline.
+        config said offline. ``scan_image`` then hands the result to
+        ``_pre_scan`` with ``config_applied``, so one image scan applies its
+        config once.
 
         Returns *config* in its dump form (or None as given): ``_pre_scan``'s
         debug dump prints the GIVEN config through the as-written rewrite,
@@ -1498,6 +1500,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         target_type: TargetType,
         config: Optional[ScannerPluginConfigBase] = None,
         *args,
+        config_applied: bool = False,
         **kwargs,
     ) -> bool:
         """Perform pre-scan setup.
@@ -1505,6 +1508,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         Args:
             target: Target to scan
             options: Optional scanner-specific options
+            config_applied: Whether the caller has already applied ``config``
+                (``scan_image`` does, ahead of its skip decision). The swap is
+                then not run a second time, and ``config`` is the dump form
+                :meth:`_apply_scan_config` returned for it.
         """
         self.start_time = datetime.now(timezone.utc)
         if self.results_dir is not None:
@@ -1517,7 +1524,10 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # memoized, it would also have left the memo answering for the old
         # config on this very target. The local is the dump form from here on;
         # the debug dump below prints it through the as-written rewrite.
-        config = self._apply_scan_config(config)
+        # scan_image swaps its config in even earlier, ahead of its skip
+        # decision, and hands the dump form down with config_applied.
+        if not config_applied:
+            config = self._apply_scan_config(config)
 
         # Honors the setup phase's validation of this instance (memoized above)
         # instead of re-probing per target: the probes ran after start_time, so
@@ -1587,7 +1597,8 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 level=logging.DEBUG,
             )
         # The swap itself already happened, before the dependency check at the
-        # top of this method; config is its dump form (or None) from there on.
+        # top of this method or, with config_applied, in the caller; config is
+        # its dump form (or None) from there on.
         self._plugin_log(
             f"config setting: {self._setting_names(config)}",
             target_type=target_type,
@@ -2874,20 +2885,31 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         # The caller's config BEFORE the skip decision: the decision reads
         # options.offline and the subclass shape hooks, and reading them off
         # the config being replaced could run the tool for a caller whose
-        # config said offline (or skip for one whose config lifted it).
-        # _pre_scan applies the same config again, which is then a no-op.
-        self._apply_scan_config(config)
+        # config said offline (or skip for one whose config lifted it). It is
+        # applied here and nowhere else: _pre_scan is told below that the swap
+        # is done. A config that cannot be applied raises before _pre_scan has
+        # started the timing, so the end is set here, as scan() sets it when
+        # its _pre_scan raises; left None, the executor would record this
+        # target with no end.
+        try:
+            config = self._apply_scan_config(config)
+        except BaseException:
+            if self.end_time is None:
+                self.end_time = datetime.now(timezone.utc)
+            raise
 
         not_scanned = self._image_not_scanned_reason(image)
         if not_scanned is not None:
             # The clean-skip shape of the staged and empty-target skips: the
             # tool is not started, and the row reads SKIPPED with this reason
-            # rather than as a clean scan of the image.
+            # rather than as a clean scan of the image. Logged as a warning,
+            # the level scan() uses when the run's scan set leaves every
+            # staged file out: the scanner did not look at what it was given.
             self._nothing_scanned_reason = not_scanned
             self._plugin_log(
                 f"{not_scanned}. Not running the tool.",
                 target_type=image_target_type,
-                level=logging.INFO,
+                level=logging.WARNING,
                 append_to_stream="stderr",
             )
             self._post_scan(target=anchor, target_type=image_target_type)
@@ -2898,6 +2920,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
                 target=anchor,
                 target_type=image_target_type,
                 config=config,
+                config_applied=True,
             )
         except BaseException:
             if self.end_time is None:

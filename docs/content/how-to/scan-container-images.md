@@ -231,7 +231,8 @@ as written. Three attribution columns say which image it came from:
 
 **The id-stability contract.** A finding's id keys on the in-image path and the scan's
 one subject key: the digest the scan start resolved (the ladder above, a pinned
-reference, or -- for a saved archive or layout -- the digest the payload itself names),
+reference, or -- for a saved archive or layout -- the digest the payload itself names and
+its bytes bear out),
 else the submitted reference. The key is per scan, so every scanner's ids in one scan
 share one basis -- a digest that only one tool's run output names stays in the
 `image_digest` column and never re-keys half a scan. So:
@@ -245,7 +246,12 @@ share one basis -- a digest that only one tool's run output names stays in the
   the intended reading. Pin by digest when ids must survive a tag moving.
 - a **saved archive or layout** keys on the digest its own index or manifest names
   (an OCI index's manifest digest; a `docker save` tarball's config digest), so the
-  same payload uploaded twice is one subject wherever it lands on disk.
+  same payload uploaded twice is one subject wherever it lands on disk. The digest is
+  checked against the bytes: ASH reads the blob the record points at (the config blob of
+  a `docker save` tarball, the manifest blob of an OCI index) from the payload, as a
+  regular file and not through a link, and takes the digest only when those bytes hash to
+  it with sha256. A payload whose blob is missing, too large to check or does not match
+  names no digest, and its ids key on the payload path.
 
 An image finding never shares an id with a source finding at the same path. The layer
 digest is not part of the id: a rebuilt layer that still carries the same vulnerable

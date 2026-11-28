@@ -38,6 +38,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_sc
 from automated_security_helper.schemas.sarif_schema_model import Run, SarifReport
 from automated_security_helper.utils.mcp_config import (
     FORMATS,
+    McpServerEntry,
     parse_mcp_config_text,
 )
 
@@ -712,6 +713,238 @@ LISTED_COMMANDS = [
 def test_a_bare_name_matches_as_written_and_a_path_matches_normalized(row) -> None:
     found = rules(row.server, allowed_command_prefixes=row.listed)
     assert found == ([] if row.allowed else [RULE_COMMAND_PREFIX])
+
+
+# ---------------------------------------------------------------------------
+# A bare name and the entry's own env. A client starts the server with the entry's
+# ``env`` and looks a bare command up on the PATH that env carries (on Windows with
+# the PATHEXT it carries), so an entry that sets either one chooses the program the
+# listed name runs. The name then allows nothing for that entry, and its command is
+# refused like any command no listed entry allows, with the same finding and text.
+# Windows reads variable names without case, so ``Path`` is ``PATH`` here too, and a
+# name that only contains PATH (``NODE_PATH``) is another variable. A command that
+# has a path is judged by the path entries as before. The entry model has no
+# ``cwd`` field, so the rule reads no working directory.
+# ---------------------------------------------------------------------------
+
+#: An env that sets the PATH a client looks a bare command up on.
+PATH_SET = {"PATH": "/opt/shims:/usr/bin"}
+
+LISTED_COMMANDS_WITH_ENV = [
+    ListedCommand("path-in-env", stdio("npx", env=PATH_SET), BARE_NAME, False),
+    ListedCommand(
+        "pathext-in-env", stdio("npx", env={"PATHEXT": ".CMD;.EXE"}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "path-spelled-Path", stdio("npx", env={"Path": r"C:\shims"}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "path-in-lower-case", stdio("npx", env={"path": "/opt/shims"}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "pathext-spelled-PathExt",
+        stdio("npx", env={"PathExt": ".CMD"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "path-beside-other-names",
+        stdio("npx", env={"LOG_LEVEL": "debug", "PATH": "/opt/shims"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "path-and-pathext",
+        stdio("npx", env={"PATH": "/opt/shims", "PATHEXT": ".CMD"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand("an-empty-value", stdio("npx", env={"PATH": ""}), BARE_NAME, False),
+    ListedCommand(
+        "a-reference-to-the-inherited-value",
+        stdio("npx", env={"PATH": "${PATH}"}),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "a-pinned-package",
+        stdio("npx", "-y", "pkg@1.2.3", env=PATH_SET),
+        BARE_NAME,
+        False,
+    ),
+    ListedCommand(
+        "a-path-entry-listed-beside-the-name",
+        stdio("npx", env=PATH_SET),
+        ["npx", "/opt/mcp"],
+        False,
+    ),
+    ListedCommand(
+        "a-second-bare-name", stdio("uvx", env=PATH_SET), ["npx", "uvx"], False
+    ),
+    ListedCommand("a-null-value", stdio("npx", env={"PATH": None}), BARE_NAME, False),
+    ListedCommand(
+        "a-list-value", stdio("npx", env={"PATH": ["./tools"]}), BARE_NAME, False
+    ),
+    ListedCommand(
+        "an-object-value", stdio("npx", env={"PATHEXT": {"x": 1}}), BARE_NAME, False
+    ),
+    ListedCommand("no-env", stdio("npx"), BARE_NAME, True),
+    ListedCommand("an-empty-env", stdio("npx", env={}), BARE_NAME, True),
+    ListedCommand(
+        "env-without-either-name",
+        stdio("npx", env={"NODE_ENV": "production", "LOG_LEVEL": "debug"}),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand(
+        "names-that-only-contain-path",
+        stdio("npx", env={"NODE_PATH": "/x", "PYTHONPATH": "/y", "MANPATH": "/z"}),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand(
+        "values-that-are-not-text-under-other-names",
+        stdio("npx", env={"NODE_ENV": None, "LOG_LEVEL": ["debug"]}),
+        BARE_NAME,
+        True,
+    ),
+    ListedCommand(
+        "a-path-command-under-a-path-entry",
+        stdio("/opt/mcp/server", env=PATH_SET),
+        ["npx", "/opt/mcp"],
+        True,
+    ),
+    ListedCommand(
+        "a-path-command-outside-every-entry",
+        stdio("/usr/bin/node", env=PATH_SET),
+        ["npx", "/opt/mcp"],
+        False,
+    ),
+]
+
+
+@pytest.mark.parametrize("row", LISTED_COMMANDS_WITH_ENV, ids=lambda row: row.name)
+def test_a_bare_name_allows_its_command_only_while_env_leaves_the_lookup_alone(
+    row,
+) -> None:
+    """A listed bare name passes its command unless the entry's env sets PATH or PATHEXT.
+
+    An env that sets neither name, an empty env and a missing one leave the name
+    allowing its command. A key that is PATH or PATHEXT in any letter case takes the
+    allowance away, whatever its value is and whatever else the list holds. A name
+    that only contains PATH leaves it alone, and a command that has a path is judged
+    by the path entries whatever its env holds.
+    """
+    found = rules(row.server, allowed_command_prefixes=row.listed)
+    assert found == ([] if row.allowed else [RULE_COMMAND_PREFIX])
+
+
+def test_an_overridden_bare_name_is_refused_like_an_unlisted_command() -> None:
+    """The refusal has the rule, text and pointer it has for a command no entry lists.
+
+    The same entry is checked under a list that names its command and under one that
+    names another program. Both give the one finding, so the text does not change for
+    this case.
+    """
+    text = json.dumps({"mcpServers": {"s": stdio("npx", env=PATH_SET)}}, indent=2)
+    (entry,) = parse_mcp_config_text(text, ".mcp.json")
+    unlisted = evaluate_entry(entry, options(allowed_command_prefixes=["/opt/mcp"]))
+    assert [found.rule_id for found in unlisted] == [RULE_COMMAND_PREFIX]
+    named = evaluate_entry(entry, options(allowed_command_prefixes=BARE_NAME))
+    assert named == unlisted
+
+
+def test_an_empty_list_checks_nothing_whatever_env_sets() -> None:
+    """With no list the check is off, so an env that sets PATH adds no finding."""
+    assert rules(stdio("npx", env=PATH_SET), allowed_command_prefixes=[]) == []
+
+
+def test_an_env_that_sets_the_lookup_adds_the_prefix_finding_and_no_other() -> None:
+    """Beside every default check, the refusal is the one finding the env adds.
+
+    A pinned `npx` with a PATH in its env is quiet under the defaults. A list that
+    names `npx` then adds the command-prefix finding at the command and moves nothing
+    else.
+    """
+    server = stdio("npx", "-y", "pkg@1.2.3", env=PATH_SET)
+    assert findings(".mcp.json", server) == []
+    assert findings(".mcp.json", server, allowed_command_prefixes=BARE_NAME) == [
+        (RULE_COMMAND_PREFIX, "/mcpServers/s/command")
+    ]
+
+
+# ---------------------------------------------------------------------------
+# A PATH or PATHEXT whose value is not text. The reader keeps an env value only when
+# it is a string, number or boolean, so a key set to null, a list or an object, or in
+# TOML to an array, a table or a date-time, leaves no text behind. The rule reads the
+# key and not its value, so each of them takes the allowance away as a PATH set to a
+# string does. The JSON shapes are rows of the list above. TOML has no null, so these
+# are the shapes a Codex config can write, with rows around them that must pass.
+# ---------------------------------------------------------------------------
+
+
+class TomlEntry(NamedTuple):
+    """The lines after `command = "npx"` in a Codex entry, and whether it passes."""
+
+    name: str
+    lines: str
+    allowed: bool
+
+
+TOML_ENTRIES = [
+    TomlEntry("an-array-value", 'env = { PATH = ["./tools"] }\n', False),
+    TomlEntry("a-table-value", "[mcp_servers.s.env.PATHEXT]\nx = 1\n", False),
+    TomlEntry(
+        "a-date-time-value", "[mcp_servers.s.env]\nPATH = 1979-05-27T07:32:00Z\n", False
+    ),
+    TomlEntry("a-string-value", 'env = { PATH = "/opt/shims" }\n', False),
+    TomlEntry("no-env-table", "", True),
+    TomlEntry(
+        "a-date-time-under-another-name",
+        "[mcp_servers.s.env]\nRELEASED_AT = 1979-05-27T07:32:00Z\n",
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize("row", TOML_ENTRIES, ids=lambda row: row.name)
+def test_a_toml_bare_name_allows_its_command_only_while_env_leaves_the_lookup_alone(
+    row,
+) -> None:
+    """A listed bare name passes a Codex entry's command unless its env sets the lookup.
+
+    A key set to an array, a table or a date-time counts as set, whatever it holds. A
+    PATH set to a string, an entry with no env table and a date-time under another
+    name are the rows around them.
+    """
+    text = '[mcp_servers.s]\ncommand = "npx"\n' + row.lines
+    found: List[str] = []
+    for entry in parse_mcp_config_text(text, ".codex/config.toml"):
+        found.extend(
+            f.rule_id
+            for f in evaluate_entry(entry, options(allowed_command_prefixes=BARE_NAME))
+        )
+    assert found == ([] if row.allowed else [RULE_COMMAND_PREFIX])
+
+
+def test_an_entry_made_by_hand_is_checked_on_the_env_it_carries() -> None:
+    """The rule reads the entry it is given, however the entry was made.
+
+    No reader made these two entries. The one whose env is set in the constructor is
+    refused, and the same entry with no env still passes.
+    """
+    base = {
+        "source_file": ".mcp.json",
+        "format_id": "claude_code",
+        "server_name": "s",
+        "pointer": "/mcpServers/s",
+        "kind": "stdio",
+        "command": "npx",
+    }
+    listed = options(allowed_command_prefixes=BARE_NAME)
+    set_by_hand = evaluate_entry(McpServerEntry(**base, env=PATH_SET), listed)
+    assert [found.rule_id for found in set_by_hand] == [RULE_COMMAND_PREFIX]
+    assert evaluate_entry(McpServerEntry(**base), listed) == []
 
 
 # ---------------------------------------------------------------------------

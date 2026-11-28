@@ -118,6 +118,12 @@ _ALLOWED_SIZED_READS = {
     "member) at _MAX_PAYLOAD_RECORD_BYTES + 1, refused over the cap and "
     "parsed as JSON for one digest; structured records, no text shown",
     (
+        "utils/image_digest_resolver.py",
+        "_sha256_of_stream",
+    ): "a payload's config or manifest blob in 64 KiB chunks, hashed and counted "
+    "against _MAX_PAYLOAD_BLOB_BYTES to check the digest its record names; "
+    "bytes digested, never shown",
+    (
         "utils/sdist_harvest.py",
         "harvest_lockfiles_from_sdist",
     ): "an embedded lockfile member of a hash-verified sdist, read at "
