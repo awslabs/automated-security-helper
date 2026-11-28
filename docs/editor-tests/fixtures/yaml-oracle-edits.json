@@ -1298,6 +1298,165 @@
       "id": "delete-keeps-the-comment-lines-above"
     },
     {
+      "after": {
+        "lines": [
+          "scanners:",
+          "  bandit: {} # keep bandit strict"
+        ]
+      },
+      "before": {
+        "lines": [
+          "scanners:",
+          "  bandit: # keep bandit strict",
+          "    enabled: false"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "scanners",
+          "bandit",
+          "enabled"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-child-keeps-the-comment-on-its-parents-key"
+    },
+    {
+      "after": {
+        "lines": [
+          "scanners:",
+          "  bandit: {}",
+          "    # about enabled",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "scanners:",
+          "  bandit:",
+          "    # about enabled",
+          "    enabled: false",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "scanners",
+          "bandit",
+          "enabled"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-child-keeps-the-comment-line-above-it"
+    },
+    {
+      "after": {
+        "lines": [
+          "suppressions: [] # reviewed quarterly",
+          "other: 1"
+        ]
+      },
+      "before": {
+        "lines": [
+          "suppressions: # reviewed quarterly",
+          "  - rule_id: a",
+          "    path: a.py",
+          "other: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "suppressions",
+          0
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-last-item-keeps-the-comment-on-its-list"
+    },
+    {
+      "after": {
+        "lines": [
+          "l:",
+          "  - {} # about a",
+          "  - c: 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "l:",
+          "  - # about a",
+          "    a: 1",
+          "  - c: 3"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "l",
+          0,
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-key-of-an-item-keeps-the-comment-after-its-dash"
+    },
+    {
+      "after": {
+        "text": "l:\r\n  - # about b\r\n    b: 2\r\n  - c: 3\r\n"
+      },
+      "before": {
+        "text": "l:\r\n  - a: 1 # one\r\n    # about b\r\n    b: 2\r\n  - c: 3\r\n"
+      },
+      "droppedComments": 1,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "l",
+          0,
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-first-key-of-a-compact-item-in-crlf-text-keeps-the-comment-above-the-next-key"
+    },
+    {
+      "after": {
+        "lines": [
+          "l:",
+          "  - # about two",
+          "    - 2",
+          "  - 3"
+        ]
+      },
+      "before": {
+        "lines": [
+          "l:",
+          "  - - 1 # one",
+          "    # about two",
+          "    - 2",
+          "  - 3"
+        ]
+      },
+      "droppedComments": 1,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "l",
+          0,
+          0
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-first-item-of-a-list-in-a-list-keeps-the-comment-above-the-next-item"
+    },
+    {
       "before": {
         "lines": [
           "a: 1"

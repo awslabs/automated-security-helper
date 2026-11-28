@@ -417,7 +417,8 @@
       "after": {
         "lines": [
           "l:",
-          "  - b: 2",
+          "  - # about b",
+          "    b: 2",
           "  - c: 3"
         ]
       },
@@ -430,7 +431,7 @@
           "  - c: 3"
         ]
       },
-      "droppedComments": 2,
+      "droppedComments": 1,
       "edit": {
         "op": "delete",
         "path": [

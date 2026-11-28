@@ -489,11 +489,32 @@ test('the first key of a compact list item is taken out where it is, and the nex
       0,
     ],
     [
-      'comments between the two keys go with it',
+      'the comment on its own line goes with it, and the comment line above the next key stays',
       'l:\n  - a: 1 # one\n    # about b\n    b: 2\n  - c: 3\n',
       { op: 'delete', path: ['l', 0, 'a'] },
-      'l:\n  - b: 2\n  - c: 3\n',
-      2,
+      'l:\n  - # about b\n    b: 2\n  - c: 3\n',
+      1,
+    ],
+    [
+      'a blank line, then two comment lines, between the keys',
+      'l:\n  - a: 1\n\n    # first\n    # second\n    b: 2\n',
+      { op: 'delete', path: ['l', 0, 'a'] },
+      'l:\n  - # first\n    # second\n    b: 2\n',
+      0,
+    ],
+    [
+      'a comment line above the next item of a list in a list',
+      'l:\n  - - 1 # one\n    # about two\n    - 2\n  - 3\n',
+      { op: 'delete', path: ['l', 0, 0] },
+      'l:\n  - # about two\n    - 2\n  - 3\n',
+      1,
+    ],
+    [
+      'line breaks of two characters',
+      'l:\r\n  - a: 1 # one\r\n    # about b\r\n    b: 2\r\n  - c: 3\r\n',
+      { op: 'delete', path: ['l', 0, 'a'] },
+      'l:\r\n  - # about b\r\n    b: 2\r\n  - c: 3\r\n',
+      1,
     ],
     [
       'a list in a list',
@@ -515,6 +536,75 @@ test('the first key of a compact list item is taken out where it is, and the nex
     assert.equal(result.how, 'patch', name);
     assert.equal(result.text, after, name);
     assert.equal(result.droppedComments, dropped, name);
+  }
+});
+
+test('the only child of a parent leaves an empty collection after the parent key, and the comments around it stay', () => {
+  const cases = [
+    [
+      'a comment on the parent key',
+      'scanners:\n  bandit: # keep bandit strict\n    enabled: false\n',
+      { op: 'delete', path: ['scanners', 'bandit', 'enabled'] },
+      'scanners:\n  bandit: {} # keep bandit strict\n',
+      0,
+    ],
+    [
+      'a comment line above the child',
+      'scanners:\n  bandit:\n    # about enabled\n    enabled: false\nother: 1\n',
+      { op: 'delete', path: ['scanners', 'bandit', 'enabled'] },
+      'scanners:\n  bandit: {}\n    # about enabled\nother: 1\n',
+      0,
+    ],
+    [
+      'the last item of a list whose key has a comment',
+      'suppressions: # reviewed quarterly\n  - id: a\n    path: a.py\nother: 1\n',
+      { op: 'delete', path: ['suppressions', 0] },
+      'suppressions: [] # reviewed quarterly\nother: 1\n',
+      0,
+    ],
+    [
+      'a comment after the dash of the item',
+      'l:\n  - # about a\n    a: 1\n  - c: 3\n',
+      { op: 'delete', path: ['l', 0, 'a'] },
+      'l:\n  - {} # about a\n  - c: 3\n',
+      0,
+    ],
+    [
+      'the only key of an item that shares its line with the dash',
+      'l:\n  - a: 1 # one\n  - c: 3\n',
+      { op: 'delete', path: ['l', 0, 'a'] },
+      'l:\n  - {} # one\n  - c: 3\n',
+      0,
+    ],
+    [
+      'a comment of the child itself goes with it',
+      'a:\n  b: 1 # note\nz: 2\n',
+      { op: 'delete', path: ['a', 'b'] },
+      'a: {}\nz: 2\n',
+      1,
+    ],
+    ['the only key of the file', '# header\na: 1\n', { op: 'delete', path: ['a'] }, '# header\n{}\n', 0],
+    [
+      'a last line with no break after it',
+      'a: # note\n  b: 1',
+      { op: 'delete', path: ['a', 'b'] },
+      'a: {} # note',
+      0,
+    ],
+    [
+      'line breaks of two characters',
+      'a: # note\r\n  b: 1\r\nz: 2\r\n',
+      { op: 'delete', path: ['a', 'b'] },
+      'a: {} # note\r\nz: 2\r\n',
+      0,
+    ],
+  ];
+  for (const [name, text, edit, after, dropped] of cases) {
+    const result = patch(text, edit);
+    assert.equal(result.how, 'patch', name);
+    assert.equal(result.text, after, name);
+    assert.equal(result.droppedComments, dropped, name);
+    assert.equal(readYaml(result.text).ok, true, name);
   }
 });
 

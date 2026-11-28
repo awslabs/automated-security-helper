@@ -209,6 +209,63 @@ test('the gate refuses a rewrite that touches the lines of a neighbor of the ent
   assert.equal(real.droppedComments, 0);
 });
 
+test('the gate refuses a delete that loses the comment line above the key that moves up', () => {
+  const text = 'l:\n  - a: 1 # one\n    # about b\n    b: 2\n  - c: 3\n';
+  const edit = { op: 'delete', path: ['l', 0, 'a'] };
+  // The text a line patch once wrote: `# about b` belongs to the key that stays, and is gone.
+  const result = applyEdit(text, edit, { patch: writes('l:\n  - b: 2\n  - c: 3\n') });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.label, 'l[0]');
+  assert.equal(result.droppedComments, 2);
+  assert.equal(result.message, 'Comments inside l[0] were not kept.');
+  const real = applyEdit(text, edit);
+  assert.equal(real.how, 'patch');
+  assert.equal(real.text, 'l:\n  - # about b\n    b: 2\n  - c: 3\n');
+  assert.equal(real.droppedComments, 1);
+});
+
+test('the gate refuses a delete that loses a comment on the parent key or above the only child', () => {
+  const edit = { op: 'delete', path: ['scanners', 'bandit', 'enabled'] };
+  const onKey = 'scanners:\n  bandit: # keep bandit strict\n    enabled: false\n';
+  const lostOnKey = applyEdit(onKey, edit, { patch: writes('scanners:\n  bandit: {}\n') });
+  assert.equal(lostOnKey.how, 'reemit');
+  assert.equal(lostOnKey.label, 'scanners.bandit');
+  assert.equal(lostOnKey.droppedComments, 1);
+  assert.equal(lostOnKey.message, 'Comments inside scanners.bandit were not kept.');
+  const keptOnKey = applyEdit(onKey, edit);
+  assert.equal(keptOnKey.how, 'patch');
+  assert.equal(keptOnKey.text, 'scanners:\n  bandit: {} # keep bandit strict\n');
+  const above = 'scanners:\n  bandit:\n    # about enabled\n    enabled: false\nother: 1\n';
+  const lostAbove = applyEdit(above, edit, { patch: writes('scanners:\n  bandit: {}\nother: 1\n') });
+  assert.equal(lostAbove.how, 'reemit');
+  assert.equal(lostAbove.message, 'Comments inside scanners.bandit were not kept.');
+  const keptAbove = applyEdit(above, edit);
+  assert.equal(keptAbove.how, 'patch');
+  assert.equal(keptAbove.text, 'scanners:\n  bandit: {}\n    # about enabled\nother: 1\n');
+  const list = 'suppressions: # reviewed quarterly\n  - id: a\nother: 1\n';
+  const last = { op: 'delete', path: ['suppressions', 0] };
+  const lostOnList = applyEdit(list, last, { patch: writes('suppressions: []\nother: 1\n') });
+  assert.equal(lostOnList.how, 'reemit');
+  assert.equal(lostOnList.label, 'suppressions');
+  const keptOnList = applyEdit(list, last);
+  assert.equal(keptOnList.how, 'patch');
+  assert.equal(keptOnList.text, 'suppressions: [] # reviewed quarterly\nother: 1\n');
+});
+
+test('the gate refuses a delete that also takes the comment line above the entry', () => {
+  const text = 'g:\n  a: 1 # one\n  # about b\n  b: 2\n  c: 3\n';
+  const edit = { op: 'delete', path: ['g', 'b'] };
+  const result = applyEdit(text, edit, { patch: writes('g:\n  a: 1 # one\n  c: 3\n') });
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.label, 'g');
+  assert.equal(result.message, 'Comments inside g were not kept.');
+  const real = applyEdit(text, edit);
+  assert.equal(real.how, 'patch');
+  assert.equal(real.text, 'g:\n  a: 1 # one\n  # about b\n  c: 3\n');
+  assert.equal(real.droppedComments, 0);
+});
+
 test('the gate keeps every digit of an integer beyond 2**53', () => {
   const text = 'limit: 9007199254740993\nother: 1\n';
   const edit = { op: 'set', path: ['other'], value: 2 };
