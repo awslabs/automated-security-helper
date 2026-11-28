@@ -252,7 +252,8 @@ _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
 
 #: A shell option that takes the next word as its value, as in ``-o pipefail`` and
 #: ``-O extglob``. The letter that takes it can end a cluster, as in ``-euo pipefail``.
-_SHELL_OPTION_WITH_A_VALUE = re.compile(r"[-+][A-Za-z]*[oO]")
+#: The long options ``--rcfile`` and ``--init-file`` of bash take a file the same way.
+_SHELL_OPTION_WITH_A_VALUE = re.compile(r"[-+][A-Za-z]*[oO]|--(?:rcfile|init-file)")
 _GIT_OPTIONS_WITH_A_VALUE = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 )
