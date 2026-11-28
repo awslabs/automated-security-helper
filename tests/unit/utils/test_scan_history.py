@@ -328,6 +328,48 @@ def test_a_write_failure_is_logged_and_never_raised(tmp_path, monkeypatch):
     assert scan_history.record_run(results(finding("B101")), tmp_path) is None
 
 
+@pytest.mark.parametrize(
+    "renders", [True, False], ids=["the-text-renders", "the-text-cannot-be-rendered"]
+)
+def test_a_write_failure_is_logged_in_its_own_words_or_by_its_type(
+    tmp_path, monkeypatch, caplog, renders
+):
+    # Red before the fix: with the text that cannot be rendered, record_run
+    # formatted the failure with a plain f-string, and an OSError built from one
+    # argument renders that argument with its __str__, which raises here, so
+    # record_run raised it, though its docstring says a failure is logged, never
+    # raised.
+    asked = []
+
+    class _TextThatCannotBeRendered:
+        def __str__(self) -> str:
+            asked.append(self)
+            raise ValueError("a planted failure making the text")
+
+    planted = _TextThatCannotBeRendered()
+    failure = OSError("disk full" if renders else planted)
+    run = results(finding("B101"))
+    calls = []
+
+    def refuse(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise failure
+
+    monkeypatch.setattr(scan_history, "write_run_record", refuse)
+    with caplog.at_level(logging.WARNING, logger="ash"):
+        assert scan_history.record_run(run, tmp_path) is None
+
+    assert calls == [((run, tmp_path, scan_history.DEFAULT_KEEP_RUNS), {})], calls
+    assert asked == ([] if renders else [planted]), asked
+    shown = "disk full" if renders else "<OSError: its message could not be rendered>"
+    said = [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("Could not record this scan")
+    ]
+    assert said == [f"Could not record this scan in the history: {shown}"], said
+
+
 def test_nothing_is_recorded_unless_the_config_enables_it(tmp_path):
     run = results(finding("B101"))
     assert scan_history.record_run_if_enabled(AshHistoryConfig(), run, tmp_path) is None

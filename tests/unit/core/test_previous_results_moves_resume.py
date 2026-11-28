@@ -454,3 +454,59 @@ def test_a_staged_name_that_is_no_result_entry_is_not_put_back(tmp_path):
 
     assert _contents(output) == _held()
     assert not (output / STAGING).exists()
+
+
+@pytest.mark.parametrize(
+    "renders", [True, False], ids=["the-text-renders", "the-text-cannot-be-rendered"]
+)
+def test_a_refused_put_back_leaves_the_set_asides_own_error(
+    tmp_path, monkeypatch, renders
+):
+    # Red before the fix: with the text that cannot be rendered, _unstage
+    # formatted the put-back's refusal with a plain f-string, and an OSError
+    # built from one argument renders that argument with its __str__, which
+    # raises here; the raise replaced the PermissionError that stopped the set
+    # aside, the error _unstage runs on the way out of and the caller gets.
+    from automated_security_helper.core import previous_results
+
+    asked = []
+
+    class _TextThatCannotBeRendered:
+        def __str__(self) -> str:
+            asked.append(self)
+            raise ValueError("a planted failure making the text")
+
+    planted = _TextThatCannotBeRendered()
+    output = _with_previous(tmp_path)
+    staged = output / STAGING
+    stopped = PermissionError(13, "Permission denied")
+    real = Path.rename
+    renames = []
+
+    def rename(self, target):
+        renames.append((self, Path(target)))
+        if len(renames) == 2:
+            raise stopped
+        if len(renames) == 3:
+            raise OSError("held open" if renders else planted)
+        return real(self, target)
+
+    logger = MagicMock()
+    monkeypatch.setattr(previous_results, "ASH_LOGGER", logger)
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(PermissionError) as raised:
+        PreviousResults(output).set_aside()
+    monkeypatch.setattr(Path, "rename", real)
+
+    assert raised.value is stopped
+    (first, first_to), (second, second_to), (put_back, put_back_to) = renames
+    assert first.parent == output and first_to == staged / first.name, renames
+    assert second.parent == output and second_to == staged / second.name, renames
+    assert (put_back, put_back_to) == (first_to, first), renames
+    assert first_to.exists() and second.exists()
+    assert asked == ([] if renders else [planted]), asked
+    shown = "held open" if renders else "<OSError: its message could not be rendered>"
+    logger.error.assert_called_once_with(
+        f"Could not move the previous results staged in {staged} back to "
+        f"{output}: {shown}"
+    )

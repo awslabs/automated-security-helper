@@ -13,8 +13,11 @@ when there is one.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from automated_security_helper.core import previous_results as previous_results_module
 from automated_security_helper.core.previous_results import (
     RESTORED_MARKER_NAME,
     RESTORING_DIR_NAME,
@@ -82,3 +85,46 @@ def test_a_restore_still_leaves_the_marker_beside_what_it_put_back(tmp_path):
     assert (tmp_path / ENTRY).read_text() == "previous"
     assert (tmp_path / RESTORED_MARKER_NAME).exists()
     assert not (tmp_path / RESTORING_DIR_NAME).exists()
+
+
+@pytest.mark.parametrize(
+    "renders", [True, False], ids=["the-text-renders", "the-text-cannot-be-rendered"]
+)
+def test_a_marker_that_cannot_be_removed_is_logged_and_never_raised(
+    tmp_path, monkeypatch, renders
+):
+    # Red before the fix: with the text that cannot be rendered,
+    # forget_restored_marker formatted the refusal with a plain f-string, and an
+    # OSError built from one argument renders that argument with its __str__,
+    # which raises here, so the method raised it, though it is documented never
+    # to raise and the orchestrator calls it from its handler for a set aside
+    # that failed.
+    asked = []
+
+    class _TextThatCannotBeRendered:
+        def __str__(self) -> str:
+            asked.append(self)
+            raise ValueError("a planted failure making the text")
+
+    planted = _TextThatCannotBeRendered()
+    results = PreviousResults(tmp_path)
+    attempts = []
+
+    def refuse(self):
+        attempts.append(self)
+        raise OSError("held open" if renders else planted)
+
+    logger = MagicMock()
+    monkeypatch.setattr(PreviousResults, "_remove_marker", refuse)
+    monkeypatch.setattr(previous_results_module, "ASH_LOGGER", logger)
+
+    results.forget_restored_marker()
+
+    assert attempts == [results], attempts
+    assert asked == ([] if renders else [planted]), asked
+    shown = "held open" if renders else "<OSError: its message could not be rendered>"
+    logger.warning.assert_called_once_with(
+        f"Could not remove the restore marker {tmp_path / RESTORED_MARKER_NAME}: "
+        f"{shown}; a reader of holds_restored_results may take this scan's results "
+        "for put-back ones until the next scan removes it"
+    )

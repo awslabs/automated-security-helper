@@ -21,10 +21,12 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel
 
+from automated_security_helper.utils import error_text as error_text_module
 from automated_security_helper.utils.error_text import (
     ESCAPE_CODES,
     error_text,
     log_unexpected_error,
+    os_error_without_named_file,
     redact_then_split,
     shown_tool_stderr,
     traceback_text,
@@ -182,3 +184,85 @@ def test_every_remover_reaches_a_fixed_point(depth):
     except RuntimeError as caught:
         text = traceback_text(caught)
     assert ESCAPE_CODES.search(text) is None, repr(text)
+
+
+def _a_name_that_cannot_be_rendered(method: str, asked: list) -> str:
+    """The file name ``f``, as a str whose own ``method`` (``__str__`` or
+    ``__repr__``) raises; each call of it is recorded in ``asked``."""
+
+    class _Name(str):
+        __slots__ = ()
+
+    def refuse(self: str) -> str:
+        asked.append((method, self))
+        raise ValueError(f"no {method} for this name")
+
+    setattr(_Name, method, refuse)
+    return _Name("f")
+
+
+@pytest.mark.parametrize("method", ["__str__", "__repr__"])
+def test_a_name_that_cannot_be_rendered_is_not_one_quoted_by_repr(method):
+    # Red before the fix: _names_a_file_by_repr, which log_unexpected_error asks
+    # how to log an OSError, quoted the error's file names with no guard (the
+    # name's repr, then through _quoted_as_given its own text), so a name whose
+    # __str__ or __repr__ raises made it raise that. It is called directly:
+    # log_unexpected_error renders the error with error_text first, and its pass
+    # naming the files as given reads the same names.
+    asked: list = []
+    name = _a_name_that_cannot_be_rendered(method, asked)
+    error = OSError(2, "No such file or directory", name)
+
+    assert error_text_module._names_a_file_by_repr(error) is False
+    assert asked == [(method, name)], asked
+
+
+@pytest.mark.parametrize(
+    ("name", "by_repr"),
+    [
+        pytest.param("f", False, id="a-plain-name"),
+        pytest.param("C:\\f", True, id="a-backslash"),
+    ],
+)
+def test_a_name_that_renders_keeps_its_answer(name, by_repr):
+    # The control: a name that renders is answered as it was before the guard.
+    error = OSError(2, "No such file or directory", name)
+
+    assert error_text_module._names_a_file_by_repr(error) is by_repr
+
+
+def test_a_message_that_cannot_be_rendered_names_the_os_error_by_its_type():
+    # Red before the fix: os_error_without_named_file rendered the error's
+    # message with a plain f-string, which calls the message's __str__, so a
+    # message whose __str__ raises made it raise that in place of the text that
+    # reports the failure.
+    asked: list = []
+
+    class _Message(_Unrenderable):
+        def __str__(self) -> str:
+            asked.append(("__str__", self))
+            return super().__str__()
+
+    message = _Message()
+    error = OSError(2, message, "f")
+
+    assert os_error_without_named_file(error, "f") == (
+        "<FileNotFoundError: its message could not be rendered>"
+    )
+    assert asked == [("__str__", message)], asked
+
+
+@pytest.mark.parametrize("method", ["__str__", "__repr__"])
+def test_a_second_file_that_cannot_be_rendered_is_left_out(method):
+    # Red before the fix: the second file's name was quoted under a guard that
+    # caught TypeError only, and quoting it calls the name's __repr__ and then
+    # its __str__, so a name whose own method raises made it raise that, past the
+    # guard.
+    asked: list = []
+    error = OSError(2, "No such file or directory", "f")
+    error.filename2 = _a_name_that_cannot_be_rendered(method, asked)
+
+    assert os_error_without_named_file(error, "f") == (
+        "[Errno 2] No such file or directory"
+    )
+    assert asked == [(method, error.filename2)], asked
