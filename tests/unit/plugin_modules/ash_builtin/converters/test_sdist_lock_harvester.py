@@ -20,12 +20,14 @@ Also the cache's trust boundary and the transfer bound, the fix round's rows:
   only against the lock's own (attacker-aligned) size claim.
 
 And the path with the syft scanner disabled: which packages and lockfiles it
-names, for which of grype and trivy, and what it does not set up.
+names, for which of grype and trivy (as their config sections and the run's
+scanner selection decide), and what it does not set up.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib
 import io
 import json
 import ntpath
@@ -874,3 +876,144 @@ def test_with_syft_off_no_cache_no_staging_and_no_results_dir_are_made(
     assert made == [], "no staging directory is made"
     assert not converter.results_dir.exists()
     assert len(converter.refused_inputs) == 1
+
+
+# ----------------------------------------------------------------------
+# With syft off: the run's scanner selection decides which readers run
+# ----------------------------------------------------------------------
+#
+# A reader its config section enables still does not run when the run's selection
+# leaves it out: an exclusion naming it, an allowlist that does not name it, or a
+# Python-only run (grype and trivy are native binaries). The engine records that
+# selection on the context, which is all a converter is handed.
+
+
+def _spy_on_the_walk(monkeypatch: pytest.MonkeyPatch) -> List[List[str]]:
+    """Record every scan-set walk the converter makes, by the names it asks for."""
+    walked: List[List[str]] = []
+    real = SdistLockHarvester._lockfiles_in_scan_set
+
+    def spy(self, names):
+        walked.append(list(names))
+        return real(self, names)
+
+    monkeypatch.setattr(SdistLockHarvester, "_lockfiles_in_scan_set", spy)
+    return walked
+
+
+def _load_the_reader_scanners() -> None:
+    """Import grype's and trivy's modules, so their classes can say they are not
+    Python-only, as they do in every run, which loads the built-in scanners."""
+    for module in ("grype_scanner", "trivy_scanner"):
+        importlib.import_module(
+            f"automated_security_helper.plugin_modules.ash_builtin.scanners.{module}"
+        )
+
+
+#: Selections that leave both readers out, by the filter that does it.
+SELECTIONS_WITHOUT_A_READER = {
+    "excluded": {"excluded": ["grype", "trivy"]},
+    "allowlist": {"enabled": ["bandit"]},
+    "python-only": {"python_only": True},
+}
+
+
+@pytest.mark.parametrize("left_out_by", sorted(SELECTIONS_WITHOUT_A_READER))
+def test_with_syft_off_readers_the_selection_leaves_out_draw_no_record(
+    harvest_env, monkeypatch: pytest.MonkeyPatch, left_out_by: str
+) -> None:
+    """grype and trivy are enabled in config, but the run's selection runs neither.
+
+    Nothing reads a harvest, so the tree is not walked and no record names a
+    reader that does not run.
+    """
+    _load_the_reader_scanners()
+    _source, _output, opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    converter.context.record_scanner_selection(
+        **SELECTIONS_WITHOUT_A_READER[left_out_by]
+    )
+    walked = _spy_on_the_walk(monkeypatch)
+
+    assert converter.convert() == []
+    assert walked == [], "nothing reads a harvest, so the tree is not walked"
+    assert converter.refused_inputs == []
+    assert converter.failed_inputs == []
+    assert opener.calls == []
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        pytest.param({"enabled": ["grype"]}, id="allowlist"),
+        pytest.param({"excluded": ["trivy"]}, id="excluded"),
+    ],
+)
+def test_with_syft_off_the_record_names_only_the_reader_the_selection_keeps(
+    harvest_env, selection
+) -> None:
+    _source, _output, opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    converter.context.record_scanner_selection(**selection)
+
+    assert converter.convert() == []
+    assert opener.calls == []
+    (record,) = converter.refused_inputs
+    assert "missing from the input of grype;" in record.reason
+    assert "trivy" not in record.reason
+
+
+def test_with_syft_off_selection_names_compare_as_the_scan_phase_compares_them(
+    harvest_env,
+) -> None:
+    """Case and surrounding spaces do not count, as in every scanner name a run
+    reads."""
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    converter.context.record_scanner_selection(enabled=[" GRYPE "])
+
+    assert converter.convert() == []
+    (record,) = converter.refused_inputs
+    assert "missing from the input of grype;" in record.reason
+    assert "trivy" not in record.reason
+
+
+def test_control_with_syft_off_a_selection_that_narrows_nothing_keeps_both_readers(
+    harvest_env,
+) -> None:
+    """No allowlist, no exclusion and not Python-only: both readers run."""
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    converter.context.record_scanner_selection(
+        enabled=[], excluded=[], python_only=False
+    )
+
+    assert converter.convert() == []
+    (record,) = converter.refused_inputs
+    assert "missing from the input of grype and trivy" in record.reason
+
+
+def test_candidate_input_count_is_zero_when_the_selection_leaves_out_both_readers(
+    harvest_env,
+) -> None:
+    _source, _output, _opener, build = harvest_env
+    converter = build(config=_syft_off_config("grype", "trivy"))
+    converter.context.record_scanner_selection(excluded=["grype", "trivy"])
+
+    assert converter.candidate_input_count() == 0
+
+
+def test_control_with_syft_on_the_selection_of_grype_and_trivy_leaves_the_harvest(
+    harvest_env,
+) -> None:
+    """syft runs, so the harvest fetches for its SBOM whatever the selection says of
+    grype and trivy."""
+    _source, _output, opener, build = harvest_env
+    converter = build()
+    converter.context.record_scanner_selection(excluded=["grype", "trivy"])
+
+    results = converter.convert()
+
+    assert sorted(p.name for p in results) == ["Cargo.lock", HARVEST_MANIFEST_NAME]
+    assert opener.calls == [SDIST_URL]
+    assert converter.failed_inputs == [] and converter.refused_inputs == []
