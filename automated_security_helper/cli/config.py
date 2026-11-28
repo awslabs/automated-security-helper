@@ -1474,7 +1474,13 @@ def update(
         List[str],
         typer.Option(
             "--set",
-            help="Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax.",
+            help=(
+                "Configuration modifications specified as key-value pairs (e.g., "
+                "'global_settings.severity_threshold=LOW'). Supports lists with "
+                '["item1","item2"], append mode with key+=["value"], remove mode '
+                'with key-=["value"], which removes every occurrence of each item, '
+                "and JSON syntax."
+            ),
         ),
     ] = [],
     source_dir: Annotated[
