@@ -241,9 +241,9 @@ def test_scan_fs_is_given_the_mount_as_its_path_argument_and_no_variable(
             id="no-command-at-all",
         ),
         pytest.param(
-            ["report", "--format", "text"],
-            ["ash", "report", "--format", "text"],
-            id="report",
+            ["results", "report", "--format", "text"],
+            ["ash", "results", "report", "--format", "text"],
+            id="results-report",
         ),
     ],
 )

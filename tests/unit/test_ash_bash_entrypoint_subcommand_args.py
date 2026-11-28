@@ -4,11 +4,11 @@
 """`./ash <subcommand>` runs the subcommand with arguments it takes.
 
 `ash` passes options given before a subcommand on to it when it takes them and
-refuses them otherwise, and `report` does not take --source-dir, so the bash
+refuses them otherwise, and `results report` does not take --source-dir, so the bash
 entrypoint does not put `--source-dir /src --output-dir /out` before a subcommand: it
 passes the mounted paths as ASH_SOURCE_DIR and ASH_OUTPUT_DIR. The one exception is
 the source directory of `scan fs`, which is that subject's PATH argument, `/src`.
-CI runs `./ash report --format text` after every bash-entrypoint scan.
+CI runs `./ash results report --format text` after every bash-entrypoint scan.
 
 A fake OCI runner stands in for docker, as in test_ash_bash_entrypoint_build_failure.py,
 and prints the argv it was given.
@@ -124,8 +124,8 @@ def test_scan_fs_is_given_the_source_directory_as_its_path_argument(runner, tmp_
     "args",
     [
         pytest.param(["scan"], id="scan-with-no-subject"),
-        pytest.param(["report", "--format", "text"], id="report"),
-        pytest.param(["merge"], id="merge"),
+        pytest.param(["results", "report", "--format", "text"], id="results-report"),
+        pytest.param(["results", "merge"], id="results-merge"),
         pytest.param(["config", "get"], id="config"),
     ],
 )
@@ -142,11 +142,13 @@ def test_a_form_with_no_scan_subject_keeps_the_source_directory_variable(
 
 @pytest.mark.integration
 def test_a_subcommand_runs_on_its_own_arguments(runner, tmp_path):
-    inner = _inner_argv(_run_argv(runner, tmp_path, "report", "--format", "text"))
+    inner = _inner_argv(
+        _run_argv(runner, tmp_path, "results", "report", "--format", "text")
+    )
 
-    assert inner == ["ash", "report", "--format", "text"], (
-        "report does not take --source-dir, so putting it before 'report' is a usage "
-        f"error: {inner}"
+    assert inner == ["ash", "results", "report", "--format", "text"], (
+        "results report does not take --source-dir, so putting it before the command "
+        f"is a usage error: {inner}"
     )
 
 
@@ -155,9 +157,9 @@ def test_a_subcommand_runs_on_its_own_arguments(runner, tmp_path):
     "args, expected",
     [
         pytest.param(
-            ["report", "--format", "text"],
-            ["ash", "report", "--format", "text"],
-            id="report-format",
+            ["results", "report", "--format", "text"],
+            ["ash", "results", "report", "--format", "text"],
+            id="results-report-format",
         ),
         pytest.param(
             ["--format", "sarif"],
@@ -170,8 +172,8 @@ def test_format_reaches_ash(runner, tmp_path, args, expected):
     """--format is ash's option, for scan (its output formats) and for report.
 
     The entrypoint passes it to ash as given, not into ASH_OUTPUT_FORMAT, which
-    nothing in ASH reads, so `./ash report --format text`, which CI runs after every
-    bash-entrypoint scan, prints text.
+    nothing in ASH reads, so `./ash results report --format text`, which CI runs after
+    every bash-entrypoint scan, prints text.
     """
     run_argv = _run_argv(runner, tmp_path, *args)
 
@@ -181,9 +183,9 @@ def test_format_reaches_ash(runner, tmp_path, args, expected):
 
 @pytest.mark.integration
 def test_an_option_before_a_subcommand_is_left_where_it_was_typed(runner, tmp_path):
-    inner = _inner_argv(_run_argv(runner, tmp_path, "--verbose", "report"))
+    inner = _inner_argv(_run_argv(runner, tmp_path, "--verbose", "results", "report"))
 
-    assert inner == ["ash", "--verbose", "report"]
+    assert inner == ["ash", "--verbose", "results", "report"]
 
 
 @pytest.mark.integration
@@ -239,8 +241,8 @@ def test_the_entrypoints_own_flags_go_only_where_ash_takes_them(
     "args, expected",
     [
         pytest.param(
-            ["-q", "merge", "--results", "scan"],
-            ["ash", "merge", "--results", "scan"],
+            ["-q", "results", "merge", "--results", "scan"],
+            ["ash", "results", "merge", "--results", "scan"],
             id="a-later-value-names-scan",
         ),
         pytest.param(
