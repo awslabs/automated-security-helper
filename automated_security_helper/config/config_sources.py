@@ -2185,8 +2185,9 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
       characters after the key's first character; written after a question mark and a
       space, with its colon, a space and its value on the next line and the colon
       under the question mark, it is read as TOML reads it. A value that takes more
-      than one line starts on the line after the colon, indented past it, or is
-      written in flow style on the colon's line.
+      than one line starts on the line after the colon, with each of its lines
+      indented past it, or is written in flow style (inside ``[...]`` or ``{...}``)
+      on the colon's line, with each string in it kept in its quotes.
 
     A ``pyproject.toml`` table is edited where it is and has none.
     """
@@ -2261,8 +2262,9 @@ def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
         )
         caveats.append(
             "A value that takes more than one line starts on the line after the "
-            "colon, indented past it, or is written in flow style on the colon's "
-            "line"
+            "colon, with each of its lines indented past it, or is written in flow "
+            "style (inside [...] or {...}) on the colon's line, with each string in "
+            "it kept in its quotes"
         )
     return caveats
 
