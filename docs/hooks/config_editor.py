@@ -1625,14 +1625,28 @@ PATTERN_SAMPLES = {r"^[0-9a-fA-F]{64}$": "0" * 64, r"^[a-zA-Z][\w-]+$": "probe-n
 #: Settings the trust probe leaves alone: ASH would import a module, open a base
 #: file or apply a patch for them while loading.
 PROBE_EXCLUDED = ("ash_plugin_modules", "extends", "patch")
-#: Settings whose value the generic generator cannot make, with values to plant.
-#: A staleness entry names its own expiry, which ASH judges against the clock, so
-#: the dates are far in the future.
-EXTRA_LEAVES: dict[str, list[Any]] = {
-    "content_db_staleness_overrides": [
+#: Settings whose value a generic planting cannot make, because ASH checks it against
+#: a vocabulary of its own, with values it accepts to plant instead.
+PROBE_VALUES: dict[str, list[Any]] = {
+    "sandbox.environment": [["PROBE_VARIABLE"]],
+    "scanners.cfn-lint.options.regions": [["us-east-1"]],
+    "scanners.cfn-lint.options.ignore_checks": [["W1001"]],
+    "scanners.cfn-lint.options.include_checks": [["W1001"]],
+}
+MAX_ROUNDS = 6
+
+
+def special_leaves() -> dict[str, list[Any]]:
+    """The settings the generic planting cannot make a value for, with the values to
+    plant. A staleness entry names a database ASH declares and its own expiry, which
+    ASH judges against the clock, so the date is far in the future."""
+    from automated_security_helper.utils.content_databases import CONTENT_DATABASES
+
+    database = CONTENT_DATABASES[0].name
+    overrides = [
         [
             {
-                "database": "probe-database",
+                "database": database,
                 "policy": policy,
                 "expiration": "2099-01-01",
                 "reason": "probe",
@@ -1640,8 +1654,7 @@ EXTRA_LEAVES: dict[str, list[Any]] = {
         ]
         for policy in ("warn", "fail")
     ]
-}
-MAX_ROUNDS = 6
+    return {**PROBE_VALUES, "content_db_staleness_overrides": overrides}
 
 
 class ControlRefused(ProjectionError):
@@ -1940,7 +1953,7 @@ def probe_leaves(fields: Mapping[str, Mapping[str, Any]]) -> dict[str, list[Any]
         values = candidate_values(field)
         if values:
             leaves[path] = values[:MAX_ROUNDS]
-    for path, values in EXTRA_LEAVES.items():
+    for path, values in special_leaves().items():
         if path in fields:
             leaves[path] = values
     return leaves
@@ -2062,8 +2075,12 @@ def probe_round(
     return result
 
 
-def describe_kept(field: Mapping[str, Any], value: Any) -> str:
-    """What kind of value a repository's file may keep, in words for the badge."""
+def describe_kept(
+    field: Mapping[str, Any], value: Any, replaced: Iterable[Any] = ()
+) -> str:
+    """What kind of value a repository's file may keep, in words for the badge.
+    ``replaced`` are the values planted for the same setting that ASH did not keep:
+    a list of entries is described by what its kept entry has that those lack."""
     kind, default = field["kind"], field.get("default")
     if kind in ("boolean", "enum"):
         return json.dumps(value) if kind == "boolean" else str(value)
@@ -2074,6 +2091,14 @@ def describe_kept(field: Mapping[str, Any], value: Any) -> str:
             if below
             else "a value at or above the operator's"
         )
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        others = [item[0] for item in replaced if item and isinstance(item[0], dict)]
+        different = [
+            f"{name} {setting}"
+            for name, setting in value[0].items()
+            if all(other.get(name) != setting for other in others)
+        ]
+        return "an entry with " + " and ".join(different or ["these values"])
     if isinstance(value, list):
         return "a list of plain names"
     return "a path" if str(value).startswith("/") else "a plain name"
@@ -2100,8 +2125,11 @@ def rules_from_outcomes(
         if all(outcome == "kept" for _, outcome in seen):
             continue
         field = fields[path]
+        replaced = [value for value, outcome in seen if outcome != "kept"]
         kept = [
-            describe_kept(field, value) for value, outcome in seen if outcome == "kept"
+            describe_kept(field, value, replaced)
+            for value, outcome in seen
+            if outcome == "kept"
         ]
         kept = list(dict.fromkeys(kept))
         stripped = any(outcome == "ignored" for _, outcome in seen)
@@ -2118,7 +2146,16 @@ def rules_from_outcomes(
     rules: list[dict[str, Any]] = []
     used: set[str] = set()
     for (name, rule, kept, instead), paths in sorted(groups.items()):
+        # A rule about one section's option says which section; one about the same
+        # option in many sections is named by the option alone.
+        sections = {".".join(path.split(".")[:2]) for path in paths}
         ident = slug(name)
+        if (
+            "." not in name
+            and len(sections) == 1
+            and all(p.split(".")[0] in SEGMENTS for p in paths)
+        ):
+            ident = slug(f"{next(iter(sections)).split('.')[1]}-{name}")
         while ident in used:
             ident += "-2"
         used.add(ident)

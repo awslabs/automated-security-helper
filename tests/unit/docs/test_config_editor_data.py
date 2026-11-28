@@ -476,6 +476,7 @@ def test_the_serialized_block_is_within_the_size_ceiling(hook, built, record_pro
     record_property("build_seconds", f"{built.seconds:.2f}")
     record_property("fields", len(built.block["fields"]))
     record_property("trust_rules", ",".join(r["id"] for r in built.block["trust"]))
+    record_property("trust_json", json.dumps(built.block["trust"], sort_keys=True))
     record_property(
         "unprobed",
         "; ".join(f"{k}: {v}" for k, v in sorted(probe["unprobed"].items()))[:6000],
@@ -632,17 +633,23 @@ def test_the_hidden_deprecated_and_inherited_annotations_equal_ashs_code(
         k: set(v) for k, v in built.block["constants"]["internalSectionFields"].items()
     } == {kind: internal[kind] for kind in hook.SEGMENTS}
     hidden = {p for p, f in fields.items() if f["hidden"]}
+
+    def internal_in_a_section(path):
+        # <kind>.<section>.<name>: the fields of the section itself, not its options
+        parts = path.split(".")
+        return (
+            len(parts) == 3
+            and parts[0] in hook.SEGMENTS
+            and parts[2] in internal[parts[0]]
+        )
+
     expected = {
         p
         for p, f in fields.items()
-        if f["key"] == "client_supplied"
-        or (
-            f["kind"] != "section"
-            and f["parent"] in hook.SEGMENTS
-            and f["key"] in internal[f["parent"]]
-        )
+        if f["key"] == "client_supplied" or internal_in_a_section(p)
     }
-    assert hidden == expected and hidden
+    assert hidden == expected, sorted(hidden ^ expected)
+    assert hidden
     assert not any(
         f["hidden"]
         for p, f in fields.items()
@@ -712,7 +719,7 @@ def test_each_host_dependent_default_is_read_where_the_hook_says_and_carries_the
     assert fields["scanners.semgrep.enabled"]["default"] is True
 
 
-def test_the_two_message_templates_equal_the_text_ash_writes(built):
+def test_the_two_message_templates_equal_the_text_ash_writes(built, tmp_path):
     from automated_security_helper.config.ash_config import load_config_yaml
     from automated_security_helper.config.config_validator import ConfigValidator
 
@@ -721,8 +728,15 @@ def test_the_two_message_templates_equal_the_text_ash_writes(built):
         Exception, match=re.escape(constants["aliasRefusal"].format(anchor="x"))
     ):
         load_config_yaml("a: &x 1\nb: *x\n")
+    planted = tmp_path / "planted.yaml"
+    planted.write_text("project_name: x\nbuild: {}\n", encoding="utf-8")
     warnings = ConfigValidator._structure_warnings(
-        Path("planted.yaml"), {"build": {}}, {"build": {}}, True, False, None
+        planted,
+        {"project_name": "x", "build": {}},
+        {"project_name": "x", "build": {}},
+        True,
+        False,
+        None,
     )
     assert constants["invalidTopLevelFieldWarning"].format(field="build") in warnings
 
@@ -797,7 +811,8 @@ SCAN_TIMEOUT = "scanners.actionlint.options.scan_timeout"
 
 
 def _lax_load(path):
-    """What a plain ``AshConfig(**data)`` does with the file: it keeps the reference."""
+    """What a plain ``AshConfig(**data)`` does with the file: the model alone, with
+    none of the steps the file-load route takes first."""
     import yaml
 
     from automated_security_helper.config.ash_config import AshConfig
@@ -805,20 +820,56 @@ def _lax_load(path):
     return AshConfig(**yaml.safe_load(Path(path).read_text(encoding="utf-8")))
 
 
+def _takes_everything(path):
+    return None
+
+
+def _refuses_a_reference(path):
+    if "${" in Path(path).read_text(encoding="utf-8"):
+        raise ValueError("a reference is refused")
+
+
 def test_a_reference_in_scan_timeout_is_reported_refused(hook, fields, tmp_path):
     assert fields[SCAN_TIMEOUT]["kind"] == "integer"
     assert hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path) is False
 
 
-def test_the_lax_route_would_have_reported_scan_timeout_accepted(
+def test_a_load_that_takes_a_reference_reads_as_accepted(hook, fields, tmp_path):
+    assert (
+        hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path, load=_takes_everything)
+        is True
+    )
+
+
+def test_a_load_that_refuses_only_the_reference_reads_as_refused(
     hook, fields, tmp_path
 ):
     assert (
-        hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path, load=_lax_load) is True
-    ), (
-        "a plain AshConfig(**data) now refuses the reference too, so the file-load "
-        "route is no longer the only one that tells the truth"
+        hook.reference_accepted(
+            fields, SCAN_TIMEOUT, tmp_path, load=_refuses_a_reference
+        )
+        is False
     )
+
+
+def test_the_answer_of_a_plain_model_load_for_scan_timeout_is_recorded(
+    hook, fields, tmp_path, record_property
+):
+    seen = []
+
+    def recording(path):
+        try:
+            _lax_load(path)
+        except Exception as error:
+            seen.append(f"{type(error).__name__}: {str(error)[:120]}")
+            raise
+        seen.append("accepted")
+
+    try:
+        answer = hook.reference_accepted(fields, SCAN_TIMEOUT, tmp_path, load=recording)
+    except hook.ControlRefused:
+        answer = "the plain value was refused"
+    record_property("plain_model_load_scan_timeout", f"{answer}; {' | '.join(seen)}")
 
 
 def test_the_probe_reports_each_class_on_the_file_load_route(built):
@@ -1174,21 +1225,40 @@ def test_a_table_row_whose_function_or_literal_moved_stops_the_build(hook):
 
 
 def test_each_table_row_reads_as_set_by_the_operator_only_in_an_operator_file(
-    hook, built, fields
+    hook, built, fields, record_property
 ):
     from automated_security_helper.config.resolve_config import resolve_config
     from automated_security_helper.utils.config_trust import set_by_operator
 
-    planted = {}
+    leaves = hook.probe_leaves(fields)
+    wanted = {}
     for row in _rows(hook):
         for path in _published(hook, fields, row):
-            values = hook.candidate_values(fields[path])
-            if values and path not in planted:
-                planted[path] = values[0]
-    assert len(planted) >= 15
-    document: dict = {}
-    for path, value in planted.items():
-        hook.merge_documents(document, hook.plant(fields, path, value) or {})
+            if path in leaves and path not in wanted:
+                wanted[path] = leaves[path][0]
+
+    def document_of(batch):
+        document: dict = {}
+        for path, value in batch.items():
+            hook.merge_documents(document, hook.plant(fields, path, value) or {})
+        return document
+
+    def loads(batch):
+        try:
+            hook.load_repository_file(built.workdir, document_of(batch))
+        except Exception:
+            return False
+        return True
+
+    planted = (
+        wanted
+        if loads(wanted)
+        else {path: value for path, value in wanted.items() if loads({path: value})}
+    )
+    refused = sorted(set(wanted) - set(planted))
+    record_property("table_paths_refused_when_planted", ", ".join(refused) or "none")
+    assert len(planted) >= 15, refused
+    document = document_of(planted)
     with_repository, _ = hook.load_repository_file(built.workdir, document)
     operator = built.workdir / "operator"
     operator.mkdir(exist_ok=True)
