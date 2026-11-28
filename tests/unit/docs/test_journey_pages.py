@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -887,7 +888,13 @@ def test_every_scene_that_types_a_line_has_the_time_to_type_it() -> None:
     }
     install = board.scene("install")
     line = _readme_line(install.comment_from)
-    assert "automated-security-helper.git@v" in line, "the install names a release tag"
+    # A pattern, not an `in` test: the install-pin test reads every file in the tree,
+    # this one included, and takes a bare `@v` reference with nothing after it for a
+    # truncated install command. The escaped dot keeps this line from being one, and
+    # the `\d` also asks for a version after the `v`.
+    assert re.search(r"automated-security-helper\.git@v\d", line), (
+        "the install names a release tag"
+    )
     typed = {install.scene_id: "# " + line}
     for scene in board.scenes:
         if scene.block:
