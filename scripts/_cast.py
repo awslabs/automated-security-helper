@@ -20,7 +20,13 @@ What it holds
   scene's own budget. Output is shortened to fit and never stretched.
 * the scrub scan: ``scan_text`` and ``scan_cast`` look for tokens that must not appear
   in a recording (home directories, user and host names) and name each hit by its
-  kind, never by its value.
+  kind, never by its value. A token that a color change, a cursor movement or an
+  invisible format character splits, or that a line wrap splits with only line breaks,
+  box-drawing borders and spaces between its halves, is found in the text with those
+  taken out (``flatten_text``). Anything else between the halves keeps it from being
+  found: a cell that wraps beside another column, a log line that wraps beside a
+  right-hand column, an ASCII table border. So the recorder has to work at a width
+  where nothing wraps beside other text.
 * the run record: dataclasses for what a recording run observed, and
   ``canonical_json``, the one JSON form the record is written in.
 
@@ -46,6 +52,7 @@ import json
 import math
 import operator
 import re
+import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
@@ -405,10 +412,24 @@ EXCLUSIVE_WORDS = ("only", "every", "all", "always", "never", "each")
 EXCLUSIVE_PHRASES = ("in seconds",)
 #: The commands a scene may type itself, besides running a journey block.
 READ_ONLY_COMMANDS = ("cat", "ls")
+#: The ``ls`` flags that print the owner or the group of each file: ``-l`` and the flags
+#: that imply it. A user or group name in such a column is not one the scrub scan can
+#: recognize, because it finds a user name only after a slash.
+LS_OWNER_FLAGS = "lgon"
+_LS_OWNER_FLAG_LIST = ", ".join("-" + flag for flag in LS_OWNER_FLAGS)
+#: What an ls listing holds that the scan cannot read, in the words of both refusals.
+_LS_OWNER_COLUMNS = (
+    "the owner and group of each file, which the scrub scan cannot recognize"
+)
 PLAYBACK_MODES = ("once", "loop")
 MIN_COLS, MAX_COLS = 20, 300
 MIN_ROWS, MAX_ROWS = 5, 100
 MAX_CHARS_PER_SECOND = 1000
+#: The slowest typing a storyboard may ask for. The floor keeps the time to type a
+#: command a number the arithmetic can hold: at 1e-320 characters a second it is
+#: infinite, and rounding it raised OverflowError. It is not a claim about realistic
+#: typing; at this rate a two-character command takes 20 s.
+MIN_CHARS_PER_SECOND = 0.1
 #: A time in a storyboard is refused above this many seconds, before any arithmetic.
 MAX_SECONDS = 3600
 
@@ -497,12 +518,27 @@ def caption_problems(caption: str, duration_ms: int) -> list[str]:
     return problems
 
 
+def _ls_owner_problem(argument: str) -> str:
+    return (
+        f"argument {argument!r} prints {_LS_OWNER_COLUMNS}; ls is admitted without a "
+        f"long listing (the {_LS_OWNER_FLAG_LIST} flags and the options that do the "
+        "same)"
+    )
+
+
 def command_problem(command: str) -> str | None:
     """Why ``command`` is not an admitted read-only command, or None when it is.
 
     Admitted: ``cat`` or ``ls`` (by that bare name), short flags such as ``-1`` or
-    ``-la``, and relative paths of plain characters that stay inside the project. The
-    check reads the text only; the recorder runs the command in the project directory.
+    ``-a``, and relative paths of plain characters that stay inside the project. An
+    ``ls`` flag that prints the owner and group of each file (``-l``, ``-g``, ``-o``
+    and ``-n``, alone or in a bundle such as ``-la``) is refused: the scrub scan
+    cannot recognize a user or group name in that column. A long option is refused as
+    an option, whatever it prints. ``ls`` has long options that print the same columns
+    and accepts abbreviations of them, so the check does not try to tell the options
+    apart, and for ``ls`` the refusal gives that reason and names the four flags too.
+    The check reads the text only; the recorder runs the command in the project
+    directory.
     """
     if not isinstance(command, str) or not command.strip():
         return "the command is empty"
@@ -516,9 +552,19 @@ def command_problem(command: str) -> str | None:
     paths = 0
     for argument in arguments:
         if _COMMAND_FLAG.fullmatch(argument):
+            if program == "ls" and set(LS_OWNER_FLAGS) & set(argument[1:]):
+                return _ls_owner_problem(argument)
             continue
         if argument.startswith("-"):
-            return f"argument {argument!r} is an option other than a short flag"
+            problem = f"argument {argument!r} is an option other than a short flag"
+            if program == "ls":
+                problem += (
+                    "; ls is admitted with short flags only, because some long "
+                    f"options print {_LS_OWNER_COLUMNS}, and the check does not try "
+                    f"to tell which (the {_LS_OWNER_FLAG_LIST} flags print them too "
+                    "and are refused)"
+                )
+            return problem
         if _COMMAND_PATH.fullmatch(argument) is None:
             return f"argument {argument!r} is not a plain relative path or a short flag"
         if argument.startswith("/"):
@@ -535,7 +581,16 @@ def command_problem(command: str) -> str | None:
 
 
 def typing_ms(chars: int, chars_per_second: float) -> int:
-    """Milliseconds to type ``chars`` characters at ``chars_per_second``."""
+    """Milliseconds to type ``chars`` characters at ``chars_per_second``.
+
+    The rate must be a number of at least ``MIN_CHARS_PER_SECOND``. Anything else is a
+    ``CastError``: a rate near zero would make the time infinite.
+    """
+    if not _is_number(chars_per_second) or chars_per_second < MIN_CHARS_PER_SECOND:
+        raise CastError(
+            f"typing rate {chars_per_second!r} must be a number of characters a "
+            f"second, at least {MIN_CHARS_PER_SECOND}"
+        )
     return round(chars * 1000 / chars_per_second)
 
 
@@ -678,10 +733,11 @@ def _parse_typing(raw: object, source: str) -> TypingPolicy:
     where = f"{source}: typing"
     data = _mapping(raw, where, _TYPING_KEYS, _TYPING_KEYS)
     rate = data["chars_per_second"]
-    if not _is_number(rate) or not 0 < rate <= MAX_CHARS_PER_SECOND:
+    in_range = _is_number(rate) and MIN_CHARS_PER_SECOND <= rate <= MAX_CHARS_PER_SECOND
+    if not in_range:
         _fail(
             where,
-            "chars_per_second must be greater than 0 and at most "
+            f"chars_per_second must be at least {MIN_CHARS_PER_SECOND} and at most "
             f"{MAX_CHARS_PER_SECOND}, not {rate!r}",
         )
     lead_in = _seconds(data["lead_in_s"], where, "lead_in_s", positive=False)
@@ -1096,7 +1152,10 @@ def retime_scene(storyboard: Storyboard, scene: Scene, run: SceneRun) -> Retimed
     follows it, retimed by ``_retimed_offsets``. The rest of the scene is the hold.
     """
     policy = storyboard.typing
-    typed_ms = typing_ms(len(run.typed), policy.chars_per_second)
+    try:
+        typed_ms = typing_ms(len(run.typed), policy.chars_per_second)
+    except CastError as exc:
+        raise RetimeError(f"scene {scene.scene_id!r}: {exc}") from exc
     window = _window_ms(scene, policy.lead_in_ms, typed_ms, has_output=bool(run.chunks))
     start = scene.start_ms
     events = [_event(start, "m", scene.caption)]
@@ -1178,6 +1237,16 @@ def build_cast(
 MATCH_MODES = ("substring", "path-component", "word")
 
 _SGR = re.compile(r"\x1b\[[0-9;:]*m")
+#: Every escape sequence a terminal reads, in the 7-bit and the 8-bit forms of the
+#: introducers: a control string (OSC, DCS, SOS, PM or APC, up to its terminator), a
+#: control sequence (CSI), or any other escape. One that the text cuts short is read as
+#: far as it goes.
+_ESCAPE = re.compile(
+    r"(?:\x1b\]|\x9d)[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?"
+    r"|(?:\x1b[PX^_]|[\x90\x98\x9e\x9f])[^\x1b\x9c]*(?:\x1b\\|\x9c)?"
+    r"|(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]?"
+    r"|\x1b[ -/]*[0-~]?"
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1225,7 +1294,12 @@ class ForbiddenHit:
     kind: str
     where: str
     #: ``raw`` is the text as recorded; ``plain`` is the text with SGR color runs
-    #: removed, which finds a token that color changes split.
+    #: removed, which finds a token that color changes split; ``flat`` is the text with
+    #: every escape sequence, control character, line break, box-drawing character and
+    #: invisible format character removed, which finds a token that a cursor movement,
+    #: a line wrap or an invisible character split, unless something else lies between
+    #: the halves (``flatten_text`` lists the shapes it rejoins and the ones it does
+    #: not).
     view: str
 
     def __str__(self) -> str:
@@ -1247,6 +1321,51 @@ def strip_sgr(text: str) -> str:
     return _SGR.sub("", text)
 
 
+def flatten_text(text: str) -> str:
+    """``text`` as one run, for a scan that must not be fooled by a wrap.
+
+    Every escape sequence (not only SGR), every control character (the carriage
+    return and line feed of a wrap among them), every box-drawing character (U+2500
+    to U+257F, the borders of a table) and every invisible format character (Unicode
+    category Cf: the zero-width space and joiners, the soft hyphen, the byte-order
+    mark, the direction marks) is removed. So are the spaces beside a removed control
+    or box-drawing character. Nothing else is removed or moved, and the text is read
+    in stream order, so a token is read as the token again only when nothing but those
+    characters lies between its halves.
+
+    It rejoins a path that a cursor movement, a title, a link or a color change cut, a
+    path that wraps onto the next line, a path with an invisible format character
+    inside it, and a path that wraps inside a table with box-drawing borders or none,
+    when the table has one column or the wrapped cell is the last one filled on its
+    row.
+
+    It does not rejoin a path with anything else between its halves: a cell that
+    wraps with another column to its right, in the first column or a middle one, since
+    the text of that column lies between the halves; a log line wrapped beside a
+    right-hand column, for the same reason; and a table drawn with ASCII bars (``|``),
+    even of one column, since those bars are kept. A recording therefore has to be
+    made at a width where nothing wraps beside other text; this view is no substitute
+    for that. It can also join words that were apart, which only makes a scan that
+    looks for a token stricter.
+    """
+    kept: list[str] = []
+    in_gap = False
+    for char in _ESCAPE.sub("", text):
+        code = ord(char)
+        if code < 0x20 or 0x7F <= code <= 0x9F or 0x2500 <= code <= 0x257F:
+            while kept and kept[-1] == " ":
+                kept.pop()
+            in_gap = True
+        elif unicodedata.category(char) == "Cf":
+            continue
+        elif in_gap and char == " ":
+            continue
+        else:
+            in_gap = False
+            kept.append(char)
+    return "".join(kept)
+
+
 def _scan(
     text: str,
     compiled: Sequence[tuple[ForbiddenToken, re.Pattern[str]]],
@@ -1257,9 +1376,12 @@ def _scan(
     hits: list[ForbiddenHit] = []
     seen = set(skip)
     plain = strip_sgr(text)
+    flat = flatten_text(text)
     views = [("raw", text)]
     if plain != text:
         views.append(("plain", plain))
+    if flat not in (text, plain):
+        views.append(("flat", flat))
     for view, body in views:
         for token, pattern in compiled:
             if token.kind not in seen and pattern.search(body):
@@ -1273,8 +1395,15 @@ def scan_text(
 ) -> list[ForbiddenHit]:
     """The forbidden tokens in ``text``, one hit per kind.
 
-    The text is read as recorded and, when it holds color sequences, again with them
-    removed, so a path that color changes split into pieces is still found.
+    The text is read as recorded, again with its color sequences removed and again
+    flattened, so a path that color changes, a cursor movement or a line wrap split
+    into pieces is still found. The flat view does not rejoin every wrapped path:
+    ``flatten_text`` lists the shapes it does and the ones it does not. A token for
+    the root of a home directory (``/home/``, ``/Users/``) is a net under those
+    limits, because the first half of a wrapped home path holds the root and the scan
+    reads it as recorded; the net does not help when the wrap falls inside the root,
+    and it flags every other path under that root as well. A view that equals an
+    earlier one is not read twice.
     """
     return _scan(text, [(token, token.pattern()) for token in tokens], where)
 
