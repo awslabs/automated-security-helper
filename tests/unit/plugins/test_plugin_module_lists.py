@@ -139,6 +139,9 @@ def _child_env(cwd: Path, extra_env=None):
     bin_dir, log = install_stand_in_uv(cwd / "uv-stand-in")
     env = stand_in_env(bin_dir, log, dict(os.environ))
     env.pop("ASH_PLUGIN_MODULES", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "250"})
     env.update(extra_env or {})
     return env

@@ -215,6 +215,9 @@ def run(work):
     (recorder / "sitecustomize.py").write_text(_RECORDER, encoding="utf-8")
     env = dict(os.environ)
     env.pop("ASH_CONFIG", None)
+    # ASH_SCANNERS is the environment variable of the deprecated --scanners, so a
+    # caller's value would reach both scans beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update(
         {VARIABLE: value},
         COLUMNS="300",

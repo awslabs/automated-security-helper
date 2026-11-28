@@ -116,6 +116,9 @@ def _scan_env(base: Path) -> dict:
     # PATH, and reached through DRIVER). The example plugins need no tool.
     bin_dir, log = install_stand_in_uv(base)
     env = stand_in_env(bin_dir, log, dict(os.environ))
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
     return env
 
