@@ -749,7 +749,7 @@ _OVERRIDE_NOTICES_LOCK = threading.Lock()
 
 def _say_once_per_run(kind: str, logged_path: str, text: str) -> None:
     """Log *text* as a warning the first time this run gives the notice *kind* for
-    the key *logged_path*. Only the application that builds the run's own
+    the key *logged_path*. Only the application that builds a command's own
     configuration calls this (``warn_unread_appends``)."""
     given = (current_run_log_scope(), kind, logged_path)
     with _OVERRIDE_NOTICES_LOCK:
@@ -814,7 +814,7 @@ def _refuse_an_edit_of_every_item(
     """Refuse a ``+=`` or ``-=`` on a list that holds the value meaning every item
     (``_sentinel_of``), naming the replace form to write instead, and a ``-=``
     whose *result* would hold that value. Called only in the application that
-    builds the run's own configuration; an empty ``output_formats`` reaches this
+    builds a command's own configuration; an empty ``output_formats`` reaches this
     for a removal only (its append keeps the 3.x meaning, with a deprecation). A
     ``-=`` that would empty a list of ``_EMPTY_MEANS_THE_DEFAULT_SELECTION`` is
     refused too, and no other edit of those lists is."""
@@ -937,7 +937,7 @@ def _removed_from_a_list(
     reaches the list the plugin reads; with no such default nothing is written.
     A typed setting that holds None holds no list and keeps None.
 
-    With *own_configuration* (the application that builds the run's own
+    With *own_configuration* (the application that builds a command's own
     configuration), what the document holds decides what is refused and said. A
     removal from a list whose value means every item (``_sentinel_of``), or one
     that would empty a list whose empty value means every item or the default
