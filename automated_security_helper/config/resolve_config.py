@@ -1434,8 +1434,10 @@ def _record_overlay_reads(
         *tuple(overlay.displayed_environment_references),
     )
     # The overlay's own deprecation lines, naming its files. Here and not in the
-    # load, so the overlay used alone (``overlaid_fallback``) carries them too, once.
-    config._resolution_warnings.extend(overlay.spelling_warnings)
+    # load, so the overlay used alone (``overlaid_fallback``) carries them too. A
+    # base the overlay and the project's file both extend gives both the same
+    # line, so these join through the dedupe the project's do, and it is said once.
+    _add_spelling_lines(config, overlay.spelling_warnings)
 
 
 def _layered_over(
