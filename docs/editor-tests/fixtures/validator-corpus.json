@@ -511,6 +511,130 @@
       "valid": true
     },
     {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "ash-plugin-modules-unquoted-date-ok",
+      "instance": {
+        "ash_plugin_modules": [
+          "2030-01-01"
+        ]
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/ash_plugin_modules/0"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "extends-unquoted-date-ok",
+      "instance": {
+        "extends": "2030-01-01"
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/extends"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "extends-list-unquoted-date-ok",
+      "instance": {
+        "extends": [
+          "base.yaml",
+          "2030-01-01"
+        ]
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/extends/1"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "extends-field-unquoted-date-ok",
+      "instance": "2030-01-01",
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          ""
+        ]
+      },
+      "path": "extends",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "ash-plugin-modules-field-unquoted-date-ok",
+      "instance": [
+        "plugins.example",
+        "2030-01-01"
+      ],
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/1"
+        ]
+      },
+      "path": "ash_plugin_modules",
+      "pointer": null,
+      "valid": true
+    },
+    {
       "id": "output-formats-comma-string-unknown-bad",
       "instance": "sarif,pdf",
       "keyword": "anyOf",

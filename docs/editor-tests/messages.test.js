@@ -491,6 +491,116 @@ test('an unquoted date is left alone where ASH does not read the field as a stri
   assert.deepEqual(projected(unknown), [{ row: 'unknown-top-level-key', severity: 'warning' }]);
 });
 
+// ASH refuses a date wherever it reads text: at a string field, at a field that takes one string
+// or a list of them, and in each item of a list of strings. The reader names the pointer of
+// each date it saw written without quotes, and the row applies to every string the schema
+// admitted at one of those places.
+const DATE = '2030-01-01';
+const DATE_PLACES = [
+  {
+    label: 'an item of a list of strings',
+    document: { ash_plugin_modules: [DATE] },
+    pointer: '/ash_plugin_modules/0',
+    name: 'ash_plugin_modules[0]',
+  },
+  {
+    label: 'a string where a path or a list of paths belongs',
+    document: { extends: DATE },
+    pointer: '/extends',
+    name: 'extends',
+  },
+  {
+    label: 'an item of a list of paths',
+    document: { extends: ['base.yaml', DATE] },
+    pointer: '/extends/1',
+    name: 'extends[1]',
+  },
+];
+
+test('an unquoted date in a list of strings, or where a path or a list of paths belongs, says to quote it', () => {
+  for (const { label, document, pointer, name } of DATE_PLACES) {
+    const result = judgeField('', document, { unquotedDates: [pointer] });
+    assert.equal(result.valid, false, label);
+    assert.deepEqual(projected(result), [{ row: 'unquoted-date', severity: 'error' }], label);
+    assert.equal(result.findings[0].pointer, pointer, label);
+    assert.equal(
+      result.findings[0].message,
+      `${name} must be quoted: an unquoted ${DATE} is read as a date, not text, so put it in quotes. ${REFUSES}`,
+      label,
+    );
+    // The same text is fine when the reader did not see it written without quotes.
+    assert.equal(judgeField('', document).valid, true, label);
+    assert.equal(judgeField('', document, { unquotedDates: [] }).valid, true, label);
+  }
+});
+
+test('an unquoted date is found from the field itself, at a pointer relative to the value', () => {
+  const alone = judgeField('extends', DATE, { unquotedDates: [''] });
+  assert.deepEqual(projected(alone), [{ row: 'unquoted-date', severity: 'error' }]);
+  assert.equal(alone.findings[0].pointer, '');
+  const list = judgeField('ash_plugin_modules', ['plugins.example', DATE], { unquotedDates: ['/1'] });
+  assert.deepEqual(projected(list), [{ row: 'unquoted-date', severity: 'error' }]);
+  assert.equal(list.findings[0].pointer, '/1');
+  assert.match(list.findings[0].message, /^ash_plugin_modules\[1\] must be quoted/);
+});
+
+test('only the items of a list that the reader names are dates, and a value the schema refuses is left to it', () => {
+  const second = judgeField('ash_plugin_modules', [DATE, '2031-02-03'], { unquotedDates: ['/1'] });
+  assert.deepEqual(
+    second.findings.map((item) => item.pointer),
+    ['/1'],
+  );
+  // An item that is not text is the schema's failure, and the date row adds nothing to it.
+  const number = judgeField('ash_plugin_modules', [5], { unquotedDates: ['/0'] });
+  assert.deepEqual(projected(number), [{ row: null, severity: 'error' }]);
+  // A list of names that the schema refuses as a whole stays the schema's failure.
+  const formats = judgeField('output_formats', [DATE], { unquotedDates: ['/0'] });
+  assert.deepEqual(projected(formats), [{ row: null, severity: 'error' }]);
+});
+
+// The fixture holds one list of strings, and ASH has more: external_reports_to_include is one,
+// and the options of a plugin hold others. A block that gains one where ASH has it shows that
+// the row follows the kind of a field and not its name.
+function blockWithStringList(path, definition) {
+  const extended = structuredClone(block);
+  const key = path.split('.').at(-1);
+  extended.validationSchema.$defs[definition].properties[key] = { items: { type: 'string' }, type: 'array' };
+  extended.fields[path] = {
+    ...structuredClone(block.fields.ash_plugin_modules),
+    key,
+    parent: path.includes('.') ? path.slice(0, path.lastIndexOf('.')) : null,
+    path,
+    schemaPointer: `#/$defs/${definition}/properties/${key}`,
+  };
+  delete extended.fields[path].trust;
+  return extended;
+}
+
+test('the date row follows the kind of a field, so a list of strings that the fixture lacks is judged too', () => {
+  const extended = blockWithStringList('external_reports_to_include', 'AshConfig');
+  const instance = { external_reports_to_include: ['report.sarif', DATE] };
+  const failures = validateField(extended, '', instance, patterns);
+  assert.deepEqual(failures, []);
+  const result = judge(extended, '', instance, failures, {
+    unquotedDates: ['/external_reports_to_include/1'],
+  });
+  assert.deepEqual(projected(result), [{ row: 'unquoted-date', severity: 'error' }]);
+  assert.equal(result.findings[0].pointer, '/external_reports_to_include/1');
+});
+
+test('an unquoted date in a list inside a respelled section is reported where the file wrote it', () => {
+  const extended = blockWithStringList('scanners.bandit.config_files', 'BanditScannerConfig');
+  const instance = { Bandit: { config_files: ['a.yaml', DATE] } };
+  const failures = validateField(extended, 'scanners', instance, patterns);
+  const result = judge(extended, 'scanners', instance, failures, {
+    unquotedDates: ['/Bandit/config_files/1'],
+  });
+  const found = result.findings.find((item) => item.row === 'unquoted-date');
+  assert.ok(found, 'the date in the list is reported');
+  assert.equal(found.pointer, '/Bandit/config_files/1');
+  assert.equal(result.valid, false);
+});
+
 test('the table of entry models names each model, how its entry is called and what a scan does', () => {
   const models = messagesModule.ENTRY_MODELS;
   assert.deepEqual(Object.keys(models).sort(), [

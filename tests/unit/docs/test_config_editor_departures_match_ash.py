@@ -90,6 +90,16 @@ def _with_dates(instance, pointers):
     return result
 
 
+def _field_of(path: str, pointer: str) -> str:
+    """The field that holds the value a case's pointer names.
+
+    The last name on the case's field path and on the pointer into its instance, leaving
+    out the indexes of list items.
+    """
+    tokens = [*(path.split(".") if path else []), *pointer.split("/")[1:]]
+    return [token for token in tokens if token and not token.isdigit()][-1]
+
+
 def _document(path: str, instance, options=None):
     """The configuration document that holds `instance` at the field `path`.
 
@@ -230,9 +240,10 @@ def _facts(
         # ASH splits on commas, strips each piece and drops the empty ones.
         assert formats == [piece.strip() for piece in text.split(",") if piece.strip()]
     elif row == "unquoted-date":
-        # ASH reads the date as a date and refuses it where text belongs.
+        # ASH reads the date as a date and refuses it where text belongs, and its
+        # refusal names the field that holds the date.
         for pointer in case["options"]["unquotedDates"]:
-            field = pointer.rsplit("/", 1)[-1]
+            field = _field_of(case["path"], pointer)
             assert field in error or "put it in quotes" in error, (field, error)
     elif row == "unknown-top-level-key":
         check = _check(document, tmp_path)
@@ -324,6 +335,47 @@ def test_a_row_that_claims_a_refusal_ash_does_not_give_is_caught(tmp_path, monke
     assert error is None
     with pytest.raises(AssertionError):
         _assert_claim("plugin-section-spelling", "error", document, error)
+
+
+DATE_TEXT = "2030-01-01"
+
+#: Each place where ASH reads text and a date can be written without quotes: an item of a
+#: list of strings, a string where a path belongs, and an item of a list of paths. The
+#: corpus runs against the data block fixture, which holds one list of strings and not
+#: external_reports_to_include, so ASH is asked about every place here.
+DATE_PLACES = [
+    pytest.param(
+        "ash_plugin_modules",
+        {"ash_plugin_modules": [_date(DATE_TEXT)]},
+        id="ash_plugin_modules-item",
+    ),
+    pytest.param(
+        "external_reports_to_include",
+        {"external_reports_to_include": ["report.sarif", _date(DATE_TEXT)]},
+        id="external_reports_to_include-item",
+    ),
+    pytest.param("extends", {"extends": _date(DATE_TEXT)}, id="extends-alone"),
+    pytest.param(
+        "extends", {"extends": ["base.yaml", _date(DATE_TEXT)]}, id="extends-item"
+    ),
+]
+
+
+@pytest.mark.parametrize(("field", "document"), DATE_PLACES)
+def test_ash_refuses_an_unquoted_date_wherever_it_reads_text(
+    field, document, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _, error = _load(document, tmp_path)
+    assert error is not None and field in error, (field, error)
+
+
+@pytest.mark.parametrize("field", ["ash_plugin_modules", "external_reports_to_include"])
+def test_ash_loads_the_text_of_a_date_once_it_is_quoted(field, tmp_path, monkeypatch):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    config, error = _load({field: ["plugins.example", DATE_TEXT]}, tmp_path)
+    assert error is None, error
+    assert getattr(config, field) == ["plugins.example", DATE_TEXT]
 
 
 VECTORS = json.loads(
