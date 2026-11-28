@@ -474,9 +474,14 @@ code.
 version), `scanner_metrics` (one row per scanner with its counts, `status`, `excluded`,
 `dependencies_missing`, `missing_reason`, and `skipped_reason`), `content_databases`,
 `top_hotspots`, and `findings`, one record per finding. Each record carries
-`result_kind`. A record whose kind is `pass`, `notApplicable` or `informational` and
-whose `severity` is `INFO` states no finding and is counted in no total; one of those
-kinds graded above `INFO` reports a problem, and counts as a finding. A finding's `id` is
+`result_kind`. A record whose kind is `pass`, `notApplicable` or `informational` states
+no finding only when its result states no level, or level `none`, and no
+`issue_severity` above `INFO`; such a record is counted in no total. One of those kinds
+graded above `INFO` reports a problem, and counts as a finding, and so does one whose
+result states the level `note`, `warning` or `error`, even when its `severity` is `INFO`.
+A record has no field for the level or for whether it states a finding, so `result_kind`
+and `severity` alone cannot tell such a finding from a record that states none; its
+`raw_data` holds the result as SARIF JSON, and the `level` in it can. A finding's `id` is
 `<scanner>-<rule>-<12 hex digits>`, such as `bandit-B602-426afbe0ae52`, and no two
 findings in a scan share one. The digits are a hash of what identifies the finding: the
 SARIF fingerprints its scanner gives, when they tell findings apart, or else its file

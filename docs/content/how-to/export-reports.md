@@ -216,9 +216,15 @@ when you enable the `spdx` reporter.
 ## CSV, HTML, and the summaries {#other}
 
 - `ash.csv` has one row per finding, with suppression status and justification columns.
-  A `result_kind` column holds the SARIF kind of each row's result. A row of kind `pass`,
-  `notApplicable` or `informational` whose `severity` is `INFO` states no finding, and the
-  reports count it in no total.
+  A `result_kind` column holds the SARIF kind of each row's result. A row whose result is
+  of kind `pass`, `notApplicable` or `informational` states no finding only when that
+  result's level is `none` or not stated and no `issue_severity` it declares is above
+  `INFO`; the reports count such a row in no total. A row of one of those kinds whose
+  result states the level `note`, `warning` or `error` is a finding, even when its
+  `severity` is `INFO`. The CSV has no column for the level or for whether a row states a
+  finding, so `result_kind` and `severity` alone cannot tell such a finding from a row
+  that states none; the `raw_data` column holds the result as SARIF JSON, and the `level`
+  in it can.
 - `ash.html` is a single page with inline styles, suitable for an artifact viewer.
 - `ash.summary.md` is a Markdown summary for pull request comments. `--compact-report`
   shortens it.
