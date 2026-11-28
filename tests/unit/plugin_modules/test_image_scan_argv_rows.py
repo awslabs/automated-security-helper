@@ -641,25 +641,23 @@ class TestTrivyImageArgv:
         assert IMAGE_REF not in argv
         assert not any(str(value).startswith("--image-src") for value in argv)
 
-    def test_a_layout_is_repacked_and_goes_through_input(self, monkeypatch, tmp_path):
-        from tests.utils.image_archive_fixture import (
-            archive_to_layout,
-            build_secret_image_archive,
-        )
-
+    def test_a_layout_goes_through_input_as_it_is(self, monkeypatch, tmp_path):
+        # trivy's --input reads an OCI image-layout directory as well as a saved
+        # tar (its container-image target docs), so the locator's own directory
+        # is the argument: nothing is re-packed, and no copy of the image lands
+        # in the results directory. The re-pack module that did this is gone, so
+        # a branch that still reached for it fails here before any tool starts.
         _no_engine(monkeypatch, tmp_path)
-        layout = archive_to_layout(
-            build_secret_image_archive(tmp_path / "saved.tar"), tmp_path / "real-layout"
-        )
+        layout = _layout(tmp_path)
         scanner = self._scanner(tmp_path)
         argv, results_file, _env = scanner._execute_image_scan(
             ImageLocator(oci_layout=layout)
         )
-        repacked = results_file.parent / "layout-repacked.tar"
-        assert repacked.is_file()
-        assert f"--input={repacked.absolute().as_posix()}" in argv
         assert argv[:2] == ["trivy", "image"]
+        assert f"--input={layout.absolute().as_posix()}" in argv
         assert not any(token.startswith("--image-src") for token in argv)
+        assert "--" not in argv
+        assert not list(results_file.parent.glob("*.tar"))
 
     def test_a_layout_is_no_longer_a_clean_skip(self, tmp_path):
         scanner = self._scanner(tmp_path)

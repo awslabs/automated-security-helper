@@ -2940,7 +2940,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         the three locator shapes answers with one sentence; the scan is then a
         reported clean skip, not a tool failure. None, the default, means every
         shape is readable, which holds for every wired scanner today: trivy
-        reads an OCI layout through a docker-archive re-pack of it.
+        reads an OCI layout directory through --input, as it reads a saved tar.
         """
         return None
 
