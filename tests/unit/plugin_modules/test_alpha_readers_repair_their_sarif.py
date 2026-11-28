@@ -251,6 +251,81 @@ def test_ferret_reads_a_control_character_inside_a_string(ferret):
     assert _warnings(report) == [_sentence("ferret-scan", _CONTROL)]
 
 
+@pytest.mark.parametrize("base_id", [["%SRCROOT%"], {"id": "%SRCROOT%"}])
+def test_ferret_refuses_a_base_id_that_is_not_text_with_the_reading_steps_words(
+    ferret, base_id
+):
+    """The base ids are resolved before the report is read as SARIF. A result with a
+    base id that is a list or an object (neither can be looked up) used to raise
+    there, so the scan failed on a Python error. The base id is left as written and
+    the reading step refuses the report with its own words, as for any report it
+    cannot repair: nothing is noted on the record."""
+    document = _document(_FERRET_TOOL, _result("SSN", 3), _result("EMAIL", 3, "b.txt"))
+    run = document["runs"][0]
+    run["originalUriBaseIds"] = {"%SRCROOT%": {"uri": "file:///src/"}}
+    where = [
+        r["locations"][0]["physicalLocation"]["artifactLocation"]
+        for r in run["results"]
+    ]
+    where[0]["uriBaseId"] = base_id
+    where[1]["uriBaseId"] = "%SRCROOT%"
+
+    with pytest.raises(ScannerError) as raised:
+        _ferret_scan(ferret, _encoded(document))
+
+    message = str(raised.value)
+    assert "not SARIF ASH can read" in message
+    assert "validation error" in message
+    assert "unhashable" not in message
+    assert ferret.output_ingest_record is None
+
+
+def test_ferret_resolves_nothing_against_a_base_whose_uri_is_not_text(ferret):
+    """A base declared with a uri that is not text cannot be joined to a path: the
+    result keeps its relative location, as for any base that is not declared."""
+    document = _document(_FERRET_TOOL, _result("SSN", 3))
+    run = document["runs"][0]
+    run["originalUriBaseIds"] = {"%SRCROOT%": {"uri": 5}}
+    run["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"][
+        "uriBaseId"
+    ] = "%SRCROOT%"
+
+    report, _ = _ferret_scan(ferret, _encoded(document))
+
+    assert _rule_ids(report) == ["SSN"]
+
+
+def test_ferret_resolves_nothing_against_a_base_that_is_not_a_uri(ferret):
+    """A base whose uri cannot be joined to a path (an unclosed bracket in the host)
+    used to raise a ValueError out of the join and lose every result. It is read as
+    a base that cannot be used, and the finding keeps its relative location."""
+    document = _document(_FERRET_TOOL, _result("SSN", 3))
+    run = document["runs"][0]
+    run["originalUriBaseIds"] = {"%SRCROOT%": {"uri": "http://[::1/"}}
+    run["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"][
+        "uriBaseId"
+    ] = "%SRCROOT%"
+
+    report, _ = _ferret_scan(ferret, _encoded(document))
+
+    assert _rule_ids(report) == ["SSN"]
+
+
+def test_ferret_refuses_runs_that_are_not_a_list_with_the_reading_steps_words(ferret):
+    """The base ids are resolved before the report is read as SARIF, and ``runs``
+    that is not a list used to raise there on a Python error. It is left as written
+    and the reading step refuses the report with its own words."""
+    document = {"version": "2.1.0", "runs": 5}
+
+    with pytest.raises(ScannerError) as raised:
+        _ferret_scan(ferret, _encoded(document))
+
+    message = str(raised.value)
+    assert "not SARIF ASH can read" in message
+    assert "validation error" in message
+    assert ferret.output_ingest_record is None
+
+
 def test_ferret_says_nothing_of_a_report_that_needed_no_repair(ferret):
     report, log = _ferret_scan(
         ferret, _encoded(_document(_FERRET_TOOL, _result("SSN", 3)))

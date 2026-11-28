@@ -640,7 +640,8 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
     """
     if not isinstance(sarif, dict):
         return
-    for run in sarif.get("runs") or []:
+    runs = sarif.get("runs")
+    for run in runs if isinstance(runs, list) else []:
         if not isinstance(run, dict):
             continue
         bases = run.get("originalUriBaseIds")
@@ -659,15 +660,31 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
             base_id = artifact.get("uriBaseId")
             if base_id is None:
                 continue
-            base = bases.get(base_id)
+            # This runs on the tool's raw document, before the reading step: a
+            # base id that is not text (a list or an object cannot even be looked
+            # up) or a base whose uri is not text is left as written, for that
+            # step to read as it reads any other part of the report, not raised
+            # here with every result lost.
+            base = bases.get(base_id) if isinstance(base_id, str) else None
             base_uri = base.get("uri") if isinstance(base, dict) else None
             uri = artifact.get("uri")
-            if not base_uri or not isinstance(uri, str):
+            if (
+                not isinstance(base_uri, str)
+                or not base_uri
+                or not isinstance(uri, str)
+            ):
                 unresolved = True
                 continue
             if not base_uri.endswith("/"):
                 base_uri += "/"
-            artifact["uri"] = urljoin(base_uri, _percent_encoded_path(uri))
+            try:
+                joined = urljoin(base_uri, _percent_encoded_path(uri))
+            except ValueError:
+                # A base that is not a URI at all (an unclosed bracket in the
+                # host, say): the same as a base that cannot be used.
+                unresolved = True
+                continue
+            artifact["uri"] = joined
             del artifact["uriBaseId"]
 
         if not unresolved:
