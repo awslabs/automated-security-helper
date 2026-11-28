@@ -49,6 +49,10 @@ FORBIDDEN_AT_VERSION_TIME = (
     "automated_security_helper.models.workspace",
     # the support register: it is read when a scan starts, never at import time
     "automated_security_helper.base.support_register",
+    # the host reader that fills it: it reads the processor's flags, the start of the
+    # interpreter's own executable and the installed distributions, which a scan does
+    # when it starts and `ash --version` must not pay for
+    "automated_security_helper.utils.host_facts",
     # the lazily-registered subcommand modules themselves
     "automated_security_helper.cli.config",
     "automated_security_helper.cli.dependencies",
