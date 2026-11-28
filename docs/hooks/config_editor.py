@@ -1637,7 +1637,13 @@ PROBE_VALUES: dict[str, list[Any]] = {
     "scanners.cfn-lint.options.include_checks": [["W1001"]],
     "global_settings.mcp.runtime_overrides.denied_paths": [["/probe"]],
     "reporters.unused-suppressions.options.output_format": ["markdown"],
+    "scanners.opengrep.options.version": ["v1.9.0"],
 }
+#: The same for a setting of one name in every section that has it. A plugin's
+#: ``tool_version`` is a PEP 440 specifier set, and ASH resets any other value to the
+#: default from every source, an operator's file included. Planting a plain name would
+#: read as a rule a repository's file is held to, which it is not.
+PROBE_VALUES_BY_KEY: dict[str, list[Any]] = {"tool_version": [">=0.1.0"]}
 MAX_ROUNDS = 6
 
 
@@ -1939,6 +1945,8 @@ def candidate_values(field: Mapping[str, Any]) -> list[Any]:
     if kind == "enum":
         return [value for value in field["enum"] if value != default][:3]
     if kind == "string":
+        if field["key"] in PROBE_VALUES_BY_KEY:
+            return list(PROBE_VALUES_BY_KEY[field["key"]])
         return [] if field.get("patternRef") else ["probe-name", "/probe/path"]
     if kind == "stringList":
         return [["probe-name"]]
