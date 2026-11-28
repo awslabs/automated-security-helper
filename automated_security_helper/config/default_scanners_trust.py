@@ -16,7 +16,6 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.override_key import split_override_key
 
@@ -39,6 +38,7 @@ def confine_default_scanners(
 ) -> None:
     from automated_security_helper.config.config_sources import describe_config_path
     from automated_security_helper.config.resolve_config import (
+        _raise_a_held_refusal,
         apply_config_overrides,
     )
 
@@ -52,8 +52,7 @@ def confine_default_scanners(
         trusted_config = apply_config_overrides(
             trusted_config, replayed, selection_refusals=refused
         )
-        if refused:
-            raise ASHConfigValidationError(refused[0])
+        _raise_a_held_refusal(trusted_config, refused)
 
     wanted = trusted_config.default_scanners
     written = dict(repository.selection_written) if repository is not None else {}
