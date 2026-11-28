@@ -24,9 +24,9 @@ What it refuses, each time with a ``MarkerError`` that names the file and the bl
 before it writes anything:
 
 - a block with no begin or no end marker, a repeated begin or end for one name, an end
-  before its begin, blocks nested in one another, an end with no begin (an orphan), and
-  a begin whose end names another block. The whole file is read, so a broken block that
-  belongs to another generator refuses a write of a healthy one too;
+  before its begin, blocks nested in one another, an end with no begin, and a begin
+  whose end names another block. The whole file is read, so a broken block that belongs
+  to another generator refuses a write of a healthy one too;
 - a begin marker that names a different generator than the caller;
 - when writing, an orphan block: one whose begin marker names the caller but that the
   call gives no body for (see ``partial`` below);
@@ -36,7 +36,8 @@ before it writes anything:
 - CRLF or any carriage return, in the file or in a body. Files are written with LF only
   and never converted;
 - a body that is not a string or a sequence of strings. A generator or any other
-  iterator is used up by its first read, so it is refused and never half written;
+  iterator is used up by its first read, so it is refused and never half written, and
+  bytes is refused with a message that says to decode it;
 - a body that holds ``{{VERSION}}`` or ``{{RELEASE}}``, a marker of its own, or a code
   fence it leaves open.
 
@@ -51,29 +52,44 @@ manager renders the two placeholders and nothing else, so a body free of them ke
 
 A file is replaced in one step, written to a temporary file beside it and swapped over
 it, so a write that fails or is cut off leaves the page as it was, never cut short. The
+swap puts a new file in the old one's place, so a hard link to the page is split and
+only its permission bits carry over (``_replace_file`` lists the rest). On Windows a
+swap refused because another process has the page open is tried again a few times. The
 two files of a pair are written one after the other: if the second write fails, the
 first stays, ``check_blocks`` reports the second, and the next run finishes the pair.
 
-A generator owns every block whose begin marker names it. One it renders no body for
-(its name is not in ``bodies``) is an orphan block: it would keep its last body for
-good, so ``check_blocks`` reports it as drift (``Drift.orphan`` is true) and
-``write_blocks`` refuses to write around it. A generator that renders only some of its
-blocks in one call says so with ``partial=True``, and the others are then left alone
-and never reported.
+A generator owns every block whose begin marker names it: the marker holds the string
+the caller passes as ``generator``, character for character, so ``scripts/x.py`` and
+``./scripts/x.py`` are two generators. One it renders no body for (its name is not in
+``bodies``) is an orphan block: it would keep its last body for good, so
+``check_blocks`` reports it as drift (``Drift.orphan`` is true) and ``write_blocks``
+refuses to write around it. A generator that renders only some of its blocks in one
+call says so with ``partial=True``, and the others are then left alone and never
+reported.
 
-``check_blocks`` returns one ``Drift`` per block that differs from its body, with a
-unified diff that names the block, and writes nothing. A second ``write_blocks`` reports
-``unchanged`` and does not touch the file.
+An orphan block is found only where a generator looks. A call reads the file it is
+given and that file's template or page twin, and nothing else, so a block is checked
+only while its generator still calls ``check_blocks`` or ``write_blocks`` on its page.
+A begin marker that names a generator that was renamed or deleted, one that spells the
+path another way, and one on a page that no generator call reads are not found by
+anything here: such a block keeps its last body.
+
+``check_blocks`` returns one ``Drift`` per block that differs from its body, and one per
+orphan block, each with a unified diff that names the block, and writes nothing. A
+second ``write_blocks`` reports ``unchanged`` and does not touch the file.
 """
 
 from __future__ import annotations
 
 import contextlib
 import difflib
+import errno
 import os
 import re
 import shutil
+import sys
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -404,11 +420,20 @@ def _body_lines(file: str, name: str, body: Body) -> list[str]:
 
     A string is its lines joined with ``\\n``, with one trailing ``\\n`` ignored. Any
     other body must be a sequence of strings, one per line. An iterator is not one: its
-    first read uses it up, and a second read finds it empty.
+    first read uses it up, and a second read finds it empty. Bytes is not one either,
+    though it is a sequence: its items are ints, so it is refused with a message that
+    says to decode it, not one that blames its first byte.
     """
     if isinstance(body, str):
         text = body.removesuffix("\n")
         lines = text.split("\n") if body else []
+    elif isinstance(body, (bytes, bytearray, memoryview)):
+        raise MarkerError(
+            file,
+            name,
+            f"the body is `{type(body).__name__}`, not text; decode it to a string "
+            "first, for example with `bytes(body).decode('utf-8')`",
+        )
     elif isinstance(body, Sequence):
         lines = list(body)
     else:
@@ -641,6 +666,45 @@ def _read(root: Path, file: str, names: Sequence[str]) -> str:
         ) from None
 
 
+#: Windows refuses to swap a file over one that another process has open without
+#: sharing delete access, and that process usually lets go within moments. On Windows
+#: ``_swap`` tries ``_REPLACE_ATTEMPTS`` times, pausing ``_REPLACE_PAUSE`` seconds
+#: before the second try and twice as long before each one after it (0.75 s in all).
+_REPLACE_ATTEMPTS = 5
+_REPLACE_PAUSE = 0.05
+
+
+def _swap(temporary: Path, target: Path) -> None:
+    """Replace ``target`` with ``temporary`` in one step; retry on Windows if refused.
+
+    Windows refuses the swap with a PermissionError while any other process has
+    ``target``, or the new file just written beside it, open without sharing delete
+    access: an editor, an indexer, a virus scanner, or a program that is only reading
+    the page. That is usually over in moments, so there the swap is tried up to
+    ``_REPLACE_ATTEMPTS`` times with a pause between the tries, and the last refusal is
+    raised naming ``target``, with the refusal itself as its cause. Anywhere else, and
+    for any error that is not a PermissionError, the first failure is raised at once.
+    """
+    if sys.platform != "win32":
+        os.replace(temporary, target)
+        return
+    pause = _REPLACE_PAUSE
+    for attempt in range(1, _REPLACE_ATTEMPTS + 1):
+        try:
+            os.replace(temporary, target)
+            return
+        except PermissionError as error:
+            if attempt == _REPLACE_ATTEMPTS:
+                raise PermissionError(
+                    error.errno or errno.EACCES,
+                    f"{error.strerror or error} (refused {attempt} times in a row; "
+                    "another program may have the file open)",
+                    str(target),
+                ) from error
+            time.sleep(pause)
+            pause *= 2
+
+
 def _replace_file(path: Path, data: bytes) -> None:
     """Make ``path`` hold ``data`` in one step, through a temporary file beside it.
 
@@ -649,6 +713,14 @@ def _replace_file(path: Path, data: bytes) -> None:
     one, and a symlink is written through: the file it points at is replaced and the
     link stays. The directory must be writable, and a process killed outright can leave
     its temporary file (a dot file ending in ``.tmp``) behind.
+
+    The swap puts a new file where the old one was; it does not write into the old one.
+    So a hard link to the page is split (the other names keep the old content), the new
+    file belongs to the user who runs the generator, and nothing but the permission bits
+    carries over from the old file: its owner and group, extended attributes and ACLs
+    are not kept. On Windows the swap is also refused while another process has the
+    page open without sharing delete access, so it is tried again a few times (see
+    ``_swap``).
     """
     target = Path(os.path.realpath(path))
     descriptor, name = tempfile.mkstemp(
@@ -661,7 +733,7 @@ def _replace_file(path: Path, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         shutil.copymode(target, temporary)
-        os.replace(temporary, target)
+        _swap(temporary, target)
     except BaseException:
         with contextlib.suppress(OSError):
             temporary.unlink()
@@ -717,7 +789,7 @@ def check_blocks(
     *,
     partial: bool = False,
 ) -> list[Drift]:
-    """The drift of the named blocks in ``root / file`` and its twin; writes nothing.
+    """The drifted and orphan blocks of ``root / file`` and its twin; writes nothing.
 
     Each body is read once, before any file is, so both files get the same lines. A
     block that names ``generator`` and has no body in ``bodies`` is drift too (an
