@@ -1918,27 +1918,38 @@ class ConfigLinter:
             return shown
         return dict.fromkeys(entry, ENVIRONMENT_VALUE_SHOWN)
 
+    #: Where the suppressions are in a configuration, by key.
+    _SUPPRESSION_KEYS: Tuple[str, ...] = ("global_settings", "suppressions")
+
     @classmethod
     def _check_suppression_issues(
         cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
     ) -> None:
         """Check for suppression-specific issues, and ignore-path expirations.
 
+        The suppressions are found where the file writes them: under the keys
+        the loader reads as ``global_settings`` and ``suppressions``
+        (``_as_the_file_spells``), and a message names each entry by those keys
+        (``_shown_keys``).
+
         ``shown_data`` is the copy of ``config_data`` a message quotes
         (``lint``); None quotes ``config_data``.
         """
         cls._check_ignore_path_expirations(config_data, result, shown_data)
 
-        global_settings = config_data.get("global_settings", {})
-        if not isinstance(global_settings, dict):
+        located = cls._as_the_file_spells(config_data, cls._SUPPRESSION_KEYS)
+        if not located:
             return
-
-        suppressions = global_settings.get("suppressions", [])
+        spelled = located[0]
+        suppressions: Any = config_data
+        for key in spelled:
+            suppressions = (
+                suppressions.get(key) if isinstance(suppressions, dict) else None
+            )
         if not isinstance(suppressions, list):
             return
-        shown_suppressions = cls._shown_entries(
-            suppressions, shown_data, ("global_settings", "suppressions")
-        )
+        shown_suppressions = cls._shown_entries(suppressions, shown_data, spelled)
+        shown_keys = cls._shown_keys(result.file_references, spelled)
 
         reported_missing_symbols_extra = False
         for i, (suppression, shown) in enumerate(zip(suppressions, shown_suppressions)):
@@ -1946,7 +1957,7 @@ class ConfigLinter:
                 continue
             shown = cls._shown_entry(suppression, shown)
 
-            path_prefix = f"global_settings.suppressions[{i}]"
+            path_prefix = cls._place((*shown_keys, i))
 
             if suppression.get("symbol") is not None:
                 reported_missing_symbols_extra = cls._check_suppression_symbol(
@@ -2077,8 +2088,12 @@ class ConfigLinter:
         A scanner's section is found under any spelling the file gives it, as a
         scan finds it (``plugin_section_names``): an expired entry under
         ``Bandit:`` is applied as one under ``bandit:`` and is reported the same.
-        A message names the entry by the declared spelling, never by a key the
-        file may have read from the environment.
+        Any other key is found as the loader reads it, as the key itself or its
+        ``-``/``_`` twin (``_as_the_file_spells``), so an entry under
+        ``global-settings:`` is reported as one under ``global_settings:`` is. A
+        message names the entry by the keys the file writes (``_shown_keys``): a
+        key the file read from the environment is named by its written
+        reference, never by the value it resolved to.
 
         Two spellings of one section are merged by a scan key by key, the
         canonical spelling winning where both set a key, so when both hold the
@@ -2100,9 +2115,10 @@ class ConfigLinter:
                 ]
             for spelled, entries in lists:
                 shown_entries = cls._shown_entries(entries, shown_data, spelled)
+                shown_keys = cls._shown_keys(result.file_references, spelled)
                 for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
                     if isinstance(entry, dict):
-                        entry_path = f"{'.'.join(keys)}[{i}]"
+                        entry_path = cls._place((*shown_keys, i))
                         # The deprecated spelling, as the suppression walk
                         # reports it.
                         result.issues.extend(
@@ -2127,11 +2143,32 @@ class ConfigLinter:
     def _as_the_file_spells(
         config_data: Any, keys: Tuple[str, ...]
     ) -> List[Tuple[str, ...]]:
-        """The key paths of ``config_data`` that ``keys`` names, with a known
-        plugin's section taken under every spelling the file gives it. Any other
-        path is ``keys`` as it is."""
+        """The key paths of ``config_data`` that ``keys`` names, as the file writes
+        them. A known plugin's section is taken under every spelling the file
+        gives it. Any other key is the one the loader reads as the declared one
+        (``spellings.key_in``: the key itself, or its ``-``/``_`` twin), followed
+        through the mappings it reaches; the keys after a list or a dict are the
+        declared ones, which ``_follow`` reads in turn. A path the file does not
+        hold gives none."""
         if len(keys) < 2 or keys[0] not in PLUGIN_SEGMENT_KEYS:
-            return [keys]
+            model: type[BaseModel] = AshConfig
+            node: Any = config_data
+            written: List[str] = []
+            for position, key in enumerate(keys):
+                shape = spellings.child_model(model, key)
+                found = (
+                    spellings.key_in(model, node, key)
+                    if isinstance(node, dict)
+                    else None
+                )
+                if shape is None or found is None:
+                    return []
+                written.append(found)
+                if shape.kind != "model":
+                    return [(*written, *keys[position + 1 :])]
+                node = node[found]
+                model = shape.model
+            return [tuple(written)]
         segment = config_data.get(keys[0]) if isinstance(config_data, dict) else None
         if not isinstance(segment, dict):
             return []
@@ -2212,7 +2249,7 @@ class ConfigLinter:
     #: issues: the suppression walk, and ``_check_ignore_path_expirations`` over
     #: ``IGNORE_PATH_LISTS``. ``_check_other_deprecated_spellings`` leaves them.
     _EXPIRY_WALKS = frozenset(
-        {("global_settings", "suppressions"), *(keys for keys, _ in IGNORE_PATH_LISTS)}
+        {_SUPPRESSION_KEYS, *(keys for keys, _ in IGNORE_PATH_LISTS)}
     )
 
     @classmethod
@@ -2974,6 +3011,19 @@ class ConfigLinter:
             ):
                 return written_without_tag(reference.written), True
         return key, False
+
+    @classmethod
+    def _shown_keys(
+        cls, references: Sequence[EnvironmentReference], spelled: Sequence[str]
+    ) -> Tuple[str, ...]:
+        """``spelled``, the keys of the file that reach a list, as a message names
+        them: each as the file writes it, and a key the file read from the
+        environment by its written reference (``_named_key``), never by the value
+        it resolved to."""
+        return tuple(
+            cls._named_key(references, spelled[:position], key)[0]
+            for position, key in enumerate(spelled)
+        )
 
     @classmethod
     def _spelling_sites(
