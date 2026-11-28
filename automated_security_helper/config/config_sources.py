@@ -1374,11 +1374,19 @@ class ConfigSource:
     read discovery makes itself (the pyproject read) compares the identity while
     the inode is still in use; a read the caller makes later compares a
     (device, inode) pair that a recycled inode number could match.
+
+    ``in_ash_subdirectory`` says whether discovery found the file in the ``.ash/``
+    subdirectory of the directory it searched, rather than in that directory
+    itself. Such a file belongs to the directory above ``.ash/``, and its canonical
+    file is there (``canonical_path_for``). Discovery sets it from the candidate
+    that matched, never from a directory's name, so a searched directory that is
+    itself named ``.ash`` keeps its own files.
     """
 
     path: Path
     kind: str
     identity: Optional[FileIdentity] = None
+    in_ash_subdirectory: bool = False
 
     @property
     def label(self) -> str:
@@ -1929,9 +1937,18 @@ def _existing_candidates(
     if _name_exists(canonical):
         candidates.append(ConfigSource(canonical, SOURCE_KIND_CANONICAL))
     for name in ASH_CONFIG_FILE_NAMES:
-        for candidate in (search_dir / name, dot_ash / name):
+        for candidate, in_ash_subdirectory in (
+            (search_dir / name, False),
+            (dot_ash / name, True),
+        ):
             if candidate != canonical and _name_exists(candidate):
-                candidates.append(ConfigSource(candidate, SOURCE_KIND_DEDICATED))
+                candidates.append(
+                    ConfigSource(
+                        candidate,
+                        SOURCE_KIND_DEDICATED,
+                        in_ash_subdirectory=in_ash_subdirectory,
+                    )
+                )
     for name in ASH_RC_FILE_NAMES:
         candidate = search_dir / name
         if _name_exists(candidate):
@@ -2095,20 +2112,184 @@ def _is_a_legacy_location(source: ConfigSource) -> bool:
 def canonical_path_for(source: ConfigSource) -> Path:
     """The canonical config file of the scan root ``source`` was found in.
 
-    A file in ``.ash/`` belongs to the root above ``.ash/``; every other source
-    was found at the root itself.
+    A file discovery found in the ``.ash/`` subdirectory
+    (``ConfigSource.in_ash_subdirectory``) belongs to the root above ``.ash/``;
+    every other source was found at the root itself, a root that is itself named
+    ``.ash`` included.
     """
     parent = source.path.parent
-    root = parent.parent if parent.name == ".ash" else parent
+    root = parent.parent if source.in_ash_subdirectory else parent
     return root / ASH_CANONICAL_CONFIG_FILE_NAME
 
 
+def legacy_move_caveats(source: ConfigSource, subject: str) -> List[str]:
+    """What else the config ``source`` needs, beyond a new name, to be read as the
+    canonical file the way it is read now. Each is one sentence without its final
+    period; `subject` names the file in it, as "this file" or as its label.
+
+    The canonical file is read as YAML whatever the file was, and a file discovery
+    found in ``.ash/`` (``ConfigSource.in_ash_subdirectory``) moves to the root
+    above it:
+
+    * a relative ``extends`` path is read from the directory of the file that
+      names it, so one in a file that leaves ``.ash/`` must be rewritten;
+    * JSON is read as JSON only under a ``.json`` name, and the YAML loader skips only
+      spaces between tokens, so it refuses a tab anywhere in the file; a tab inside a
+      JSON string is refused by JSON itself, so every tab of a JSON file that loads is
+      between tokens. YAML also refuses a key whose colon is on another line, or more
+      than 1,024 characters after the key's opening quote mark, and, inside quotes,
+      reads U+0085, U+2028 and U+2029 as line breaks and refuses DEL, the other C1
+      controls, U+FFFE and U+FFFF, each of which a JSON string holds as written; it
+      reads the two escapes of a surrogate pair as two characters, where JSON reads
+      one; and it reads ``Infinity``, ``-Infinity``, ``NaN`` and a number that has an
+      exponent but no decimal point, or no sign after the ``e``, as text. Each such
+      character written as its escape, a character above U+FFFF written as itself,
+      such a number written with a decimal point and a sign after the ``e``,
+      ``Infinity``, ``-Infinity`` and ``NaN`` written as ``.inf``, ``-.inf`` and
+      ``.nan``, and such a long key written with a question mark and a space before it
+      are read as JSON reads them;
+    * a TOML string value that starts with ``${`` is a reference to the environment. In
+      YAML a quoted value is one only when it is tagged ``!ENV``, and an unquoted
+      value ends at a space followed by ``#`` and is refused when it holds a ``:``
+      followed by a space or sits inside ``[...]`` or ``{...}``. A basic or literal
+      string, with one quote mark on each side, tagged ``!ENV`` with its quotes
+      kept is read as TOML reads it unless its text holds one of the characters
+      named below: a basic string's escapes mean the same in a YAML double-quoted
+      string, and YAML single quotes change only a single quote, which a literal
+      string cannot hold;
+    * a multi-line string, with three quote marks on each side on one line or more,
+      cannot keep them: with three single quote marks YAML reads another value than
+      TOML does, such as the text with a quote mark at each end, which is no reference,
+      or refuses the file, and it refuses three double quote marks. Its text as TOML
+      reads it leaves out a line break that directly follows the opening marks and, in a
+      basic one, an unescaped backslash that ends a line (only spaces or tabs after it
+      on that line) with the spaces, tabs and line breaks after it. Written as a
+      one-line double-quoted string, with each other line break (a line feed, or a
+      carriage return and a line feed) as the escape for a line feed, each backslash
+      and double quote of a literal one escaped, and a basic one's escapes kept and
+      its unescaped double quotes escaped, it is read as TOML reads it;
+    * in any TOML string, YAML reads a U+0085, U+2028 or U+2029 written as itself inside
+      quotes as a line break, so U+0085 is not kept, U+2028 and U+2029 are kept, and the
+      spaces and tabs beside any of the three are dropped; and it refuses a file that
+      holds a C1 control other than U+0085, or U+FFFE or U+FFFF. Written as its escape
+      in a double-quoted YAML string, each keeps its TOML meaning; a literal string
+      that holds one becomes double-quoted, with its backslashes and double quotes
+      escaped;
+    * a TOML number that has an exponent but no decimal point, no sign after the ``e``
+      or an underscore after the ``e``, that is octal (``0o``), or that is ``inf`` or
+      ``nan`` with or without a sign, is read by YAML as text, which a field that
+      takes a number refuses; written with a decimal point and, after the ``e``, a
+      sign and no underscore, in decimal, as ``.inf`` with its sign, or as ``.nan``,
+      it is read as TOML reads it;
+    * a TOML key written in YAML as usual is refused when its colon is more than 1,024
+      characters after the key's first character; written after a question mark and a
+      space, with its colon, a space and its value on the next line and the colon
+      under the question mark, it is read as TOML reads it. A value that takes more
+      than one line starts on the line after the colon, with each of its lines
+      indented past it, or is written in flow style (inside ``[...]`` or ``{...}``)
+      on the colon's line, with each string in it kept in its quotes.
+
+    A ``pyproject.toml`` table is edited where it is and has none.
+    """
+    caveats: List[str] = []
+    if source.in_ash_subdirectory:
+        caveats.append(
+            "A relative extends path is read from the file's own directory, so "
+            f"rewrite any in {subject} for the scan root before you move it"
+        )
+    if is_json_file(source.path):
+        caveats.append(
+            f"Replace each tab character in {subject} with spaces before you move "
+            f"it: {ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, which refuses "
+            "a tab (the parse error gives the tab's line and column)"
+        )
+        caveats.append(
+            "Before you move it, also write each DEL (U+007F), C1 control (U+0080 "
+            "to U+009F), U+2028, U+2029, U+FFFE or U+FFFF in a string as its "
+            "four-digit Unicode escape and each character above U+FFFF that is "
+            "written as two escapes as the character itself, give each number that "
+            "has an exponent a decimal point and a sign after the e, such as 1.0e+3 "
+            "for 1e3, and keep each key on the same line as its colon: otherwise "
+            "YAML reads another value or refuses the file"
+        )
+        caveats.append(
+            "In the moved file, write Infinity, -Infinity and NaN as .inf, -.inf and "
+            ".nan, and put a question mark and a space before each key whose colon is "
+            "more than 1,024 characters after its opening quote mark: YAML reads the "
+            "JSON spelling of each number as text and refuses such a key without the "
+            "question mark"
+        )
+    if is_toml_file(source.path) and not is_pyproject(source.path):
+        caveats.append(
+            "In the YAML, put !ENV and a space before the opening quote of each "
+            f"string value from {subject} whose text starts with "
+            "${, and keep its quotes if it has one quote mark on each side: a "
+            "quoted value without the tag is read as literal text, not from the "
+            "environment"
+        )
+        caveats.append(
+            "Write a string that has three quote marks on each side as a "
+            "one-line double-quoted string with the text TOML reads: leave out a "
+            "line break that directly follows the opening marks and, from three "
+            "double quote marks, an unescaped backslash that ends a line (only "
+            "spaces or tabs after it on that line), with the spaces, tabs and line "
+            "breaks after it; write each other line break (a line feed, or a carriage "
+            "return and a line feed) as \\n; from three single "
+            "quote marks, also write each backslash as \\\\ and each double quote as "
+            '\\"; from three double quote marks, keep each escape and write each '
+            'unescaped double quote as \\"'
+        )
+        caveats.append(
+            "A string whose text holds a C1 control (U+0080 to U+009F), U+2028, "
+            "U+2029, U+FFFE or U+FFFF, whatever its quote marks, becomes a "
+            "double-quoted string, a literal string's backslashes and double "
+            "quotes escaped, with each such character written as its four-digit "
+            "Unicode escape: YAML reads U+0085, U+2028 and U+2029 inside quotes as "
+            "line breaks and refuses a file that holds one of the others"
+        )
+        caveats.append(
+            "Give each number that has an exponent a decimal point and, after the e, "
+            "a sign and no underscore, such as 1.0e+3 for 1e3, write each octal "
+            "number, such as 0o17, in decimal, and write inf, +inf and -inf as .inf, "
+            "+.inf and -.inf, and nan, +nan and -nan as .nan: YAML reads the TOML "
+            "spelling of each as text"
+        )
+        caveats.append(
+            "Write each key whose colon would be more than 1,024 characters after the "
+            "key's first character after a question mark and a space, and put its "
+            "colon, a space and its value on the next line, the colon under the "
+            "question mark: without the question mark YAML refuses such a key"
+        )
+        caveats.append(
+            "A value that takes more than one line starts on the line after the "
+            "colon, with each of its lines indented past it, or is written in flow "
+            "style (inside [...] or {...}) on the colon's line, with each string in "
+            "it kept in its quotes"
+        )
+    return caveats
+
+
 def _legacy_location_warning(source: ConfigSource) -> str:
+    canonical = describe_config_path(canonical_path_for(source))
+    if is_toml_file(source.path):
+        # Only an ashrc name is a TOML legacy location (no dedicated name ends in
+        # .toml, and a pyproject.toml table is not a legacy location). The
+        # canonical file is read as YAML (the parser is chosen by the file
+        # suffix), so this file renamed to it would be refused.
+        remedy = (
+            f"rewrite this file as YAML in {canonical} and delete it; "
+            f"{ASH_CANONICAL_CONFIG_FILE_NAME} is read as YAML, so renaming the "
+            "TOML file is not enough"
+        )
+    else:
+        remedy = f"move this file to {canonical}"
+    caveats = "".join(
+        f" {caveat}." for caveat in legacy_move_caveats(source, "this file")
+    )
     return (
         f"ASH is reading its configuration from {source.label}, a deprecated "
         f"location that ASH 4.0 stops reading. The canonical config file is "
-        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: move this file to "
-        f"{describe_config_path(canonical_path_for(source))}."
+        f"{ASH_CANONICAL_CONFIG_FILE_NAME} at the scan root: {remedy}.{caveats}"
     )
 
 

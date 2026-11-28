@@ -70,14 +70,28 @@
   before). Every location that worked before still loads: `.ash/.ash.yaml`, `.ash.yml`,
   `ash.yaml` and the other names of the old list, each also under `.ash/`, and the
   `ashrc` names. A scan that reads one of them prints one warning that names the file
-  as deprecated and gives the path to move it to, and ASH 4.0 stops reading them. When
-  `.ash.yaml` and an older file both exist, `.ash.yaml` is read and the warning names the
-  file it shadowed; for a project that has `.ash.yml` beside `.ash.yaml`, this reverses
-  which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
+  as deprecated and gives the path to move it to (for a TOML file, the path to rewrite
+  it in as YAML), and ASH 4.0 stops reading them. When `.ash.yaml` and an older file both
+  exist, `.ash.yaml` is read and the warning names the file it shadowed; for a project
+  that has `.ash.yml` beside `.ash.yaml`, this reverses which of the two is read. `--config` and `ASH_CONFIG` are unchanged and print no
   warning, and a `pyproject.toml` with a `[tool.ash]` table is still read, after the file
   names, with no warning. To move a config, run `git mv .ash/.ash.yaml .ash.yaml`
-  (or the same with the file's own name). This repository's own config moved the same
-  way.
+  (or the same with the file's own name). A relative `extends` path in a file from
+  `.ash/` is read from the file's own directory, so rewrite it for the root first. A
+  TOML config, `.ashrc.toml` or `ashrc.toml`, cannot be moved: `.ash.yaml` is read as
+  YAML, so rewrite its settings as YAML in `.ash.yaml` and delete the TOML file, and
+  put `!ENV` and a space before the opening quote of each string value whose text
+  starts with `${`, and keep its quotes if it has one quote mark on each side,
+  because a quoted YAML value without the tag is read as literal text. A string that
+  has three quote marks on each side becomes a one-line double-quoted string with
+  the text TOML reads, and so does any string whose text holds a C1 control (U+0080
+  to U+009F), U+2028, U+2029, U+FFFE or U+FFFF, written with each such character as
+  its escape, and a number with an exponent, an octal number, `inf`, `nan` and a key
+  longer than YAML allows are written another way too;
+  [Move an existing config to `.ash.yaml`](docs/content/how-to/configure.md#move-config)
+  gives the rules. A JSON config needs each tab replaced with spaces first, because
+  YAML refuses it, and some characters, numbers and keys written another way, as the
+  same section says. This repository's own config moved the same way.
 - **A finding moved from an MCP config's generated script back to the config file has a
   new property name and a new id.** The result property that names the generated script
   is now `converted_from`; it was `ash/convertedFrom`, so a tool that reads the old name

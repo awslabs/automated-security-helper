@@ -33,6 +33,7 @@ from automated_security_helper.config.config_linter import (
     LintResult,
     LintSeverity,
 )
+from automated_security_helper.core.constants import ASH_RC_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from tests.utils.wizard_script import script_wizard
 
@@ -122,6 +123,205 @@ def test_init_still_refuses_a_new_file_beside_the_one_ash_reads(tmp_path, monkey
 
     assert result.exit_code == 1, result.output
     assert "ASH already reads its configuration from" in result.output, result.output
+
+
+TOML_RC_NAMES = [name for name in ASH_RC_FILE_NAMES if name.endswith(".toml")]
+
+# The sentences init adds after its move advice, each for one kind of source. The
+# file's path sits between the two parts of the first two.
+EXTENDS_BEFORE_PATH = (
+    "A relative extends path is read from the file's own directory, so rewrite any in "
+)
+EXTENDS_AFTER_PATH = " for the scan root before you move it"
+TAB_BEFORE_PATH = "Replace each tab character in "
+TAB_AFTER_PATH = (
+    " with spaces before you move it: .ash.yaml is read as YAML, which refuses "
+    "a tab (the parse error gives the tab's line and column). Before you move "
+    "it, also write each DEL (U+007F), C1 control (U+0080 to U+009F), U+2028, "
+    "U+2029, U+FFFE or U+FFFF in a string as its four-digit Unicode escape and "
+    "each character above U+FFFF that is written as two escapes as the "
+    "character itself, give each number that has an exponent a decimal point "
+    "and a sign after the e, such as 1.0e+3 for 1e3, and keep each key on the "
+    "same line as its colon: otherwise YAML reads another value or refuses the "
+    "file. In the moved file, write Infinity, -Infinity and NaN as .inf, -.inf "
+    "and .nan, and put a question mark and a space before each key whose colon "
+    "is more than 1,024 characters after its opening quote mark: YAML reads the "
+    "JSON spelling of each number as text and refuses such a key without the "
+    "question mark"
+)
+ENV_BEFORE_PATH = (
+    "In the YAML, put !ENV and a space before the opening quote of each string "
+    "value from "
+)
+ENV_AFTER_PATH = (
+    " whose text starts with ${, and keep its quotes if it has one quote mark on "
+    "each side: a quoted value without the tag is read as literal text, not from "
+    "the environment. Write a string that has three quote marks on each side "
+    "as a one-line double-quoted string with the text TOML reads: leave out a line "
+    "break that directly follows the opening marks and, from three double quote "
+    "marks, an unescaped backslash that ends a line (only spaces or tabs after it "
+    "on that line), with the spaces, tabs and line breaks after it; write each "
+    "other line break (a line feed, or a carriage return and a line feed) as "
+    "\\n; from three single quote marks, also write each "
+    'backslash as \\\\ and each double quote as \\"; from three double quote '
+    "marks, keep each escape and write each unescaped double quote as "
+    '\\". A string whose text holds a C1 control (U+0080 to U+009F), '
+    "U+2028, U+2029, U+FFFE or U+FFFF, whatever its quote marks, becomes a "
+    "double-quoted string, a literal string's backslashes and double quotes "
+    "escaped, with each such character written as its four-digit Unicode escape: "
+    "YAML reads U+0085, U+2028 and U+2029 inside quotes as line breaks and "
+    "refuses a file that holds one of the others. Give each number that has an "
+    "exponent a decimal point and, after the e, a sign and no underscore, such "
+    "as 1.0e+3 for 1e3, write each octal number, such as 0o17, in decimal, and "
+    "write inf, +inf and -inf as .inf, +.inf and -.inf, and nan, +nan and -nan "
+    "as .nan: YAML reads the TOML spelling of each as text. Write each key whose "
+    "colon would be more than 1,024 characters after the key's first character "
+    "after a question mark and a space, and put its colon, a space and its value "
+    "on the next line, the colon under the question mark: without the question "
+    "mark YAML refuses such a key. A value that takes more than one line starts "
+    "on the line after the colon, with each of its lines indented past it, or is "
+    "written in flow style (inside [...] or {...}) on the colon's line, with each "
+    "string in it kept in its quotes"
+)
+
+
+def test_the_toml_rc_names_are_there_to_test():
+    """The parametrized test below has cases."""
+    assert TOML_RC_NAMES == [".ashrc.toml", "ashrc.toml"]
+
+
+@pytest.mark.parametrize("name", TOML_RC_NAMES)
+def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
+    tmp_path, monkeypatch, name
+):
+    """`.ash.yaml` is read as YAML, so the advice to move a TOML file there sent
+    the user to a file every later scan refused with exit 3."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / name).write_text('project_name = "old"\n', encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert "as YAML in .ash.yaml and delete the TOML file" in result.output, (
+        result.output
+    )
+    assert "renaming the TOML file is not enough" in result.output, result.output
+    assert "Move " not in result.output, result.output
+    assert not (tmp_path / ".ash.yaml").exists()
+    # A TOML string value that starts with `${` is read from the environment. In YAML
+    # a quoted value is one only when `!ENV` is in front of it, without its quotes the
+    # value is cut short at a space and a hash, or refused, three quote marks cannot
+    # be kept, a character YAML reads as a line break or refuses needs its escape, a
+    # number with an exponent, an octal number, inf or nan needs another spelling, and
+    # so does a key too long for YAML: the advice gives the form for each.
+    assert ENV_BEFORE_PATH in result.output, result.output
+    assert ENV_AFTER_PATH in result.output, result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert TAB_BEFORE_PATH not in result.output, result.output
+
+
+def test_init_beside_a_json_source_says_a_file_with_a_tab_needs_spaces_first(
+    tmp_path, monkeypatch
+):
+    """A JSON file is read as YAML at `.ash.yaml`, and the YAML loader refuses a
+    tab between tokens: the move is still the advice, with that caveat."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ashrc.json").write_text('{"project_name": "old"}\n', encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert " to .ash.yaml (the canonical config file), edit " in result.output
+    assert TAB_BEFORE_PATH in result.output, result.output
+    assert TAB_AFTER_PATH in result.output, result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert ENV_BEFORE_PATH not in result.output, result.output
+    assert "as YAML in .ash.yaml and delete" not in result.output, result.output
+    assert not (tmp_path / ".ash.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "text", "holds_a_tab_caveat"),
+    [
+        (".ash/.ash.yaml", "project_name: old\n", False),
+        (".ash/ash.json", '{"project_name": "old"}\n', True),
+    ],
+)
+def test_init_beside_a_source_in_ash_says_to_rewrite_a_relative_extends(
+    tmp_path, monkeypatch, name, text, holds_a_tab_caveat
+):
+    """The file moves to the root above `.ash/`, and a base is read from the
+    directory of the file that names it, so a relative path changes with it."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ash").mkdir()
+    (tmp_path / name).write_text(text, encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert EXTENDS_BEFORE_PATH in result.output, result.output
+    assert EXTENDS_AFTER_PATH in result.output, result.output
+    assert (TAB_BEFORE_PATH in result.output) is holds_a_tab_caveat, result.output
+    if holds_a_tab_caveat:
+        assert result.output.index(EXTENDS_BEFORE_PATH) < result.output.index(
+            TAB_BEFORE_PATH
+        )
+    assert ENV_BEFORE_PATH not in result.output, result.output
+
+
+def test_init_beside_a_yaml_source_at_the_root_keeps_the_plain_advice(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".ashrc.yaml").write_text("project_name: old\n", encoding="utf-8")
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert " to .ash.yaml (the canonical config file), edit " in result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert TAB_BEFORE_PATH not in result.output, result.output
+    assert ENV_BEFORE_PATH not in result.output, result.output
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        pytest.param(".ash.yml", "project_name: old\n", id=".ash.yml"),
+        pytest.param("ash.json", '{"project_name": "old"}\n', id="ash.json"),
+        pytest.param(".ashrc.toml", 'project_name = "old"\n', id=".ashrc.toml"),
+    ],
+)
+def test_init_in_a_directory_named_ash_says_nothing_about_a_relative_extends(
+    tmp_path, monkeypatch, name, text
+):
+    """The file sits at the top of the directory `init` runs in, so moving it to
+    `.ash.yaml` beside it does not change the directory its bases are read from."""
+    scan_root = tmp_path / ".ash"
+    scan_root.mkdir()
+    (scan_root / name).write_text(text, encoding="utf-8")
+    monkeypatch.chdir(scan_root)
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert EXTENDS_BEFORE_PATH not in result.output, result.output
+    assert not (scan_root / ".ash.yaml").exists()
+
+
+def test_init_beside_a_pyproject_table_keeps_its_own_advice(tmp_path, monkeypatch):
+    """A pyproject.toml table is a TOML file too, and is edited where it is."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ash]\nproject_name = "d"\n', encoding="utf-8"
+    )
+
+    result = _invoke(["init"])
+
+    assert result.exit_code == 1, result.output
+    assert "or pass --config to write the new file somewhere else" in result.output
+    assert "as YAML" not in result.output, result.output
+    assert "Move " not in result.output, result.output
 
 
 def test_init_writes_the_config_when_dot_ash_is_a_regular_file(tmp_path):

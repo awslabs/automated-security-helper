@@ -1706,8 +1706,9 @@ directory: `.ash.yaml` at the root, then the deprecated locations `.ash.yml`, `.
 `.ash/.ash.yaml`), then the deprecated `.ashrc.toml`, `.ashrc.yaml`, `.ashrc.yml`,
 `.ashrc.json`, `ashrc.toml`, `ashrc.yaml`, `ashrc.yml`, and `ashrc.json` in the directory,
 then the `[tool.ash]` table of `pyproject.toml`. A config at a deprecated location still
-loads, with one warning that names `.ash.yaml` as the path to move it to; support is removed
-in ASH 4.0. If the config has an `extends` key, its own
+loads, with one warning that names `.ash.yaml` as the path to move it to (a TOML file is
+rewritten there as YAML, not renamed); support is removed in ASH 4.0. If the config has an
+`extends` key, its own
 `suppressions` list replaces the base config's list instead of adding to it; keep the base's
 entries by adding yours with a `patch` operation `add` at `/global_settings/suppressions/-`.
 

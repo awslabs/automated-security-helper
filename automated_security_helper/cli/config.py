@@ -68,6 +68,7 @@ from automated_security_helper.config.config_sources import (
     is_pyproject,
     is_regular_file,
     is_toml_file,
+    legacy_move_caveats,
     parse_config_text,
     read_config_bytes,
     read_config_file,
@@ -885,11 +886,27 @@ def _new_source_refusal(search_dir: Path, target: Path) -> str | None:
             "somewhere else"
         )
     else:
-        advice = (
-            f"Move {selected.label} to {target} (the canonical config file), "
-            f"edit {selected.label} in place, or pass --config to write the "
-            "new file somewhere else"
-        )
+        if is_toml_file(selected.path):
+            # After the pyproject branch: pyproject.toml is a TOML file too, and
+            # its [tool.ash] table is edited where it is. Any other TOML source is
+            # an ashrc file. The target is read as YAML (the parser is chosen by
+            # the file suffix), so the TOML file renamed to it would be refused.
+            advice = (
+                f"Rewrite {selected.label} as YAML in {target} and delete the TOML "
+                f"file ({target} is the canonical config file, and it is read as "
+                "YAML, so renaming the TOML file is not enough), edit "
+                f"{selected.label} in place, or pass --config to write the new file "
+                "somewhere else"
+            )
+        else:
+            advice = (
+                f"Move {selected.label} to {target} (the canonical config file), "
+                f"edit {selected.label} in place, or pass --config to write the "
+                "new file somewhere else"
+            )
+        # What else the file needs to be read from the target as it is read now.
+        caveats = legacy_move_caveats(selected, selected.label)
+        advice = ". ".join([advice, *caveats])
     return (
         f"ASH already reads its configuration from {selected.label}, and "
         f"configuration sources are never merged, so a new {target} here "
