@@ -239,3 +239,24 @@ test('a pattern is a search, through the translation in the table', () => {
     assert.ok(regex instanceof RegExp);
   }
 });
+
+test('a failure names the definition its schema comes from, when it comes from one', () => {
+  const instance = { suppressions: [{ path: 'a', reason: 'b', ruleId: 'x' }] };
+  const failures = validateField(block, 'global_settings', instance, patterns);
+  const [extra] = failures.filter((failure) => failure.keyword === 'additionalProperties');
+  assert.equal(extra.pointer, '/suppressions/0');
+  assert.equal(extra.definition, 'AshSuppression');
+  const closed = { properties: { a: {} }, additionalProperties: false };
+  const [plain] = validate(closed, closed, { z: 1 }, patterns);
+  assert.equal('definition' in plain, false);
+});
+
+test('an anyOf failure carries the failures of each of its branches', () => {
+  const schema = {
+    anyOf: [{ type: 'string' }, { type: 'object', properties: { a: {} }, additionalProperties: false }],
+  };
+  const [failure] = validate(schema, schema, { b: 1 }, patterns);
+  assert.equal(failure.keyword, 'anyOf');
+  const keywords = failure.detail.branches.map((branch) => branch.map((found) => found.keyword));
+  assert.deepEqual(keywords, [['type'], ['additionalProperties']]);
+});

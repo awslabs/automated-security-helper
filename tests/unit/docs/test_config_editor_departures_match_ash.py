@@ -217,6 +217,74 @@ def test_a_row_that_claims_a_refusal_ash_does_not_give_is_caught(tmp_path, monke
         _assert_claim("plugin-section-spelling", "error", document, error)
 
 
+ENTRY_TABLE = re.compile(
+    r"export const ENTRY_MODELS = Object\.freeze\(\{(?P<body>.*?)\n\}\);", re.DOTALL
+)
+ENTRY_MODEL = re.compile(
+    r"^\s+(?P<name>\w+): \{ noun: '(?P<noun>[^']+)',", re.MULTILINE
+)
+
+
+def parse_entry_models(source: str) -> dict[str, str]:
+    """The entry models of the table in messages.js, as { definition: its noun }."""
+    table = ENTRY_TABLE.search(source)
+    if table is None:
+        return {}
+    return {
+        match["name"]: match["noun"] for match in ENTRY_MODEL.finditer(table["body"])
+    }
+
+
+ENTRY_MODELS = parse_entry_models(MESSAGES.read_text(encoding="utf-8"))
+
+ENTRY = {"path": "a", "reason": "b"}
+UNKNOWN = {**ENTRY, "bogus": 1}
+
+#: A document for each place an entry model sits, each holding one key it does not know.
+ENTRY_DOCUMENTS = {
+    "AshSuppression": [{"global_settings": {"suppressions": [UNKNOWN]}}],
+    "AshExclusion": [
+        {"global_settings": {"exclusions": [{**UNKNOWN, "rule_id": "r"}]}},
+    ],
+    "IgnorePathWithReason": [
+        {"global_settings": {"ignore_paths": [UNKNOWN]}},
+        {"scanners": {"bandit": {"options": {"excluded_paths": [UNKNOWN]}}}},
+    ],
+    "SuppressionScope": [
+        {"global_settings": {"suppressions": [{**ENTRY, "scope": {"bogus": 1}}]}},
+    ],
+}
+PLACES = [
+    pytest.param(model, document, id=f"{model}-{index}")
+    for model, documents in ENTRY_DOCUMENTS.items()
+    for index, document in enumerate(documents)
+]
+
+
+def test_the_table_of_entry_models_is_read_whole_and_each_model_has_a_document():
+    assert ENTRY_MODELS, "messages.js holds no table of entry models"
+    assert set(ENTRY_MODELS) == set(ENTRY_DOCUMENTS)
+
+
+@pytest.mark.parametrize(("model", "document"), PLACES)
+def test_ash_warns_about_an_unknown_key_in_an_entry_and_loads_the_file(
+    model, document, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    config, error = _load(document, tmp_path)
+    assert error is None, (model, error)
+    assert any("bogus" in text for text in config._resolution_warnings), model
+
+
+@pytest.mark.parametrize(("model", "document"), PLACES)
+def test_ash_refuses_the_same_key_once_the_file_asks_to_fail_on_unknown_keys(
+    model, document, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    _, error = _load({**document, "fail_on_unknown_keys": True}, tmp_path)
+    assert error is not None and "bogus" in error, (model, error)
+
+
 def test_a_row_that_claims_a_tolerance_ash_does_not_give_is_caught(
     tmp_path, monkeypatch
 ):

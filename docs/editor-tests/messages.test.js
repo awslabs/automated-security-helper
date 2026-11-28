@@ -20,6 +20,7 @@ import {
   judge,
   validationOffMessage,
 } from '../content/assets/javascripts/config-editor/messages.js';
+import * as messagesModule from '../content/assets/javascripts/config-editor/messages.js';
 import {
   UnsupportedKeyword,
   compilePatterns,
@@ -231,4 +232,135 @@ test('a keyword the validator cannot judge turns validation off with a message t
   assert.match(message, /Validation is off/);
   assert.match(message, /oneOf/);
   assert.match(message, /ash config validate/);
+});
+
+test('a key named like a member of Object is an unknown key, and no entry is called its old name', () => {
+  for (const key of ['constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
+    const entry = { path: 'a', reason: 'b', [key]: 1 };
+    const [found] = judgeField('global_settings', { suppressions: [entry] }).findings;
+    assert.equal(found.message, `Unknown key '${key}' in a suppression. A scan ignores this entry.`);
+  }
+  // JSON.parse makes __proto__ an ordinary own key.
+  const parsed = JSON.parse('{"suppressions":[{"path":"a","reason":"b","__proto__":1}]}');
+  const [found] = judgeField('global_settings', parsed).findings;
+  assert.equal(found.message, "Unknown key '__proto__' in a suppression. A scan ignores this entry.");
+});
+
+test('a build section with contents says the editor does not check them', () => {
+  const warning = block.constants.invalidTopLevelFieldWarning.replace('{field}', 'build');
+  const [found] = judgeField('', { build: { anything: true } }).findings;
+  assert.equal(found.row, 'internal-top-level-field');
+  assert.equal(found.message, `${warning} This editor does not check what is inside it.`);
+  assert.equal(judgeField('', { build: {} }).findings[0].message, warning);
+});
+
+// The fixture's schema leaves out some entry models of ASH's published schema. This block
+// puts them in where ASH puts them: a scope inside a suppression, and a list of ignore-path
+// entries beside the suppressions.
+function blockWithEntryModels() {
+  const extended = structuredClone(block);
+  const defs = extended.validationSchema.$defs;
+  const text = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+  defs.SuppressionScope = {
+    additionalProperties: false,
+    properties: { resource_id: text, resource_type: text },
+    type: 'object',
+  };
+  defs.IgnorePathWithReason = {
+    additionalProperties: false,
+    properties: { path: { minLength: 1, type: 'string' }, reason: { minLength: 1, type: 'string' } },
+    required: ['path', 'reason'],
+    type: 'object',
+  };
+  defs.AshSuppression.properties.scope = {
+    anyOf: [{ $ref: '#/$defs/SuppressionScope' }, { type: 'null' }],
+  };
+  defs.GlobalSettings.properties.ignore_paths = {
+    items: { $ref: '#/$defs/IgnorePathWithReason' },
+    type: 'array',
+  };
+  return extended;
+}
+
+const withModels = blockWithEntryModels();
+
+const judgeWithModels = (path, instance, options) =>
+  judge(withModels, path, instance, validateField(withModels, path, instance, patterns), options);
+
+const shown = (result) => result.findings.map(({ row, severity, pointer }) => ({ row, severity, pointer }));
+
+const typoInScope = {
+  global_settings: { suppressions: [{ path: 'a', reason: 'b', scope: { resorce_id: 'x' } }] },
+};
+
+test('an unknown key in a suppression scope warns, and the scope is named by what it is', () => {
+  const result = judgeWithModels('', typoInScope);
+  assert.equal(result.valid, true);
+  assert.deepEqual(shown(result), [
+    {
+      row: 'unknown-key-in-list-entry',
+      severity: 'warning',
+      pointer: '/global_settings/suppressions/0/scope',
+    },
+  ]);
+  assert.equal(
+    result.findings[0].message,
+    "Unknown key 'resorce_id' (did you mean 'resource_id'?) in a suppression scope. The suppression it belongs to matches nothing.",
+  );
+});
+
+test('the same key in a scope is an error when the file asks to fail on unknown keys', () => {
+  const result = judgeWithModels('', typoInScope, { failOnUnknownKeys: true });
+  assert.equal(result.valid, false);
+  assert.deepEqual(shown(result), [
+    {
+      row: 'unknown-key-in-list-entry',
+      severity: 'error',
+      pointer: '/global_settings/suppressions/0/scope',
+    },
+  ]);
+  assert.ok(result.findings[0].message.endsWith(REFUSES));
+});
+
+test('an unknown key in an ignore-path entry warns wherever the list is judged from', () => {
+  const entry = { path: 'a', reason: 'b', resaon: 'c' };
+  const list = { global_settings: { ignore_paths: [entry] } };
+  for (const [path, instance, pointer] of [
+    ['', list, '/global_settings/ignore_paths/0'],
+    ['global_settings', list.global_settings, '/ignore_paths/0'],
+  ]) {
+    const result = judgeWithModels(path, instance);
+    const found = result.findings.find((item) => item.row === 'unknown-key-in-list-entry');
+    assert.equal(found.severity, 'warning', path);
+    assert.equal(found.pointer, pointer, path);
+    assert.equal(
+      found.message,
+      "Unknown key 'resaon' (did you mean 'reason'?) in an ignore-path entry. A scan ignores this entry.",
+    );
+  }
+});
+
+test('a scope with an unknown key and a wrong value is refused, not downgraded', () => {
+  const scope = { resorce_id: 'x', resource_id: 5 };
+  const instance = { global_settings: { suppressions: [{ path: 'a', reason: 'b', scope }] } };
+  const result = judgeWithModels('', instance);
+  assert.equal(result.valid, false);
+  assert.deepEqual(shown(result), [
+    { row: null, severity: 'error', pointer: '/global_settings/suppressions/0/scope' },
+  ]);
+});
+
+test('the table of entry models names each model, how its entry is called and what a scan does', () => {
+  const models = messagesModule.ENTRY_MODELS;
+  assert.deepEqual(Object.keys(models).sort(), [
+    'AshExclusion',
+    'AshSuppression',
+    'IgnorePathWithReason',
+    'SuppressionScope',
+  ]);
+  for (const [name, model] of Object.entries(models)) {
+    assert.match(model.noun, /^an? [a-z -]+$/, name);
+    assert.ok(model.ignored.endsWith('.'), name);
+  }
+  assert.equal(Object.isFrozen(models), true);
 });
