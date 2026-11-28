@@ -38,7 +38,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScannerConfigOptions,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 VERIFICATION_FILTER = (
     "detect_secrets.filters.common.is_ignored_due_to_verification_policies"
@@ -54,26 +57,6 @@ def _baseline_text() -> str:
             "results": {},
             "generated_at": "2026-01-01T00:00:00Z",
         }
-    )
-
-
-@pytest.fixture(autouse=True)
-def _checkouts_below_the_temporary_directory(monkeypatch, tmp_path):
-    """Let the trust rules see only the git checkouts at or below ``tmp_path``.
-
-    They walk EVERY checkout at or above the scanned directory, not the nearest
-    (``path_trust._checkouts_holding``), so a temporary directory placed inside
-    a work tree (a pytest base temp under a clone) would make the operator's
-    files in ``tmp_path`` the repository's. The tests here are about the
-    checkout they make, not about one above the temporary directory."""
-    from automated_security_helper.config import path_trust
-    from automated_security_helper.config.sandbox_grants import is_within
-
-    real = path_trust._checkouts_holding
-    monkeypatch.setattr(
-        path_trust,
-        "_checkouts_holding",
-        lambda scan_root: [c for c in real(scan_root) if is_within(c, tmp_path)],
     )
 
 
@@ -257,9 +240,12 @@ def test_a_regular_in_tree_baseline_is_named_where_it_sits(tmp_path, monkeypatch
 
     assert scanner._baseline_in_use()
     assert scanner._baseline_named == context.source_dir / ".secrets.baseline"
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The file was read (its plugin list is the marker); a baseline in the tree
+    # sets no plugins, so the scan keeps the default set.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "AWSKeyDetector"
     ]
+    assert len(scanner.config.options.scan_settings.plugins_used) > 10
     reason = scanner._untrusted_baseline_reason(None)
     assert reason is not None and "inside the scanned directory" in reason, reason
 

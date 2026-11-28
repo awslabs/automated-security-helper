@@ -43,7 +43,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     _detect_secrets_api,
 )
 
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path")
 
 BASELINE_NAME = ".secrets.baseline"
 # Assembled at runtime so this file holds no key-shaped literal for ASH's own
@@ -312,9 +312,9 @@ def test_the_real_worker_reports_nothing_on_a_baseline_that_only_lists(
     tmp_path, monkeypatch
 ):
     """The common case: a committed baseline of two entries and nothing else.
-    Scanned by the real worker with the three detectors the baseline lists (AWS
-    keys, hex entropy and keywords) it reports nothing on the file, as it did
-    before the baseline was scanned at all."""
+    Scanned by the real worker with the default plugins, which include the three
+    the baseline lists (AWS keys, hex entropy and keywords), it reports nothing
+    on the file, as it did before the baseline was scanned at all."""
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)
@@ -353,7 +353,8 @@ def test_the_filter_that_skips_files_by_name_is_not_taken_from_the_repositorys_b
     baseline, naming it, and the worker skips every file of that name. Read
     from a baseline the repository controls, the name is the repository's
     choice, so the file is in the scan set and never scanned. The worker is not
-    handed the filter; the baseline's other filters still reach it."""
+    handed the filter, and none of the repository baseline's other filters
+    either: a baseline in the tree sets no filters."""
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)
@@ -365,7 +366,7 @@ def test_the_filter_that_skips_files_by_name_is_not_taken_from_the_repositorys_b
     scanner.scan(target=source, target_type="source")
 
     assert BASELINE_NAME in seen["names"]
-    assert UUID_FILTER["path"] in seen["filters"]
+    assert UUID_FILTER["path"] not in seen["filters"]
     assert IS_BASELINE_FILE_FILTER not in seen["filters"]
 
 
@@ -472,9 +473,10 @@ def test_an_operator_baselines_default_name_filter_does_not_skip_the_trees_basel
 def test_a_pattern_in_the_repositorys_baseline_does_not_drop_the_baseline_from_the_scan(
     tmp_path, monkeypatch
 ):
-    """The baseline's own ``should_exclude_file`` patterns leave files out of
-    the scan set, and a repository could name the baseline itself. Its patterns
-    apply to the other files and not to it."""
+    """The baseline's own ``should_exclude_file`` patterns would leave files out
+    of the scan set, and a repository could name the baseline itself. A baseline
+    in the tree sets no filters, so neither pattern applies and both files are
+    scanned."""
     monkeypatch.chdir(tmp_path)
     context = _context(tmp_path)
     source = Path(context.source_dir)
@@ -495,7 +497,7 @@ def test_a_pattern_in_the_repositorys_baseline_does_not_drop_the_baseline_from_t
 
     scanner.scan(target=source, target_type="source")
 
-    assert seen["names"] == [BASELINE_NAME, "kept.py"]
+    assert seen["names"] == [BASELINE_NAME, "kept.py", "skipped.py"]
 
 
 @pytest.mark.unit

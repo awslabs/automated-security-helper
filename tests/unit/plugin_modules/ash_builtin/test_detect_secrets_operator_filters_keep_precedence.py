@@ -32,10 +32,17 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
     DetectSecretsScanSettingsFiltersUsed,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("no_tool_probes")]
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path"),
+]
 
 HEURISTIC = "detect_secrets.filters.heuristic.is_likely_id_string"
 SEQUENTIAL = "detect_secrets.filters.heuristic.is_sequential_string"
+
+
+def _baseline_path(context: PluginContext) -> Path:
+    return Path(context.source_dir).parent / "operator" / "shared.baseline"
 
 
 def _context_with_baseline(tmp_path: Path, filters: list) -> PluginContext:
@@ -47,7 +54,11 @@ def _context_with_baseline(tmp_path: Path, filters: list) -> PluginContext:
     )
     context.source_dir.mkdir(parents=True)
     context.output_dir.mkdir(parents=True)
-    (context.source_dir / ".secrets.baseline").write_text(
+    # Named by the operator from outside the scanned tree: a baseline the scan
+    # found in the tree sets no plugins or filters.
+    baseline = _baseline_path(context)
+    baseline.parent.mkdir()
+    baseline.write_text(
         json.dumps(
             {
                 "version": "1.5.0",
@@ -67,7 +78,8 @@ def _scanner(context: PluginContext, filters: list) -> DetectSecretsScanner:
         context=context,
         config=DetectSecretsScannerConfig(
             options=DetectSecretsScannerConfigOptions(
-                scan_settings=DetectSecretsScanSettings(filters_used=filters)
+                baseline_file=str(_baseline_path(context)),
+                scan_settings=DetectSecretsScanSettings(filters_used=filters),
             )
         ),
     )
@@ -146,11 +158,13 @@ def test_a_baseline_filter_file_is_refused_beside_the_operators_filters(
     tmp_path, monkeypatch
 ):
     """The counterpart of the test above: the same ``file://`` filter under the
-    scan's output directory, named by the tree's own baseline rather than by the
-    operator. It is the repository's, so it is not loaded, while the operator's
-    own filter beside it is kept. Authorship by entry has to cut both ways: a
-    reading that kept every ``file://`` entry once an operator filter was
-    present would hand the worker a file the repository chose."""
+    scan's output directory, named by the baseline rather than by the
+    operator's own settings. The baseline here is one the operator named from
+    outside the scanned tree, so its filters load; the entry is still the
+    baseline's, not the operator's, and a derived directory refuses it, while the
+    operator's own filter beside it is kept. Authorship by entry has to cut both
+    ways: a reading that kept every ``file://`` entry once an operator filter
+    was present would hand the worker a file the baseline chose."""
     monkeypatch.chdir(tmp_path)
     filter_file = tmp_path / "out" / "filters" / "theirs.py"
     context = _context_with_baseline(

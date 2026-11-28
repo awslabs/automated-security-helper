@@ -62,7 +62,7 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 # detect-secrets --version``), so every scan here started the tool wherever uv could
 # reach it. The scan itself runs in ASH's worker, so the probes answer without a
 # process (tests/unit/conftest.py).
-pytestmark = pytest.mark.usefixtures("no_tool_probes")
+pytestmark = pytest.mark.usefixtures("no_tool_probes", "checkouts_below_tmp_path")
 
 # Assembled at runtime so this file contains no contiguous key-shaped literal.
 # The value is AWS's own documentation placeholder. FLY002 is suppressed on
@@ -348,7 +348,12 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     )
     in_source = plugin_context.source_dir / "custom.baseline"
     in_source.write_text(
-        json.dumps(baseline_document(plugins=[{"name": "SourceMarker"}])),
+        json.dumps(
+            baseline_document(
+                plugins=[{"name": "SourceMarker"}],
+                filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -365,8 +370,20 @@ def test_a_relative_configured_baseline_is_taken_from_the_source_directory(
     assert scanner._baseline_in_use()
     assert scanner._baseline_file_path() == in_source.resolve()
     assert str(scanner.config.options.baseline_file) == "custom.baseline"
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The document the scan read is the marker of which file that was.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "SourceMarker"
+    ]
+    # The file is in the scanned tree, so it is the repository's whoever named
+    # it, and its settings are not applied: the scan runs the default plugins
+    # and none of the baseline's filters.
+    effective_plugins = [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+    assert "SourceMarker" not in effective_plugins
+    assert "AWSKeyDetector" in effective_plugins
+    assert EXCLUDE_FILTER_PATH not in [
+        f.path for f in scanner.config.options.scan_settings.filters_used
     ]
 
 
@@ -401,7 +418,12 @@ def test_a_found_configured_baseline_leaves_the_option_as_written(
     so every dump of the configuration still shows it."""
     monkeypatch.chdir(tmp_path)
     (plugin_context.source_dir / "custom.baseline").write_text(
-        json.dumps(baseline_document(plugins=[{"name": "StandIn"}])),
+        json.dumps(
+            baseline_document(
+                plugins=[{"name": "StandIn"}],
+                filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+            )
+        ),
         encoding="utf-8",
     )
     options = DetectSecretsScannerConfigOptions(baseline_file="custom.baseline")
@@ -415,8 +437,18 @@ def test_a_found_configured_baseline_leaves_the_option_as_written(
     assert scanner.config.options.baseline_file == written
     assert str(scanner.config.options.baseline_file) == "custom.baseline"
     assert scanner._baseline_in_use() is True
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
+    ]
+    # Named by the operator but sitting in the scanned tree, the file is the
+    # repository's: its plugins and filters are not applied.
+    effective_plugins = [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+    assert "StandIn" not in effective_plugins
+    assert "AWSKeyDetector" in effective_plugins
+    assert EXCLUDE_FILTER_PATH not in [
+        f.path for f in scanner.config.options.scan_settings.filters_used
     ]
 
 
@@ -445,10 +477,13 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     """SecretsCollection.load_from_baseline only loads results, not settings.
 
     So the scanner has to propagate plugins_used and filters_used itself, or the
-    baseline's configuration silently fails to apply during scanning.
+    baseline's configuration silently fails to apply during scanning. Only a
+    baseline the operator names from outside the scanned tree is propagated.
     """
     monkeypatch.chdir(tmp_path)
-    (plugin_context.source_dir / ".secrets.baseline").write_text(
+    named = tmp_path / "operator" / "shared.baseline"
+    named.parent.mkdir()
+    named.write_text(
         json.dumps(
             baseline_document(
                 plugins=[{"name": "AWSKeyDetector"}, {"name": "JwtTokenDetector"}],
@@ -459,7 +494,10 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
     )
 
     scanner = DetectSecretsScanner(
-        context=plugin_context, config=DetectSecretsScannerConfig()
+        context=plugin_context,
+        config=DetectSecretsScannerConfig(
+            options=DetectSecretsScannerConfigOptions(baseline_file=str(named))
+        ),
     )
 
     plugin_names = [p.name for p in scanner.config.options.scan_settings.plugins_used]
@@ -474,10 +512,22 @@ def test_baseline_plugins_and_filters_are_loaded_into_scan_settings(
 def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
     plugin_context, tmp_path, monkeypatch
 ):
-    """A user-provided scan_settings takes precedence over the baseline's."""
+    """A user-provided scan_settings takes precedence over the baseline's.
+
+    The baseline is one the operator names from outside the tree, whose
+    settings would load but for the precedence rule: a baseline found in the
+    tree sets none whatever scan_settings holds, so it could not show the rule.
+    """
     monkeypatch.chdir(tmp_path)
-    (plugin_context.source_dir / ".secrets.baseline").write_text(
-        json.dumps(baseline_document(plugins=[{"name": "AWSKeyDetector"}])),
+    named = tmp_path / "operator" / "shared.baseline"
+    named.parent.mkdir()
+    named.write_text(
+        json.dumps(
+            baseline_document(
+                plugins=[{"name": "AWSKeyDetector"}],
+                filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -485,20 +535,24 @@ def test_explicit_scan_settings_are_not_overwritten_by_the_baseline(
         context=plugin_context,
         config=DetectSecretsScannerConfig(
             options=DetectSecretsScannerConfigOptions(
+                baseline_file=str(named),
                 scan_settings=DetectSecretsScanSettings(
                     version="1.5.0",
                     plugins_used=[
                         DetectSecretsScanSettingsPluginsUsed(name="JwtTokenDetector")
                     ],
-                )
+                ),
             )
         ),
     )
 
+    assert scanner._baseline_entries_trusted()
     plugin_names = [p.name for p in scanner.config.options.scan_settings.plugins_used]
     assert plugin_names == ["JwtTokenDetector"], (
         f"the baseline overwrote explicit scan_settings; got {plugin_names}"
     )
+    filter_paths = [f.path for f in scanner.config.options.scan_settings.filters_used]
+    assert EXCLUDE_FILTER_PATH not in filter_paths, filter_paths
 
 
 @pytest.mark.unit
@@ -602,7 +656,10 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     work = output / ASH_WORK_DIR_NAME
     work.mkdir(parents=True)
     baseline_document_with_marker = json.dumps(
-        baseline_document(plugins=[{"name": "StandIn"}])
+        baseline_document(
+            plugins=[{"name": "StandIn"}],
+            filters=[{"path": EXCLUDE_FILTER_PATH, "pattern": ["^tests/"]}],
+        )
     )
     if first_pass == "missing":
         first_baseline = tmp_path / "gone" / "absent.baseline"
@@ -659,8 +716,21 @@ def test_processing_options_again_forgets_an_earlier_baseline_decision(
     assert getattr(scanner, other_flag) is False
     assert scanner._baseline_in_use() is True
     assert asked, "the valid baseline was never consulted"
-    assert [p.name for p in scanner.config.options.scan_settings.plugins_used] == [
+    # The repository wrote a config of its own, so the baseline is not the
+    # operator's: its settings are not applied, though it sits outside the
+    # tree, and its entries are not trusted either. The document read is the
+    # marker that this baseline, and not the first pass's, was the one used.
+    assert [p["name"] for p in scanner._baseline_document["plugins_used"]] == [
         "StandIn"
+    ]
+    assert scanner._baseline_entries_trusted() is False
+    effective_plugins = [
+        p.name for p in scanner.config.options.scan_settings.plugins_used
+    ]
+    assert "StandIn" not in effective_plugins
+    assert "AWSKeyDetector" in effective_plugins
+    assert EXCLUDE_FILTER_PATH not in [
+        f.path for f in scanner.config.options.scan_settings.filters_used
     ]
 
 

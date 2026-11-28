@@ -48,6 +48,35 @@
 
 ### Behavior changes
 
+- **A detect-secrets baseline sets which plugins run and which filters apply
+  only when you name it in your own settings, from outside the scanned tree.**
+  A `.secrets.baseline` or `.ash/.secrets.baseline` that the scan finds in the
+  scanned tree still marks the candidates it lists as known, as before, but its
+  `plugins_used` and `filters_used` are not applied: the scan runs the plugins
+  `scan_settings` names (the default plugins when it names none) with the
+  filters `scan_settings` names. The same holds for a baseline that
+  `baseline_file` names when the file is inside the scanned tree or a git
+  checkout that holds the scan root, or when a config you did not write names
+  it. The scan logs one warning that names the baseline file and what it lists
+  that the scan does not run as listed (plugins that do not run, plugins and
+  filters that run with other parameters, filters that do not apply; a baseline
+  written by `detect-secrets scan` without `--no-verify` is named for its
+  verification filter, which ASH applies only from your own settings), or an
+  INFO line when everything it lists runs as listed. To keep applying a
+  baseline's plugins and filters, set
+  `scanners.detect-secrets.options.baseline_file` in your own settings to a
+  baseline file outside the scanned tree and any git checkout that holds the
+  scan root, and leave `scan_settings.plugins_used` empty. With the scanner
+  sandbox on, ASH reads that file only when `sandbox.read_path_scanners` names
+  `detect-secrets` and the file is inside one of your `sandbox.extra_read_paths`
+  entries, both set through `--config-overrides` or a config file outside every
+  git checkout and the scanned directory; otherwise it skips the file with a
+  warning. To keep a baseline's exclusions without naming it, copy the entries
+  you rely on from its `filters_used` into `scan_settings.filters_used`; once
+  any filter is listed there, detect-secrets' default filters no longer apply
+  unless you list them too. A scan that no longer skips the files a baseline's
+  exclusions covered reads more of the tree, so a large tree can reach
+  `scan_timeout` or `max_worker_output_mib`.
 - **`ash merge` records the merged run in the scan history.** With
   `global_settings.history.enabled` in the merged configuration (the shards'
   recorded config, with `--config-overrides` applied), the merge appends one run
