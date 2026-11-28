@@ -39,9 +39,9 @@ directly after ``<meta charset>``, with a sha256 for each executable inline scri
 of the final page, so that the page can load only this site's own files and cannot
 connect anywhere else. The build fails when that page holds an inline event
 handler, a ``javascript:`` URL, an external script, a second policy meta or no
-charset meta. The one exception is the search-share anchor Material for MkDocs
-writes on every page while ``search.share`` is on, which is exempt by its exact
-markup.
+charset meta, or ends inside a style or script element. The one exception is the
+search-share anchor Material for MkDocs writes on every page while
+``search.share`` is on, which is exempt by its exact markup.
 
 Both parts run in on_post_page at the lowest event priority, after every other
 plugin, so the hashes are taken over the final bytes.
@@ -3072,9 +3072,15 @@ def first_attributes(attrs: list[tuple[str, str | None]]) -> dict[str, str | Non
     return found
 
 
+#: The elements whose content a parser reads as raw text, up to the end tag of the
+#: same name: the two a page can hold.
+RAW_TEXT_ELEMENTS = ("style", "script")
+
+
 class PageScanner(HTMLParser):
     """Reads a built page for what the policy needs: the charset meta's end, each
-    executable inline script, and everything a build must refuse."""
+    executable inline script, and everything a build must refuse, a style or script
+    element the page ends inside included."""
 
     def __init__(self, source: str, foreign: int = 0):
         super().__init__(convert_charrefs=True)
@@ -3090,6 +3096,10 @@ class PageScanner(HTMLParser):
         # inside one: a browser parses the content of those as markup.
         self._foreign = foreign
         self._style: list[str] | None = None
+        # The style or script element the start and end tags so far leave open: its
+        # name, its line and offset, the text of its start tag, and whether an svg or
+        # math element was open around it.
+        self._open: tuple[str, int, int, str, bool] | None = None
 
     def where(self) -> tuple[int, int]:
         line, offset = self.getpos()
@@ -3099,6 +3109,15 @@ class PageScanner(HTMLParser):
         self.problems.append(f"line {self.getpos()[0]}: {text}")
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in RAW_TEXT_ELEMENTS:
+            line, offset = self.where()
+            self._open = (
+                tag,
+                line,
+                offset,
+                self.get_starttag_text() or "",
+                bool(self._foreign),
+            )
         exempt = is_search_share_anchor(tag, attrs)
         for name, value in attrs:
             if name.startswith("on"):
@@ -3156,6 +3175,8 @@ class PageScanner(HTMLParser):
             self._style.append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if self._open is not None and self._open[0] == tag:
+            self._open = None
         if tag == "script" and self._text is not None:
             text = "".join(self._text)
             if self._executable:
@@ -3171,27 +3192,36 @@ class PageScanner(HTMLParser):
 
     def close(self) -> None:
         super().close()
-        # An element left open runs to the end of the page.
-        if self._style is not None:
-            self.rescan("style", "".join(self._style))
-            self._style = None
-        if self._text is not None and self._foreign:
-            self.rescan("script", "".join(self._text))
-            self._text = None
+        # An element left open runs to the end of the page, and the page is refused
+        # for it. It is found from the start and end tags, and its text is read from
+        # the page, not taken from what the parser hands over: CPython up to 3.12.10
+        # hands over none of the text of a style or script element still open at the
+        # end of the input, and later releases hand it over from close().
+        if self._open is None:
+            return
+        tag, line, offset, start_tag, foreign = self._open
+        self._open = None
+        self.problems.append(f"line {line}: the {tag} element is never closed")
+        if foreign:
+            if self.source[offset : offset + len(start_tag)] != start_tag:
+                raise ProjectionError(f"the page's {tag} element could not be located")
+            self.rescan(tag, self.source[offset + len(start_tag) :], line)
 
-    def rescan(self, tag: str, text: str) -> None:
+    def rescan(self, tag: str, text: str, line: int | None = None) -> None:
         """Read the text of an SVG or MathML ``style`` or ``script`` as markup.
 
         The parser here reads that text as text, as it does for an HTML element of
         those names. A browser parses it as markup inside SVG and MathML, so an
         ``img`` in it is an HTML element with its handlers, and a link in it keeps
         its ``javascript:`` URL. The same refusals apply to what the text holds. The
-        element itself is not refused: the site's own logo is an SVG with a style.
+        element itself is not refused for what it holds: the site's own logo is an
+        SVG with a style. ``line`` is where the element starts, by default where the
+        parser is.
         """
         inner = PageScanner(text, foreign=1)
         inner.feed(text)
         inner.close()
-        line = self.getpos()[0]
+        line = line or self.getpos()[0]
         for problem in inner.problems:
             reason = problem.split(": ", 1)[1]
             self.problems.append(
