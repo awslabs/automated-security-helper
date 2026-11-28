@@ -452,6 +452,69 @@
   any word or hide a repeated key, so a tag is refused whatever it would have made of the
   node. `tests/unit/docs/test_cast_core.py` and `tests/unit/docs/test_journey_pages.py`
   cover it.
+- `tests/unit/docs/test_render_cast.py` now runs the recording renderer's child
+  processes against this checkout (`run_cli` and `run_cli_under` pass their environment
+  through `checkout_env`), and `tests/unit/test_child_processes_import_this_checkout.py`
+  lists the two standalone scripts that `tests/unit/docs/test_illustrative_ratchet.py`
+  and `tests/unit/test_alpha_extra_sync_gate.py` run, each with the reason the script
+  imports nothing from ASH. The test that every child process running ASH imports this
+  checkout passes with those four launches.
+- The JSON config case of `tests/unit/test_scan_workflow_reads_toml_without_tomllib.py`
+  now uses the name `.config/ash.json` in place of `.ash/ash.json`, so that test no
+  longer builds a config in the legacy `.ash` directory and
+  `tests/unit/config/test_no_new_fixture_at_the_legacy_config_path.py` passes.
+- Added the support matrices. `docs/content/reference/support-matrix.md` is a new
+  generated page with one row for every scanner manifest: its tier, whether its module
+  loads on its own and which module to list when it does not, how its tool reaches the
+  machine, and what ASH declares about running it on each of six operating system and
+  CPU pairs. A cell is a name taken from the code or one phrase of a closed list, and a
+  fact that nothing in the code states reads `not measured`.
+  `scripts/generate_support_matrices.py` writes the page, and the blocks of hand-written
+  pages that name a matrix (no page holds one yet), from typed matrices that collector
+  modules build through `scripts/_support_model.py`. `scripts/_matrix_scan.py` reads the
+  scanners from the manifests, the operational facets register and each scanner's own
+  platform refusal, and `scripts/_matrix_destinations.py` lists the pages and blocks, so
+  the script names no scanner, mode or channel itself. A refusal is read under a patched
+  `platform.system`, so the page has the same bytes on every host, and a matrix whose
+  rows are not exactly the members it must cover is refused. `--check` prints a diff for
+  each stale page or block and exits 1, and `--self-test` plants each defect the script
+  exists to refuse and requires each to be refused. The `lint` job of
+  `.github/workflows/ash-unified-ci.yml` runs `--check`, and
+  `.github/scripts/check-snapshot-trailers.py` lists the page among the generated pages
+  whose change needs a `Snapshot-Update` trailer. The docs checks in
+  `scripts/docs_checks.py` now lint the generated blocks of every page: a pair of markers
+  that does not parse is reported at its line, a block of the support-matrix generator
+  must be listed in `scripts/_matrix_destinations.py` and a listed block must be in its
+  file, a finding on a generated line names the generator, and a fenced block inside a
+  generated block is left out of the count of commands that nothing runs. A new check in
+  `scripts/verify_docs_freshness.py`, "Support matrices still refuse what they must and
+  list what ASH ships", runs the generator's self-test and holds the committed page to a
+  second inventory of the scanners, read from the config models. The contributing guide
+  to the docs checks has a new section, "Generated blocks in a hand-written page", with
+  the marker form and the rules for a block, how the checks treat one, how the support
+  matrices are built, and what a change that adds a scanner or moves its tier has to run.
+  The page is in the docs navigation and the reference index.
+  `tests/unit/test_support_matrices.py` and `tests/unit/test_generated_block_lints.py`
+  cover it.
+- The registers that declare how a scanner's tool reaches the container image check
+  more of what they hold. `Exclusion` in
+  `automated_security_helper/base/plugin_provisioning.py` reads its `reason` as an
+  `ExclusionReason`: a plain string that names a member is that member, and a spelling
+  that names none raises when the exclusion is built. The text `"cooldown"` used to build
+  without error and fail the registry's own test for a cooldown, so such a pin passed
+  with no `until` date. The registry check also refuses a cooldown exclusion whose
+  `until` is not an ISO 8601 date, an `until` on any other reason, and a pin whose
+  `runtime` is neither `uv-tool` nor `ash-environment`. `HostMatch` in
+  `automated_security_helper/base/image_register.py` and in
+  `automated_security_helper/base/install_package_facets.py` refuses an `arches` that is
+  not a tuple of strings or that holds a blank entry, as it already did for `ids` and
+  `versions`. The test that binds a content database's cache variable to its scanner and
+  to the image now reads the `ENV` line from the `core` stage of the `Dockerfile`, the
+  stage the `ci` and non-root stages are built on, and counts a scanner as reading the
+  variable only when it reads the environment (`environ.get`, `getenv`, an `environ`
+  subscript, `snapshot_environ` or `cache_dir_env_var`), not when the name is any string
+  in its module. `tests/unit/base/test_plugin_provisioning_pypi_pins.py` and
+  `tests/unit/base/test_register_bindings.py` cover them.
 
 ### Deprecations
 
