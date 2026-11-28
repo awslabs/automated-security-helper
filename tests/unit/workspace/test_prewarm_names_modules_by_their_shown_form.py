@@ -126,6 +126,10 @@ class TestARealWorkspaceRunNamesAnEnvReadEntryMasked:
         (site / package / "__init__.py").write_text("", encoding="utf-8")
         monkeypatch.syspath_prepend(str(site))
         monkeypatch.setenv("ASH_WS_CANARY", package)
+        # A caller's ASH_SCANNERS, the environment variable of the deprecated
+        # --scanners, would reach the scan beside --add-scanners and start
+        # scanners the run is built not to start.
+        monkeypatch.delenv("ASH_SCANNERS", raising=False)
         workspace_root = tmp_path / "ws"
         (workspace_root / "api").mkdir(parents=True)
         (workspace_root / "api" / "app.py").write_text("x = 1\n", encoding="utf-8")
@@ -193,6 +197,10 @@ class TestEveryProjectEngineNamesTheModuleByTheRunsMap:
         (site / package / "__init__.py").write_text("", encoding="utf-8")
         monkeypatch.syspath_prepend(str(site))
         monkeypatch.setenv("ASH_CROSS_CANARY", package)
+        # A caller's ASH_SCANNERS, the environment variable of the deprecated
+        # --scanners, would reach the scan beside --add-scanners and start
+        # scanners the run is built not to start.
+        monkeypatch.delenv("ASH_SCANNERS", raising=False)
         root = tmp_path / "ws"
         disabled = "scanners:\n  bandit:\n    enabled: false\n"
         entries = {
