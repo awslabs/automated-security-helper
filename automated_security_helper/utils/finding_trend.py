@@ -56,8 +56,10 @@ markers a run record keeps; a test holds the two equal) and the scanners that
 entered or left the expected set. A step in which a scanner disappeared and twenty
 findings are "fixed" is labeled ``like_for_like: false`` with the reason, never
 presented as progress. So is a step between a record written before ASH stored each
-row's ``result_kind`` and one written after it, in either order: the older record
-counts the results that state no finding and the newer one does not.
+row's ``result_kind``, when it holds rows, and one written after it, with rows or
+none, in either order: the older record counts the results that state no finding
+and the newer one does not. A record written after says so in
+``result_kind_recorded``.
 
 Engine
 ------
@@ -543,10 +545,11 @@ def _run_entry(run: TrendRun, rows: list[_Row]) -> dict[str, Any]:
     }
 
 
-#: The warning of a boundary between a record whose rows name their result's kind
-#: and one whose rows do not, which was written before ASH stored the kind: the
-#: older record counts the results that state no finding and the newer one does
-#: not, so they read as fixed or as new at that boundary.
+#: The warning of a boundary between a record that names its rows' result kind
+#: (its rows do, or ``result_kind_recorded`` says so) and one whose rows do not,
+#: which was written before ASH stored the kind: the older record counts the
+#: results that state no finding and the newer one does not, so they read as fixed
+#: or as new at that boundary.
 RESULT_KIND_BOUNDARY_WARNING = (
     "One scan's history record names the result kind of its findings and the "
     "other's does not, so results that state no finding are counted in one and "
@@ -555,11 +558,15 @@ RESULT_KIND_BOUNDARY_WARNING = (
 
 
 def _names_result_kinds(record: dict[str, Any]) -> bool | None:
-    """Whether *record*'s rows name their result's kind; None when it has no rows.
+    """Whether *record* names its rows' result kind; None when it cannot say.
 
-    A record written before ASH stored ``result_kind`` names none. A record with no
-    rows cannot say, so a boundary beside it gets no warning from this.
+    A record ASH writes says so in ``result_kind_recorded``, with rows or none. A
+    record written before ASH stored ``result_kind`` has no such key and names no
+    kind in its rows. One with neither the key nor rows cannot say; it counts
+    nothing, so a boundary beside it gets no warning from this.
     """
+    if record.get("result_kind_recorded") is True:
+        return True
     rows = record["findings"]
     if not rows:
         return None

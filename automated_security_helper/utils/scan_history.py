@@ -26,6 +26,8 @@ and the identity ingredients ``fallback_key`` reads), the kind of its SARIF resu
 which the trend reads to leave out a row that states no finding, plus the run's
 metadata and the coverage markers ``coverage_warnings`` compares. ``record_version``
 is 1, and a row with no kind, from before it was stored, reads as a finding.
+``result_kind_recorded`` says that the rows name their kind, so a record with no
+rows still tells the trend it was not written before the kind was stored.
 
 Which scans are recorded
 ------------------------
@@ -213,6 +215,9 @@ def run_record_body(results: "AshAggregatedResults") -> dict[str, Any]:
     metadata = results.metadata
     return {
         "record_version": RECORD_VERSION,
+        # Every row names its result's kind. A record with no rows says so here,
+        # so the trend can tell it from one written before the kind was stored.
+        "result_kind_recorded": True,
         "report_id": metadata.report_id,
         "generated_at": metadata.generated_at,
         "project_name": metadata.project_name,
