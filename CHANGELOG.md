@@ -271,6 +271,34 @@
   deprecated `ASH_OCI_RUNNER`), such as `./bin/docker`, is refused with exit 3 instead of
   being run from the working directory, which is usually the repository being scanned.
   The same path given as `-OCIRunner` is used as written, as before.
+- **`./ash` keeps the container's stdin open for the commands that read it, not for
+  whole command groups.** `./ash results inspect findings` now gets its keyboard
+  input, as `./ash inspect findings` does. `config wizard`, `inspect findings`,
+  `results inspect findings` and `mcp` keep stdin open, and so does `config lint` when
+  it is given `--fix` or `--fix-unused` and none of `-y`, `--yes` and
+  `--non-interactive`, the runs of it that ask a question. The other commands of
+  `config` and `inspect`, such as `config get` and `inspect sarif-fields`, and a
+  `config lint` that asks nothing, read nothing and no longer take the caller's stdin,
+  so a `while read` loop that runs one of them keeps its remaining lines.
+- **`ash --express` no longer hands `ash container build` and a bare `ash results` to
+  the express daemon, and no longer takes an option's value for a command name.** The
+  client did not know the `container` and `results` groups, so it took both for scans
+  and sent them to a running daemon; they now run directly, as every other command
+  that is not a scan does. And a scan whose option value spells a command, as `report`
+  does in `--output-dir report` and `config` in `--source-dir config`, was kept off the
+  daemon for that reason; the word is now read as the option's value and the scan can
+  use the daemon.
+- **`set_source_image` reads a reference's registry as the image tools do.** A first
+  segment with an uppercase letter (`Intranet/app:1`) names a registry host, so that host
+  must be on `ASH_MCP_IMAGE_ALLOWED_REGISTRIES` where it was read as Docker Hub;
+  `index.docker.io` counts as `docker.io` in the list and in a reference; and grype's
+  `purl:` and `cpe:` input prefixes are refused like the other source schemes.
+- **trivy's image findings keep their package, and its layer pass needs a digest.** An
+  image scan now writes `package_name`, `package_version` and `fix_available` on each
+  trivy vulnerability, as grype's does, without reading a lockfile of the scanned
+  directory. The second run that fills `layer_digest` needs a saved archive or layout,
+  or a reference that carries its digest, even when an engine is detected, and a time
+  budget it cannot work out no longer fails the scan.
 
 ### Features
 
@@ -421,9 +449,23 @@
   scanner's results directory instead of below checkov's working directory, the
   filesystem root. A directory set in `CKV_GITLAB_CONF_DIR_NAME`,
   `CKV_GITHUB_CONF_DIR_NAME` or `CKV_BITBUCKET_CONF_DIR_NAME` is used as set.
+- A saved image archive whose `manifest.json` or `index.json` is a link, and a saved
+  image or OCI layout whose record is JSON nested too deeply to parse, now name no digest
+  instead of raising; their ids key on the payload path.
+- The `resource_id` of a checkov finding no longer changes when a check at the
+  resource's other line range starts to fail. An id that a file gives at two line
+  ranges is dropped from its findings, and the checks that passed now count as
+  places, as the ones that failed already did.
 - Listed `GIT_CONFIG_*` environment entries are refused for scanners that need
   git `safe.directory` (opengrep); remove the entry from the environment list to
   run such a scanner.
+- `ash config validate` and `ash config lint` no longer warn that an absolute `path` in
+  `ignore_paths` or `suppressions` matches nothing when it can name a file outside the
+  scan root, such as a converted file under a container scan's `/out` or a path inside
+  an image; such a file keeps its absolute path, and the pattern is compared with it as
+  written. They still warn about an absolute path under the scan root, one that names
+  something in it, one with a `.` or `..` component, and `/`, and the warning now says
+  the path matches nothing in the scan root.
 
 ## v3.8.0 (2026-11-12)
 

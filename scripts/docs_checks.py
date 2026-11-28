@@ -895,8 +895,10 @@ def marker_problems(block: Block, root: Path) -> list[str]:
             )
         if lang in WINDOWS_SHELLS or lang in ("zsh", "fish"):
             problems.append(
-                f"{lang} blocks cannot run in the docs job (it executes bash on Linux); "
-                f'mark it <!-- doctest: illustrative reason="..." -->'
+                f"{lang} blocks cannot run in the docs job (it executes bash on Linux): "
+                "write the example as a bash or console block that runs, or in prose. A "
+                "new illustrative marker is refused (see 'The illustrative ratchet' on "
+                "the contributor page)"
             )
         return problems
 
@@ -1368,7 +1370,10 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # ---------------------------------------------------------------------------
 #
 # ``<!-- doctest: illustrative reason="..." -->`` keeps a block out of the runs, and the
-# docs are moving to blocks that all run. The markers that exist today are frozen in a
+# docs are moving to blocks that all run. Two other markers keep a block out of them the
+# same way: ``runner=none reason="..."``, which keeps a pipeline from its CI runner, and
+# a bare ``save-as=<path>`` on a shell or Python block, which saves it and never runs it
+# (``run save-as=<path>`` saves and runs it). The markers that exist today are frozen in a
 # seed that may only shrink.
 #
 # THE SEED. One file per page under ILLUSTRATIVE_SEED_DIR, so that changes converting
@@ -1376,9 +1381,11 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # encoded (illustrative_seed_name: a page has one name, and a name gives back one page).
 # A line is the page's path, a tab, and the marker's reason with its whitespace
 # collapsed, one line for each marker the parser binds to a block, in the order of the
-# page. A marker that binds to no block (one inside an example fence, in a table cell,
-# or with a blank line before its fence) governs nothing and has no line. A
-# ``.md.template`` and the page it renders to have a marker each, so a file each.
+# page: ``runner=none: `` comes before the reason of a runner=none marker, and a bare
+# save-as marker's line is ``save-as=<path>``. A marker that binds to no block (one
+# inside an example fence, in a table cell, or with a blank line before its fence)
+# governs nothing and has no line. A ``.md.template`` and the page it renders to have a
+# marker each, so a file each.
 #
 # THE SEED CHECK, in check_markers: a marker the seed does not list is a finding, and so
 # is a seed line no marker matches, so a commit that converts a block deletes its line
@@ -1391,20 +1398,31 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 # with no UNEXECUTED_SEED_FILE is not held to that: the pages the unit tests write in a
 # temporary root are checked without either. This checkout has both, and
 # tests/unit/docs/test_illustrative_ratchet.py fails when it stops having them.
+# Converting the last page deletes its seed file, and git keeps no empty directory, so
+# ILLUSTRATIVE_SEED_DIR/.gitkeep is what keeps the directory, and with it the check.
 #
 # AGAINST RELABELING. Fencing a bash block as ``text`` takes it out of the runs with no
 # marker, so the seed check never sees it. A block in a language nothing runs (the
-# family "other": text and the rest, groovy aside) that shows an ``ash`` command line or
-# a ``$`` prompt line is a finding, unless it is the output of the run block above it
-# (output_samples), or the page is a record of a past release (is_historical_doc) or one
-# a generator writes (is_generated_page: the repository's list of those names the page,
-# and the banner that opens it names the generator the list gives it), or
-# UNEXECUTED_SEED_FILE lists it. That seed holds a line for each such block of a page a
-# person writes, as measured at main: the page's path, a tab, and the block's first
-# command. It is read like the illustrative seed, and may only shrink. The journey
-# pages (getting-started/local.md and ci.md, and their templates) open with a banner
-# too, but their blocks are written by hand in a journey file, so the list does not
-# name them and they are read like any page.
+# family "other": text and the rest, groovy aside) that shows an ``ash`` command line, a
+# ``$`` prompt line, or a line that starts with a program (_program_line: ASH, a
+# container runtime, uv, uvx, pip, git or aws, after a ``%``, ``PS>`` or ``C:\>``
+# prompt, environment assignments and a wrapper such as ``sudo``) is a finding, unless
+# it is the output of the run block above it
+# (output_samples), or the page is a record of a past release (is_historical_doc), or
+# the block is the usage line of a command on a page a generator writes
+# (is_generated_page: the repository's list of those names the page, and the banner
+# that opens it names the generator the list gives it; is_usage_line: the program, the
+# command's path, ``[OPTIONS]`` and a placeholder for each argument), or
+# UNEXECUTED_SEED_FILE lists it. A generator prints a usage line from its command tree,
+# and the freshness test holds the page to that output, so no person has a seed to keep
+# for one. It fences the examples that a person wrote in a command's help text as
+# ``text`` too, which keeps them out of the runs with no marker, so those are counted
+# like the blocks of any page. The seed holds a line for each such block, as measured at
+# main: the page's path, a tab, and the block's first command. It is read like the
+# illustrative seed, and may only shrink. The journey pages (getting-started/local.md
+# and ci.md, and their templates) open with a banner too, but their blocks are written
+# by hand in a journey file, so the list does not name them and they are read like any
+# page.
 
 #: The illustrative seed: one file per page, in this directory.
 ILLUSTRATIVE_SEED_DIR = "docs/illustrative-seed"
@@ -1416,6 +1434,57 @@ UNEXECUTED_SEED_FILE = "scripts/docs_unexecuted_commands_seed.tsv"
 _PAGE_SUFFIXES = (".md", ".md.template")
 
 _PROMPT_LINE = re.compile(r"^\s*\$ +(?P<command>\S.*)$")
+#: The prompts that are not a ``$``: a ``%`` (csh and zsh), PowerShell's ``PS>`` or
+#: ``PS C:\path>``, and the Windows command prompt's ``C:\>`` or ``C:\path>``.
+_OTHER_PROMPT = re.compile(r"^\s*(?:%\s+|PS(?: [^>\n]*)?>\s*|[A-Za-z]:\\[^>\n]*>\s*)")
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+#: Words that run the next word as a command, and so may stand in front of a program.
+_WRAPPERS = frozenset({"sudo", "env", "time", "nohup", "exec", "command"})
+#: The options of each wrapper that take a value, as its manual page lists them: the next
+#: word, or the rest of the word an option is written in (``-uroot``), is that value and no
+#: program, so ``sudo -u ash ls`` runs ``ls`` as the user ``ash``. Every other option of a
+#: wrapper (``-E``, ``-H``, ``-i``, ``-p``, ``--``) stands alone.
+_WRAPPER_VALUE_OPTIONS = {
+    "sudo": frozenset(
+        {
+            "-C",
+            "-D",
+            "-R",
+            "-T",
+            "-U",
+            "-g",
+            "-p",
+            "-r",
+            "-t",
+            "-u",
+            "--chdir",
+            "--chroot",
+            "--close-from",
+            "--command-timeout",
+            "--group",
+            "--host",
+            "--other-user",
+            "--prompt",
+            "--role",
+            "--type",
+            "--user",
+        }
+    ),
+    "env": frozenset(
+        {"-C", "-S", "-a", "-u", "--argv0", "--chdir", "--split-string", "--unset"}
+    ),
+    "time": frozenset({"-f", "-o", "--format", "--output"}),
+    "exec": frozenset({"-a"}),
+    "nohup": frozenset(),
+    "command": frozenset(),
+}
+#: The programs a line may start with, besides ASH_PROGRAMS and CONTAINER_RUNTIMES, to
+#: show a command in a block nothing runs.
+_OTHER_PROGRAMS = frozenset({"uv", "uvx", "pip", "git", "aws"})
+#: What a ``runner=none`` marker's seed line puts before its reason, and what a bare
+#: ``save-as=`` marker's line is made of: both say which marker the line stands for.
+RUNNER_NONE_PREFIX = f"runner={CI_RUNNER_NONE}: "
+SAVE_ONLY_PREFIX = f"{SAVE_AS}="
 
 
 def illustrative_seed_name(page: str) -> str:
@@ -1448,21 +1517,36 @@ def illustrative_seed_page(name: str) -> str | None:
     return page if illustrative_seed_name(page) == name else None
 
 
-def illustrative_markers(page: Page) -> list[tuple[int, str]]:
-    """(line, reason) of each illustrative marker bound to a block of ``page``, in page
-    order: the markers the seed lists.
+def _collapsed(reason: object) -> str:
+    """``reason`` with each run of whitespace read as one space; empty if it is no text."""
+    return " ".join(reason.split()) if isinstance(reason, str) else ""
 
-    A reason has each run of whitespace read as one space, which is how the seed holds
-    it, so two spellings of one reason are one reason. A marker with no reason
-    (marker_problems reports it) reads as the empty string.
+
+def illustrative_markers(page: Page) -> list[tuple[int, str]]:
+    """(line, text) of each marker bound to a block of ``page`` that keeps the block out
+    of the runs, in page order: the markers the seed lists.
+
+    That is an ``illustrative`` marker, with its reason; a ``runner=none`` marker, which
+    keeps a pipeline from its runner and whose reason follows the same rules, as
+    ``runner=none: <reason>``; and a bare ``save-as=<path>`` marker on a shell or Python
+    block, which saves the block and never runs it, as ``save-as=<path>`` (a block saved
+    with ``run`` runs, and a saved config, Dockerfile or text block is a file and no
+    command). A reason has each run of whitespace read as one space, which is how the
+    seed holds it, so two spellings of one reason are one reason. A marker with no
+    reason (marker_problems reports it) reads as the empty string.
     """
     found: list[tuple[int, str]] = []
     for block in page.blocks:
         marker = block.marker
-        if marker is not None and marker.mode == "illustrative":
-            reason = marker.keys.get("reason")
-            text = " ".join(reason.split()) if isinstance(reason, str) else ""
-            found.append((marker.line, text))
+        if marker is None:
+            continue
+        if marker.mode == "illustrative":
+            found.append((marker.line, _collapsed(marker.keys.get("reason"))))
+        elif marker.mode == "config" and marker.keys.get("runner") == CI_RUNNER_NONE:
+            reason = _collapsed(marker.keys.get("reason"))
+            found.append((marker.line, RUNNER_NONE_PREFIX + reason if reason else ""))
+        elif block.mode == "save" and block.family in ("shell", "python"):
+            found.append((marker.line, f"{SAVE_ONLY_PREFIX}{block.save_as or ''}"))
     return found
 
 
@@ -1477,13 +1561,78 @@ def _continued(lines: list[str], index: int, command: str) -> str:
     return command
 
 
+def _after_options(words: list[str], index: int, takes_value: frozenset[str]) -> int:
+    """The index of the first word of ``words`` from ``index`` on that is no option of a
+    wrapper, nor the value of one.
+
+    An option is a word that starts with ``-``. A long option written ``--user=root``
+    carries its value; one written ``--user root`` is in ``takes_value`` and takes the
+    next word; a cluster of short options (``-Eu root``) ends at the first letter that is
+    in ``takes_value``, which takes the rest of the word (``-uroot``) or, as the last
+    letter, the next word. ``--`` ends the options. A value with a space in it, quoted,
+    is read as two words.
+    """
+    while index < len(words) and words[index].startswith("-") and words[index] != "-":
+        word = words[index]
+        index += 1
+        if word == "--":
+            break
+        if word.startswith("--"):
+            if "=" not in word and word in takes_value:
+                index += 1
+            continue
+        for position, letter in enumerate(word[1:], start=2):
+            if f"-{letter}" in takes_value:
+                if position == len(word):
+                    index += 1
+                break
+    return index
+
+
+def _program_line(line: str) -> str | None:
+    """The command ``line`` shows when it starts with a program, or None.
+
+    A program is ASH under any of its names, a container runtime, ``uv``, ``uvx``,
+    ``pip``, ``git`` or ``aws``, and it may follow a ``%``, ``PS>`` or Windows command
+    prompt (a ``$`` prompt is read by _PROMPT_LINE, for any command), environment
+    assignments, and a wrapper such as ``sudo`` with all its options and their values
+    (``sudo -E -H``, ``sudo -u root``): the program is the first word after those, so a
+    user named ``ash`` is no program. It must have an argument: a word alone is prose.
+    The command is the line after its prompt, which is how the seed names it.
+    """
+    text = _OTHER_PROMPT.sub("", line, count=1).strip()
+    words = text.split()
+    index = 0
+    while index < len(words):
+        if _ENV_ASSIGNMENT.match(words[index]):
+            index += 1
+        elif words[index] in _WRAPPERS:
+            takes_value = _WRAPPER_VALUE_OPTIONS.get(words[index], frozenset())
+            index = _after_options(words, index + 1, takes_value)
+        else:
+            break
+    if index + 1 >= len(words):
+        return None
+    program = words[index]
+    if (
+        program in ASH_PROGRAMS
+        or program in CONTAINER_RUNTIMES
+        or program in _OTHER_PROGRAMS
+    ):
+        return text
+    return None
+
+
 def _first_command(block: Block) -> str | None:
     """The first command a block shows, without its prompt and with its words one space
     apart; None when it shows none.
 
     A command is an ``ash`` command line (ash_lines, which reads a diff as the lines it
-    adds and keeps) or any line that is a ``$`` prompt and a command. Whichever comes
-    first names the block, and where one line is both, it is read as an ash line.
+    adds and keeps), any line that is a ``$`` prompt and a command, or a line that starts
+    with a program (_program_line), so that a block does not leave the count by showing
+    its command behind ``uvx``, ``sudo``, an environment assignment or another prompt.
+    Whichever comes first names the block, and where one line is both, it is read as an
+    ash line.
     """
     first_ash = ash_lines(block.body, block.lang)[:1]
     lines = block.body.split("\n")
@@ -1495,7 +1644,50 @@ def _first_command(block: Block) -> str | None:
         prompt = _PROMPT_LINE.match(line)
         if prompt:
             return " ".join(_continued(lines, index, prompt.group("command")).split())
+        program = _program_line(line)
+        if program is not None:
+            return " ".join(_continued(lines, index, program).split())
     return " ".join(first_ash[0][1].split()) if first_ash else None
+
+
+#: What a command's name is in the usage line a CLI reference generator prints: a word of
+#: lower-case letters, digits and hyphens.
+_USAGE_COMMAND_WORD = re.compile(r"[a-z][a-z0-9-]*")
+#: What click prints for an argument after ``[OPTIONS]``: a placeholder in brackets for
+#: one that is optional, in braces as the CLI spells a required one, or in capitals as
+#: click spells it when the CLI names no metavar, with ``...`` after it for one that
+#: takes more than a value. ``COMMAND [ARGS]...`` is this too.
+_USAGE_PLACEHOLDER = re.compile(
+    r"(?:\[[^\s\[\]{}]+\]|\{[^\s\[\]{}]+\}|[A-Z][A-Z0-9_]*)(?:\.\.\.)?"
+)
+_USAGE_OPTIONS = "[OPTIONS]"
+
+
+def is_usage_line(command: str) -> bool:
+    """Whether ``command`` has the shape of the usage line that a generator of the CLI
+    reference prints for a command (scripts/generate_cli_docs.py, from click's own
+    usage): the program, the command's path, ``[OPTIONS]``, and a placeholder for each
+    argument and nothing else, as in ``ash config get [OPTIONS] [config_path]``.
+
+    Click prints ``[OPTIONS]`` for every command, since ``--help`` is an option, and
+    prints only placeholders after it. So an example, which is a command with values
+    (``ash config lint --fix``), a flag before or after ``[OPTIONS]``, or a bare word
+    where a placeholder belongs, is not a usage line, and neither is a command that
+    starts with another program. The shape names no page: whether a block of a page may
+    be left out for having it is is_generated_page's to say.
+    """
+    words = command.split()
+    if not words or words[0] not in ASH_PROGRAMS:
+        return False
+    path = 1
+    while path < len(words) and _USAGE_COMMAND_WORD.fullmatch(words[path]):
+        path += 1
+    pieces = words[path:]
+    return (
+        bool(pieces)
+        and pieces[0] == _USAGE_OPTIONS
+        and all(_USAGE_PLACEHOLDER.fullmatch(piece) for piece in pieces)
+    )
 
 
 def unexecuted_command_blocks(
@@ -1507,18 +1699,26 @@ def unexecuted_command_blocks(
     A block of the family "other" (text, markdown, diff, ...) holding an ash command
     line or a ``$`` prompt line. Not the output of a run block (output_samples), which
     the runner compares with what that block prints; not groovy, whose ``sh`` steps the
-    CLI check parses; and nothing in a record of a past release, or in a page a
-    generator writes (is_generated_page, with ``generated`` as read_generated_pages
-    gives it). The freshness test holds that page to the generator's output, and a
-    usage line printed from the CLI's own command tree is no command the page tells a
-    reader to run, so a person has no seed to keep for it. A page that only opens with
-    a banner is read: a journey page does. A block a generator writes between the
-    markers of a hand-written page (generated_block_rows) gets the same rule as a
-    generated page: its fence is not an unexecuted command block, whatever it shows.
+    CLI check parses; and nothing in a record of a past release.
+
+    A page that a generator writes (is_generated_page, with ``generated`` as
+    read_generated_pages gives it) is read for what the generator does not print. The
+    freshness test holds the page to the generator's output, and a usage line printed
+    from the CLI's own command tree (is_usage_line) is no command the page tells a
+    reader to run, so a person has no seed to keep for it: a block whose first command
+    is one is left out. Every other block of the page is counted, the examples that a
+    person wrote in a command's help text among them. The generator fences them as
+    ``text``, so they never reach the runs, and nothing but this count would track them.
+    A page that only opens with a banner is read in full: a journey page does.
+
+    A block a generator writes between the markers of a hand-written page
+    (generated_block_rows) is left out whole, whatever it shows, because the freshness
+    test holds it to its generator's output.
     """
-    if is_historical_doc(page.rel) or is_generated_page(page, generated):
+    if is_historical_doc(page.rel):
         return []
     samples = output_samples(page)
+    generated_page = is_generated_page(page, generated)
     written = generated_block_rows(page)
     found: list[tuple[Block, str]] = []
     for block in page.blocks:
@@ -1527,8 +1727,13 @@ def unexecuted_command_blocks(
         if block.fence_line in written:
             continue
         command = _first_command(block)
-        if command is not None:
-            found.append((block, command))
+        if command is None:
+            continue
+        # A usage line is left out only where a generator prints it; the same block on a
+        # page a person writes is read like any other block.
+        if generated_page and is_usage_line(command):
+            continue
+        found.append((block, command))
     return found
 
 
@@ -1610,8 +1815,8 @@ def write_seeds(files: Iterable[Path], root: Path = REPO_ROOT) -> list[str]:
     The seed is written once, from main. Where a seed already exists this refuses, so
     the markers added since are never written into it: a seed only shrinks, by deleting
     lines. It refuses too (ValueError) when the list of generated pages under ``root``
-    cannot be read, because a seed written without it would list the blocks of every
-    generated page. ``python scripts/docs_checks.py write-seeds`` runs it on this
+    cannot be read, because a seed written without it would list the usage lines of
+    every generated page. ``python scripts/docs_checks.py write-seeds`` runs it on this
     checkout.
     """
     refuse_a_second_seed(root)
@@ -1776,16 +1981,37 @@ def _seed_findings(
                     line.number,
                     f"this seed line is for {rel}, which does not exist: delete the "
                     "line, and its file once it has none, in the commit that deletes "
-                    "or renames the page",
+                    f"or renames the page. Keep {ILLUSTRATIVE_SEED_DIR}/.gitkeep, and "
+                    f"{UNEXECUTED_SEED_FILE} even when it is empty: they keep the "
+                    "checks armed",
                 )
                 for line in lines
             ]
     return findings
 
 
+def _unlisted_marker(text: str) -> str:
+    """The finding for a marker the illustrative seed does not list, by what ``text``
+    says the marker is (illustrative_markers)."""
+    if text.startswith(RUNNER_NONE_PREFIX):
+        reason = text[len(RUNNER_NONE_PREFIX) :]
+        what = f"this runner=none marker (reason {reason!r})"
+    elif text.startswith(SAVE_ONLY_PREFIX):
+        what = f"this marker, which saves a block and never runs it ({text!r}),"
+    else:
+        what = f"this illustrative marker (reason {text!r})"
+    return (
+        f"{what} is not in the illustrative seed, and the seed only shrinks: make the "
+        "block run (a saved block runs with run save-as=), or delete it. A block that "
+        "cannot run yet is no reason to add a line; see 'The illustrative ratchet' on "
+        "the contributor page"
+    )
+
+
 def illustrative_seed_problems(pages: Sequence[Page], root: Path) -> list[Finding]:
-    """The illustrative markers of ``pages`` are the lines of the seed under ``root``.
-    Nothing when ``root`` has no seed directory (see the section above)."""
+    """The markers of ``pages`` that keep a block out of the runs are the lines of the
+    seed under ``root``. Nothing when ``root`` has no seed directory (see the section
+    above)."""
     read = read_illustrative_seed(root)
     if read is None:
         return []
@@ -1795,12 +2021,7 @@ def illustrative_seed_problems(pages: Sequence[Page], root: Path) -> list[Findin
         seed,
         root,
         illustrative_markers,
-        lambda reason: (
-            f"this illustrative marker (reason {reason!r}) is not in the illustrative "
-            "seed, and the seed only shrinks: make the block run, or delete it. A "
-            "block that cannot run yet is no reason to add a line; see 'The "
-            "illustrative ratchet' on the contributor page"
-        ),
+        _unlisted_marker,
         lambda reason: (
             f"the seed has a line for this page with the reason {reason!r}, and no "
             "illustrative marker on the page has it: delete the line in the commit "
@@ -1813,9 +2034,9 @@ def unexecuted_command_problems(pages: Sequence[Page], root: Path) -> list[Findi
     """The blocks of ``pages`` that show a command nothing runs are the lines of the
     unexecuted-command seed under ``root``. Nothing when ``root`` has no such seed.
 
-    The pages a generator writes, which are not read, are the ones the list under
-    ``root`` names (read_generated_pages). A list it cannot read is a finding, and
-    names no page.
+    The pages a generator writes, whose usage lines are not read (is_usage_line), are the
+    ones the list under ``root`` names (read_generated_pages). A list it cannot read is
+    a finding, and names no page.
     """
     read = read_unexecuted_seed(root)
     if read is None:
@@ -1833,9 +2054,10 @@ def unexecuted_command_problems(pages: Sequence[Page], root: Path) -> list[Findi
         ],
         lambda command: (
             f"this block shows a command that nothing runs ({command!r}): fence it as "
-            "bash so the docs runner executes it, mark it output if it is what the "
-            "block above prints, or write the command in prose. The blocks like this "
-            f"are listed in {UNEXECUTED_SEED_FILE}, which only shrinks"
+            "bash so the docs runner executes it (as console when it shows $ prompts "
+            "with their output), mark it output if it is what the block above prints, "
+            "or write the command in prose. The blocks like this are listed in "
+            f"{UNEXECUTED_SEED_FILE}, which only shrinks"
         ),
         lambda command: (
             f"no block on this page shows this command ({command!r}), which this seed "
@@ -5904,6 +6126,26 @@ def validate_with_outside_modules(
 
 
 _CHILD_RESULT = "ash-docs-checks-result:"
+#: The names the child validator takes from this process's environment, when set:
+#: what an import needs, and what a Windows Python needs from a parent that builds its
+#: environment. SYSTEMROOT lets the interpreter start. PROCESSOR_ARCHITECTURE (and
+#: PROCESSOR_ARCHITEW6432 under WOW64) is where ``platform.machine()`` reads the CPU
+#: type on a Windows Python 3.11: without it the answer is "", polars' import-time CPU
+#: check then reads no CPU flags and raises "unknown feature flag: 'sse3'", and no
+#: block whose modules import ASH could be validated there. The Windows names are the
+#: ones the test suite's child builders carry (WINDOWS_CHILD_START_NAMES in
+#: tests/utils/helpers.py). None of them holds a credential.
+_CHILD_ENVIRONMENT_NAMES = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "VIRTUAL_ENV",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_ARCHITEW6432",
+)
 #: Run as ``python -I -c``: loads this file by path and validates one block with the
 #: modules it loads, then prints the problems as one JSON line.
 _CHILD_VALIDATOR = f"""
@@ -5970,12 +6212,13 @@ def _outside_module_problems(
         if not on_page and not any(_module_exists(n.split(".")[0]) for n in modules):
             return None
         # The page's code runs here, so it gets a private HOME and none of the
-        # caller's credentials or tokens: only what an import needs.
+        # caller's credentials or tokens: only what an import needs, and what a
+        # Windows Python needs to start (_CHILD_ENVIRONMENT_NAMES).
         home = Path(scratch) / "home"
         home.mkdir()
         environment = {
             name: os.environ[name]
-            for name in ("PATH", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
+            for name in _CHILD_ENVIRONMENT_NAMES
             if name in os.environ
         }
         environment.update(

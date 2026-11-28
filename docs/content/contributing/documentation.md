@@ -34,7 +34,7 @@ samples.
 | Language | Unmarked, it is | Checked |
 |----------|-----------------|---------|
 | `bash`, `sh`, `shell`, `console` | `run` | executed by the runner; every `ash` line parsed |
-| `zsh`, `fish`, `powershell`, `pwsh`, `ps1`, `cmd`, `bat` | an error | must be marked `illustrative` |
+| `zsh`, `fish`, `powershell`, `pwsh`, `ps1`, `cmd`, `bat` | an error | rewrite it as a `bash` or `console` block that runs, or in prose: a new `illustrative` marker is refused (see [The illustrative ratchet](#the-illustrative-ratchet)) |
 | `yaml`, `yml`, `json`, `jsonc`, `toml` | `config kind=ash` | parsed, and validated as an ASH config |
 | `python`, `py` | `run` | executed by the runner; must parse; imports must resolve |
 | `dockerfile` | not executed | `ash` in `RUN`, `CMD`, and `ENTRYPOINT` lines parsed |
@@ -74,13 +74,14 @@ Values with spaces go in double quotes. Unknown modes and keys are errors.
 | `<!-- doctest: run env="ASH_OFFLINE=YES,LANG=C" -->` | set these variables for this block only |
 | `<!-- doctest: run fixture=empty -->` | start a new session in another fixture project |
 | `<!-- doctest: run fresh -->` | start a new session in the default fixture |
-| `<!-- doctest: illustrative reason="needs AWS credentials" -->` | do not run the block |
+| `<!-- doctest: illustrative reason="needs AWS credentials" -->` | do not run the block; the marker is closed to new blocks (see [The illustrative ratchet](#the-illustrative-ratchet)) |
 
-`illustrative` needs a reason a reader would accept, such as "needs Docker", "installs
-from the network", "needs AWS credentials", "Windows only", or "runs in CI". "TODO",
-"TBD", and "n/a" are rejected, and so is a reason that names no cause, such as "example"
-or "illustrative example only". An illustrative block is still checked statically: its
-`ash` lines must parse, and a Python block must still parse and import.
+A new `illustrative` marker is refused: write the example so that it runs, or as prose.
+The markers that remain need a reason a reader would accept, such as "needs Docker",
+"installs from the network", "needs AWS credentials", "Windows only", or "runs in CI".
+"TODO", "TBD", and "n/a" are rejected, and so is a reason that names no cause, such as
+"example" or "illustrative example only". An illustrative block is still checked
+statically: its `ash` lines must parse, and a Python block must still parse and import.
 
 The runner treats a page as one session, the way a reader follows a tutorial:
 
@@ -96,9 +97,9 @@ The runner treats a page as one session, the way a reader follows a tutorial:
 - `HOME` is private to the session, `ash` is the one in the project's virtual
   environment, and downloads fail at once: every proxy variable points at a port that
   refuses connections, and uv, pip, and npm run offline. A block that needs the network
-  must be `illustrative`. This is not a sandbox: a program that ignores the proxy
-  variables can still connect, and blocks run as you, so run the examples only on docs
-  you trust.
+  cannot run: show the command in prose, or point the block at a fixture that works
+  offline. This is not a sandbox: a program that ignores the proxy variables can still
+  connect, and blocks run as you, so run the examples only on docs you trust.
 
 This block runs in CI. The default fixture has one finding, so the scan exits with 2:
 
@@ -109,16 +110,22 @@ ash --source-dir . --scanners detect-secrets --offline --no-progress
 
 ### The illustrative ratchet
 
-The `illustrative` blocks only get fewer. The ones that existed when the ratchet was
-added are listed in
+The `illustrative` blocks only get fewer, and a new marker is refused. The ones that
+existed when the ratchet was added are listed in
 [`docs/illustrative-seed`](https://github.com/awslabs/automated-security-helper/tree/main/docs/illustrative-seed),
-one file for each page, and that list only shrinks. A file is named by its page's path
-with every `/` written `%2F`: the page `docs/content/how-to/install.md` is listed in
-`docs%2Fcontent%2Fhow-to%2Finstall.md.tsv`, and its template, `install.md.template`, in
-a file of its own. A line is the page's path, a tab, and the marker's reason with its
-words one space apart. Each marker that sits directly above a block has one line. A
-marker shown inside an example fence, like the one under [Markers](#markers), or in a
-table cell governs no block and has none.
+one file for each page, and that list only shrinks. Two other markers keep a block out of
+the runs in the same way, so the list counts them too: `runner=none`, which keeps a CI
+pipeline from its runner, and a bare `save-as=` on a shell or Python block, which saves
+the block and never runs it (write `run save-as=` to save it and run it). A file is
+named by its page's path written as `urllib.parse.quote(path, safe="")` writes it, then
+`.tsv`: every `/` is `%2F` and every `%` is `%25`, so the page
+`docs/content/how-to/install.md` is listed in `docs%2Fcontent%2Fhow-to%2Finstall.md.tsv`,
+and its template, `install.md.template`, in a file of its own. A line is the page's path,
+a tab, and the marker's reason with its words one space apart; the line of a `runner=none`
+marker has `runner=none: ` before the reason, and that of a bare `save-as=` marker is
+`save-as=<path>`. Each marker that sits directly above a block has one line. A marker
+shown inside an example fence, like the one under [Markers](#markers), or in a table cell
+governs no block and has none.
 
 Two checks hold the list to that:
 
@@ -130,37 +137,61 @@ Two checks hold the list to that:
   which fails on any line the list did not have where your branch left `main`. That
   catches the line added to cover a new marker, which the first check cannot, and it
   also fails a reworded reason, a second copy of a line, and a line moved to another
-  page. A page that moves takes its lines with it, but move it in a pull request of its
-  own: git pairs a moved page with its old path from 50% similarity, and a page moved
-  and rewritten at once reads as new lines.
+  page. It fails too when a seed is gone, where your branch left `main` (what deleting
+  the last page's file does without the `.gitkeep` of step 3) or at your branch's head
+  (what deleting `docs/illustrative-seed`, or the command file named below, does; that
+  file stays, empty, when no line is left in it). A page
+  that moves takes its lines with it only when you move them: do it in a pull request of
+  its own that changes nothing else in the page, because git pairs a moved page with its
+  old path from 50% similarity, and a page moved and rewritten at once reads as new
+  lines. Rename the page's seed file to the new page's name, and write the new path in
+  each of its lines; `markers` fails on both until you do.
 
 A block that cannot run yet is no reason to add a marker. To convert one:
 
-1. Delete the marker above the block. The block then runs as `run`, like its neighbors.
+1. Delete the marker above the block. A shell or Python block then runs as `run`, like
+   its neighbors, and a pipeline marked `runner=none` goes to its CI runner. A block
+   saved with `save-as=` alone is only saved, so write `run save-as=` on it. A block in
+   a language the runner has no interpreter for (`zsh`, `fish`, PowerShell) still cannot
+   run: rewrite it as `bash` or `console`, or in prose.
 2. Change what kept it from running: point it at a fixture, add `expect-exit`, make the
    command work offline, or replace it with one that does. An example that cannot run
    in the docs job at all is written in prose instead of a block.
 3. Delete the block's line from the page's file in `docs/illustrative-seed`, and the
-   file itself once it has no line left.
+   file itself once it has no line left. Keep `docs/illustrative-seed/.gitkeep`: git
+   keeps no empty directory, so without it the last file takes the directory with it, the
+   `markers` check stops holding the pages to a seed, and the ratchet job has nothing to
+   compare later changes with.
 4. Run the page and the static checks, as under
    [Run the checks locally](#run-the-checks-locally).
 
 Fencing a block as `text` takes it out of the runs with no marker, so the same list has
-a second part. A block in a language nothing runs that shows an `ash` command or a `$`
-prompt line fails `markers` unless it is the output sample of the block above it, or sits
-in a record of a past release (`CHANGELOG.md` and the notes under
-`.github/release-notes/`), or is listed in
+a second part. A block in a language nothing runs that shows a command fails `markers`
+unless it is the output sample of the block above it, or sits in a record of a past
+release (`CHANGELOG.md` and the notes under `.github/release-notes/`), or is listed in
 [`scripts/docs_unexecuted_commands_seed.tsv`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_unexecuted_commands_seed.tsv).
-That file holds a line for each such block as it was when the check was added: the
-page's path, a tab, and the block's first command. It only shrinks too. Fence the block
-as `bash`, or mark it `output`, and delete its line.
+A line shows a command when it follows a `$` prompt, or starts with `ash` (or another
+name of ASH), a container runtime (`docker`, `podman`, `finch`, `nerdctl`), `uv`, `uvx`,
+`pip`, `git` or `aws`, after an optional `%`, `PS>` or `C:\>` prompt, environment
+assignments and a wrapper such as `sudo`. That file holds a line for each such block as
+it was when the check was added: the page's path, a tab, and the block's first command.
+It only shrinks too. Fence the block as `bash` so the runner executes it, or as
+`console` when it shows `$` prompts with their output, or mark it `output`, or write the
+command in prose, and delete its line.
 
-The check does not read a page that a generator writes. A page is one when
-`REFERENCE_PAGES` in the freshness test lists it and the banner that opens it names the
-generator listed for it, as
+On a page that a generator writes, the check leaves out the usage lines and reads every
+other block. A page is one when `REFERENCE_PAGES` in the freshness test lists it and the
+banner that opens it names the generator listed for it, as
 [Add a generated reference page](#add-a-generated-reference-page) describes. The
-freshness test holds the page's text to that generator's output, so the usage line of a
-new command in the CLI reference needs no line in the seed. A banner alone is not
+freshness test holds the page's text to that generator's output, and a usage line is
+the program, the command's path, `[OPTIONS]` and a placeholder for each argument, as
+in `ash config get [OPTIONS] [config_path]`. It is no command the page tells a reader to
+run, so the usage line of a new command in the CLI reference needs no line in the seed.
+A block with values or flags is read like any block, because a person wrote it: the
+examples in a command's help text come out as `text` blocks of the CLI reference, so
+the seed lists each of them. A new example in a help text would be a new line the seed
+refuses, so show it where it runs: in a `bash` block of a how-to page, or have the
+generator fence the `Examples:` block of a help text as `bash`. A banner alone is not
 enough: the getting-started pages open with one, but a person writes their blocks in a
 journey file, so they are read like any other page, and so is a page that copies a
 banner.
@@ -281,8 +312,10 @@ earlier blocks changed to. An absolute path, a path containing `..`, and a path 
 goes through a symbolic link are refused, and the block fails; the static check
 reports the first two before CI runs. A marker without a mode may carry nothing but
 `save-as`. An `illustrative` block is never run or saved, so `illustrative` with
-`save-as` is an error: use a marker without a mode to save a block that must not run,
-such as a PowerShell script.
+`save-as` is an error. A shell or Python block saved with no mode is never run either,
+so the illustrative ratchet counts it like an `illustrative` block and refuses a new one
+(see [The illustrative ratchet](#the-illustrative-ratchet)): write `run save-as=<path>`
+to save the block and run it.
 
 The python check knows which modules a page saves. `save-as=my_plugins/scanner.py`
 makes `my_plugins` and `my_plugins.scanner` importable by every Python block of the
@@ -314,7 +347,9 @@ The keys follow these rules:
   GitHub workflow runs for `pull_request` when its `on:` lists that event, and for
   `push` otherwise, and a GitLab pipeline runs for `push`.
 - `runner=` takes only `none`, and then needs a `reason=` that follows the
-  `illustrative` rules. `reason=` goes with `runner=none` only.
+  `illustrative` rules. `reason=` goes with `runner=none` only. A `runner=none` block is
+  listed in the illustrative seed like an `illustrative` block, so a new one is refused
+  (see [The illustrative ratchet](#the-illustrative-ratchet)).
 - `azure-pipelines` blocks and YAML `jenkins` blocks have no runner. They take none of
   these keys and get the static checks only.
 - A `groovy` block must be marked `config kind=jenkinsfile`, with `runner=none` and a
@@ -897,7 +932,7 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | Message contains | Fix |
 |------------------|-----|
 | has no language | name the language; use `text` for output |
-| cannot run in the docs job | mark the Windows, zsh, or fish block `illustrative` with a reason |
+| cannot run in the docs job | the runner has no interpreter for the block's language (Windows shells, zsh, fish): write it as a `bash` or `console` block that runs, or in prose; a new `illustrative` marker is refused |
 | a blank line separates this marker | delete the blank line under the marker |
 | not directly followed by a fenced code block | move the marker to the line above its fence, or delete it |
 | unknown mode, is not a key of | use a mode and key from the tables above |
@@ -916,8 +951,8 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | names no earlier block on this page saved with, can extend only a block of its own kind, cannot also be saved | point `extends=` at a block above it, of its own kind, saved with `save-as=` at that path |
 | runner= takes only none, runner=none needs reason=, reason= goes with runner=none | mark a block no runner can run `runner=none reason="..."`, and give `reason=` only there |
 | is not in the illustrative seed | the list takes no new marker: make the block run, or take it out (see [the illustrative ratchet](#the-illustrative-ratchet)) |
-| the seed has a line for this page | the marker was converted or deleted: delete its line from the page's file in `docs/illustrative-seed`, and the file once it has no line left |
-| shows a command that nothing runs | fence the block as `bash` so the runner executes it, mark it `output` when it is what the block above prints, or write the command in prose |
+| the seed has a line for this page | the marker was converted or deleted: delete its line from the page's file in `docs/illustrative-seed`, and the file once it has no line left; keep `docs/illustrative-seed/.gitkeep` |
+| shows a command that nothing runs | fence the block as `bash` so the runner executes it (as `console` when it shows `$` prompts with their output), mark it `output` when it is what the block above prints, or write the command in prose |
 | no block on this page shows this command | the block was converted or deleted: delete its line from `scripts/docs_unexecuted_commands_seed.tsv` |
 | malformed seed line, is not the name of a page's seed file, which belongs in, which does not exist | a seed file has a line in the wrong shape, a name that is not its page's, a line for another page, or a line for a page that is gone: fix the file the finding names |
 | looks like a generated-block marker, marker is repeated, has no end marker, has no begin marker, comes before the begin marker, blocks do not nest, is closed at line, holds a carriage return | a pair of generated-block markers is not well formed: write the begin and end marker exactly as [Generated blocks in a hand-written page](#generated-blocks-in-a-hand-written-page) shows, each alone on its line, begin first, one pair for a name, no pair inside another, and with LF line ends |
@@ -937,7 +972,7 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | is not an option of any ash command | another program's option: put the program in the code span |
 | a plugin's code wrote this row | put the program in the span, or write `ash --config` for ASH's own; the page is generated, so change the text in the plugin's code |
 | The row sits between generated-block markers | a generator wrote this row, the one the message names: put the program in the span, or write `ash --config` for ASH's own, and change the text in that generator, not in the page |
-| placeholder | a run block cannot contain `<placeholder>`; use a real value or mark it `illustrative` |
+| placeholder | a run block cannot contain `<placeholder>`; use a real value, or show the command in prose |
 | `no __main__` | that module cannot be run with `python -m` |
 | names no action, has no input | a GitHub Actions `uses:` of this repository names a path or input that does not exist |
 
@@ -1063,8 +1098,9 @@ tools) is generated, never written by hand. To add one:
    when the code changes and the page does not, and checks the banner in the page's
    first 600 characters. The docs checks read the same entry: the check for commands
    shown in blocks that nothing runs
-   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page out only when
-   this entry names it and the banner from step 2 names the script the entry gives it.
+   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page's usage lines
+   out only when this entry names the page and the banner from step 2 names the script
+   the entry gives it.
 4. Add the page to `GOLDEN` in
    [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py),
    so a commit that changes it needs a `Snapshot-Update:` trailer.

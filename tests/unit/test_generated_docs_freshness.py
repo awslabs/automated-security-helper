@@ -109,6 +109,13 @@ REFERENCE_DIR = REPO_ROOT / "docs" / "content" / "reference"
 #: Every generated reference page: generator script -> the page it writes.
 #: generate_mcp_tool_reference.py also owns the agentic-plugins tool-reference.md, and
 #: its --check covers both files.
+#: scripts/docs_checks.py reads this dict as source, with ast.literal_eval, and never
+#: imports this module: its check for commands shown in blocks that nothing runs leaves
+#: a page's usage lines out only when this dict names the page. So keep it one literal
+#: dict of file names, assigned once at the top level of this module. A comprehension or
+#: a ``{**other}`` is refused with a finding; an ``update`` or a ``del`` after the
+#: literal is not seen, and a ``del`` would keep a page left out of that check after
+#: these tests stopped holding it to its generator.
 REFERENCE_PAGES = {
     "generate_cli_docs.py": "cli.md",
     "generate_config_reference.py": "configuration.md",

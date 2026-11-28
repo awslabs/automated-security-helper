@@ -1,1 +1,2 @@
 docs/content/how-to/export-reports.md	requires two saved ASH scan results files
+docs/content/how-to/export-reports.md	runner=none: one step of the workflow on how-to/ci/github-actions.md, which runs it

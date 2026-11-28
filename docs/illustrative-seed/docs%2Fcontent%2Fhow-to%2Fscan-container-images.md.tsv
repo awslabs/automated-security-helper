@@ -1,0 +1,2 @@
+docs/content/how-to/scan-container-images.md	needs a container runtime, network access and a registry that holds the image, and grype, syft and trivy installed on the host
+docs/content/how-to/scan-container-images.md	scans two images from a registry, which needs network access and grype, syft and trivy installed on the host

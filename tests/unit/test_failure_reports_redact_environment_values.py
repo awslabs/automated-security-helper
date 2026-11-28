@@ -1252,11 +1252,28 @@ def test_the_childs_environment_keeps_the_names_a_windows_python_needs(
     environment, and polars' import-time CPU check reads no CPU flags (and
     raises "unknown feature flag") when it answers "". The child's environment
     is built, not inherited, so the names a Windows Python needs must be
-    carried by the build. The stand-in values prove the carry on any
-    platform."""
-    expected = dict.fromkeys(WINDOWS_CHILD_START_NAMES, "stand-in")
-    for name, value in expected.items():
-        monkeypatch.setenv(name, value)
+    carried by the build.
+
+    Where the host sets none of the names (Linux, macOS), stand-in values prove
+    the carry. On Windows they are the child's own start values, and a stand-in
+    breaks the child it is meant to prove: with SYSTEMROOT set to one, the
+    child's ``import asyncio`` died at ``import _overlapped`` with WinError 10106
+    on every windows-latest leg, and on 3.11 a stand-in PROCESSOR_ARCHITEW6432 is
+    what ``platform.machine()`` answers. There the host's own values are what
+    the build must carry, and SYSTEMROOT and PROCESSOR_ARCHITECTURE are always
+    among them."""
+    if os.name == "nt":
+        expected = {
+            name: os.environ[name]
+            for name in WINDOWS_CHILD_START_NAMES
+            if name in os.environ
+        }
+        named = set(expected)
+        assert {"SYSTEMROOT", "PROCESSOR_ARCHITECTURE"} <= named, sorted(named)
+    else:
+        expected = dict.fromkeys(WINDOWS_CHILD_START_NAMES, "stand-in")
+        for name, value in expected.items():
+            monkeypatch.setenv(name, value)
     returncode, output, _ = _run_under_the_suites_conftest(
         tmp_path, _CONTAINMENT_CHILD.format(expected=expected), {}
     )

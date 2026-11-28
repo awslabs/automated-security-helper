@@ -16,3 +16,5 @@ automated_security_helper/plugin_modules/ash_snyk_plugins/README.md	needs the Sn
 automated_security_helper/plugin_modules/ash_snyk_plugins/README.md	needs the Snyk CLI and a Snyk account
 automated_security_helper/plugin_modules/ash_snyk_plugins/README.md	runs a scan that needs the Snyk CLI and a Snyk account
 automated_security_helper/plugin_modules/ash_snyk_plugins/README.md	runs a scan that needs the Snyk CLI and a Snyk account
+automated_security_helper/plugin_modules/ash_snyk_plugins/README.md	runner=none: a workflow for the reader's own repository, which needs a Snyk token
+automated_security_helper/plugin_modules/ash_snyk_plugins/README.md	runner=none: a pipeline for the reader's own project, which needs a Snyk token

@@ -1,0 +1,2 @@
+docs/content/docs/plugins/builtin/mcp-config.md	the script the converter writes for the entry above; running it would run sudo
+docs/content/docs/plugins/builtin/mcp-config.md	runs semgrep, whose default ruleset p/ci is fetched from the Semgrep registry over the network
