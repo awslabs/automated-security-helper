@@ -4289,6 +4289,9 @@ class ConfigValidator:
         built = None
         chain_resolved = True
         refused: Optional[ConfigFileRefused] = None
+        # What the build refuses in an edit of default_scanners.only, held as a
+        # scan's resolution holds it and reported below where that refusal stands.
+        held_selection: List[str] = []
         try:
             document, built = load_config_file(
                 config_path,
@@ -4307,6 +4310,7 @@ class ConfigValidator:
                     None if untrusted_config else the_operators_files(repository.trees)
                 ),
                 expect=expect,
+                selection_refusals=held_selection,
             )
         except ConfigFileRefused as refusal:
             document = refusal.document
@@ -4522,6 +4526,14 @@ class ConfigValidator:
         selection_ignored, selection_unknown = cls._ignored_default_scanners(
             repository, config_overrides, ash_config
         )
+        # An edit of default_scanners.only is refused where a scan refuses it. When
+        # no file of the chain is the repository's, this file's build is the scan's
+        # selection and its refusal stands, as resolve_config raises it. A scan of a
+        # chain that holds a repository file takes the selection from the operator's
+        # configuration and judges the edit there (confine_default_scanners), so the
+        # refusal of this build is not the scan's and is not reported.
+        if held_selection and refused is None and not repository.repository_files:
+            result.errors.append(result.redact(held_selection[0]))
         for place in selection_ignored:
             if place not in ignored_places:
                 ignored_places.append(place)

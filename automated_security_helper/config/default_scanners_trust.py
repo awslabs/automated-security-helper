@@ -16,6 +16,7 @@ from automated_security_helper.config.untrusted_source import (
     IN_TREE_OR_DELIVERED,
     UntrustedSource,
 )
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.override_key import split_override_key
 
@@ -43,7 +44,16 @@ def confine_default_scanners(
 
     replayed = [o for o in config_overrides or [] if _is_selection_override(o)]
     if replayed:
-        trusted_config = apply_config_overrides(trusted_config, replayed)
+        # The run's selection is this replay's result, so an edit of it is judged
+        # here, against the operator's selection: the command's own build judged
+        # it against a document the run does not take default_scanners from, and
+        # resolve_config set that refusal aside.
+        refused: List[str] = []
+        trusted_config = apply_config_overrides(
+            trusted_config, replayed, selection_refusals=refused
+        )
+        if refused:
+            raise ASHConfigValidationError(refused[0])
 
     wanted = trusted_config.default_scanners
     written = dict(repository.selection_written) if repository is not None else {}

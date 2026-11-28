@@ -813,19 +813,45 @@ def _say_once_per_run(kind: str, logged_path: str, text: str) -> None:
     ASH_LOGGER.warning(text, extra=NO_MARKUP)
 
 
-#: The selection lists whose empty value is no selection, by resolved key: the
-#: mode's default set runs, which outside precommit mode is every enabled scanner
-#: (``SelectionLayers.fold``, core/scanner_selection.py). A ``-=`` that would empty
-#: one is refused in a command's own build (``_refuse_an_edit_of_every_item``), as
-#: an exclusion that empties a selection is refused (``selection_after_exclusions``):
-#: the run would execute the default set, the scanners the removal took out
-#: included, where the list named the scanners to run. The empty value is the
-#: default, not a value that names every scanner, so every other edit is applied
-#: as written: ``+=`` onto it writes the names it lists, and ``-=`` from it finds
-#: nothing to remove.
-_EMPTY_MEANS_THE_DEFAULT_SELECTION: FrozenSet[Tuple[str, ...]] = frozenset(
-    {("default_scanners", "only"), ("precommit", "only_scanners")}
-)
+#: The selection lists whose empty value is no selection, by resolved key, each
+#: with the set its empty value runs and the key that adds scanners to that set.
+#: Empty, ``default_scanners.only`` runs the mode's default set, which outside
+#: precommit mode is every enabled scanner, and ``precommit.only_scanners`` the
+#: selection below it (``SelectionLayers.fold``, core/scanner_selection.py). The
+#: empty value is the default, not a list of names: ``+=`` onto it would narrow
+#: the run to the names it adds and ``-=`` from it would remove nothing, and a
+#: ``-=`` that would empty a list would run the default set where the list named
+#: the scanners to run, as an exclusion that empties a selection would
+#: (``selection_after_exclusions``). Each is refused, naming the replace form
+#: (``_refuse_an_edit_of_a_scanner_selection``).
+_EMPTY_MEANS_THE_DEFAULT_SELECTION: Mapping[Tuple[str, ...], Tuple[str, str]] = {
+    ("default_scanners", "only"): (
+        "the mode's default set of scanners",
+        "default_scanners.add",
+    ),
+    ("precommit", "only_scanners"): (
+        "the selection below it (default_scanners over the mode's default set)",
+        "precommit.add_scanners",
+    ),
+}
+
+#: The selection list a run takes from the operator's own configuration whenever
+#: ``resolve_config`` confines the load (a file of the chain is the repository's,
+#: or a client supplied the overrides): the run gets the trusted base's
+#: ``default_scanners`` with the operator's selection overrides replayed onto it
+#: (config/default_scanners_trust.py), which judges an edit it makes. So the
+#: command's own build holds its refusal of an edit of this list until the load
+#: knows which of the two the run uses (``selection_refusals``).
+_CONFINED_SELECTION: Tuple[str, ...] = ("default_scanners", "only")
+
+
+def _raise_a_held_refusal(config: AshConfig, refusals: Sequence[str]) -> None:
+    """Raise the first refusal *refusals* holds (``selection_refusals``), when it
+    holds one, redacted as ``load_config_file`` redacts an override's refusal."""
+    if refusals:
+        raise ASHConfigValidationError(
+            redact_values(refusals[0], config_environment_values(config))
+        )
 
 
 def _sentinel_of(resolved_keys: Sequence[str]) -> Optional[List[Any]]:
@@ -855,6 +881,61 @@ def _plugin_option_entry(
     return None
 
 
+#: The options of ``OVERRIDE_EDIT_SENTINELS`` whose plugin reads an empty list as
+#: the value that means every item too, keyed as that table: checkov runs an empty
+#: ``frameworks`` as ``all`` (``CheckovScanner``), so a written ``frameworks: []``
+#: stands for every framework as the default does, and ``+=`` onto it would run
+#: only the frameworks it adds.
+_EMPTY_READ_AS_THE_SENTINEL: Mapping[
+    str, Mapping[str, Mapping[Tuple[str, ...], bool]]
+] = {"scanners": {"checkov": {("options", "frameworks"): True}}}
+
+
+def _refuse_an_edit_of_a_scanner_selection(
+    resolved_keys: Sequence[str],
+    held: List[Any],
+    result: Optional[List[Any]],
+    logged_path: str,
+    operator: OverrideOp,
+    refusals: Optional[List[str]] = None,
+) -> None:
+    """Refuse a ``+=`` or ``-=`` on an empty list of
+    ``_EMPTY_MEANS_THE_DEFAULT_SELECTION``, naming the replace form, the key that
+    adds to the default set and the flag that leaves scanners out of it, and a
+    ``-=`` whose *result* would leave such a list empty. The refusal names the key,
+    never an item.
+
+    With *refusals*, a refusal of an edit of ``_CONFINED_SELECTION`` is appended to
+    it instead of raised (``apply_config_overrides``'s ``selection_refusals``). The
+    precommit selection is read from the configuration the edit applies to, so its
+    refusal is raised in every application that judges it."""
+    selection = _EMPTY_MEANS_THE_DEFAULT_SELECTION.get(tuple(resolved_keys))
+    if selection is None:
+        return
+    runs, add_key = selection
+    if not held:
+        verb = "add to" if operator == APPEND else "remove items from"
+        text = (
+            f"Invalid config override: '{logged_path}{operator}'. {logged_path} is "
+            f"empty, which runs {runs}, so there is no list to {verb}. Write "
+            f"'{logged_path}=[...]' to run exactly the scanners you list, "
+            f"'{add_key}=[...]' to add scanners to that set, or --exclude-scanners "
+            "to leave scanners out of it."
+        )
+    elif operator == REMOVE and not result:
+        text = (
+            f"Invalid config override: '{logged_path}-='. The removal would leave "
+            f"{logged_path} empty, and an empty list runs {runs}. Write the whole "
+            f"list with '{logged_path}=[...]'."
+        )
+    else:
+        return
+    if refusals is not None and tuple(resolved_keys) == _CONFINED_SELECTION:
+        refusals.append(text)
+        return
+    raise ASHConfigValidationError(text)
+
+
 def _refuse_an_edit_of_every_item(
     resolved_keys: Sequence[str],
     held: List[Any],
@@ -864,33 +945,27 @@ def _refuse_an_edit_of_every_item(
     items: Sequence[Any] = (),
 ) -> None:
     """Refuse a ``+=`` or ``-=`` on a list that holds the value meaning every item
-    (``_sentinel_of``), naming the replace form to write instead, and a ``-=``
-    whose *result* would hold that value. Called only in the application that
-    builds a command's own configuration; an empty ``output_formats`` reaches this
-    for a removal only (its append keeps the 3.x meaning, with a deprecation). A
-    ``-=`` that would empty a list of ``_EMPTY_MEANS_THE_DEFAULT_SELECTION`` is
-    refused too, and no other edit of those lists is."""
-    if (
-        operator == REMOVE
-        and tuple(resolved_keys) in _EMPTY_MEANS_THE_DEFAULT_SELECTION
-        and held
-        and not result
-    ):
-        raise ASHConfigValidationError(
-            f"Invalid config override: '{logged_path}-='. The removal would leave "
-            f"{logged_path} empty, and an empty selection runs the mode's default "
-            "scanners, the ones the removal took out included. Write the whole "
-            f"list with '{logged_path}=[...]'."
-        )
+    (``_sentinel_of``, or an empty list where the plugin reads one as that value,
+    ``_EMPTY_READ_AS_THE_SENTINEL``), naming the replace form to write instead, and
+    a ``-=`` whose *result* would hold such a value. Called only in the application
+    that builds a command's own configuration; an empty ``output_formats`` reaches
+    this for a removal only (its append keeps the 3.x meaning, with a
+    deprecation)."""
     sentinel = _sentinel_of(resolved_keys)
     if sentinel is None:
         return
-    shown = json.dumps(sentinel)
-    if held == sentinel:
+    every_item = [sentinel]
+    if sentinel and _plugin_option_entry(_EMPTY_READ_AS_THE_SENTINEL, resolved_keys):
+        every_item.append([])
+    if held in every_item:
+        shown = json.dumps(held)
+        # The items the sentinel leaves out may be added to it, not to an empty
+        # list read as it, where they would be all the plugin runs.
         additions = (
             _plugin_option_entry(OVERRIDE_EDIT_SENTINEL_ADDITIONS, resolved_keys)
-            or frozenset()
-        )
+            if held == sentinel
+            else None
+        ) or frozenset()
         if (
             operator == APPEND
             and items
@@ -907,10 +982,10 @@ def _refuse_an_edit_of_every_item(
         )
     # Only an empty value is reached by taking items out of a list that did not mean
     # every item; a removal that leaves ["all"] started from a list that held it.
-    if operator == REMOVE and not sentinel and result == sentinel:
+    if operator == REMOVE and result == [] and [] in every_item:
         raise ASHConfigValidationError(
             f"Invalid config override: '{logged_path}-='. The removal would leave "
-            f"{logged_path} holding {shown}, which means every item. Write the "
+            f"{logged_path} holding [], which means every item. Write the "
             f"whole list with '{logged_path}=[...]'."
         )
 
@@ -972,6 +1047,7 @@ def _removed_from_a_list(
     *,
     own_configuration: bool = False,
     list_changes: Optional[List[ListChange]] = None,
+    selection_refusals: Optional[List[str]] = None,
 ) -> Tuple[List[str], Any, OverrideOp]:
     """Apply one ``key-=value`` override: each item of the parsed value (the
     items of a list value, any other value as one item) is taken out of the list
@@ -991,9 +1067,10 @@ def _removed_from_a_list(
 
     With *own_configuration* (the application that builds a command's own
     configuration), what the document holds decides what is refused and said. A
-    removal from a list whose value means every item (``_sentinel_of``), or one
+    removal from a list whose value means every item (``_sentinel_of``) or from an
+    empty selection of scanners (``_EMPTY_MEANS_THE_DEFAULT_SELECTION``), or one
     that would empty a list whose empty value means every item or the default
-    selection of scanners (``_EMPTY_MEANS_THE_DEFAULT_SELECTION``), is refused. So
+    selection of scanners, is refused. So
     is a removal from a value that is no list, at an option of such a section that
     the shipped plugin's row does not name (it has no list option of that name), at
     a key the document does not hold outside such a section, or of an item that
@@ -1003,6 +1080,10 @@ def _removed_from_a_list(
     applies them to a base that can hold less than the real document, so there a
     removal that finds no list changes nothing and nothing is refused or said above
     debug.
+
+    *selection_refusals* is ``apply_config_overrides``'s: an edit of a selection
+    of scanners is judged in every application that passes it, and a refusal of
+    an edit of ``_CONFINED_SELECTION`` is appended there instead of raised.
 
     *list_changes*, when given, gets one ``ListChange`` for a removal from a
     list the document holds: the list's old length and the old index of each
@@ -1043,6 +1124,10 @@ def _removed_from_a_list(
             if not any(_removal_matches(entry, item) for item in items)
         )
         kept = [held[index] for index in kept_at]
+        if own_configuration or selection_refusals is not None:
+            _refuse_an_edit_of_a_scanner_selection(
+                resolved_keys, held, kept, logged_path, REMOVE, selection_refusals
+            )
         if own_configuration:
             _refuse_an_edit_of_every_item(
                 resolved_keys, held, kept, logged_path, REMOVE
@@ -1168,6 +1253,7 @@ def _apply_config_override(
     warn_unread_appends: bool = False,
     started_lists: Optional[List[Tuple[Tuple[str, ...], str, str]]] = None,
     list_changes: Optional[List[ListChange]] = None,
+    selection_refusals: Optional[List[str]] = None,
 ) -> Tuple[List[str], Any, OverrideOp]:
     """
     Apply a single config override to a configuration dictionary.
@@ -1199,6 +1285,9 @@ def _apply_config_override(
             plugin ASH ships reads is added to it as (the keys it landed on, the key
             as logged, the section as logged); ``apply_config_overrides`` records
             them on the model it returns.
+        selection_refusals: ``apply_config_overrides``'s: an edit of a selection
+            of scanners is judged where it is given, and a refusal of an edit of
+            ``default_scanners.only`` is appended to it instead of raised.
 
     Returns:
         The key segments the override landed on, as this apply resolved them
@@ -1220,6 +1309,7 @@ def _apply_config_override(
             environment_values,
             own_configuration=warn_unread_appends,
             list_changes=list_changes,
+            selection_refusals=selection_refusals,
         )
     append_mode = operator == APPEND
 
@@ -1261,6 +1351,15 @@ def _apply_config_override(
     # print where the file used it as its own key.
     logged_path = redact_values(key_path, environment_values)
     if append_mode and final_key in current and isinstance(current[final_key], list):
+        if warn_unread_appends or selection_refusals is not None:
+            _refuse_an_edit_of_a_scanner_selection(
+                resolved_keys,
+                current[final_key],
+                None,
+                logged_path,
+                APPEND,
+                selection_refusals,
+            )
         if warn_unread_appends:
             if resolved_keys == ["output_formats"]:
                 if not current[final_key]:
@@ -1542,6 +1641,7 @@ def apply_config_overrides(
     config_overrides: List[str],
     *,
     warn_unread_appends: bool = False,
+    selection_refusals: Optional[List[str]] = None,
 ) -> AshConfig:
     """
     Apply configuration overrides to an AshConfig object.
@@ -1567,6 +1667,18 @@ def apply_config_overrides(
             whose value means every item, a removal that finds no list, and the two
             deprecation lines of a ``+=``); a replay, view or gate never raises or
             says them.
+        selection_refusals: Judge an edit of a selection of scanners
+            (``_refuse_an_edit_of_a_scanner_selection``: a ``+=`` or ``-=`` on an
+            empty ``default_scanners.only`` or ``precommit.only_scanners``, or a
+            ``-=`` that would empty one) with the flag or without it, and append a
+            refusal of an edit of ``default_scanners.only`` to this list instead
+            of raising it; a refusal of ``precommit.only_scanners`` is raised.
+            ``resolve_config`` gives one to the build of the command's own
+            configuration, whose ``default_scanners`` is the run's only when the
+            load confines nothing, and one to the replay of the selection
+            overrides onto the operator's selection (``confine_default_scanners``),
+            which is the run's otherwise; ``ash config validate`` gives one to its
+            own load.
 
     Returns:
         The modified AshConfig object
@@ -1682,6 +1794,7 @@ def apply_config_overrides(
                     warn_unread_appends=warn_unread_appends,
                     started_lists=started,
                     list_changes=removals,
+                    selection_refusals=selection_refusals,
                 )
             )
             raw_values.append(value)
@@ -1969,12 +2082,17 @@ def _entry_warn_context(
     return context, warned
 
 
-def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> AshConfig:
+def build_config(
+    data: Any,
+    config_overrides: Optional[List[str]] = None,
+    selection_refusals: Optional[List[str]] = None,
+) -> AshConfig:
     """The AshConfig a scan builds from a resolved document.
 
     Strict validation, then ``--config-overrides``. Raises pydantic's
     ValidationError for the document and ASHConfigValidationError for an
     override; see ``load_config_file``, which every config file goes through.
+    ``selection_refusals`` is ``apply_config_overrides``'s.
     """
     context, warned = _entry_warn_context(data, config_overrides)
     config = AshConfig.model_validate(data, strict=True, context=context)
@@ -1992,7 +2110,10 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
         # reporter_section names such a list where a reporter that sends findings
         # off the host is built from one.
         config = apply_config_overrides(
-            config, config_overrides, warn_unread_appends=True
+            config,
+            config_overrides,
+            warn_unread_appends=True,
+            selection_refusals=selection_refusals,
         )
     return config
 
@@ -2332,6 +2453,7 @@ def load_config_file(
     filled_out: Optional[List[Any]] = None,
     anchor_relative_paths: Optional[AnchorPaths] = None,
     expect: Optional[FileIdentity] = None,
+    selection_refusals: Optional[List[str]] = None,
 ) -> Tuple[ResolvedConfigDocument, AshConfig]:
     """Load a config file the way every scan loads one.
 
@@ -2374,6 +2496,8 @@ def load_config_file(
     ``scan_repository_settings`` or ``repository_settings_for_root``),
     classifies it as a scan does: the operator-only writes of every checkout
     file are left out.
+
+    ``selection_refusals`` is ``apply_config_overrides``'s, for ``build_config``.
 
     ``fill`` is the references the operator's copy of a profile a client patched
     read from the environment: the client's copy holds each as text, and the
@@ -2452,7 +2576,7 @@ def load_config_file(
         # error is still raised rather than replaced by the overlay's content.
         data = _layered_over(data, overlay)
     try:
-        return document, build_config(data, config_overrides)
+        return document, build_config(data, config_overrides, selection_refusals)
     except ValidationError as e:
         if _has_a_client_file(document):
             # A chain that holds a file an MCP client supplied, by any name on
@@ -3080,6 +3204,13 @@ def resolve_config(
     # The selected chain's merged document, before overrides, carried out of
     # the one load for the operator-paths record (_operator_paths).
     merged_documents: List[Any] = []
+    # What the build of the command's own configuration refuses in an edit of
+    # default_scanners.only, held until the load knows where the run's selection
+    # comes from: raised at the two returns below where nothing of the load is
+    # confined (the build is then the run's selection), and set aside where
+    # something is (the run's selection is then the operator's, and the replay of
+    # the operator's overrides onto it judges the edit, confine_default_scanners).
+    selection_refusals: List[str] = []
     config = _resolve_config(
         config_path,
         source_dir,
@@ -3108,6 +3239,7 @@ def resolve_config(
         names_out=client_names,
         filled_references_out=client_filled,
         expect=expect,
+        selection_refusals=selection_refusals,
     )
     # The ASH_CONFIG slice of the files read: the one load's own chain, or
     # none when the load never read one -- never a fresh resolution, which
@@ -3476,6 +3608,8 @@ def resolve_config(
             # The chain is wholly the operator's own, so the confinement
             # steps below are skipped and the trusted-base build never walks
             # this chain. The junk pass above already ran over both chains.
+            # The build is the run's selection, so what it refused stands.
+            _raise_a_held_refusal(config, selection_refusals)
             record_provenance(config, in_tree=[])
             return config
     else:
@@ -3542,7 +3676,9 @@ def resolve_config(
             if warn_pending:
                 warn_fail_closed()
             # The ASH_CONFIG chain is wholly the operator's own: the junk
-            # pass above ran over it, and nothing below confines it.
+            # pass above ran over it, and nothing below confines it, so the build
+            # is the run's selection and what it refused stands.
+            _raise_a_held_refusal(config, selection_refusals)
             record_provenance(config, in_tree=[])
             return config
         # The configuration IS the ASH_CONFIG chain and its files are in the
@@ -5977,6 +6113,7 @@ def _resolve_config(
     names_out: Optional[Dict[Path, Tuple[Path, ...]]] = None,
     filled_references_out: Optional[Dict[Path, Tuple[Any, ...]]] = None,
     expect: Optional[FileIdentity] = None,
+    selection_refusals: Optional[List[str]] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
@@ -6007,7 +6144,9 @@ def _resolve_config(
     receive the selected chain's per-file documents and the paths each file
     was reached by, and ``filled_references_out`` the references the fill read
     in each (``ResolvedConfigDocument.filled_references``), for the client
-    config rules.
+    config rules. ``selection_refusals`` rides into each build of the command's
+    own configuration here (``apply_config_overrides``), for the caller to raise
+    or set aside.
     """
 
     def overlaid_fallback(
@@ -6145,7 +6284,10 @@ def _resolve_config(
             # (build_config's rule).
             if config_overrides:
                 return apply_config_overrides(
-                    config, config_overrides, warn_unread_appends=True
+                    config,
+                    config_overrides,
+                    warn_unread_appends=True,
+                    selection_refusals=selection_refusals,
                 )
             return config
 
@@ -6230,7 +6372,10 @@ def _resolve_config(
                 # is named (build_config's rule).
                 if config_overrides:
                     return apply_config_overrides(
-                        config, config_overrides, warn_unread_appends=True
+                        config,
+                        config_overrides,
+                        warn_unread_appends=True,
+                        selection_refusals=selection_refusals,
                     )
                 return config  # Return default config if no config file found
             else:
@@ -6325,6 +6470,7 @@ def _resolve_config(
                     fill=fill,
                     anchor_relative_paths=anchor_paths,
                     expect=expect,
+                    selection_refusals=selection_refusals,
                 )
             except ConfigFileRefused as refusal:
                 if not refusal.after_overrides:
