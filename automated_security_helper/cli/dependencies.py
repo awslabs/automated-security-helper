@@ -14,9 +14,11 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PureWindowsPath
+from types import SimpleNamespace
 from typing import (
     Annotated,
     Any,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -54,6 +56,7 @@ from automated_security_helper.cli.params import from_command_line
 from automated_security_helper.config.named_config import (
     refuse_a_named_config_that_does_not_exist,
 )
+from automated_security_helper.config.plugin_module_trust import plugin_modules_by_trust
 from automated_security_helper.config.plugin_option_check import (
     refuse_unknown_options_of_registered,
 )
@@ -76,12 +79,15 @@ from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
 )
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.enablement import modules_needing_naming
 from automated_security_helper.plugins.loader import (
     PluginModuleError,
     PluginModuleNamespaceError,
     load_plugins,
     plugin_module_fix,
+    scan_plugin_filter,
 )
+from automated_security_helper.plugins.plugin_manager import callable_module
 from automated_security_helper.utils.download_utils import (
     NO_BIN_DIRECTORY,
     NO_RECEIPT_STORE,
@@ -709,6 +715,34 @@ def _declared_install_name(
         else getattr(section, "name", None)
     )
     return configured if isinstance(configured, str) and configured else declared
+
+
+def _install_takes(config: Any) -> Callable[[Any], bool]:
+    """``takes(plugin_class)``: whether the install takes a registered plugin class.
+
+    The plugin registry is the process's, and reading a config's section of a
+    scanner ASH ships whose manifest gives no typed section (guarddog's) imports
+    that scanner's module, which registers the scanner whatever the config names.
+    A scan selects its plugins through ``scan_plugin_filter`` over the modules its
+    config names, so it leaves such a scanner out unless the config names its
+    module, and the install does the same.
+
+    A class of a shipped scanner module that loads only when it is named
+    (``modules_needing_naming``) is taken when that filter takes it. Every other
+    registered class is taken: a built-in plugin, one a named module defines, and
+    one registered any other way.
+    """
+    operator_modules, untrusted_modules = plugin_modules_by_trust(config, None)
+    scan_takes = scan_plugin_filter([*operator_modules, *untrusted_modules])
+    opt_in = modules_needing_naming()
+
+    def takes(plugin_class: Any) -> bool:
+        module = callable_module(plugin_class) or ""
+        if not any(module == root or module.startswith(root + ".") for root in opt_in):
+            return True
+        return scan_takes(plugin_class)
+
+    return takes
 
 
 def _refuse_unknown_tools(
@@ -1477,6 +1511,21 @@ def install_dependencies(
             f"{escape(error_text(e, environment_values))}[/red]"
         )
         raise typer.Exit(EXIT_INVALID_CONFIG)
+
+    # The registry holds every plugin the process imported, a shipped scanner the
+    # config does not name included (reading its section registers it). The install
+    # takes the plugins a scan of this config takes (_install_takes), so a scanner
+    # the scan would not load is neither built nor installed nor option-checked.
+    takes = _install_takes(resolved_config)
+
+    def registered(plugin_module_input: str) -> List[type]:
+        """The registered plugins of one kind that the install takes."""
+        return [
+            plugin_class
+            for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input)
+            if takes(plugin_class)
+        ]
+
     outcomes: List[PluginInstallOutcome] = []
     construction_failures: List[PluginInstallOutcome] = []
     discovered: List[tuple] = []
@@ -1500,9 +1549,7 @@ def install_dependencies(
         failed: List[PluginInstallOutcome] = []
         plugin_module_input = _plugin_kind(plugin_type)
         for plugin_class in (
-            ash_plugin_manager.plugin_modules(plugin_module_input)
-            if classes is None
-            else classes
+            registered(plugin_module_input) if classes is None else classes
         ):
             try:
                 # The plugin's own section of the resolved config, looked up the way
@@ -1556,7 +1603,7 @@ def install_dependencies(
     candidates: List[tuple] = []
     for plugin_type in plugin_types:
         plugin_module_input = _plugin_kind(plugin_type)
-        for plugin_class in ash_plugin_manager.plugin_modules(plugin_module_input):
+        for plugin_class in registered(plugin_module_input):
             candidates.append(
                 (
                     plugin_type,
@@ -1617,9 +1664,12 @@ def install_dependencies(
             return False
         return not tools or plugin_class in requested_classes
 
+    # The check reads the registered plugins of the manager it is given, one kind at
+    # a time: given the ones the install takes, it reads the sections of those
+    # alone, as a scan's check reads the sections of the plugins that scan loads.
     try:
         refuse_unknown_options_of_registered(
-            resolved_config, ash_plugin_manager, builds=builds
+            resolved_config, SimpleNamespace(plugin_modules=registered), builds=builds
         )
     except ASHConfigValidationError as e:
         print(f"[red]Invalid configuration: {escape(error_text(e))}[/red]")
@@ -1747,7 +1797,7 @@ def install_dependencies(
                 # it, quietly, as the selected kinds' unnamed plugins are.
                 names = set()
                 unnamed = []
-                for plugin_class in ash_plugin_manager.plugin_modules(kind):
+                for plugin_class in registered(kind):
                     declared = _declared_install_name(
                         plugin_class, kind, resolved_config
                     )

@@ -315,8 +315,10 @@ def _known_plugin_field(name: str) -> Optional[_Field]:
     The section is read as the scanner's own config class: the one model its
     ``config`` names whose ``options`` are the manifest's options model. Found once
     for each name, a failure too. Reading it imports the scanner's plugin module,
-    which registers the scanner there; a scan still takes only the plugins its own
-    ``ash_plugin_modules`` name (``plugins.loader.scan_plugin_filter``).
+    which registers the scanner there. The registration enables nothing: a scan
+    (``plugins.loader.scan_plugin_filter``) and ``ash dependencies install`` both
+    leave the scanner out unless the configuration names its module in
+    ``ash_plugin_modules``.
     """
     index = _index()
     if name not in index.known_plugin_fields:
