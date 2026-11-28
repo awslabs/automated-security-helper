@@ -2440,8 +2440,24 @@ jobs:
           # refuse. route_option above holds the words each subject reads. An ASH
           # may have `fs` and `workspace` and not `image` or `git`; the probe says
           # so, and --image stays on `ash scan fs` as written.
+          #
+          # The config the probes name. A probe starts in RUNNER_TEMP, and the scan
+          # in the checkout, so a config written relative to the checkout (`config:
+          # ops/ash.yaml`) names a file the probe's directory does not hold. Each
+          # probe gets the checkout's file by its absolute path, as --config and as
+          # ASH_CONFIG, worked out here once, before the probes' cd: a relative path
+          # is joined to this step's working directory, and an absolute one, such as
+          # the config-ref copy, is kept. With no config a probe gets neither word
+          # nor variable. The scan below keeps the config as the caller wrote it.
+          probe_config=""
+          if [ -n "${ASH_CONFIG:-}" ]; then
+            case "${ASH_CONFIG}" in
+              /*) probe_config="${ASH_CONFIG}" ;;
+              *) probe_config="${PWD}/${ASH_CONFIG}" ;;
+            esac
+          fi
           fs_help_status=0
-          fs_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan fs ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || fs_help_status=$?
+          fs_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan fs ${probe_config:+--config "${probe_config}"} --help 2>&1)" || fs_help_status=$?
           case "${fs_help_status}:${fs_help}" in
             0:*"scan fs"*)
               scan_form=fs
@@ -2463,7 +2479,7 @@ jobs:
           esac
           if [ "${scan_form}" = fs ] && [ -n "${routed_subject}" ] && [ -z "${routed_mixed}" ] && [ -z "${source_dir_named}" ]; then
             subject_help_status=0
-            subject_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || subject_help_status=$?
+            subject_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${probe_config:+--config "${probe_config}"} --help 2>&1)" || subject_help_status=$?
             case "${subject_help_status}:${subject_help}" in
               0:*"scan ${routed_subject}"*)
                 scan_form=routed
@@ -2577,8 +2593,23 @@ jobs:
           # install. The cd is inside the substitution, so the report below still
           # starts in the checkout. The step says which spelling it chose and why,
           # on stderr.
+          #
+          # The config the probe names, by its absolute path, as the scan step's
+          # probes name it. The probe starts in RUNNER_TEMP, and a config written
+          # relative to the checkout names a file that directory does not hold. The
+          # path is worked out once here, before the probe's cd: a relative one is
+          # joined to this step's working directory, and an absolute one is kept.
+          # With no config the probe gets neither word nor variable. The report
+          # below keeps the config as written.
+          probe_config=""
+          if [ -n "${ASH_CONFIG:-}" ]; then
+            case "${ASH_CONFIG}" in
+              /*) probe_config="${ASH_CONFIG}" ;;
+              *) probe_config="${PWD}/${ASH_CONFIG}" ;;
+            esac
+          fi
           report_help_status=0
-          report_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 uvx --no-config --from "${ASH_UVX_SOURCE}" ash results report ${ASH_CONFIG:+--config "${ASH_CONFIG}"} --help 2>&1)" || report_help_status=$?
+          report_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash results report ${probe_config:+--config "${probe_config}"} --help 2>&1)" || report_help_status=$?
           case "${report_help_status}:${report_help}" in
             0:*"results report"*)
               report_has_results=yes
