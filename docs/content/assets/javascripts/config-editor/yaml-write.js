@@ -219,10 +219,12 @@ export function formatNumber(number) {
   if (Object.is(number, -0)) {
     return "-0.0";
   }
-  if (Number.isInteger(number)) {
-    return BigInt(number).toString();
+  if (Number.isSafeInteger(number)) {
+    return String(number);
   }
-  const text = String(number);
+  // Beyond 2**53 a number is written as a float, as the number it is; the digits
+  // of an integer that large are what a BigInt value is for.
+  const text = Number.isInteger(number) ? number.toExponential() : String(number);
   // YAML 1.1 wants a dot before an exponent: 1e-7 is text, 1.0e-7 is a float.
   return text.includes("e") && !text.includes(".") ? text.replace("e", ".0e") : text;
 }
