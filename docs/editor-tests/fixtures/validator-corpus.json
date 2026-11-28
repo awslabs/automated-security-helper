@@ -1432,6 +1432,157 @@
       "valid": true
     },
     {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-variant-enabled-text-ok",
+      "instance": {
+        "Bandit": {
+          "enabled": "yes"
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-variant-number-ok",
+      "instance": {
+        "Bandit": 5
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": true
+      },
+      "id": "scanners-variant-overridden-by-declared-ok",
+      "instance": {
+        "Bandit": {
+          "enabled": "yes"
+        },
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "scanners-variant-reference-in-typed-field-ok",
+      "instance": {
+        "Bandit": {
+          "options": {
+            "scan_timeout": "${ASH_SCAN_TIMEOUT}"
+          }
+        }
+      },
+      "keyword": null,
+      "path": "scanners",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "converters-variant-enabled-word-ok",
+      "instance": {
+        "Archive": {
+          "enabled": "no"
+        }
+      },
+      "keyword": null,
+      "path": "converters",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "variant-section-contents",
+            "severity": "error"
+          },
+          {
+            "row": "plugin-section-spelling",
+            "severity": "note"
+          }
+        ],
+        "valid": false
+      },
+      "id": "document-variant-enabled-text-ok",
+      "instance": {
+        "scanners": {
+          "Bandit": {
+            "enabled": "yes"
+          }
+        }
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
       "id": "bandit-empty-ok",
       "instance": {},
       "keyword": null,

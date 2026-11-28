@@ -12,7 +12,9 @@ for every key.
 docs/editor-tests/fixtures/spelling-vectors.json holds the keys and the expected
 answers. This file runs ASH's own functions on them, with the declared section names
 replaced by the lists in the same file, and requires every expected answer to be what
-ASH gives. The node test requires the port to give the same answers.
+ASH gives. That includes the merges: a mapping with a variant spelling in it, and the
+mapping ASH reads once the variant is merged into the declared section key by key. The
+node test requires the port to give the same answers.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ BLOCK = json.loads((FIXTURES / "editor-data.json").read_text(encoding="utf-8"))
 CANONICAL = VECTORS["canonical"]
 TARGETS = VECTORS["targets"]
 SECTIONS = VECTORS["sections"]
+MERGES = VECTORS["merges"]
 
 
 def _declared_by_fold(kind: str) -> dict[str, str]:
@@ -70,11 +73,26 @@ def test_a_mapping_folds_to_the_declared_spellings_or_is_refused(case, monkeypat
         assert refused.value.target == expected["target"]
 
 
+@pytest.mark.parametrize(
+    "case",
+    MERGES,
+    ids=[f"{case['kind']}-{index}" for index, case in enumerate(MERGES)],
+)
+def test_a_variant_section_is_merged_into_the_declared_one_as_ash_merges_it(
+    case, monkeypatch
+):
+    monkeypatch.setattr(names, "declared_section_names", _declared_by_fold)
+    data = {case["kind"]: case["section"]}
+    folded = names.fold_known_plugin_sections(data)
+    assert folded[case["kind"]] == case["folded"]
+
+
 def test_the_vectors_only_use_the_plugin_sections_of_ash():
     kinds = set(CANONICAL)
     assert kinds <= set(names.PLUGIN_SEGMENT_KEYS)
     assert {kind for kind, _, _ in TARGETS} <= kinds
     assert {case["kind"] for case in SECTIONS} <= kinds
+    assert {case["kind"] for case in MERGES} <= kinds
 
 
 def test_each_mapping_case_names_either_a_result_or_a_refusal():

@@ -210,6 +210,7 @@ DIVERGENCE_ROWS = frozenset(
         "internal-top-level-field",
         "plugin-section-spelling",
         "unquoted-date",
+        "variant-section-contents",
     }
 )
 

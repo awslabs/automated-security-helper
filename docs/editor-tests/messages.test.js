@@ -466,3 +466,127 @@ test('the table of entry models names each model, how its entry is called and wh
   }
   assert.equal(Object.isFrozen(models), true);
 });
+
+// ASH folds the spellings of each plugin section onto the declared one before it reads a
+// file, so what is inside a section spelled another way is read, and refused, as the declared
+// section's contents are. The schema admits any contents at a key it does not declare.
+
+test('what is inside a section spelled another way is judged as the declared section, where the file wrote it', () => {
+  const instance = {
+    scanners: { Bandit: { enabled: 'yes' } },
+    converters: { Archive: { enabled: 'no' } },
+  };
+  const result = judgeField('', instance);
+  assert.equal(result.valid, false);
+  const inside = result.findings.filter((item) => item.row === 'variant-section-contents');
+  assert.deepEqual(inside.map((item) => [item.severity, item.pointer, item.keyword]).sort(), [
+    ['error', '/converters/Archive/enabled', 'type'],
+    ['error', '/scanners/Bandit/enabled', 'type'],
+  ]);
+  // Each respelled section is still noted.
+  assert.equal(result.findings.filter((item) => item.row === 'plugin-section-spelling').length, 2);
+});
+
+test("the sentence for a failure inside a respelled section is the declared spelling's", () => {
+  const declared = judgeField('', { scanners: { bandit: { enabled: 'yes' } } }).findings[0];
+  const variant = judgeField('', { scanners: { Bandit: { enabled: 'yes' } } }).findings[0];
+  assert.equal(declared.row, null);
+  assert.equal(declared.pointer, '/scanners/bandit/enabled');
+  assert.equal(variant.row, 'variant-section-contents');
+  assert.equal(variant.pointer, '/scanners/Bandit/enabled');
+  assert.equal(variant.message, declared.message);
+  assert.match(variant.message, /Expected a boolean, found a string\./);
+});
+
+test('a value of a respelled section that the declared spelling overrides is not judged', () => {
+  const overridden = judgeField('scanners', { Bandit: { enabled: 'yes' }, bandit: { enabled: true } });
+  assert.equal(overridden.valid, true);
+  assert.deepEqual(projected(overridden), [{ row: 'plugin-section-spelling', severity: 'note' }]);
+  const leaf = {
+    Bandit: { options: { scan_timeout: 'x' } },
+    bandit: { options: { scan_timeout: 30 } },
+  };
+  assert.equal(judgeField('scanners', leaf).valid, true);
+});
+
+test('a failing value is reported where the file wrote it, whichever spelling it came from', () => {
+  const instance = {
+    Bandit: { options: { scan_timeout: 'x' } },
+    bandit: { options: { confidence_level: 'nonsense' } },
+  };
+  const result = judgeField('scanners', instance);
+  const failures = Object.fromEntries(
+    result.findings.filter((item) => item.keyword).map((item) => [item.pointer, item.row]),
+  );
+  // The declared spelling's own failure is one the schema shows for the file as written, so
+  // it is a plain failure; the variant's is the one the fold finds.
+  assert.deepEqual(failures, {
+    '/Bandit/options/scan_timeout': 'variant-section-contents',
+    '/bandit/options/confidence_level': null,
+  });
+  assert.equal(result.valid, false);
+});
+
+test('the rows that look at a value apply inside a section spelled another way', () => {
+  const reference = judgeField('', {
+    scanners: { Bandit: { options: { scan_timeout: '${ASH_SCAN_TIMEOUT}' } } },
+  });
+  const found = reference.findings.find((item) => item.row === 'reference-in-typed-field');
+  assert.equal(found.pointer, '/scanners/Bandit/options/scan_timeout');
+  assert.equal(reference.valid, false);
+});
+
+// The fixture holds no string field and no list of entries inside a plugin section. These
+// blocks put them in, where ASH has them.
+function blockWithStringField() {
+  const extended = structuredClone(block);
+  extended.validationSchema.$defs.BanditScannerConfig.properties.config_file = { type: 'string' };
+  extended.fields['scanners.bandit.config_file'] = {
+    ...structuredClone(block.fields['scanners.bandit.enabled']),
+    key: 'config_file',
+    kind: 'string',
+    path: 'scanners.bandit.config_file',
+    schemaPointer: '#/$defs/BanditScannerConfig/properties/config_file',
+  };
+  return extended;
+}
+
+test('an unquoted date inside a respelled section is reported where the file wrote it', () => {
+  const extended = blockWithStringField();
+  const instance = { Bandit: { config_file: '2030-01-01' } };
+  const failures = validateField(extended, 'scanners', instance, patterns);
+  const result = judge(extended, 'scanners', instance, failures, {
+    unquotedDates: ['/Bandit/config_file'],
+  });
+  const found = result.findings.find((item) => item.row === 'unquoted-date');
+  assert.equal(found.pointer, '/Bandit/config_file');
+  assert.equal(result.valid, false);
+});
+
+test('an unknown key in an entry inside a respelled section warns where the file wrote it', () => {
+  const extended = blockWithEntryModels();
+  extended.validationSchema.$defs.BanditScannerConfigOptions.properties.excluded_paths = {
+    items: { $ref: '#/$defs/IgnorePathWithReason' },
+    type: 'array',
+  };
+  const entry = { path: 'a', reason: 'b', resaon: 'c' };
+  const instance = { Bandit: { options: { excluded_paths: [entry] } } };
+  const failures = validateField(extended, 'scanners', instance, patterns);
+  const result = judge(extended, 'scanners', instance, failures);
+  const found = result.findings.find((item) => item.row === 'unknown-key-in-list-entry');
+  assert.equal(found.severity, 'warning');
+  assert.equal(found.pointer, '/Bandit/options/excluded_paths/0');
+  assert.equal(result.valid, true);
+});
+
+test('two spellings of one plugin are not folded, so the clash is the only thing said', () => {
+  const result = judgeField('scanners', { BANDIT: { enabled: 'yes' }, 'ban-dit': {} });
+  assert.deepEqual(projected(result), [{ row: 'ambiguous-plugin-spellings', severity: 'error' }]);
+});
+
+test('a key named __proto__ beside a respelled section is data, and pollutes nothing', () => {
+  const instance = JSON.parse('{"__proto__": {"polluted": true}, "Bandit": {"enabled": "yes"}}');
+  const result = judgeField('scanners', instance);
+  assert.equal({}.polluted, undefined);
+  assert.deepEqual(result.findings.map((item) => item.pointer).sort(), ['/Bandit', '/Bandit/enabled']);
+});

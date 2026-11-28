@@ -13,8 +13,8 @@ own file-load route over it: the loader every scan goes through (the file, its s
 folded, the model built under strict validation), and the config checker that reports
 what a scan tolerates. Then it requires ASH's outcome to be the one the row states, and
 the facts each row rests on: the field a refused reference names, the words of the
-clash, the warning ASH gives, the list a comma string reads as, and the section a
-respelled name lands in.
+clash, the warning ASH gives, the list a comma string reads as, the section a
+respelled name lands in, and the field its contents are refused at.
 
 Two controls show that the comparison can fail: a row that claims a refusal ASH does not
 give, and a row that claims a tolerance ASH does not give.
@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 
 from automated_security_helper.config import plugin_section_names as names
 from automated_security_helper.config.ash_config import AshConfig
@@ -100,6 +101,28 @@ def _document(path: str, instance, options=None):
     return document
 
 
+def _declared(prefix: str, key: str) -> str:
+    """`key` as ASH reads it: a respelled plugin section is the declared one."""
+    if prefix in names.PLUGIN_SEGMENT_KEYS:
+        target = names.declared_target(names.declared_section_names(prefix), key)
+        return key if target is None else target
+    return key
+
+
+def _plugin_sections(case: dict) -> list[tuple[str, dict]]:
+    """(kind, mapping) of each plugin section the case's file holds."""
+    instance = case["instance"]
+    if case["path"] in names.PLUGIN_SEGMENT_KEYS:
+        return [(case["path"], instance)]
+    if case["path"] == "":
+        return [
+            (kind, instance[kind])
+            for kind in names.PLUGIN_SEGMENT_KEYS
+            if isinstance(instance.get(kind), dict)
+        ]
+    return []
+
+
 def _references(path: str, instance) -> list[tuple[str, list[str]]]:
     """(field path, variables) of each field that holds a reference in `instance`."""
     found: list[tuple[str, list[str]]] = []
@@ -110,7 +133,8 @@ def _references(path: str, instance) -> list[tuple[str, list[str]]]:
                 found.append((prefix, re.findall(r"\$\{(\w+)", node)))
         elif isinstance(node, dict):
             for key, value in node.items():
-                walk(f"{prefix}.{key}" if prefix else key, value)
+                name = _declared(prefix, key)
+                walk(f"{prefix}.{name}" if prefix else name, value)
         elif isinstance(node, list):
             for item in node:
                 walk(f"{prefix}[]", item)
@@ -224,16 +248,33 @@ def _facts(
         assert check.scan_accepts, check.errors
         assert want.replace("{field}", "build") in check.warnings, check.warnings
     elif row == "plugin-section-spelling":
-        kind = case["path"]
-        declared = names.declared_section_names(kind)
-        for key, value in instance.items():
-            target = names.declared_target(declared, key)
-            if target is None or target == key:
-                continue
-            # A declared spelling beside a variant wins key by key.
-            written = instance.get(target, value)
-            section = getattr(getattr(config, kind), target.replace("-", "_"))
-            assert section.enabled == written["enabled"], (kind, key, target)
+        for kind, section in _plugin_sections(case):
+            declared = names.declared_section_names(kind)
+            for key, value in section.items():
+                target = names.declared_target(declared, key)
+                if target is None or target == key:
+                    continue
+                # ASH folds the file first: the declared spelling is the one it reads.
+                read = names.fold_known_plugin_sections(document)[kind]
+                assert target in read and key not in read, (kind, key, target)
+                if config is None:
+                    continue  # refused for what is inside it, as the other row checks
+                # A declared spelling beside a variant wins key by key.
+                written = section.get(target, value)
+                loaded = getattr(getattr(config, kind), target.replace("-", "_"))
+                assert loaded.enabled == written["enabled"], (kind, key, target)
+    elif row == "variant-section-contents":
+        # ASH reads a respelled section as the declared one, so the schema, applied to
+        # the file as ASH reads it, fails where ASH refuses it.
+        folded = names.fold_known_plugin_sections(document)
+        validator = Draft202012Validator(BLOCK["validationSchema"])
+        places = {
+            tuple(str(part) for part in problem.absolute_path)
+            for problem in validator.iter_errors(folded)
+        }
+        assert places, "the schema reads the file as ASH reads it as valid"
+        for place in places:
+            assert place[-1] in error, (place, error)
     else:  # pragma: no cover - a new row needs its facts written here
         pytest.fail(f"no facts are checked for the row {row}")
 
@@ -250,8 +291,12 @@ def test_ash_does_what_the_rows_of_the_case_say(case, tmp_path, monkeypatch):
     for finding in case["editor"]["findings"]:
         row = finding["row"]
         assert row in DEPARTURES, f"the table has no row {row}"
-        assert DEPARTURES[row]["editor"] == finding["severity"], (case["id"], row)
-        _assert_claim(row, DEPARTURES[row]["editor"], document, error)
+        claim = DEPARTURES[row]["editor"]
+        assert claim == finding["severity"], (case["id"], row)
+        # A warning or a note says a scan loads the file, which holds only while no
+        # other finding of the case refuses it.
+        if claim == "error" or case["editor"]["valid"]:
+            _assert_claim(row, claim, document, error)
         _facts(row, case, document, config, error, tmp_path, monkeypatch)
 
 

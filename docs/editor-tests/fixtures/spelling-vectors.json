@@ -1,5 +1,5 @@
 {
-  "about": "Inputs and expected results for the plugin-section spelling fold. canonical lists the declared section names per kind, standing in for the names ASH declares. targets are [kind, input, expected] triples, as the data block's spelling vectors are: expected is the declared name the input is a spelling of, or null. sections are whole mappings of one kind: keys in file order, and either the sorted keys left after the fold or, when two spellings of one plugin collide, the first and second key and the declared name. A Python test checks every expected value against ASH's own fold, with the declared names replaced by canonical. A node test checks the JavaScript port against the same file.",
+  "about": "Inputs and expected results for the plugin-section spelling fold. canonical lists the declared section names per kind, standing in for the names ASH declares. targets are [kind, input, expected] triples, as the data block's spelling vectors are: expected is the declared name the input is a spelling of, or null. sections are whole mappings of one kind: keys in file order, and either the sorted keys left after the fold or, when two spellings of one plugin collide, the first and second key and the declared name. merges are whole mappings of one kind with a variant spelling in them, each with the mapping ASH reads once the variant is merged into the declared section key by key, the declared value winning. A Python test checks every expected value against ASH's own fold, with the declared names replaced by canonical. A node test checks the JavaScript port against the same file.",
   "canonical": {
     "converters": [
       "archive",
@@ -21,6 +21,210 @@
       "semgrep"
     ]
   },
+  "merges": [
+    {
+      "folded": {
+        "bandit": {
+          "enabled": false
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": true,
+          "options": {
+            "scan_timeout": 5
+          }
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "enabled": false,
+          "options": {
+            "scan_timeout": 5
+          }
+        },
+        "bandit": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "options": {
+            "a": 1,
+            "b": 3,
+            "c": 4
+          }
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "options": {
+            "a": 1,
+            "b": 2
+          }
+        },
+        "bandit": {
+          "options": {
+            "b": 3,
+            "c": 4
+          }
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": null
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "enabled": true
+        },
+        "bandit": null
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": 5,
+        "bandit": {
+          "enabled": true
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": 5
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": 5
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "paths": [
+            3
+          ]
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "paths": [
+            1,
+            2
+          ]
+        },
+        "bandit": {
+          "paths": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "options": 3
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "options": {
+            "a": 1
+          }
+        },
+        "bandit": {
+          "options": 3
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "options": {
+            "a": 1
+          }
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "Bandit": {
+          "options": 3
+        },
+        "bandit": {
+          "options": {
+            "a": 1
+          }
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": false
+        },
+        "mystery": {
+          "x": 1
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "BanditScanner": {
+          "enabled": false
+        },
+        "mystery": {
+          "x": 1
+        }
+      }
+    },
+    {
+      "folded": {
+        "archive": {
+          "enabled": false
+        }
+      },
+      "kind": "converters",
+      "section": {
+        "Archive": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "folded": {
+        "bandit": {
+          "enabled": true
+        }
+      },
+      "kind": "scanners",
+      "section": {
+        "bandit": {
+          "enabled": true
+        }
+      }
+    }
+  ],
   "sections": [
     {
       "ambiguous": null,
