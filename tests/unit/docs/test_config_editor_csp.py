@@ -364,6 +364,10 @@ REFUSED = {
         _page(body='<svg><style><a href="javascript:go()">x</a></style></svg>\n'),
         "javascript: URL",
     ),
+    "markup in an SVG style that is never closed": (
+        _page(body='<svg><style><img src="x" onerror="go()">\n'),
+        "inline event handler",
+    ),
     "markup in a MathML style": (
         _page(body='<math><style><img src="x" onerror="go()"></style></math>\n'),
         "inline event handler",

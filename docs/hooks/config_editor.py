@@ -2979,7 +2979,7 @@ class PageScanner(HTMLParser):
     """Reads a built page for what the policy needs: the charset meta's end, each
     executable inline script, and everything a build must refuse."""
 
-    def __init__(self, source: str):
+    def __init__(self, source: str, foreign: int = 0):
         super().__init__(convert_charrefs=True)
         self.source = source
         self.line_starts = [0] + [m.end() for m in re.finditer("\n", source)]
@@ -2989,6 +2989,10 @@ class PageScanner(HTMLParser):
         self.policy_metas = 0
         self._text: list[str] | None = None
         self._executable = False
+        # The svg and math elements open at this point, and the text of a style
+        # inside one: a browser parses the content of those as markup.
+        self._foreign = foreign
+        self._style: list[str] | None = None
 
     def where(self) -> tuple[int, int]:
         line, offset = self.getpos()
@@ -3009,7 +3013,11 @@ class PageScanner(HTMLParser):
             for name in dict.fromkeys(n for n in names if names.count(n) > 1):
                 self.problem(f"the {tag} element repeats the attribute {name!r}")
         attributes = first_attributes(attrs)
-        if tag == "meta":
+        if tag in ("svg", "math"):
+            self._foreign += 1
+        elif tag == "style" and self._foreign:
+            self._style = []
+        elif tag == "meta":
             self.meta(attributes)
         elif tag == "script":
             self.script(attributes)
@@ -3047,12 +3055,52 @@ class PageScanner(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._text is not None:
             self._text.append(data)
+        if self._style is not None:
+            self._style.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "script" and self._text is not None:
+            text = "".join(self._text)
             if self._executable:
-                self.scripts.append("".join(self._text))
+                self.scripts.append(text)
+            if self._foreign:
+                self.rescan(tag, text)
             self._text = None
+        elif tag == "style" and self._style is not None:
+            self.rescan(tag, "".join(self._style))
+            self._style = None
+        elif tag in ("svg", "math") and self._foreign:
+            self._foreign -= 1
+
+    def close(self) -> None:
+        super().close()
+        # An element left open runs to the end of the page.
+        if self._style is not None:
+            self.rescan("style", "".join(self._style))
+            self._style = None
+        if self._text is not None and self._foreign:
+            self.rescan("script", "".join(self._text))
+            self._text = None
+
+    def rescan(self, tag: str, text: str) -> None:
+        """Read the text of an SVG or MathML ``style`` or ``script`` as markup.
+
+        The parser here reads that text as text, as it does for an HTML element of
+        those names. A browser parses it as markup inside SVG and MathML, so an
+        ``img`` in it is an HTML element with its handlers, and a link in it keeps
+        its ``javascript:`` URL. The same refusals apply to what the text holds. The
+        element itself is not refused: the site's own logo is an SVG with a style.
+        """
+        inner = PageScanner(text, foreign=1)
+        inner.feed(text)
+        inner.close()
+        line = self.getpos()[0]
+        for problem in inner.problems:
+            reason = problem.split(": ", 1)[1]
+            self.problems.append(
+                f"line {line}: in the markup a browser reads inside the {tag} "
+                f"element, {reason}"
+            )
 
 
 def apply_page_policy(page_html: str, name: str = EDITOR_PAGE) -> str:
