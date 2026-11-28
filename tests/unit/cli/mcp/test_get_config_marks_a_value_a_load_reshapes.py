@@ -8,10 +8,12 @@ environment as its reference also where the load reshapes the value. A list made
 of the variable's text (``output_formats: ${VAR}`` holding ``html,sarif``) shows
 the reference for each entry, and a relative path the load anchors at the file's
 directory and normalizes (``../shared/bandit.yaml``, ``./conf/bandit.yaml``) shows
-that directory and the reference, never the value. The cells run both routes to an
-operator's file (the call names it, or ``ASH_CONFIG`` does) and keep the controls
-that must not change: a list the file wrote as text, a relative path the anchoring
-keeps whole, and a text field read from a variable.
+that directory and the reference, never the value. A relative path that a ``patch``
+operation sets or appends, or that the file's own ``patch`` moves, is shown the same
+way. The cells run both routes to an operator's file (the call names it, or
+``ASH_CONFIG`` does) and keep the controls that must not change: a list the file
+wrote as text, a relative path the anchoring keeps whole, and a text field read
+from a variable.
 """
 
 import json
@@ -64,6 +66,15 @@ _ROUTES = pytest.mark.parametrize(
     [
         pytest.param(_named_operator_file, id="named-operator-file"),
         pytest.param(_ash_config_operator_file, id="ash-config-operator-file"),
+    ],
+)
+
+_RELATIVE_PATHS = pytest.mark.parametrize(
+    "held, canary",
+    [
+        pytest.param("../shared-6d0a/x-6d0a.yaml", "shared-6d0a", id="parent-dir"),
+        pytest.param("./conf-8e2b/x.yaml", "conf-8e2b", id="dot-dir"),
+        pytest.param("conf-1f4c/x.yaml", "conf-1f4c", id="kept-whole"),
     ],
 )
 
@@ -120,6 +131,103 @@ def test_a_relative_path_from_a_variable_shows_the_directory_and_the_reference(
         os.path.join(os.path.realpath(tmp_path / "operator"), "")
         + "<from ${ASH_TEST_BANDIT_CFG}>"
     )
+    assert shown == expected, shown
+    assert canary not in json.dumps(result, default=str)
+
+
+@_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_a_patch_operation_sets_shows_the_directory_and_the_reference(
+    tmp_path, monkeypatch, answer, held, canary
+):
+    """A ``patch`` operation's value is anchored at the file's directory like any
+    other relative path, and its reference follows it to the place the operation
+    sets; the answer shows that directory and the reference, and none of the text
+    the variable held."""
+    monkeypatch.setenv("ASH_TEST_PATCH_CFG", held)
+    body = (
+        "scanners:\n"
+        "  bandit:\n"
+        "    options: {}\n"
+        "patch:\n"
+        "  - op: add\n"
+        "    path: /scanners/bandit/options/config_file\n"
+        "    value: ${ASH_TEST_PATCH_CFG}\n"
+    )
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    base = os.path.realpath(tmp_path / "operator")
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    expected = os.path.join(base, "") + "<from ${ASH_TEST_PATCH_CFG}>"
+    assert shown == expected, shown
+    assert canary not in json.dumps(result, default=str)
+
+
+@_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_the_files_patch_moves_shows_the_directory_and_the_reference(
+    tmp_path, monkeypatch, answer, held, canary
+):
+    """The file's own ``patch`` inserts an entry ahead of the one the variable
+    wrote, so the entry moves to index 1; the answer shows the inserted entry as a
+    path and the moved one as the file's directory and the reference, and none of
+    the text the variable held."""
+    monkeypatch.setenv("ASH_TEST_GUARD_RULES", held)
+    body = (
+        "scanners:\n"
+        "  cfn-guard:\n"
+        "    options:\n"
+        "      rules_paths:\n"
+        "        - ${ASH_TEST_GUARD_RULES}\n"
+        "patch:\n"
+        "  - op: add\n"
+        "    path: /scanners/cfn-guard/options/rules_paths/0\n"
+        "    value: literal-first.guard\n"
+    )
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    base = os.path.realpath(tmp_path / "operator")
+    shown = result["scanners"]["cfn_guard"]["options"]["rules_paths"]
+    expected = [
+        os.path.join(base, "literal-first.guard"),
+        os.path.join(base, "") + "<from ${ASH_TEST_GUARD_RULES}>",
+    ]
+    assert shown == expected, shown
+    assert canary not in json.dumps(result, default=str)
+
+
+@_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_a_patch_operation_appends_shows_the_directory_and_the_reference(
+    tmp_path, monkeypatch, answer, held, canary
+):
+    """A ``patch`` operation appends the variable's path to a list (``/-``) and the
+    anchoring takes it from the file's directory; the answer shows the file's own
+    entry as a path and the appended one as that directory and the reference, and
+    none of the text the variable held."""
+    monkeypatch.setenv("ASH_TEST_GUARD_RULES", held)
+    body = (
+        "scanners:\n"
+        "  cfn-guard:\n"
+        "    options:\n"
+        "      rules_paths:\n"
+        "        - literal-first.guard\n"
+        "patch:\n"
+        "  - op: add\n"
+        "    path: /scanners/cfn-guard/options/rules_paths/-\n"
+        "    value: ${ASH_TEST_GUARD_RULES}\n"
+    )
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    base = os.path.realpath(tmp_path / "operator")
+    shown = result["scanners"]["cfn_guard"]["options"]["rules_paths"]
+    expected = [
+        os.path.join(base, "literal-first.guard"),
+        os.path.join(base, "") + "<from ${ASH_TEST_GUARD_RULES}>",
+    ]
     assert shown == expected, shown
     assert canary not in json.dumps(result, default=str)
 

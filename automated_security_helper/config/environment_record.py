@@ -154,12 +154,13 @@ class EnvironmentReference:
     length: Optional[int] = None
     #: Where in ``path`` the index of that list entry sits; set with ``length``.
     index_at: Optional[int] = None
-    #: For a relative path the load anchored at its file's directory and
-    #: normalized, so that the text holds neither ``resolved`` nor ``resolved``
-    #: after a path prefix (a ``..`` or ``./`` folded): that text, and the
-    #: directory it was anchored at, recorded at the anchoring
-    #: (``with_anchored_forms``). A view shows such a text as the directory and
-    #: the reference. None otherwise. Not compared.
+    #: For a relative path the load anchored at its file's directory: the text
+    #: the anchoring made of it, normalized (a ``..`` or ``./`` folded, so the
+    #: text holds neither ``resolved`` nor ``resolved`` after a path prefix) or
+    #: kept whole, and the directory it was anchored at, recorded at the
+    #: anchoring (``with_anchored_forms``). A view shows such a text as the
+    #: directory and the reference. None when the anchoring left the value as it
+    #: was. Not compared.
     anchored: Optional[Tuple[str, str]] = dataclass_field(default=None, compare=False)
 
     def moved_to_unknown_list(
@@ -522,19 +523,30 @@ def _anchored(text: str, reference: EnvironmentReference) -> bool:
     return prefix.endswith(("/", os.sep))
 
 
+def holds_reference(text: str, reference: EnvironmentReference) -> bool:
+    """Whether ``text`` is the entry ``reference`` wrote: what it resolved to,
+    that after a path prefix the load put on it (``_anchored``), or the text the
+    anchoring made of it (``EnvironmentReference.anchored``)."""
+    return _anchored(text, reference) or (
+        reference.anchored is not None and text == reference.anchored[0]
+    )
+
+
 def with_anchored_forms(
     references: Sequence[EnvironmentReference], document: Any, base_dir: str
 ) -> List[EnvironmentReference]:
     """``references``, one file's, each with the text the anchoring made of its
-    value recorded (``EnvironmentReference.anchored``) where ``document``, that
-    file's own document after its relative paths were anchored at ``base_dir``,
-    holds a string at the reference's place that ``_anchored`` does not
-    recognize: the anchoring normalized it. Every other reference, keys
-    included, is returned as it is."""
+    value recorded (``EnvironmentReference.anchored``) where ``document``, the
+    document after that file's relative paths were anchored at ``base_dir`` (its
+    own, or the one its patch made), holds a string at the reference's place
+    other than what the reference resolved to: the anchoring made a path of it,
+    normalized or kept whole behind the directory. Every other reference, keys
+    included, is returned as it is, so ``anchored`` stays None where the
+    anchoring left the value as it was."""
     found: List[EnvironmentReference] = []
     for reference in references:
         node = _node_at(document, reference.path)
-        if reference.key or not isinstance(node, str) or _anchored(node, reference):
+        if reference.key or not isinstance(node, str) or node == reference.resolved:
             found.append(reference)
         else:
             found.append(replace(reference, anchored=(str(node), base_dir)))
@@ -750,16 +762,16 @@ class _Index:
         """Whether the entry the file wrote ``reference`` at no longer holds it.
 
         True when the list is not the length the file wrote (defaults put before
-        the entry, a patch) and the entry at the same index is neither the value
-        nor a path the load anchored on it (``_anchored``). A list of the same
-        length whose entry changed is an entry the load or an override changed,
-        not one that moved.
+        the entry, a patch) and the entry at the same index is neither the value,
+        nor a path the load anchored on it, nor the text the anchoring made of it
+        (``holds_reference``). A list of the same length whose entry changed is
+        an entry the load or an override changed, not one that moved.
         """
         if reference.length is None or reference.index_at is None:
             return False
         exact = _exact_path(reference.path)
         text = self.strings.get(exact)
-        if text is not None and _anchored(text, reference):
+        if text is not None and holds_reference(text, reference):
             return False
         return self.lengths.get(exact[: reference.index_at]) != reference.length
 
@@ -779,8 +791,9 @@ class _Index:
         from. Only when the entry at a reference's own index no longer carries its
         value (the list was lengthened or patched) is the reference read at the
         other indices, and then only into a string of the shape the load gives
-        its entry (``_anchored``): another entry that merely contains the text
-        is not that entry.
+        its entry (``holds_reference``: what it resolved to, that after a path
+        prefix, or the text the anchoring made of it): another entry that merely
+        contains the text is not that entry.
 
         A reference whose list index says nothing about where its entry is
         (``EnvironmentReference.position_unknown``: the append of a ``patch``
@@ -793,7 +806,7 @@ class _Index:
             r
             for r in references
             if (
-                _anchored(text, r)
+                holds_reference(text, r)
                 if r.position_unknown or self._moved(r)
                 else _exact_path(r.path) == exact
             )
@@ -1041,9 +1054,11 @@ class _Index:
             return text
         for reference in candidates:
             if reference.anchored is not None and text == reference.anchored[0]:
-                # A relative path the load anchored and normalized holds none of
-                # the value's text: shown as its file's directory and the
-                # reference, the shape a path anchored whole is shown in.
+                # A relative path the load anchored, normalized or kept whole, is
+                # shown as its file's directory and the reference. The text the
+                # anchoring made of it need not hold the value's text (a folded
+                # ``..``, a path separator a platform rewrote), so it is matched
+                # as a whole and not searched for the value.
                 return os.path.join(reference.anchored[1], "") + self._whole(reference)
         for reference in candidates:
             if reference.value in text:

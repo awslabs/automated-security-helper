@@ -4467,9 +4467,9 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     (``ResolvedConfigDocument.displayed_environment_references``); it stays an
     environment read (``environment_references``), so redaction still masks
     its value. A value that still contains the environment's part is kept,
-    erring toward keeping. A relative path the load anchored and normalized
-    still describes the place when it holds the text recorded at the anchoring
-    (``EnvironmentReference.anchored``).
+    erring toward keeping. A relative path the load anchored still describes the
+    place when it holds the text recorded at the anchoring, or where a patch
+    operation's value landed (``EnvironmentReference.anchored``).
     """
     node = document
     for segment in reference.path:
@@ -4601,7 +4601,11 @@ def _plant(
     held = container[last]
     if isinstance(held, str) and held in planted:
         return held
-    if held != reference.resolved:
+    # A relative path the load anchored holds the text the anchoring made of it,
+    # which the reference recorded (``with_anchored_forms``): that text exactly.
+    if held != reference.resolved and not (
+        reference.anchored is not None and held == reference.anchored[0]
+    ):
         return None
     container[last] = token
     planted.add(token)
@@ -4615,6 +4619,7 @@ def _placed_through_patch(
     from_ops: List[_OpReference],
     where: str,
     rewritten: Optional[Dict[int, _Rewritten]] = None,
+    anchored_in: Optional[Tuple[Any, str]] = None,
 ) -> List[EnvironmentReference]:
     """The references of a file and of its bases, each at the place its value
     has once the file's ``patch`` (``ops``, which applied to ``document``) has.
@@ -4635,18 +4640,26 @@ def _placed_through_patch(
 
     A reference whose place does not hold what it read (a value the extending
     file wrote over) is kept as it was.
+
+    ``anchored_in`` is the document the file's operations made
+    (``_Patched.document``) and the directory they were anchored at. With
+    ``anchored_in``, a reference from an operation's value records the text the
+    anchoring made of it where it lands (``with_anchored_forms``), as the file's
+    own references record theirs before the patch.
     """
     shadow = copy.deepcopy(document)
     shadow_ops = copy.deepcopy(ops)
     tokens: Set[str] = set()
-    planted: List[Tuple[EnvironmentReference, Optional[str]]] = []
+    # Each reference, its token (None where its place does not hold it), and
+    # whether it came from an operation's value.
+    planted: List[Tuple[EnvironmentReference, Optional[str], bool]] = []
     for reference in tracked:
         token = _plant(shadow, tuple(reference.path), reference, tokens)
-        planted.append((reference, token))
+        planted.append((reference, token, False))
     for index, inside, reference in from_ops:
         token = _plant(shadow_ops[index], ("value", *inside), reference, tokens)
         if token is not None:
-            planted.append((reference, token))
+            planted.append((reference, token, True))
     if not tokens:
         return list(tracked)
     result: Any = shadow
@@ -4697,13 +4710,19 @@ def _placed_through_patch(
 
     walk(result, ())
     placed: List[EnvironmentReference] = []
-    for reference, token in planted:
+    for reference, token, from_operation in planted:
         if token is None:
             placed.append(reference)
         else:
-            placed.extend(
+            copies = [
                 reference.moved_to_unknown_list(path) for path in found.get(token, ())
-            )
+            ]
+            if from_operation and anchored_in is not None:
+                # The operation's value was anchored where the operations
+                # applied; a tracked reference already holds its own file's
+                # anchored form, which ``moved_to_unknown_list`` keeps.
+                copies = with_anchored_forms(copies, anchored_in[0], anchored_in[1])
+            placed.extend(copies)
     return placed
 
 
@@ -5226,6 +5245,9 @@ def _resolve(
                 from_ops,
                 where=state.shown(real),
                 rewritten=patched.rewritten,
+                anchored_in=(
+                    (patched.document, os.fspath(real.parent)) if anchor else None
+                ),
             )
             merged = patched.document
             unconfined = patched.unconfined
