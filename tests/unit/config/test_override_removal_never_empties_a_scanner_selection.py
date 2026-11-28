@@ -8,7 +8,8 @@ and ``-=`` from it would take nothing out while the named scanner still ran. A
 ``-=`` that took the last name out of a list would turn a run narrowed to some
 scanners into a run of the default set. The application that builds a command's
 own configuration (``warn_unread_appends=True``) refuses each of them, naming the
-replace form, the key that adds to the default set and ``--exclude-scanners``, as
+replace form and ``--exclude-scanners``, and for precommit mode only the key that
+adds to the default set (outside that mode the scanner fold drops the key), as
 the command line refuses an exclusion that cancels the selection it applies to.
 Every other edit is applied as written, and a replay of the same overrides onto
 another base (a view, a gate) applies every edit as written.
@@ -44,7 +45,8 @@ SELECTIONS = [
     pytest.param("default_scanners.only", id="default-scanners-only"),
     pytest.param("precommit.only_scanners", id="precommit-only-scanners"),
 ]
-#: The key that adds scanners to the set each selection list runs while empty.
+#: The key that adds scanners to the set each selection list runs while empty, in
+#: precommit mode only (outside it the scanner fold drops the key).
 ADDS = {
     "default_scanners.only": "default_scanners.add",
     "precommit.only_scanners": "precommit.add_scanners",
@@ -122,15 +124,17 @@ def test_an_edit_of_an_empty_scanner_selection_is_refused(key, operator):
     """Empty, the list is not a list of names but the default set, so neither edit
     has a list to act on: the append would narrow the run to bandit, and the
     removal would take nothing out while bandit still ran. The run's own build
-    refuses both, naming the replace form, the key that adds to the default set
-    and the flag that leaves scanners out of it, never the item."""
+    refuses both, naming the replace form and the flag that leaves scanners out of
+    it, and the key that adds to the default set for precommit mode only, where
+    the scanner fold reads it; never the item."""
     with pytest.raises(ASHConfigValidationError) as refused:
         _selection(key, [f'{operator}["bandit"]'], own_configuration=True)
 
     text = str(refused.value)
     assert "is empty" in text, text
     assert f"'{key}=[...]'" in text, text
-    assert f"'{ADDS[key]}=[...]'" in text, text
+    assert f"in precommit mode, '{ADDS[key]}=[...]' adds scanners" in text, text
+    assert "to add scanners to that set" not in text, text
     assert "--exclude-scanners" in text, text
     assert "bandit" not in text, text
 
