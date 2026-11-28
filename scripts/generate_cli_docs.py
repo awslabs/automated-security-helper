@@ -334,6 +334,17 @@ def _builtin_reporters() -> list[str]:
     return sorted(p.name for p in discover("reporter") if p.builtin)
 
 
+def _plugin_module_reporters() -> list[str]:
+    """The config names of the reporters in plugin modules.
+
+    The report phase selects any loaded reporter by its name, so a value that one of
+    these is named by writes a report once ``ash_plugin_modules`` loads its module.
+    """
+    from _plugin_reference import discover
+
+    return sorted(p.name for p in discover("reporter") if not p.builtin)
+
+
 def _output_formats_note(_param: Any) -> str:
     """``--output-formats``: accepted values, and which of them write a report.
 
@@ -345,13 +356,21 @@ def _output_formats_note(_param: Any) -> str:
     selects a reporter whose config name equals a value (``reporter_format_name``). So
     an ExportFormat value that names no reporter is accepted and writes nothing, and a
     reporter whose name is not one is refused.
+
+    A reporter in a plugin module is a reporter too: the report phase selects any
+    loaded reporter by its name, so a value that one of them is named by is not one
+    that names no reporter. The AWS module's values are these. They write a report
+    only when ``ash_plugin_modules`` loads the module and the reporter is enabled,
+    which is why the note gives them a sentence of their own.
     """
     from automated_security_helper.core.enums import ExportFormat
 
     accepted = [f.value for f in ExportFormat]
     reporters = _builtin_reporters()
+    in_modules = _plugin_module_reporters()
     writes = [v for v in accepted if v in reporters]
-    nothing = [v for v in accepted if v not in reporters]
+    when_loaded = [v for v in accepted if v in in_modules and v not in reporters]
+    nothing = [v for v in accepted if v not in reporters and v not in in_modules]
     refused = [r for r in reporters if r not in accepted]
     sentences = [
         "Values that write a report: " + ", ".join(code(v) for v in writes) + ".",
@@ -359,6 +378,14 @@ def _output_formats_note(_param: Any) -> str:
         + ", ".join(code(v) for v in nothing)
         + ".",
     ]
+    if when_loaded:
+        sentences.insert(
+            1,
+            "Values that write a report when the plugin module that provides the "
+            f"reporter is in {code('ash_plugin_modules')} and the reporter is enabled: "
+            + ", ".join(code(v) for v in when_loaded)
+            + ".",
+        )
     if refused:
         sentences.append(
             "Built-in reporters that are refused: "
