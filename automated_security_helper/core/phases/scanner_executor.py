@@ -1611,7 +1611,7 @@ class ScannerExecutor:
                                         heartbeat.start()
                                         scan_called = True
                                         if target_type == "image":
-                                            # The image dispatch (design C5): a
+                                            # The image dispatch: a
                                             # separate method, not a widened
                                             # scan(). The scan phase queues an
                                             # image task only for a scanner

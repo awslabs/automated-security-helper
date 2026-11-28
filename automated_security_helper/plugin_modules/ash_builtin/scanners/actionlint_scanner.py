@@ -1390,7 +1390,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     "actionlint (IAC) and zizmor (SAST) scan the same workflow files; the "
                     "split is defensible (linting versus security analysis) and changing "
                     "either moves reporter-side type exclusions, so it is recorded here "
-                    "and changed in neither (design E3)"
+                    "and changed in neither"
                 ),
             ),
             runtime=opsf.RuntimeFacet(
