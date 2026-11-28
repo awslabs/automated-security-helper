@@ -1952,7 +1952,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             artifact = (
                 physical.get("artifactLocation") if isinstance(physical, dict) else None
             )
-            uri = artifact.get("uri") if isinstance(artifact, dict) else None
+            if not isinstance(artifact, dict):
+                continue
+            uri = artifact.get("uri")
             # A uri that is not text is left as written, for the reading step.
             if uri and isinstance(uri, str):
                 # Cleaned, as gitleaks' filepath.Join cleans each path it walks.
