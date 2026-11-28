@@ -728,7 +728,7 @@ def _warn_that_an_off_host_reporter_runs_with_the_appended_items(
     if not _first_naming_in_this_run(logged_path):
         return
     ASH_LOGGER.warning(
-        f"{section} sends findings off the host, so {built_from}, and there "
+        f"{section} sends findings off the host; {built_from}, and there "
         f"'{logged_path}+=' starts the list from the appended items: the plugin's "
         "default for that option is not added. Set the whole list with "
         f"'{logged_path}=[...]'.",

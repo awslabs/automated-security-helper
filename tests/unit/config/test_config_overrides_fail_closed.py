@@ -14,7 +14,7 @@ import importlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, ClassVar, List, Literal, Tuple
+from typing import Any, ClassVar, Dict, List, Literal, Tuple
 
 import pytest
 import typer
@@ -711,6 +711,46 @@ class _RelayReporter(ReporterPluginBase[_RelayConfig]):
         return None
 
 
+class _SpelledRelayOptions(ReporterOptionsBase):
+    relay_targets: List[str] = ["plugin-default"]
+
+
+class _SpelledRelayConfig(ReporterPluginConfigBase):
+    name: Literal["orbit-spelled"] = "orbit-spelled"
+    enabled: bool = False
+    options: _SpelledRelayOptions = _SpelledRelayOptions()
+
+
+class _SpelledRelayReporter(ReporterPluginBase[_SpelledRelayConfig]):
+    """Sends findings off the host, and declares ``relay_targets`` as a destination."""
+
+    sends_off_host: ClassVar[bool] = True
+    destination_options: ClassVar[Tuple[str, ...]] = ("relay_targets",)
+
+    def report(self, model):
+        return None
+
+
+class _NestedRelayOptions(ReporterOptionsBase):
+    routes: Dict[str, List[str]] = {"primary": ["plugin-default"]}
+
+
+class _NestedRelayConfig(ReporterPluginConfigBase):
+    name: Literal["orbit-nested"] = "orbit-nested"
+    enabled: bool = False
+    options: _NestedRelayOptions = _NestedRelayOptions()
+
+
+class _NestedRelayReporter(ReporterPluginBase[_NestedRelayConfig]):
+    """Sends findings off the host, and declares a mapping of lists as a destination."""
+
+    sends_off_host: ClassVar[bool] = True
+    destination_options: ClassVar[Tuple[str, ...]] = ("routes",)
+
+    def report(self, model):
+        return None
+
+
 _UPLINK = "reporters.orbit-uplink.options.destinations"
 _LOCAL = "reporters.orbit-local.options.destinations"
 _UPLINK_ITEM = "appended-uplink-5e1d"
@@ -720,6 +760,10 @@ _RELAY = "reporters.orbit-relay.options.destinations"
 _RELAY_ITEM = "appended-relay-9c4a"
 _RELAY_TAGS = "reporters.orbit-relay.options.tags"
 _RELAY_TAG_ITEM = "appended-relay-tag-6b2e"
+_SPELLED = "reporters.orbit-spelled.options.relay-targets"
+_SPELLED_ITEM = "appended-spelled-2d8f"
+_NESTED = "reporters.orbit-nested.options.routes.primary"
+_NESTED_ITEM = "appended-nested-7a15"
 
 
 def _scan_with_a_view(tmp_path: Path, key: str, item: str, operator_base: AshConfig):
@@ -1404,6 +1448,9 @@ class TestAppendOntoAnUntypedPluginOption:
         warnings = _warnings_naming(caplog, _UPLINK)
         assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
         assert (
+            "sends findings off the host; ash merge given no config file" in warnings[0]
+        )
+        assert (
             "ash merge given no config file takes its section from ASH's defaults "
             "and the overrides (another command, from its own configuration and "
             "the overrides)" in warnings[0]
@@ -1502,15 +1549,106 @@ class TestAppendOntoAnUntypedPluginOption:
         )
         assert "only those options" not in appended[0]
 
+    def test_a_declared_option_appended_under_its_other_spelling_comes_from_the_defaults(
+        self, caplog, tmp_path
+    ):
+        """A reporter that declares ``relay_targets`` as a destination option takes
+        it under either spelling from ASH's defaults and the overrides. The named
+        file writes it as ``relay-targets`` and the override appends under that
+        spelling, so the append started the list there: the file's list is replaced
+        by it, and building the reporter names the key once, with the destination
+        options' clause."""
+        override = f'{_SPELLED}+=["{_SPELLED_ITEM}"]'
+        named_file = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "orbit-spelled": {
+                        "enabled": True,
+                        "options": {"relay-targets": ["named-file"]},
+                    }
+                }
+            }
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(
+                named_file, [override], warn_unread_appends=True
+            )
+            confine_off_host_reporters_to_overrides(
+                config, [tmp_path / "ash.yaml"], [override], REPORT_CONFIG_FILE
+            )
+            confine_declared_reporter_destinations(
+                config, [_SpelledRelayReporter], source=REPORT_CONFIG_FILE
+            )
+            section = reporter_section(config, _SpelledRelayReporter)
+
+        assert section["options"]["relay-targets"] == [_SPELLED_ITEM]
+        assert "relay_targets" not in section["options"]
+        assert section["enabled"] is False
+        appended = [
+            text
+            for text in _warnings_naming(caplog, _SPELLED)
+            if f"{_SPELLED}+=" in text
+        ]
+        assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "ash report and ash merge take its destination options and enabled from "
+            "ASH's defaults and the overrides, not from the config files they read"
+            in appended[0]
+        )
+        assert "take its options other than its destination options" not in appended[0]
+
+    def test_a_list_under_a_declared_option_comes_from_the_defaults(
+        self, caplog, tmp_path
+    ):
+        """A list one level under a destination option the reporter declares comes
+        from ASH's defaults and the overrides, as the option does. The named file
+        writes ``routes`` with a list under ``primary`` and the override appends
+        under that key, so the append started the list there: building the reporter
+        names the key once, with the destination options' clause."""
+        override = f'{_NESTED}+=["{_NESTED_ITEM}"]'
+        named_file = AshConfig.model_validate(
+            {
+                "reporters": {
+                    "orbit-nested": {"options": {"routes": {"primary": ["named-file"]}}}
+                }
+            }
+        )
+
+        with caplog.at_level("WARNING", logger="ash"):
+            config = apply_config_overrides(
+                named_file, [override], warn_unread_appends=True
+            )
+            confine_off_host_reporters_to_overrides(
+                config, [tmp_path / "ash.yaml"], [override], REPORT_CONFIG_FILE
+            )
+            confine_declared_reporter_destinations(
+                config, [_NestedRelayReporter], source=REPORT_CONFIG_FILE
+            )
+            section = reporter_section(config, _NestedRelayReporter)
+
+        assert section["options"]["routes"] == {"primary": [_NESTED_ITEM]}
+        appended = [
+            text for text in _warnings_naming(caplog, _NESTED) if f"{_NESTED}+=" in text
+        ]
+        assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "ash report and ash merge take its destination options and enabled from "
+            "ASH's defaults and the overrides, not from the config files they read"
+            in appended[0]
+        )
+        assert "take its options other than its destination options" not in appended[0]
+
     def test_with_a_view_the_destinations_come_from_the_defaults_given_a_named_file(
         self, caplog, tmp_path
     ):
         """With a reporters view recorded for the named file (a file under the
         working directory or in a git checkout), ``ash report`` and ``ash merge``
         build such a reporter from the view, confined: its destination options and
-        ``enabled`` come from ASH's defaults and the overrides, and its other options
-        from the view, not from the named file. The warning for the declared list
-        says so and does not say the other options come from the file."""
+        ``enabled`` come from ASH's defaults and the overrides, though the view sets
+        its own, and its other options from the view, not from the named file. The
+        warning for the declared list says so and does not say the other options
+        come from the file."""
         from automated_security_helper.config.resolve_config import (
             _with_reporter_overrides,
         )
@@ -1529,7 +1667,17 @@ class TestAppendOntoAnUntypedPluginOption:
             }
         )
         operator_base = AshConfig.model_validate(
-            {"reporters": {"orbit-relay": {"options": {"label": "operator-label"}}}}
+            {
+                "reporters": {
+                    "orbit-relay": {
+                        "enabled": True,
+                        "options": {
+                            "destinations": ["operator-destination"],
+                            "label": "operator-label",
+                        },
+                    }
+                }
+            }
         )
 
         with caplog.at_level("WARNING", logger="ash"):
@@ -1551,6 +1699,7 @@ class TestAppendOntoAnUntypedPluginOption:
 
         assert section["options"]["destinations"] == [_RELAY_ITEM]
         assert section["options"]["label"] == "operator-label"
+        assert section["enabled"] is False
         appended = [
             text for text in _warnings_naming(caplog, _RELAY) if f"{_RELAY}+=" in text
         ]
@@ -1659,6 +1808,10 @@ class TestAppendOntoAnUntypedPluginOption:
             if f"{_RELAY_TAGS}+=" in text
         ]
         assert len(appended) == 1, [r.getMessage() for r in caplog.records]
+        assert (
+            "sends findings off the host; ash report and ash merge take its options "
+            "other than" in appended[0]
+        )
         assert (
             "ash report and ash merge take its options other than its destination "
             "options from the config files they read and the overrides" in appended[0]
