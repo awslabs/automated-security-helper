@@ -115,7 +115,8 @@ one structural one, both of which will cost you a failed plan if you guess:
 
 Leave it at its default, or pin the release you took these files from. The targets
 call ASH with options that older releases do not have (`ash mcp --stateless-http`,
-the shard options of `ash scan`, `ash results merge` or, before ASH 3.9, `ash merge`),
+the shard options of `ash scan`, and the merge command `ash results merge`, named
+`ash merge` before ASH 3.9),
 so an older `AshVersion` can fail to start or, for `ash scan`, quietly ignore an
 option. The CDK default and the Terraform examples name the release this tree
 belongs to, and every release moves them to itself, so a target taken from release

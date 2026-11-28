@@ -51,8 +51,9 @@ Prerequisites:
   templates to the ASH release they ship in. The Terraform `ash_version` variable has
   no default, and the Terraform examples pin the same release. Both accept a tag, a
   branch, or a full commit SHA. The targets need options that no release up to 3.7.1
-  has: stateless MCP (`ash mcp --stateless-http`), and the shard options of `ash scan`,
-  `ash results merge` or, before ASH 3.9, `ash merge`, for the distributed pipeline.
+  has: stateless MCP (`ash mcp --stateless-http`) and, for the distributed pipeline,
+  the shard options of `ash scan` and the merge command, `ash results merge`
+  (`ash merge` before ASH 3.9).
   Set `AshVersion` to an ASH that has them, for example the commit SHA you deploy from.
   With one that lacks them, the Fargate MCP container exits at startup, the AgentCore
   server starts in stateful mode and logs a warning, and the distributed pipeline
