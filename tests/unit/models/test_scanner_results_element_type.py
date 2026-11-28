@@ -55,6 +55,9 @@ TARGET_ONLY_FIELDS = (
     # what the scan phase and the executor recorded.
     "missing_reason",
     "skipped_reason",
+    # The scan categories the scanner can serve: set on every rebuilt row by
+    # unified_metrics from the scanner's name.
+    "categories",
 )
 
 

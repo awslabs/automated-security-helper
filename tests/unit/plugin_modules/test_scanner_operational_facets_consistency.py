@@ -29,6 +29,7 @@ import importlib
 import json
 import re
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -280,12 +281,16 @@ def test_declared_native_format_matches_the_committed_fixture(scanner_name) -> N
 
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
-def test_tool_type_is_one_story_across_four_declarations(cls, _instances) -> None:
-    """The register, the scanner's own ``tool_type``, the ``SCANNER_TOOL_TYPES``
-    table the reporters read, and the declared target kinds agree.
+def test_tool_type_is_one_story_across_three_declarations(
+    cls: type, _instances: dict[type, ScannerPluginBase]
+) -> None:
+    """The register, the scanner's own ``tool_type`` and the ``SCANNER_TOOL_TYPES``
+    table the reporters read agree.
 
     ``tool_type`` feeds the reporter-side ``exclude_scanner_types``, so a type
-    that contradicts what the scanner scans is behavior-visible (E3).
+    that contradicts the register is behavior-visible (E3). Which target kinds
+    serve a row is asked of the row's categories, through ``CATEGORY_SERVED_BY``,
+    in the tests below.
     """
     facets = _ops(cls)
     declared = facets.targets.tool_type
@@ -297,11 +302,174 @@ def test_tool_type_is_one_story_across_four_declarations(cls, _instances) -> Non
         f"{facets.scanner_name}: utils/scanner_names.SCANNER_TOOL_TYPES says "
         f"{SCANNER_TOOL_TYPES[facets.scanner_name]}, the register {declared.value}"
     )
-    served_by = opsf.TOOL_TYPE_SERVED_BY[declared]
-    assert set(facets.targets.kinds) & served_by, (
-        f"{facets.scanner_name} is typed {declared.value} but declares target "
-        f"kinds {[k.value for k in facets.targets.kinds]}, none of which a "
-        f"{declared.value} scanner scans ({sorted(k.value for k in served_by)})"
+
+
+#: Categories no target kind carries of its own. A row that declares one says in
+#: ``targets.categories_note`` which of its declared kinds it reads them from.
+_CATEGORIES_WITHOUT_A_KIND = frozenset({"agent", "api", "binary", "posture"})
+
+
+def _scan_category() -> Any:
+    """``core.enums.ScanCategory``, read when the test runs rather than at import."""
+    enums = importlib.import_module("automated_security_helper.core.enums")
+    found = getattr(enums, "ScanCategory", None)
+    assert found is not None, "core.enums has no ScanCategory"
+    return found
+
+
+def _category_served_by() -> dict[Any, frozenset[opsf.TargetKind]]:
+    """``CATEGORY_SERVED_BY``, read when the test runs rather than at import."""
+    found = getattr(opsf, "CATEGORY_SERVED_BY", None)
+    assert found is not None, (
+        "base/scanner_operational_facets.py has no CATEGORY_SERVED_BY"
+    )
+    return found
+
+
+def _scanner_categories() -> dict[str, tuple[Any, ...]]:
+    """``SCANNER_CATEGORIES``, read when the test runs rather than at import."""
+    names = importlib.import_module("automated_security_helper.utils.scanner_names")
+    found = getattr(names, "SCANNER_CATEGORIES", None)
+    assert found is not None, "utils/scanner_names has no SCANNER_CATEGORIES"
+    return found
+
+
+def _row_categories(cls: type) -> tuple[Any, ...]:
+    """The categories the operational row of *cls* declares."""
+    assert "categories" in opsf.TargetsFacet.model_fields, (
+        "TargetsFacet declares no categories field"
+    )
+    return _ops(cls).targets.categories
+
+
+def _values(categories: tuple[Any, ...] | frozenset[Any]) -> list[str]:
+    return [member.value for member in categories]
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_every_shipped_row_declares_its_categories(cls: type) -> None:
+    """A shipped row writes its categories out, never leaning on the derivation
+    from ``tool_type`` that is removed in 4.0."""
+    facets = _ops(cls)
+    categories = _row_categories(cls)
+
+    assert "categories" in facets.targets.model_fields_set, (
+        f"{facets.scanner_name}: its row derives its categories from tool_type "
+        f"{facets.targets.tool_type.value}; write targets.categories"
+    )
+    assert categories, f"{facets.scanner_name}: its row names no category"
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_the_name_table_states_each_rows_categories(cls: type) -> None:
+    """``SCANNER_CATEGORIES`` answers by name for a reader that imports no scanner,
+    so each entry is its row's categories, value for value."""
+    facets = _ops(cls)
+    categories = _row_categories(cls)
+    table = _scanner_categories()
+
+    assert facets.scanner_name in table, (
+        f"SCANNER_CATEGORIES has no row for {facets.scanner_name}"
+    )
+    assert table[facets.scanner_name] == categories, (
+        f"{facets.scanner_name}: utils/scanner_names.SCANNER_CATEGORIES says "
+        f"{_values(table[facets.scanner_name])}, the register {_values(categories)}"
+    )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_each_declared_category_is_served_by_a_declared_target_kind(cls: type) -> None:
+    """A category the row declares is one that some declared target kind carries:
+    a row claiming a category none of its targets holds would answer a category
+    scope with findings it cannot produce."""
+    facets = _ops(cls)
+    categories = _row_categories(cls)
+    served_by = _category_served_by()
+    kinds = set(facets.targets.kinds)
+    declared_kinds = sorted(kind.value for kind in kinds)
+
+    unserved: list[str] = []
+    for category in categories:
+        serving = served_by.get(category, frozenset())
+        if kinds & serving:
+            continue
+        unserved.append(
+            f"{facets.scanner_name} declares {category.value}, which none of its "
+            f"target kinds {declared_kinds} serves; {category.value} is served by "
+            f"{sorted(kind.value for kind in serving)}"
+        )
+
+    assert not unserved, "\n".join(unserved)
+
+
+def test_every_category_has_a_served_by_row() -> None:
+    """Every category has a row, so a new category comes with a decision about
+    the target kinds that carry it; ``dast`` and ``other`` are carried by none."""
+    category = _scan_category()
+    served_by = _category_served_by()
+
+    missing = [member.value for member in category if member not in served_by]
+    assert not missing, f"CATEGORY_SERVED_BY has no row for {missing}"
+    assert set(served_by) == set(category)
+    for member, kinds in served_by.items():
+        assert isinstance(kinds, frozenset), member
+        assert all(isinstance(kind, opsf.TargetKind) for kind in kinds), member
+    assert served_by[category.DAST] == frozenset()
+    assert served_by[category.OTHER] == frozenset()
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_category_with_no_kind_of_its_own_carries_a_note(cls: type) -> None:
+    """``agent``, ``api``, ``binary`` and ``posture`` have no target kind of their
+    own, so a row that declares one says in its categories note which declared
+    kinds it reads them from."""
+    facets = _ops(cls)
+    named = sorted(
+        _CATEGORIES_WITHOUT_A_KIND.intersection(_values(_row_categories(cls)))
+    )
+
+    if named:
+        assert (facets.targets.categories_note or "").strip(), (
+            f"{facets.scanner_name} declares {', '.join(named)}, which no target "
+            "kind carries of its own; say in targets.categories_note which of its "
+            "declared kinds it reads them from"
+        )
+
+
+def test_the_rows_with_a_category_without_a_kind_are_checkov_and_mcp_config() -> None:
+    """The note test above reaches two shipped rows, so it does not pass on none."""
+    found = sorted(
+        _ops(cls).scanner_name
+        for cls in SCANNER_CLASSES
+        if _CATEGORIES_WITHOUT_A_KIND.intersection(_values(_row_categories(cls)))
+    )
+
+    assert found == ["checkov", "mcp-config"]
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_the_instance_serves_within_the_categories_its_row_declares(
+    cls: type, _instances: dict[type, ScannerPluginBase]
+) -> None:
+    """A constructed scanner declares its row's categories, and the categories its
+    default options make it serve in a run are among them."""
+    facets = _ops(cls)
+    categories = _row_categories(cls)
+    instance = _instances[cls]
+
+    declared = instance.declared_categories()
+    for_run = instance.categories_for_run()
+
+    assert isinstance(declared, tuple), type(declared)
+    assert declared == categories, (
+        f"{facets.scanner_name}: the instance declares {_values(declared)}, its "
+        f"row {_values(categories)}"
+    )
+    assert isinstance(for_run, frozenset), type(for_run)
+    beyond = sorted(_values(for_run - set(categories)))
+    assert not beyond, (
+        f"{facets.scanner_name}: a run with its default options serves {beyond}, "
+        f"which its row does not declare ({_values(categories)})"
     )
 
 
