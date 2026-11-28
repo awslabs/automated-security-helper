@@ -21,6 +21,8 @@ Use Python 3.11 to 3.14 and [pipx](https://pipx.pypa.io/).
 For container mode, also install an OCI-compatible runtime such as Docker,
 Finch, or Podman.
 
+<a id="quick-start-install"></a>
+
 <!-- doctest: illustrative reason="installs ASH from GitHub over the network and starts a container scan" -->
 ```bash
 pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.8.0

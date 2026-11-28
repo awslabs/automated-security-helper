@@ -16,6 +16,8 @@ What it holds
 * the storyboard: ``parse_storyboard`` and ``load_storyboard`` read schema 1, refuse
   unknown keys the way the journey loader does, and apply the copy rules to captions
   with ``count_words`` and ``caption_problems``, the one counter those rules use.
+  ``load_storyboard`` also refuses the YAML that PyYAML resolves silently: anchors,
+  aliases, every explicit tag, merge keys, and a key given twice in one mapping.
 * the retimer: ``retime`` rewrites the measured output times of every scene into the
   scene's own budget. Output is shortened to fit and never stretched.
 * the scrub scan: ``scan_text`` and ``scan_cast`` look for tokens that must not appear
@@ -32,10 +34,11 @@ What it holds
 
 Dependencies
 ------------
-The standard library only. PyYAML is imported inside ``load_storyboard``, the one
-function that reads a YAML file; ``parse_storyboard`` takes data that is already
-parsed. This module imports no ``pty``, ``termios`` or ``fcntl``, and
-tests/unit/docs/test_cast_core.py checks that on the syntax tree.
+The standard library only. The one import that reaches PyYAML is the sibling module
+``_strict_yaml``, inside ``_load_yaml``, the one function that reads YAML;
+``load_storyboard`` reads through it, and ``parse_storyboard`` takes data that is
+already parsed. This module imports no ``pty``, ``termios`` or ``fcntl``, and
+tests/unit/docs/test_cast_core.py checks both on the syntax tree.
 
 Times
 -----
@@ -52,6 +55,7 @@ import json
 import math
 import operator
 import re
+import sys
 import unicodedata
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -957,25 +961,48 @@ def parse_storyboard(
     )
 
 
+def _load_yaml(text: str, source: str) -> object:
+    """``text`` as YAML data, refusing what schema 1 has no use for.
+
+    The reading is done by ``_strict_yaml``, the sibling module the journey generator
+    reads through too. This is the one function of the module that imports it, so the
+    module needs no PyYAML to import, parse or retime. ``yaml.safe_load`` accepts
+    anchors, aliases, tags and merge keys and keeps the last of a key given twice, so a
+    caption written twice in a scene would replace the first without a word. Each is
+    refused by name instead. The module's own directory is on ``sys.path`` only for the
+    import, because a caller may have loaded this module by its path.
+    """
+    here = str(Path(__file__).resolve().parent)
+    added = here not in sys.path
+    if added:
+        sys.path.insert(0, here)
+    try:
+        import _strict_yaml
+    finally:
+        if added:
+            sys.path.remove(here)
+    schema = f"storyboard schema {STORYBOARD_SCHEMA}"
+    try:
+        return _strict_yaml.load(text, source, schema)
+    except _strict_yaml.StrictYamlError as exc:
+        raise StoryboardError(str(exc)) from exc
+
+
 def load_storyboard(
     path: str | Path, journey_ids: Collection[str] | None
 ) -> Storyboard:
     """Read the storyboard YAML file at ``path`` and validate it.
 
-    PyYAML is imported here and nowhere else in this module.
+    The YAML is read by ``_load_yaml``, which refuses anchors, aliases, every explicit
+    tag, merge keys and a key given twice in one mapping. Each refusal is a
+    ``StoryboardError`` naming the file, the line and the anchor, tag or key.
     """
-    import yaml
-
     source = str(path)
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise StoryboardError(f"{source}: cannot be read: {exc}") from exc
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
-        raise StoryboardError(f"{source}: not valid YAML: {exc}") from exc
-    return parse_storyboard(data, journey_ids, source=source)
+    return parse_storyboard(_load_yaml(text, source), journey_ids, source=source)
 
 
 # ---------------------------------------------------------------------------

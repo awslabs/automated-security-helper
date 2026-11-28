@@ -10,8 +10,10 @@ every rule it holds is checked here on planted input:
 * the storyboard loader: schema 1, unknown keys refused, scene ids unique, scene starts
   as running sums, a 30 to 60 s total, a typing rate that is neither zero nor so slow
   that its arithmetic overflows, caption copy rules counted by the loader's own
-  counter, and a read-only command allowlist limited to paths inside the project and
-  to ls listings that print no owner or group;
+  counter, a read-only command allowlist limited to paths inside the project and to ls
+  listings that print no owner or group, and the YAML that PyYAML would resolve
+  silently (anchors, aliases, every explicit tag, merge keys and a key given twice in
+  one mapping) refused by file, line and name;
 * the retimer: the same input gives the same events, the scene totals are the
   storyboard's whatever the machine speed, output is shortened and never stretched, and
   a scene that does not fit its duration is refused;
@@ -140,6 +142,38 @@ def test_the_module_imports_no_pty_termios_or_fcntl():
     # A scan that saw no imports at all would pass for any file.
     assert {"json", "re", "dataclasses"} <= roots
     assert roots & FORBIDDEN_MODULES == set()
+
+
+def _names_imported(node: ast.AST) -> set[str]:
+    """The top-level module names one import statement brings in."""
+    if isinstance(node, ast.Import):
+        return {alias.name.split(".")[0] for alias in node.names}
+    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        return {node.module.split(".")[0]}
+    return set()
+
+
+def test_the_module_reaches_pyyaml_in_one_function_through_the_strict_loader():
+    """The module imports, parses and retimes with the standard library alone. The one
+    import that reaches PyYAML is the strict loader's, inside ``_load_yaml``, the one
+    function that reads YAML, so no other function of the module has a YAML reader of
+    its own."""
+    source = MODULE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    holders = [
+        node
+        for node in ast.walk(tree)
+        if _names_imported(node) & {"yaml", "_strict_yaml"}
+    ]
+    assert len(holders) == 1, "PyYAML is reached from one import and no more"
+    (holder,) = holders
+    assert _names_imported(holder) == {"_strict_yaml"}
+    loader = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_load_yaml"
+    )
+    assert loader.lineno < holder.lineno <= loader.end_lineno
 
 
 def test_every_refusal_is_one_error_family(cast):
@@ -607,6 +641,289 @@ def test_a_missing_or_malformed_storyboard_file_is_refused_by_name(cast, tmp_pat
 def test_a_storyboard_must_be_a_mapping(cast, bad):
     with pytest.raises(cast.StoryboardError, match="must be a mapping"):
         _parse(cast, bad)
+
+
+# PyYAML accepts anchors, aliases, tags and merge keys, and keeps the last of a key
+# given twice. Schema 1 uses none of the first four, and the fifth would replace a
+# caption written twice in a scene without a word. A tag can also hide the fifth:
+# PyYAML builds a key tagged ``!!value`` as the text of the key, so it repeats another
+# key, and a check that compares tags sees two different keys. So the loader refuses all
+# five, by file, line and name, before the schema sees the data. It refuses every
+# explicit tag, because the committed storyboard has none, which leaves a plain ``<<``
+# as the only way to write a merge key.
+
+BOARD_NAME = "board.cast.yaml"
+COMMITTED_STORYBOARD = (
+    SCRIPTS.parent / "docs" / "journeys" / "getting-started-local.cast.yaml"
+)
+VERSION_CAPTION = 'caption: "Check the install"'
+INSTALL_CAPTION = 'caption: "Install from a release tag"'
+
+
+def _board(tmp_path, *edits):
+    """The design storyboard with each (old, new) edit applied, written to a file.
+
+    Returns the path and the text. An edit must match exactly once, so a mistake in the
+    test fails here instead of planting nothing.
+    """
+    text = DESIGN_STORYBOARD
+    for old, new in edits:
+        assert text.count(old) == 1, f"the planted edit {old!r} must match once"
+        text = text.replace(old, new)
+    path = tmp_path / BOARD_NAME
+    path.write_text(text, encoding="utf-8")
+    return path, text
+
+
+def _lines(text, needle):
+    """The 1-based numbers of the lines of ``text`` that hold ``needle``."""
+    return [n for n, line in enumerate(text.splitlines(), 1) if needle in line]
+
+
+def _refused(cast, path):
+    """The message of the StoryboardError that loading ``path`` raises."""
+    with pytest.raises(cast.StoryboardError) as caught:
+        cast.load_storyboard(path, JOURNEY_IDS)
+    return str(caught.value)
+
+
+def test_a_yaml_anchor_is_refused_by_file_line_and_name(cast, tmp_path):
+    anchored = VERSION_CAPTION.replace("caption: ", "caption: &cap ")
+    path, text = _board(tmp_path, (VERSION_CAPTION, anchored))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '&cap')[0]}: ")
+    assert "the YAML anchor &cap is not part of storyboard schema 1" in message
+
+
+def test_a_yaml_alias_is_refused_by_file_line_and_name(cast, tmp_path):
+    path, text = _board(tmp_path, (VERSION_CAPTION, "caption: *cap"))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '*cap')[0]}: ")
+    assert "the YAML alias *cap is not part of storyboard schema 1" in message
+
+
+def test_an_anchor_and_its_alias_are_refused_at_the_anchor(cast, tmp_path):
+    """The way anchors are used: one scene's caption reused in another scene."""
+    path, text = _board(
+        tmp_path,
+        (INSTALL_CAPTION, INSTALL_CAPTION.replace("caption: ", "caption: &cap ")),
+        (VERSION_CAPTION, "caption: *cap"),
+    )
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '&cap')[0]}: ")
+    assert "the YAML anchor &cap" in message
+
+
+def test_a_yaml_merge_key_is_refused_by_file_line_and_key(cast, tmp_path):
+    merged = "{id: version, <<: {" + VERSION_CAPTION + "}"
+    path, text = _board(tmp_path, ("{id: version, " + VERSION_CAPTION, merged))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '<<')[0]}: ")
+    assert "the YAML merge key '<<' is not part of storyboard schema 1" in message
+
+
+# Every explicit tag is refused where it is written, on a key and on a value, whatever
+# PyYAML would have made of the node. A tag can turn any word into a merge key, turn a
+# key into the text of another key, or turn a value into a set, an ordered mapping or a
+# date, and schema 1 uses none of them. The refusal names the tag as PyYAML resolves it,
+# so ``!m!value`` after a ``%TAG`` directive reads as ``!!value``.
+OTHER_WORDS = '"Other words"'
+READ_TWICE = '{caption: "Read it twice"}'
+SHOWN_SCREEN = 'expect_screen: ["awslabs/automated-security-helper v"]'
+VALUE_TAG_DIRECTIVE = ("schema: 1\n", "%TAG !m! tag:yaml.org,2002:\n---\nschema: 1\n")
+LOCAL_TAG_DIRECTIVE = (
+    "schema: 1\n",
+    "%TAG !e! tag:example.com,2000:app/\n---\nschema: 1\n",
+)
+
+
+def _extra_key(spelling, value):
+    """The edit that adds a key written as ``spelling`` after the version caption."""
+    return (VERSION_CAPTION, f"{VERSION_CAPTION}, {spelling}: {value}")
+
+
+def _with_value(value):
+    """The edit that gives the version scene's ``expect_screen`` the value ``value``."""
+    return (SHOWN_SCREEN, f"expect_screen: {value}")
+
+
+def _key_row(spelling, shown, value=READ_TWICE):
+    """A row of ``EXPLICIT_TAGS``: an extra key written as ``spelling``."""
+    return ((_extra_key(spelling, value),), spelling, shown)
+
+
+#: name -> (the edits that plant it, the text its line holds, the tag the refusal names)
+EXPLICIT_TAGS = {
+    "the merge tag": _key_row("!!merge <<", "!!merge"),
+    "the merge tag on another word": _key_row("!!merge extra", "!!merge"),
+    "the verbatim merge tag": _key_row("!<tag:yaml.org,2002:merge> <<", "!!merge"),
+    "the merge tag on a flow sequence": _key_row("!!merge [extra]", "!!merge"),
+    "the merge tag on a flow mapping": _key_row("!!merge {extra: 1}", "!!merge"),
+    "the non-specific tag": _key_row("! <<", "!"),
+    "the non-specific tag on a quoted key": _key_row('! "<<"', "!"),
+    "the verbatim non-specific tag": _key_row("!<!> <<", "!"),
+    "the string tag on a repeated key": _key_row("!!str caption", "!!str", OTHER_WORDS),
+    "a local tag on a key": _key_row("!local caption", "!local", OTHER_WORDS),
+    "the value tag behind a TAG directive": (
+        (VALUE_TAG_DIRECTIVE, _extra_key("!m!value caption", OTHER_WORDS)),
+        "!m!value",
+        "!!value",
+    ),
+    "a local tag behind a TAG directive": (
+        (LOCAL_TAG_DIRECTIVE, _extra_key("!e!thing caption", OTHER_WORDS)),
+        "!e!thing",
+        "tag:example.com,2000:app/thing",
+    ),
+    "the set tag on a value": (
+        (_with_value('!!set {"awslabs/automated-security-helper v"}'),),
+        "!!set",
+        "!!set",
+    ),
+    "the ordered mapping tag on a value": (
+        (_with_value("!!omap [{a: 1}]"),),
+        "!!omap",
+        "!!omap",
+    ),
+    "the timestamp tag on a caption": (
+        ((VERSION_CAPTION, "caption: !!timestamp 2001-12-14"),),
+        "!!timestamp",
+        "!!timestamp",
+    ),
+}
+# A key PyYAML reads as text is an ordinary key, however much it looks like ``<<``.
+NOT_MERGE_SPELLINGS = {
+    "a quoted key": '"<<"',
+    "a single-quoted key": "'<<'",
+}
+
+
+@pytest.mark.parametrize("name", sorted(EXPLICIT_TAGS))
+def test_every_explicit_tag_is_refused_by_file_line_and_tag(cast, tmp_path, name):
+    """A tag changes what a node is before the schema looks at it, so none is read."""
+    edits, needle, shown = EXPLICIT_TAGS[name]
+    path, text = _board(tmp_path, *edits)
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, needle)[0]}: ")
+    assert f"the YAML tag {shown} is not part of storyboard schema 1" in message
+
+
+def test_a_value_tagged_key_cannot_hide_a_repeated_caption(cast, tmp_path):
+    """The shape that got past the repeated-key check. PyYAML builds a key tagged
+    ``!!value`` as the text ``caption``, so the second caption replaces the first, and
+    a check that compared tags saw two different keys. The tag is refused as written."""
+    path, text = _board(tmp_path, _extra_key("!!value caption", OTHER_WORDS))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '!!value')[0]}: ")
+    assert "the YAML tag !!value is not part of storyboard schema 1" in message
+
+
+def test_pyyaml_keeps_the_later_caption_of_a_value_tagged_key(tmp_path):
+    """Control for the test above: the planted scene is the silent shape. PyYAML alone
+    loads it with no error and with the second caption in place of the first."""
+    _path, text = _board(tmp_path, _extra_key("!!value caption", OTHER_WORDS))
+    assert _scene(yaml.safe_load(text), "version")["caption"] == "Other words"
+
+
+def test_a_plain_equals_and_a_quoted_equals_are_one_key(cast, tmp_path):
+    """PyYAML resolves a plain ``=`` to the value tag and builds it as the text ``=``,
+    so it is the key ``"="``. The repeated-key check reads a key as PyYAML builds it."""
+    path, text = _board(
+        tmp_path, (VERSION_CAPTION, VERSION_CAPTION + ', =: 1,\n     "=": 2')
+    )
+    message = _refused(cast, path)
+    first, second = _lines(text, "=: 1")[0], _lines(text, '"=": 2')[0]
+    assert second == first + 1
+    assert message.startswith(f"{path}: line {second}: ")
+    assert "the key '=' is given twice in scenes[1]" in message
+    assert f"(first on line {first})" in message
+
+
+def test_a_merge_marker_given_as_a_value_is_refused(cast, tmp_path):
+    shown = 'expect_screen: ["awslabs/automated-security-helper v"]'
+    path, text = _board(tmp_path, (shown, "expect_screen: [<<]"))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '[<<]')[0]}: ")
+    assert "the YAML merge key" in message
+
+
+@pytest.mark.parametrize("name", sorted(NOT_MERGE_SPELLINGS))
+def test_a_key_the_resolver_reads_as_a_string_is_not_a_merge_key(cast, tmp_path, name):
+    """Must-not-flag: PyYAML merges nothing under these, so the loader does not call
+    them merge keys. The schema refuses each as a key it does not name."""
+    old = "{id: version, " + VERSION_CAPTION
+    new = "{id: version, " + NOT_MERGE_SPELLINGS[name] + ": 1, " + VERSION_CAPTION
+    path, _text = _board(tmp_path, (old, new))
+    message = _refused(cast, path)
+    assert "unknown key(s) ['<<']" in message
+    assert "merge key" not in message
+
+
+def test_a_caption_given_twice_in_a_scene_is_refused(cast, tmp_path):
+    """The later caption would replace the first, so the loader names both lines."""
+    again = 'caption: "Check it again"'
+    path, text = _board(tmp_path, ("block: version, ", f"block: version, {again}, "))
+    message = _refused(cast, path)
+    first, second = _lines(text, VERSION_CAPTION)[0], _lines(text, again)[0]
+    assert second == first + 1
+    assert message.startswith(f"{path}: line {second}: ")
+    assert "the key 'caption' is given twice in scenes[1]" in message
+    assert f"(first on line {first})" in message
+
+
+def test_a_repeated_top_level_key_is_refused_even_when_equal(cast, tmp_path):
+    repeated = "poster_scene: scan\n"
+    path, text = _board(tmp_path, (repeated, repeated * 2))
+    message = _refused(cast, path)
+    first, second = _lines(text, "poster_scene:")
+    assert message.startswith(f"{path}: line {second}: ")
+    assert "the key 'poster_scene' is given twice at the top level" in message
+    assert f"(first on line {first})" in message
+
+
+def test_a_repeated_key_in_a_nested_mapping_is_refused(cast, tmp_path):
+    path, text = _board(tmp_path, ("rows: 30,", "rows: 30, rows: 24,"))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, 'rows: 24')[0]}: ")
+    assert "the key 'rows' is given twice in terminal" in message
+
+
+def test_text_that_only_looks_like_a_yaml_feature_is_data(cast, tmp_path):
+    """Must-not-flag: a quoted ``&x``, ``*x`` or ``<<``, an ``&`` or ``*`` inside a
+    plain word, and a comment that names all three are data and comments, not features.
+    """
+    shown = 'expect_screen: ["awslabs/automated-security-helper v"]'
+    entries = [
+        '"awslabs/automated-security-helper v"',
+        '"&bandit"',
+        "'*bandit'",
+        '"<<"',
+        "'<<'",
+        "x&y",
+        "2*3",
+    ]
+    path, _text = _board(
+        tmp_path,
+        (shown, "expect_screen: [" + ", ".join(entries) + "]"),
+        ("schema: 1\n", "# a comment may say &a, *a and <<:\nschema: 1\n"),
+    )
+    board = cast.load_storyboard(path, JOURNEY_IDS)
+    assert board.scene("version").expect_screen == (
+        "awslabs/automated-security-helper v",
+        "&bandit",
+        "*bandit",
+        "<<",
+        "<<",
+        "x&y",
+        "2*3",
+    )
+
+
+def test_the_committed_storyboard_loads_through_the_strict_loader(cast):
+    """Must-not-flag: the real file has no anchor, alias, tag, merge key or repeated
+    key, so refusing each takes nothing from it."""
+    board = cast.load_storyboard(COMMITTED_STORYBOARD, JOURNEY_IDS)
+    assert board.journey == "docs/journeys/getting-started-local.journey.yaml"
+    assert board.scenes
 
 
 @pytest.mark.parametrize(
