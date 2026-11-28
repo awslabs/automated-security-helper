@@ -71,6 +71,13 @@ export const DEPARTURES = Object.freeze(
       editor: 'note',
       reason: "ASH reads any spelling of a declared plugin's section name as that section.",
     },
+    {
+      row: 'unquoted-date',
+      schema: 'valid',
+      editor: 'error',
+      reason:
+        'The schema sees the text of a date, and ASH reads a date written without quotes as a date, not text, and refuses it where a string belongs.',
+    },
   ].map((departure) => Object.freeze(departure)),
 );
 
@@ -337,6 +344,77 @@ function entryFailures(failure) {
   return null;
 }
 
+// What Python's str.strip removes: the characters Unicode counts as white space, and the four
+// separators of the C0 block (U+001C to U+001F), which Python counts as spaces and Unicode
+// does not. The byte order mark, the zero-width space and the soft hyphen are not spaces to
+// either, so a name that carries one is not a name.
+const PYTHON_SPACE = /^[\p{White_Space}\x1c-\x1f]+|[\p{White_Space}\x1c-\x1f]+$/gu;
+
+/**
+ * The names ASH reads in a string at output_formats: the string split on commas, each piece
+ * stripped the way Python strips, and the empty pieces dropped. "sarif,html," is two names,
+ * "" is none and " sarif" is one.
+ */
+export function readOutputFormats(text) {
+  return text
+    .split(',')
+    .map((piece) => piece.replace(PYTHON_SPACE, ''))
+    .filter((piece) => piece !== '');
+}
+
+// Every value in `instance` that sits at a field of the data block, as { field, pointer,
+// value }; `path` is the field that `instance` is the value of, and '' a whole document.
+// Keys come from the file, so each is looked up as an own property, and a key that holds a
+// character of the path grammar names no field.
+function* valuesAtFields(block, path, instance) {
+  const lookup = (fieldPath) => (hasOwn(block.fields, fieldPath) ? block.fields[fieldPath] : null);
+
+  function* members(fieldPath, object, pointer) {
+    for (const key of Object.keys(object)) {
+      if (/[.[\]{}]/.test(key)) {
+        continue;
+      }
+      const child = fieldPath === '' ? key : `${fieldPath}.${key}`;
+      const field = lookup(child);
+      if (field !== null) {
+        yield* visit(child, field, object[key], `${pointer}/${escapeToken(key)}`);
+      }
+    }
+  }
+
+  function* visit(fieldPath, field, value, pointer) {
+    yield { field, pointer, value };
+    if (Array.isArray(value)) {
+      if (field.kind === 'objectList') {
+        for (const [index, item] of value.entries()) {
+          if (isObject(item)) {
+            yield* members(`${fieldPath}[]`, item, `${pointer}/${index}`);
+          }
+        }
+      }
+    } else if (isObject(value)) {
+      if (field.kind === 'map') {
+        const valueField = lookup(`${fieldPath}{}`);
+        if (valueField !== null) {
+          for (const key of Object.keys(value)) {
+            yield* visit(`${fieldPath}{}`, valueField, value[key], `${pointer}/${escapeToken(key)}`);
+          }
+        }
+      } else {
+        yield* members(fieldPath, value, pointer);
+      }
+    }
+  }
+
+  if (path === '') {
+    if (isObject(instance)) {
+      yield* members('', instance, '');
+    }
+  } else if (lookup(path) !== null) {
+    yield* visit(path, lookup(path), instance, '');
+  }
+}
+
 /**
  * The editor's verdict for `instance`, the value at the field `path` of the data block (the
  * empty path is a whole document), given the schema's `failures` for it
@@ -345,50 +423,63 @@ function entryFailures(failure) {
  * Returns { valid, findings }. Each finding is { row, severity, pointer, message }: `row`
  * names the row of the table that produced it, or is null for a failure the schema reports
  * as it is, and `pointer` is relative to `instance`. A row replaces the failure it stands in
- * for, so a file is valid exactly when no finding is an error. `options.failOnUnknownKeys`
- * is true when the file asks to fail on unknown keys.
+ * for, so a file is valid exactly when no finding is an error. Every row applies wherever its
+ * input sits in `instance`, so a whole document and a section are judged as their fields are.
+ *
+ * `options.failOnUnknownKeys` is true when the file asks to fail on unknown keys.
+ * `options.unquotedDates` lists the pointers, relative to `instance`, of the values the file
+ * wrote as unquoted dates: the reader that knows them passes each date's text in `instance`.
  */
 export function judge(block, path, instance, failures, options = {}) {
   const rows = [];
   const replaced = new Set();
-  const field = path !== '' && hasOwn(block.fields, path) ? block.fields[path] : null;
 
-  // The schema admits a reference where ASH's loader refuses one.
-  if (
-    field !== null &&
-    field.envRef &&
-    !field.envAccepted &&
-    failures.length === 0 &&
-    isReference(block, instance)
-  ) {
-    rows.push(
-      finding(
-        'reference-in-typed-field',
-        'error',
-        '',
-        `The reference ${instance} is not accepted in this ${field.kind} field. ${REFUSES}`,
-      ),
-    );
-  }
+  // The rows that belong to one field apply to every value of the instance that sits at a
+  // field, the instance itself or a value deep in a whole document.
+  const dates = new Set(Array.isArray(options.unquotedDates) ? options.unquotedDates : []);
+  for (const { field, pointer, value } of valuesAtFields(block, path, instance)) {
+    const failed = failures.some((failure) => failure.pointer === pointer);
 
-  // A comma-separated string where a list of output formats belongs.
-  if (
-    field !== null &&
-    field.kind === 'enumList' &&
-    typeof instance === 'string' &&
-    instance.includes(',')
-  ) {
-    const pieces = instance.split(',').map((piece) => piece.trim());
-    const allowed = Array.isArray(field.enum) ? field.enum : [];
-    const index = failures.findIndex((failure) => failure.pointer === '' && failure.keyword === 'anyOf');
-    if (index !== -1 && pieces.every((piece) => allowed.includes(piece))) {
-      replaced.add(index);
+    // The schema admits a reference where ASH's loader refuses one.
+    if (field.envRef && !field.envAccepted && !failed && isReference(block, value)) {
       rows.push(
         finding(
-          'comma-separated-output-formats',
-          'warning',
-          '',
-          `Write as a list: ${field.key}: [${pieces.join(', ')}]. ASH reads the comma-separated string as the same list.`,
+          'reference-in-typed-field',
+          'error',
+          pointer,
+          `The reference ${value} is not accepted in this ${field.kind} field. ${REFUSES}`,
+        ),
+      );
+    }
+
+    // A string where a list of output formats belongs, which ASH reads as the list.
+    if (field.kind === 'enumList' && typeof value === 'string') {
+      const index = failures.findIndex(
+        (failure) => failure.pointer === pointer && failure.keyword === 'anyOf',
+      );
+      const pieces = readOutputFormats(value);
+      const allowed = Array.isArray(field.enum) ? field.enum : [];
+      if (index !== -1 && pieces.every((piece) => allowed.includes(piece))) {
+        replaced.add(index);
+        rows.push(
+          finding(
+            'comma-separated-output-formats',
+            'warning',
+            pointer,
+            `Write as a list: ${field.key}: [${pieces.join(', ')}]. ASH reads the string as the same list.`,
+          ),
+        );
+      }
+    }
+
+    // A date written without quotes, which ASH reads as a date and refuses at a string.
+    if (field.kind === 'string' && typeof value === 'string' && !failed && dates.has(pointer)) {
+      rows.push(
+        finding(
+          'unquoted-date',
+          'error',
+          pointer,
+          `${field.key} must be quoted: an unquoted ${value} is read as a date, not text, so put it in quotes. ${REFUSES}`,
         ),
       );
     }
