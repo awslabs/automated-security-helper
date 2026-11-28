@@ -222,6 +222,17 @@ _BETTERLEAKS_FLAGS = [
 ]
 
 
+def _without_no_config(argv: list[str]) -> list[str]:
+    """*argv* without uv's --no-config, wherever it stands before `ash`.
+
+    Every uvx call of the workflow carries it, which
+    tests/unit/test_reusable_workflow_scan_subject.py holds; the rows here read the
+    rest of the call: uvx's install options and the words ASH is given.
+    """
+    command = argv.index("ash") if "ash" in argv else len(argv)
+    return [word for word in argv[:command] if word != "--no-config"] + argv[command:]
+
+
 def _run(
     tmp_path: Path,
     ash_args: str,
@@ -237,7 +248,8 @@ def _run(
     installed reads: the stand-in prints ``help_text``, or ``in_color`` (the same text
     unless given) when NO_COLOR is not set, exits ``help_exit``, and writes the
     directory it was started in to ``uvx-help-cwd``. Any other call is the scan, whose
-    argv is returned. ``inputs`` gives the step's own inputs a value on top of the ones
+    argv is returned without uv's --no-config (``_without_no_config``). ``inputs``
+    gives the step's own inputs a value on top of the ones
     left empty (VERBOSE, CHANGED_FILES_ONLY, BASE_REF), as ASH_CONFIG and
     USE_BETTERLEAKS, which are not set at all otherwise.
     """
@@ -298,7 +310,7 @@ def _run(
         check=False,
     )
     argv = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else None
-    return result, argv
+    return result, None if argv is None else _without_no_config(argv)
 
 
 posix_only = pytest.mark.skipif(

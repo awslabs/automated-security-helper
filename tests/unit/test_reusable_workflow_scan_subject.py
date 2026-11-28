@@ -75,8 +75,9 @@ refusal, or one whose probe fails.
    ASH_CONFIG: they start in RUNNER_TEMP, while the scan and the report start in the
    checkout, so a config written relative to the checkout would name a file that is
    not there. This tree's ``ash scan fs --help`` reads no config, which a row
-   measures. The probes pass ``--no-config``, so the scanned repository's uv settings
-   do not reach the install they make.
+   measures. Every uvx call in the workflow file carries ``--no-config``, the probes,
+   the scan, the report and the tool installs alike, so the scanned repository's uv
+   settings reach no install and the probes resolve ASH as the scan does.
 6. Each step says on stderr which spelling it chose and why, and what a failed probe
    printed goes through ``one_line`` a line at a time, so no line of it is read as a
    workflow command.
@@ -123,6 +124,7 @@ from __future__ import annotations
 
 import functools
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -238,8 +240,21 @@ SCAN_ENV = {
     "BASE_REF": "",
 }
 
-#: uvx's own words before the scan's.
+#: uvx's own words before the scan's, uv's --no-config aside (`_without_no_config`).
 UVX_SCAN = ["--reinstall", "--from", "ash-source", "ash"]
+
+
+def _without_no_config(call: list[str]) -> list[str]:
+    """*call* without uv's --no-config, wherever it stands before `ash`.
+
+    Every uvx call in the workflow file carries it, which
+    test_every_uvx_call_in_the_workflow_runs_with_no_config holds; the rows that read
+    a recorded call read the rest of it: uvx's install options and ASH's words.
+    """
+    command = call.index("ash") if "ash" in call else len(call)
+    return [word for word in call[:command] if word != "--no-config"] + call[command:]
+
+
 #: What the step passes after the directory, with SCAN_ENV.
 OWN_OPTIONS = [
     "--output-dir",
@@ -376,7 +391,7 @@ def helps(tmp_path_factory) -> dict[str, Path]:
 @dataclass(frozen=True)
 class Ran:
     result: subprocess.CompletedProcess
-    #: The calls the stand-in recorded, each its argument list.
+    #: The calls the stand-in recorded, each its argument list, uv's --no-config aside.
     calls: list[list[str]]
     #: The probes it answered, each `<argv> NO_COLOR=<value>`.
     probes: list[str]
@@ -412,7 +427,8 @@ def _run(
     *release* is how the stand-in answers the probes for ``fs`` and ``results``.
     *subjects* is what it answers to ``ash scan <subject> --help``, subject by subject,
     as the status it exits with and what it prints; left out, it answers as this tree
-    does.
+    does. The calls other than the probes come back without uv's --no-config
+    (`_without_no_config`), and the probes as the stand-in logged them.
     """
     where.mkdir(parents=True, exist_ok=True)
     bin_dir = where / "bin"
@@ -488,7 +504,7 @@ def _run(
     )
     return Ran(
         result,
-        calls,
+        [_without_no_config(call) for call in calls],
         probes,
         probe_dirs,
         call_dirs,
@@ -884,6 +900,68 @@ def test_the_help_is_asked_from_runner_temp_and_the_scan_runs_in_the_checkout(
     assert ran.probe_dirs == [str(tmp_path / "runner_temp")], ran.probe_dirs
     assert [probe.split()[0] for probe in ran.probes] == ["--no-config"], ran.probes
     assert ran.call_dirs == [str(tmp_path)], ran.call_dirs
+
+
+#: A word that runs uv's tool runner: `uvx`, or `uv tool run`, the same command. Not a
+#: name that ends in it (`ash-install-preflight-uvx.ran`) or starts with it (`uvx_ran`).
+_TOOL_RUNNER = re.compile(r"(?<![\w./-])(?:uvx|uv\s+tool\s+run)(?=\s)")
+#: The calls of it in the workflow file: the three help probes, the three installs
+#: that run the scan, the report's two, the check that the installed ASH can install
+#: tools, and the four installs of scanner tools.
+TOOL_RUNS = 13
+
+
+def _tool_runs() -> list[tuple[str, list[str]]]:
+    """Each call of uv's tool runner in the workflow file's run scripts: the step that
+    makes it, and the words before `ash`, the command it runs, which are uv's own.
+
+    The scripts are read as bash reads them for this: a line that ends in a backslash
+    goes on on the next one, and a comment, or a message that names uvx (echo or
+    printf), makes no call.
+    """
+    found = []
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    for job in workflow["jobs"].values():
+        for step in job.get("steps") or []:
+            script = str(step.get("run") or "").replace("\\\n", " ")
+            for line in script.splitlines():
+                words = line.split()
+                if not words or words[0].startswith("#"):
+                    continue
+                if words[0] in ("echo", "printf"):
+                    continue
+                for call in _TOOL_RUNNER.finditer(line):
+                    own = re.match(r"\s+(.*?)\s+ash(?=\s|$)", line[call.end() :])
+                    assert own, f"{step.get('name')!r} runs uvx without ash: {line}"
+                    found.append((str(step.get("name")), own.group(1).split()))
+    return found
+
+
+@pytest.mark.unit
+def test_every_uvx_call_in_the_workflow_runs_with_no_config():
+    """Every uvx call in the workflow file carries --no-config.
+
+    uvx installs the ASH it is given. The install that runs the scan must not read the
+    scanned repository's uv settings, where a package index, an override or a
+    constraint could choose which ASH, and which of its dependencies, scan that
+    repository. The probes, which ask the installed ASH what it has, and the scan must
+    resolve ASH with the same settings, or a probe answers for an ASH the scan does not
+    install. uv documents uvx as `uv tool run` ("the two commands are exactly
+    equivalent", https://docs.astral.sh/uv/concepts/tools/), and of tool commands it
+    says: "For `tool` commands, which operate at the user level, local configuration
+    files will be ignored" (https://docs.astral.sh/uv/concepts/configuration-files/).
+    So the flag drops the user- and system-level files, which the repository cannot
+    write. On every call it keeps the installs alike, and it would keep the checkout's
+    files out of a uv release that did read them.
+
+    The calls are found by reading the run scripts, not by their lines, and counted,
+    so a reading that finds none, or misses one, fails here.
+    """
+    calls = _tool_runs()
+
+    assert len(calls) == TOOL_RUNS, calls
+    without = [(step, own) for step, own in calls if "--no-config" not in own]
+    assert not without, without
 
 
 @pytest.mark.integration
