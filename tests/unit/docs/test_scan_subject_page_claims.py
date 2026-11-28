@@ -13,13 +13,15 @@ What is pinned:
   scan, which ``ash scan fs`` refuses; what ``ash scan workspace`` refuses; and the
   workspace file that the page's example names.
 - how-to/migrate-to-scan-subjects.md: the workspace scan without its subject, the three
-  variables that name what a scan scans, and the ``--scanners`` row.
+  variables that name what a scan scans, the ``--scanners`` row, and what that row says
+  ``--add-scanners`` adds to.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
@@ -116,13 +118,26 @@ _THE_VARIABLES_ARE_TOLD = (
     "`--workspace-config`, takes its place and prints no line."
 )
 
+#: migrate-to-scan-subjects.md: what `--add-scanners` adds to. A default set exists only
+#: in `--mode precommit` or as the operator's `default_scanners.only`; elsewhere the
+#: names the flag gives are the whole selection.
+_THE_ADD_SCANNERS_SENTENCE = (
+    "`--only-scanners` states the whole selection. `--add-scanners` adds scanners to "
+    "the default set of `--mode precommit`, or to the operator's "
+    "`default_scanners.only`; with neither, the scanners it names are the whole "
+    "selection."
+)
 #: migrate-to-scan-subjects.md: `--scanners`, whose line names no removal release.
 _THE_SCANNERS_ROW = (
     "| `ash scan fs --scanners bandit,semgrep` | "
-    "`ash scan fs --only-scanners bandit,semgrep` | `--only-scanners` states the whole "
-    "selection, and `--add-scanners` adds scanners to the mode's default set. "
-    "`ASH_SCANNERS` is deprecated with `--scanners`. `--scanners` keeps its behavior "
+    "`ash scan fs --only-scanners bandit,semgrep` | "
+    + _THE_ADD_SCANNERS_SENTENCE
+    + " `ASH_SCANNERS` is deprecated with `--scanners`. `--scanners` keeps its behavior "
     "and prints one `DeprecationWarning:` line that names no removal release. |"
+)
+
+ORCHESTRATOR_CREATE = (
+    "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create"
 )
 _THE_SCANNERS_LINE_NAMES_NO_RELEASE = (
     "ASH 4.0 removes the old spellings, and their deprecation lines say so, except the "
@@ -436,3 +451,77 @@ def test_the_scanners_option_prints_one_line_that_names_no_removal_release(
     assert "--only-scanners" in lines[0] and "--add-scanners" in lines[0], lines[0]
     assert "4.0" not in lines[0], lines[0]
     assert forwarded["scanners"] == ["bandit"], forwarded
+
+
+def _selection_handed_to_the_orchestrator(
+    monkeypatch, root: Path, *options: str
+) -> dict:
+    """What ``ash scan fs`` with *options* hands ``ASHScanOrchestrator.create``, which
+    stops the run there, so no scanner starts."""
+    # Besides the fixture's: each of these, exported, can stop the run before the
+    # orchestrator is asked, with no defect in the selection.
+    for name in (
+        "ASH_STAGED",
+        "ASH_CHANGED_FILES_ONLY",
+        "ASH_BASE_REF",
+        "ASH_BASELINE",
+        "ASH_PLUGIN_MODULES",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    source = root / "src"
+    source.mkdir(parents=True)
+    with patch(ORCHESTRATOR_CREATE, side_effect=RuntimeError("stop")) as create:
+        result = _invoke(
+            [
+                "scan",
+                "fs",
+                str(source),
+                "--output-dir",
+                str(root / "out"),
+                "--no-progress",
+                *options,
+            ]
+        )
+    assert create.call_count == 1, result.output
+    return create.call_args.kwargs
+
+
+def test_add_scanners_adds_to_a_default_set_and_is_the_whole_selection_without_one(
+    tmp_path, monkeypatch
+):
+    """migrate-to-scan-subjects.md (the ``--scanners`` row, on ``--add-scanners``).
+
+    Outside ``--mode precommit``, with no ``default_scanners.only`` from the operator,
+    the scanners ``--add-scanners`` names are the whole selection. In precommit mode
+    they join the mode's default set, and beside the operator's ``only`` list they
+    join that list. The page said the flag adds to the mode's default set in every
+    mode. The command runs before the page is read, so a red at the page is the
+    page's alone.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        PRECOMMIT_MODE_SCANNERS,
+    )
+
+    local = _selection_handed_to_the_orchestrator(
+        monkeypatch, tmp_path / "local", "--add-scanners", "bandit"
+    )
+    layers = local["selection_layers"]
+    # The local mode has no default set, and no config gives one here.
+    assert list(layers.mode_default) == [], layers
+    assert local["enabled_scanners"] == ["bandit"], local["enabled_scanners"]
+    # The orchestrator folds in the operator's default_scanners: empty, the flag is
+    # still the whole selection; an only list, and the flag adds to it.
+    assert layers.fold([], []).names == ["bandit"], layers
+    assert set(layers.fold(["checkov"], []).names) == {"bandit", "checkov"}, layers
+
+    precommit = _selection_handed_to_the_orchestrator(
+        monkeypatch,
+        tmp_path / "precommit",
+        "--mode",
+        "precommit",
+        "--add-scanners",
+        "grype",
+    )
+    assert set(precommit["enabled_scanners"]) == {"grype", *PRECOMMIT_MODE_SCANNERS}
+
+    assert_on_page(MIGRATE, _THE_ADD_SCANNERS_SENTENCE)

@@ -1255,6 +1255,17 @@ def _builtin_reporter_names() -> set[str]:
     return set(re.findall(r"^\| \[[^\]]+\]\(#([a-z-]+)\)", table, re.MULTILINE))
 
 
+def _plugin_module_reporter_names() -> set[str]:
+    """The reporters of the bundled plugin modules, from the reporters page's own
+    table of them. Their names can hold a digit (``s3``)."""
+    table = (
+        _page("reporters.md")
+        .split("## Reporters in plugin modules", 1)[1]
+        .split("\n## ", 1)[0]
+    )
+    return set(re.findall(r"^\| \[[^\]]+\]\(#([a-z0-9-]+)\)", table, re.MULTILINE))
+
+
 def _in_code_tree(tmp_path: Path, source: str, *args: str):
     """Run ``source`` in a fresh interpreter outside this checkout; return the JSON
     its last line prints.
@@ -1283,9 +1294,11 @@ def test_output_formats_say_which_values_write_a_report(tmp_path: Path) -> None:
 
     A value that names no reporter is accepted and writes nothing; a reporter whose
     name is not an ExportFormat value is refused (cli/scan.py's parse loop, and
-    ``_parse_output_formats`` of cli/merge.py). Every row of the page that is the
-    option of a command says so, found by its anchor, so a command that takes the
-    option is read whether or not this test names it.
+    ``_parse_output_formats`` of cli/merge.py). A value that a reporter of a bundled
+    plugin module writes is not one that names no reporter: the report phase writes it
+    when the configuration loads the module. Every row of the page that is the option
+    of a command says so, found by its anchor, so a command that takes the option is
+    read whether or not this test names it.
     """
     formats = set(
         _in_code_tree(
@@ -1299,6 +1312,8 @@ def test_output_formats_say_which_values_write_a_report(tmp_path: Path) -> None:
     )
     reporters = _builtin_reporter_names()
     assert reporters, "no built-in reporters read from reporters.md"
+    in_modules = _plugin_module_reporter_names()
+    assert in_modules, "no plugin-module reporters read from reporters.md"
     page = _page("cli.md")
     anchors = re.findall(r'<a id="([a-z-]*--output-formats)"></a>', page)
     # The commands that run a scan are the ones whose row lost its note when `ash scan`
@@ -1307,12 +1322,17 @@ def test_output_formats_say_which_values_write_a_report(tmp_path: Path) -> None:
         anchors
     ), anchors
     for anchor in anchors:
-        _assert_output_formats_row(_row(page, anchor), formats, reporters)
+        _assert_output_formats_row(_row(page, anchor), formats, reporters, in_modules)
 
 
-def _assert_output_formats_row(row: str, formats: set, reporters: set) -> None:
-    """The row names the reporters it writes, the values that write nothing, and,
-    only when there are any, the built-in reporters it refuses."""
+def _assert_output_formats_row(
+    row: str, formats: set, reporters: set, in_modules: frozenset = frozenset()
+) -> None:
+    """The row names the built-in *reporters*' values as writing a report; as writing
+    nothing, only the values that no reporter writes, built in or in a plugin module
+    (*in_modules*); and, only when there are any, the built-in reporters it refuses.
+    A plugin module's value may be among those that write a report, or in a sentence
+    of its own, but never among those that write nothing."""
     writes, nothing = (
         re.search(pattern, row).group(1)
         for pattern in (
@@ -1320,8 +1340,9 @@ def _assert_output_formats_row(row: str, formats: set, reporters: set) -> None:
             r"name no reporter and write no report: ([^.]*)\.",
         )
     )
-    assert set(re.findall(r"`([^`]+)`", writes)) == formats & reporters
-    assert set(re.findall(r"`([^`]+)`", nothing)) == formats - reporters
+    written = set(re.findall(r"`([^`]+)`", writes))
+    assert formats & reporters <= written <= formats & (reporters | in_modules), row
+    assert set(re.findall(r"`([^`]+)`", nothing)) == formats - reporters - in_modules
     refused = re.search(r"reporters that are refused: ([^;.]*)[;.]", row)
     if reporters - formats:
         assert refused, f"the refused reporters are not named: {row}"
@@ -1341,13 +1362,36 @@ def test_output_formats_note_names_refused_reporters_only_when_there_are_some(
 ) -> None:
     """Both cases of the --output-formats note, planted: with every built-in
     reporter an ExportFormat value (as on the merged code) it has no "refused"
-    sentence, and with one that is not, it names that one."""
+    sentence, and with one that is not, it names that one.
+
+    The planted reporters reach the note through the discovery it reads the
+    reporters from, all of them built in, so no plugin module's reporter joins
+    them, whichever of its helpers the note asks."""
     from automated_security_helper.core.enums import ExportFormat
 
     generator = _script_module("generate_cli_docs")
+    reference = _script_module("_plugin_reference")
     formats = {f.value for f in ExportFormat}
     reporters = sorted(formats - {"text"})[:3] + list(extra_reporters)
-    monkeypatch.setattr(generator, "_builtin_reporters", lambda: sorted(reporters))
+    planted = [
+        reference.Plugin(
+            cls=object,
+            package=reference.BUILTIN_PACKAGE,
+            kind="reporter",
+            config_cls=None,
+            name=name,
+            enabled=True,
+            options_cls=None,
+        )
+        for name in reporters
+    ]
+
+    def discover(kind):
+        return list(planted) if kind == "reporter" else []
+
+    monkeypatch.setattr(reference, "discover", discover)
+    # And where the generator would hold the name had it imported it once.
+    monkeypatch.setattr(generator, "discover", discover, raising=False)
     note = generator._output_formats_note(None)
     _assert_output_formats_row(note, formats, set(reporters))
     assert ("refused" in note) == bool(extra_reporters)

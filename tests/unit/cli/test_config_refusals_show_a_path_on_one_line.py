@@ -971,6 +971,11 @@ def test_the_scan_s_scanner_selection_refusal_is_one_line(tmp_path, monkeypatch,
 
     monkeypatch.setattr(ASHScanOrchestrator, "add_metadata", stop)
     monkeypatch.delenv("ASH_CONFIG", raising=False)
+    # Either variable, exported, gives the selection a scanner that exists, so it is
+    # not refused: ASH_SCANNERS joins --add-scanners, and ASH_MODE=precommit adds
+    # the mode's default set.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
+    monkeypatch.delenv("ASH_MODE", raising=False)
     monkeypatch.chdir(tmp_path)
 
     result = CliRunner().invoke(

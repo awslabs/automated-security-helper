@@ -17,9 +17,22 @@ What is asserted:
   A key that names nothing is silent, because the generator does not say that its note
   was never written, so the next move of a command would leave another one. The key
   that went dead here is planted to show that the check finds it.
+* A value that a reporter of a bundled plugin module writes is not said to name no
+  reporter. The report phase writes the report of any loaded reporter whose name is
+  the value, so ``s3`` writes one when ``ash_plugin_modules`` names the AWS module; the
+  note listed it with ``aggregated`` because it read the built-in reporters only. The
+  values the note says name no reporter are those no reporter writes, built in or in a
+  plugin module, and the note still names every accepted value. Read on a planted pair
+  and on the reporters this build ships, both found through ``_plugin_reference``'s
+  ``discover``, which is how the generator learns the reporters.
 """
 
 from __future__ import annotations
+
+import importlib
+import re
+import sys
+from pathlib import Path
 
 import pytest
 import typer.main
@@ -131,3 +144,101 @@ def test_a_key_that_names_no_command_or_no_option_of_it_is_found(
     monkeypatch.setitem(cli_docs.VALUE_NOTES, ABSENT_KEY, cli_docs._output_formats_note)
 
     assert _dead_keys(cli_docs, root) == sorted([DEAD_KEY, ABSENT_KEY])
+
+
+#: The sentence of the note that lists the accepted values no reporter writes.
+NO_REPORTER = "Values that name no reporter and write no report"
+
+SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+
+
+def _plugin_reference():
+    """The module the generator reads the reporters from, imported by its bare name as
+    the generator imports it, so a patch of it is the generator's."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        return importlib.import_module("_plugin_reference")
+    finally:
+        sys.path.remove(str(SCRIPTS))
+
+
+def _accepted() -> list:
+    """The values ``--output-formats`` accepts."""
+    from automated_security_helper.core.enums import ExportFormat
+
+    return [f.value for f in ExportFormat]
+
+
+def _reporter(reference, name: str, package: str):
+    """A reporter record as discovery writes one: *name*, declared by *package*."""
+    return reference.Plugin(
+        cls=object,
+        package=package,
+        kind="reporter",
+        config_cls=None,
+        name=name,
+        enabled=True,
+        options_cls=None,
+    )
+
+
+def _assert_only_unwritten_values_name_no_reporter(note: str, reporters: set) -> None:
+    """The values the note says name no reporter are the accepted values that no
+    reporter in *reporters* writes, and the note names every accepted value."""
+    accepted = _accepted()
+    sentence = re.search(rf"{NO_REPORTER}: ([^.]*)\.", note)
+    assert sentence, f"no sentence opens with {NO_REPORTER!r}: {note}"
+    named = set(re.findall(r"`([^`]+)`", sentence.group(1)))
+    written = sorted(named & reporters)
+    assert written == [], f"values a reporter writes, said to name none: {written}"
+    assert named == {value for value in accepted if value not in reporters}, note
+    unnamed = sorted(set(accepted) - set(re.findall(r"`([^`]+)`", note)))
+    assert unnamed == [], f"accepted values the note does not name: {unnamed}"
+
+
+def test_a_plugin_module_reporters_value_is_not_said_to_name_no_reporter(
+    script_loader, monkeypatch
+):
+    """A planted pair: ``sarif`` built in, and ``s3`` declared by the AWS module."""
+    module = script_loader("generate_cli_docs")
+    reference = _plugin_reference()
+    planted = [
+        _reporter(reference, "sarif", reference.BUILTIN_PACKAGE),
+        _reporter(reference, "s3", f"{reference.PLUGIN_ROOT}.ash_aws_plugins"),
+    ]
+    # The control: one reporter of the pair is built in and the other is not.
+    assert [plugin.builtin for plugin in planted] == [True, False]
+
+    def discover(kind):
+        return list(planted) if kind == "reporter" else []
+
+    monkeypatch.setattr(reference, "discover", discover)
+    # And where the generator would hold the name had it imported it once.
+    monkeypatch.setattr(module, "discover", discover, raising=False)
+
+    note = module._output_formats_note(None)
+
+    _assert_only_unwritten_values_name_no_reporter(note, {"sarif", "s3"})
+
+
+def test_the_shipped_reporters_leave_only_unwritten_values_naming_no_reporter(
+    script_loader,
+):
+    """The same, on the reporters discovery finds in this build: the built-in ones and
+    those of the bundled plugin modules."""
+    module = script_loader("generate_cli_docs")
+    found = _plugin_reference().discover("reporter")
+    in_modules = sorted(
+        plugin.name
+        for plugin in found
+        if not plugin.builtin and plugin.name in _accepted()
+    )
+    # The control: a bundled plugin module writes an accepted value, so the check
+    # below reads a value the note can get wrong.
+    assert in_modules, sorted((plugin.name, plugin.builtin) for plugin in found)
+
+    note = module._output_formats_note(None)
+
+    _assert_only_unwritten_values_name_no_reporter(
+        note, {plugin.name for plugin in found}
+    )

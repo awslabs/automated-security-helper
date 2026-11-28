@@ -22,7 +22,7 @@ arrive in 3.9.
 | `ash scan --mode local` | `ash scan fs --mode local` | `ash scan` with no subject runs the same scan. |
 | `ash scan fs --source-dir ../app` | `ash scan fs ../app` | The directory is the path argument, the current directory when you give none. `ash --source-dir ../app` and `ash scan --source-dir ../app` move the same way. A path argument and a different `--source-dir` together are a usage error, exit code 5. |
 | `ash scan --workspace project.code-workspace` | `ash scan workspace project.code-workspace` | `ash --workspace project.code-workspace` moves the same way. `--workspace-config`, `--allow-missing-projects` and `--dry-run` go with the subject: `ash scan fs` does not take them. |
-| `ash scan fs --scanners bandit,semgrep` | `ash scan fs --only-scanners bandit,semgrep` | `--only-scanners` states the whole selection, and `--add-scanners` adds scanners to the mode's default set. `ASH_SCANNERS` is deprecated with `--scanners`. `--scanners` keeps its behavior and prints one `DeprecationWarning:` line that names no removal release. |
+| `ash scan fs --scanners bandit,semgrep` | `ash scan fs --only-scanners bandit,semgrep` | `--only-scanners` states the whole selection. `--add-scanners` adds scanners to the default set of `--mode precommit`, or to the operator's `default_scanners.only`; with neither, the scanners it names are the whole selection. `ASH_SCANNERS` is deprecated with `--scanners`. `--scanners` keeps its behavior and prints one `DeprecationWarning:` line that names no removal release. |
 | `ash report` | `ash results report` | |
 | `ash merge` | `ash results merge` | |
 | `ash inspect findings` | `ash results inspect findings` | `ash inspect sarif-fields` moves the same way. |
