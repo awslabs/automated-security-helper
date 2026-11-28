@@ -1024,6 +1024,8 @@ FORCE_CASES = {
     "to HEAD, in a shell string run with a cluster": (
         'bash -euo pipefail -c "git checkout gh-pages && git push -f origin HEAD"'
     ),
+    "to the matching refspec": "git push --force origin :",
+    "to a destination under heads/": "git push --force origin HEAD:heads/gh-pages",
     "of every branch": "git push --force --all origin",
     "as a mirror": "git push --mirror origin",
     "as a + refspec with a wildcard destination": (
@@ -1056,6 +1058,12 @@ CLEAN_CASES = {
         "git push --force origin preview 2>/dev/null"
     ),
     "a forced push of HEAD to another branch": "git push --force origin HEAD:preview",
+    "a forced push of HEAD to another branch under heads/": (
+        "git push --force origin HEAD:heads/preview"
+    ),
+    "a forced push to a branch whose name starts with heads/": (
+        "git push --force origin HEAD:refs/heads/heads/gh-pages"
+    ),
     "a plain push of every branch by refspec": (
         "git push origin 'refs/heads/*:refs/heads/*'"
     ),
