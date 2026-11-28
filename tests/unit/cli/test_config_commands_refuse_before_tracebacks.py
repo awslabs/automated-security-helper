@@ -179,8 +179,9 @@ ENV_AFTER_PATH = (
     "after a question mark and a space, and put its colon, a space and its value "
     "on the next line, the colon under the question mark: without the question "
     "mark YAML refuses such a key. A value that takes more than one line starts "
-    "on the line after the colon, indented past it, or is written in flow style "
-    "on the colon's line"
+    "on the line after the colon, with each of its lines indented past it, or is "
+    "written in flow style (inside [...] or {...}) on the colon's line, with each "
+    "string in it kept in its quotes"
 )
 
 

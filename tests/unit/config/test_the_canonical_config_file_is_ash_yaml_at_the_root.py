@@ -123,8 +123,9 @@ ENV_CAVEAT = (
     "after a question mark and a space, and put its colon, a space and its value "
     "on the next line, the colon under the question mark: without the question "
     "mark YAML refuses such a key. A value that takes more than one line starts "
-    "on the line after the colon, indented past it, or is written in flow style "
-    "on the colon's line."
+    "on the line after the colon, with each of its lines indented past it, or is "
+    "written in flow style (inside [...] or {...}) on the colon's line, with each "
+    "string in it kept in its quotes."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -813,14 +814,20 @@ class TestALongKeyIsReadByYamlOnlyAsAnExplicitKey:
                 {TOML_LONG_KEY: None, "first": "x", "second": "y"},
                 id="both-settings-under-the-colon",
             ),
+            pytest.param(
+                ["    :", "      first: x", "    second: y"],
+                {TOML_LONG_KEY: {"first": "x"}, "second": "y"},
+                id="second-setting-back-in-the-colon-column",
+            ),
         ],
     )
     def test_a_table_under_a_long_toml_key_laid_out_under_the_colon_is_read_another_way(
         self, tmp_path, yaml_value_lines, yaml_reads
     ):
-        """Why the advice says where such a value goes: a setting laid out in the
-        colon's column is read beside the key, not under it, with no error, and with
-        the colon alone on its line the key is read with no value."""
+        """Why the advice says where each line of such a value goes: a setting laid
+        out in the colon's column is read beside the key, not under it, with no error,
+        whether it is the value's first line or a later one, and when the first line is
+        there, under a colon alone on its line, the key is read with no value."""
         toml_root, yaml_root = _toml_and_yaml_roots(
             tmp_path,
             [f"[scanners.probe.{self.TOML_LONG_KEY}]", 'first = "x"', 'second = "y"'],
@@ -830,6 +837,28 @@ class TestALongKeyIsReadByYamlOnlyAsAnExplicitKey:
             self.TOML_LONG_KEY: {"first": "x", "second": "y"}
         }
         assert _probe_section(yaml_root) == yaml_reads
+
+    @pytest.mark.parametrize(
+        ("yaml_value_line", "yaml_reads"),
+        [
+            pytest.param('    : ["x, y", "z"]', ["x, y", "z"], id="quoted"),
+            pytest.param("    : [x, y, z]", ["x", "y", "z"], id="unquoted"),
+        ],
+    )
+    def test_a_string_with_a_comma_in_a_flow_value_reads_as_toml_only_in_its_quotes(
+        self, tmp_path, yaml_value_line, yaml_reads
+    ):
+        """Why the advice keeps each string of a flow value in its quotes: in flow
+        style YAML ends a string without its quotes at a comma, so a string that
+        holds one is read as two, with no error, while the quoted string reads as
+        TOML reads it."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[scanners.probe]", f'{self.TOML_LONG_KEY} = ["x, y", "z"]'],
+            ["scanners:", "  probe:", f"    ? {self.TOML_LONG_KEY}", yaml_value_line],
+        )
+        assert _probe_section(toml_root) == {self.TOML_LONG_KEY: ["x, y", "z"]}
+        assert _probe_section(yaml_root) == {self.TOML_LONG_KEY: yaml_reads}
 
 
 #: Spellings of a float that TOML or JSON reads and YAML reads as text, each as the
