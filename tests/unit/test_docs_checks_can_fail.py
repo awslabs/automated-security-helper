@@ -288,6 +288,112 @@ def test_a_marker_binds_only_to_the_next_block(fixture_root):
 
 
 # ---------------------------------------------------------------------------
+# The seeds: the illustrative blocks and the unexecuted commands only shrink
+# ---------------------------------------------------------------------------
+#
+# The marker check holds a root that has a seed (docs/illustrative-seed/ and
+# scripts/docs_unexecuted_commands_seed.tsv) to it. A root with none is not held to one,
+# which is why the tests above, on pages in a temporary root, are unchanged. The cases
+# of tests/unit/docs/test_illustrative_ratchet.py and test_unexecuted_command_ratchet.py
+# go further; these are this file's contract: each rule of the check, one planted
+# defect, and a clean page beside it.
+
+
+def _seed_page(root: Path, page: str, text: str, illustrative=(), unexecuted=()):
+    """Write a page and the two seeds of a root, which arms both rules for it."""
+    path = _write(root, page, text)
+    _write(
+        root,
+        dc.illustrative_seed_file(page),
+        "".join(f"{page}\t{reason}\n" for reason in illustrative),
+    )
+    _write(
+        root,
+        dc.UNEXECUTED_SEED_FILE,
+        "".join(f"{page}\t{command}\n" for command in unexecuted),
+    )
+    return path
+
+
+@pytest.mark.unit
+def test_marker_check_passes_a_page_whose_markers_the_seed_lists(fixture_root):
+    page = _seed_page(
+        fixture_root,
+        "docs/page.md",
+        CLEAN_MARKERS,
+        illustrative=["needs Docker", "writes to a real bucket"],
+    )
+
+    assert dc.check_markers([page], fixture_root) == []
+
+
+SEED_DEFECTS = [
+    (
+        "a marker the seed does not list",
+        (
+            f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\n'
+            f"docker ps\n{FENCE}\n"
+        ),
+        [],
+        [],
+        "not in the illustrative seed",
+    ),
+    (
+        "a seed line whose marker is gone",
+        f"{FENCE}bash\ndocker ps\n{FENCE}\n",
+        ["needs Docker"],
+        [],
+        "no illustrative marker",
+    ),
+    (
+        "a command shown in a block nothing runs",
+        f"{FENCE}text\nash scan --source-dir .\n{FENCE}\n",
+        [],
+        [],
+        "shows a command that nothing runs",
+    ),
+    (
+        "an unexecuted-command seed line whose block is gone",
+        f"{FENCE}text\nScan complete\n{FENCE}\n",
+        [],
+        ["ash scan --source-dir ."],
+        "no block on this page shows this command",
+    ),
+]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "case,text,illustrative,unexecuted,expected",
+    SEED_DEFECTS,
+    ids=[c[0] for c in SEED_DEFECTS],
+)
+def test_the_seed_checks_can_fail(
+    fixture_root, case, text, illustrative, unexecuted, expected
+):
+    page = _seed_page(fixture_root, "docs/page.md", text, illustrative, unexecuted)
+
+    _assert_reports(dc.check_markers([page], fixture_root), expected)
+
+
+@pytest.mark.unit
+def test_the_seed_checks_pass_a_page_the_seeds_list_whole(fixture_root):
+    text = (
+        f'<!-- doctest: illustrative reason="needs Docker" -->\n{FENCE}bash\n'
+        f"docker ps\n{FENCE}\n\n{FENCE}text\nash scan --source-dir .\n{FENCE}\n"
+    )
+    page = _seed_page(
+        fixture_root,
+        "docs/page.md",
+        text,
+        illustrative=["needs Docker"],
+        unexecuted=["ash scan --source-dir ."],
+    )
+
+    assert dc.check_markers([page], fixture_root) == []
+
+
+# ---------------------------------------------------------------------------
 # CLI usage
 # ---------------------------------------------------------------------------
 

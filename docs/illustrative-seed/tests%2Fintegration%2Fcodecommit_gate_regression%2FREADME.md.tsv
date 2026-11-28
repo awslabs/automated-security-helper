@@ -1,0 +1,4 @@
+tests/integration/codecommit_gate_regression/README.md	needs Docker and the gate's container image
+tests/integration/codecommit_gate_regression/README.md	needs AWS credentials and Docker
+tests/integration/codecommit_gate_regression/README.md	runs from tests/integration/codecommit_gate_regression in a checkout of this repository
+tests/integration/codecommit_gate_regression/README.md	runs from tests/integration/codecommit_gate_regression in a checkout of this repository

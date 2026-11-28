@@ -1,0 +1,18 @@
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	reads .ash/.ash_alpha_plugins.yaml, a file of the ASH repository that a project does not have until it adds one, and installs ferret-scan over the network
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	installs a tool over the network
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	installs a tool over the network
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	a shell outline that needs the plugin's tool and a project to scan
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	needs a container runtime
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	installs a tool over the network
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runner=none: a workflow for the reader's own repository, which installs ferret-scan from the network
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runner=none: a pipeline for the reader's own project, which installs ferret-scan from the network
+docs/content/docs/plugins/alpha/ferret-scan-plugin.md	runs a scan that needs ferret-scan installed on the host

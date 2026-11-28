@@ -1,0 +1,1 @@
+automated_security_helper/core/phases/README.md	a fragment that uses objects the scan engine creates for a run (the plugin context, the plugin classes, the progress display and the results model)

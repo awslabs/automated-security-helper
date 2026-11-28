@@ -1,0 +1,2 @@
+automated_security_helper/plugin_modules/ash_hadolint_plugins/README.md	runs a full ash scan of the current directory
+automated_security_helper/plugin_modules/ash_hadolint_plugins/README.md	downloads and installs the scanner's tool

@@ -1,0 +1,1 @@
+deploy/terraform/modules/ash-image-pipeline/README.md	needs AWS credentials and an applied Terraform state

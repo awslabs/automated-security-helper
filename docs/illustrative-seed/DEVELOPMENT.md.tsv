@@ -1,0 +1,19 @@
+DEVELOPMENT.md	installs packages from the network and runs the full test suite
+DEVELOPMENT.md	installs uv and packages from the network
+DEVELOPMENT.md	runs this repository's tests, whose --run-integration option comes from the repository's own tests/conftest.py, so it needs a checkout of this repository
+DEVELOPMENT.md	installs the extras from this repository's pyproject.toml and runs its test suite, so it needs a checkout of this repository
+DEVELOPMENT.md	installs and runs this repository's pre-commit hooks, so it needs a checkout of this repository
+DEVELOPMENT.md	one line for a test module, which needs pytest imported and a test file to put it in
+DEVELOPMENT.md	runs this repository's snapshot tests, so it needs a checkout of this repository
+DEVELOPMENT.md	rewrites this repository's snapshot files, so it needs a checkout of this repository
+DEVELOPMENT.md	commits the changes staged in a contributor's clone, and nothing is staged here
+DEVELOPMENT.md	runs ash from this repository's own environment, so it needs a checkout of this repository
+DEVELOPMENT.md	rewrites ./ash and utils/ash_helpers.ps1 in this repository's own checkout
+DEVELOPMENT.md	runs a script from this repository's scripts directory that asks GitHub for each tool's latest release
+DEVELOPMENT.md	removes and reinstalls this repository's virtual environment over the network, so it needs a checkout of this repository
+DEVELOPMENT.md	updates uv itself over the network and upgrades this repository's dependencies
+DEVELOPMENT.md	downloads the uv installer over the network, then builds and tests this repository
+DEVELOPMENT.md	bumps the version of this repository with commitizen, so it needs a checkout of this repository and its commit history
+DEVELOPMENT.md	previews a version bump of this repository with commitizen, so it needs a checkout of this repository and its commit history
+DEVELOPMENT.md	a method for a scanner plugin class, shown without the class around it
+DEVELOPMENT.md	runs this repository's own unit and integration tests, so it needs a checkout of this repository
