@@ -138,7 +138,8 @@ class _Verify:
         monkeypatch.setattr(installer, "_uv_tool_dir", lambda: None)
 
         def version_output(executable, argv=None):
-            self.probe_calls.append(list(argv or [executable]))
+            # The real function's default: no argv runs `executable --version`.
+            self.probe_calls.append(list(argv or [executable, "--version"]))
             return "demo 1.2.3\n"
 
         monkeypatch.setattr(installer, "version_output", version_output)
@@ -317,6 +318,57 @@ class TestVerifyThirdParty:
         assert verify.run() == []
 
         assert verify.probe_calls == [[str(verify.probe), "--version"]]
+
+    @staticmethod
+    def _as_executable(verify: _Verify, **fields) -> Path:
+        """The entry as a program on PATH, checked through its copies there."""
+        verify.entry.version_probe = ()
+        for name, value in fields.items():
+            setattr(verify.entry, name, value)
+        exe = verify.bin_dir / verify.entry.tool
+        exe.write_text("#!/bin/sh\n", encoding="utf-8")
+        exe.chmod(0o755)
+        return exe
+
+    def test_a_copy_on_path_is_run_with_the_entrys_version_args(
+        self, monkeypatch, tmp_path
+    ):
+        """crane takes no --version: asked that way it printed "Error: unknown flag:
+        --version", and every image build stopped at this check. Red before: each
+        copy was run with --version whatever its entry named."""
+        verify = _Verify(monkeypatch, tmp_path)
+        exe = self._as_executable(verify, version_args=("version",))
+
+        assert verify.run() == []
+
+        assert verify.probe_calls == [[str(exe), "version"]]
+
+    def test_an_entry_without_version_args_is_run_with_the_version_flag(
+        self, monkeypatch, tmp_path
+    ):
+        """Control: an entry that names none (as a table from before the field
+        existed) is still asked with --version, as every other tool is."""
+        verify = _Verify(monkeypatch, tmp_path)
+        exe = self._as_executable(verify)
+
+        assert verify.run() == []
+
+        assert verify.probe_calls == [[str(exe), "--version"]]
+
+    def test_the_problem_names_the_command_that_was_run(self, monkeypatch, tmp_path):
+        verify = _Verify(monkeypatch, tmp_path)
+        exe = self._as_executable(verify, version_args=("version",))
+        monkeypatch.setattr(
+            installer,
+            "version_output",
+            lambda executable, argv=None: "Error: unknown command\n",
+        )
+
+        problems = verify.run()
+
+        assert any(f"`{exe} version` does not report 1.2.3" in p for p in problems), (
+            problems
+        )
 
     def test_uv_is_not_taken_from_a_relative_path_entry(self, monkeypatch, tmp_path):
         planted = tmp_path / "relative-bin"

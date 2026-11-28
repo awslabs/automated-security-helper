@@ -26,11 +26,17 @@ What is held to what:
   packages too (ruff, pydantic-core, rpds-py, rtoml, uv), so the controls read
   every one of them: a broad entry with no version pin would cover polars'
   lockfile as well and silently undo the four entries' version pin.
+
+The layout holds one more kind of entry: a secret suppression for each
+provenance manifest (``harvest-manifest.json``), pinned to the line of the
+sdist digest. Those excuse a hash in a file the harvest writes, not a crate in
+a lockfile, so the oracle leaves them out, and how many packages the repository
+harvests changes nothing it asserts.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Sequence
 
 import yaml
@@ -39,6 +45,7 @@ from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.sdist_harvest import (
     HARVEST_DIR_NAME,
+    HARVEST_MANIFEST_NAME,
     PROPERTY_PARENT_PURL,
     PROPERTY_SDIST_SHA256,
 )
@@ -116,8 +123,19 @@ def assert_linked_crate_is_listed_with_its_parent(
     return locations
 
 
+def _names_a_manifest(path: str) -> bool:
+    """Whether ``path`` ends in the provenance manifest's file name."""
+    return PurePosixPath(path).name == HARVEST_MANIFEST_NAME
+
+
 def harvest_layout_suppressions() -> List[AshSuppression]:
-    """Every suppression of the repository whose path names the harvest layout."""
+    """Every suppression of the repository over the harvested lockfiles.
+
+    The entries whose path names the harvest layout, except the ones that name
+    a provenance manifest (see the module docstring). Anything else over the
+    layout stays in, a broad entry included, because the controls exist to find
+    an entry that reaches polars' lockfile.
+    """
     document = yaml.safe_load(
         REPO_ROOT.joinpath(".ash.yaml").read_text(encoding="utf-8")
     )
@@ -125,6 +143,7 @@ def harvest_layout_suppressions() -> List[AshSuppression]:
         AshSuppression.model_validate(raw)
         for raw in document["global_settings"]["suppressions"]
         if HARVEST_DIR_NAME in str(raw.get("path", ""))
+        and not _names_a_manifest(str(raw.get("path", "")))
     ]
 
 
