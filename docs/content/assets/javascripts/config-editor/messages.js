@@ -30,7 +30,7 @@ export const DEPARTURES = Object.freeze(
       schema: 'valid',
       editor: 'error',
       reason:
-        "The schema admits a reference in a field that is not a string, and ASH's loader refuses it when it reads the file.",
+        "The schema admits a reference, and any text its pattern takes for one, in a field that is not a string. ASH's loader refuses a reference there, and any other string, when it reads the file.",
     },
     {
       row: 'ambiguous-plugin-spellings',
@@ -297,16 +297,6 @@ function finding(row, severity, pointer, message, extra = {}) {
   return { row, severity, pointer, message, ...extra };
 }
 
-function isReference(block, text) {
-  if (typeof text !== 'string') {
-    return false;
-  }
-  const tag = block.env.explicitTag;
-  const body = text.startsWith(tag) ? text.slice(tag.length) : text;
-  const { js, flags } = block.env.referencePattern;
-  return new RegExp(js, flags).test(body);
-}
-
 function topLevelKeys(block) {
   const root = block.validationSchema;
   const schema = typeof root.$ref === 'string' ? resolveRef(root, root.$ref) : root;
@@ -504,14 +494,17 @@ export function judge(block, path, instance, failures, options = {}) {
     const at = read.written(pointer);
     const failed = seen.some((failure) => failure.pointer === pointer);
 
-    // The schema admits a reference where ASH's loader refuses one.
-    if (field.envRef && !field.envAccepted && !failed && isReference(block, value)) {
+    // The schema admits a reference where ASH's loader refuses one. It also admits text that
+    // only looks like a reference to it: its pattern lets a carriage return through a default,
+    // and the loader's recognizer stops at one. ASH reads no reference at such a field and
+    // takes no other string either, so every string the schema admitted here is refused.
+    if (field.envRef && !field.envAccepted && !failed && typeof value === 'string') {
       rows.push(
         finding(
           'reference-in-typed-field',
           'error',
           at,
-          `The reference ${value} is not accepted in this ${field.kind} field. ${REFUSES}`,
+          `The value ${value} is not accepted in this ${field.kind} field: a reference is refused here, and so is any other string. ${REFUSES}`,
         ),
       );
     }
