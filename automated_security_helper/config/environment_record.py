@@ -158,10 +158,12 @@ class EnvironmentReference:
     #: For a relative path the load anchored at its file's directory: the text
     #: the anchoring made of it, normalized (a ``..`` or ``./`` folded, so the
     #: text holds neither ``resolved`` nor ``resolved`` after a path prefix) or
-    #: kept whole, and the directory it was anchored at, recorded at the
-    #: anchoring (``with_anchored_forms``). A view shows such a text as the
-    #: directory and the reference. None when the anchoring left the value as it
-    #: was. Not compared.
+    #: kept whole, and the directory it was anchored at, or ``<value>`` when
+    #: that directory's path came from the environment
+    #: (``ResolvedConfigDocument.environment_paths``), recorded at the anchoring
+    #: (``with_anchored_forms``). A view shows such a text as the directory and
+    #: the reference. None when the anchoring left the value as it was. Not
+    #: compared.
     anchored: Optional[Tuple[str, str]] = dataclass_field(default=None, compare=False)
     #: Set where a document of the chain merged after this reference's file
     #: writes its place (config_sources._mark_written_over): the configuration
@@ -169,6 +171,16 @@ class EnvironmentReference:
     #: session copy describes the place by this reference. It stays one of the
     #: chain's reads, so redaction still masks its value. Not compared.
     written_over: bool = dataclass_field(default=False, compare=False)
+    #: A display-only entry for a literal relative path that a file whose own
+    #: path came from the environment wrote, and the anchoring took from that
+    #: file's directory (``anchored_literals``). Nothing was read from the
+    #: environment at its place, so ``value`` is empty: ``written`` is the text a
+    #: view shows (the directory as ``<value>`` and the path as the file wrote
+    #: it), and ``resolved`` and ``anchored[0]`` are the anchored text. It is in
+    #: ``ResolvedConfigDocument.displayed_environment_references`` only, never
+    #: in ``environment_references``, so no record, redaction or session copy
+    #: reads one; a view shows the path by ``written`` (``_Index._string``).
+    literal: bool = False
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
@@ -560,6 +572,94 @@ def with_anchored_forms(
     return found
 
 
+#: The scheme of a ``file://`` entry, which the anchoring puts the directory
+#: after (``operator_paths._anchored_file_entry``).
+_FILE_SCHEME = "file://"
+
+
+def _literal_shown(written: str, shown_dir: str) -> str:
+    """``written``, a relative path a file wrote, as a view shows it: after
+    ``shown_dir``, the directory the anchoring took it from, and for a
+    ``file://`` entry after the scheme."""
+    if written.startswith(_FILE_SCHEME):
+        return _FILE_SCHEME + os.path.join(shown_dir, "") + written[len(_FILE_SCHEME) :]
+    return os.path.join(shown_dir, "") + written
+
+
+def anchored_literals(
+    written: Any,
+    anchored: Any,
+    *,
+    skip: Collection[Tuple[PathSegment, ...]],
+    shown_dir: str,
+    resolved_as_written: bool = False,
+    path: Tuple[PathSegment, ...] = (),
+) -> List[EnvironmentReference]:
+    """A display-only entry (``EnvironmentReference.literal``) for each string of
+    ``written`` that ``anchored``, the same document after its relative paths were
+    anchored, holds as another string, and that is no place of ``skip`` (the
+    places the file read from the environment, whose references record their own
+    anchored text).
+
+    ``written`` is a file's document, or the value of one of its ``patch``
+    operations, as the file wrote it; ``anchored`` the same after the
+    anchoring. The entry is shown after ``shown_dir`` (``_literal_shown``), and
+    for a list entry it records the length of the innermost list and where its
+    index is, as ``environment_references`` does. With ``resolved_as_written``,
+    for a value of an operation, ``resolved`` is the text the operation wrote
+    and ``anchored`` is left to ``with_anchored_forms``, which records the anchored
+    text where the operation puts it (``config_sources._placed_through_patch``).
+    ``path`` is where ``written`` sits, for the recursion.
+    """
+    found: List[EnvironmentReference] = []
+    if isinstance(written, dict) and isinstance(anchored, dict):
+        for key, value in written.items():
+            if key in anchored:
+                found += anchored_literals(
+                    value,
+                    anchored[key],
+                    skip=skip,
+                    shown_dir=shown_dir,
+                    resolved_as_written=resolved_as_written,
+                    path=(*path, str(key)),
+                )
+    elif (
+        isinstance(written, list)
+        and isinstance(anchored, list)
+        and len(written) == len(anchored)
+    ):
+        for index, (item, anchored_item) in enumerate(zip(written, anchored)):
+            for entry in anchored_literals(
+                item,
+                anchored_item,
+                skip=skip,
+                shown_dir=shown_dir,
+                resolved_as_written=resolved_as_written,
+                path=(*path, index),
+            ):
+                # The innermost list the entry was written in gives its length.
+                if entry.length is None:
+                    entry = replace(entry, length=len(written), index_at=len(path))
+                found.append(entry)
+    elif (
+        isinstance(written, str)
+        and isinstance(anchored, str)
+        and written != anchored
+        and path not in skip
+    ):
+        found.append(
+            EnvironmentReference(
+                path=path,
+                written=_literal_shown(written, shown_dir),
+                resolved=written if resolved_as_written else anchored,
+                value="",
+                anchored=None if resolved_as_written else (anchored, shown_dir),
+                literal=True,
+            )
+        )
+    return found
+
+
 def _node_at(document: Any, path: Sequence[PathSegment]) -> Any:
     """The value at ``path`` in ``document``, or None when the place is gone."""
     node = document
@@ -874,7 +974,11 @@ class _Index:
             return None
         entries = list(item)
         for reference in self._references_at(self.values, path, pinned):
-            if reference.key or not isinstance(reference.resolved, str):
+            if (
+                reference.key
+                or reference.literal
+                or not isinstance(reference.resolved, str)
+            ):
                 continue
             if _exact_path(reference.path) != exact:
                 continue
@@ -1096,6 +1200,20 @@ class _Index:
     ) -> Any:
         if self.mark is None:
             return _recorded_string(text, candidates)
+        for reference in candidates:
+            if (
+                reference.literal
+                and reference.anchored is not None
+                and text == reference.anchored[0]
+            ):
+                # A literal relative path of a file whose own path the
+                # environment chose: nothing was read at its place, so it is
+                # shown as the file wrote it after the shown directory, and
+                # not as a reference.
+                return reference.written
+        # A literal entry names no value, and an empty value is part of every
+        # string, so the searches below never read one.
+        candidates = [reference for reference in candidates if not reference.literal]
         for reference in candidates:
             if text == reference.resolved:
                 return self._whole(reference)

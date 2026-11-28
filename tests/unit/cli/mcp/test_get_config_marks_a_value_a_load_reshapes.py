@@ -26,6 +26,15 @@ another checkout.
 converter section, so the config of a file in a checkout takes the operator's
 value there too, and the answer shows the operator's reference at that place, in a
 built-in section and in a plugin's, whether or not the checkout wrote a value.
+
+A base that an ``extends`` entry read from the environment chose is in a directory
+that holds what the variable gave. A relative path the load takes from that
+directory is shown as ``<value>`` and then the path: the reference where the base
+read it from a variable, and the text the base wrote where it wrote the path
+itself, in the settings or in a ``patch`` operation, and in a list the root's own
+``patch`` moves. A base the file's own text names keeps its directory in the
+answer, and a later document's value over the base's path is shown as it was
+written.
 """
 
 import json
@@ -48,7 +57,7 @@ def _named_operator_file(
     and in a directory ASH_MCP_ALLOWED_CONFIG_ROOTS names, named from a directory
     elsewhere."""
     named = tmp_path / "operator" / "ash.yaml"
-    named.parent.mkdir(parents=True)
+    named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text(body, encoding="utf-8")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -64,7 +73,7 @@ def _ash_config_operator_file(
     """get_config with no file named: ASH_CONFIG names ``operator/ash.yaml``, which
     holds *body*, in no git checkout, and the process sits in a checkout of its own."""
     named = tmp_path / "operator" / "ash.yaml"
-    named.parent.mkdir(parents=True)
+    named.parent.mkdir(parents=True, exist_ok=True)
     named.write_text(body, encoding="utf-8")
     checkout = tmp_path / "checkout"
     mark_git_checkout(checkout)
@@ -493,3 +502,203 @@ def test_a_tool_version_an_operators_plugin_section_reads_is_shown_by_its_refere
     shown = result["scanners"]["ferret-scan"]["options"]["tool_version"]
     assert shown == "<from ${ASH_TEST_TOOL_RANGE}>", shown
     assert "1.7.97" not in json.dumps(result, default=str)
+
+
+#: What ``ASH_TEST_TEAM_BASE`` holds: the operator's file extends this base through
+#: a variable, so the base's directory holds part of what the variable gave.
+_TEAM_BASE = "teams-4c7e/base.yaml"
+
+_EXTENDS_THE_TEAM_BASE = "extends: ${ASH_TEST_TEAM_BASE}\n"
+
+#: The base writes bandit's ``config_file`` as a relative path of its own.
+_BASE_WRITES_CONFIG_FILE = (
+    "scanners:\n  bandit:\n    options:\n      config_file: lit-2a9f/bandit.yaml\n"
+)
+
+#: The base's own ``patch`` sets bandit's ``config_file`` from a variable.
+_BASE_PATCHES_IN_A_VARIABLE = (
+    "scanners:\n  bandit:\n    options: {}\npatch:\n  - op: add\n"
+    "    path: /scanners/bandit/options/config_file\n"
+    "    value: ${ASH_TEST_PATCH_CFG}\n"
+)
+
+#: The base's own ``patch`` sets bandit's ``config_file`` to a relative path.
+_BASE_PATCHES_IN_A_LITERAL = (
+    "scanners:\n  bandit:\n    options: {}\npatch:\n  - op: add\n"
+    "    path: /scanners/bandit/options/config_file\n"
+    "    value: lit-2a9f/bandit.yaml\n"
+)
+
+#: The base writes a list of relative paths, and the root's ``patch`` adds one in
+#: front of it.
+_BASE_WRITES_A_RULES_LIST = (
+    "scanners:\n  cfn-guard:\n    options:\n      rules_paths:\n"
+    "        - lit-guard-1d3c.guard\n"
+)
+_EXTENDS_THE_TEAM_BASE_AND_ADDS_A_RULE = (
+    "extends: ${ASH_TEST_TEAM_BASE}\n"
+    "patch:\n  - op: add\n    path: /scanners/cfn-guard/options/rules_paths/0\n"
+    "    value: first.guard\n"
+)
+
+
+def _base(tmp_path: Path, directory: str, body: str) -> None:
+    """Write ``operator/<directory>/base.yaml``, holding *body*, which the file a
+    route writes at ``operator/ash.yaml`` extends."""
+    base = tmp_path / "operator" / directory / "base.yaml"
+    base.parent.mkdir(parents=True)
+    base.write_text(body, encoding="utf-8")
+
+
+@_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_from_a_variable_in_a_base_a_variable_chose_shows_no_directory(
+    tmp_path, monkeypatch, answer, held, canary
+):
+    """The operator's file extends a base that a variable names, and the base reads
+    bandit's ``config_file`` from another variable. The load takes the path from
+    the base's directory, which holds what the first variable gave, so the answer
+    shows ``<value>`` there and the reference after it, and none of the text either
+    variable held."""
+    monkeypatch.setenv("ASH_TEST_TEAM_BASE", _TEAM_BASE)
+    monkeypatch.setenv("ASH_TEST_BANDIT_CFG", held)
+    _base(tmp_path, "teams-4c7e", _OPERATOR_READS_CONFIG_FILE)
+
+    result = answer(tmp_path, monkeypatch, _EXTENDS_THE_TEAM_BASE)
+
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    expected = os.path.join("<value>", "") + "<from ${ASH_TEST_BANDIT_CFG}>"
+    assert shown == expected, shown
+    dumped = json.dumps(result, default=str)
+    assert "teams-4c7e" not in dumped
+    assert canary not in dumped
+
+
+@_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_a_patch_in_a_base_a_variable_chose_sets_shows_no_directory(
+    tmp_path, monkeypatch, answer, held, canary
+):
+    """The base's own ``patch`` sets bandit's ``config_file`` from a variable. The
+    value lands anchored at the base's directory, so the answer shows ``<value>``
+    there and the reference after it, as it does for the base's own setting."""
+    monkeypatch.setenv("ASH_TEST_TEAM_BASE", _TEAM_BASE)
+    monkeypatch.setenv("ASH_TEST_PATCH_CFG", held)
+    _base(tmp_path, "teams-4c7e", _BASE_PATCHES_IN_A_VARIABLE)
+
+    result = answer(tmp_path, monkeypatch, _EXTENDS_THE_TEAM_BASE)
+
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    expected = os.path.join("<value>", "") + "<from ${ASH_TEST_PATCH_CFG}>"
+    assert shown == expected, shown
+    dumped = json.dumps(result, default=str)
+    assert "teams-4c7e" not in dumped
+    assert canary not in dumped
+
+
+@_ROUTES
+def test_a_relative_path_a_base_a_variable_chose_writes_shows_no_directory(
+    tmp_path, monkeypatch, answer
+):
+    """The base the variable names writes ``config_file`` as a relative path of its
+    own. Nothing was read from the environment at its place, but the directory
+    the load took it from holds what the variable gave, so the answer shows
+    ``<value>`` and then the path as the base wrote it."""
+    monkeypatch.setenv("ASH_TEST_TEAM_BASE", _TEAM_BASE)
+    _base(tmp_path, "teams-4c7e", _BASE_WRITES_CONFIG_FILE)
+
+    result = answer(tmp_path, monkeypatch, _EXTENDS_THE_TEAM_BASE)
+
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.join("<value>", "") + "lit-2a9f/bandit.yaml", shown
+    assert "teams-4c7e" not in json.dumps(result, default=str)
+
+
+@_ROUTES
+def test_a_relative_path_a_patch_in_a_base_a_variable_chose_writes_shows_no_directory(
+    tmp_path, monkeypatch, answer
+):
+    """As the base's own setting, for a relative path the base's ``patch`` writes."""
+    monkeypatch.setenv("ASH_TEST_TEAM_BASE", _TEAM_BASE)
+    _base(tmp_path, "teams-4c7e", _BASE_PATCHES_IN_A_LITERAL)
+
+    result = answer(tmp_path, monkeypatch, _EXTENDS_THE_TEAM_BASE)
+
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.join("<value>", "") + "lit-2a9f/bandit.yaml", shown
+    assert "teams-4c7e" not in json.dumps(result, default=str)
+
+
+@_ROUTES
+def test_a_relative_path_a_base_a_variable_chose_writes_follows_the_roots_patch(
+    tmp_path, monkeypatch, answer
+):
+    """The root's ``patch`` adds an entry in front of the list of relative paths the
+    base wrote. The base's path is still shown after ``<value>`` at the index the
+    patch moved it to, and the entry the patch added is shown as it is, anchored
+    at the operator's directory."""
+    monkeypatch.setenv("ASH_TEST_TEAM_BASE", _TEAM_BASE)
+    _base(tmp_path, "teams-4c7e", _BASE_WRITES_A_RULES_LIST)
+
+    result = answer(tmp_path, monkeypatch, _EXTENDS_THE_TEAM_BASE_AND_ADDS_A_RULE)
+
+    directory = os.path.realpath(tmp_path / "operator")
+    shown = result["scanners"]["cfn_guard"]["options"]["rules_paths"]
+    assert shown == [
+        os.path.join(directory, "first.guard"),
+        os.path.join("<value>", "") + "lit-guard-1d3c.guard",
+    ], shown
+
+
+@_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_from_a_variable_in_an_extends_base_shows_the_bases_directory_and_the_reference(
+    tmp_path, monkeypatch, answer, held, canary
+):
+    """The control: a base the file's own text names (``extends: team-8d1b/base.yaml``)
+    is no value read from the environment, so the answer keeps showing its
+    directory, with the reference after it."""
+    monkeypatch.setenv("ASH_TEST_BANDIT_CFG", held)
+    _base(tmp_path, "team-8d1b", _OPERATOR_READS_CONFIG_FILE)
+
+    result = answer(tmp_path, monkeypatch, "extends: team-8d1b/base.yaml\n")
+
+    directory = os.path.realpath(tmp_path / "operator" / "team-8d1b")
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.join(directory, "") + "<from ${ASH_TEST_BANDIT_CFG}>", shown
+    assert canary not in json.dumps(result, default=str)
+
+
+@_ROUTES
+def test_a_relative_path_an_extends_base_writes_shows_the_bases_directory(
+    tmp_path, monkeypatch, answer
+):
+    """The control: a relative path a base the file's own text names writes is shown
+    anchored at that base's directory, as the file's own is."""
+    _base(tmp_path, "team-8d1b", _BASE_WRITES_CONFIG_FILE)
+
+    result = answer(tmp_path, monkeypatch, "extends: team-8d1b/base.yaml\n")
+
+    directory = os.path.realpath(tmp_path / "operator" / "team-8d1b")
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.normpath(os.path.join(directory, "lit-2a9f/bandit.yaml"))
+
+
+@_ROUTES
+def test_a_roots_literal_over_a_chosen_bases_literal_is_shown_as_the_root_wrote_it(
+    tmp_path, monkeypatch, answer
+):
+    """The root writes ``config_file`` as the absolute path the base's relative path
+    comes to, so the place holds the same text either way. The root wrote it last,
+    so the answer shows the root's text, and the base's entry, which the root's
+    value wrote over, is not read into it."""
+    monkeypatch.setenv("ASH_TEST_TEAM_BASE", _TEAM_BASE)
+    _base(tmp_path, "teams-4c7e", _BASE_WRITES_CONFIG_FILE)
+    directory = os.path.realpath(tmp_path / "operator" / "teams-4c7e")
+    written = os.path.normpath(os.path.join(directory, "lit-2a9f/bandit.yaml"))
+    roots_own = _CHECKOUT_WRITES_CONFIG_FILE.format(json.dumps(written))
+
+    result = answer(tmp_path, monkeypatch, _EXTENDS_THE_TEAM_BASE + roots_own)
+
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == written, shown

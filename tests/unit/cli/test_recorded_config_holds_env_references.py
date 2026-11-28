@@ -22,7 +22,8 @@ Also covered: a reference whose variable is unset records the default the file
 wrote, or null; an environment value equal to another field's value leaves that
 field alone; a relative path the load anchored has only its environment part
 replaced, and one it folded a ``..`` or ``./`` out of is recorded as its
-directory and the reference; a list the load made of one reference's text is
+directory and the reference, the directory being ``<value>`` where the file's
+own path came from a variable; a list the load made of one reference's text is
 recorded as that reference; a ``patch`` value, a base's value and a TOML value
 are recorded as written; and the other writers of a resolved config (MCP
 ``get_config``, ``ash config get``, and the profile file the MCP server writes
@@ -1630,3 +1631,50 @@ def test_ash_config_get_shows_a_choice_the_trusted_base_gives_a_plugin_section_b
 
     assert result.exit_code == 0, result.output
     assert "${ASH_PROBE_FERRET_DEFAULT}" in result.output
+
+
+# ---------------------------------------------------------------------------
+# A relative path in a base that a variable chose
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("./cfg-7a3d/bandit.yaml", id="dot-dir"),
+        pytest.param(os.path.join("cfg-7a3d", "bandit.yaml"), id="kept-whole"),
+    ],
+)
+def test_a_relative_path_from_a_variable_in_a_base_a_variable_chose_is_recorded_without_its_directory(
+    tmp_path, probe_env, held
+):
+    """The operator's file extends a base that a variable names, and the base reads
+    bandit's ``config_file`` from another. The directory the load takes the path
+    from holds what the first variable gave, so the record holds ``<value>`` and
+    the reference, for a path the anchoring folded a ``./`` out of (``dot-dir``)
+    and for one it kept whole (``kept-whole``), and none of either variable's
+    text."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    probe_env.setenv("ASH_PROBE_TEAM_BASE", "teams-4c7e/base.yaml")
+    path = _operator_config(tmp_path, "extends: ${ASH_PROBE_TEAM_BASE}\n")
+    base = tmp_path / "op" / "teams-4c7e" / "base.yaml"
+    base.parent.mkdir()
+    base.write_text(RELATIVE_CONFIG, encoding="utf-8")
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the load took the path from the base's directory.
+    directory = (tmp_path / "op" / "teams-4c7e").resolve()
+    assert (
+        Path(str(config.scanners.bandit.options.config_file))
+        == directory / "cfg-7a3d" / "bandit.yaml"
+    )
+    recorded = _recorded(config)
+    assert recorded["scanners"]["bandit"]["options"]["config_file"] == (
+        os.path.join("<value>", "") + "${ASH_PROBE_RELATIVE}"
+    )
+    dumped = json.dumps(recorded)
+    assert "teams-4c7e" not in dumped
+    assert "cfg-7a3d" not in dumped

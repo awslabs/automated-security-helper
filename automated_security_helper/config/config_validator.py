@@ -3259,7 +3259,9 @@ def record_of_config(
     recorded as that directory and the reference, the shape a path kept whole
     has. With ``mark`` the text stays, and the writer refuses it
     (config_writer): a file loaded again reads a reference only at the start of
-    a string.
+    a string. Where the file's own path came from the environment, the directory
+    is ``<value>``, and a path the anchoring kept whole is recorded that way too,
+    so the record never holds the directory of such a file.
 
     ``for_results``, for the results file and the off-host payload, records a
     list the field made of one reference's text (``output_formats: ${VAR}``) as
@@ -3319,6 +3321,18 @@ def record_of_config(
         if key is _MISSING_IN_RECORD:
             continue
         current = container[key]
+        # A relative path of a file whose own path the environment chose, as the
+        # record holds it: anchored at ``<value>``. It is recorded as that
+        # directory and the reference whether the anchoring folded it or kept
+        # it whole (below), so the part replace never writes the directory of
+        # that file, which holds part of what the variable gave.
+        under_a_shown_directory = (
+            mark is None
+            and isinstance(current, str)
+            and rewrite.anchored is not None
+            and rewrite.anchored[1] == ENVIRONMENT_VALUE_SHOWN
+            and current == rewrite.anchored[0]
+        )
         if current == rewrite.resolved or (
             # A dump of a section a plugin's model typed: the number it read
             # from the variable's text. Not for a file written to be loaded
@@ -3328,6 +3342,7 @@ def record_of_config(
             container[key] = marked(rewrite.written)
         elif (
             isinstance(current, str)
+            and not under_a_shown_directory
             and rewrite.environment_part
             and rewrite.environment_part in current
         ):
