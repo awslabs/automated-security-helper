@@ -37,9 +37,11 @@ Rules 1 and 2 also read the steps of the local composite actions under
 ``.github/actions/``, since a workflow can call one.
 
 A step's script is read as a shell reads it. Quotes come first, so a separator inside
-quotes ends no command; comments, backslash continuations and here-documents are read
-too. The script a shell runs with ``-c`` and the text of a here-document are read as
-scripts of their own, up to ``MAX_SHELL_DEPTH`` of them inside one another.
+quotes ends no command; comments, backslash continuations, redirections and
+here-documents are read too, and a redirection with its target is no word of the
+command it sits in. The script a shell runs with ``-c`` and the text of a
+here-document are read as scripts of their own, up to ``MAX_SHELL_DEPTH`` of them
+inside one another.
 
 How each rule is shown to fail
 ------------------------------
@@ -312,18 +314,23 @@ _BODY = "body"
 _Token = tuple[str, str]
 _DOUBLE_QUOTE_ESCAPES = ('"', "\\", "$", "`", "\n")
 
+#: A redirection operator: ``<`` and ``>``, alone or doubled, with an ``&`` before or
+#: after them (``&>``, ``>&``, ``<&``) or a ``|`` after them (``>|``).
+_REDIRECTION = re.compile(r"&?[<>]+[&|]?")
 
-def _redirects(text: str, position: int) -> bool:
-    """Whether the ``&`` at ``position`` belongs to a redirection, as in ``2>&1``."""
-    following = text[position + 1 : position + 2]
-    previous = text[position - 1] if position else ""
-    return following != "&" and (previous in ("<", ">") or following == ">")
+#: The digits in front of an operator that name a file descriptor, as in ``2>&1``.
+_FILE_DESCRIPTOR = re.compile(r"[0-9]+")
+
+#: What ends a command outside quotes, and what ends a word: a blank, a separator, or
+#: the start of a redirection.
+_SEPARATORS = ";|()`&"
+_WORD_ENDS = " \t\r\n" + _SEPARATORS + "<>"
 
 
-def _is_separator(text: str, position: int) -> bool:
-    """Whether the character at ``position``, outside quotes, ends a command."""
-    char = text[position]
-    return char in ";|()`" or (char == "&" and not _redirects(text, position))
+def _is_file_descriptor(text: str, start: int, end: int) -> bool:
+    """Whether ``text[start:end]`` is the number of a redirection, as in ``2>file``."""
+    digits = _FILE_DESCRIPTOR.fullmatch(text, start, end)
+    return digits is not None and text[end : end + 1] in ("<", ">")
 
 
 def _read_word(
@@ -338,7 +345,7 @@ def _read_word(
     position = start
     while position < len(text):
         char = text[position]
-        if char in " \t\r\n" or _is_separator(text, position):
+        if char in _WORD_ENDS:
             break
         if char == "\\":
             escaped = text[position + 1 : position + 2]
@@ -394,6 +401,9 @@ def _read_body(
 def _scan(text: str, literal: frozenset[int]) -> tuple[list[_Token], int | None]:
     """The tokens of ``text``, reading each quote before anything else.
 
+    A redirection gives no token, nor does its target or the number of its file
+    descriptor: none of them is a word of the command it sits in.
+
     The second value is the position of a quote the text never closes, or None.
     """
     tokens: list[_Token] = []
@@ -415,9 +425,6 @@ def _scan(text: str, literal: frozenset[int]) -> tuple[list[_Token], int | None]
         elif char == "#":
             end = text.find("\n", position)
             position = len(text) if end == -1 else end
-        elif _is_separator(text, position):
-            tokens.append((_END, ""))
-            position += 1
         elif text.startswith("<<", position) and not text.startswith("<<<", position):
             strip_tabs = text.startswith("<<-", position)
             position += 3 if strip_tabs else 2
@@ -428,11 +435,23 @@ def _scan(text: str, literal: frozenset[int]) -> tuple[list[_Token], int | None]
                 return tokens, opened
             if delimiter:
                 here_documents.append((delimiter, strip_tabs))
-        else:
-            word, position, opened = _read_word(text, position, literal)
+        elif redirection := _REDIRECTION.match(text, position):
+            position = redirection.end()
+            while text[position : position + 1] in (" ", "\t"):
+                position += 1
+            _, position, opened = _read_word(text, position, literal)
             if opened is not None:
                 return tokens, opened
-            tokens.append((_WORD, word))
+        elif char in _SEPARATORS:
+            tokens.append((_END, ""))
+            position += 1
+        else:
+            start = position
+            word, position, opened = _read_word(text, start, literal)
+            if opened is not None:
+                return tokens, opened
+            if not _is_file_descriptor(text, start, position):
+                tokens.append((_WORD, word))
     return tokens, None
 
 
