@@ -120,7 +120,7 @@ class InstallRequest:
     #: The interpreter an environment install targets.
     target_python: Optional[str] = None
     #: True when the plugin declared the command with ``shell=True``.
-    shell: bool = False
+    declared_with_shell: bool = False
 
     @property
     def subject(self) -> str:
@@ -286,7 +286,11 @@ def classify_install_command(
     parts = tuple(argv)
     if shell or not parts:
         return InstallRequest(
-            CommandKind.CUSTOM, parts, "custom", tool=tool_key, shell=bool(shell)
+            CommandKind.CUSTOM,
+            parts,
+            "custom",
+            tool=tool_key,
+            declared_with_shell=bool(shell),
         )
 
     if parts[:3] == ("uv", "tool", "install"):
@@ -715,12 +719,11 @@ class ReleaseDownloadProvider(InstallProvider):
             # installs nothing (it writes why and exits 1), so it runs as declared
             # and the run fails with its reason. Any other custom command is the
             # plugin's own shell or download command, which only the custom provider
-            # runs: refused here, it runs when custom is listed, and nothing runs
-            # when it is not. (A pinned rules bundle is a release download, served
-            # above.)
+            # runs as declared: refused here; custom, when listed, runs it. (A pinned
+            # rules bundle is a release download, served above.)
             argv = request.argv
             if (
-                not request.shell
+                not request.declared_with_shell
                 and len(argv) == 4
                 and argv[0] == sys.executable
                 and argv[1] == "-c"

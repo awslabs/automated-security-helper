@@ -336,6 +336,7 @@ def test_the_rules_bundle_install_is_recognized_as_a_release_download():
         (_RULES_BUNDLE_ARGV, True),
         ([*_RULES_BUNDLE_ARGV, "more"], False),
         (["/not/the/interpreter", *_RULES_BUNDLE_ARGV[1:]], False),
+        ([_RULES_BUNDLE_ARGV[0], "-u", *_RULES_BUNDLE_ARGV[2:]], False),
         (
             [
                 *_RULES_BUNDLE_ARGV[:2],
@@ -345,12 +346,21 @@ def test_the_rules_bundle_install_is_recognized_as_a_release_download():
             False,
         ),
     ],
-    ids=["shell", "extra-argument", "other-interpreter", "longer-script"],
+    ids=[
+        "shell",
+        "extra-argument",
+        "other-interpreter",
+        "other-flag",
+        "longer-script",
+    ],
 )
 def test_a_command_that_only_resembles_the_rules_bundle_install_stays_custom(
     argv, shell
 ):
-    """Recognition is by the whole command, never by a part of it."""
+    """Recognition checks every part of the command's shape.
+
+    The shell flag, length, interpreter, flag and script must all match.
+    """
     request = ip.classify_install_command(argv, shell, "cfn-guard")
 
     assert request.kind == ip.CommandKind.CUSTOM, request
@@ -361,6 +371,8 @@ def test_a_command_that_only_resembles_the_rules_bundle_install_stays_custom(
     [
         (list(refusing_install_command("why").args), True),
         ([*refusing_install_command("why").args, "more"], False),
+        (["/not/the/interpreter", *refusing_install_command("why").args[1:]], False),
+        ([sys.executable, "-u", *refusing_install_command("why").args[2:]], False),
         (
             [
                 sys.executable,
@@ -371,7 +383,13 @@ def test_a_command_that_only_resembles_the_rules_bundle_install_stays_custom(
             False,
         ),
     ],
-    ids=["shell", "extra-argument", "longer-script"],
+    ids=[
+        "shell",
+        "extra-argument",
+        "other-interpreter",
+        "other-flag",
+        "longer-script",
+    ],
 )
 def test_release_download_refuses_a_command_that_only_resembles_the_refusal(
     argv, shell
@@ -380,8 +398,8 @@ def test_release_download_refuses_a_command_that_only_resembles_the_refusal(
 
     The command a plugin declares when it cannot install its tool installs
     nothing, so release-download runs it as declared. A custom command that
-    differs from it in its shell flag, its length or its script is the plugin's
-    own, which only custom runs: release-download refuses it, naming custom.
+    differs from it in its shell flag, length, interpreter, flag or script is the
+    plugin's own, which only custom runs: release-download refuses it, naming custom.
     """
     request = ip.classify_install_command(argv, shell, "grype")
 

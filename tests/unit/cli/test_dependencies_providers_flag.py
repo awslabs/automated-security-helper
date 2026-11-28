@@ -372,11 +372,11 @@ def test_the_no_bin_directory_refusal_runs_as_declared_on_every_route(
 def test_release_download_still_refuses_a_command_of_a_tool_it_cannot_download(
     tmp_path, monkeypatch
 ):
-    """A tool with no pinned download is not served, whatever its command does.
+    """A custom command of a tool with no pinned download is refused.
 
-    cfn-nag declares the same refusal when it has no bin directory. release-download
-    refuses it, as it refuses every command of a tool it has no pinned download for,
-    and nothing runs.
+    cfn-nag declares the same refusal when it has no bin directory. The refusal is a
+    custom command, not a release download, and cfn-nag has no pinned release
+    asset, so release-download refuses it and nothing runs.
     """
     refusal = download_utils.refusing_install_command(download_utils.NO_BIN_DIRECTORY)
     scene, _argv = _refusal_scene(tmp_path, monkeypatch, refusal, tool="cfn_nag_scan")
@@ -400,7 +400,7 @@ def _own_command_scene(tmp_path, monkeypatch):
     gitleaks has a pinned release download on every platform pair ASH pins, so
     which provider serves the command does not depend on this host.
     """
-    own = CustomCommand(args=[_OWN_SHELL_INSTALL], shell=True)
+    own = CustomCommand(args=[_OWN_SHELL_INSTALL], shell=True)  # nosec B604
     scene = build_scene(
         monkeypatch,
         tmp_path,

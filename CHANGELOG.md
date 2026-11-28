@@ -439,10 +439,11 @@
   something in it, one with a `.` or `..` component, and `/`, and the warning now says
   the path matches nothing in the scan root.
 - `ash dependencies install --providers release-download` installs cfn-guard's rules
-  bundle instead of downloading the cfn-guard binary a second time, and an opengrep
-  version that ASH cannot verify fails the install instead of being replaced by the
-  pinned one. A plugin's own shell or download command for a tool with a pinned
-  download is refused by release-download and runs only when `custom` is listed too.
+  bundle, which it had replaced with the cfn-guard binary's download (then skipped
+  as already present), and an opengrep version that ASH cannot verify fails the
+  install instead of being replaced by the pinned one. A plugin's own shell or
+  download command for a tool with a pinned download is refused by release-download
+  and runs only when `custom` is listed too.
 
 ## v3.8.0 (2026-11-12)
 
