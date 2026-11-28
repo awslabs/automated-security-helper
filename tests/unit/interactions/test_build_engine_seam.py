@@ -983,17 +983,28 @@ class TestAshBuildArgs:
         }
         return rac._ash_build_args(**{**arguments, **settings})
 
-    def test_the_words_of_a_pinned_revision(self, tmp_path):
-        words = self._words(tmp_path / "Dockerfile", offline=True)
+    @pytest.mark.parametrize(
+        "folder", ["docker", "docker files"], ids=["no-space", "a-space"]
+    )
+    def test_the_words_of_a_pinned_revision(self, folder, tmp_path):
+        dockerfile = tmp_path / folder / "Dockerfile"
 
-        assert words == _argv(
-            "--build-arg UID=1000 --build-arg GID=1001 "
-            "--tag ash:test --target ci "
-            f"--file {tmp_path / 'Dockerfile'} "
-            "--build-arg INSTALL_ASH_REVISION=v3.7.0 --build-arg OFFLINE=YES "
-            "--build-arg OFFLINE_SEMGREP_RULESETS=p/ci "
-            "--build-arg BUILD_DATE_EPOCH=1700000000"
-        )
+        words = self._words(dockerfile, offline=True)
+
+        # The file is one word whatever the path holds: written with forward slashes
+        # on every host, and not split at a space in the temporary directory.
+        assert words == [
+            *_argv(
+                "--build-arg UID=1000 --build-arg GID=1001 "
+                "--tag ash:test --target ci --file"
+            ),
+            dockerfile.as_posix(),
+            *_argv(
+                "--build-arg INSTALL_ASH_REVISION=v3.7.0 --build-arg OFFLINE=YES "
+                "--build-arg OFFLINE_SEMGREP_RULESETS=p/ci "
+                "--build-arg BUILD_DATE_EPOCH=1700000000"
+            ),
+        ]
 
     def test_a_branch_carries_the_clone_date_right_after_the_ids(self, tmp_path):
         words = self._words(tmp_path / "Dockerfile", resolved_revision="main")
