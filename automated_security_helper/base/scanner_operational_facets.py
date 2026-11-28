@@ -56,12 +56,18 @@ Declaration rules, fail closed:
 from __future__ import annotations
 
 import re
+import warnings
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+    categories_of_tool_type,
+)
 
 if TYPE_CHECKING:
     from automated_security_helper.core.asset import AssetKind
@@ -315,32 +321,79 @@ UNCLAIMED_TARGET_KINDS: dict[TargetKind, str] = {
     ),
 }
 
-#: ``tool_type`` is consumed by reporter-side type exclusions
-#: (bedrock_summary_reporter ``exclude_scanner_types``), so a type that
-#: contradicts what the scanner scans is behavior-visible. A scanner's type
-#: must be served by at least one of the target kinds it declares.
-TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
-    ScannerToolType.SAST: frozenset(
+#: The target kinds whose content can carry a finding of each scan category (for
+#: ``sbom``, the artifact). Every shipped scanner's every declared category is
+#: served by at least one of the target kinds its row declares (the consistency
+#: test asserts it), and every ``TargetKind`` is in some row or in
+#: ``UNCLAIMED_TARGET_KINDS``. ``secrets`` holds every kind: a literal credential
+#: present in content is a secrets finding, whatever the artifact. ``binary`` and
+#: ``posture`` name the nearest kinds (compiled code ships inside installed
+#: packages and images; a deployed environment's posture is declared by its
+#: IaC). ``dast`` and ``other`` are empty: no target kind ASH scans serves them.
+CATEGORY_SERVED_BY: dict[ScanCategory, frozenset[TargetKind]] = {
+    ScanCategory.SAST: frozenset(
         {
             TargetKind.SOURCE_CODE,
             TargetKind.GITHUB_ACTIONS_WORKFLOWS,
             TargetKind.COMPOSITE_ACTIONS,
         }
     ),
-    ScannerToolType.IAC: frozenset(
+    ScanCategory.SECRETS: frozenset(TargetKind),
+    ScanCategory.PII: frozenset(
         {
+            TargetKind.SOURCE_CODE,
+            TargetKind.SECRETS_CONTENTS,
+            TargetKind.SECRETS_GIT_HISTORY,
+        }
+    ),
+    ScanCategory.SCA: frozenset(
+        {
+            TargetKind.DEPENDENCY_LOCKFILES,
+            TargetKind.PACKAGE_SOURCES,
+            TargetKind.PACKAGE_INVENTORY,
+            TargetKind.CONTAINER_IMAGE,
+            TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+            TargetKind.COMPOSITE_ACTIONS,
+        }
+    ),
+    ScanCategory.CONTAINER: frozenset({TargetKind.CONTAINER_IMAGE}),
+    ScanCategory.IAC: frozenset(
+        {
+            TargetKind.SOURCE_CODE,
             TargetKind.IAC_CLOUDFORMATION,
             TargetKind.IAC_TERRAFORM,
             TargetKind.IAC_KUBERNETES,
             TargetKind.IAC_OTHER,
             TargetKind.DOCKERFILES,
             TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+            TargetKind.CONTAINER_IMAGE,
         }
     ),
-    ScannerToolType.SECRETS: frozenset(
-        {TargetKind.SECRETS_CONTENTS, TargetKind.SECRETS_GIT_HISTORY}
+    ScanCategory.CI: frozenset(
+        {
+            TargetKind.SOURCE_CODE,
+            TargetKind.IAC_OTHER,
+            TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+            TargetKind.COMPOSITE_ACTIONS,
+        }
     ),
-    ScannerToolType.SCA: frozenset(
+    ScanCategory.SUPPLY_CHAIN: frozenset(
+        {
+            TargetKind.SOURCE_CODE,
+            TargetKind.DEPENDENCY_LOCKFILES,
+            TargetKind.PACKAGE_SOURCES,
+            TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+            TargetKind.COMPOSITE_ACTIONS,
+        }
+    ),
+    ScanCategory.MALWARE: frozenset(
+        {
+            TargetKind.PACKAGE_SOURCES,
+            TargetKind.PACKAGE_INVENTORY,
+            TargetKind.CONTAINER_IMAGE,
+        }
+    ),
+    ScanCategory.MAINTENANCE: frozenset(
         {
             TargetKind.DEPENDENCY_LOCKFILES,
             TargetKind.PACKAGE_SOURCES,
@@ -348,18 +401,73 @@ TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
             TargetKind.CONTAINER_IMAGE,
         }
     ),
-    ScannerToolType.SBOM: frozenset(
+    ScanCategory.LICENSE: frozenset(
+        {
+            TargetKind.SOURCE_CODE,
+            TargetKind.DEPENDENCY_LOCKFILES,
+            TargetKind.PACKAGE_SOURCES,
+            TargetKind.PACKAGE_INVENTORY,
+            TargetKind.CONTAINER_IMAGE,
+        }
+    ),
+    ScanCategory.QUALITY: frozenset(
+        {
+            TargetKind.SOURCE_CODE,
+            TargetKind.DOCKERFILES,
+            TargetKind.GITHUB_ACTIONS_WORKFLOWS,
+            TargetKind.COMPOSITE_ACTIONS,
+        }
+    ),
+    ScanCategory.COMPLEXITY: frozenset({TargetKind.SOURCE_CODE}),
+    ScanCategory.API: frozenset({TargetKind.SOURCE_CODE, TargetKind.IAC_OTHER}),
+    ScanCategory.AGENT: frozenset({TargetKind.SOURCE_CODE}),
+    ScanCategory.BINARY: frozenset(
         {TargetKind.PACKAGE_INVENTORY, TargetKind.CONTAINER_IMAGE}
     ),
+    ScanCategory.POSTURE: frozenset(
+        {
+            TargetKind.IAC_CLOUDFORMATION,
+            TargetKind.IAC_TERRAFORM,
+            TargetKind.IAC_KUBERNETES,
+            TargetKind.IAC_OTHER,
+        }
+    ),
+    ScanCategory.DAST: frozenset(),
+    ScanCategory.SBOM: frozenset(
+        {
+            TargetKind.DEPENDENCY_LOCKFILES,
+            TargetKind.PACKAGE_INVENTORY,
+            TargetKind.CONTAINER_IMAGE,
+        }
+    ),
+    ScanCategory.OTHER: frozenset(),
 }
+
+
+def _categories_from_tool_type(data: dict[str, Any]) -> tuple[ScanCategory, ...]:
+    """The categories a targets row that omits ``categories`` derives: the one
+    its ``tool_type`` stands for, or none for UNKNOWN.
+
+    pydantic passes the fields validated so far; ``tool_type`` is declared
+    before ``categories``, so it is among them when it validated."""
+    return categories_of_tool_type(data.get("tool_type"))
 
 
 class TargetsFacet(_Frozen):
     """What the scanner scans (design section C)."""
 
     kinds: tuple[TargetKind, ...]
-    #: Mirror of the ``tool_type`` the scanner sets in ``model_post_init``.
+    #: The legacy scanner type, the one the scanner sets in ``model_post_init``.
+    #: The plugin base then writes it onto the instance, so the row is the last
+    #: writer.
     tool_type: ScannerToolType
+    #: The scan categories this scanner can serve, in canonical order (the
+    #: declaration order of ``ScanCategory``). A row that omits it derives the
+    #: one category its ``tool_type`` stands for, and building such a row warns
+    #: once per scanner name; 4.0 removes that derivation.
+    categories: tuple[ScanCategory, ...] = Field(
+        default_factory=_categories_from_tool_type
+    )
     #: One line naming the selection mechanism, citing the adapter.
     selection: str
     #: Where ``covers`` (the display string) understates or overstates the
@@ -368,6 +476,11 @@ class TargetsFacet(_Frozen):
     #: Why this ``tool_type`` is what it is, where two scanners over the same
     #: target kind disagree or a value was corrected.
     tool_type_note: Optional[str] = None
+    #: Why ``categories`` is what it is, where the kinds do not show it: a
+    #: category served only under a condition (an optional integration, a mode
+    #: that is off by default), or one served through the nearest target kind
+    #: rather than a kind of its own.
+    categories_note: Optional[str] = None
 
     @model_validator(mode="after")
     def _shape(self) -> "TargetsFacet":
@@ -380,6 +493,28 @@ class TargetsFacet(_Frozen):
             raise ValueError(
                 f"{[k.value for k in claimed]} is wired by no scanner today "
                 "(UNCLAIMED_TARGET_KINDS); wire it before claiming it"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _categories_are_canonical(self) -> "TargetsFacet":
+        """A written ``categories`` names at least one category, each once, in
+        canonical order. An omitted one, derived from ``tool_type``, is not
+        checked here; ``ash plugin verify`` refuses a row that derives none."""
+        if "categories" not in self.model_fields_set:
+            return self
+        if not self.categories:
+            raise ValueError("categories is empty: name at least one category")
+        seen: set[ScanCategory] = set()
+        for category in self.categories:
+            if category in seen:
+                raise ValueError(f"categories names {category.value} more than once")
+            seen.add(category)
+        canonical = tuple(category for category in ScanCategory if category in seen)
+        if canonical != self.categories:
+            raise ValueError(
+                "categories are not in canonical order: write "
+                + ", ".join(category.value for category in canonical)
             )
         return self
 
@@ -1098,6 +1233,30 @@ class ScannerOperationalFacets(_Frozen):
     provenance: ProvenanceFacet
     prerequisites: PrerequisitesFacet
 
+    @model_validator(mode="after")
+    def _record_categories(self) -> "ScannerOperationalFacets":
+        """Record the row's categories under its scanner name, and warn once per
+        name when the row derives them from ``tool_type`` (it writes no
+        ``targets.categories``)."""
+        targets = self.targets
+        _ROW_CATEGORIES[self.scanner_name] = tuple(targets.categories)
+        if (
+            "categories" not in targets.model_fields_set
+            and self.scanner_name not in _ROW_DERIVATION_WARNED
+        ):
+            _ROW_DERIVATION_WARNED.add(self.scanner_name)
+            derived = ", ".join(category.value for category in targets.categories)
+            warnings.warn(
+                f"scanner '{self.scanner_name}': its operational row names no "
+                "categories, so they are derived from tool_type "
+                f"{targets.tool_type.value} as {derived or 'nothing'}; declare "
+                "targets.categories (deriving categories from tool_type is "
+                "removed in 4.0)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return self
+
 
 # --------------------------------------------------------------------------
 # Asset routing: which asset kinds a declaration serves
@@ -1179,3 +1338,102 @@ def serves_asset_kind(scanner_class: type, kind: "AssetKind") -> bool:
     if facets is None:
         return True
     return any(k in FILESYSTEM_SIDE_KINDS for k in facets.targets.kinds)
+
+
+# --------------------------------------------------------------------------
+# Scan categories: the by-name record and the mode maps
+# --------------------------------------------------------------------------
+
+#: The categories each operational row built in this process declares, by
+#: scanner name. ``ScannerOperationalFacets`` records them when it is built; a
+#: later row with the same name replaces the earlier one, and ``model_copy``
+#: (which runs no validator) records nothing.
+_ROW_CATEGORIES: dict[str, tuple[ScanCategory, ...]] = {}
+
+#: The categories each scanner instance declared, by its config name
+#: (``ScannerPluginBase.model_post_init`` records them on every instance).
+_INSTANCE_CATEGORIES: dict[str, tuple[ScanCategory, ...]] = {}
+
+#: The scanner names whose row has raised the derivation warning in this
+#: process: the warning is raised once per name.
+_ROW_DERIVATION_WARNED: set[str] = set()
+
+#: The ``json_schema_extra`` key under which a mode option carries its map.
+CATEGORY_MAP_KEY = "x-ash-categories"
+
+#: The map key that stands for every value the map does not name.
+CATEGORY_MAP_ANY = "*"
+
+
+def row_categories(scanner_name: str) -> Optional[tuple[ScanCategory, ...]]:
+    """The categories the row named *scanner_name* declared when it was built in
+    this process, or None when no row of that name was built."""
+    return _ROW_CATEGORIES.get(scanner_name)
+
+
+def instance_categories(scanner_name: str) -> Optional[tuple[ScanCategory, ...]]:
+    """The categories an instance with this config name declared when it was
+    built in this process, or None when none was recorded."""
+    return _INSTANCE_CATEGORIES.get(scanner_name)
+
+
+def record_instance_categories(
+    scanner_name: str, categories: Iterable[ScanCategory]
+) -> None:
+    """Record the categories a scanner instance with this config name declares."""
+    _INSTANCE_CATEGORIES[scanner_name] = tuple(categories)
+
+
+def nearest_operational_facets(
+    scanner_class: type,
+) -> Optional[ScannerOperationalFacets]:
+    """The operational row of *scanner_class* or of its nearest declaring base, or
+    None when no class in its MRO declares one.
+
+    Each class is read from its own namespace, as
+    :func:`declared_operational_facets` reads it; unlike that function, a
+    subclass answers with an inherited row, the way
+    :func:`declared_runtime_compat` walks the MRO.
+    """
+    for klass in scanner_class.__mro__:
+        facets = declared_operational_facets(klass)
+        if facets is not None:
+            return facets
+    return None
+
+
+def category_map(
+    options_model: type[BaseModel], field_name: str
+) -> dict[str, tuple[ScanCategory, ...]]:
+    """The category map option *field_name* of *options_model* carries.
+
+    Read from the field's ``json_schema_extra`` under ``CATEGORY_MAP_KEY``: each
+    mode value with its categories in canonical order, repeats dropped. A value
+    that names no category raises ValueError. ``{}`` when the field does not
+    exist, has no ``json_schema_extra``, has a callable one, or holds no dict
+    under the key.
+    """
+    field = getattr(options_model, "model_fields", {}).get(field_name)
+    extra = getattr(field, "json_schema_extra", None)
+    if not isinstance(extra, dict):
+        return {}
+    published = extra.get(CATEGORY_MAP_KEY)
+    if not isinstance(published, dict):
+        return {}
+    mapping: dict[str, tuple[ScanCategory, ...]] = {}
+    for key, values in published.items():
+        named = {ScanCategory(value) for value in values}
+        mapping[str(key)] = tuple(
+            category for category in ScanCategory if category in named
+        )
+    return mapping
+
+
+def category_mapped_fields(options_model: type[BaseModel]) -> tuple[str, ...]:
+    """The names of *options_model*'s fields that carry a category map, in
+    declaration order; ``()`` when none does."""
+    return tuple(
+        field_name
+        for field_name in getattr(options_model, "model_fields", {})
+        if category_map(options_model, field_name)
+    )

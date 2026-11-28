@@ -4458,7 +4458,96 @@
             ]
           },
           "title": "Frameworks",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "3d_policy": [
+              "iac"
+            ],
+            "ansible": [
+              "iac"
+            ],
+            "argo_workflows": [
+              "ci"
+            ],
+            "arm": [
+              "iac"
+            ],
+            "azure_pipelines": [
+              "ci"
+            ],
+            "bicep": [
+              "iac"
+            ],
+            "bitbucket_configuration": [
+              "ci"
+            ],
+            "bitbucket_pipelines": [
+              "ci"
+            ],
+            "cdk": [],
+            "circleci_pipelines": [
+              "ci"
+            ],
+            "cloudformation": [
+              "iac"
+            ],
+            "dockerfile": [
+              "iac"
+            ],
+            "github_actions": [
+              "ci"
+            ],
+            "github_configuration": [
+              "ci"
+            ],
+            "gitlab_ci": [
+              "ci"
+            ],
+            "gitlab_configuration": [
+              "ci"
+            ],
+            "helm": [
+              "iac"
+            ],
+            "json": [
+              "iac"
+            ],
+            "kubernetes": [
+              "iac"
+            ],
+            "kustomize": [
+              "iac"
+            ],
+            "openapi": [
+              "api"
+            ],
+            "sast": [],
+            "sast_golang": [],
+            "sast_java": [],
+            "sast_javascript": [],
+            "sast_python": [],
+            "sast_typescript": [],
+            "sca_image": [],
+            "sca_package": [],
+            "secrets": [
+              "secrets"
+            ],
+            "serverless": [
+              "iac"
+            ],
+            "terraform": [
+              "iac"
+            ],
+            "terraform_json": [
+              "iac"
+            ],
+            "terraform_plan": [
+              "iac"
+            ],
+            "yaml": [
+              "iac"
+            ]
+          }
         },
         "install_timeout": {
           "anyOf": [
@@ -14000,31 +14089,58 @@
             "type": "string"
           },
           "title": "Allowed Command Prefixes",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "*": [
+              "agent"
+            ]
+          }
         },
         "flag_env_secrets": {
           "default": true,
           "description": "Flag an `env` entry whose name says key, token, secret or password and whose value is a literal rather than a reference such as `${NAME}` (LOW). The value is never written into the finding.",
           "title": "Flag Env Secrets",
-          "type": "boolean"
+          "type": "boolean",
+          "x-ash-categories": {
+            "true": [
+              "secrets",
+              "agent"
+            ]
+          }
         },
         "forbid_auto_approval": {
           "default": true,
           "description": "Flag settings that approve MCP tool calls without asking (HIGH): gemini `trust: true`, a non-empty kiro `autoApprove` or roo `alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`.",
           "title": "Forbid Auto Approval",
-          "type": "boolean"
+          "type": "boolean",
+          "x-ash-categories": {
+            "true": [
+              "agent"
+            ]
+          }
         },
         "forbid_privilege_escalation": {
           "default": true,
           "description": "Flag sudo, doas, su and pkexec used as the command, or as a whole argument, of a stdio MCP server entry (HIGH). The match is on the whole word, so a name that merely contains one is not flagged.",
           "title": "Forbid Privilege Escalation",
-          "type": "boolean"
+          "type": "boolean",
+          "x-ash-categories": {
+            "true": [
+              "agent"
+            ]
+          }
         },
         "forbid_unpinned_runners": {
           "default": true,
           "description": "Flag npx, bunx, pnpm dlx, pnpx and uvx entries whose package has no exact version, such as `npx -y pkg` or `uvx pkg` (MEDIUM). `pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg@latest` and ranges are not.",
           "title": "Forbid Unpinned Runners",
-          "type": "boolean"
+          "type": "boolean",
+          "x-ash-categories": {
+            "true": [
+              "supply-chain",
+              "agent"
+            ]
+          }
         },
         "offline": {
           "default": false,
@@ -14039,13 +14155,23 @@
             "type": "string"
           },
           "title": "Remote Url Prefixes",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "*": [
+              "agent"
+            ]
+          }
         },
         "require_local": {
           "default": false,
           "description": "Flag every remote (url, httpUrl, serverUrl) entry whose host is not loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count as local, whichever way the IPv6 address is spelled.",
           "title": "Require Local",
-          "type": "boolean"
+          "type": "boolean",
+          "x-ash-categories": {
+            "true": [
+              "agent"
+            ]
+          }
         },
         "scan_timeout": {
           "anyOf": [
@@ -21261,6 +21387,15 @@
           "default": 0,
           "title": "Actionable Finding Count"
         },
+        "categories": {
+          "default": [],
+          "description": "The scan categories the scanner can serve, as their values in canonical order: its operational row's targets.categories, or the one category its tool_type stands for. Empty on a row read from an older results file.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Categories",
+          "type": "array"
+        },
         "dependencies_satisfied": {
           "default": true,
           "description": "False on a MISSING row: the scanner's tool or another dependency was not available. True on every other row, including a SKIPPED one, which did not need its tool, and a MISSING row for a scanner whose filtering raised before any dependency was checked (its missing_reason says so).",
@@ -25920,7 +26055,22 @@
           },
           "minItems": 1,
           "title": "Scanners",
-          "type": "array"
+          "type": "array",
+          "x-ash-categories": {
+            "license": [
+              "license"
+            ],
+            "misconfig": [
+              "iac"
+            ],
+            "secret": [
+              "secrets"
+            ],
+            "vuln": [
+              "sca",
+              "container"
+            ]
+          }
         },
         "secret_config_file": {
           "anyOf": [

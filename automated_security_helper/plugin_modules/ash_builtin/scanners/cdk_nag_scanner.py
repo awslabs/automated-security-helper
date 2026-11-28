@@ -21,7 +21,11 @@ from yaml import YAMLError
 
 from automated_security_helper.utils.sandbox.policy import SandboxRequirements
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.base import scanner_operational_facets as opsf
 from automated_security_helper.base.scanner_facets import (
@@ -1275,6 +1279,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
                 tool_type=ScannerToolType.IAC,
+                categories=(ScanCategory.IAC,),
                 selection=(
                     "each CloudFormation template through run_cdk_nag_against_cfn_template "
                     "(utils/cdk_nag_worker.py); it does not synthesize a CDK application"

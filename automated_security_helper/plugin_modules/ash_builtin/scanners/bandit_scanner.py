@@ -29,7 +29,11 @@ from automated_security_helper.base.options import (
     tool_version_constraint,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.config.tool_config_trust import empty_tool_config
 from automated_security_helper.models.core import ToolArgs
@@ -949,6 +953,7 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SOURCE_CODE,),
                 tool_type=ScannerToolType.SAST,
+                categories=(ScanCategory.SAST,),
                 selection="tool-side over the directory; staged_scope_patterns ('*.py',) in precommit",
             ),
             runtime=opsf.RuntimeFacet(

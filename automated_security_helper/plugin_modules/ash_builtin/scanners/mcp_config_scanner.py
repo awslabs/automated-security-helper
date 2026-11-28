@@ -114,7 +114,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -259,6 +263,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "argument, of a stdio MCP server entry (HIGH). The match is on the "
                 "whole word, so a name that merely contains one is not flagged."
             ),
+            json_schema_extra={"x-ash-categories": {"true": ["agent"]}},
         ),
     ] = True
     forbid_unpinned_runners: Annotated[
@@ -270,6 +275,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "`pkg@1.2.3` and `pkg==1.2.3` are pinned; `pkg@latest` and ranges "
                 "are not."
             ),
+            json_schema_extra={"x-ash-categories": {"true": ["supply-chain", "agent"]}},
         ),
     ] = True
     forbid_auto_approval: Annotated[
@@ -280,6 +286,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "gemini `trust: true`, a non-empty kiro `autoApprove` or roo "
                 "`alwaysAllow`, and codex `approval_mode` of `auto` or `full-auto`."
             ),
+            json_schema_extra={"x-ash-categories": {"true": ["agent"]}},
         ),
     ] = True
     require_local: Annotated[
@@ -290,6 +297,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "loopback (MEDIUM). `localhost`, `127.0.0.0/8` and `::1` count as "
                 "local, whichever way the IPv6 address is spelled."
             ),
+            json_schema_extra={"x-ash-categories": {"true": ["agent"]}},
         ),
     ] = False
     remote_url_prefixes: Annotated[
@@ -301,6 +309,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "host in lower case, and a remote URL that is not loopback must be "
                 "https (MEDIUM). Empty turns the check off."
             ),
+            json_schema_extra={"x-ash-categories": {"*": ["agent"]}},
         ),
     ] = []
     allowed_command_prefixes: Annotated[
@@ -315,6 +324,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "on PATH, and no command that has a path, `./npx` included. "
                 "Empty turns the check off."
             ),
+            json_schema_extra={"x-ash-categories": {"*": ["agent"]}},
         ),
     ] = []
     flag_env_secrets: Annotated[
@@ -325,6 +335,7 @@ class McpConfigScannerConfigOptions(ScannerOptionsBase):
                 "and whose value is a literal rather than a reference such as "
                 "`${NAME}` (LOW). The value is never written into the finding."
             ),
+            json_schema_extra={"x-ash-categories": {"true": ["secrets", "agent"]}},
         ),
     ] = True
 
@@ -871,10 +882,22 @@ class McpConfigScanner(ScannerPluginBase[McpConfigScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SOURCE_CODE,),
                 tool_type=ScannerToolType.SAST,
+                categories=(
+                    ScanCategory.SECRETS,
+                    ScanCategory.SUPPLY_CHAIN,
+                    ScanCategory.AGENT,
+                ),
                 selection="the scan set filtered to the ten MCP config paths of "
                 "utils/mcp_config/readers.py FORMATS",
                 covers_note="no target kind names tool configuration files; "
                 "source_code is the nearest, and covers says what is read",
+                categories_note=(
+                    "agent and supply-chain are served through SOURCE_CODE, the "
+                    "nearest target kind: the MCP client configuration files this "
+                    "scanner reads are classed as source. secrets comes only from "
+                    "flag_env_secrets and supply-chain only from "
+                    "forbid_unpinned_runners; every rule serves agent."
+                ),
             ),
             runtime=opsf.RuntimeFacet(
                 kind=opsf.RuntimeKind.IN_PROCESS,

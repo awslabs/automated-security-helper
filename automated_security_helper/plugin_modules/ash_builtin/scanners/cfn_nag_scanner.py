@@ -29,7 +29,11 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.constants import ASH_ASSETS_DIR
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -608,6 +612,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
                 tool_type=ScannerToolType.IAC,
+                categories=(ScanCategory.IAC,),
                 selection=(
                     "its own loop over holds_cloudformation_template, held equal to "
                     "utils/cfn_template_discovery.py by a test"

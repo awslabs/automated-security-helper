@@ -161,7 +161,11 @@ from automated_security_helper.config.confinement_remedy import (
     SET_BY_THE_OPERATOR,
 )
 from automated_security_helper.config.tool_config_trust import empty_tool_directory
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.models.vocab import Severity, TargetType
@@ -456,6 +460,7 @@ class BetterleaksScanner(ScannerPluginBase[BetterleaksScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
                 tool_type=ScannerToolType.SECRETS,
+                categories=(ScanCategory.SECRETS,),
                 selection="`betterleaks dir` over the target; contents, not history (module header)",
                 covers_note=(
                     "the alpha scanners declare no covers display string; no scanner "

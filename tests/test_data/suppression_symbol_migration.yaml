@@ -661,8 +661,8 @@ kept:
 - config: .ash.yaml
   rule_id: SECRET-BASIC-AUTH-CREDENTIALS
   path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-  line_start: 171
-  line_end: 171
+  line_start: 179
+  line_end: 179
   remeasured_at: c15148192f4
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash.yaml

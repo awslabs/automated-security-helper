@@ -1,10 +1,13 @@
 from datetime import datetime, timezone
+from enum import Enum
 import functools
+import inspect
 import json
 import logging
 import os
 import re
 import shlex
+import warnings
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import (
     PluginBase,
@@ -16,13 +19,26 @@ from automated_security_helper.base.plugin_config import (
     PluginConfigBase,
     config_validated_by_declared_model,
 )
+from automated_security_helper.base.scanner_operational_facets import (
+    CATEGORY_MAP_ANY,
+    category_map,
+    category_mapped_fields,
+    nearest_operational_facets,
+    record_instance_categories,
+)
 from automated_security_helper.base.uv_tool_mixin import (
     _restore_uv_route,
     guarded_values,
     guarded_values_read,
     tool_name,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+    categories_of_tool_type,
+    tool_type_member,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.models.vocab import TargetType
@@ -414,6 +430,48 @@ T = TypeVar("T", bound=ScannerPluginConfigBase)
 _FORCED_RECORD_PREFIX_MARK = "_ash_reads_forced_binary_record"
 
 
+#: The scanner classes that have raised a category derivation warning in this
+#: process, at class creation or at first instantiation: each warns once.
+_CATEGORY_DERIVATION_WARNED: set[type] = set()
+
+
+def _warn_class_tool_type_derivation(cls: type) -> None:
+    """Warn once when a scanner class with no operational row in its MRO declares
+    a class-level ``tool_type`` default that stands for a category.
+
+    Called from ``__pydantic_init_subclass__``, which must never raise out of
+    class creation. Only the class's own annotations are read, so a subclass that
+    inherits the default without restating it does not warn. An error from
+    reading them (a NameError from a forward reference, or any other error a newer
+    Python raises there) reads as no declaration: the class does not warn here,
+    and its first instance warns instead.
+    """
+    if cls in _CATEGORY_DERIVATION_WARNED:
+        return
+    if nearest_operational_facets(cls) is not None:
+        return
+    try:
+        own = inspect.get_annotations(cls)
+    except Exception:
+        return
+    if "tool_type" not in own:
+        return
+    field = getattr(cls, "model_fields", {}).get("tool_type")
+    member = tool_type_member(getattr(field, "default", None))
+    if member is ScannerToolType.UNKNOWN:
+        return
+    _CATEGORY_DERIVATION_WARNED.add(cls)
+    derived = ", ".join(category.value for category in categories_of_tool_type(member))
+    warnings.warn(
+        f"scanner class {cls.__qualname__}: no operational row names its "
+        "categories, so they are derived from its class-level tool_type "
+        f"{member.value} as {derived or 'nothing'}; declare targets.categories on "
+        "an operational row (deriving categories from tool_type is removed in 4.0)",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
 class ScannerPluginBase(PluginBase, Generic[T]):
     """Base class for all scanner plugins.
 
@@ -719,6 +777,118 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         tool_type = self.tool_type or ScannerToolType.UNKNOWN
         return f"tool_type::{getattr(tool_type, 'value', tool_type)}"
 
+    def declared_categories(self) -> tuple[ScanCategory, ...]:
+        """The scan categories this scanner can serve, in canonical order.
+
+        Its operational row's ``targets.categories`` when its class or a base
+        declares a row; otherwise the one category its ``tool_type`` stands for;
+        ``()`` when neither says.
+        """
+        row = nearest_operational_facets(type(self))
+        if row is not None:
+            return tuple(row.targets.categories)
+        return categories_of_tool_type(self.tool_type)
+
+    def categories_for_run(self) -> frozenset[ScanCategory]:
+        """The scan categories this run serves, as a frozenset: the declared ones,
+        narrowed by the modes the scanner is set to run.
+
+        With no options model, or one whose fields carry no category map, it is
+        every declared category. Otherwise it is the union, over the mapped
+        options, of what each option's values serve: a value its map names serves
+        that value's categories, else the map's ``"*"`` categories when the map
+        has that key, else every declared category. An option read as every mode
+        (``_category_mode_values`` returns None) serves every category its map
+        names.
+        """
+        options = getattr(self.config, "options", None)
+        mapped = category_mapped_fields(type(options)) if options is not None else ()
+        if not mapped:
+            return frozenset(self.declared_categories())
+        serves: set[ScanCategory] = set()
+        for field_name in mapped:
+            mapping = category_map(type(options), field_name)
+            values = self._category_mode_values(field_name)
+            if values is None:
+                for categories in mapping.values():
+                    serves.update(categories)
+                continue
+            for value in values:
+                if value in mapping:
+                    serves.update(mapping[value])
+                elif CATEGORY_MAP_ANY in mapping:
+                    serves.update(mapping[CATEGORY_MAP_ANY])
+                else:
+                    serves.update(self.declared_categories())
+        return frozenset(serves)
+
+    def _category_mode_values(self, field_name: str) -> Optional[list[str]]:
+        """The value of option *field_name*, read as keys of its category map.
+
+        A bool reads ``["true"]`` when true and ``[]`` when false; None reads
+        ``[]``; a string reads its comma-separated parts, each stripped, empty
+        parts dropped; a list, tuple, set or frozenset reads each item as text, an
+        ``Enum`` member by its value, each stripped, empty ones dropped; an
+        ``Enum`` member reads as its value; any other value reads as its text,
+        stripped. An override returns None to mean every mode its map names.
+        """
+        value = getattr(getattr(self.config, "options", None), field_name, None)
+        if isinstance(value, bool):
+            return ["true"] if value else []
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, (list, tuple, set, frozenset)):
+            texts = (
+                str(item.value if isinstance(item, Enum) else item).strip()
+                for item in value
+            )
+            return [text for text in texts if text]
+        if isinstance(value, Enum):
+            return [str(value.value).strip()]
+        return [str(value).strip()]
+
+    def classify_result(self, result: Any) -> frozenset[ScanCategory]:
+        """The scan categories one result of this scanner belongs to.
+
+        The run's one category when it serves exactly one; unclassified
+        (``frozenset()``) otherwise. A scanner that serves several categories and
+        can tell them apart overrides this.
+        """
+        categories = self.categories_for_run()
+        return categories if len(categories) == 1 else frozenset()
+
+    def _warn_instance_category_derivation(self) -> None:
+        """Warn once per class, for a class with no operational row, that its
+        categories are derived from its ``tool_type``, or that it derives none.
+
+        Shares ``_CATEGORY_DERIVATION_WARNED`` with the class-creation warning, so
+        a class warned there is not warned again.
+        """
+        cls = type(self)
+        if cls in _CATEGORY_DERIVATION_WARNED:
+            return
+        _CATEGORY_DERIVATION_WARNED.add(cls)
+        name = getattr(self.config, "name", None)
+        derived = self.declared_categories()
+        if derived:
+            message = (
+                f"scanner '{name}': no operational row names its categories, so "
+                "they are derived from its tool_type "
+                f"{tool_type_member(self.tool_type).value} as "
+                f"{', '.join(category.value for category in derived)}; declare "
+                "targets.categories on an operational row (deriving categories "
+                "from tool_type is removed in 4.0)"
+            )
+        else:
+            message = (
+                f"scanner '{name}' declares no categories and no tool_type, so it "
+                "derives no category and meets a category scope as 'other'; "
+                "declare targets.categories on an operational row"
+            )
+        warnings.warn(message, DeprecationWarning, stacklevel=2)
+
     def model_post_init(self, context):
         if self.config is None:
             raise ScannerError(
@@ -734,6 +904,15 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         self.results_dir = self.context.output_dir.joinpath("scanners").joinpath(
             self.config.name
         )
+
+        # The operational row is the last writer of the legacy type: a plugin's own
+        # model_post_init sets self.tool_type before it calls this one.
+        row = nearest_operational_facets(type(self))
+        if row is not None:
+            self.tool_type = row.targets.tool_type
+        else:
+            self._warn_instance_category_derivation()
+        record_instance_categories(self.config.name, self.declared_categories())
 
         self._process_config_options()
 
@@ -842,6 +1021,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         ``_forced_binary_precluded_reason`` hook, never by skipping the wrap.
         """
         super().__pydantic_init_subclass__(**kwargs)
+        _warn_class_tool_type_derivation(cls)
         override = cls.__dict__.get("validate_plugin_dependencies")
         if override is None or not callable(override):
             return

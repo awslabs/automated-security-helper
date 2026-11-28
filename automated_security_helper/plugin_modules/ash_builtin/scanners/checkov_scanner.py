@@ -48,7 +48,11 @@ from automated_security_helper.base.uv_tool_mixin import (
     tool_name,
 )
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -931,7 +935,46 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
                 "they check the repository host's settings through its API, not "
                 "files in the scanned tree. Name one of them here, with or "
                 "without `all`, to run it."
-            )
+            ),
+            json_schema_extra={
+                "x-ash-categories": {
+                    "ansible": ["iac"],
+                    "argo_workflows": ["ci"],
+                    "arm": ["iac"],
+                    "azure_pipelines": ["ci"],
+                    "bicep": ["iac"],
+                    "bitbucket_pipelines": ["ci"],
+                    "cdk": [],
+                    "circleci_pipelines": ["ci"],
+                    "cloudformation": ["iac"],
+                    "dockerfile": ["iac"],
+                    "github_configuration": ["ci"],
+                    "github_actions": ["ci"],
+                    "gitlab_configuration": ["ci"],
+                    "gitlab_ci": ["ci"],
+                    "bitbucket_configuration": ["ci"],
+                    "helm": ["iac"],
+                    "json": ["iac"],
+                    "yaml": ["iac"],
+                    "kubernetes": ["iac"],
+                    "kustomize": ["iac"],
+                    "openapi": ["api"],
+                    "sca_package": [],
+                    "sca_image": [],
+                    "secrets": ["secrets"],
+                    "serverless": ["iac"],
+                    "terraform": ["iac"],
+                    "terraform_json": ["iac"],
+                    "terraform_plan": ["iac"],
+                    "sast": [],
+                    "sast_python": [],
+                    "sast_java": [],
+                    "sast_javascript": [],
+                    "sast_typescript": [],
+                    "sast_golang": [],
+                    "3d_policy": ["iac"],
+                },
+            },
         ),
     ] = ["all"]
     skip_frameworks: Annotated[
@@ -1197,6 +1240,12 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     opsf.TargetKind.IAC_OTHER,
                 ),
                 tool_type=ScannerToolType.IAC,
+                categories=(
+                    ScanCategory.SECRETS,
+                    ScanCategory.IAC,
+                    ScanCategory.CI,
+                    ScanCategory.API,
+                ),
                 selection=(
                     "directory scan; precommit per-file with same-directory .tf/.tfvars "
                     "siblings (staged_scope_patterns)"
@@ -1206,6 +1255,14 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
                     "serverless, ansible, argo, azure-pipelines, circleci, github-actions, "
                     "gitlab-ci, openapi and bicep (iac_other); the display string was "
                     "widened and the register declares the wired truth"
+                ),
+                categories_note=(
+                    "checkov's cdk, sast, sast_python, sast_java, sast_javascript, "
+                    "sast_typescript, sast_golang, sca_package and sca_image "
+                    "frameworks run only with a platform API key, which ASH does not "
+                    "pass, so they serve no category here (with a key they would add "
+                    "sast, sca and license). ci and api are served through IAC_OTHER, "
+                    "where this row classes pipeline files and OpenAPI specs."
                 ),
             ),
             runtime=opsf.RuntimeFacet(
@@ -1434,6 +1491,38 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
     # builds runs, read by an offline scan to say what each one checks
     # (_warn_offline_vcs_frameworks).
     _vcs_frameworks_run: Tuple[str, ...] = PrivateAttr(default=())
+
+    def _category_mode_values(self, field_name: str) -> Optional[List[str]]:
+        """The frameworks this built scanner passes, as keys of the ``frameworks``
+        category map; any other field is read as the plugin base reads it.
+
+        The values of its ``--framework`` arguments, with ``all`` replaced by every
+        framework the map names, without the values of its ``--skip-framework``
+        arguments, each once. ``frameworks: []`` is built as ``all``, so it reads
+        as the default ``["all"]`` does: every framework but the three VCS
+        configuration ones, which the scanner skips unless they are asked for.
+        With no ``--framework`` argument (the arguments are not built yet)
+        checkov would run every framework, so that also reads as ``all``.
+        """
+        if field_name != "frameworks":
+            return super()._category_mode_values(field_name)
+        passed = [
+            str(arg.value).strip()
+            for arg in self.args.extra_args
+            if arg.key == "--framework"
+        ]
+        skipped = {
+            str(arg.value).strip()
+            for arg in self.args.extra_args
+            if arg.key == "--skip-framework"
+        }
+        every = list(opsf.category_map(CheckovScannerConfigOptions, "frameworks"))
+        chosen: list[str] = []
+        for name in passed or ["all"]:
+            for framework in every if name == "all" else [name]:
+                if framework and framework not in skipped and framework not in chosen:
+                    chosen.append(framework)
+        return chosen
 
     def model_post_init(self, context):
         if self.config is None:

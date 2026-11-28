@@ -121,7 +121,8 @@ KNOWN_VIOLATIONS: Dict[Tuple[str, str], int] = {
     ("utils", "config"): 27,
     # 35 -> 39: image_attribution and image_tool_targets read core.asset and
     # core.container_engine, and sdist_harvest reads core.constants.xdg_directory.
-    ("utils", "core"): 44,
+    # 44 -> 45: utils/scan_categories reads ScanCategory from core.enums.
+    ("utils", "core"): 45,
     # 2 -> 3: utils/scan_history reads interactions.run_ash_scan (landed on main
     # with the scan trend/history work this branch was rebased onto).
     # 3 -> 5: utils/finding_diff and utils/scan_baseline read

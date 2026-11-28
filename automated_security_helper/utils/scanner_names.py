@@ -118,7 +118,7 @@ from __future__ import annotations
 import re
 from typing import Dict, FrozenSet, Mapping
 
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import ScanCategory, ScannerToolType
 
 #: The tool type (a ``ScannerToolType`` value) of every scanner ASH ships, by
 #: config name. A scanner sets its ``tool_type`` in ``model_post_init``, so the
@@ -152,12 +152,75 @@ SCANNER_TOOL_TYPES: Mapping[str, str] = {
     "zizmor": ScannerToolType.SAST.value,
 }
 
+#: The scan categories each scanner ASH ships can serve, in canonical order: the
+#: ``targets.categories`` its operational row declares (the consistency test holds
+#: the two equal). utils/scan_categories.py answers a scanner name from here first.
+SCANNER_CATEGORIES: dict[str, tuple[ScanCategory, ...]] = {
+    "actionlint": (ScanCategory.SECRETS, ScanCategory.CI, ScanCategory.QUALITY),
+    "bandit": (ScanCategory.SAST,),
+    "cdk-nag": (ScanCategory.IAC,),
+    "cfn-guard": (ScanCategory.IAC,),
+    "cfn-lint": (ScanCategory.IAC,),
+    "cfn-nag": (ScanCategory.IAC,),
+    "checkov": (
+        ScanCategory.SECRETS,
+        ScanCategory.IAC,
+        ScanCategory.CI,
+        ScanCategory.API,
+    ),
+    "detect-secrets": (ScanCategory.SECRETS,),
+    "betterleaks": (ScanCategory.SECRETS,),
+    "ferret-scan": (ScanCategory.SECRETS, ScanCategory.PII),
+    "gitleaks": (ScanCategory.SECRETS,),
+    "grype": (ScanCategory.SCA, ScanCategory.CONTAINER),
+    "guarddog": (ScanCategory.SUPPLY_CHAIN, ScanCategory.MALWARE),
+    "hadolint": (ScanCategory.IAC, ScanCategory.QUALITY),
+    "mcp-config": (ScanCategory.SECRETS, ScanCategory.SUPPLY_CHAIN, ScanCategory.AGENT),
+    "npm-audit": (ScanCategory.SCA,),
+    "opengrep": (
+        ScanCategory.SAST,
+        ScanCategory.SECRETS,
+        ScanCategory.IAC,
+        ScanCategory.CI,
+        ScanCategory.QUALITY,
+    ),
+    "semgrep": (
+        ScanCategory.SAST,
+        ScanCategory.SECRETS,
+        ScanCategory.IAC,
+        ScanCategory.CI,
+        ScanCategory.QUALITY,
+    ),
+    "snyk-code": (ScanCategory.SAST, ScanCategory.SECRETS),
+    "syft": (ScanCategory.SBOM,),
+    "trivy": (
+        ScanCategory.SECRETS,
+        ScanCategory.SCA,
+        ScanCategory.CONTAINER,
+        ScanCategory.IAC,
+        ScanCategory.LICENSE,
+    ),
+    "trivy-repo": (
+        ScanCategory.SECRETS,
+        ScanCategory.SCA,
+        ScanCategory.IAC,
+        ScanCategory.LICENSE,
+    ),
+    "zizmor": (
+        ScanCategory.SECRETS,
+        ScanCategory.SCA,
+        ScanCategory.CI,
+        ScanCategory.SUPPLY_CHAIN,
+        ScanCategory.QUALITY,
+    ),
+}
+
 #: Scanner config names for every scanner ASH ships, as they appear in SARIF
-#: result tags.
+#: result tags (the keys of ``SCANNER_CATEGORIES``).
 #:
 #: Derived-and-compared by tests/unit/utils/test_scanner_names_registry_agreement.py.
 #: Add a scanner to the registry without adding it here and that test fails.
-SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
+SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_CATEGORIES)
 
 #: The shipped scanners whose operational-facets row declares the
 #: ``container_image`` target kind, by config name. The flat extractor and the
@@ -167,7 +230,7 @@ SCANNER_TAG_NAMES: FrozenSet[str] = frozenset(SCANNER_TOOL_TYPES)
 #: results alike -- so for shipped scanners the answer cannot depend on which
 #: scanner modules the current process happens to have imported
 #: (``scanner_tool_types.scanner_serves_container_images`` consults this table
-#: before any loaded-class walk). Same leaf-module reasoning as the two tables
+#: before any loaded-class walk). Same leaf-module reasoning as the tables
 #: above; tests/unit/utils/test_image_attribution_flows_into_identity_and_suppressions.py
 #: checks each entry against the loaded class's own register row.
 IMAGE_SERVING_SCANNERS: FrozenSet[str] = frozenset({"grype", "syft", "trivy"})

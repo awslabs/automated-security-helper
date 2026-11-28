@@ -579,8 +579,8 @@ global_settings:
     # self-scan runs it. Each was read at the reported line and is pinned to it.
     - path: automated_security_helper/base/scanner_operational_facets.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 714
-      line_end: 714
+      line_start: 849
+      line_end: 849
       reason: >-
         False positive. An enum member whose name is a token word and whose value is a
         lowercase label of the same word; no credential is held.
@@ -1707,8 +1707,8 @@ global_settings:
     # .ash.yaml. Reasons paraphrase the flagged text, so this file does not flag itself.
     - path: automated_security_helper/plugin_modules/ash_builtin/scanners/mcp_config_scanner.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 169
-      line_end: 169
+      line_start: 173
+      line_end: 173
       reason: >-
         False positive. The constant that names one of the MCP config scanner's own
         rule ids; its value is that rule id, not a credential. The inline pragma on the

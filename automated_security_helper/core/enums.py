@@ -1,5 +1,5 @@
 from enum import Enum, IntEnum
-from typing import Iterable, Optional
+from typing import Iterable, Mapping, Optional
 
 
 class AshExitCode(IntEnum):
@@ -58,6 +58,102 @@ class ScannerToolType(str, Enum):
     SBOM = "SBOM"
     CUSTOM = "CUSTOM"
     UNKNOWN = "UNKNOWN"
+
+
+class ScanCategory(str, Enum):
+    """The category of a scan finding, or for ``sbom`` of a scan artifact.
+
+    A scanner declares the categories it can serve on its operational row
+    (``TargetsFacet.categories``), and a run serves those of its modes it is set
+    to run. The declaration order is the canonical order: every tuple of
+    categories ASH writes is in this order.
+    """
+
+    SAST = "sast"
+    SECRETS = "secrets"  # pragma: allowlist secret - not actually a secret, just the word "secrets"
+    PII = "pii"
+    SCA = "sca"
+    CONTAINER = "container"
+    IAC = "iac"
+    CI = "ci"
+    SUPPLY_CHAIN = "supply-chain"
+    MALWARE = "malware"
+    MAINTENANCE = "maintenance"
+    LICENSE = "license"
+    QUALITY = "quality"
+    COMPLEXITY = "complexity"
+    API = "api"
+    AGENT = "agent"
+    BINARY = "binary"
+    POSTURE = "posture"
+    DAST = "dast"
+    SBOM = "sbom"
+    OTHER = "other"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class CategoryKind(str, Enum):
+    """Whether a scan category names a kind of finding or a kind of artifact."""
+
+    FINDING = "finding"
+    ARTIFACT = "artifact"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+#: ``sbom`` is the one artifact category; the other nineteen are finding categories.
+CATEGORY_KIND: Mapping[ScanCategory, CategoryKind] = {
+    category: (
+        CategoryKind.ARTIFACT if category is ScanCategory.SBOM else CategoryKind.FINDING
+    )
+    for category in ScanCategory
+}
+
+#: The category each legacy tool type stands for. UNKNOWN stands for none.
+CATEGORY_OF_TOOL_TYPE: Mapping[ScannerToolType, Optional[ScanCategory]] = {
+    ScannerToolType.SAST: ScanCategory.SAST,
+    ScannerToolType.DAST: ScanCategory.DAST,
+    ScannerToolType.SCA: ScanCategory.SCA,
+    ScannerToolType.IAC: ScanCategory.IAC,
+    ScannerToolType.SECRETS: ScanCategory.SECRETS,
+    ScannerToolType.CONTAINER: ScanCategory.CONTAINER,
+    ScannerToolType.SBOM: ScanCategory.SBOM,
+    ScannerToolType.CUSTOM: ScanCategory.OTHER,
+    ScannerToolType.UNKNOWN: None,
+}
+
+
+def tool_type_member(value: object) -> ScannerToolType:
+    """The ``ScannerToolType`` a legacy tool-type spelling names.
+
+    A member is returned as it is. Any other value is read as text (its
+    ``value`` when it has one), stripped and upper-cased, with a leading
+    ``SCANNERTOOLTYPE.`` removed and the retired ``SECRET`` read as ``SECRETS``.
+    Text that names no member, an empty value and None give UNKNOWN.
+    """
+    if isinstance(value, ScannerToolType):
+        return value
+    text = str(getattr(value, "value", value) or "").strip().upper()
+    text = text.removeprefix("SCANNERTOOLTYPE.")
+    if text == "SECRET":
+        text = ScannerToolType.SECRETS.value
+    try:
+        return ScannerToolType(text)
+    except ValueError:
+        return ScannerToolType.UNKNOWN
+
+
+def categories_of_tool_type(value: object) -> tuple[ScanCategory, ...]:
+    """The categories a legacy tool type derives: the one it stands for, or none.
+
+    ``categories_of_tool_type("SAST") == (ScanCategory.SAST,)``; UNKNOWN, a
+    spelling that names no member and None derive ``()``.
+    """
+    category = CATEGORY_OF_TOOL_TYPE[tool_type_member(value)]
+    return () if category is None else (category,)
 
 
 class ScannerStatus(str, Enum):

@@ -178,7 +178,11 @@ from automated_security_helper.config.tool_config_trust import (
     empty_tool_config,
     empty_tool_directory,
 )
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason, ToolArgs
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
@@ -663,6 +667,7 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SECRETS_CONTENTS,),
                 tool_type=ScannerToolType.SECRETS,
+                categories=(ScanCategory.SECRETS,),
                 selection=(
                     "`gitleaks dir` over the target (subcommands = ['dir']); history "
                     "scanning is deliberately not offered (module header)"

@@ -3725,8 +3725,8 @@ global_settings:
         shown_flake_ref REDACTS. No value is held.
     - rule_id: SECRET-BASIC-AUTH-CREDENTIALS
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/npm_audit_scanner.py
-      line_start: 171
-      line_end: 171
+      line_start: 179
+      line_end: 179
       reason: >-
         False positive. A comment placeholder URL above the regex that MASKS a
         URL's userinfo in log excerpts. No value is held.
@@ -3777,8 +3777,8 @@ global_settings:
         attribute the entry to.
     - rule_id: SECRET-SECRET-KEYWORD
       path: automated_security_helper/plugin_modules/ash_builtin/scanners/mcp_config_scanner.py
-      line_start: 180
-      line_end: 180
+      line_start: 184
+      line_end: 184
       reason: >-
         False positive. The severity table maps the RULE_ENV_SECRET rule id to
         the severity label "LOW". No value is held.

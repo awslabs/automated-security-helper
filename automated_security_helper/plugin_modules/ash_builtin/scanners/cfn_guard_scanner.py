@@ -102,7 +102,11 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.base.uv_tool_mixin import guarded_values
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERATOR
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import IgnorePathWithReason
@@ -516,6 +520,7 @@ class CfnGuardScanner(ScannerPluginBase[CfnGuardScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.IAC_CLOUDFORMATION,),
                 tool_type=ScannerToolType.IAC,
+                categories=(ScanCategory.IAC,),
                 selection="shared template discovery (utils/cfn_template_discovery.py)",
             ),
             runtime=opsf.RuntimeFacet(

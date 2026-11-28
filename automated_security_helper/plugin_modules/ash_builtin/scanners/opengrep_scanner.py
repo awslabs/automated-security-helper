@@ -34,7 +34,11 @@ from automated_security_helper.base.scanner_facets import (
 )
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.uv_tool_mixin import tool_name
-from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
+from automated_security_helper.core.enums import (
+    OfflineStrategy,
+    ScanCategory,
+    ScannerToolType,
+)
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base import (
@@ -375,6 +379,13 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
             targets=opsf.TargetsFacet(
                 kinds=(opsf.TargetKind.SOURCE_CODE,),
                 tool_type=ScannerToolType.SAST,
+                categories=(
+                    ScanCategory.SAST,
+                    ScanCategory.SECRETS,
+                    ScanCategory.IAC,
+                    ScanCategory.CI,
+                    ScanCategory.QUALITY,
+                ),
                 selection=(
                     "whole scan set, languages defined by the ruleset; .semgrepignore "
                     "normalized to ASH's ignore model (_grep_scanner_base.py)"
