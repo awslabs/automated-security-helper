@@ -913,7 +913,10 @@ function pulledUpFrom(doc, hit, childEnd) {
 // - The only child of a parent leaves an empty `{}` or `[]` behind. It is written right
 //   after the key (or the dash) that holds the parent, ahead of any comment on that line,
 //   and the child's own lines go. Comment lines between the two stay where they are.
-//   At the top level the file becomes `{}` or `[]`.
+// - The only entry of the whole file has no key or dash above it, so its own text, from
+//   its key or dash to its end, becomes `{}` or `[]`. The tag or anchor the file starts
+//   with, the line that starts the document and every comment line stay, and so does a
+//   comment after the entry on its line.
 function deletePlan(doc, loc) {
   const text = doc.text;
   const hit = loc.trail[loc.trail.length - 1];
@@ -934,7 +937,7 @@ function deletePlan(doc, loc) {
   }
   const empty = parent.kind === "map" ? "{}" : "[]";
   if (loc.trail.length === 1) {
-    return { splices: [[parent.start, parent.end, empty]], reach: [[parent.start, parent.end]] };
+    return { splices: [[childStart, childEnd, empty]], reach: [[childStart, childEnd]] };
   }
   const holder = loc.trail[loc.trail.length - 2];
   const at = regionStart(holder);
@@ -1069,8 +1072,10 @@ export function editBound(doc, edit) {
  * key of a list item that shares its line with the dash, up to the next comment line or key;
  * and, when it empties its parent, the point after the parent's key where the empty
  * collection is written, with the lines of the entry. A comment on the parent's key line,
- * or on a line between that line and the entry, is outside it. Null when the edit may reach
- * the whole file.
+ * or on a line between that line and the entry, is outside it. The only entry of the whole
+ * file reaches its own text and no more, from its key or dash to its end: the tag or anchor
+ * the file starts with, the line that starts the document and every comment line are
+ * outside it. Null when the edit may reach the whole file.
  */
 export function patchBound(doc, edit) {
   const checked = check(doc, edit);

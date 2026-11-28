@@ -12,8 +12,9 @@
 //   included. A line patch may reach the lines of the smallest block that holds the edit
 //   (see `patchBound` in yaml-write.js); a delete reaches only the deleted entry's own
 //   lines, the line it pulls up beside a dash, and the empty `{}` or `[]` it leaves after
-//   the key of its parent. An entry written again may reach the lines of that entry or
-//   list item (see `editBound`).
+//   the key of its parent, or, for the only entry of the whole file, only that entry's own
+//   text, which the `{}` or `[]` takes the place of. An entry written again may reach the
+//   lines of that entry or list item (see `editBound`).
 //
 // A line patch that fails the gate, or that the writer cannot make, is retried by
 // writing the smallest block that holds the edit again; if that fails the gate too,
