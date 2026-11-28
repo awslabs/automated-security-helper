@@ -32,6 +32,7 @@ import importlib.util
 import itertools
 import json
 import os
+import platform
 import re
 import time
 import types
@@ -116,6 +117,14 @@ def schema():
 
 @pytest.fixture(scope="module")
 def built(hook, tmp_path_factory):
+    if platform.system() == "Windows":
+        # The hook refuses a Windows host by design: its trust probe measures ASH on
+        # the build host. Every test that needs a build is skipped there, with the
+        # hook's own words as the reason, and the refusal is held on every system by
+        # test_a_windows_host_is_refused_before_anything_is_measured.
+        with pytest.raises(hook.ProjectionError) as refusal:
+            hook.check_host(tmp_path_factory.getbasetemp(), {})
+        pytest.skip(str(refusal.value))
     report: dict = {}
     workdir = tmp_path_factory.mktemp("editor-probe")
     started = time.monotonic()
@@ -1630,13 +1639,66 @@ def test_a_list_of_network_scanners_in_a_repository_file_is_kept_only_as_a_limit
 
 
 def test_a_refused_load_is_reported_without_the_build_directory(hook, tmp_path):
-    refused = ValueError(
-        f"refused '{tmp_path}/repository/.ash.yaml': Invalid value at 'x'"
-    )
+    # The message names the planted file as the loader prints a path: with the
+    # separators of the system the build runs on.
+    planted = tmp_path / "repository" / ".ash.yaml"
+    refused = ValueError(f"refused '{planted}': Invalid value at 'x'")
     text = hook.failure_text(refused, tmp_path)
-    assert text.startswith("ValueError: refused '<repository>/.ash.yaml'")
+    assert text.startswith("ValueError: refused '<repository>")
+    assert text.endswith(".ash.yaml': Invalid value at 'x'")
     assert str(tmp_path) not in text
     assert len(hook.failure_text(ValueError("x" * 1000), tmp_path)) <= 300
+
+
+#: A Windows temporary directory, and the same one written with slashes. The marker
+#: is the part of it that would show if a message kept the directory.
+WINDOWS_DIRECTORY = (
+    r"C:\Users\runner\AppData\Local\Temp\pytest-of-runner\pytest-0\build-dir-marker0"
+)
+SLASHED_DIRECTORY = WINDOWS_DIRECTORY.replace("\\", "/")
+POSIX_DIRECTORY = "/tmp/pytest-of-runner/pytest-0/build-dir-marker0"
+
+
+@pytest.mark.parametrize(
+    ("directory", "planted"),
+    [
+        (WINDOWS_DIRECTORY, WINDOWS_DIRECTORY + "\\repository\\.ash.yaml"),
+        (WINDOWS_DIRECTORY, WINDOWS_DIRECTORY + "/repository/.ash.yaml"),
+        (WINDOWS_DIRECTORY, SLASHED_DIRECTORY + "/repository/.ash.yaml"),
+        (WINDOWS_DIRECTORY, SLASHED_DIRECTORY + "\\repository\\.ash.yaml"),
+        (SLASHED_DIRECTORY, WINDOWS_DIRECTORY + "\\repository\\.ash.yaml"),
+        (POSIX_DIRECTORY, POSIX_DIRECTORY + "/repository/.ash.yaml"),
+    ],
+    ids=[
+        "backslashes only",
+        "a slash after the temporary directory",
+        "slashes only",
+        "slashes, then backslashes",
+        "a directory written with slashes, a message with backslashes",
+        "a POSIX directory",
+    ],
+)
+def test_the_build_directory_is_left_out_whichever_separator_the_message_uses(
+    hook, directory, planted
+):
+    refused = ValueError(f"refused '{planted}': Invalid value at 'x'")
+    text = hook.failure_text(refused, directory)
+    assert "build-dir-marker" not in text, text
+    assert text.startswith("ValueError: refused '<repository>"), text
+    assert text.endswith(".ash.yaml': Invalid value at 'x'"), text
+
+
+def test_a_windows_host_is_refused_before_anything_is_measured(
+    hook, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    with pytest.raises(
+        hook.ProjectionError,
+        match=re.escape(
+            "the trust probe measures ASH on the build host and needs Linux or macOS"
+        ),
+    ):
+        hook.check_host(tmp_path, {})
 
 
 def test_the_probe_runs_on_the_pinned_host_and_restores_the_environment(

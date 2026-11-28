@@ -479,6 +479,97 @@ def test_the_policy_is_not_applied_to_a_page_twice(hook):
         hook.apply_page_policy(once)
 
 
+# -- A page that ends inside a style or script element -------------------------------
+
+
+def _page_ending_in(element: str) -> str:
+    """A page whose body ends inside ``element``: no later end tag closes it, so the
+    page holds no script after it."""
+    return _page(body=element + "\n", scripts="")
+
+
+#: Pages that end inside a style or script element, each with the element's name. A
+#: browser reads the rest of the page as that element's text, so each is refused for
+#: the open element itself, whatever text it holds.
+UNCLOSED = {
+    "a style": (_page_ending_in("<style>.a{fill:red}"), "style"),
+    "a style in capitals": (_page_ending_in("<STYLE>.a{fill:red}"), "style"),
+    "a script": (_page_ending_in("<script>go();"), "script"),
+    "a script with a source": (
+        _page_ending_in('<script src="/assets/x.js">'),
+        "script",
+    ),
+    "an SVG style": (_page_ending_in("<svg><style>.a{fill:red}"), "style"),
+    "an SVG script": (_page_ending_in("<svg><script>go();"), "script"),
+    "a MathML style": (_page_ending_in("<math><style>.a{fill:red}"), "style"),
+}
+
+
+def _drops_open_raw_text(scanner_class):
+    """The page scanner over a parser that, like CPython up to 3.12.10, hands the
+    handlers none of the text of a style or script element still open when the input
+    ends. Later releases hand it over from close(); this one never does, so a check
+    that waits for that text sees nothing."""
+
+    class Scanner(scanner_class):
+        def goahead(self, end):
+            super().goahead(end and not self.cdata_elem)
+
+    return Scanner
+
+
+@pytest.fixture(
+    params=["the interpreter's parser", "a parser that hands over no open raw text"]
+)
+def parser_shape(request, hook, monkeypatch):
+    if request.param.startswith("a parser"):
+        monkeypatch.setattr(hook, "PageScanner", _drops_open_raw_text(hook.PageScanner))
+    return request.param
+
+
+@pytest.mark.parametrize("defect", sorted(UNCLOSED))
+def test_a_page_that_ends_inside_a_style_or_script_is_refused(
+    hook, parser_shape, defect
+):
+    page, tag = UNCLOSED[defect]
+    line = page[: re.search(f"<{tag}", page, re.IGNORECASE).start()].count("\n") + 1
+    with pytest.raises(
+        hook.ProjectionError,
+        match=re.escape(f"line {line}: the {tag} element is never closed"),
+    ):
+        hook.apply_page_policy(page)
+
+
+def test_every_refused_page_is_refused_by_a_parser_that_hands_over_no_open_raw_text(
+    hook, monkeypatch
+):
+    monkeypatch.setattr(hook, "PageScanner", _drops_open_raw_text(hook.PageScanner))
+    missed = []
+    for defect, (page, fragment) in REFUSED.items():
+        try:
+            hook.apply_page_policy(page)
+        except hook.ProjectionError as error:
+            if fragment not in str(error):
+                missed.append(f"{defect}: refused for another reason")
+        else:
+            missed.append(f"{defect}: not refused")
+    assert missed == []
+
+
+def test_no_page_is_refused_too_wide_by_a_parser_that_hands_over_no_open_raw_text(
+    hook, monkeypatch
+):
+    monkeypatch.setattr(hook, "PageScanner", _drops_open_raw_text(hook.PageScanner))
+    logo = LOGO.read_text(encoding="utf-8")
+    refused = []
+    for name, body in {**BUILT, "the site's own logo": logo + "\n"}.items():
+        try:
+            hook.apply_page_policy(_page(body=body))
+        except hook.ProjectionError as error:
+            refused.append(f"{name}: {error}")
+    assert refused == []
+
+
 # -- The one exempt element, in its exact markup only --------------------------------
 
 
