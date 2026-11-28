@@ -200,9 +200,9 @@ SCAN_ENV_DROPPED_VARIABLES = frozenset(
 #: extra args they have a real use for: --offline, --output-formats and its aliases,
 #: --strategy, --cleanup, --inspect, --verbose, --debug, --quiet, --log-level,
 #: --progress, --color, --show-summary, --simple, --compact-report. --offline was
-#: checked rather than assumed: it does not drop the npm/pnpm/yarn audit scanners, it
-#: passes `--offline` through to the tool and keeps going, so those scanners still run
-#: and still report a status the completeness gate covers. --ignore-suppressions is
+#: checked rather than assumed: offline, npm-audit audits nothing, so it is recorded
+#: MISSING when the tree has a lockfile, which the completeness gate covers, and
+#: SKIPPED only when there is no lockfile to audit. --ignore-suppressions is
 #: absent for the same kind of reason -- it makes suppressed findings actionable, so
 #: it can only report more, and its negation is ASH's own default.
 #:

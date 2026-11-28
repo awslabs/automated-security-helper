@@ -561,9 +561,9 @@ def test_a_benign_extra_arg_is_still_passed_through(gate, monkeypatch, tmp_path)
 
     The extras here were chosen for being unable to narrow the verdict, which
     ``--scanners bandit`` -- what this test used to offer as its example of a benign arg -- is
-    not. ``--offline`` does not drop the npm/pnpm/yarn audit scanners; it passes ``--offline``
-    through to the tool and keeps going, so each of them still runs and still reports a status
-    that ``--fail-on-incomplete-scanners`` covers. ``--output-formats`` decides which report
+    not. Offline, npm-audit audits nothing: it is recorded MISSING when the tree has a
+    lockfile, a status ``--fail-on-incomplete-scanners`` covers, and SKIPPED only when
+    there is no lockfile to audit. ``--output-formats`` decides which report
     files get written and is read by nothing that computes the exit code.
 
     An operator whose Lambda has no egress needs ``--offline``, so a guard that refused it
