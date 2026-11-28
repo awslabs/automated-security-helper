@@ -617,12 +617,19 @@ def test_records_are_named_for_their_report_id_and_hold_only_what_the_page_lists
         "It leaves out code snippets, the scanners' raw output, the SARIF document, and "
         "the resolved configuration.",
     )
+    assert_on_page(
+        PAGE,
+        "A newer record also holds `result_kind_recorded`, which says that its "
+        "rows name their kind, so the warning is there when the newer record has "
+        "no rows.",
+    )
     out = tmp_path / "out"
     (path,) = _record(out, _results(_finding("B101"), second=1))
     assert path == out / "history" / _name(1)
     record = json.loads(path.read_text(encoding="utf-8"))
     assert set(record) == {
         "record_version",
+        "result_kind_recorded",
         "report_id",
         "generated_at",
         "project_name",
@@ -631,6 +638,7 @@ def test_records_are_named_for_their_report_id_and_hold_only_what_the_page_lists
         "coverage",
         "findings",
     }
+    assert record["result_kind_recorded"] is True
     (row,) = record["findings"]
     assert set(row) == {
         "id",
@@ -646,6 +654,8 @@ def test_records_are_named_for_their_report_id_and_hold_only_what_the_page_lists
         "identity_base",
         "identity_message",
         "source_report",
+        "result_kind",
+        "is_finding",
     }
 
 

@@ -27,6 +27,7 @@ from automated_security_helper.utils.converter_refusals import (
     markdown_summary_lines,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    INFORMATION_NOTE,
     SUMMARY_BELOW_THRESHOLD,
     SUMMARY_POLICY_NOT_GATING,
     OutcomeTone,
@@ -213,6 +214,24 @@ def _block_text(value) -> str:
 
 def _cell(value) -> str:
     return _text(value).replace("\r", "").replace("\n", "<br>")
+
+
+def _information_table(rows) -> list[str]:
+    """The header, the divider and one row per result of the Information table.
+
+    The rows are ``ReportContentEmitter.get_information_overview``'s: the
+    scanner, rule, message, file and kind, and no severity, which rates no
+    finding. Each value is one shown line, as all of them come from the scan.
+    """
+    keys = ("scanner", "rule_id", "message", "file_path", "result_kind")
+    return [
+        "| Scanner | Rule ID | Message | File | Result kind |",
+        "| --- | --- | --- | --- | --- |",
+        *(
+            "| " + " | ".join(_cell(shown_on_one_line(row[key])) for key in keys) + " |"
+            for row in rows
+        ),
+    ]
 
 
 def _findings_table(findings) -> list[str]:
@@ -437,7 +456,7 @@ class MarkdownReporterConfigOptions(ReporterOptionsBase):
     include_findings_table: Annotated[
         bool,
         Field(
-            description="When true, the report has a Findings overview table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long."
+            description="When true, the report has a Findings overview table with one row per finding, including suppressed findings and findings below the severity threshold, and an Information table with one row per result that states no finding. Off by default because the tables can be long; with it off, the report lists no such result."
         ),
     ] = False
     include_detailed_findings: Annotated[
@@ -644,6 +663,14 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             if findings:
                 parts.append("## Findings overview\n")
                 parts.extend(_findings_table(findings))
+                parts.append("")
+            # A result that states no finding is listed apart, and counted in
+            # no total.
+            information = emitter.get_information_overview()
+            if information:
+                parts.append("## Information\n")
+                parts.append(f"{INFORMATION_NOTE}\n")
+                parts.extend(_information_table(information))
                 parts.append("")
 
         if options.include_detailed_findings:

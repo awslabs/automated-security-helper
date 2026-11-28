@@ -22804,3 +22804,184 @@ def test_the_plugins_overview_names_every_alpha_scanner_and_no_other(
     assert row, "the alpha plugins row no longer has the listed form"
     named = set(re.findall(r"`([^`]+)`", row.group(1)))
     assert named == alpha, (sorted(named - alpha), sorted(alpha - named))
+
+
+# --------------------------------------------------------------------------- #
+# The rule for a row of a kind that states no finding
+# --------------------------------------------------------------------------- #
+
+#: (page, sentence): the rule for a CSV or flat JSON row whose result is of kind pass,
+#: notApplicable or informational, on each page that gives it.
+_ROW_RULE_SENTENCES = [
+    pytest.param(
+        EXPORT_REPORTS,
+        "A row whose result is of kind `pass`, `notApplicable` or `informational` "
+        "states no finding only when that result's level is `none` or not stated and "
+        "no `issue_severity` it declares is above `INFO`; the reports count such a row "
+        "in no total.",
+        id="export-reports-rule",
+    ),
+    pytest.param(
+        EXPORT_REPORTS,
+        "A row of one of those kinds whose result states the level `note`, `warning` "
+        "or `error` is a finding, even when its `severity` is `INFO`.",
+        id="export-reports-level",
+    ),
+    pytest.param(
+        EXPORT_REPORTS,
+        "The CSV has no column for the level or for whether a row states a finding, so "
+        "`result_kind` and `severity` alone cannot tell such a finding from a row that "
+        "states none; the `raw_data` column holds the result as SARIF JSON, and the "
+        "`level` in it can.",
+        id="export-reports-raw-data",
+    ),
+    pytest.param(
+        _OUTPUTS_PAGE,
+        "A record whose kind is `pass`, `notApplicable` or `informational` states no "
+        "finding only when its result states no level, or level `none`, and no "
+        "`issue_severity` above `INFO`; such a record is counted in no total.",
+        id="output-files-rule",
+    ),
+    pytest.param(
+        _OUTPUTS_PAGE,
+        "One of those kinds graded above `INFO` reports a problem, and counts as a "
+        "finding, and so does one whose result states the level `note`, `warning` or "
+        "`error`, even when its `severity` is `INFO`.",
+        id="output-files-level",
+    ),
+    pytest.param(
+        _OUTPUTS_PAGE,
+        "A record has no field for the level or for whether it states a finding, so "
+        "`result_kind` and `severity` alone cannot tell such a finding from a record "
+        "that states none; its `raw_data` holds the result as SARIF JSON, and the "
+        "`level` in it can.",
+        id="output-files-raw-data",
+    ),
+    pytest.param(
+        STEERING_GUIDE,
+        "A record whose `result_kind` is `pass`, `notApplicable` or `informational` "
+        "states no finding only when its result states no level, or level `none`, and "
+        "no `issue_severity` above `INFO` (the `ASH-container-image-not-scanned` note "
+        "is one): read it as information.",
+        id="steering-guide-rule",
+    ),
+    pytest.param(
+        STEERING_GUIDE,
+        "A record of one of those kinds with a `severity` above `INFO` reports a "
+        "problem, and counts as a finding, and so does one whose result states the "
+        "level `note`, `warning` or `error`, even when its `severity` is `INFO`.",
+        id="steering-guide-level",
+    ),
+    pytest.param(
+        STEERING_GUIDE,
+        "A record has no field for the level or for whether it states a finding, so "
+        "`result_kind` and `severity` alone cannot tell such a finding from a record "
+        "that states none: read the `level` in `raw_data`, which holds the result as "
+        "SARIF JSON.",
+        id="steering-guide-raw-data",
+    ),
+    pytest.param(
+        STEERING_GUIDE,
+        'and json.loads(finding.get("raw_data") or "{}")'
+        '.get("level") in (None, "none")',
+        id="steering-guide-example",
+    ),
+]
+
+
+@pytest.mark.parametrize("page, sentence", _ROW_RULE_SENTENCES)
+@pytest.mark.unit
+def test_the_pages_state_the_row_rule_by_the_result_and_its_level(
+    page: str, sentence: str
+) -> None:
+    """export-reports.md (CSV, HTML, and the summaries); output-files.md (Reports);
+    genai-steering-guide.md (Read the results).
+
+    The page half of the claim only. The code half is
+    test_a_pass_result_at_level_warning_is_a_finding_whose_rows_read_info.
+    """
+    assert_on_page(page, sentence)
+
+
+@pytest.mark.unit
+def test_a_pass_result_at_level_warning_is_a_finding_whose_rows_read_info(
+    tmp_path: Path,
+) -> None:
+    """export-reports.md (CSV, HTML, and the summaries); output-files.md (Reports);
+    genai-steering-guide.md (Read the results).
+
+    The code half of the row rule. Two results of kind pass declare an
+    ``issue_severity`` of INFO, one at level warning and one at level none. The rule
+    the reports read makes the first a finding and the second information, and both
+    rows read ``result_kind`` pass and ``severity`` INFO in the CSV and the flat JSON,
+    which have no level field and no field that says whether a row states a finding.
+    The level is in ``raw_data``. It passes before and after the pages change.
+    """
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
+    from automated_security_helper.config.default_config import get_default_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
+        CsvReporter,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter import (
+        FlatJSONReporter,
+    )
+    from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+        ReportContentEmitter,
+    )
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+    from automated_security_helper.utils.severity_ladder import result_states_no_finding
+
+    results = [
+        {
+            "ruleId": rule_id,
+            "kind": "pass",
+            "level": level,
+            "message": {"text": f"a pass result at level {level}"},
+            "properties": {"issue_severity": "INFO"},
+        }
+        for rule_id, level in (("R-PASS-WARNING", "warning"), ("R-PASS-NONE", "none"))
+    ]
+    model = AshAggregatedResults()
+    model.ash_config = get_default_config()
+    model.sarif = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [{"tool": {"driver": {"name": "bandit"}}, "results": results}],
+        }
+    )
+
+    states_no_finding = [
+        result_states_no_finding(result) for result in model.sarif.runs[0].results
+    ]
+    assert states_no_finding == [False, True]
+    emitter = ReportContentEmitter(model)
+    assert [row.rule_id for row in emitter.finding_rows()] == ["R-PASS-WARNING"]
+    assert [row.rule_id for row in emitter.information_rows()] == ["R-PASS-NONE"]
+
+    context = PluginContext(
+        source_dir=tmp_path, output_dir=tmp_path, config=AshConfig(project_name="rows")
+    )
+    flat_rows = json.loads(FlatJSONReporter(context=context).report(model))["findings"]
+    csv_text = CsvReporter(context=context).report(model)
+    csv_header = next(csv.reader(io.StringIO(csv_text)))
+    csv_rows = list(csv.DictReader(io.StringIO(csv_text)))
+    expected = [
+        ("R-PASS-WARNING", "pass", "INFO", "warning"),
+        ("R-PASS-NONE", "pass", "INFO", "none"),
+    ]
+    for rows in (flat_rows, csv_rows):
+        read = [
+            (
+                row["rule_id"],
+                row["result_kind"],
+                row["severity"],
+                json.loads(row["raw_data"])["level"],
+            )
+            for row in rows
+        ]
+        assert sorted(read) == sorted(expected)
+    for row in flat_rows:
+        assert "level" not in row and "is_finding" not in row, sorted(row)
+    assert "level" not in csv_header and "is_finding" not in csv_header, csv_header

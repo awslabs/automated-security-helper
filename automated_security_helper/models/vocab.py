@@ -214,12 +214,19 @@ class Disposition(str, Enum):
 
     The menu's ``active`` and ``all`` choices are view scopes over these, not
     dispositions, and stay in the report template.
+
+    ``INFORMATION`` is a result that states no finding: its SARIF kind is
+    ``pass``, ``notApplicable`` or ``informational``, its level is ``none`` or not
+    stated, and no ``issue_severity`` it declares is above INFO. The reports list
+    it under Information, never as a card, so the scope menu has no entry for it.
+    The summary writes no key for it: no total counts such a result.
     """
 
     ACTIONABLE = "actionable"
     SUPPRESSED = "suppressed"
     BELOW_THRESHOLD = "below-threshold"
     POLICY_NOT_GATING = "policy-not-gating"
+    INFORMATION = "information"
 
     @property
     def summary_key(self) -> str:

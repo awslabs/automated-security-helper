@@ -46,8 +46,8 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.sarif_utils import (
-    is_not_a_finding,
     result_rule_id,
+    result_states_no_finding,
 )
 
 pytestmark = pytest.mark.unit
@@ -60,7 +60,7 @@ def _oracle(results: List[Any], shared_ids: List[Optional[str]]) -> List[Optiona
     seen: Dict[str, int] = {}
     identities: List[Optional[str]] = []
     for result, shared_id in zip(results, shared_ids):
-        if shared_id or is_not_a_finding(result):
+        if shared_id or result_states_no_finding(result):
             identities.append(None)
             continue
         key = _identity_key(result, result_rule_id(result) or "Unknown Rule")
@@ -172,7 +172,8 @@ class TestTheIdentitiesAgreeWithTheRowByRowPass:
                 )
             )
             shared.append(rng.choice([None, None, None, None, "s"]))
-        # pass kind carries level none in SARIF; the reporter only reads the kind.
+        # A pass result here is built at level error, so it contradicts its kind:
+        # the reporter reads the whole result, and that one is a finding.
         assert _fallback_identities(results, shared) == _oracle(results, shared)
 
 
@@ -252,7 +253,8 @@ class TestTheRunsTalliesAreStatedAsTheyWere:
         ) in lines
         assert (
             "1 SARIF result(s) state no problem (kind pass, "
-            "notApplicable or informational) and are not OCSF findings"
+            "notApplicable or informational, with no level or severity that "
+            "reports one) and are not OCSF findings"
         ) in lines
 
     def test_a_clean_run_reports_no_failures_or_degradation(

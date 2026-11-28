@@ -688,7 +688,7 @@ def test_different_workspace_projects_are_refused_even_with_equal_names():
 
 def test_unique_findings_returns_the_flat_list_unchanged():
     rows = flats((1,), (2,), (3,))
-    assert unique_findings(_scan(findings=rows), "Baseline") is rows
+    assert unique_findings(_scan(findings=rows), "Baseline") == rows
     assert unique_findings(_scan(findings=[]), "Baseline") == []
 
 

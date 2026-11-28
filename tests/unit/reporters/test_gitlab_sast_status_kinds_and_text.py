@@ -7,7 +7,8 @@
   the transform-failure path uses, so a completed scan with findings read as a
   broken one. Findings do not fail the scan; an incomplete transform does.
 * A result whose ``kind`` says no problem (pass, notApplicable, informational)
-  was published as an Info vulnerability.
+  and whose level reports none was published as an Info vulnerability; one that
+  reports a problem by its level is a finding and is published.
 * A message given by ``id`` alone had an empty description.
 * The suppression reason came from the first suppression only, and a rejected
   or under-review suppression downgraded the finding.
@@ -128,6 +129,31 @@ class TestNonFindingKinds:
         )
 
         assert [v["name"] for v in report["vulnerabilities"]] == ["B102"]
+
+    @pytest.mark.parametrize(
+        "kind", [Kind.pass_, Kind.notApplicable, Kind.informational]
+    )
+    def test_a_result_whose_level_reports_a_problem_is_a_vulnerability(
+        self, reporter, kind
+    ):
+        """A result that contradicts its kind is a finding: the level decides."""
+        report = _report(
+            reporter,
+            _model(
+                Result(
+                    ruleId="CDK-1",
+                    kind=kind,
+                    level=Level.warning,
+                    message=Message(text="x"),
+                ),
+                Result(ruleId="B102", level=Level.error, message=Message(text="y")),
+            ),
+        )
+
+        assert sorted(v["name"] for v in report["vulnerabilities"]) == [
+            "B102",
+            "CDK-1",
+        ]
 
 
 class TestMessageAndSecretText:

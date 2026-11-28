@@ -73,16 +73,26 @@ def _run(*results: Result, **run_kwargs) -> Run:
 
 class TestKind:
     @pytest.mark.parametrize(
-        "kind", [Kind.notApplicable, Kind.pass_, Kind.informational, Kind.open]
+        ("kind", "level"),
+        [
+            (Kind.notApplicable, Level.none),
+            (Kind.pass_, Level.none),
+            (Kind.informational, Level.none),
+            (Kind.open, Level.error),
+        ],
     )
-    def test_a_result_whose_kind_is_not_fail_is_left_out(self, reporter, kind):
+    def test_a_result_that_states_no_finding_or_cannot_be_judged_is_left_out(
+        self, reporter, kind, level
+    ):
         """GitHub's documented result properties do not include ``kind``, so a
         notApplicable result it was given (a cdk-nag rule that was not
-        evaluated) opened an alert like a failing one."""
+        evaluated) opened an alert like a failing one. A result that states no
+        finding is left out, and so is one whose kind code scanning cannot
+        judge."""
         kept = Result(ruleId="R", level=Level.error, message=Message(text="m"))
         other = Result(
             ruleId="CDK-NAG-1",
-            level=Level.error,
+            level=level,
             kind=kind,
             message=Message(text="not evaluated"),
         )
@@ -91,8 +101,26 @@ class TestKind:
 
         assert [r["ruleId"] for r in out["results"]] == ["R"]
 
+    @pytest.mark.parametrize(
+        "kind", [Kind.notApplicable, Kind.pass_, Kind.informational]
+    )
+    def test_a_result_whose_level_reports_a_problem_is_uploaded(self, reporter, kind):
+        """A result that contradicts its kind is a finding, and GitHub reads its
+        level."""
+        kept = Result(ruleId="R", level=Level.error, message=Message(text="m"))
+        other = Result(
+            ruleId="CDK-NAG-1",
+            level=Level.error,
+            kind=kind,
+            message=Message(text="reports a problem"),
+        )
+
+        out = json.loads(reporter.report(_model(_run(kept, other))))["runs"][0]
+
+        assert [r["ruleId"] for r in out["results"]] == ["R", "CDK-NAG-1"]
+
     def test_a_left_out_result_does_not_score_its_rule(self, reporter):
-        """One notApplicable error-level result and one failing note-level
+        """One notApplicable level-none result and one failing note-level
         result of a rule with no security-severity: the rule scores as the
         result the file carries, not as the one it leaves out."""
         rule = ReportingDescriptor(id="R")
@@ -101,7 +129,7 @@ class TestKind:
             results=[
                 Result(
                     ruleId="R",
-                    level=Level.error,
+                    level=Level.none,
                     kind=Kind.notApplicable,
                     message=Message(text="not evaluated"),
                 ),
@@ -113,6 +141,28 @@ class TestKind:
 
         (slim_rule,) = out["tool"]["driver"]["rules"]
         assert slim_rule["properties"]["security-severity"] == "3.0"
+
+    def test_an_uploaded_result_of_such_a_kind_scores_its_rule(self, reporter):
+        """The same two results with the notApplicable one at level error: it is a
+        finding now, so the rule scores as the worse of the two."""
+        rule = ReportingDescriptor(id="R")
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[rule])),
+            results=[
+                Result(
+                    ruleId="R",
+                    level=Level.error,
+                    kind=Kind.notApplicable,
+                    message=Message(text="reports a problem"),
+                ),
+                Result(ruleId="R", level=Level.note, message=Message(text="m")),
+            ],
+        )
+
+        out = json.loads(reporter.report(_model(run)))["runs"][0]
+
+        (slim_rule,) = out["tool"]["driver"]["rules"]
+        assert slim_rule["properties"]["security-severity"] == "9.5"
 
     def test_a_failing_result_carries_no_kind_key(self, reporter):
         result = Result(ruleId="R", level=Level.error, message=Message(text="m"))

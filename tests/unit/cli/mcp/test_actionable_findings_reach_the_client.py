@@ -73,7 +73,7 @@ def _sarif_result(finding: Dict[str, Any]) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "ruleId": finding["rule"],
         "level": finding["level"],
-        "kind": "fail",
+        "kind": finding.get("kind", "fail"),
         "message": {"text": f"{finding['rule']} finding"},
         "locations": [
             {
@@ -153,6 +153,7 @@ class TestActionableOnlyListsTheFindings:
             "scanner": "bandit",
             "file_path": "src/app.py",
             "line_start": 12,
+            "result_kind": "fail",
         }
 
     async def test_severities_narrow_the_list(self, output_dir):
@@ -175,6 +176,63 @@ class TestActionableOnlyListsTheFindings:
         result = await _results(output_dir, actionable_only=True)
 
         assert "sarif" not in result["raw_results"]
+
+
+NOTE = "ASH-container-image-not-scanned"
+
+
+def _note_finding(**over) -> Dict[str, Any]:
+    """The note ASH writes when nothing scanned a container image."""
+    note = {
+        "scanner": "bandit",
+        "rule": NOTE,
+        "kind": "informational",
+        "level": "none",
+        "severity": "INFO",
+        "path": "Dockerfile",
+        "line": 1,
+        "suppressed": False,
+    }
+    note.update(over)
+    return note
+
+
+@pytest.mark.asyncio
+async def test_the_findings_list_never_holds_a_result_that_states_no_finding(
+    output_dir,
+):
+    """Guard: the list is the actionable view's, so the note is not in it."""
+    from automated_security_helper.utils.sarif_utils import FINDING_KINDS
+
+    stored = output_dir.parent / "with-note"
+    _write_results(stored, [FINDINGS[0], _note_finding()])
+
+    result = await _results(stored, actionable_only=True)
+
+    assert _rule_ids(result) == ["B602"]
+    assert result["findings_count"] == 1
+    assert all(entry["result_kind"] in FINDING_KINDS for entry in result["findings"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+async def test_the_findings_list_counts_a_result_whose_level_reports_a_problem(
+    output_dir, kind
+):
+    """A result that contradicts its kind is a finding: at MEDIUM, one at level
+    warning is an entry of the list with its kind, and it is counted."""
+    stored = output_dir.parent / "with-pair"
+    pair = _note_finding(
+        rule="R-PAIR", kind=kind, level="warning", severity="MEDIUM", path="src/b.py"
+    )
+    _write_results(stored, [pair])
+
+    result = await _results(stored, actionable_only=True)
+
+    assert [(f["rule_id"], f["result_kind"]) for f in result["findings"]] == [
+        ("R-PAIR", kind)
+    ]
+    assert result["findings_count"] == 1
 
 
 @pytest.mark.asyncio

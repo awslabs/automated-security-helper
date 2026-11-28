@@ -89,10 +89,10 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.finding_identity import CORRELATION_ID_PROPERTY
 from automated_security_helper.utils.sarif_utils import (
-    DEFAULT_RESULT_KIND,
     result_kind,
     result_rule_id,
     result_scanner_name,
+    result_states_no_finding,
     shared_correlation_ids,
     suppressions_in_effect,
 )
@@ -846,13 +846,13 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         """Say how many results of each kind a reader still has to judge are left
         out of the file (:data:`_UNJUDGED_KINDS`).
 
-        ``_left_out`` drops every result whose kind is not ``fail``, ``open`` and
-        ``review`` included, and the file said nothing about them, so a reviewer
-        comparing it with another report of the same scan found results that were
-        not in the file. Only the count is logged, and only what this file does:
-        whether those kinds belong in the file is a decision this method does
-        not take, and what another report does with them depends on which
-        reports are enabled.
+        ``_left_out`` drops every result that states no finding, and every ``open``
+        and ``review`` result as well. The file said nothing about those last two,
+        so a reviewer comparing it with another report of the same scan found
+        results that were not in the file. Only the count is logged, and only what
+        this file does: whether those kinds belong in the file is a decision this
+        method does not take, and what another report does with them depends on
+        which reports are enabled.
         """
         counts = dict.fromkeys(_UNJUDGED_KINDS, 0)
         for run in runs:
@@ -866,8 +866,8 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 f"{count} of kind '{kind}'" for kind, count in found.items()
             )
             ASH_LOGGER.warning(
-                f"GHAS report: {listed} left out of the file, as every result whose "
-                "kind is not 'fail' is"
+                f"GHAS report: {listed} left out of the file, as every result that "
+                "states no finding is"
             )
 
     def _used_uri_base_ids(self, run: Any) -> set:
@@ -1201,20 +1201,24 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
         """Whether *result* is kept out of the file. One test for the results
         list and the rules' scores, so a result never scores a rule it is not in.
 
-        Two kinds of result are left out. A result whose ``kind`` is not
-        ``fail`` (SARIF 3.27.9: pass, open, review, notApplicable,
-        informational) states no failing finding. GitHub's documented result
+        Three kinds of result are left out. A result that states no finding
+        (a ``kind`` of pass, notApplicable or informational, with a level of
+        none and nothing declared above INFO). GitHub's documented result
         properties do not include ``kind`` ("code scanning will only use the
         following supported properties"), so a copy that carried it, or that
         dropped it, was read under SARIF's default kind, fail, and a cdk-nag rule
         ASH marked notApplicable was an open alert; such a result stays in the
-        other reports. And a suppressed result, under ``exclude_suppressed``
+        other reports. A result whose ``kind`` is ``open`` or ``review``, which
+        asserts a finding that a reader still has to judge and that code
+        scanning cannot judge. A result of the first three kinds that reports a
+        problem by its level or its declared severity is a finding and is
+        uploaded, read by GitHub under its level. And a suppressed result, under ``exclude_suppressed``
         (the default): suppressed means a suppression in effect
         (``suppressions_in_effect``); one ``rejected`` by the reviewer or still
         ``underReview`` has not taken effect (SARIF 3.35.4), the gate still fails
         the scan on the finding, and the file kept it out as if it were dismissed.
         """
-        if result_kind(result) != DEFAULT_RESULT_KIND:
+        if result_states_no_finding(result) or result_kind(result) in _UNJUDGED_KINDS:
             return True
         return bool(
             self.config

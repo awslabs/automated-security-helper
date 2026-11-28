@@ -437,12 +437,14 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
     """
     Filter results to the actionable findings, the ones that make a scan exit 2.
 
-    A finding is actionable when it is not suppressed and is at or above the
-    severity threshold the scan was judged by: its scanner's own threshold when
-    the scan's config sets one, else the global one. That is the set
-    ``run_ash_scan._compute_exit_code`` counts. Dropping only the suppressed
-    findings would keep findings below the threshold, which the scan reports but
-    does not fail on, so a client gating on them would fail a scan that exited 0.
+    A finding is actionable when it is not suppressed, is not a result that states
+    no finding (kind ``pass``, ``notApplicable`` or ``informational``, with nothing
+    in it that reports a problem), and is at or above the severity threshold the
+    scan was judged by: its scanner's own threshold when the scan's config sets
+    one, else the global one. That is the set ``run_ash_scan._compute_exit_code``
+    counts. Dropping only the suppressed findings would keep findings below the
+    threshold, which the scan reports but does not fail on, so a client gating on
+    them would fail a scan that exited 0.
 
     Returns a deep copy of *results* with the SARIF entries that are not
     actionable removed, and the suppressed counts zeroed. ``summary_stats.total``
@@ -793,20 +795,26 @@ def _actionable_in_view(
 def _counts_toward_exit_2(result: Dict[str, Any], threshold: Optional[str]) -> bool:
     """Whether ``_compute_exit_code`` counts *result* toward exit 2 at *threshold*.
 
-    Its per-result test, step for step: a suppressed result never counts, where
-    suppressed means a suppression in effect (``sarif_utils.is_result_suppressed``:
-    a ``rejected`` or ``underReview`` one hides nothing, SARIF 3.35.4);
-    ``properties.issue_severity`` decides when it names an ASH severity;
-    otherwise the SARIF ``level`` does. Both comparisons are
-    ``utils.severity_ladder``'s, so a falsy threshold counts nothing here too.
+    Its per-result test, step for step: a result that states no finding
+    (``severity_ladder.result_states_no_finding``: kind ``pass``,
+    ``notApplicable`` or ``informational``, and nothing in it reports a problem)
+    never counts, and neither does a suppressed one, where suppressed means a
+    suppression in effect (``sarif_utils.is_result_suppressed``: a ``rejected`` or
+    ``underReview`` one hides nothing, SARIF 3.35.4); ``properties.issue_severity``
+    decides when it names an ASH severity; otherwise the SARIF ``level`` does. Both
+    comparisons are ``utils.severity_ladder``'s, so a falsy threshold counts nothing
+    here too.
     """
     from automated_security_helper.utils.sarif_utils import is_result_suppressed
     from automated_security_helper.utils.severity_ladder import (
         SEVERITIES,
+        result_states_no_finding,
         sarif_level_fails_threshold,
         severity_fails_threshold,
     )
 
+    if result_states_no_finding(result):
+        return False
     if is_result_suppressed(result):
         return False
     props = result.get("properties")
@@ -1156,10 +1164,13 @@ def _stats_of_sarif(
     """The severity buckets, ``total`` and ``actionable`` of *sarif*'s results.
 
     The counts a scanner row would carry, read from the findings themselves:
-    a result with a suppression in effect is in the ``suppressed`` bucket, every
-    other one in its severity's, ``total`` is every non-suppressed result, and
+    a result that states no finding (``severity_ladder.result_states_no_finding``:
+    kind pass, notApplicable or informational, and nothing in it reports a problem)
+    is in no bucket and no total, suppressed or not, a result with a suppression in
+    effect is in the ``suppressed`` bucket, every other one in its severity's,
+    ``total`` is every non-suppressed result that states a finding, and
     ``actionable`` is exit 2's test at the scan's thresholds, or None when the
-    document records no thresholds to judge it by. Every non-suppressed result
+    document records no thresholds to judge it by. Every counted result
     is in exactly one named bucket: ``result_severity`` returns a declared
     severity only when it names one of the ladder's five, and reads any other
     declared value from the SARIF level, so ``total`` equals the sum of the
@@ -1167,7 +1178,10 @@ def _stats_of_sarif(
     directly rather than summed back from the buckets, so it stays the plain
     "non-suppressed results" figure whatever the bucket set becomes.
     """
-    from automated_security_helper.utils.sarif_utils import is_result_suppressed
+    from automated_security_helper.utils.sarif_utils import (
+        is_result_suppressed,
+        result_states_no_finding,
+    )
 
     counts = dict.fromkeys(_SEVERITY_KEYS, 0)
     total = 0
@@ -1176,6 +1190,8 @@ def _stats_of_sarif(
     kinds: List[str] = []
     for run in sarif.get("runs") or []:
         for result in (run.get("results") or []) if isinstance(run, dict) else []:
+            if result_states_no_finding(result):
+                continue
             if is_result_suppressed(result):
                 kinds.append("suppressed")
                 continue
@@ -1293,8 +1309,13 @@ def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
         ``findings_available``: whether the document carried the SARIF the list
         is built from. An empty list beside False means the findings could not
         be listed; beside True it means there are none. The two used to read
-        the same.
+        the same. The list holds the findings the actionable view kept, so no
+        result that states no finding reaches it; each entry names the
+        ``result_kind`` of its SARIF result, and ``findings_count`` is the
+        number of entries.
     """
+    from automated_security_helper.utils.sarif_utils import result_kind
+
     findings_list = []
 
     # Extract findings from SARIF runs. ``sarif`` is None for a document that
@@ -1345,6 +1366,7 @@ def add_findings_list(results: Dict[str, Any]) -> Dict[str, Any]:
                     "file_path": file_path,
                     "line_start": line_start,
                     "line_end": line_end,
+                    "result_kind": result_kind(result),
                 }
 
                 # Only include non-None values

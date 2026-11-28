@@ -464,13 +464,24 @@ class ScannerStatisticsCalculator:
 
         Results that name no scanner are skipped. The kind is ``"suppressed"`` for a
         result with a suppression in effect, otherwise its resolved severity.
+        A result that states no finding (``result_states_no_finding``: kind
+        ``pass``, ``notApplicable`` or ``informational``, and nothing in it reports a
+        problem) counts in no figure, suppressed or not: its level ``none`` resolves
+        to INFO, which counted a rule that was not evaluated as an info finding, and
+        a suppression has no finding to hide on it. It is yielded with the kind
+        ``NOT_A_FINDING`` all the same, so the scanner that reported it keeps its
+        row, and every count leaves that kind out.
         *only*, when given, keeps the results whose name matches it case-insensitively,
-        and the two per-result readings are made for those alone.
+        and the per-result readings are made for those alone.
         """
-        from automated_security_helper.utils.count_frame import SUPPRESSED
+        from automated_security_helper.utils.count_frame import (
+            NOT_A_FINDING,
+            SUPPRESSED,
+        )
         from automated_security_helper.utils.sarif_utils import (
             _resolve_result_severity,
             is_result_suppressed,
+            result_states_no_finding,
         )
 
         if not asharp_model.sarif:
@@ -484,6 +495,13 @@ class ScannerStatisticsCalculator:
             if only is not None and result_scanner.lower() != only.lower():
                 continue
 
+            # A result that states no finding is read before the suppression and
+            # the level: it carries level none, which resolves to INFO, and it is
+            # in no count, a suppressed one included. Its scanner is named all the
+            # same, so a scanner that reported nothing else keeps its row.
+            if result_states_no_finding(result):
+                yield (result_scanner, NOT_A_FINDING)
+                continue
             # Suppressed means a suppression IN EFFECT: one whose state is
             # rejected or underReview (SARIF 3.35.4) hides nothing, so its
             # finding is counted under its severity, as the exit code, the
@@ -586,6 +604,7 @@ class ScannerStatisticsCalculator:
             - (default) -> info
         """
         from automated_security_helper.utils.count_frame import (
+            NOT_A_FINDING,
             severity_frame,
             tally_severities,
         )
@@ -596,11 +615,14 @@ class ScannerStatisticsCalculator:
         # tree's and stay in ``_sarif_name_kinds``; the counting is
         # utils.count_frame's group-by. Asked for one name, it reads that name's
         # results alone; ``extract_scanner_statistics`` asks for every name's at once.
+        # A result that states no finding is yielded to name its scanner and is in
+        # no count.
         kinds = [
             kind
             for _, kind in ScannerStatisticsCalculator._sarif_name_kinds(
                 asharp_model, only=scanner_name
             )
+            if kind != NOT_A_FINDING
         ]
         tally_severities(severity_frame(kinds), counts)
 
@@ -2174,30 +2196,40 @@ class ScannerStatisticsCalculator:
 
     @staticmethod
     def verify_sarif_finding_counts(asharp_model: AshAggregatedResults) -> bool:
-        """Verify that the total number of findings matches the length of results in SARIF.
+        """Verify that the total number of findings matches the findings in the SARIF.
 
         This method is used for validation to ensure that the statistics calculation
         is accurate. It compares the total number of findings in the SARIF data with
         the total number of findings calculated from the scanner statistics.
 
-        The method counts the number of results in the SARIF runs and compares it with
-        the sum of total and suppressed findings from the scanner statistics, less the
-        findings recorded on non-SARIF (dict) target reports: those are findings the
-        merged SARIF never holds, and ``extract_sarif_counts_for_scanner`` adds them to
-        every row so the summary and the exit code see them. If the counts match, the
-        method returns True, indicating that the statistics calculation is accurate.
+        The method counts the results in the SARIF runs that state a finding and
+        compares it with the sum of total and suppressed findings from the scanner
+        statistics, less the findings recorded on non-SARIF (dict) target reports:
+        those are findings the merged SARIF never holds, and
+        ``extract_sarif_counts_for_scanner`` adds them to every row so the summary
+        and the exit code see them. Both sides count findings: a result that states
+        no finding (``result_states_no_finding``) is in neither, suppressed or not.
+        If the counts match, the method returns True, indicating that the statistics
+        calculation is accurate.
 
         Args:
             asharp_model: The AshAggregatedResults model containing SARIF data
 
         Returns:
-            True if the total number of findings matches the length of results in SARIF,
+            True if the total number of findings matches the findings in the SARIF,
             False otherwise
         """
+        from automated_security_helper.utils.severity_ladder import (
+            result_states_no_finding,
+        )
+
         # Count findings in SARIF
         sarif_finding_count = 0
         if asharp_model.sarif:
-            sarif_finding_count = len(asharp_model.sarif.get_all_results())
+            sarif_finding_count = sum(
+                not result_states_no_finding(result)
+                for result in asharp_model.sarif.get_all_results()
+            )
 
         # Count findings from scanner statistics
         scanner_stats = ScannerStatisticsCalculator.extract_scanner_statistics(

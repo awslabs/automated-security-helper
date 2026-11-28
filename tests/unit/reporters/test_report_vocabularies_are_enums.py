@@ -6,8 +6,9 @@
 Three vocabularies lived as bare strings across the emitter and its reporters:
 
 * the finding disposition (``actionable``, ``suppressed``, ``below-threshold``,
-  ``policy-not-gating``), spelled with hyphens in the HTML and its script and with
-  underscores as the summary's JSON keys;
+  ``policy-not-gating``, and ``information`` for a result that states no finding),
+  spelled with hyphens in the HTML and its script and with underscores as the
+  summary's JSON keys;
 * the outcome tone (``danger``, ``warning``, ``success``), looked up in two dicts
   (the HTML masthead symbol and the Markdown alert type) that raised ``KeyError``
   for a tone they did not list;
@@ -68,15 +69,19 @@ def test_disposition_members_are_the_html_tokens():
         "suppressed",
         "below-threshold",
         "policy-not-gating",
+        "information",
     ]
 
 
 def test_summary_keys_are_the_underscore_spelling_and_did_not_change():
+    # INFORMATION has the spelling too, but the summary writes no key for it: a
+    # result that states no finding is counted in no total.
     assert {m.name: m.summary_key for m in Disposition} == {
         "ACTIONABLE": "actionable",
         "SUPPRESSED": "suppressed",
         "BELOW_THRESHOLD": "below_threshold",
         "POLICY_NOT_GATING": "policy_not_gating",
+        "INFORMATION": "information",
     }
     assert SUMMARY_ACTIONABLE == "actionable"
     assert SUMMARY_SUPPRESSED == "suppressed"
@@ -91,6 +96,7 @@ def test_every_disposition_has_a_card_label():
         DISPOSITION_LABELS[Disposition.POLICY_NOT_GATING]
         == "Not gating (workspace policy)"
     )
+    assert DISPOSITION_LABELS[Disposition.INFORMATION] == "Information"
 
 
 # --- OutcomeTone ----------------------------------------------------------------
@@ -269,13 +275,17 @@ def test_python_emits_exactly_the_tokens_the_script_compares(
 
     # Every scope-menu choice is a disposition (a card's status equals it) or one
     # of the two view scopes. "below-threshold" has no menu entry of its own: those
-    # cards show under "All active" and "All findings".
+    # cards show under "All active" and "All findings". "information" has none
+    # either: its rows have a section of their own, and no card carries the status.
     menu = re.search(r'<select id="finding-scope">(.*?)</select>', template, re.DOTALL)
     options = set(re.findall(r'<option value="([^"]+)"', menu.group(1)))
     assert options, "the scan found no scope options"
     assert options <= tokens | view_scopes, options - tokens - view_scopes
     assert view_scopes <= options
-    assert tokens - options == {Disposition.BELOW_THRESHOLD.value}
+    assert tokens - options == {
+        Disposition.BELOW_THRESHOLD.value,
+        Disposition.INFORMATION.value,
+    }
 
 
 def test_the_scan_of_the_script_flags_a_planted_unknown_token():

@@ -55,7 +55,11 @@ A boundary carries the same coverage warnings ``ash diff`` prints
 markers a run record keeps; a test holds the two equal) and the scanners that
 entered or left the expected set. A step in which a scanner disappeared and twenty
 findings are "fixed" is labeled ``like_for_like: false`` with the reason, never
-presented as progress.
+presented as progress. So is a step between a record written before ASH stored each
+row's ``result_kind``, when it holds rows, and one written after it, with rows or
+none, in either order: the older record counts the results that state no finding
+and the newer one does not. A record written after says so in
+``result_kind_recorded``.
 
 Engine
 ------
@@ -181,6 +185,8 @@ class _Row:
         "identity_base",
         "identity_message",
         "source_report",
+        "result_kind",
+        "is_finding",
     )
 
     def __init__(self, index: int, row: dict[str, Any]) -> None:
@@ -199,13 +205,31 @@ class _Row:
         self.identity_base = json.loads(base) if isinstance(base, str) else None
         self.identity_message = row.get("identity_message")
         self.source_report = row.get("source_report")
+        self.result_kind = row.get("result_kind")
+        self.is_finding = row.get("is_finding")
+
+
+def _row_counts(row: _Row) -> bool:
+    """Whether *row* is a finding, by the verdict the record stored for it, else by
+    its kind and severity."""
+    from automated_security_helper.utils.severity_ladder import row_states_no_finding
+
+    if row.is_finding is not None:
+        return bool(row.is_finding)
+    if row.result_kind is None:
+        return True
+    return not row_states_no_finding(row.result_kind, row.severity)
 
 
 def _rows(run: TrendRun) -> list[_Row]:
     rows = [_Row(i, row) for i, row in enumerate(run.record["findings"])]
     if len({row.id for row in rows}) != len(rows):
         raise TrendRefusal(f"{run.label}: run contains duplicate finding IDs")
-    return rows
+    # A row whose result states no finding is in no count. A record written
+    # before ``is_finding`` falls back to its kind and severity, and one written
+    # before ``result_kind`` names none, so its rows read as findings. Each row
+    # keeps its ``index``, its place in the record.
+    return [row for row in rows if _row_counts(row)]
 
 
 def _severity(value: str | None) -> str:
@@ -521,10 +545,42 @@ def _run_entry(run: TrendRun, rows: list[_Row]) -> dict[str, Any]:
     }
 
 
+#: The warning of a boundary between a record that names its rows' result kind
+#: (its rows do, or ``result_kind_recorded`` says so) and one whose rows do not,
+#: which was written before ASH stored the kind: the older record counts the
+#: results that state no finding and the newer one does not, so they read as fixed
+#: or as new at that boundary.
+RESULT_KIND_BOUNDARY_WARNING = (
+    "One scan's history record names the result kind of its findings and the "
+    "other's does not, so results that state no finding are counted in one and "
+    "not in the other, and can read as fixed or new."
+)
+
+
+def _names_result_kinds(record: dict[str, Any]) -> bool | None:
+    """Whether *record* names its rows' result kind; None when it cannot say.
+
+    A record ASH writes says so in ``result_kind_recorded``, with rows or none. A
+    record written before ASH stored ``result_kind`` has no such key and names no
+    kind in its rows. One with neither the key nor rows cannot say; it counts
+    nothing, so a boundary beside it gets no warning from this.
+    """
+    if record.get("result_kind_recorded") is True:
+        return True
+    rows = record["findings"]
+    if not rows:
+        return None
+    return any("result_kind" in row for row in rows)
+
+
 def _boundary(k: int, earlier: TrendRun, later: TrendRun) -> dict[str, Any]:
     warnings = coverage_warnings_from_records(
         earlier.record, later.record, ("Earlier", "Later")
     )
+    earlier_names = _names_result_kinds(earlier.record)
+    later_names = _names_result_kinds(later.record)
+    if None not in (earlier_names, later_names) and earlier_names != later_names:
+        warnings.append(RESULT_KIND_BOUNDARY_WARNING)
     before = set(earlier.record["coverage"]["expected_scanners"])
     after = set(later.record["coverage"]["expected_scanners"])
     return {

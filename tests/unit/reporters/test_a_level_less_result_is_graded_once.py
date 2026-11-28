@@ -357,4 +357,5 @@ def test_a_rules_default_level_and_a_non_fail_kind_are_honored(tmp_path):
 
     assert by_uri == {"src/b.py": "error", "src/c.py": "none", "src/d.py": "note"}
     counts = model.metadata.summary_stats.severity_counts
-    assert (counts.critical, counts.low, counts.info) == (1, 1, 1)
+    # The pass result states no finding, so it is in no severity count.
+    assert (counts.critical, counts.low, counts.info) == (1, 1, 0)

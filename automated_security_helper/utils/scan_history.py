@@ -22,8 +22,12 @@ scanner payloads and the whole resolved configuration, and fifty of them are a
 disk and privacy cost a trend never reads. A record holds one row per finding
 with what ``utils.finding_diff.match_findings`` needs to pair it with the same
 finding in the next run (its id, scanner, rule, severity, suppression state, place,
-and the identity ingredients ``fallback_key`` reads), plus the run's metadata and
-the coverage markers ``coverage_warnings`` compares. ``record_version`` is 1.
+and the identity ingredients ``fallback_key`` reads), the kind of its SARIF result,
+which the trend reads to leave out a row that states no finding, plus the run's
+metadata and the coverage markers ``coverage_warnings`` compares. ``record_version``
+is 1, and a row with no kind, from before it was stored, reads as a finding.
+``result_kind_recorded`` says that the rows name their kind, so a record with no
+rows still tells the trend it was not written before the kind was stored.
 
 Which scans are recorded
 ------------------------
@@ -173,6 +177,12 @@ def _finding_row(finding: "FlatVulnerability") -> dict[str, Any]:
         "identity_base": canonical(base) if base is not None else None,
         "identity_message": finding.identity_message,
         "source_report": finding.source_report,
+        # The trend leaves a row whose result states no finding out of its
+        # counts. ``is_finding`` is the verdict the whole result gave; a record
+        # written before it falls back to the row's kind and severity, and a record
+        # written before ``result_kind`` reads as a finding.
+        "result_kind": finding.result_kind,
+        "is_finding": finding.is_finding,
     }
 
 
@@ -205,6 +215,9 @@ def run_record_body(results: "AshAggregatedResults") -> dict[str, Any]:
     metadata = results.metadata
     return {
         "record_version": RECORD_VERSION,
+        # Every row names its result's kind. A record with no rows says so here,
+        # so the trend can tell it from one written before the kind was stored.
+        "result_kind_recorded": True,
         "report_id": metadata.report_id,
         "generated_at": metadata.generated_at,
         "project_name": metadata.project_name,
@@ -467,6 +480,7 @@ def _valid_row(row: Any) -> bool:
             row.get("file_path"),
             row.get("identity_message"),
             row.get("source_report"),
+            row.get("result_kind"),
         )
     ):
         return False
@@ -474,6 +488,9 @@ def _valid_row(row: Any) -> bool:
         value is None or (isinstance(value, int) and not isinstance(value, bool))
         for value in (row.get("line_start"), row.get("line_end"))
     ):
+        return False
+    # The verdict is a flag, or absent in a record from before it was written.
+    if row.get("is_finding") is not None and not isinstance(row["is_finding"], bool):
         return False
     base = row.get("identity_base")
     if base is None:

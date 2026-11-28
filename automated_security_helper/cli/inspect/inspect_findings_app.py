@@ -74,7 +74,9 @@ from automated_security_helper.utils.scanned_tree import (
 )
 from automated_security_helper.utils.secret_masking import source_snippet_masker
 from automated_security_helper.utils.severity_ladder import (
+    result_kind,
     result_severity,
+    result_states_no_finding,
 )
 from automated_security_helper.utils.terminal_text import (
     controls_shown,
@@ -628,16 +630,43 @@ def _one_line(value: object) -> str:
     return controls_shown(str(value), keep_layout=False)
 
 
+def _states_no_finding(finding: dict) -> bool:
+    """Whether the result behind *finding* states no finding.
+
+    The verdict ``extract_findings`` stored when it read the whole result. A dict
+    built without it (a test's, an older caller's) knows only its kind, level and
+    graded severity, and gets the same rule over those.
+    """
+    stored = finding.get("states_no_finding")
+    if stored is not None:
+        return bool(stored)
+    return result_states_no_finding(
+        {
+            "kind": finding.get("kind"),
+            "level": finding.get("level"),
+            "properties": {"issue_severity": finding.get("severity")},
+        }
+    )
+
+
 def _named_finding(finding: dict, *, status: bool) -> Content:
     """The finding named on two layout lines: the rule id (with the scanner and
-    suppression state when *status*), then its location.
+    state when *status*), then its location.
 
     Each value goes through _one_line, so the one newline here is the layout's
     own. For the selected-finding strip and the suppress dialog, which show one
-    line per field row whatever a value holds."""
+    line per field row whatever a value holds. The state is Information for a
+    result that states no finding, suppressed or not (its suppression shows in
+    the detail screen); otherwise Suppressed when a suppression is in effect, and
+    Active for the rest."""
     first = _one_line(_display_value(finding.get("rule_id")))
     if status:
-        state = "Suppressed" if finding.get("suppressed") else "Active"
+        if _states_no_finding(finding):
+            state = "Information"
+        elif finding.get("suppressed"):
+            state = "Suppressed"
+        else:
+            state = "Active"
         first += f"  ·  {_one_line(finding.get('scanner', 'N/A'))}  ·  {state}"
     return Content(
         f"{first}\n"
@@ -938,19 +967,26 @@ def _summary_line(findings: list) -> Text:
 
     Built from counts and this module's own words alone - no finding text
     reaches it - and listed with the vetted text builders so the markup guard
-    can hold every widget to them.
+    can hold every widget to them. A result that states no finding (kind pass,
+    notApplicable or informational, with nothing in it that reports a problem)
+    is counted as information alone: never active, in no severity and never
+    suppressed.
     """
     summary = Text()
-    active = [finding for finding in findings if not finding.get("suppressed")]
+    information = sum(1 for finding in findings if _states_no_finding(finding))
+    counted = [finding for finding in findings if not _states_no_finding(finding)]
+    active = [finding for finding in counted if not finding.get("suppressed")]
     summary.append(f"{len(active)} active", style=f"bold {COLORS['foreground']}")
     for level in SEVERITY_BUCKETS:
         count = sum(finding.get("severity", "").lower() == level for finding in active)
         if count:
             summary.append("  ·  ", style=COLORS["muted"])
             summary.append(f"{count} {level}", style=severity_color(level))
-    suppressed_count = len(findings) - len(active)
+    suppressed_count = len(counted) - len(active)
     if suppressed_count:
         summary.append(f"  ·  {suppressed_count} suppressed", style=COLORS["muted"])
+    if information:
+        summary.append(f"  ·  {information} information", style=COLORS["muted"])
     return summary
 
 
@@ -964,7 +1000,20 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
     after the values are escaped, and a value cannot add a row of its own.
     """
     is_suppressed = finding.get("suppressed", False)
-    color = COLORS["muted"] if is_suppressed else severity_color(finding["severity"])
+    # A result that states no finding reads INFORMATION, in the muted colour of a
+    # suppressed one: its severity rates no finding.
+    is_information = _states_no_finding(finding)
+    color = (
+        COLORS["muted"]
+        if is_suppressed or is_information
+        else severity_color(finding["severity"])
+    )
+    if is_information:
+        severity_text = "INFORMATION"
+    elif is_suppressed:
+        severity_text = "SUPPRESSED"
+    else:
+        severity_text = _one_line(finding["severity"].upper())
     title = Text(
         _one_line(_display_value(finding.get("rule_id"))),
         style=COLORS["foreground"],
@@ -980,12 +1029,9 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
         location += "\nline " + _one_line(finding["line"])
     cells = {
         # The severity is a results file's value like the others, so it goes
-        # through _one_line too; only the SUPPRESSED marker is this module's
-        # own word.
-        "severity": Text(
-            "SUPPRESSED" if is_suppressed else _one_line(finding["severity"].upper()),
-            style=color,
-        ),
+        # through _one_line too; only the SUPPRESSED and INFORMATION markers are
+        # this module's own words.
+        "severity": Text(severity_text, style=color),
         "finding": title,
         "scanner": Text(
             _one_line(finding.get("scanner", "N/A")),
@@ -999,10 +1045,18 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
 
 
 def _metadata_table(finding: dict) -> Table:
-    """The detail view's finding-context metadata, each value a text cell."""
+    """The detail view's finding-context metadata, each value a text cell.
+
+    A result that states no finding shows its SARIF kind where a finding shows
+    its severity: its severity rates no finding.
+    """
     table = Table("Key", "Value", show_lines=True, expand=True)
+    if _states_no_finding(finding):
+        first = ("Result kind", result_kind(finding))
+    else:
+        first = ("Severity", finding["severity"])
     for key, value in (
-        ("Severity", finding["severity"]),
+        first,
         ("Scanner", finding["scanner"]),
         ("File", _display_value(finding.get("file"))),
         ("Line", _display_value(finding.get("line"))),
@@ -1047,11 +1101,15 @@ class FindingDetailScreen(Screen):
         # _shown, _metadata_table or _snippet, with its terminal controls
         # shown as escapes; the section layout and theming are the redesign's.
         with ScrollableContainer(id="finding_details"):
+            # A result that states no finding opens with INFORMATION in the
+            # muted color the findings table gives it: its severity rates no finding.
+            if _states_no_finding(self.finding):
+                first_line, first_line_color = "INFORMATION", COLORS["muted"]
+            else:
+                first_line = self.finding["severity"].upper()
+                first_line_color = severity_color(self.finding["severity"])
             yield Static(
-                _cell(
-                    self.finding["severity"].upper(),
-                    style=f"bold {severity_color(self.finding['severity'])}",
-                ),
+                _cell(first_line, style=f"bold {first_line_color}"),
                 classes="detail-severity",
             )
             # One line: a rule id's own newline would draw a second title line.
@@ -2163,6 +2221,11 @@ def extract_findings(model: AshAggregatedResults) -> List[Dict[str, Any]]:
                         ),
                         "level": result.level,
                         "kind": result.kind,
+                        # The verdict of the whole result, taken here where it is
+                        # at hand: the screens read it, so a result that states
+                        # no finding reads Information and one that contradicts
+                        # its kind reads as the finding it is.
+                        "states_no_finding": result_states_no_finding(result),
                         # The gate's reading, so a finding inspect shows as
                         # high is not one the scan failed as critical.
                         "severity": result_severity(result).lower(),

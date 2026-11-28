@@ -111,6 +111,47 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **A result that states no finding counts in no figure.** A SARIF result states no
+  finding when its kind is `pass`, `notApplicable` or `informational` and nothing in it
+  reports a problem: its level is `none` or not stated, and no `issue_severity` it
+  declares is above INFO. The note ASH records for an image it did not scan and a cdk-nag
+  rule that was not evaluated are such results. They carry level `none`, which ASH reads
+  as INFO, so under a `severity_threshold` of `ALL`, which fails INFO, the image note
+  made the scan exit 2; it no longer does. A cdk-nag rule that was not evaluated still
+  makes the scan exit 1, as before, through the check for rules that were not evaluated.
+  Such a result is left out of the exit-code gate, of the `--min-severity` check and of a
+  workspace project's verdict. It is left out of every count: the per-scanner and summary
+  counts, the suppressed count included (so a suppressed result that states no finding is
+  in no suppressed figure), the counts the MCP server reports (the actionable view of a
+  scan's results and its recounts under the `scanners` and `severities` filters, the
+  progress of a scan and the summary of a completed one), and the counts of a workspace
+  run (a project's `finding_count` and `policy_origin_finding_count`, and the per-scanner
+  `finding_count` of the unified results). The listings show it as information. The HTML
+  report lists it under Information, and the Markdown and text reports list it in an
+  Information table when `include_findings_table` is on (it is off by default), each with
+  its scanner, rule, message, file and `result_kind` and no severity. `ash inspect findings`
+  counts it as information. The CSV and flat JSON rows keep it, with its severity, and gain
+  a `result_kind` field. The MCP findings
+  list holds actionable findings only, so it never lists it, and `explain_finding` returns
+  its `result_kind` with a `severity_rationale` saying it counts at no threshold. A diff, a
+  baseline and a trend never see it as new, gone, moved or changed, history rows record
+  whether each result states a finding, and an older record falls back to its kind and
+  severity. A trend boundary between a record written before ASH stored the kind, when it
+  holds rows, and a newer one carries a warning and is not like for like, because the
+  older record counts such results. A newer record holds `result_kind_recorded`, which
+  says that its rows name the kind, so this holds when it has no rows.
+  Duplicate clusters leave it out. The ASFF, OCSF, GitLab SAST and GitHub code scanning
+  exports leave it out too, and so does the Bedrock summary's `actionable_only`. ASFF
+  still sends a suppressed one, archived, and GitHub code scanning still leaves out `open`
+  and `review` results. With `archive_resolved_findings` on, an earlier Security Hub
+  finding for such a result is archived at the next import when its scanner completed; the
+  image note names no scanner, so its earlier finding stays active. A result of such a
+  kind that does report a problem is a finding, graded as before: by its `issue_severity`
+  when that names an ASH severity, otherwise by its level. At the default threshold,
+  `MEDIUM`, the exit code does not change. JUnit grades each result by its level, as
+  before, so it differs from the exit code for a result of these kinds at level `note`,
+  for one at level `none` whose `issue_severity` is above INFO, and for a `notApplicable`
+  result at any level, which it writes as a skipped case.
 
 ### Maintenance
 

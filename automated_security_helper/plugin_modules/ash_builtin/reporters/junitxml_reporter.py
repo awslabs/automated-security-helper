@@ -87,6 +87,14 @@ import warnings
 # case, and one below the threshold is a skip. `notApplicable` is neither: the
 # rule was NOT evaluated, so it renders as skipped (see the emit cascade in
 # `report`).
+#
+# JUnit therefore differs from the exit code in three shapes, each the report's own
+# reading of a result and none a count of findings. A `pass` or `informational`
+# result that reports a problem by its level (`error` or `warning`) is an <error>
+# here, as the exit code counts it. One that reports none stays a passing test case
+# above the threshold, and the exit code counts it nowhere. And every unsuppressed
+# `notApplicable` result is a skipped case whatever its level, so one at `warning`
+# or `error` is a skip here while the exit code counts it as a finding.
 
 #: The ``type`` attribute on a skipped project's ``<skipped>`` element. Distinct
 #: from the existing ``suppression`` and ``threshold`` types, which are both about
@@ -666,10 +674,11 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                     # is decided ahead of the gate, above.
                     #
                     # A result that is not actionable is a skip whatever its
-                    # kind: the exit code reads the level against the threshold
-                    # and ignores the kind, so a `pass` or `informational` result
-                    # below it is a skip here too, and the report agrees with the
-                    # exit code.
+                    # kind. A `pass` or `informational` result below the
+                    # threshold is one, and above it keeps its bare passing test
+                    # case (see above): the exit code counts neither, because it
+                    # leaves out every result that states no finding (such a kind
+                    # at level none, with nothing declared above INFO).
                     actionable = is_actionable
 
                 level_types.append(_ERROR_TYPE_BY_LEVEL.get(str(result.level)))

@@ -4,6 +4,7 @@
 """Tests for mcp_explain_finding."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -115,6 +116,49 @@ class TestSeverityRationale:
         assert expected_fragment in rationale, (
             f"Expected '{expected_fragment}' in rationale '{rationale}'"
         )
+
+
+class TestAResultThatStatesNoFinding:
+    @pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+    def test_its_rationale_says_it_counts_at_no_threshold(self, tmp_path, kind):
+        vuln = _make_vuln(severity="INFO", result_kind=kind)
+        with _patch_flat_list([vuln]):
+            result = mcp_explain_finding(
+                finding_id="bandit-B601-deadbeef",
+                results_path=str(tmp_path),
+            )
+        rationale = result["finding"]["severity_rationale"]
+
+        assert "below default threshold" not in rationale
+        assert "states no finding" in rationale.lower()
+        assert result["finding"]["result_kind"] == kind
+
+    def test_a_result_of_such_a_kind_that_reports_a_problem_keeps_its_rationale(
+        self, tmp_path
+    ):
+        """Control: graded HIGH, the result is a finding whatever its kind."""
+        vuln = _make_vuln(severity="HIGH", result_kind="informational")
+        with _patch_flat_list([vuln]):
+            result = mcp_explain_finding(
+                finding_id="bandit-B601-deadbeef",
+                results_path=str(tmp_path),
+            )
+
+        assert "above MEDIUM threshold" in result["finding"]["severity_rationale"]
+
+    def test_the_recorded_tool_description_names_result_kind(self):
+        golden = json.loads(
+            (
+                Path(__file__).resolve().parents[4]
+                / ".github"
+                / "actions"
+                / "validate-mcp"
+                / "tool_surface.golden.json"
+            ).read_text(encoding="utf-8")
+        )
+        description = golden["tools"]["explain_finding"]["description"]
+
+        assert "result_kind" in description
 
 
 class TestReferencesListParsed:

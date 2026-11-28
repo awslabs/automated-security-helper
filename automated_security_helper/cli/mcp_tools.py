@@ -4574,9 +4574,17 @@ def mcp_explain_finding(
         scanner_metadata = {}
 
     severity_upper = (match.severity or "").upper()
-    severity_rationale = _SEVERITY_RATIONALE.get(
-        severity_upper, f"{severity_upper} severity"
-    )
+    if match.is_finding:
+        severity_rationale = _SEVERITY_RATIONALE.get(
+            severity_upper, f"{severity_upper} severity"
+        )
+    else:
+        # A result that states no finding counts at no threshold; the rationale of
+        # its INFO grade would say it counts at a lower one.
+        severity_rationale = (
+            f"States no finding: a {match.result_kind} result that reports no "
+            "problem, so it counts at no severity threshold"
+        )
 
     return {
         "success": True,
@@ -4591,6 +4599,7 @@ def mcp_explain_finding(
             "references": references,
             "scanner": match.scanner,
             "scanner_metadata": scanner_metadata,
+            "result_kind": match.result_kind,
         },
     }
 

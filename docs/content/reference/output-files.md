@@ -473,7 +473,15 @@ code.
 `ash.flat.json` holds `metadata` (the project name, the scan and report times, and ASH's
 version), `scanner_metrics` (one row per scanner with its counts, `status`, `excluded`,
 `dependencies_missing`, `missing_reason`, and `skipped_reason`), `content_databases`,
-`top_hotspots`, and `findings`, one record per finding. A finding's `id` is
+`top_hotspots`, and `findings`, one record per finding. Each record carries
+`result_kind`. A record whose kind is `pass`, `notApplicable` or `informational` states
+no finding only when its result states no level, or level `none`, and no
+`issue_severity` above `INFO`; such a record is counted in no total. One of those kinds
+graded above `INFO` reports a problem, and counts as a finding, and so does one whose
+result states the level `note`, `warning` or `error`, even when its `severity` is `INFO`.
+A record has no field for the level or for whether it states a finding, so `result_kind`
+and `severity` alone cannot tell such a finding from a record that states none; its
+`raw_data` holds the result as SARIF JSON, and the `level` in it can. A finding's `id` is
 `<scanner>-<rule>-<12 hex digits>`, such as `bandit-B602-426afbe0ae52`, and no two
 findings in a scan share one. The digits are a hash of what identifies the finding: the
 SARIF fingerprints its scanner gives, when they tell findings apart, or else its file
@@ -505,7 +513,7 @@ its status.
 | `scanner_name`, `target`, `target_type` | Which scanner ran, on which directory, and whether it was `source` or `converted`. |
 | `exit_code` | The tool's exit code. |
 | `start_time`, `end_time`, `duration` | When it ran. |
-| `finding_count`, `severity_counts` | How many results the run produced, suppressed ones included, and their split by severity, with suppressed results under `suppressed`. |
+| `finding_count`, `severity_counts` | How many findings the run produced, suppressed ones included, and their split by severity, with suppressed findings under `suppressed`. A result that states no finding is in neither. |
 | `status` | The status of this run. It can differ from the scanner's row in `scanner_results`, which is the verdict the summary table shows. |
 | `targets_attempted`, `targets_failed` | For scanners that count their inputs, how many they tried and how many they could not evaluate. |
 | `raw_results` | For a failed run, `errors`, `exception`, and `stack_trace`. |

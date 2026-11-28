@@ -114,6 +114,21 @@ state, and location, plus the fields ASH pairs it by with the same finding in th
 run, which can include the finding's message. It leaves out code snippets, the scanners'
 raw output, the SARIF document, and the resolved configuration.
 
+Each row also holds `result_kind`, the SARIF kind of its result, and `is_finding`,
+whether that result states a finding. A result states no finding when its kind is `pass`,
+`notApplicable`, or `informational` and nothing in it reports a problem: its level is
+`none` or not stated, and no `issue_severity` it declares is above INFO. The trend reads
+`is_finding` and counts a row that states no finding in no total. A record written before
+ASH stored `is_finding` falls back to the row's kind and severity, so a row of one of
+those kinds with severity INFO counts in no total. A record written before ASH stored the
+kind has neither, so the trend reads every row of it as a finding. At a boundary between
+such a record and a newer one, those results are counted on one side and not on the
+other, so they can read as fixed or new; the boundary carries a warning that says so,
+and its `like_for_like` is false. Such a record with no rows counts nothing, so a
+boundary beside it carries no such warning. A newer record also holds
+`result_kind_recorded`, which says that its rows name their kind, so the warning is
+there when the newer record has no rows.
+
 A record ASH cannot read is skipped: a corrupt file, one in a record format this version
 of ASH does not read, or one whose report ID is not its file name. The output says how
 many were skipped. A record from another project cuts the series: `ash results trend`

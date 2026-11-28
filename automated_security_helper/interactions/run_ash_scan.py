@@ -211,6 +211,7 @@ from automated_security_helper.utils.inner_run_outcome import (
 from automated_security_helper.utils.sarif_utils import (
     _resolve_result_severity,
     is_result_suppressed,
+    result_states_no_finding,
 )
 from automated_security_helper.utils.scan_output_dirs import WORKING_DIR_NAMES
 from automated_security_helper.utils.severity_ladder import severity_fails_threshold
@@ -1430,7 +1431,19 @@ def _result_fails_its_scanner_threshold(result, threshold_for, run=None) -> bool
 
     *run* is the SARIF run that holds the result: it names the scanner of a
     result that carries no ``scanner_name`` of its own.
+
+    A result that states no finding (``utils.severity_ladder.result_states_no_finding``:
+    kind ``pass``, ``notApplicable`` or ``informational``, and nothing in it reports a
+    problem) fails no gate. SARIF asks for level ``none`` beside those kinds, the
+    ladder grades that INFO, and a threshold of ``ALL`` fails INFO, so graded by its
+    level the note a scan records for an image it did not scan failed a scan whose
+    threshold was ``ALL`` and the scan exited 2. A cdk-nag rule that was not evaluated
+    exits 1 through the check for rules that were not evaluated, whatever this test
+    says. A result of such a kind whose level or ``issue_severity`` does report a
+    problem is graded as any other result is.
     """
+    if result_states_no_finding(result):
+        return False
     return severity_fails_threshold(
         _resolve_result_severity(result),
         threshold_for(_result_scanner_name(result, run)),

@@ -25,6 +25,7 @@ from automated_security_helper.utils.terminal_text import (
 )
 from automated_security_helper.utils.ui_theme import FOOTER_CREDIT
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    INFORMATION_NOTE,
     SUMMARY_BELOW_THRESHOLD,
     SUMMARY_POLICY_NOT_GATING,
     ReportContentEmitter,
@@ -73,6 +74,29 @@ def _findings_table(findings) -> list[str]:
     return lines
 
 
+def _information_table(rows) -> list[str]:
+    """The header, the divider and one row per result of the INFORMATION table.
+
+    The rows are ``ReportContentEmitter.get_information_overview``'s: the
+    scanner, rule, message, file and kind, and no severity, which rates no
+    finding. Each value is shown on one line before it is cut to its column.
+    """
+    lines = [
+        f"{'Scanner':<15} {'Rule ID':<15} {'Message':<60} {'File':<30} {'Result kind':<15}",
+        f"{'-' * 15} {'-' * 15} {'-' * 60} {'-' * 30} {'-' * 15}",
+    ]
+    for row in rows:
+        scanner = str(shown_on_one_line(row["scanner"]))[:15]
+        rule_id = str(shown_on_one_line(row["rule_id"]))[:15]
+        message = str(shown_on_one_line(row["message"]))[:60]
+        file_path = str(shown_on_one_line(row["file_path"]))[:30]
+        kind = str(shown_on_one_line(row["result_kind"]))[:15]
+        lines.append(
+            f"{scanner:<15} {rule_id:<15} {message:<60} {file_path:<30} {kind:<15}"
+        )
+    return lines
+
+
 class TextReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Text reporter."""
 
@@ -85,7 +109,7 @@ class TextReporterConfigOptions(ReporterOptionsBase):
     include_findings_table: Annotated[
         bool,
         Field(
-            description="When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long."
+            description="When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold, and an INFORMATION table with one row per result that states no finding. Off by default because the tables can be long; with it off, the report lists no such result."
         ),
     ] = False
     include_detailed_findings: Annotated[
@@ -418,6 +442,15 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append("FINDINGS OVERVIEW")
                 text_parts.append("----------------")
                 text_parts.extend(_findings_table(findings))
+                text_parts.append("")
+            # A result that states no finding is listed apart, and counted in no
+            # total.
+            information = emitter.get_information_overview()
+            if information:
+                text_parts.append("INFORMATION")
+                text_parts.append("-----------")
+                text_parts.append(INFORMATION_NOTE)
+                text_parts.extend(_information_table(information))
                 text_parts.append("")
 
         # Add detailed findings if enabled

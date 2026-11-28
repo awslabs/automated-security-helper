@@ -176,6 +176,7 @@ from automated_security_helper.utils.severity_ladder import (
     result_fails_scanner_threshold,
     result_scanner_name,
     result_severity,
+    result_states_no_finding as result_states_no_finding,
 )
 from automated_security_helper.utils.workspace_paths import (
     drive_anchor,
@@ -885,9 +886,12 @@ def actionable_results_by_scanner(
     project-wide *threshold* governing a scanner that has no setting of its own
     and a finding that names no scanner; ``properties.issue_severity`` decides
     when it names a severity ASH knows, otherwise the SARIF ``level`` does; and a
-    suppressed finding never counts. Both arms go through Phase 0's severity
-    ladder, which was verified to gate identically to the inline tables in
-    ``_compute_exit_code`` for all five real threshold values.
+    suppressed finding never counts, nor does a result that states no finding
+    (kind ``pass``, ``notApplicable`` or ``informational``, and nothing in it
+    reports a problem). Both arms go
+    through Phase 0's severity ladder, which was verified to gate identically to
+    the inline tables in ``_compute_exit_code`` for all five real threshold
+    values.
 
     Every scanner that produced a result is a key, counted or not, so a caller
     can tell "no actionable findings" from "no findings".
@@ -997,6 +1001,14 @@ def has_finding_at_min_severity(
     LOW actionable: the same project exited 0 as ``ash --source-dir P`` and 2
     inside a workspace.
 
+    A result that states no finding (:func:`result_states_no_finding`: kind
+    ``pass``, ``notApplicable`` or ``informational``, and nothing in it reports a
+    problem) never qualifies. Its level is ``none``, which this scale reads as low,
+    so with no gate to turn it away a rule that was not evaluated met
+    ``--min-severity low``. The guard here covers the call that passes no
+    threshold; the gated call is already covered by
+    ``severity_ladder.result_fails_scanner_threshold``, which reads the same rule.
+
     Note that this scale is not the severity ladder's. It has no ``info``, and it
     treats ``critical`` and ``high`` as equal because SARIF's ``error`` covers
     both.
@@ -1013,10 +1025,16 @@ def has_finding_at_min_severity(
         return True
     gated = threshold is not None or threshold_for is not None
     effective = effective_threshold_resolver(threshold, threshold_for)
+
     for result in results:
         if not isinstance(result, Mapping):
             continue
         if result_is_suppressed(result):
+            continue
+        # A result that states no finding carries level none, which the scale
+        # below reads as low, so it is turned away before the scale. One whose
+        # level or issue_severity reports a problem is graded by that instead.
+        if result_states_no_finding(result):
             continue
         # The resolver run_ash_scan._severity_filters_finding uses: the
         # declared issue_severity first, a missing level as
@@ -1455,9 +1473,12 @@ class WorkspaceAggregator:
         # Credit findings to the scanner that produced them, so the rollup sums
         # what the per-project files say rather than re-deriving it.
         #
-        # The per-result readings (the scanner's folded name, the suppression
-        # state) stay on the host, in row order; the per-scanner counts are one
-        # frame of (name, counted) and two ordered counts over it. The partition
+        # The per-result readings (the scanner's folded name, whether the result
+        # is one of its findings) stay on the host, in row order; the per-scanner
+        # counts are one frame of (name, counted) and two ordered counts over it.
+        # A result is one of the scanner's findings when it is not suppressed and
+        # it does not state no finding, as in the project's own count
+        # (execution._reduce_project_scan), which this rollup sums. The partition
         # of the results by scanner is read only by the fallback below, so it is
         # built only when that branch is armed.
         import polars as pl
@@ -1483,7 +1504,10 @@ class WorkspaceAggregator:
             if fallback:
                 by_scanner.setdefault(name, []).append(result)
             wired_names.append(wire(name))
-            counted_flags.append(not result_is_suppressed(result))
+            counted_flags.append(
+                not result_is_suppressed(result)
+                and not result_states_no_finding(result)
+            )
         if wired_names:
             frame = _scanner_count_frame(wired_names, counted_flags)
             for wired, _ in ordered_counts(frame, "name").iter_rows():
