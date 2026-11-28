@@ -112,11 +112,11 @@ new ASHScanStep('SecurityScan', {
 `shardCount: 4` produces five actions: four shards that run in parallel, and one
 merge action that runs after them.
 
-Sharding needs the `--shard-index` and `--shard-count` options of `ash scan` and
-`ash results merge` (`ash merge` before ASH 3.9), which no ASH release up to v3.7.1
-has. Set `version` to a tag or commit whose ASH has both (or, with `PREINSTALLED`,
-use an image built from one); otherwise every shard action fails and the merge
-never runs.
+Sharding needs the `--shard-index` and `--shard-count` options of `ash scan`, and
+the merge command `ash results merge` (`ash merge` before ASH 3.9). No ASH release
+up to v3.7.1 has either. Set `version` to a tag or commit whose ASH has both (or,
+with `PREINSTALLED`, use an image built from one); otherwise every shard action
+fails and the merge never runs.
 
 A `shardCount` above 5 fails at synthesis. The merge action takes one input
 artifact per shard, and CodePipeline allows a CodeBuild action at most five input
