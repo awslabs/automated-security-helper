@@ -192,7 +192,10 @@ def _files_as_given(error: BaseException, text: str) -> str:
     """*text* with each OSError's own text in ``error``'s chain naming its files as given.
 
     Only Python's own text is changed: an error whose class writes its own
-    ``__str__`` is left as it is, even where that text ends the same way.
+    ``__str__`` is left as it is, even where that text ends the same way. So is
+    one whose text or files cannot be rendered (Python's own text renders the
+    error's arguments, and an argument's ``__str__`` can raise): a printer that
+    raised here would replace the error it is printing, as ``_own_text`` says.
     """
     for current in _chain(error):
         if (
@@ -200,8 +203,11 @@ def _files_as_given(error: BaseException, text: str) -> str:
             or type(current).__str__ is not OSError.__str__
         ):
             continue
-        quoted = _files_quoted(current)
-        own = str(current)
+        try:
+            quoted = _files_quoted(current)
+            own = str(current)
+        except Exception:  # noqa: BLE001 -- whatever its text or its files raised
+            quoted, own = None, ""
         if quoted is None or not own.endswith(quoted[0]):
             continue
         text = text.replace(own, own[: -len(quoted[0])] + quoted[1])

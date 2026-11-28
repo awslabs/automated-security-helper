@@ -291,7 +291,10 @@
   of ending the scan's task with the entry still running. A history record that cannot
   be removed when a scan is taken back no longer keeps the previous scan's results set
   aside, and a removal that fails with an error whose message cannot be rendered is
-  logged instead of raising in place of the cancel.
+  logged instead of raising in place of the cancel. `error_text`, which renders the
+  errors ASH logs and reports, now names an `OSError` whose own text cannot be made by
+  its type, as it already named any other error whose message cannot be rendered,
+  instead of raising.
 
 ### Features
 
