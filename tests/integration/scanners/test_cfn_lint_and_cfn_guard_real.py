@@ -162,6 +162,10 @@ def _scan(
         yaml.safe_dump({"project_name": "cfn-tools-e2e", **(config or {})}),
         encoding="utf-8",
     )
+    child_env = checkout_env({**os.environ, **(env or {})})
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanners --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     proc = subprocess.run(  # nosec B603 - fixed argv
         [
             _ash(),
@@ -184,7 +188,7 @@ def _scan(
         encoding="utf-8",
         errors="replace",
         timeout=900,
-        env=checkout_env({**os.environ, **(env or {})}),
+        env=child_env,
     )
     log = (
         f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\n"
@@ -471,6 +475,10 @@ def _scan_with_tree_config(
         encoding="utf-8",
     )
     output = tmp_path / f"out-{len(list(tmp_path.iterdir()))}"
+    child_env = checkout_env({**os.environ, "ASH_OFFLINE": "true"})
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     proc = subprocess.run(  # nosec B603 - fixed argv
         [
             _ash(),
@@ -492,7 +500,7 @@ def _scan_with_tree_config(
         encoding="utf-8",
         errors="replace",
         timeout=900,
-        env=checkout_env({**os.environ, "ASH_OFFLINE": "true"}),
+        env=child_env,
         cwd=cwd,
     )
     return proc, output

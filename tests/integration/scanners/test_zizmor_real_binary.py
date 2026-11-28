@@ -327,6 +327,10 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
     except (OSError, NotImplementedError) as exc:  # pragma: no cover - Windows
         pytest.skip(f"symlink creation unavailable on this platform: {exc}")
     output = tmp_path / "out"
+    child_env = checkout_env({**os.environ, "ASH_OFFLINE": "true"})
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
 
     result = subprocess.run(  # nosec B603 - fixed argv
         [
@@ -355,7 +359,7 @@ def test_an_operator_config_file_in_the_tree_that_links_out_is_not_read(
         encoding="utf-8",
         errors="replace",
         timeout=600,
-        env=checkout_env({**os.environ, "ASH_OFFLINE": "true"}),
+        env=child_env,
     )
 
     console = result.stdout + result.stderr

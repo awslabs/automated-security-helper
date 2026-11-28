@@ -629,6 +629,10 @@ def _ash() -> str:
 def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
     config_path = source.parent / "ash.yaml"
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    child_env = checkout_env(env)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     proc = subprocess.run(  # nosec B603 - starts the real ash CLI under test, fixed argv
         [
             _ash(),
@@ -654,7 +658,7 @@ def _run_ash(source: Path, output: Path, config: dict, env: dict, *extra: str):
         encoding="utf-8",
         errors="replace",
         timeout=600,
-        env=checkout_env(env),
+        env=child_env,
     )
     log = f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\nSTDERR:\n{proc.stderr[-4000:]}"
     return proc, log

@@ -81,10 +81,13 @@ def scan(tmp_path_factory):
     home = base / "home"
     for directory in (".cache", ".config", ".local/share"):
         (home / directory).mkdir(parents=True)
+    # ASH_SCANNERS is the environment variable of the deprecated --scanners, so a
+    # caller's value would add scanners to the one --add-scanners names.
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith("AWS_") and key not in ("ASH_CONFIG", "ASH_BIN_PATH")
+        if not key.startswith("AWS_")
+        and key not in ("ASH_CONFIG", "ASH_BIN_PATH", "ASH_SCANNERS")
     }
     env.update(
         {

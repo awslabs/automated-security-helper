@@ -56,6 +56,10 @@ def _ash_scan(
     env: dict | None = None,
     list_module: bool = True,
 ) -> subprocess.CompletedProcess:
+    child_env = dict(os.environ if env is None else env)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     return subprocess.run(  # nosec B603 - fixed argv, no shell
         [
             sys.executable,
@@ -84,7 +88,7 @@ def _ash_scan(
         text=True,
         timeout=600,
         check=False,
-        env=env,
+        env=child_env,
     )
 
 

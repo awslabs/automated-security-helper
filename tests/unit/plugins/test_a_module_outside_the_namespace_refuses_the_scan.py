@@ -40,6 +40,9 @@ def planted_modules(tmp_path, monkeypatch):
     """Two importable modules on sys.path, each writing a marker when imported."""
     monkeypatch.setenv("COLUMNS", "400")
     monkeypatch.setenv("NO_COLOR", "1")
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the in-process scan beside --add-scanners.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
     monkeypatch.chdir(tmp_path)
     modules = tmp_path / "modules"
     modules.mkdir()

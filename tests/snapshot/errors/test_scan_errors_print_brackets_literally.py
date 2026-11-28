@@ -22,6 +22,13 @@ SCAN = ["scan", "fs", "--no-progress", "--add-scanners", "bandit"]
 TAG = "[/bold]"
 
 
+@pytest.fixture(autouse=True)
+def _no_scanners_variable(monkeypatch):
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach each scan beside the scanner --add-scanners names.
+    monkeypatch.delenv("ASH_SCANNERS", raising=False)
+
+
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

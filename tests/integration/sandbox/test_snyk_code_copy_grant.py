@@ -184,6 +184,9 @@ def _scan(tmp_path: Path, mode: str) -> dict:
         env.update(TEMP=str(temp_root), TMP=str(temp_root), USERPROFILE=str(home))
     env = stand_in_env(uv_bin, uv_log, env)
     env.pop("ASH_OFFLINE", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach this scan beside the scanner it names itself.
+    env.pop("ASH_SCANNERS", None)
     command = [
         sys.executable,
         "-I",

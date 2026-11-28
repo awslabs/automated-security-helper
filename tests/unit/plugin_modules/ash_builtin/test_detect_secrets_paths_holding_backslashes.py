@@ -207,6 +207,9 @@ def _findings_of_ash_scan(cwd: Path, source_dir: str) -> list[str]:
     """``ash scan fs --add-scanners detect-secrets`` run in a child process, as a user runs it."""
     output = cwd / f"out-{abs(hash(source_dir))}"
     env = dict(os.environ)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
     env.update({"ASH_OFFLINE": "YES", "NO_COLOR": "1", "COLUMNS": "200"})
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
         [

@@ -114,6 +114,10 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
 
     ash = shutil.which("ash", path=str(Path(sys.executable).parent))
     assert ash, f"no ash entry point beside {sys.executable}"
+    child_env = checkout_env()
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach both scans beside the scanner --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     proc = subprocess.run(
         [
             ash,
@@ -131,7 +135,7 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
             "--no-progress",
             "--no-fail-on-findings",
         ],
-        env=checkout_env(),
+        env=child_env,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -192,7 +196,7 @@ def test_symbol_suppression_in_a_real_bandit_scan(tmp_path):
             "--no-progress",
             "--no-fail-on-findings",
         ],
-        env=checkout_env(),
+        env=child_env,
         capture_output=True,
         text=True,
         encoding="utf-8",

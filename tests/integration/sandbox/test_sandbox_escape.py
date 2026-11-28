@@ -334,6 +334,9 @@ def _scan(
         "UV_CACHE_DIR": str(host_cache),
         **_ipc_environment(listeners),
     }
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach this scan beside the scanner it names itself.
+    env.pop("ASH_SCANNERS", None)
     command = [
         _ash_executable(),
         "scan",

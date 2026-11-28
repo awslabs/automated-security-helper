@@ -1013,8 +1013,9 @@ def test_validation_looks_the_account_up_when_it_is_not_configured(tmp_path):
 def test_the_send_path_refuses_an_account_id_that_is_not_the_callers(tmp_path):
     """With the default product ARN, only the finding's own account may import it.
 
-    Checked in report(), before GetFindings or BatchImportFindings, so it holds
-    for ``ash report`` too, which skips the dependency check.
+    Checked in report(), before GetFindings or BatchImportFindings. The dependency
+    check, which a scan and ``ash report`` both run first, does not compare a
+    configured account_id with the caller's, so this refusal is what holds in both.
     """
     securityhub, stub = _stubbed_client("securityhub")
     imports = _Capture(securityhub)

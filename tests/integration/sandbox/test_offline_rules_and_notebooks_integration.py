@@ -111,6 +111,9 @@ def _scan(tmp_path: Path, sandbox: str, *, scanners: str, env_extra: dict, extra
     source = tmp_path / "src"
     output = tmp_path / "out"
     env = checkout_env({**os.environ, **env_extra})
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach this scan beside the scanners it names itself.
+    env.pop("ASH_SCANNERS", None)
     command = [
         _ash_executable(),
         "scan",

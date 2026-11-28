@@ -5,13 +5,13 @@
 
 The dependency check calls DescribeHub, a permission the import itself does not
 need. Credentials granted only securityhub:BatchImportFindings (and GetFindings
-to archive) import with `ash report`, which skips the check, but a scan dropped
-the reporter on the refusal with no word of which permission was missing. The
-check now leaves the reporter enabled on an access-denied refusal from
-DescribeHub, in either spelling the reporter's ``_ACCESS_DENIED_ERRORS`` names
-(AccessDeniedException, AccessDenied), and names the permission; any other
-refusal is handled as before (the InvalidAccessException test beside this one in
-the batch-import tests).
+to archive) can import, but a scan dropped the reporter on the refusal with no
+word of which permission was missing. The check now leaves the reporter enabled
+on an access-denied refusal from DescribeHub, in either spelling the reporter's
+``_ACCESS_DENIED_ERRORS`` names (AccessDeniedException, AccessDenied), and names
+the permission; ``ash report`` runs the same check before it reports, so the same
+answer applies to it. Any other refusal is handled as before (the
+InvalidAccessException test beside this one in the batch-import tests).
 
 No test here calls AWS: the clients are botocore Stubbers over blocked sockets.
 """

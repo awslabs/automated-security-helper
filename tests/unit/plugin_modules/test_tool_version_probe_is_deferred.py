@@ -543,6 +543,9 @@ def test_a_scan_of_one_scanner_probes_only_that_scanner(tmp_path):
     env = stand_in_env(bin_dir, log, {**os.environ, "PATH": "/usr/bin:/bin"})
     env.update({"HOME": str(tmp_path / "home"), "NO_COLOR": "1"})
     env.pop("ASH_OFFLINE", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    env.pop("ASH_SCANNERS", None)
 
     completed = subprocess.run(  # nosec B603 - fixed argv, the test's own interpreter
         [

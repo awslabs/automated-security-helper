@@ -97,6 +97,10 @@ def _scan(
         command += ["--add-scanners", scanner]
     if ignore_suppressions:
         command.append("--ignore-suppressions")
+    child_env = checkout_env()
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanners --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     proc = subprocess.run(
         command,
         capture_output=True,
@@ -107,7 +111,7 @@ def _scan(
         encoding="utf-8",
         errors="replace",
         timeout=600,
-        env=checkout_env(),
+        env=child_env,
     )
     log = (
         f"exit {proc.returncode}\nSTDOUT:\n{proc.stdout[-4000:]}\n"
