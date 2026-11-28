@@ -1276,6 +1276,14 @@ ASH_EXIT_CODES: Dict[int, str] = {
     AshExitCode.USAGE_ERROR.value: "usage error",
 }
 
+#: The spelling of the option that reads a command's options from a JSON document.
+#: cli/json_input.py adds it to the commands that take it and re-exports this name.
+#: It is defined here, in the layer ``interactions`` may read, because
+#: interactions/wrapper_contract.py has to know which commands take it, and the
+#: layer order lets ``interactions`` import ``core`` but not ``cli``
+#: (tests/unit/test_layer_dag_boundaries.py).
+CLI_JSON_INPUT_FLAG = "--cli-json-input"
+
 
 #: The ASH_OFFLINE values that name offline mode, and the ones that name online
 #: mode. They are pairs (ON/OFF, Y/N, YES/NO, TRUE/FALSE, 1/0): a value that names
