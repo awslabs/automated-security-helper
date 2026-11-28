@@ -2078,10 +2078,21 @@ def read_back(
     return result
 
 
+#: A run of separators between the parts of a path, written either way.
+_PATH_SEPARATORS = r"[\\/]+"
+
+
 def failure_text(error: Exception, workdir: Path) -> str:
     """What a refused load said, without the directory of the planted file: that
-    directory belongs to this build, and the reason is what a reader needs."""
-    text = str(error).replace(str(Path(workdir) / "repository"), "<repository>")
+    directory belongs to this build, and the reason is what a reader needs.
+
+    The directory is found whichever separator the message writes between its
+    parts. A path printed on Windows can hold backslashes and slashes together,
+    for example when a message joins a file name to a directory with a slash.
+    """
+    parts = re.split(_PATH_SEPARATORS, str(Path(workdir) / "repository"))
+    directory = re.compile(_PATH_SEPARATORS.join(re.escape(part) for part in parts))
+    text = directory.sub("<repository>", str(error))
     return f"{type(error).__name__}: {text}"[:300]
 
 
