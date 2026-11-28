@@ -1861,7 +1861,7 @@ _REASON_MAPPINGS: FrozenSet[str] = frozenset(
 )
 
 #: The fields that list one input's records: each record's path is kept, and its
-#: reason shown.
+#: reason and the archive member it names (as the archive spells it) are shown.
 _REASON_RECORDS: FrozenSet[str] = frozenset(
     {"converter_refusals", "inputs_not_scanned"}
 )
@@ -1881,7 +1881,8 @@ def _text_shown(value: Any) -> Any:
 
 def _verdict_text_shown(verdict: Dict[str, Any]) -> None:
     """Show the text of one projected *verdict* written for a reader, in place:
-    its messages, and its mappings' and records' reasons (``_MESSAGE_FIELDS``)."""
+    its messages, its mappings' and records' reasons, and the archive member a
+    record names (``_MESSAGE_FIELDS``)."""
     for field in _MESSAGE_FIELDS:
         if field in verdict:
             verdict[field] = _text_shown(verdict[field])
@@ -1892,8 +1893,9 @@ def _verdict_text_shown(verdict: Dict[str, Any]) -> None:
             }
     for field in _REASON_RECORDS:
         for record in verdict.get(field) or []:
-            if "reason" in record:
-                record["reason"] = _text_shown(record["reason"])
+            for key in ("member", "reason"):
+                if key in record:
+                    record[key] = _text_shown(record[key])
 
 
 def _skip_shown(record: Dict[str, Any]) -> Dict[str, Any]:
