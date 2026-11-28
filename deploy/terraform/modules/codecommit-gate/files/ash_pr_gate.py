@@ -287,9 +287,9 @@ GATE_OWNED_SCAN_OPTIONS = frozenset(
         "--honor-ignore-files",
         "--no-honor-ignore-files",
         # Hold this gate's config, or one file of its chain, to the limits of a config
-        # the scanned repository wrote. What only an operator's file may set (plugin
-        # modules, the ignore-file setting, the sandbox grants) then comes from the
-        # defaults.
+        # the scanned repository wrote, or, with --config-file-from-another-checkout,
+        # of a config in another git checkout. Either way that file can no longer
+        # grant what only an operator's file may, so this gate's own grants are lost.
         "--config-from-scanned-repository",
         "--config-file-from-scanned-repository",
         "--config-file-from-another-checkout",

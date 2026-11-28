@@ -353,7 +353,7 @@ _NARROWING_OPTIONS_WITH_VALUES = [
     (
         "--config-file-from-another-checkout",
         "/opt/ash/ash.yaml",
-        "the same limits, for a file judged to be in another checkout",
+        "that file is read as a config in another checkout and can no longer grant",
     ),
 ]
 

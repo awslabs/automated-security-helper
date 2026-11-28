@@ -218,9 +218,10 @@ or how the verdict is reached, and refuses them in `ash_scan_extra_args`:
   which decide the configuration the scan reads;
 - the content database staleness flags; to accept an over-age database, set
   `content_db_staleness: warn` in the base config;
-- `--honor-ignore-files` and `--no-honor-ignore-files`, and the hidden options that
-  hold the gate's config to the limits of a config the scanned repository wrote;
-  set `honor_ignore_files` in the base config instead;
+- `--honor-ignore-files` and `--no-honor-ignore-files`; set `honor_ignore_files`
+  in the base config instead;
+- the hidden options that hold the gate's config, or one file of its chain, to the
+  limits of a config the scanned repository wrote or of one in another git checkout;
 - `--allow-in-tree-tools`, since nothing in the scan should run code from the pull
   request;
 - `--help`, `--version` and `--generate-cli-skeleton`, which end the run with exit 0
