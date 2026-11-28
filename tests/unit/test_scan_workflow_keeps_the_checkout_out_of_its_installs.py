@@ -51,9 +51,12 @@ is a sibling of the checkout.
 Steps are located by the commands in their run text, not by name or by their comments.
 So a renamed or merged step is still checked, and so is a step added later, while a
 step whose comments alone name ``uv run`` or python is not taken for one that runs it.
+A ``#!`` line is read like a command, since it names the interpreter of a script the
+step may write and run.
 ``test_the_install_steps_found_install_grype_and_syft`` fails if the locator stops
 finding the Install Grype and Install Syft steps, and
-``TestTheLocatorReadsCommandsNotComments`` fails if it reads comments again.
+``TestTheLocatorReadsCommandsNotComments`` fails if it reads comments again or stops
+reading ``#!`` lines.
 
 What it does not cover
 ----------------------
@@ -95,23 +98,36 @@ def _workflow_and_job() -> tuple[ga.Workflow, dict[str, Any]]:
     return workflow, workflow.jobs[JOB_ID]
 
 
+def _is_searched(line: str) -> bool:
+    """Whether the locator searches ``line`` of a step's run text.
+
+    It leaves out a line whose first non-blank character is ``#``, unless the line's
+    first non-blank characters are ``#!``; ``_run_contains`` says why. The
+    real-workflow row of ``TestTheLocatorReadsCommandsNotComments`` reads lines by
+    this rule too, so the two cannot disagree about which lines to read.
+    """
+    stripped = line.lstrip(" \t")
+    return not stripped.startswith("#") or stripped.startswith("#!")
+
+
 def _run_contains(run: str, fragment: str) -> bool:
-    """Whether ``fragment`` is on a line of a step's run text that bash runs.
+    """Whether ``fragment`` is on a line of a step's run text, leaving comments out.
 
     A line whose first non-blank character is ``#`` is a comment to bash and runs
-    nothing, so it is left out. Heredoc body lines that start with ``#`` are left out
-    too, which loses nothing: the line that opens the heredoc holds the command that
-    reads it. A ``#`` line inside a quoted string that spans lines is left out as well,
-    though bash reads it as part of the string. Only whole-line comments are left out:
-    a ``#`` later in a line starts a comment or not as bash quoting decides, so that
-    line is searched whole. The locator may then find a step too many, which shows as
-    a failing row, rather than one too few, which would leave a step unchecked.
+    nothing, so it is left out, unless its first non-blank characters are ``#!``. A
+    ``#!`` line is kept because it names the interpreter a script runs under. The line
+    that opens a heredoc may be a command, such as ``cat``, that only writes a script;
+    a step that then runs the script starts the interpreter the script's ``#!`` line
+    names, which may be named on no other line. Other heredoc body lines that start
+    with ``#`` are left out, as they are comments in python and shell scripts. A ``#``
+    line inside a quoted string that spans lines is left out as well, though bash reads
+    it as part of the string. A ``#!`` line is kept even at the top of a run text,
+    where bash reads it as a comment. Only whole-line comments are left out: a ``#``
+    later in a line starts a comment or not as bash quoting decides, so that line is
+    searched whole. The locator may then find a step too many, which shows as a failing
+    row, rather than one too few, which would leave a step unchecked.
     """
-    return any(
-        fragment in line
-        for line in run.split("\n")
-        if not line.lstrip(" \t").startswith("#")
-    )
+    return any(fragment in line for line in run.split("\n") if _is_searched(line))
 
 
 def _steps_whose_run_contains(fragment: str) -> list[str]:
@@ -538,6 +554,36 @@ _FRAGMENT_ON_A_COMMAND_LINE = [
     ),
 ]
 
+# A step that writes a script with cat and then runs it. Its fragment is only on the
+# script's #! line, which names the interpreter the script runs under: the line that
+# opens the heredoc holds cat. Planted like the texts above.
+_FRAGMENT_ONLY_ON_A_SHEBANG_LINE = [
+    pytest.param(
+        "uv run",
+        "set -euo pipefail\n"
+        "cat > \"${RUNNER_TEMP}/helper\" <<'EOF'\n"
+        "#!/usr/bin/env -S uv run --script\n"
+        "import sys\n"
+        "print(sys.version)\n"
+        "EOF\n"
+        'chmod +x "${RUNNER_TEMP}/helper"\n'
+        '"${RUNNER_TEMP}/helper"\n',
+        id="uv run only on the shebang line of a script the step runs",
+    ),
+    pytest.param(
+        "python",
+        "set -euo pipefail\n"
+        "cat > \"${RUNNER_TEMP}/helper\" <<'EOF'\n"
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "print(sys.version)\n"
+        "EOF\n"
+        'chmod +x "${RUNNER_TEMP}/helper"\n'
+        '"${RUNNER_TEMP}/helper"\n',
+        id="python only on the shebang line of a script the step runs",
+    ),
+]
+
 
 @pytest.mark.unit
 class TestTheLocatorReadsCommandsNotComments:
@@ -576,19 +622,32 @@ class TestTheLocatorReadsCommandsNotComments:
             f"the locator misses a step that runs {fragment!r}:\n{run}"
         )
 
+    @pytest.mark.parametrize(("fragment", "run"), _FRAGMENT_ONLY_ON_A_SHEBANG_LINE)
+    def test_a_fragment_only_on_a_shebang_line_finds_the_step(self, fragment, run):
+        """A fragment only on the ``#!`` line of a script the step runs finds the step.
+
+        The step writes the script with ``cat`` and then runs it, which starts the
+        interpreter the ``#!`` line names. That is the one line holding the fragment:
+        the line that opens the heredoc holds ``cat``. Missed, the step would be
+        checked by no row at all.
+        """
+        assert _run_contains(run, fragment), (
+            f"the locator misses a step that runs {fragment!r} from a #! line:\n{run}"
+        )
+
     def test_every_step_found_holds_its_fragment_on_a_command_line(self):
         """Each step found in the workflow holds its fragment on a command line.
 
         So every row of the parametrized checks above is about a command the step
-        runs. A failure names the step and the fragment.
+        runs. A command line is one ``_is_searched`` keeps, the rule the locator uses,
+        so this row and the locator cannot disagree about a ``#!`` line. A failure
+        names the step and the fragment.
         """
         stray = []
         for fragment in ("ash dependencies install", "uv run", "python"):
             for name in _steps_whose_run_contains(fragment):
                 lines = str(_step(name).get("run") or "").split("\n")
-                commands = [
-                    line for line in lines if not line.lstrip(" \t").startswith("#")
-                ]
+                commands = [line for line in lines if _is_searched(line)]
                 if not any(fragment in line for line in commands):
                     stray.append(f"step {name!r} for {fragment!r}")
         assert not stray, (
