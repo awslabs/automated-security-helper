@@ -538,3 +538,23 @@ class TestTheTextAClientMayDisplayIsShownOnOneLine:
         assert verdicts[0]["relative_path"] == key
         assert verdicts[0]["output_path"] == f"projects/{key}"
         assert verdicts[0]["scan_id"] == "scan-1"
+
+    def test_an_archive_members_name_is_shown(self):
+        """A converter refusal names the archive member it refused as the archive
+        spells it: the archive's text, and not a path a client opens, so the
+        reply shows it as it shows the refusal's reason."""
+        from automated_security_helper.models.workspace import ProjectConverterRefusal
+
+        refused = ProjectConverterRefusal(
+            converter="archive",
+            path="api/bundle.zip",
+            member="../a\x1bb.py",
+            reason="a member names a parent directory",
+        )
+        payload = _payload(_outcome("api", converter_refusals=[refused]))
+
+        verdicts = _module()._project_verdicts(payload, {"api": "scan-1"})
+
+        (shown,) = verdicts[0]["converter_refusals"]
+        assert shown["member"] == "../a\\x1bb.py"
+        assert shown["path"] == "api/bundle.zip"
