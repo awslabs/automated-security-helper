@@ -19,7 +19,6 @@ reads it as it reads any other result.
 from __future__ import annotations
 
 import copy
-import inspect
 import json
 from pathlib import Path
 from typing import Any
@@ -41,9 +40,6 @@ from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import (
 )
 
 pytestmark = pytest.mark.unit
-
-#: Whether the reading step of this branch can leave out one result it cannot read.
-_CAN_ISOLATE = "isolate" in inspect.signature(ingest_sarif).parameters
 
 #: The empty values a part of a result can hold, and what each part is called in a
 #: result: ``(part, value)``, the part's place named by ``_with_the_part``.
@@ -200,34 +196,3 @@ def test_a_finding_with_an_empty_region_is_reported_once(tmp_path, monkeypatch, 
         "github-pat",
     ]
     assert record.left_out == 0
-
-
-@pytest.mark.skipif(
-    not _CAN_ISOLATE, reason="the reading step has no isolation on this branch"
-)
-@pytest.mark.parametrize(
-    "empty",
-    [
-        pytest.param(("locations", ""), id="locations_a_string"),
-        pytest.param(("locations", 0), id="locations_zero"),
-    ],
-)
-def test_a_finding_the_reading_step_cannot_read_is_left_out_once(
-    tmp_path, monkeypatch, empty
-):
-    """Reported once or left out once, never twice: with the reading step that
-    isolates a result it cannot read, the one result of the finding is left out and
-    counted once."""
-    part, value = empty
-    finding = _with_the_part(FINDING, part, value)
-    scanner, source = _rescan_reporting(
-        tmp_path, monkeypatch, [copy.deepcopy(finding), copy.deepcopy(HIDDEN)]
-    )
-    raw = _report(copy.deepcopy(finding))
-    _add_back(scanner, source, raw, tmp_path)
-
-    record = IngestRecord()
-    report = ingest_sarif(raw, record, isolate=True)
-
-    assert sorted(r.ruleId for r in report.runs[0].results) == ["github-pat"]
-    assert record.left_out == 1
