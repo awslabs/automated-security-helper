@@ -32,6 +32,7 @@ from automated_security_helper.utils.sandbox.policy import (
     SandboxPolicy,
     SandboxRequirements,
 )
+from tests.unit.base.test_image_register import dockerfile_stages
 
 pytestmark = pytest.mark.unit
 
@@ -568,15 +569,82 @@ def test_each_database_names_the_cache_variable_ash_relies_on() -> None:
     ]
 
 
-def _string_constants(path: Path) -> set[str]:
-    """Every string literal a module holds, read from its syntax tree: a name in a
-    comment, or inside a longer message, is not one."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _tail(node: ast.expr) -> str | None:
+    """The last name of ``a.b.c``, or the name ``c`` itself."""
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _is_environment(node: ast.expr) -> bool:
+    """The process environment, or the copy of it ``snapshot_environ()`` takes: the two
+    places the scanners read a variable from."""
+    if isinstance(node, ast.Call):
+        return _tail(node.func) == "snapshot_environ"
+    return _tail(node) == "environ"
+
+
+def _environment_keys(tree: ast.AST) -> list[ast.expr]:
+    """The key of every read of the environment in a module: ``environ.get(key)``,
+    ``getenv(key)`` and ``environ[key]`` as a load. A name that is only listed in a set,
+    stored into a mapping, used as a key of a dict display or written in a message is
+    none of these."""
+    keys: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args:
+            reads = _tail(node.func) == "getenv" or (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and _is_environment(node.func.value)
+            )
+            if reads:
+                keys.append(node.args[0])
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Load)
+            and _is_environment(node.value)
+        ):
+            keys.append(node.slice)
+    return keys
+
+
+def _returned_strings(tree: ast.AST, method: str) -> set[str]:
+    """The string literals a function of that name returns."""
     return {
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        node.value.value
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef) and function.name == method
+        for node in ast.walk(function)
+        if isinstance(node, ast.Return)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
     }
+
+
+def _reads_the_variable(sources: list[str], variable: str) -> bool:
+    """Whether the modules read *variable* from the environment. The key is its literal
+    name, or a call of a method of the scanner that returns it: the grep scanners read
+    ``environ.get(self.cache_dir_env_var())`` and each names its variable in that
+    method."""
+    trees = [ast.parse(source) for source in sources]
+    keys = [key for tree in trees for key in _environment_keys(tree)]
+    if any(isinstance(key, ast.Constant) and key.value == variable for key in keys):
+        return True
+    methods = {
+        key.func.attr
+        for key in keys
+        if isinstance(key, ast.Call)
+        and isinstance(key.func, ast.Attribute)
+        and isinstance(key.func.value, ast.Name)
+        and key.func.value.id == "self"
+    }
+    return any(
+        variable in _returned_strings(tree, method)
+        for tree in trees
+        for method in methods
+    )
 
 
 def _scanner_class(scanner: str) -> type:
@@ -610,29 +678,47 @@ def test_the_module_reader_takes_in_the_shared_base_and_not_the_generic_one() ->
     assert "scanner_plugin.py" not in names
 
 
+def _core_stage(dockerfile: str) -> str:
+    """The lines of the Dockerfile's ``core`` stage. The ``ci`` and ``non-root`` stages
+    are built on it, so a variable set there reaches both, while one set in ``uv-reqs``
+    or in one of the other two does not reach the rest."""
+    stages = dockerfile_stages(dockerfile)
+    assert "core" in stages, "the Dockerfile has no core stage"
+    return stages["core"]
+
+
+def _in_core(*lines: str) -> str:
+    """A Dockerfile whose ``core`` stage holds *lines*."""
+    return "".join(["FROM base AS core\n", *(f"{line}\n" for line in lines)])
+
+
 def _image_sets(dockerfile: str, variable: str) -> bool:
-    """Whether the image sets the variable with an ``ENV`` line of its own."""
-    return bool(re.search(rf"^ENV {variable}=", dockerfile, flags=re.MULTILINE))
+    """Whether the image's ``core`` stage sets the variable with an ``ENV`` line of its
+    own."""
+    return bool(
+        re.search(rf"^ENV {variable}=", _core_stage(dockerfile), flags=re.MULTILINE)
+    )
 
 
 def _image_env_value(dockerfile: str, variable: str) -> str | None:
-    """The value the image's own ``ENV`` line gives *variable*, without its quotes."""
+    """The value the ``core`` stage's own ``ENV`` line gives *variable*, without its
+    quotes."""
     match = re.search(
         rf'^ENV {re.escape(variable)}="?([^"\s]+)"?\s*$',
-        dockerfile,
+        _core_stage(dockerfile),
         flags=re.MULTILINE,
     )
     return match.group(1) if match else None
 
 
 def test_the_value_reader_sees_a_quoted_and_a_bare_value_and_not_a_mention() -> None:
-    dockerfile = (
-        'ENV A_VARIABLE="/quoted/path"\n'
-        "ENV B_VARIABLE=/bare/path\n"
-        "ENV C_VARIABLE=\n"
-        '# ENV D_VARIABLE="/commented"\n'
-        "RUN echo ENV E_VARIABLE=/in/a/run\n"
-        'ENV A_VARIABLE_LONGER="/other"\n'
+    dockerfile = _in_core(
+        'ENV A_VARIABLE="/quoted/path"',
+        "ENV B_VARIABLE=/bare/path",
+        "ENV C_VARIABLE=",
+        '# ENV D_VARIABLE="/commented"',
+        "RUN echo ENV E_VARIABLE=/in/a/run",
+        'ENV A_VARIABLE_LONGER="/other"',
     )
 
     assert _image_env_value(dockerfile, "A_VARIABLE") == "/quoted/path"
@@ -644,23 +730,129 @@ def test_the_value_reader_sees_a_quoted_and_a_bare_value_and_not_a_mention() -> 
     assert _image_env_value(dockerfile, "MISSING") is None
 
 
-def test_the_readers_see_a_planted_variable_and_not_a_mention(tmp_path: Path) -> None:
-    module = tmp_path / "scanner.py"
-    module.write_text(
-        "# A_VARIABLE is only named in this comment.\n"
-        'value = environ.get("B_VARIABLE")\n'
-        'message = "set C_VARIABLE to move it"\n',
-        encoding="utf-8",
+def test_the_image_readers_see_a_planted_variable_and_not_a_mention() -> None:
+    dockerfile = _in_core(
+        "ENV A_VARIABLE=1", "# ENV B_VARIABLE=2", "RUN echo ENV C_VARIABLE=3"
     )
-    dockerfile = "ENV A_VARIABLE=1\n# ENV B_VARIABLE=2\nRUN echo ENV C_VARIABLE=3\n"
 
-    constants = _string_constants(module)
-
-    assert "B_VARIABLE" in constants
-    assert "A_VARIABLE" not in constants and "C_VARIABLE" not in constants
     assert _image_sets(dockerfile, "A_VARIABLE")
     assert not _image_sets(dockerfile, "B_VARIABLE")
     assert not _image_sets(dockerfile, "C_VARIABLE")
+
+
+def test_the_image_readers_take_the_core_stage_and_no_other() -> None:
+    """A variable set only in ``uv-reqs``, ``ci`` or ``non-root`` is not one the image
+    every target builds on sets, and the readers say so while the whole file still
+    holds the line."""
+    dockerfile = (
+        "ARG BASE_IMAGE=base\n"
+        "FROM ${BASE_IMAGE} AS uv-reqs\n"
+        "ENV IN_BUILDER=/builder\n"
+        "FROM ${BASE_IMAGE} AS core\n"
+        "ENV IN_CORE=/core\n"
+        "FROM core AS ci\n"
+        "ENV IN_CI=/ci\n"
+        "FROM core AS non-root\n"
+        "ENV IN_NON_ROOT=/non-root\n"
+    )
+
+    assert _image_sets(dockerfile, "IN_CORE")
+    assert _image_env_value(dockerfile, "IN_CORE") == "/core"
+    for variable in ("IN_BUILDER", "IN_CI", "IN_NON_ROOT"):
+        assert re.search(rf"^ENV {variable}=", dockerfile, flags=re.MULTILINE)
+        assert not _image_sets(dockerfile, variable), variable
+        assert _image_env_value(dockerfile, variable) is None, variable
+
+
+def test_the_image_readers_refuse_a_dockerfile_with_no_core_stage() -> None:
+    with pytest.raises(AssertionError, match="no core stage"):
+        _image_sets("FROM base AS builder\nENV A_VARIABLE=1\n", "A_VARIABLE")
+
+
+def _stage_bases(dockerfile: str) -> dict[str, str]:
+    """``{stage name: what its FROM line builds it on}`` for each named stage."""
+    return {
+        name: base
+        for base, name in re.findall(
+            r"^FROM (\S+) AS (\S+)\s*$", dockerfile, flags=re.MULTILINE
+        )
+    }
+
+
+def test_the_stage_base_reader_names_what_each_stage_is_built_on() -> None:
+    planted = (
+        "FROM image AS first\n"
+        "FROM first AS second\n"
+        "# FROM first AS commented\n"
+        "FROM second\n"
+    )
+
+    assert _stage_bases(planted) == {"first": "image", "second": "first"}
+    assert _stage_bases("RUN true\n") == {}
+
+
+def test_the_ci_and_non_root_stages_are_built_on_the_core_stage() -> None:
+    """Why the readers take ``core``: the two other images start from it, and ``core``
+    does not start from ``uv-reqs``."""
+    built_on = _stage_bases((_ROOT / "Dockerfile").read_text(encoding="utf-8"))
+
+    assert built_on["ci"] == "core"
+    assert built_on["non-root"] == "core"
+    assert built_on["core"] != "uv-reqs"
+
+
+#: Each way a module reads a variable the scanners use, as the source that does it.
+_READS = {
+    "environ.get": 'value = environ.get("A_VARIABLE")',
+    "os.environ.get with a default": 'value = os.environ.get("A_VARIABLE", "")',
+    "os.getenv": 'value = os.getenv("A_VARIABLE")',
+    "getenv": 'value = getenv("A_VARIABLE")',
+    "an environ subscript": 'value = os.environ["A_VARIABLE"]',
+    "a snapshot of the environment": 'value = snapshot_environ().get("A_VARIABLE")',
+}
+#: Each way a module can hold the name without reading it from the environment.
+_MENTIONS = {
+    "a comment": "# A_VARIABLE is only named in this comment.\nvalue = 1",
+    "a message": 'message = "set A_VARIABLE to move it"',
+    "a set of names it removes": 'REMOVED = {"A_VARIABLE", "OTHER_VARIABLE"}',
+    "a store into a mapping": 'env["A_VARIABLE"] = "/x"',
+    "a key of a dict display": 'env = {"A_VARIABLE": "/x"}',
+    "a get on another mapping": 'value = options.get("A_VARIABLE")',
+    "a subscript of another mapping": 'value = options["A_VARIABLE"]',
+    "a sandbox declaration": 'needs = Requirements(read_path_env=("A_VARIABLE",))',
+}
+
+
+@pytest.mark.parametrize("case", sorted(_READS))
+def test_the_environment_reader_sees_a_read(case: str) -> None:
+    assert _reads_the_variable([_READS[case]], "A_VARIABLE")
+
+
+@pytest.mark.parametrize("case", sorted(_MENTIONS))
+def test_the_environment_reader_does_not_take_a_mention_for_a_read(case: str) -> None:
+    assert not _reads_the_variable([_MENTIONS[case]], "A_VARIABLE")
+
+
+def test_the_environment_reader_follows_the_method_that_names_the_variable() -> None:
+    base = (
+        "class Base:\n"
+        "    def probe(self):\n"
+        '        return os.environ.get(self.cache_dir_env_var(), "")\n'
+    )
+    scanner = (
+        "class Scanner(Base):\n"
+        "    def cache_dir_env_var(self):\n"
+        '        return "A_VARIABLE"\n'
+    )
+    other = scanner.replace("A_VARIABLE", "OTHER_VARIABLE")
+
+    assert _reads_the_variable([base, scanner], "A_VARIABLE")
+    # The method alone names the variable and nothing reads through it, the base alone
+    # reads through a method nothing defines, and a method that names another variable
+    # is not this one's.
+    assert not _reads_the_variable([scanner], "A_VARIABLE")
+    assert not _reads_the_variable([base], "A_VARIABLE")
+    assert not _reads_the_variable([base, other], "A_VARIABLE")
 
 
 _DATABASES = (
@@ -671,24 +863,28 @@ _DATABASES = (
 )
 
 
+def test_the_cache_variable_tests_cover_every_database_the_register_declares() -> None:
+    assert [db.name for db in prov.content_databases()] == list(_DATABASES)
+
+
 def _row(database: str) -> prov.ContentDatabase:
     return next(db for db in prov.content_databases() if db.name == database)
 
 
 @pytest.mark.parametrize("database", _DATABASES)
-def test_a_cache_variable_is_one_the_scanner_names_and_the_image_sets(
+def test_a_cache_variable_is_one_the_scanner_reads_and_the_core_stage_sets(
     database: str,
 ) -> None:
-    """The scanner reads the variable (grype sets it for its child as well) and the
-    Dockerfile sets it, so the register records a fact the code holds."""
+    """The scanner reads the variable from the environment and the Dockerfile's ``core``
+    stage sets it, so the register records a fact the code holds."""
     row = _row(database)
     dockerfile = (_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    constants = set().union(
-        *(_string_constants(path) for path in _scanner_modules(row.scanner))
-    )
+    sources = [
+        path.read_text(encoding="utf-8") for path in _scanner_modules(row.scanner)
+    ]
 
     assert row.cache_env is not None, database
-    assert row.cache_env in constants, database
+    assert _reads_the_variable(sources, row.cache_env), database
     assert _image_sets(dockerfile, row.cache_env), database
 
 
@@ -737,15 +933,16 @@ def test_the_value_rule_refuses_a_value_the_row_does_not_name() -> None:
     keeps = _database()
     tool_default = _database(cache_path="~/.cache/x")
 
-    assert cache_value_problems(keeps, 'ENV X_CACHE_DIR="/deps/.x"\n') == []
-    moved = cache_value_problems(keeps, 'ENV X_CACHE_DIR="/deps/.y"\n')
+    assert cache_value_problems(keeps, _in_core('ENV X_CACHE_DIR="/deps/.x"')) == []
+    moved = cache_value_problems(keeps, _in_core('ENV X_CACHE_DIR="/deps/.y"'))
     assert len(moved) == 1 and "keeps the cache in '/deps/.x'" in moved[0]
-    missing = cache_value_problems(keeps, "RUN true\n")
+    missing = cache_value_problems(keeps, _in_core("RUN true"))
     assert missing == ["the image sets no X_CACHE_DIR"]
     # A row that is the tool's default is not equated to the directory the image moves
     # it to, but the value is an absolute directory whatever the row says.
-    assert cache_value_problems(tool_default, 'ENV X_CACHE_DIR="/deps/.x"\n') == []
-    relative = cache_value_problems(tool_default, 'ENV X_CACHE_DIR="deps/.x"\n')
+    set_in_core = _in_core('ENV X_CACHE_DIR="/deps/.x"')
+    assert cache_value_problems(tool_default, set_in_core) == []
+    relative = cache_value_problems(tool_default, _in_core('ENV X_CACHE_DIR="deps/.x"'))
     assert len(relative) == 1 and "which is not absolute" in relative[0]
 
 
