@@ -1691,6 +1691,8 @@ sarif:
 scanner_results:
   bandit:
     actionable_finding_count: 3
+    categories:
+    - sast
     dependencies_satisfied: true
     duration: 12.5
     excluded: false
@@ -1709,6 +1711,8 @@ scanner_results:
     suppressed_finding_count: 1
   cdk-nag:
     actionable_finding_count: 0
+    categories:
+    - iac
     dependencies_satisfied: true
     duration: 7.0
     excluded: false
@@ -1727,6 +1731,11 @@ scanner_results:
     suppressed_finding_count: 0
   checkov:
     actionable_finding_count: 0
+    categories:
+    - secrets
+    - iac
+    - ci
+    - api
     dependencies_satisfied: true
     duration: 0.5
     excluded: false
@@ -1745,6 +1754,8 @@ scanner_results:
     suppressed_finding_count: 0
   detect-secrets:
     actionable_finding_count: 0
+    categories:
+    - secrets
     dependencies_satisfied: true
     duration: 0.25
     excluded: false
@@ -1763,6 +1774,9 @@ scanner_results:
     suppressed_finding_count: 0
   grype:
     actionable_finding_count: 0
+    categories:
+    - sca
+    - container
     dependencies_satisfied: false
     duration: null
     excluded: false
@@ -1782,6 +1796,8 @@ scanner_results:
     suppressed_finding_count: 0
   npm-audit:
     actionable_finding_count: 0
+    categories:
+    - sca
     dependencies_satisfied: true
     duration: 1.0
     excluded: false
@@ -1800,6 +1816,12 @@ scanner_results:
     suppressed_finding_count: 0
   opengrep:
     actionable_finding_count: 0
+    categories:
+    - sast
+    - secrets
+    - iac
+    - ci
+    - quality
     dependencies_satisfied: true
     duration: 95.0
     excluded: false
@@ -1818,6 +1840,12 @@ scanner_results:
     suppressed_finding_count: 0
   semgrep:
     actionable_finding_count: 1
+    categories:
+    - sast
+    - secrets
+    - iac
+    - ci
+    - quality
     dependencies_satisfied: true
     duration: 48.0
     excluded: false
@@ -1836,6 +1864,8 @@ scanner_results:
     suppressed_finding_count: 2
   syft:
     actionable_finding_count: 0
+    categories:
+    - sbom
     dependencies_satisfied: true
     duration: null
     excluded: true

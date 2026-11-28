@@ -732,7 +732,10 @@
       "exit_code": null,
       "duration": null,
       "missing_reason": "its dependencies were not available; no reason was recorded, and ash.log has the scanner's own message",
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "sca"
+      ]
     },
     "cdk-nag": {
       "status": "SKIPPED",
@@ -752,7 +755,10 @@
       "exit_code": null,
       "duration": null,
       "missing_reason": null,
-      "skipped_reason": "left out of this run"
+      "skipped_reason": "left out of this run",
+      "categories": [
+        "iac"
+      ]
     },
     "bandit": {
       "status": "FAILED",
@@ -772,7 +778,10 @@
       "exit_code": 0,
       "duration": 1.25,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "sast"
+      ]
     },
     "cfn-nag": {
       "status": "ERROR",
@@ -792,7 +801,10 @@
       "exit_code": 1,
       "duration": 0.25,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "iac"
+      ]
     },
     "checkov": {
       "status": "FAILED",
@@ -812,7 +824,13 @@
       "exit_code": 0,
       "duration": 7.5,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "secrets",
+        "iac",
+        "ci",
+        "api"
+      ]
     },
     "detect-secrets": {
       "status": "PASSED",
@@ -832,7 +850,10 @@
       "exit_code": 0,
       "duration": 0.5,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "secrets"
+      ]
     },
     "grype": {
       "status": "FAILED",
@@ -852,7 +873,11 @@
       "exit_code": 0,
       "duration": 3.0,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "sca",
+        "container"
+      ]
     },
     "semgrep": {
       "status": "PASSED",
@@ -872,7 +897,14 @@
       "exit_code": 0,
       "duration": 4.0,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "sast",
+        "secrets",
+        "iac",
+        "ci",
+        "quality"
+      ]
     },
     "syft": {
       "status": "PASSED",
@@ -892,7 +924,10 @@
       "exit_code": 0,
       "duration": 2.0,
       "missing_reason": null,
-      "skipped_reason": null
+      "skipped_reason": null,
+      "categories": [
+        "sbom"
+      ]
     }
   },
   "converter_results": {},

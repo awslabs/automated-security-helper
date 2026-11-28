@@ -2,6 +2,13 @@
 # name: test_zizmor_scanner_row
   dict({
     'actionable_finding_count': 6,
+    'categories': list([
+      'secrets',
+      'sca',
+      'ci',
+      'supply-chain',
+      'quality',
+    ]),
     'dependencies_satisfied': True,
     'duration': 0.25,
     'excluded': False,

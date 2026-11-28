@@ -49,6 +49,35 @@ When `sandbox.mode` confines scanners, a scanner process receives only an allowl
 
 The network entry of each scanner below is its default. `sandbox.network_scanners`, when it is set, replaces every scanner's declared need: only the scanners it names get a network. A config file inside a git checkout or the scanned directory can only take network away, and an offline scan gives no scanner a network.
 
+## Scan categories by mode
+
+A scanner can serve the scan categories listed with it below. For the options in this table, a run serves only the categories of the values it is set to: each value serves the categories beside it, an on-off option serves its categories when it is on, and a value the table does not name, with no `any other value` row, serves every category the scanner can serve.
+
+| Scanner | Option | Values | Categories |
+|---------|--------|--------|------------|
+| [`checkov`](#checkov) | `frameworks` | `ansible`, `arm`, `bicep`, `cloudformation`, `dockerfile`, `helm`, `json`, `yaml`, `kubernetes`, `kustomize`, `serverless`, `terraform`, `terraform_json`, `terraform_plan`, `3d_policy` | `iac` |
+| [`checkov`](#checkov) | `frameworks` | `argo_workflows`, `azure_pipelines`, `bitbucket_pipelines`, `circleci_pipelines`, `github_configuration`, `github_actions`, `gitlab_configuration`, `gitlab_ci`, `bitbucket_configuration` | `ci` |
+| [`checkov`](#checkov) | `frameworks` | `cdk`, `sca_package`, `sca_image`, `sast`, `sast_python`, `sast_java`, `sast_javascript`, `sast_typescript`, `sast_golang` | none |
+| [`checkov`](#checkov) | `frameworks` | `openapi` | `api` |
+| [`checkov`](#checkov) | `frameworks` | `secrets` | `secrets` |
+| [`mcp-config`](#mcp-config) | `forbid_privilege_escalation` | `true` | `agent` |
+| [`mcp-config`](#mcp-config) | `forbid_unpinned_runners` | `true` | `supply-chain`, `agent` |
+| [`mcp-config`](#mcp-config) | `forbid_auto_approval` | `true` | `agent` |
+| [`mcp-config`](#mcp-config) | `require_local` | `true` | `agent` |
+| [`mcp-config`](#mcp-config) | `remote_url_prefixes` | any other value | `agent` |
+| [`mcp-config`](#mcp-config) | `allowed_command_prefixes` | any other value | `agent` |
+| [`mcp-config`](#mcp-config) | `flag_env_secrets` | `true` | `secrets`, `agent` |
+| [`trivy`](#trivy) | `scanners` | `vuln` | `sca`, `container` |
+| [`trivy`](#trivy) | `scanners` | `misconfig` | `iac` |
+| [`trivy`](#trivy) | `scanners` | `secret` | `secrets` |
+| [`trivy`](#trivy) | `scanners` | `license` | `license` |
+| [`ferret-scan`](#ferret-scan) | `checks` | `SECRETS` | `secrets` |
+| [`ferret-scan`](#ferret-scan) | `checks` | any other value | `pii` |
+| [`trivy-repo`](#trivy-repo) | `scanners` | `vuln` | `sca` |
+| [`trivy-repo`](#trivy-repo) | `scanners` | `misconfig` | `iac` |
+| [`trivy-repo`](#trivy-repo) | `scanners` | `secret` | `secrets` |
+| [`trivy-repo`](#trivy-repo) | `scanners` | `license` | `license` |
+
 ## `actionlint`
 
 - Scanner page: [`actionlint` scanner page](../docs/plugins/builtin/actionlint.md)
@@ -56,6 +85,7 @@ The network entry of each scanner below is its default. `sandbox.network_scanner
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `secrets`, `ci`, `quality`
 - Command: `actionlint`
 - Install: pinned, checksum-verified release of `actionlint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
@@ -83,6 +113,7 @@ Bandit is a Python source code security analyzer.
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SAST
+- Scan categories: `sast`
 - Command: `bandit`
 - Install: `uv tool install` on first use (`bandit[sarif,toml]>=1.7.8,<2.0.0`)
 - Offline strategy: `bundled`
@@ -114,6 +145,7 @@ CDK Nag is a security scanner for AWS CloudFormation templates that applies indu
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `iac`
 - Command: `python`
 - Install: none declared
 - Offline strategy: `bundled`
@@ -139,6 +171,7 @@ Options, under `scanners.cdk-nag.options`. An option not listed here refuses the
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `iac`
 - Command: `cfn-guard`
 - Install: pinned, checksum-verified release of `cfn-guard`; custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
@@ -164,6 +197,7 @@ Options, under `scanners.cfn-guard.options`. An option not listed here refuses t
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `iac`
 - Command: `cfn-lint`
 - Install: `uv tool install` on first use (`cfn-lint[sarif]>=1.43.3,<2.0.0`)
 - Offline strategy: `bundled`
@@ -193,6 +227,7 @@ Options, under `scanners.cfn-lint.options`. An option not listed here refuses th
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `iac`
 - Command: `cfn_nag_scan`
 - Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
@@ -215,6 +250,7 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `secrets`, `iac`, `ci`, `api`
 - Command: `checkov`
 - Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0` with Python `>=3.10,<3.15`)
 - Offline strategy: `cache_flags`
@@ -245,6 +281,7 @@ Options, under `scanners.checkov.options`. An option not listed here refuses the
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SECRETS
+- Scan categories: `secrets`
 - Command: `detect-secrets`
 - Install: none declared
 - Offline strategy: `bundled`
@@ -272,6 +309,7 @@ Options, under `scanners.detect-secrets.options`. An option not listed here refu
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SECRETS
+- Scan categories: `secrets`
 - Command: `gitleaks`
 - Install: pinned, checksum-verified release of `gitleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
@@ -298,6 +336,7 @@ Options, under `scanners.gitleaks.options`. An option not listed here refuses th
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SCA
+- Scan categories: `sca`, `container`
 - Command: `grype`
 - Install: pinned, checksum-verified release of `grype` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
@@ -322,6 +361,7 @@ Options, under `scanners.grype.options`. An option not listed here refuses the c
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SAST
+- Scan categories: `secrets`, `supply-chain`, `agent`
 - Command: `ash-mcp-config-scanner`
 - Install: none declared
 - Offline strategy: `bundled`
@@ -351,6 +391,7 @@ Options, under `scanners.mcp-config.options`. An option not listed here refuses 
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SCA
+- Scan categories: `sca`
 - Command: `npm`
 - Install: none declared
 - Offline strategy: `skip_offline`
@@ -373,6 +414,7 @@ Options, under `scanners.npm-audit.options`. An option not listed here refuses t
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
+- Scan categories: `sast`, `secrets`, `iac`, `ci`, `quality`
 - Command: `opengrep`
 - Install: pinned, checksum-verified release of `opengrep` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
@@ -403,6 +445,7 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes on Linux and macOS; no on Windows
 - Tool type: SAST
+- Scan categories: `sast`, `secrets`, `iac`, `ci`, `quality`
 - Command: `semgrep`
 - Install: `uv tool install` on first use (`semgrep>=1.125.0,<2.0.0`)
 - Offline strategy: `cache_flags`
@@ -433,6 +476,7 @@ Options, under `scanners.semgrep.options`. An option not listed here refuses the
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SBOM
+- Scan categories: `sbom`
 - Command: `syft`
 - Install: pinned, checksum-verified release of `syft` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `cache_flags`
@@ -460,6 +504,7 @@ Options, under `scanners.syft.options`. An option not listed here refuses the co
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SCA
+- Scan categories: `secrets`, `sca`, `container`, `iac`, `license`
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`
@@ -492,6 +537,7 @@ zizmor finds security issues in GitHub Actions workflows and composite actions.
 - Provided by: built in, loaded on every scan
 - Enabled by default: yes
 - Tool type: SAST
+- Scan categories: `secrets`, `sca`, `ci`, `supply-chain`, `quality`
 - Command: `zizmor`
 - Install: `uv tool install` on first use (`zizmor>=1.29.0,<2.0.0`)
 - Offline strategy: `bundled`
@@ -521,6 +567,7 @@ Options, under `scanners.zizmor.options`. An option not listed here refuses the 
 - Provided by: alpha module `ash_betterleaks_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
+- Scan categories: `secrets`
 - Command: `betterleaks`
 - Install: pinned, checksum-verified release of `betterleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
 - Offline strategy: `bundled`
@@ -549,6 +596,7 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 - Provided by: alpha module `ash_ferret_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
 - Enabled by default: yes
 - Tool type: SECRETS
+- Scan categories: `secrets`, `pii`
 - Command: `ferret-scan`
 - Install: none declared
 - Offline strategy: `bundled`
@@ -594,6 +642,7 @@ GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, R
 - Provided by: alpha module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
 - Enabled by default: yes
 - Tool type: SCA
+- Scan categories: `supply-chain`, `malware`
 - Command: `guarddog`
 - Install: `uv tool install` on first use (`guarddog==3.2.0` with Python `>=3.10,<3.14`)
 - Offline strategy: `bundled`
@@ -629,6 +678,7 @@ Options, under `scanners.guarddog.options`. An option not listed here refuses th
 - Provided by: alpha module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
 - Enabled by default: yes
 - Tool type: IAC
+- Scan categories: `iac`, `quality`
 - Command: `hadolint`
 - Install: pinned, checksum-verified release of `hadolint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `bundled`
@@ -653,6 +703,7 @@ Options, under `scanners.hadolint.options`. An option not listed here refuses th
 - Provided by: alpha module `ash_snyk_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
 - Enabled by default: yes
 - Tool type: SAST
+- Scan categories: `sast`, `secrets`
 - Command: `snyk`
 - Install: none declared
 - Offline strategy: `skip_offline`
@@ -677,6 +728,7 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 - Provided by: alpha module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
 - Enabled by default: yes
 - Tool type: SCA
+- Scan categories: `secrets`, `sca`, `iac`, `license`
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
 - Offline strategy: `cache_flags`

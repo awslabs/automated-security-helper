@@ -1845,6 +1845,9 @@
               'scanner_results': dict({
                 'bandit': dict({
                   'actionable_finding_count': 1,
+                  'categories': list([
+                    'sast',
+                  ]),
                   'duration': 1.25,
                   'exit_code': 0,
                   'finding_count': 2,
@@ -1861,6 +1864,9 @@
                 }),
                 'cdk-nag': dict({
                   'actionable_finding_count': 0,
+                  'categories': list([
+                    'iac',
+                  ]),
                   'dependencies_satisfied': True,
                   'duration': None,
                   'excluded': True,
@@ -1880,6 +1886,9 @@
                 }),
                 'cfn-nag': dict({
                   'actionable_finding_count': 0,
+                  'categories': list([
+                    'iac',
+                  ]),
                   'duration': 0.25,
                   'exit_code': 1,
                   'finding_count': 0,
@@ -1896,6 +1905,12 @@
                 }),
                 'checkov': dict({
                   'actionable_finding_count': 3,
+                  'categories': list([
+                    'secrets',
+                    'iac',
+                    'ci',
+                    'api',
+                  ]),
                   'duration': 7.5,
                   'exit_code': 0,
                   'finding_count': 4,
@@ -1912,6 +1927,9 @@
                 }),
                 'detect-secrets': dict({
                   'actionable_finding_count': 0,
+                  'categories': list([
+                    'secrets',
+                  ]),
                   'duration': 0.5,
                   'exit_code': 0,
                   'finding_count': 0,
@@ -1928,6 +1946,10 @@
                 }),
                 'grype': dict({
                   'actionable_finding_count': 2,
+                  'categories': list([
+                    'sca',
+                    'container',
+                  ]),
                   'duration': 3.0,
                   'exit_code': 0,
                   'finding_count': 2,
@@ -1944,6 +1966,9 @@
                 }),
                 'npm-audit': dict({
                   'actionable_finding_count': 0,
+                  'categories': list([
+                    'sca',
+                  ]),
                   'dependencies_satisfied': False,
                   'duration': None,
                   'excluded': False,
@@ -1963,6 +1988,13 @@
                 }),
                 'semgrep': dict({
                   'actionable_finding_count': 0,
+                  'categories': list([
+                    'sast',
+                    'secrets',
+                    'iac',
+                    'ci',
+                    'quality',
+                  ]),
                   'duration': 4.0,
                   'exit_code': 0,
                   'finding_count': 2,
@@ -1979,6 +2011,9 @@
                 }),
                 'syft': dict({
                   'actionable_finding_count': 0,
+                  'categories': list([
+                    'sbom',
+                  ]),
                   'duration': 2.0,
                   'exit_code': 0,
                   'finding_count': 0,
@@ -3411,6 +3446,9 @@
           'scanner_results': dict({
             'bandit': dict({
               'actionable_finding_count': 1,
+              'categories': list([
+                'sast',
+              ]),
               'duration': 1.25,
               'exit_code': 0,
               'finding_count': 2,
@@ -3427,6 +3465,9 @@
             }),
             'cdk-nag': dict({
               'actionable_finding_count': 0,
+              'categories': list([
+                'iac',
+              ]),
               'dependencies_satisfied': True,
               'duration': None,
               'excluded': True,
@@ -3446,6 +3487,9 @@
             }),
             'cfn-nag': dict({
               'actionable_finding_count': 0,
+              'categories': list([
+                'iac',
+              ]),
               'duration': 0.25,
               'exit_code': 1,
               'finding_count': 0,
@@ -3462,6 +3506,12 @@
             }),
             'checkov': dict({
               'actionable_finding_count': 3,
+              'categories': list([
+                'secrets',
+                'iac',
+                'ci',
+                'api',
+              ]),
               'duration': 7.5,
               'exit_code': 0,
               'finding_count': 4,
@@ -3478,6 +3528,9 @@
             }),
             'detect-secrets': dict({
               'actionable_finding_count': 0,
+              'categories': list([
+                'secrets',
+              ]),
               'duration': 0.5,
               'exit_code': 0,
               'finding_count': 0,
@@ -3494,6 +3547,10 @@
             }),
             'grype': dict({
               'actionable_finding_count': 2,
+              'categories': list([
+                'sca',
+                'container',
+              ]),
               'duration': 3.0,
               'exit_code': 0,
               'finding_count': 2,
@@ -3510,6 +3567,9 @@
             }),
             'npm-audit': dict({
               'actionable_finding_count': 0,
+              'categories': list([
+                'sca',
+              ]),
               'dependencies_satisfied': False,
               'duration': None,
               'excluded': False,
@@ -3529,6 +3589,13 @@
             }),
             'semgrep': dict({
               'actionable_finding_count': 0,
+              'categories': list([
+                'sast',
+                'secrets',
+                'iac',
+                'ci',
+                'quality',
+              ]),
               'duration': 4.0,
               'exit_code': 0,
               'finding_count': 2,
@@ -3545,6 +3612,9 @@
             }),
             'syft': dict({
               'actionable_finding_count': 0,
+              'categories': list([
+                'sbom',
+              ]),
               'duration': 2.0,
               'exit_code': 0,
               'finding_count': 0,

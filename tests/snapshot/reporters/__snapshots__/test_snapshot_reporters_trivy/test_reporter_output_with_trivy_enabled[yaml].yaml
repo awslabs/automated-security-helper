@@ -2879,6 +2879,12 @@ sarif:
 scanner_results:
   trivy:
     actionable_finding_count: 10
+    categories:
+    - secrets
+    - sca
+    - container
+    - iac
+    - license
     dependencies_satisfied: true
     duration: 0.5
     excluded: false

@@ -2,6 +2,11 @@
 # name: test_actionlint_status_and_counts
   dict({
     'actionable_finding_count': 4,
+    'categories': list([
+      'secrets',
+      'ci',
+      'quality',
+    ]),
     'duration': 0.25,
     'exit_code': 0,
     'finding_count': 8,
