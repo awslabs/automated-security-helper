@@ -1,0 +1,20 @@
+
+ Usage: ash suppress migrate [OPTIONS]
+
+ Convert version 1 lock entries whose files are unchanged.
+
+ A version 1 entry is bound to the raw bytes of its file, so any byte change,
+ line endings included, makes it stale. This re-records each entry whose
+ bytes still match as syntax-tree digests with 'file' invalidation scope,
+ which approves nothing: the bytes present are the ones reviewed. An entry
+ whose file changed is listed with the refresh that records its review and
+ left as it is; so are a file that is gone or cannot be parsed. Exits 0 only
+ when no version 1 entry is left.
+
+ Needs the optional 'symbols' extra, which parses the files.
+
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
+│ --source-dir        <str>  The directory the scan covers, which holds .ash.lock. Defaults to the │
+│                            current directory.                                                    │
+│ --help                     Show this message and exit.                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

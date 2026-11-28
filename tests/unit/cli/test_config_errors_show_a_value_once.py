@@ -166,3 +166,92 @@ def test_the_lint_symbol_path_is_shown_once(tmp_path: Path) -> None:
         result.output
     )
     _assert_shown_once(result.output)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("written", "shown"),
+    [
+        pytest.param("a\\x1bb.py", "'a\\x1bb.py' no longer exists", id="gone"),
+        pytest.param("a\\x1bb*.py", "'a\\x1bb*.py' is a pattern", id="pattern"),
+    ],
+)
+def test_the_lock_refusal_shows_the_path_once(
+    tmp_path: Path, written: str, shown: str
+) -> None:
+    """The linter's refusal of a symbol suppression that ``.ash.lock`` does not
+    record quotes its path as written, for a file that is gone and for a
+    pattern, and the lint sink shows it once."""
+    from automated_security_helper.cli.config import config_app
+
+    config = tmp_path / ".ash.yaml"
+    config.write_text(
+        "project_name: demo\n"
+        "global_settings:\n"
+        "  suppressions:\n"
+        "    - rule_id: R1\n"
+        f'      path: "{written}"\n'
+        "      symbol: MyClass.my_method\n"
+        "      reason: probe\n",
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(config_app, ["lint", "--config", str(config)])
+
+    assert shown in result.output, result.output
+    _assert_shown_once(result.output)
+
+
+_SYMBOL_SUPPRESSION_CONFIG = (
+    "project_name: demo\n"
+    "global_settings:\n"
+    "  suppressions:\n"
+    "    - rule_id: R1\n"
+    "      path: src/app.py\n"
+    "      symbol: MyClass.my_method\n"
+    "      reason: probe\n"
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("lock", "shown"),
+    [
+        pytest.param(
+            '{"version": 2, "files": {}, "a\\u001bb": 0}',
+            "has an unknown key 'a\\x1bb' in the document",
+            id="unknown-key",
+        ),
+        pytest.param(
+            '{"version": 2, "files": {"a\\u001bb.py": {}, "a\\u001bb.py": {}}}',
+            "key 'a\\x1bb.py' appears more than once in the object at /files",
+            id="repeated-key",
+        ),
+        pytest.param(
+            '{"version": 2, "files": {"a\\u001bb.py": '
+            '{"created": "x", "created": "y"}}}',
+            "key 'created' appears more than once in the object at /files/a\\x1bb.py",
+            id="repeated-key-pointer",
+        ),
+    ],
+)
+def test_a_lock_file_key_is_shown_once(tmp_path: Path, lock: str, shown: str) -> None:
+    """A committed .ash.lock that the linter cannot read for a symbol
+    suppression is refused naming the lock's key as written, and the lint sink
+    shows it once: an unknown key, a repeated key, and a repeated key inside an
+    object whose pointer holds the character."""
+    from automated_security_helper.cli.config import config_app
+    from automated_security_helper.utils.ash_lock import LOCK_RELATIVE_PATH
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / LOCK_RELATIVE_PATH).write_text(lock, encoding="utf-8")
+    config = root / ".ash.yaml"
+    config.write_text(_SYMBOL_SUPPRESSION_CONFIG, encoding="utf-8")
+
+    result = CliRunner().invoke(
+        config_app, ["lint", "--config", str(config), "--source-dir", str(root)]
+    )
+
+    assert shown in result.output, result.output
+    _assert_shown_once(result.output)

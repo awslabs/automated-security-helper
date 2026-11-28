@@ -254,7 +254,10 @@ from automated_security_helper.utils.output_dir_links import (
     ignore_output_dir_in_git,
     refuse_linked_output_dir,
 )
-from automated_security_helper.utils.terminal_text import shown_on_one_line
+from automated_security_helper.utils.terminal_text import (
+    raw_controls_on_one_line,
+    shown_on_one_line,
+)
 
 #: The remedy for this tool's caller, which names the output tree with output_dir.
 MCP_WORKSPACE_OUTPUT_REMEDY = (
@@ -1839,6 +1842,68 @@ def _project_coverage(
 #: reading that outcome needs. An entry added here must say why.
 _WITHHELD_PROJECT_FIELDS: FrozenSet[str] = frozenset()
 
+#: The fields of a verdict written for a reader: its messages. Each can quote a
+#: value as written (a lock's key, a suppression's path, a tool's own error), and
+#: what a client may display holds no control character (cli/mcp_server.py), so
+#: each is handed over as ``_text_shown`` writes it, as are the reasons of the two
+#: kinds of field below. The project's key and paths, which a client joins on and
+#: opens, and its names, tokens and counts are handed over as recorded.
+_MESSAGE_FIELDS: FrozenSet[str] = frozenset({"display_label", "error", "skip_detail"})
+
+#: The fields that map a scanner's or a converter's name, kept, to a reason, shown.
+_REASON_MAPPINGS: FrozenSet[str] = frozenset(
+    {
+        "incomplete_converters",
+        "incomplete_scanner_details",
+        "scanner_reasons",
+        "unstoppable_tools",
+    }
+)
+
+#: The fields that list one input's records: each record's path is kept, and its
+#: reason and the archive member it names (as the archive spells it) are shown.
+_REASON_RECORDS: FrozenSet[str] = frozenset(
+    {"converter_refusals", "inputs_not_scanned"}
+)
+
+
+def _text_shown(value: Any) -> Any:
+    """*value* on one line, each control character written as its escape, when it
+    is text; any other value as it is.
+
+    ``raw_controls_on_one_line`` and not ``shown_on_one_line``: the text can hold
+    an escape already, where a value was escaped as the error was raised, and that
+    escape keeps its one backslash, as the registry's copy of a project's error
+    reads (``_error_message_shown`` in cli/mcp_tools.py).
+    """
+    return raw_controls_on_one_line(value) if isinstance(value, str) else value
+
+
+def _verdict_text_shown(verdict: Dict[str, Any]) -> None:
+    """Show the text of one projected *verdict* written for a reader, in place:
+    its messages, its mappings' and records' reasons, and the archive member a
+    record names (``_MESSAGE_FIELDS``)."""
+    for field in _MESSAGE_FIELDS:
+        if field in verdict:
+            verdict[field] = _text_shown(verdict[field])
+    for field in _REASON_MAPPINGS:
+        if verdict.get(field):
+            verdict[field] = {
+                name: _text_shown(reason) for name, reason in verdict[field].items()
+            }
+    for field in _REASON_RECORDS:
+        for record in verdict.get(field) or []:
+            for key in ("member", "reason"):
+                if key in record:
+                    record[key] = _text_shown(record[key])
+
+
+def _skip_shown(record: Dict[str, Any]) -> Dict[str, Any]:
+    """One dumped ``skipped_projects`` entry with its ``detail`` shown: the text
+    the project's verdict carries as ``skip_detail``, shown as that is."""
+    record["detail"] = _text_shown(record.get("detail"))
+    return record
+
 
 def _project_verdicts(
     payload: WorkspaceResults,
@@ -1853,6 +1918,12 @@ def _project_verdicts(
     the field is projected like every other, but its values name the pid of a
     server-side process, which a remote client cannot act on and should not
     learn; the cancel warning already withholds them on a network transport.
+
+    The text written for a reader, the messages and the reasons
+    (``_MESSAGE_FIELDS``), is shown on one line with each control character as
+    its escape (``_verdict_text_shown``): a project refused for its configuration
+    has the refusal as its ``error``, and the refusal quotes a lock's key or a
+    suppression's path as written.
 
     Per project and not merged, because the first question about a workspace scan
     is which project failed and a merged count cannot answer it.
@@ -1896,6 +1967,8 @@ def _project_verdicts(
                 name: without_process_ids(str(reason))
                 for name, reason in verdict["unstoppable_tools"].items()
             }
+        # After the pids are dropped: their pattern reads the reason as recorded.
+        _verdict_text_shown(verdict)
         verdict["scan_id"] = scan_ids.get(entry.project)
         verdicts.append(verdict)
     return verdicts
@@ -3220,7 +3293,8 @@ async def _scan_workspace(
             name_process_ids=name_process_ids,
         ),
         "skipped_projects": [
-            entry.model_dump(mode="json") for entry in plan.skipped_projects
+            _skip_shown(entry.model_dump(mode="json"))
+            for entry in plan.skipped_projects
         ],
     }
 

@@ -1,13 +1,15 @@
 
  Usage: ash suppress [OPTIONS] COMMAND [ARGS]...
 
- Create symbol suppressions and keep their content-hash lock (.ash.lock) current.
+ Create symbol suppressions and keep the syntax-tree lock that binds them to reviewed code
+ (.ash.lock) current.
 
 ╭─ Options ────────────────────────────────────────────────────────────────────────────────────────╮
 │ --help          Show this message and exit.                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭─ Commands ───────────────────────────────────────────────────────────────────────────────────────╮
-│ add      Add a symbol suppression and lock its file's content hash.                              │
-│ refresh  Record a new review: re-hash locked files whose bytes changed.                          │
+│ add      Add a symbol suppression and lock its file's syntax tree.                               │
+│ refresh  Record a new review: re-record locked files whose code changed.                         │
 │ verify   Check the lock against the tree. Exits 1 when anything is out of date.                  │
+│ migrate  Convert version 1 lock entries whose files are unchanged.                               │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -265,10 +265,12 @@ def path_pattern_advice(
     - a pattern whose leading names the tree holds only in another case is named
       with the tree's spelling;
     - a ``**`` pattern whose glob-free last component names a directory the tree
-      holds somewhere below the root gets ``directory_path_advice``. A pattern
-      ending in ``/`` never does: under the bare-directory rule (issue #894) it
-      already names the directory and matches the files below it, and it is the
-      spelling the advice itself recommends.
+      holds somewhere below the root gets ``directory_path_advice``. An ignore
+      path ending in ``/`` never does: it already names the directory and
+      matches the files below it (``ignore_path_pattern``), and it is the
+      spelling the advice itself recommends for one. A suppression path ending
+      in ``/`` does: matched as written, ``**/node_modules/`` covers no file,
+      and the advice is ``**/node_modules/**/*``.
 
     The message names the pattern as ``shown_pattern``, with any part read from
     the environment shown as such, and then quotes neither the pattern nor the
@@ -341,12 +343,16 @@ def path_pattern_advice(
             )
         return f"Path '{shown}' matches '{spelled}' {CASE_ONLY_PROBLEM}."
 
-    # Under the bare-directory rule (issue #894) a trailing '/' names the
-    # directory and matches the files below it, in ignore paths and
-    # suppressions alike, so a pattern already spelled that way is the very
-    # spelling directory_path_advice recommends: '**/node_modules/' must not
-    # be advised to become '**/node_modules/'.
-    if form.endswith("/"):
+    # An ignore path ending in '/' names the directory and matches the files
+    # below it (path_matching.ignore_path_pattern reads '**/node_modules/' as
+    # '**/node_modules/*/**'), so it is the very spelling directory_path_advice
+    # recommends for one: '**/node_modules/' must not be advised to become
+    # '**/node_modules/'. A suppression path gets no such reading. The
+    # bare-directory rule (issue #894) covers a glob-free one, which the '**'
+    # check below never advises, but '**/node_modules/' as a suppression
+    # matches no file (its last component is empty), and the advice for it is
+    # '**/node_modules/**/*'.
+    if ignore_path and form.endswith("/"):
         return None
 
     clean_path = form.rstrip("/")
@@ -4000,6 +4006,17 @@ class ConfigValidator:
         "Missing required top-level field: 'project_name'"
     )
 
+    # Prefix of the warning check_config_file gives, with no source_dir, for
+    # what the .ash.lock check found: the directory a scan reads, and so its
+    # lock, is not known, and a lock beside the config file is only a guess at
+    # it. The ash_lock refusal follows the prefix.
+    LOCK_NOT_CHECKED_PREFIX = (
+        "Lock not checked against a source tree (no source directory was "
+        "given): a scan refuses this config unless the .ash.lock of the "
+        "directory it scans records these symbol suppressions. Checked here "
+        "against the root the config file's location implies instead: "
+    )
+
     @classmethod
     def check_config_file(
         cls,
@@ -4422,10 +4439,15 @@ class ConfigValidator:
         # A symbol-scoped suppression needs a recorded entry in .ash.lock, as a
         # scan requires (core/orchestrator.resolve_scan_config). Judged on the
         # config the model built, relative to the directory a scan would scan.
-        # Without a source_dir (MCP validate_config, validate_and_raise) the
-        # lock root falls back to the root the config's location implies, as
-        # _structure_warnings resolves paths: skipping the check answered
-        # ``valid: True`` for a config a scan refuses.
+        # Without a source_dir (MCP validate_config, validate_and_raise) that
+        # directory is unknown. The lock read is then the one at the root the
+        # config's location implies, as _structure_warnings resolves paths, and
+        # what it finds is a warning (LOCK_NOT_CHECKED_PREFIX), not an error:
+        # as an error it called a config invalid that a scan of its tree
+        # accepts, since MCP content is written to an empty temporary
+        # directory and a config outside the scanned tree sits beside no lock
+        # of that tree. Skipping the check instead answered ``valid: True``
+        # with nothing said.
         if refused is None and built is not None:
             from automated_security_helper.core.exceptions import (
                 ASHConfigValidationError as _LockRefusal,
@@ -4434,6 +4456,7 @@ class ConfigValidator:
                 refuse_unlocked_symbol_suppressions,
             )
 
+            lock_root_inferred = source_dir is None
             if source_dir is not None:
                 lock_root = Path(source_dir)
             else:
@@ -4450,9 +4473,15 @@ class ConfigValidator:
                     )
                     or [],
                     lock_root,
+                    scanned_tree=not lock_root_inferred,
                 )
             except _LockRefusal as e:
-                result.errors.append(result.redact(str(e)))
+                if lock_root_inferred:
+                    result.warnings.append(
+                        result.redact(cls.LOCK_NOT_CHECKED_PREFIX + str(e))
+                    )
+                else:
+                    result.errors.append(result.redact(str(e)))
 
         # The checks that read the merged result read it as the scan builds
         # it: with --config-overrides applied. A missing project_name an
@@ -5762,8 +5791,11 @@ class ConfigValidator:
         path is fine (``path_pattern_advice``, shared with ``ash config lint``),
         after ``absolute_path_warning`` for an absolute one.
 
-        A path ending in ``/`` names the directory and matches what is in it
-        (issue #894), in ignore paths and suppressions alike, so it is fine.
+        An ignore path ending in ``/`` names the directory and matches what is
+        in it, so it is fine; so does a suppression path ending in ``/`` with no
+        glob character (issue #894). A ``**`` suppression path ending in ``/``
+        matches no file, and when its last component names a directory the
+        tree holds it is advised the spelling that does.
         The message names the path as ``shown_pattern``, with any part read
         from the environment shown as ``<value>``; None names it as it is.
         """

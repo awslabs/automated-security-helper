@@ -11,7 +11,7 @@ Usage:
     uv run python scripts/generate_test_docx.py
 """
 
-import datetime
+import datetime as dt
 import io
 import random  # nosec B311 — seeded PRNG for reproducible synthetic test data
 import string
@@ -41,7 +41,7 @@ SEED = 42
 #: The timestamps written into the document, so two runs save the same bytes.
 #: The zip date_time tuple is the earliest a zip entry can carry.
 FIXED_ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
-FIXED_DOCUMENT_TIME = datetime.datetime(2024, 1, 1, 0, 0, 0)
+FIXED_DOCUMENT_TIME = dt.datetime(2024, 1, 1, 0, 0, 0)
 
 # ============================================================================
 # Synthetic data generators

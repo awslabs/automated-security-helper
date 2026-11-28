@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import collections.abc
 import dataclasses
-import datetime
+import datetime as dt
 import decimal
 import enum
 import ipaddress
@@ -104,7 +104,7 @@ def _assert_named_not_echoed(text: str, field: str) -> None:
         conint(ge=0),
         Union[int, float],
         decimal.Decimal,
-        datetime.date,
+        dt.date,
     ],
     ids=[
         "optional-positive-int",
@@ -1727,6 +1727,173 @@ def test_a_marker_behind_a_generated_alias_key_is_refused(kind):
     assert "067" not in text, text
 
 
+class _NamedTuplePlainStr(NamedTuple):
+    name: str
+
+
+class _PrefixedStrSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_NamedTuplePlainStr] = None
+
+
+def test_a_marker_behind_a_generated_alias_key_at_a_str_field_keeps_the_text():
+    """The must-not-flag control for the named-tuple cell above: the same
+    generated key at a str field keeps the text, so the refusal there answers
+    to the field's type, not to the key being a generated one."""
+    section = _PrefixedStrSection.model_validate(
+        {"x_items": {"x_name": env_resolved_scalar("067", VARIABLE)}}
+    )
+    assert section.items is not None
+    assert section.items.name == "067"
+    assert type(section.items.name) is str
+
+
+#: A core-schema node type no pydantic release builds: the shape a later
+#: release might build a holder as, which the generated-alias reader does not
+#: know.
+_LATER_NODE = "holder-of-a-later-pydantic"
+
+
+class _UnreadTypedDict(TypedDict):
+    count: int
+
+
+class _UnreadNamedTuple(NamedTuple):
+    count: int
+
+
+@dataclasses.dataclass
+class _UnreadDataclass:
+    count: int
+
+
+class _OpaqueHandle:
+    """A class pydantic checks by isinstance alone, and only under
+    ``arbitrary_types_allowed``."""
+
+
+class _TypedDictWithAnOpaqueField(TypedDict):
+    count: int
+    handle: _OpaqueHandle
+
+
+class _UnreadTypedDictSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_UnreadTypedDict] = None
+
+
+class _UnreadNamedTupleSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_UnreadNamedTuple] = None
+
+
+class _UnreadDataclassSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed)
+    items: Optional[_UnreadDataclass] = None
+
+
+class _OpaqueFieldSection(RedactedSection):
+    model_config = ConfigDict(alias_generator=_prefixed, arbitrary_types_allowed=True)
+    items: Optional[_TypedDictWithAnOpaqueField] = None
+
+
+_HANDLE = _OpaqueHandle()
+
+#: Each way the generated-alias reader can fail to read a holder's keys: the
+#: section, the node the reader's holder-node lookup is made to return (None
+#: keeps the real one), and what the refusal must name. The last row needs no
+#: stand-in: the reader builds the holder's schema with the alias_generator
+#: alone, so a holder whose field only arbitrary_types_allowed admits cannot
+#: be built there, while the section builds it under its own config.
+_UNREAD_SCHEMAS = {
+    "typed-dict-as-a-later-node": (
+        _UnreadTypedDictSection,
+        {"type": _LATER_NODE},
+        (f"`{_LATER_NODE}`", "_UnreadTypedDict"),
+    ),
+    "named-tuple-as-a-later-node": (
+        _UnreadNamedTupleSection,
+        {"type": _LATER_NODE},
+        (f"`{_LATER_NODE}`", "_UnreadNamedTuple"),
+    ),
+    "dataclass-as-a-later-node": (
+        _UnreadDataclassSection,
+        {"type": _LATER_NODE},
+        (f"`{_LATER_NODE}`", "_UnreadDataclass"),
+    ),
+    "dataclass-fields-as-a-later-node": (
+        _UnreadDataclassSection,
+        {"type": "dataclass", "schema": {"type": _LATER_NODE}},
+        (f"`{_LATER_NODE}`", "_UnreadDataclass"),
+    ),
+    "typed-dict-node-whose-fields-cannot-be-read": (
+        _UnreadTypedDictSection,
+        {"type": "typed-dict"},
+        ("`typed-dict`", "KeyError", "_UnreadTypedDict"),
+    ),
+    "holder-schema-that-cannot-be-built-here": (
+        _OpaqueFieldSection,
+        None,
+        ("PydanticSchemaGenerationError", "_TypedDictWithAnOpaqueField"),
+    ),
+}
+
+
+def _unread_holder_schema(monkeypatch, kind):
+    """The section and the payload builder of the *kind* row, with the
+    generated-alias cache emptied so no earlier read of a holder answers for
+    it, and the row's stand-in node, if any, returned by the reader's
+    holder-node lookup."""
+    from automated_security_helper.utils import redacted_model as module
+
+    section_type, node, _ = _UNREAD_SCHEMAS[kind]
+    monkeypatch.setattr(module, "_GENERATED_ALIAS_CACHE", {})
+    if node is not None:
+        monkeypatch.setattr(module, "_holder_core_schema", lambda schema: node)
+
+    def payload(value):
+        items = {"x_count": value}
+        if section_type is _OpaqueFieldSection:
+            items["x_handle"] = _HANDLE
+        return {"x_items": items}
+
+    return section_type, payload
+
+
+@pytest.mark.parametrize("kind", list(_UNREAD_SCHEMAS))
+def test_a_marker_under_a_generated_key_the_reader_cannot_read_is_refused(
+    kind, monkeypatch
+):
+    """The keys an alias_generator gives a TypedDict, NamedTuple or stdlib
+    dataclass are read from the core schema pydantic builds for it. When that
+    schema holds a node the reader does not know, or cannot be read or built,
+    the walk used to fall back to the field metadata, which holds no generated
+    key, so a reference under one went to pydantic downcast and the int field
+    converted it silently. It cannot be placed, so it is refused, naming the
+    holder and the schema node that went unread."""
+    section_type, payload = _unread_holder_schema(monkeypatch, kind)
+    text = _refusal_text(section_type, payload(env_resolved_scalar("067", VARIABLE)))
+    assert VARIABLE in text, text
+    assert "067" not in text, text
+    for named in _UNREAD_SCHEMAS[kind][2]:
+        assert named in text, text
+
+
+@pytest.mark.parametrize("kind", list(_UNREAD_SCHEMAS))
+def test_the_same_value_without_a_marker_validates_at_an_unread_holder_schema(
+    kind, monkeypatch
+):
+    """The must-not-flag control for the refusal above: the same value with
+    the text written in place of the reference validates as it did, so the
+    refusal answers to the reference, not to the holder or the payload."""
+    section_type, payload = _unread_holder_schema(monkeypatch, kind)
+    section = section_type.model_validate(payload("067"))
+    items = section.items
+    assert items is not None
+    count = items["count"] if isinstance(items, dict) else items.count
+    assert count == 67
+
+
 def test_sections_under_a_root_model_keep_a_marker_at_a_str_field_as_text():
     """The must-not-flag control for the cells above: a str field keeps the
     text, downcast to a plain str, behind the RootModel."""
@@ -1917,10 +2084,13 @@ def _typed_dict_fields(adapter):
     return nodes[0]["fields"]
 
 
-def _named_tuple_parameters(adapter):
-    nodes = _schema_nodes(adapter.core_schema, "arguments")
+def _named_tuple_fields(adapter):
+    """The fields of the one ``named-tuple`` node: the shape pydantic 2.14
+    builds a NamedTuple as (2.13 built a ``call`` node over an ``arguments``
+    schema), and the one the walk's generated-alias read takes them from."""
+    nodes = _schema_nodes(adapter.core_schema, "named-tuple")
     assert len(nodes) == 1, nodes
-    return {param["name"]: param for param in nodes[0]["arguments_schema"]}
+    return {field["name"]: field for field in nodes[0]["fields"]}
 
 
 def test_the_public_schema_carries_a_typed_dicts_own_generated_alias():
@@ -1943,10 +2113,8 @@ def test_the_public_schema_carries_the_enclosing_generated_alias_for_a_typed_dic
 
 def test_the_public_schema_carries_a_named_tuples_generated_alias():
     config = ConfigDict(alias_generator=_prefixed)
-    parameters = _named_tuple_parameters(
-        TypeAdapter(List[_NamedTuplePlainInt], config=config)
-    )
-    assert parameters["count"]["alias"] == "x_count"
+    fields = _named_tuple_fields(TypeAdapter(List[_NamedTuplePlainInt], config=config))
+    assert fields["count"]["validation_alias"] == "x_count"
 
 
 @_NEEDS_GENERIC_NAMED_TUPLE
@@ -1955,8 +2123,8 @@ def test_the_public_schema_carries_the_alias_choices_of_a_parameterized_holder()
     turn back into the objects the walk's alias helper reads."""
     typed_dict = _typed_dict_fields(TypeAdapter(List[_GenericTypedDict[int]]))
     assert typed_dict["count"]["validation_alias"] == [["count"], ["n"]]
-    named_tuple = _named_tuple_parameters(TypeAdapter(List[_GenericNamedTuple[int]]))
-    assert named_tuple["count"]["alias"] == [["count"], ["n"]]
+    named_tuple = _named_tuple_fields(TypeAdapter(List[_GenericNamedTuple[int]]))
+    assert named_tuple["count"]["validation_alias"] == [["count"], ["n"]]
 
 
 @pydantic.dataclasses.dataclass(config=ConfigDict(alias_generator=_prefixed))
@@ -2150,7 +2318,7 @@ class _Options(BaseModel):
         Union[Literal["all"], float],
         Union[Literal["all"], bool],
         Union[Literal["all"], decimal.Decimal],
-        Union[Literal["all"], datetime.date],
+        Union[Literal["all"], dt.date],
         Union[Literal["all"], Path],
         Union[Literal["all"], _Level],
         Union[Literal["all"], _CountRoot],

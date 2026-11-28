@@ -174,7 +174,9 @@ def test_a_rename_refused_once_is_tried_again(monkeypatch) -> None:
     monkeypatch.setattr(profile_registry.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(profile_registry, "_rename_waits_on_readers", lambda: True)
 
-    path = materialize_session_config(SESSION, AshConfig(project_name="retried"))
+    path = materialize_session_config(
+        SESSION, AshConfig(project_name="retried"), filename=SESSION_CONFIG_FILENAME
+    )
 
     assert refused, "the stand-in never saw the rename"
     assert "retried" in Path(path).read_text(encoding="utf-8")
@@ -202,7 +204,9 @@ def test_a_refusal_where_the_rename_never_waits_is_raised_at_once(
     monkeypatch.setattr(profile_registry, "_rename_waits_on_readers", lambda: False)
 
     with pytest.raises(PermissionError):
-        materialize_session_config(SESSION, AshConfig(project_name="at-once"))
+        materialize_session_config(
+            SESSION, AshConfig(project_name="at-once"), filename=SESSION_CONFIG_FILENAME
+        )
 
     assert len(attempts) == 1, attempts
     assert slept == [], slept
@@ -221,6 +225,8 @@ def test_a_rename_refused_every_time_is_raised_without_a_partial(monkeypatch) ->
     monkeypatch.setattr(profile_registry.time, "sleep", lambda seconds: None)
 
     with pytest.raises(PermissionError):
-        materialize_session_config(SESSION, AshConfig(project_name="never"))
+        materialize_session_config(
+            SESSION, AshConfig(project_name="never"), filename=SESSION_CONFIG_FILENAME
+        )
 
     _no_partial_left(*_session_directories())

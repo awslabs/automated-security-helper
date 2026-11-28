@@ -127,6 +127,7 @@ ash_config:
         - /scanners/grype/options/config_file
         - /scanners/syft/options/config_file
         - /scanners/syft/options/sdist_harvest/**
+        - /converters/sdist-lock-harvester/**
         - /scanners/trivy-repo/options/secret_config_file
         - /scanners/trivy-repo/options/config_file
         - /scanners/trivy-repo/options/module_dir
@@ -185,6 +186,7 @@ ash_config:
         enabled: false
         replace_default_denied_paths: false
     severity_threshold: MEDIUM
+    suppression_invalidation_scope: file
     suppressions: []
   honor_ignore_files: true
   mcp-resource-management:

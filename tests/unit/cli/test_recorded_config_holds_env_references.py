@@ -682,7 +682,9 @@ def test_a_profile_session_copy_reads_the_value_at_load(tmp_path, probe_env):
     registry = profile_registry.register_profiles([f"probe={profile}"])
     written = Path(
         profile_registry.materialize_session_config(
-            "session-env", registry["probe"].config
+            "session-env",
+            registry["probe"].config,
+            filename=profile_registry.SESSION_CONFIG_FILENAME,
         )
     )
     text = written.read_text(encoding="utf-8")

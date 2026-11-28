@@ -220,6 +220,28 @@ def scanner_resource_id_state(scanner_name: Any) -> Optional["FacetState"]:
     return None
 
 
+def scanner_declares_python_only(scanner_name: Any) -> Optional[bool]:
+    """The ``python_only`` the loaded scanner class named ``scanner_name`` states,
+    or None.
+
+    A Python-only run leaves out every scanner whose ``is_python_only`` is False,
+    and a class that states ``python_only`` answers with it
+    (``ScannerPluginBase.is_python_only``). A plugin that runs before the scan
+    phase has no scanner instance to ask, so it reads the statement here. None
+    when no loaded class has this config name, or the class states nothing: its
+    answer then depends on its instance, and the caller cannot decide.
+    """
+    if not isinstance(scanner_name, str) or not scanner_name:
+        return None
+    for cls in _loaded_scanner_classes():
+        if _class_config_name(cls) != scanner_name:
+            continue
+        declared = getattr(cls, "python_only", None)
+        if isinstance(declared, bool):
+            return declared
+    return None
+
+
 def an_image_digest_consumer_is_selected(
     enabled_scanners: Optional[Iterable[Any]] = None,
     excluded_scanners: Optional[Iterable[Any]] = None,

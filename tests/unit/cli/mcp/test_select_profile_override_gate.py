@@ -759,6 +759,10 @@ _POINTED_DENIALS: Dict[str, Tuple[str, Any]] = {
         "/scanners/syft/options/sdist_harvest/enabled",
         False,
     ),
+    "/converters/sdist-lock-harvester/**": (
+        "/converters/sdist-lock-harvester/enabled",
+        False,
+    ),
     "/scanners/bandit/options/config_file": (
         "/scanners/bandit/options/config_file",
         "/etc/other.ini",

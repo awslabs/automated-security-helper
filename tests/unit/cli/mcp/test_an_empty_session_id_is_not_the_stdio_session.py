@@ -103,7 +103,9 @@ def test_materializing_for_an_empty_id_writes_nothing_for_the_stdio_session(
     """An empty id has no session sandbox, so the write is refused, and the
     stdio session's workspace is not created."""
     with pytest.raises(RuntimeError):
-        profile_registry.materialize_session_config("", AshConfig())
+        profile_registry.materialize_session_config(
+            "", AshConfig(), filename=profile_registry.SESSION_CONFIG_FILENAME
+        )
 
     assert not (root / profile_registry.DEFAULT_SESSION_ID).exists()
 

@@ -59,9 +59,10 @@ The Environment variable column names the variable click reads for the option; a
 | [`ash results report`](#results-report) | Generate a report from ASH scan results using the specified reporter plugin. |
 | [`ash results trend`](#results-trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 | [`ash scan`](#scan) | Scan code, infrastructure, secrets, and dependencies. |
-| [`ash suppress`](#suppress) | Create symbol suppressions and keep their content-hash lock (.ash.lock) current. |
-| [`ash suppress add`](#suppress-add) | Add a symbol suppression and lock its file's content hash. |
-| [`ash suppress refresh`](#suppress-refresh) | Record a new review: re-hash locked files whose bytes changed. |
+| [`ash suppress`](#suppress) | Create symbol suppressions and keep the syntax-tree lock that binds them to reviewed code (.ash.lock) current. |
+| [`ash suppress add`](#suppress-add) | Add a symbol suppression and lock its file's syntax tree. |
+| [`ash suppress migrate`](#suppress-migrate) | Convert version 1 lock entries whose files are unchanged. |
+| [`ash suppress refresh`](#suppress-refresh) | Record a new review: re-record locked files whose code changed. |
 | [`ash suppress verify`](#suppress-verify) | Check the lock against the tree. Exits 1 when anything is out of date. |
 | [`ash trend`](#trend) | Show new, carried and fixed findings over a series of saved ASH scans. |
 
@@ -1062,7 +1063,7 @@ ash scan [OPTIONS]
 
 ## <a id="suppress"></a>`ash suppress`
 
-Create symbol suppressions and keep their content-hash lock (.ash.lock) current.
+Create symbol suppressions and keep the syntax-tree lock that binds them to reviewed code (.ash.lock) current.
 
 ```text
 ash suppress [OPTIONS] COMMAND [ARGS]...
@@ -1070,26 +1071,31 @@ ash suppress [OPTIONS] COMMAND [ARGS]...
 
 This command takes no options.
 
-Subcommands: [`ash suppress add`](#suppress-add), [`ash suppress refresh`](#suppress-refresh), [`ash suppress verify`](#suppress-verify).
+Subcommands: [`ash suppress add`](#suppress-add), [`ash suppress migrate`](#suppress-migrate), [`ash suppress refresh`](#suppress-refresh), [`ash suppress verify`](#suppress-verify).
 
 ### <a id="suppress-add"></a>`ash suppress add`
 
-Add a symbol suppression and lock its file's content hash.
+Add a symbol suppression and lock its file's syntax tree.
 
-Writes the suppression into the config and the hash of the file's bytes
-into .ash.lock. While the file is unchanged the suppression applies;
-after any edit to the file its findings are reported again until the change
-is reviewed and `ash suppress refresh` records it.
+Writes the suppression into the config and digests of the file's
+tree-sitter parse into .ash.lock. While the code is unchanged the
+suppression applies; after a change, in the file or only in the symbol as
+the invalidation scope says, its findings are reported again until the
+change is reviewed and `ash suppress refresh` records it. Changes to
+spaces, tabs and line breaks between tokens do not count; comments, string
+literals and every other token do.
 
 A suppression already in the config for the same rule, file and symbol is
 not written twice; the lock entry is still created or completed, which is
 how an existing suppression is brought under the lock.
 
+Needs the optional 'symbols' extra, which parses the file.
+
 Example:
 
 ```text
 ash suppress add B602 --symbol Handler.run --file src/app.py \
-    --reason "The command is a constant."
+    --reason "The command is a constant." --invalidation-scope symbol
 ```
 
 ```text
@@ -1105,19 +1111,50 @@ ash suppress add [OPTIONS] {rule_id}
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
 | <a id="suppress-add--symbol"></a>`--symbol` | text | required |  | The definition the suppression covers, as a dotted qualified name such as 'MyClass.my_method'. |
-| <a id="suppress-add--file"></a>`--file` | text | required |  | The file that holds the definition, relative to the source directory. Its content hash is recorded in the lock. |
+| <a id="suppress-add--file"></a>`--file` | text | required |  | The file that holds the definition, relative to the source directory. Its syntax-tree digests are recorded in the lock. |
 | <a id="suppress-add--reason"></a>`--reason` | text | required |  | Why the finding is safe to suppress. |
 | <a id="suppress-add--config"></a>`--config`, `-c` | text | not set |  | The YAML config file to write the suppression to. Defaults to the config a scan of the source directory uses. |
 | <a id="suppress-add--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
+| <a id="suppress-add--invalidation-scope"></a>`--invalidation-scope` | one of `file`, `symbol` | not set |  | What makes the suppression stop applying until it is reviewed again: 'file', a change to the code of the file, or 'symbol', a change to the code of the definition itself. Defaults to the config's global_settings.suppression_invalidation_scope, else 'file'. A suppression already recorded keeps its kind; change it with `ash suppress refresh --invalidation-scope`. |
+
+### <a id="suppress-migrate"></a>`ash suppress migrate`
+
+Convert version 1 lock entries whose files are unchanged.
+
+A version 1 entry is bound to the raw bytes of its file, so any byte change,
+line endings included, makes it stale. This re-records each entry whose
+bytes still match as syntax-tree digests with 'file' invalidation scope,
+which approves nothing: the bytes present are the ones reviewed. An entry
+whose file changed is listed with the refresh that records its review and
+left as it is; so are a file that is gone or cannot be parsed. Exits 0 only
+when no version 1 entry is left.
+
+Needs the optional 'symbols' extra, which parses the files.
+
+```text
+ash suppress migrate [OPTIONS]
+```
+
+<!-- doctest: options of=cli.suppress.migrate -->
+| Option | Type | Default | Environment variable | Description |
+|--------|------|---------|----------------------|-------------|
+| <a id="suppress-migrate--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-refresh"></a>`ash suppress refresh`
 
-Record a new review: re-hash locked files whose bytes changed.
+Record a new review: re-record locked files whose code changed.
 
 Run it after reading what changed in a file and confirming its suppressions
-still hold. It prints each file whose hash changed. A locked file that no
-longer exists is reported and left as it was (exit code 1), unless
---drop-missing removes its dead entry.
+still hold. It re-records every suppression of each named file from the
+code as it stands, and prints each file it re-recorded. A locked file that
+no longer exists is reported and left as it was (exit code 1), unless
+--drop-missing removes its dead entry, and so is the lock's record of a
+symbol the file no longer defines. A file that changed and cannot be parsed
+is left as it was (exit code 1).
+
+--invalidation-scope converts suppressions between 'file' and 'symbol'
+scope; recording a new kind is a review too. A version 1 entry is
+converted to a syntax-tree entry when its file is refreshed.
 
 ```text
 ash suppress refresh [OPTIONS] [paths]...
@@ -1126,26 +1163,31 @@ ash suppress refresh [OPTIONS] [paths]...
 <!-- doctest: options of=cli.suppress.refresh -->
 | Argument | Type | Default | Environment variable | Description |
 |----------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to re-hash. Pass --all for every locked file. |
+| <a id="suppress-refresh--arg-paths"></a>`paths` | text, any number | not set |  | Locked files to record a new review of. Pass --all for every locked file. |
 
 <!-- doctest: options of=cli.suppress.refresh -->
 | Option | Type | Default | Environment variable | Description |
 |--------|------|---------|----------------------|-------------|
-| <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Re-hash every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
-| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, instead of leaving it and exiting 1. |
+| <a id="suppress-refresh--all"></a>`--all` | flag | off |  | Refresh every locked file. A refresh re-approves each changed file it touches, so the whole-lock run is asked for explicitly. |
+| <a id="suppress-refresh--drop-missing"></a>`--drop-missing` | flag | off |  | Remove the entry of a named file that no longer exists, and the lock's record of a symbol the file no longer defines, instead of leaving them and exiting 1. The config's suppression is not removed: rename or remove it, or the next scan refuses the config. |
+| <a id="suppress-refresh--invalidation-scope"></a>`--invalidation-scope` | one of `file`, `symbol` | not set |  | Set the invalidation scope of the named files' recorded suppressions, or with --symbol of that symbol's only: 'file' or 'symbol'. Without it every suppression keeps its kind. |
+| <a id="suppress-refresh--symbol"></a>`--symbol` | text | not set |  | With --invalidation-scope, change only the suppressions of this symbol. Every suppression of the file is re-recorded either way. |
 | <a id="suppress-refresh--source-dir"></a>`--source-dir` | text | not set |  | The directory the scan covers, which holds .ash.lock. Defaults to the current directory. |
 
 ### <a id="suppress-verify"></a>`ash suppress verify`
 
 Check the lock against the tree. Exits 1 when anything is out of date.
 
-Lists every locked file whose bytes changed or that is gone, and every
-symbol suppression in the checked configs that the lock does not record
-(no entry for its file, or no recorded (rule_id, symbol) scope). It checks
-the named --config files, or the one config file a scan of the source
-directory discovers, and prints which; suppressions an `extends` base
-contributes are not read, so exit code 0 covers the checked files, not
-every config a scan could merge.
+Lists every recorded suppression whose code changed (its file's, or its
+symbol's when it is symbol-scoped), whose symbol is gone, whose file is
+gone or changed and cannot be parsed, and every symbol suppression in the
+checked configs that the lock does not record (no entry for its file, or
+no recorded (rule_id, symbol) scope). It checks the named --config files,
+or the one config file a scan of the source directory discovers, and
+prints which; suppressions an `extends` base contributes are not read, so
+exit code 0 covers the checked files, not every config a scan could merge.
+
+Needs the optional 'symbols' extra only for a file that changed.
 
 ```text
 ash suppress verify [OPTIONS]

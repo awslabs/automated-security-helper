@@ -14,7 +14,7 @@ tested ``current in TIGHTENING_VALUES[...]``, which is Python equality, so
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import sys
 from typing import Any
 
@@ -52,9 +52,7 @@ def test_control_an_option_with_no_listed_value_is_never_a_tightening() -> None:
 
 
 def test_a_value_that_is_not_json_is_not_a_tightening_and_does_not_raise() -> None:
-    assert (
-        is_tightening_value("opengrep", "metrics", datetime.date(2026, 1, 1)) is False
-    )
+    assert is_tightening_value("opengrep", "metrics", dt.date(2026, 1, 1)) is False
 
 
 def test_a_value_nested_too_deep_is_not_a_tightening_and_does_not_raise() -> None:

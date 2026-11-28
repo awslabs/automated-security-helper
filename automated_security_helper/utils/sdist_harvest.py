@@ -524,8 +524,10 @@ def harvest_options_of(config: object) -> Mapping[str, object]:
     surface (it owns SBOM configuration) while the harvest itself runs in the
     convert phase. Returns a plain mapping with every key defaulted, so the
     harvester behaves identically whether the section is typed, absent, or an
-    operator override. The syft scanner being DISABLED reads as harvest
-    disabled: the harvest exists to complete the SBOM that scanner produces.
+    operator override. The syft scanner being DISABLED (``syft_enabled``) means
+    nothing is fetched: the harvest exists to complete the SBOM that scanner
+    produces. The converter then only names what it did not harvest, for the
+    readers :func:`harvest_advisory_readers_that_run` finds.
     """
     defaults: Dict[str, object] = {
         "enabled": True,
@@ -570,3 +572,79 @@ def harvest_options_of(config: object) -> Mapping[str, object]:
             item for item in lockfiles if isinstance(item, str) and item
         ]
     return defaults
+
+
+#: The scanners besides syft that read the harvested lockfiles from the converted
+#: target, to match advisories against the packages they name. With the syft
+#: scanner disabled nothing is fetched, and the converter names the packages it
+#: did not harvest only for the ones of these that run.
+HARVEST_ADVISORY_READERS: Tuple[str, ...] = ("grype", "trivy")
+
+
+def harvest_advisory_readers_that_run(
+    config: object, selection: object = None
+) -> List[str]:
+    """The scanners of ``HARVEST_ADVISORY_READERS`` that this run runs.
+
+    A reader runs when its config section leaves it enabled and the run's
+    scanner selection keeps it. The section is read with ``section_enabled``,
+    the one reading of ``enabled`` the phases share, from the section
+    ``get_plugin_config`` returns, or from the ``scanners`` attribute of a
+    config that has no such method. An absent section, and a lookup that
+    raises, read as enabled, as an absent syft section does in
+    :func:`harvest_options_of`: a record that names a gap no reader has is
+    noise, while a missing one hides a gap.
+
+    ``selection`` is the context's ``scanner_selection``, which the engine
+    records. It leaves a reader out as the scan phase does: an exclusion names
+    it, an allowlist is given and does not name it, or the run is Python-only
+    and the reader's class says it is not Python-only. A reader is named by its
+    section's ``name``, else by its own, and names compare through
+    ``selection_key``. With no selection (a context no engine was built over)
+    none is left out. The shards of a split scan are not told apart: each
+    shard names the readers the selection keeps for the whole scan.
+    """
+    from automated_security_helper.base.plugin_config import section_enabled
+    from automated_security_helper.utils.scanner_names import selection_key
+    from automated_security_helper.utils.scanner_tool_types import (
+        scanner_declares_python_only,
+    )
+
+    lookup = getattr(config, "get_plugin_config", None)
+    scanners = getattr(config, "scanners", None)
+    allowlist = {selection_key(name) for name in getattr(selection, "enabled", ())}
+    excluded = {selection_key(name) for name in getattr(selection, "excluded", ())}
+    python_only = bool(getattr(selection, "python_only", False))
+    running: List[str] = []
+    for name in HARVEST_ADVISORY_READERS:
+        if callable(lookup):
+            try:
+                section = lookup("scanner", name)
+            except Exception:
+                section = None
+        else:
+            section = getattr(scanners, name, None)
+        if not section_enabled(section):
+            continue
+        key = selection_key(_selected_as(section, name))
+        if key in excluded or (allowlist and key not in allowlist):
+            continue
+        if python_only and scanner_declares_python_only(name) is False:
+            continue
+        running.append(name)
+    return running
+
+
+def _selected_as(section: object, name: str) -> str:
+    """The name a scanner is selected by: its section's ``name``, else ``name``.
+
+    The scan phase matches a selection against ``config.name`` on each scanner,
+    which a section can set, so the reader is judged by the same name.
+    """
+    if isinstance(section, dict):
+        configured = section.get("name")
+    else:
+        configured = getattr(section, "name", None)
+    if isinstance(configured, str) and configured:
+        return configured
+    return name

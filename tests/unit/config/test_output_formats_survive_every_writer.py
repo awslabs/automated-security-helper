@@ -97,6 +97,7 @@ def _printed_yaml(stdout: str) -> str:
 
 def test_one_file_keeps_output_formats_through_every_writer(tmp_path):
     from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
         materialize_session_config,
     )
 
@@ -135,7 +136,11 @@ def test_one_file_keeps_output_formats_through_every_writer(tmp_path):
     _loaded(from_get, tmp_path).save(saved, as_written=False)
     _assert_kept(_loaded(saved, tmp_path), "wizarded")
 
-    session = Path(materialize_session_config("session-a", _loaded(saved, tmp_path)))
+    session = Path(
+        materialize_session_config(
+            "session-a", _loaded(saved, tmp_path), filename=SESSION_CONFIG_FILENAME
+        )
+    )
     _assert_kept(_loaded(session, session.parent), "wizarded")
 
 

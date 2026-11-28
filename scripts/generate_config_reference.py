@@ -64,7 +64,7 @@ from __future__ import annotations
 
 import argparse
 import ast
-import datetime as _dt
+import datetime as dt
 import enum
 import inspect
 import operator
@@ -182,8 +182,8 @@ def type_text(annotation: Any, link=None) -> str:
         float: "number",
         bool: "boolean",
         Path: "path",
-        _dt.date: "date",
-        _dt.datetime: "date and time",
+        dt.date: "date",
+        dt.datetime: "date and time",
         Any: "any",
         type(None): "null",
     }.get(annotation, getattr(annotation, "__name__", str(annotation)))

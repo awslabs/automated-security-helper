@@ -17,6 +17,12 @@ cannot be read or lies outside the scan root, and a file that tree-sitter
 cannot parse without errors. A partial tree is not trusted, because an error
 node can swallow or truncate a definition and give it the wrong span.
 
+The same parse yields the syntax-tree digests ``.ash.lock`` records
+(``utils/ast_digest.py``): one read of a file gives its spans, the digest of the
+whole file and the digest of each symbol a suppression is scoped to, so the
+lines a finding must lie in and the bytes a lock entry covers come from the same
+bytes. Analyses are cached by the bytes' SHA-256, never by a file's stat.
+
 Qualified names
 ---------------
 
@@ -41,21 +47,28 @@ declaration, so a finding reported on a decorator line is inside the symbol.
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib
+import importlib.metadata
 import re
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Tuple
 
 from automated_security_helper.core.constants import ASH_DOCS_URL
+from automated_security_helper.utils import ash_lock as _ash_lock
+from automated_security_helper.utils import ast_digest
 from automated_security_helper.utils.ash_install import extra_install_command
 from automated_security_helper.utils.ash_lock import (
     LOCK_RELATIVE_PATH,
     AshLock,
+    file_is_gone,
     lock_key,
     stale_notice,
 )
+from automated_security_helper.utils.ast_digest import DigestUnavailable, Occurrence
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.undecodable_text import undecodable_of_text
 
@@ -127,7 +140,8 @@ def is_valid_symbol(symbol: str) -> bool:
 
 @dataclass(frozen=True)
 class SymbolGrammar:
-    """How one tree-sitter grammar spells a named definition."""
+    """How one tree-sitter grammar spells a named definition, and how its files
+    are digested for ``.ash.lock``."""
 
     language: str
     """Display name, for messages."""
@@ -158,8 +172,28 @@ class SymbolGrammar:
     member inside ``class_body``, not as the member's child (Python's decorator is
     a ``decorated_definition`` parent, Java's annotation a ``modifiers`` child, and
     plain JavaScript's a field of the method), so a span that started at the
-    member left its decorator line out.
+    member left its decorator line out. A comment between such a decorator and
+    the definition does not end the run.
     """
+    lock_id: str = ""
+    """The grammar's name in a ``.ash.lock`` entry: ``python``, ``javascript``,
+    ``typescript``, ``tsx`` or ``java``."""
+    distribution: str = ""
+    """The distribution that ships the grammar; a lock entry records its version."""
+    verbatim: frozenset[str] = frozenset()
+    """Node types a digest hashes as their exact text: string-like literals,
+    whose bytes are their meaning (an f-string's spacing, a text block's
+    indentation)."""
+    skip: frozenset[str] = frozenset()
+    """Node types a digest leaves out: Python's backslash line continuation,
+    which joins two physical lines into the same logical line."""
+    line_breaks: bool = False
+    """Whether a digest records, for every token, if a line feed precedes it:
+    in JavaScript and TypeScript a line break can change what code means."""
+    prologue: str = ""
+    """Which prelude rules apply: ``python`` (encoding declaration, ``#!``
+    line, ``from __future__`` imports), ``ecmascript`` (``#!`` line and the
+    leading comments and directives) or none."""
 
 
 _PYTHON = SymbolGrammar(
@@ -168,6 +202,11 @@ _PYTHON = SymbolGrammar(
     loader="language",
     definitions=frozenset({"class_definition", "function_definition"}),
     span_wrappers=frozenset({"decorated_definition"}),
+    lock_id="python",
+    distribution="tree-sitter-python",
+    verbatim=frozenset({"string"}),
+    skip=frozenset({"line_continuation"}),
+    prologue="python",
 )
 
 _JS_FUNCTION_VALUES = frozenset(
@@ -188,6 +227,11 @@ _JAVASCRIPT = SymbolGrammar(
     },
     function_values=_JS_FUNCTION_VALUES,
     span_wrappers=frozenset({"export_statement"}),
+    lock_id="javascript",
+    distribution="tree-sitter-javascript",
+    verbatim=frozenset({"string", "template_string", "regex"}),
+    line_breaks=True,
+    prologue="ecmascript",
 )
 
 _TYPESCRIPT = SymbolGrammar(
@@ -222,6 +266,11 @@ _TYPESCRIPT = SymbolGrammar(
     function_values=_JS_FUNCTION_VALUES,
     span_wrappers=frozenset({"export_statement"}),
     leading_siblings=frozenset({"decorator"}),
+    lock_id="typescript",
+    distribution="tree-sitter-typescript",
+    verbatim=frozenset({"string", "template_string", "template_literal_type", "regex"}),
+    line_breaks=True,
+    prologue="ecmascript",
 )
 
 _TSX = SymbolGrammar(
@@ -234,6 +283,12 @@ _TSX = SymbolGrammar(
     function_values=_TYPESCRIPT.function_values,
     span_wrappers=_TYPESCRIPT.span_wrappers,
     leading_siblings=_TYPESCRIPT.leading_siblings,
+    lock_id="tsx",
+    distribution=_TYPESCRIPT.distribution,
+    verbatim=_TYPESCRIPT.verbatim,
+    skip=_TYPESCRIPT.skip,
+    line_breaks=_TYPESCRIPT.line_breaks,
+    prologue=_TYPESCRIPT.prologue,
 )
 
 _JAVA = SymbolGrammar(
@@ -252,6 +307,10 @@ _JAVA = SymbolGrammar(
             "record_declaration",
         }
     ),
+    lock_id="java",
+    distribution="tree-sitter-java",
+    # Text blocks are string_literal nodes too; their indentation is meaning.
+    verbatim=frozenset({"string_literal", "character_literal"}),
 )
 
 #: File extension (lower case) -> grammar. The only place a language is
@@ -269,6 +328,13 @@ GRAMMARS_BY_EXTENSION: Mapping[str, SymbolGrammar] = {
     ".tsx": _TSX,
     ".java": _JAVA,
 }
+
+
+def digest_grammars() -> List[SymbolGrammar]:
+    """Each grammar once, by its lock id: the tables ``ast_digest.ALGORITHM``
+    names and ``ast_digest.POLICY_SHA256`` pins."""
+    unique = {g.lock_id: g for g in GRAMMARS_BY_EXTENSION.values()}
+    return [unique[k] for k in sorted(unique)]
 
 
 def grammar_for_path(file_path: str) -> Optional[SymbolGrammar]:
@@ -330,6 +396,12 @@ def _new_parser(grammar: SymbolGrammar) -> Any:
         raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
 
 
+def _parse(source: bytes, grammar: SymbolGrammar) -> Any:
+    """The one place a file is parsed: the tree of ``source``, the parse input
+    (``_normalize_source``). Errors in the tree are the caller's to check."""
+    return _new_parser(grammar).parse(source)
+
+
 def _normalize_source(source: bytes) -> bytes:
     """Line endings to LF and a leading UTF-8 BOM dropped.
 
@@ -340,7 +412,7 @@ def _normalize_source(source: bytes) -> bytes:
     """
     if source.startswith(b"\xef\xbb\xbf"):
         source = source[3:]
-    return source.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return _ash_lock.normalize_line_endings(source)
 
 
 def _line_span(start_node: Any, node: Any) -> Tuple[int, int]:
@@ -405,28 +477,27 @@ def _first_error_line(root: Any) -> int:
     return root.start_point[0] + 1
 
 
-def index_symbols(
-    source: bytes, grammar: SymbolGrammar
-) -> Dict[str, List[Tuple[int, int]]]:
-    """Map each qualified name defined in ``source`` to its line spans.
+def _parse_error(root: Any, grammar: SymbolGrammar) -> str:
+    return (
+        f"tree-sitter's {grammar.language} grammar reports a syntax error at "
+        f"line {_first_error_line(root)}"
+    )
 
-    Raises SymbolsUnavailableError if the grammar cannot be loaded and
-    SymbolParseError if the parse tree contains an error.
+
+def _definitions(
+    root: Any, grammar: SymbolGrammar
+) -> Iterator[Tuple[str, Any, Any, Tuple[Any, ...]]]:
+    """Every definition under ``root``: its qualified name, its node, the node
+    its span starts at and the definitions it sits in, outer to inner.
+
+    The one walk both the spans (``index_symbols``) and the symbol digests read,
+    so the lines a finding must lie in and the bytes a digest covers cannot
+    drift apart. Iterative, so a deeply nested file cannot exhaust the
+    recursion limit.
     """
-    parser = _new_parser(grammar)
-    tree = parser.parse(_normalize_source(source))
-    root = tree.root_node
-    if root.has_error:
-        raise SymbolParseError(
-            f"tree-sitter's {grammar.language} grammar reports a syntax error at "
-            f"line {_first_error_line(root)}"
-        )
-
-    spans: Dict[str, List[Tuple[int, int]]] = {}
-    # Iterative, so a deeply nested file cannot exhaust the recursion limit.
-    stack: List[Tuple[Any, Tuple[str, ...]]] = [(root, ())]
+    stack: List[Tuple[Any, Tuple[str, ...], Tuple[Any, ...]]] = [(root, (), ())]
     while stack:
-        node, scope = stack.pop()
+        node, scope, enclosing = stack.pop()
         name = _definition_name(node, grammar)
         if name is not None:
             scope = (*scope, name)
@@ -436,17 +507,38 @@ def index_symbols(
             ):
                 start = start.parent
             # A decorator the grammar places beside the definition, not inside it
-            # (leading_siblings), begins the definition's own lines.
-            while (
-                start.prev_named_sibling is not None
-                and start.prev_named_sibling.type in grammar.leading_siblings
-            ):
-                start = start.prev_named_sibling
-            spans.setdefault(".".join(scope), []).append(_line_span(start, node))
+            # (leading_siblings), begins the definition's own lines, and a comment
+            # between the two does not end the run.
+            decorators = ast_digest.leading_decorators(start, grammar.leading_siblings)
+            if decorators:
+                start = decorators[0]
+            yield ".".join(scope), node, start, enclosing
+            enclosing = (*enclosing, node)
         for child in reversed(node.children):
             if child.is_named:
-                stack.append((child, scope))
+                stack.append((child, scope, enclosing))
+
+
+def _spans_of(root: Any, grammar: SymbolGrammar) -> Dict[str, List[Tuple[int, int]]]:
+    spans: Dict[str, List[Tuple[int, int]]] = {}
+    for name, node, start, _ in _definitions(root, grammar):
+        spans.setdefault(name, []).append(_line_span(start, node))
     return spans
+
+
+def index_symbols(
+    source: bytes, grammar: SymbolGrammar
+) -> Dict[str, List[Tuple[int, int]]]:
+    """Map each qualified name defined in ``source`` to its line spans.
+
+    Raises SymbolsUnavailableError if the grammar cannot be loaded and
+    SymbolParseError if the parse tree contains an error.
+    """
+    tree = _parse(_normalize_source(source), grammar)
+    root = tree.root_node
+    if root.has_error:
+        raise SymbolParseError(_parse_error(root, grammar))
+    return _spans_of(root, grammar)
 
 
 @dataclass(frozen=True)
@@ -459,72 +551,309 @@ class _Unresolvable:
     reason: str
 
 
-# Parsed files, keyed by resolved path and the stat fields that change when the
-# file does. Module-level so one scan parses a file once, however many times
-# suppressions are applied: once per scanner's SARIF and once more to the
-# aggregate. Bounded so a long-lived process (the MCP server) cannot grow it
-# without limit.
-_INDEX_CACHE: Dict[Tuple[str, int, int], Any] = {}
-_INDEX_CACHE_MAX = 4096
+@dataclass(frozen=True)
+class GrammarIdentity:
+    """The grammar a digest was computed under, as a lock entry records it."""
+
+    language: str
+    """``SymbolGrammar.lock_id``."""
+    fingerprint: str
+    """``ast_digest.language_fingerprint`` of the loaded grammar."""
+    distribution: str
+    """The grammar's distribution and version, e.g. ``tree-sitter-python 0.25.0``."""
+    tree_sitter: str
+    """The tree-sitter binding's version."""
+
+
+def _distribution_version(name: str) -> str:
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+_identity_cache: Dict[Tuple[str, str], GrammarIdentity] = {}
+_validated: Dict[Tuple[str, str], Optional[str]] = {}
+
+
+def grammar_identity(grammar: SymbolGrammar) -> GrammarIdentity:
+    """The identity of the running ``grammar``: its lock id, the fingerprint of
+    its tables and the versions that shipped it. Raises SymbolsUnavailableError
+    when the grammar cannot be loaded, or its binding does not expose the
+    tables the fingerprint reads."""
+    key = (grammar.module, grammar.loader)
+    cached = _identity_cache.get(key)
+    if cached is not None:
+        return cached
+    language = _load_language(grammar)
+    try:
+        fingerprint = ast_digest.language_fingerprint(language)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise SymbolsUnavailableError(f"{type(exc).__name__}: {exc}") from exc
+    identity = GrammarIdentity(
+        language=grammar.lock_id,
+        fingerprint=fingerprint,
+        distribution=(
+            f"{grammar.distribution} {_distribution_version(grammar.distribution)}"
+        ),
+        tree_sitter=_distribution_version("tree-sitter"),
+    )
+    _identity_cache[key] = identity
+    return identity
+
+
+def _policy_problem(grammar: SymbolGrammar) -> Optional[str]:
+    """Why the digest rules do not describe ``grammar``'s running tables, or
+    None. Decided once per language per process."""
+    key = (grammar.module, grammar.loader)
+    if key in _validated:
+        return _validated[key]
+    problem: Optional[str] = None
+    try:
+        ast_digest.check_policy_pin(digest_grammars())
+        ast_digest.validate_policy(_load_language(grammar), grammar)
+    except DigestUnavailable as exc:
+        problem = str(exc)
+    except (AttributeError, TypeError) as exc:
+        problem = (
+            f"the {grammar.language} grammar's binding does not expose the "
+            f"tables a digest reads ({type(exc).__name__}: {exc})"
+        )
+    _validated[key] = problem
+    return problem
+
+
+def _unavailable_reason(grammar: SymbolGrammar, exc: Exception) -> str:
+    return (
+        f"the {grammar.language} grammar is not available ({exc}). "
+        f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
+        f"{symbols_extra_install_hint()}"
+    )
+
+
+class Analysis:
+    """What one read of one file gives: its spans and its syntax-tree digests.
+
+    A pure function of the raw bytes and the grammar. The spans are computed
+    when the analysis is made; the file digest and each symbol digest when
+    first asked for, from the same parse, and kept with it.
+    """
+
+    def __init__(
+        self,
+        raw: bytes,
+        raw_sha256: str,
+        grammar: Optional[SymbolGrammar],
+        *,
+        reason: Optional[str] = None,
+        parse_error: Optional[str] = None,
+        source: Optional[bytes] = None,
+        tree: Any = None,
+        spans: Optional[Mapping[str, Tuple[Tuple[int, int], ...]]] = None,
+    ) -> None:
+        self.raw = raw
+        self.raw_sha256 = raw_sha256
+        self.grammar = grammar
+        #: Why the spans cannot be known, or None.
+        self.reason = reason
+        self._parse_error = parse_error
+        self._source = source
+        self._tree = tree
+        self.spans = spans
+        self._lock = threading.Lock()
+        self._file_digest: Optional[str] = None
+        self._symbol_digests: Dict[str, Optional[str]] = {}
+        self._occurrences: Optional[Dict[str, List[Occurrence]]] = None
+        self._starts: Optional[List[int]] = None
+
+    @property
+    def size(self) -> int:
+        return len(self.raw)
+
+    def indexed(self) -> Any:
+        """The spans as ``_index_file`` answers them."""
+        if self.spans is None:
+            return _Unresolvable(self.reason or "the file's spans are unknown")
+        return _Indexed(self.spans)
+
+    def require_digestible(self) -> None:
+        """Raise DigestUnavailable when no digest of this file can be computed:
+        no grammar or extra, a parse error, digest rules that do not describe
+        the running grammar, or an encoding declaration that cannot be read."""
+        if self.grammar is None:
+            raise DigestUnavailable(self.reason or "the file has no grammar")
+        if self._parse_error is not None:
+            raise DigestUnavailable(self._parse_error)
+        if self._tree is None:
+            raise DigestUnavailable(self.reason or "the file was not parsed")
+        problem = _policy_problem(self.grammar)
+        if problem is not None:
+            raise DigestUnavailable(problem)
+        if self.grammar.prologue == "python":
+            ast_digest.python_encoding(self.raw)
+
+    def identity(self) -> GrammarIdentity:
+        """The identity of the grammar the digests are computed under."""
+        if self.grammar is None:
+            raise DigestUnavailable(self.reason or "the file has no grammar")
+        try:
+            return grammar_identity(self.grammar)
+        except SymbolsUnavailableError as exc:
+            raise DigestUnavailable(_unavailable_reason(self.grammar, exc)) from None
+
+    def _parsed(self) -> Tuple[SymbolGrammar, bytes, Any]:
+        """The grammar, parse input and tree a digest is computed from."""
+        if self.grammar is None or self._source is None or self._tree is None:
+            raise DigestUnavailable(self.reason or "the file was not parsed")
+        return self.grammar, self._source, self._tree
+
+    def file_digest(self) -> str:
+        """The digest of the whole file (``ast_digest.file_digest``)."""
+        self.require_digestible()
+        identity = self.identity()
+        grammar, source, tree = self._parsed()
+        with self._lock:
+            if self._file_digest is None:
+                self._file_digest = ast_digest.file_digest(
+                    self.raw,
+                    source,
+                    tree.root_node,
+                    grammar,
+                    identity.fingerprint,
+                )
+            return self._file_digest
+
+    def symbol_digest(self, name: str) -> Optional[str]:
+        """The digest of one qualified name, or None when the file defines none
+        that bears it (``ast_digest.symbol_digest``)."""
+        self.require_digestible()
+        identity = self.identity()
+        grammar, source, tree = self._parsed()
+        with self._lock:
+            if name in self._symbol_digests:
+                return self._symbol_digests[name]
+            root = tree.root_node
+            if self._occurrences is None:
+                found: Dict[str, List[Occurrence]] = {}
+                for qualified, node, start, enclosing in _definitions(root, grammar):
+                    found.setdefault(qualified, []).append(
+                        Occurrence(
+                            name=qualified,
+                            node=node,
+                            start=start,
+                            enclosing=enclosing,
+                            lines=_line_span(start, node),
+                        )
+                    )
+                self._occurrences = found
+            if self._starts is None:
+                self._starts = ast_digest.line_starts(source)
+            digest = ast_digest.symbol_digest(
+                self.raw,
+                source,
+                root,
+                grammar,
+                identity.fingerprint,
+                name,
+                self._occurrences.get(name, ()),
+                self._starts,
+            )
+            self._symbol_digests[name] = digest
+            return digest
+
+
+# Analyses, keyed by the SHA-256 of the bytes read and the grammar's lock id,
+# never by stat: a same-size rewrite that keeps the mtime is another key.
+# Module-level so a file is parsed once per content however many times
+# suppressions are applied (once per scanner's SARIF and once more to the
+# aggregate) and whoever asks (``ash suppress add`` and a scan in one process).
+# An analysis keeps its tree for its digests, so the cache is bounded by count
+# and by the source bytes it holds. Measured with the pinned grammars on five
+# of this repository's largest Python files (945 KB of source), the cached
+# analyses held 15 MB resident with their trees, about 16 times the source, so
+# the byte bound keeps a long-lived process (the MCP server) near 130 MB at most.
+_ANALYSIS_CACHE: "OrderedDict[Tuple[str, str], Analysis]" = OrderedDict()
+_ANALYSIS_CACHE_MAX = 512
+_ANALYSIS_CACHE_MAX_BYTES = 8 * 1024 * 1024
+_ANALYSIS_BYTES = [0]
 _INDEX_LOCK = threading.Lock()
 
 
-def _index_file(path: Path) -> Any:
-    """The spans of ``path``, from the cache or a parse.
+def _cache(key: Tuple[str, str], analysis: Analysis) -> None:
+    while _ANALYSIS_CACHE and (
+        len(_ANALYSIS_CACHE) >= _ANALYSIS_CACHE_MAX
+        or _ANALYSIS_BYTES[0] + analysis.size > _ANALYSIS_CACHE_MAX_BYTES
+    ):
+        _, evicted = _ANALYSIS_CACHE.popitem(last=False)
+        _ANALYSIS_BYTES[0] -= evicted.size
+    _ANALYSIS_CACHE[key] = analysis
+    _ANALYSIS_BYTES[0] += analysis.size
 
-    A result is cached under the file's stat only when it is the file's own: a
-    parse, clean or not, of bytes whose stat read the same before and after the
-    read. A grammar that is not available and a file that cannot be read are
-    answered but not cached, since both can change without the file changing
-    (the extra installed, a permission fixed), and a file whose stat moved
-    during the read is answered from the bytes read but not cached under the
-    stat read first, which may be another content's.
+
+def analyze(raw: bytes, file_name: str) -> Analysis:
+    """The analysis of the bytes ``raw`` of a file named ``file_name``.
+
+    Cached by the bytes' SHA-256 and the grammar. An analysis is cached only
+    when it is the bytes' own: a parse, clean or not. A grammar that is not
+    available and a file with no grammar are answered but not cached, since
+    the first can change without the bytes changing (the extra installed).
+    """
+    raw_sha256 = hashlib.sha256(raw).hexdigest()
+    grammar = grammar_for_path(file_name)
+    if grammar is None:
+        return Analysis(raw, raw_sha256, None, reason=_unsupported_reason(file_name))
+    key = (raw_sha256, grammar.lock_id)
+    with _INDEX_LOCK:
+        cached = _ANALYSIS_CACHE.get(key)
+        if cached is not None:
+            _ANALYSIS_CACHE.move_to_end(key)
+            return cached
+        source = _normalize_source(raw)
+        try:
+            tree = _parse(source, grammar)
+        except SymbolsUnavailableError as exc:
+            return Analysis(
+                raw, raw_sha256, grammar, reason=_unavailable_reason(grammar, exc)
+            )
+        root = tree.root_node
+        if root.has_error:
+            error = _parse_error(root, grammar)
+            analysis = Analysis(
+                raw,
+                raw_sha256,
+                grammar,
+                reason=f"the file does not parse cleanly: {error}",
+                parse_error=error,
+            )
+        else:
+            spans = _spans_of(root, grammar)
+            analysis = Analysis(
+                raw,
+                raw_sha256,
+                grammar,
+                source=source,
+                tree=tree,
+                spans={k: tuple(v) for k, v in spans.items()},
+            )
+        _cache(key, analysis)
+        return analysis
+
+
+def _read_reason(exc: BaseException) -> str:
+    return f"the file cannot be read ({type(exc).__name__}: {exc})"
+
+
+def _index_file(path: Path) -> Any:
+    """The spans of ``path``, from one read of it and the analysis cache.
+
+    A read that fails is answered but not cached: a permission can be fixed
+    without the file changing.
     """
     try:
-        stat = path.stat()
-    except OSError as exc:
-        return _Unresolvable(f"the file cannot be read ({type(exc).__name__}: {exc})")
-    key = (str(path), stat.st_mtime_ns, stat.st_size)
-    with _INDEX_LOCK:
-        cached = _INDEX_CACHE.get(key)
-        if cached is not None:
-            return cached
-        grammar = grammar_for_path(path.name)
-        result: Any
-        cacheable = True
-        if grammar is None:
-            result = _Unresolvable(_unsupported_reason(path.name))
-        else:
-            try:
-                source = path.read_bytes()
-                spans = index_symbols(source, grammar)
-                result = _Indexed({k: tuple(v) for k, v in spans.items()})
-            except SymbolsUnavailableError as exc:
-                cacheable = False
-                result = _Unresolvable(
-                    f"the {grammar.language} grammar is not available ({exc}). "
-                    f"Symbol suppressions need the optional '{SYMBOLS_EXTRA}' extra: "
-                    f"{symbols_extra_install_hint()}"
-                )
-            except SymbolParseError as exc:
-                result = _Unresolvable(f"the file does not parse cleanly: {exc}")
-            except OSError as exc:
-                cacheable = False
-                result = _Unresolvable(
-                    f"the file cannot be read ({type(exc).__name__}: {exc})"
-                )
-            if cacheable:
-                try:
-                    after = path.stat()
-                except OSError:
-                    cacheable = False
-                else:
-                    cacheable = (after.st_mtime_ns, after.st_size) == key[1:]
-        if cacheable:
-            if len(_INDEX_CACHE) >= _INDEX_CACHE_MAX:
-                _INDEX_CACHE.clear()
-            _INDEX_CACHE[key] = result
-        return result
+        raw = _ash_lock.read_bounded(path)
+    except (OSError, ValueError) as exc:
+        return _Unresolvable(_read_reason(exc))
+    return analyze(raw, path.name).indexed()
 
 
 def _unsupported_reason(file_name: str) -> str:
@@ -535,18 +864,16 @@ def _unsupported_reason(file_name: str) -> str:
     )
 
 
-#: The lock notices already printed in this process, as ``(root, key, state)``.
-#: A scan builds a fresh resolver for each suppression pass (per scanner, then
-#: merged), so a per-resolver record repeated every stale-file warning, and its
-#: re-hash, once per pass.
-_LOCK_NOTICED: set = set()
-
-
 def clear_symbol_cache() -> None:
-    """Drop every cached parse and printed lock notice. For tests."""
+    """Drop every cached analysis. For tests.
+
+    The lock notices a scan has printed are not kept here: they live on the
+    scan's own context (``PluginContext.lock_notices``), so the next scan in
+    the same process starts with none printed.
+    """
     with _INDEX_LOCK:
-        _INDEX_CACHE.clear()
-    _LOCK_NOTICED.clear()
+        _ANALYSIS_CACHE.clear()
+        _ANALYSIS_BYTES[0] = 0
 
 
 class SymbolResolver:
@@ -554,8 +881,8 @@ class SymbolResolver:
 
     Parses lazily, only for a file that a symbol suppression otherwise matches,
     and through a cache shared by every resolver, so each file is parsed at most
-    once while it is unchanged. Each distinct reason a file cannot be resolved is
-    logged once per resolver at WARNING.
+    once per content. Each distinct reason a file cannot be resolved is logged
+    once per resolver at WARNING.
     """
 
     def __init__(
@@ -563,21 +890,34 @@ class SymbolResolver:
         source_dir: Path,
         lock: "Optional[AshLock]" = None,
         lock_error: Optional[str] = None,
+        noticed: Optional[set[Any]] = None,
     ):
         self._source_dir = Path(source_dir).resolve()
         self._warned: set[Tuple[str, str]] = set()
-        # The scan root's ``.ash.lock``, or None to resolve spans with no
-        # content-hash binding (the span resolver on its own). With a lock, a
-        # file whose bytes no longer hash to its entry, or that has none, gets
-        # no match: the suppression is inert and a notice says so once.
-        # ``lock_error`` is the reason the lock could not be read: every symbol
-        # suppression is then inert (fail closed), and the per-file notices do
-        # not run, since "no entry; lock it with `ash suppress add`" would be
-        # false of a lock that exists and is broken, and ``add`` would fail on
-        # the same broken lock.
+        # The lock notices already printed in this scan: the scan's
+        # PluginContext.lock_notices, shared by the resolver of every
+        # suppression pass (each scanner's, then the merged one), so a stale
+        # file or symbol is named once per scan. A resolver given none keeps its
+        # own. Kept per process before, a long-lived process (the MCP server,
+        # the express daemon) named a file once and then never again, though
+        # later scans dropped its suppressions just the same.
+        self._noticed: set[Any] = noticed if noticed is not None else set()
+        # The scan root's ``.ash.lock``, or None to resolve spans with no lock
+        # binding (the span resolver on its own). With a lock, a suppression
+        # whose recorded scope is not current, or that was never recorded, gets
+        # no match: it is inert and a notice says so once. ``lock_error`` is
+        # the reason the lock could not be read: every symbol suppression is
+        # then inert (fail closed), and the per-file notices do not run, since
+        # "no entry; lock it with `ash suppress add`" would be false of a lock
+        # that exists and is broken, and ``add`` would fail on the same broken
+        # lock.
         self._lock = lock
         self._lock_error = lock_error
-        self._lock_states: Dict[str, str] = {}
+        # One read per file for the life of the resolver: the lock state and
+        # the spans a finding is checked against come from the same bytes.
+        self._files: Dict[str, Any] = {}
+        self._scope_states: Dict[Tuple[str, str, str], str] = {}
+        self._indexed: Dict[str, Any] = {}
 
     def contains(
         self,
@@ -585,11 +925,16 @@ class SymbolResolver:
         line_start: Optional[int],
         line_end: Optional[int],
         symbol: str,
+        *,
+        rule_id: Optional[str] = None,
     ) -> bool:
         """Return True if lines ``line_start``..``line_end`` of ``file_path``
         lie wholly inside a definition named ``symbol``.
 
         ``file_path`` is relative to the scan root, as suppressions match it.
+        With a lock, the suppression's own recorded scope, ``(rule_id,
+        symbol)``, must be current; a caller that passes no rule id asks for
+        the rule-less scope, which only a rule-less suppression records.
         Returns False, never raises, whenever the span cannot be known.
         """
         if not file_path or line_start is None:
@@ -614,12 +959,25 @@ class SymbolResolver:
             # loaded (sarif_utils._symbol_resolver_for).
             return False
 
-        if self._lock is not None and not self._locked_and_unchanged(
-            self._lock, resolved
-        ):
-            return False
+        if self._lock is not None:
+            key = lock_key(resolved.relative_to(self._source_dir).as_posix())
+            if key is None:
+                return False
+            # The lock is asked first. A file it does not hold and a scope it
+            # does not record are decided from the lock alone, so such a file is
+            # never opened: a FIFO or a device a finding names is not waited on.
+            if not self._scope_is_current(self._lock, key, symbol, rule_id):
+                return False
+            locked = self._locked_file(key)
+            if locked.raw is None:
+                return False
+            indexed = locked.analysis().indexed()
+        else:
+            indexed = self._indexed.get(str(resolved))
+            if indexed is None:
+                indexed = _index_file(resolved)
+                self._indexed[str(resolved)] = indexed
 
-        indexed = _index_file(resolved)
         if isinstance(indexed, _Unresolvable):
             self._warn(file_path, symbol, indexed.reason)
             return False
@@ -628,38 +986,89 @@ class SymbolResolver:
             for first, last in indexed.spans.get(symbol, ())
         )
 
-    def _locked_and_unchanged(self, lock: AshLock, resolved: Path) -> bool:
-        """Whether ``resolved`` has a lock entry its bytes still hash to.
+    def _locked_file(self, key: str) -> Any:
+        locked = self._files.get(key)
+        if locked is None:
+            locked = _ash_lock.LockedFile.load(self._source_dir, key)
+            self._files[key] = locked
+        return locked
 
-        Decided once per file for the life of the resolver, so a scan hashes
-        each file at most once per suppression pass. The notice is printed once
-        per file per process (``_LOCK_NOTICED``): a scan builds a resolver for
-        each per-scanner pass and the merged pass, and a per-resolver record
-        repeated it every pass.
+    def _notice(self, noticed: Tuple[Any, ...], message: str) -> None:
+        if noticed in self._noticed:
+            return
+        self._noticed.add(noticed)
+        ASH_LOGGER.warning(message, extra=NO_MARKUP)
+
+    def _scope_is_current(
+        self,
+        lock: AshLock,
+        key: str,
+        symbol: str,
+        rule_id: Optional[str],
+    ) -> bool:
+        """Whether the lock records the suppression's scope and it is current.
+
+        Decided once per scope for the life of the resolver, from the one read
+        of the file. The read is made only when the lock records the scope: a
+        file with no entry, and a scope the entry does not record, are answered
+        from the lock alone and the file is not opened. Each notice is printed
+        once per scan (``noticed``): per file for a file-scope or version 1
+        entry and for a file that cannot be read or checked, per symbol for a
+        symbol-scope one, and per scope for a scope the lock never recorded.
         """
-        key = lock_key(resolved.relative_to(self._source_dir).as_posix())
-        if key is None:
-            return False
-        state = self._lock_states.get(key)
-        if state is None:
-            state = lock.status(key)
-            self._lock_states[key] = state
-            entry = lock.entries.get(key)
-            noticed = (str(self._source_dir), key, state)
-            if state == "ok" or noticed in _LOCK_NOTICED:
-                pass
-            elif state == "unlocked":
-                _LOCK_NOTICED.add(noticed)
-                ASH_LOGGER.warning(
-                    f"Symbol suppressions for '{key}' do not apply: the file has "
-                    f"no entry in {LOCK_RELATIVE_PATH}. Lock it with "
-                    f"`ash suppress add <rule-id> --symbol <name> --file {key} "
-                    "--reason <text>`.",
-                    extra=NO_MARKUP,
+        wanted = (rule_id or "").casefold()
+        memo = (key, wanted, symbol)
+        state = self._scope_states.get(memo)
+        if state is not None:
+            return state == "ok"
+        root = str(self._source_dir)
+        entry = lock.entries.get(key)
+        if entry is None:
+            state = "unlocked"
+            self._notice(
+                (root, key, state),
+                f"Symbol suppressions for '{key}' do not apply: the file has "
+                f"no entry in {LOCK_RELATIVE_PATH}. Lock it with "
+                f"`ash suppress add <rule-id> --symbol <name> --file {key} "
+                "--reason <text>`.",
+            )
+        else:
+            scope = _ash_lock.recorded_scope(entry, rule_id, symbol)
+            if scope is None:
+                state = "unrecorded"
+                rule = rule_id or "(any rule)"
+                self._notice(
+                    (root, key, state, wanted, symbol),
+                    f"Symbol suppression {rule} in {symbol} for '{key}' does "
+                    f"not apply: {LOCK_RELATIVE_PATH} records no such scope for "
+                    f"the file, so it was never reviewed. Record it with "
+                    f"`{_ash_lock.add_command_for(rule_id, symbol, key)}`.",
                 )
-            elif entry is not None:
-                _LOCK_NOTICED.add(noticed)
-                ASH_LOGGER.warning(stale_notice(key, entry, state), extra=NO_MARKUP)
+            else:
+                checked = lock.scope_state(key, scope, self._locked_file(key))
+                state = checked.state
+                if state != "ok":
+                    per_symbol = checked.per_symbol
+                    noticed = (
+                        (root, key, state, scope.symbol)
+                        if per_symbol
+                        else (root, key, state)
+                    )
+                    self._notice(
+                        noticed,
+                        stale_notice(
+                            key,
+                            entry,
+                            state,
+                            gone=file_is_gone(self._source_dir, key),
+                            symbol=scope.symbol if per_symbol else None,
+                            reason=checked.reason or None,
+                            scopes=_ash_lock.scopes_of_problem(
+                                entry, scope.symbol if per_symbol else None, checked
+                            ),
+                        ),
+                    )
+        self._scope_states[memo] = state
         return state == "ok"
 
     def _resolve(self, file_path: str) -> Optional[Path]:

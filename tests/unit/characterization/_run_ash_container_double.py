@@ -12,7 +12,7 @@ in for the container module's ``datetime`` and ``sys`` where a cell freezes them
 
 from __future__ import annotations
 
-import datetime as _datetime
+import datetime as dt
 import os
 import subprocess
 import sys
@@ -39,7 +39,7 @@ PACKAGED_DOCKERFILE = PACKAGE_DIR / "assets" / "Dockerfile"
 PACKAGED_CONTEXT = PACKAGE_DIR / "assets"
 
 #: What the frozen ``datetime.now()`` answers: 2026-01-02T03:04:05Z.
-FROZEN_NOW = _datetime.datetime(2026, 1, 2, 3, 4, 5, tzinfo=_datetime.timezone.utc)
+FROZEN_NOW = dt.datetime(2026, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc)
 
 #: What the ``id`` double reports.
 HOST_UID = "1234"
@@ -67,7 +67,7 @@ CUSTOM_CONTAINERFILE = (
 )
 
 
-class _FrozenDatetime(_datetime.datetime):
+class _FrozenDatetime(dt.datetime):
     @classmethod
     def now(cls, tz=None):  # noqa: D102 - datetime's own signature
         return FROZEN_NOW if tz is None else FROZEN_NOW.astimezone(tz)

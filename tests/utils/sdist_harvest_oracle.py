@@ -14,29 +14,32 @@ One place holds them so the two legs that run them cannot drift apart:
 
 What is held to what:
 
-- the crate the repository's suppressions are written for (``rustls`` 0.23.43,
+- the crate polars' suppressions are written for (``rustls`` 0.23.43,
   statically linked into the polars runtime wheel) is in the SBOM, and it
   carries the polars parent purl and the sdist's sha256 the harvest stamped;
 - the four ``global_settings.suppressions`` entries of ``.ash.yaml`` that
-  name polars' harvested lockfile each match a finding reported at the path
-  syft gives the lockfile, so none of them reads as unused;
-- no entry over the harvest layout suppresses a finding there for another
-  crate or another rustls version, or the same advisory in a file outside the
-  layout (the controls). The layout holds entries for other harvested
-  packages too (ruff, pydantic-core, rpds-py, rtoml, uv), so the controls read
-  every one of them: a broad entry with no version pin would cover polars'
-  lockfile as well and silently undo the four entries' version pin.
+  name polars' harvested lockfile directory each match a finding reported at
+  the path syft gives the lockfile, so none of them reads as unused;
+- no entry over the harvest layout suppresses a finding at that lockfile for
+  another crate or another rustls version, or the same advisory in a file
+  outside the layout (the controls). The layout can hold entries for other
+  harvested packages too (one for the pyo3 that rpds-py 0.30.0 embeds is such
+  an entry), so the controls read every one of them, and each such entry is
+  held to its own lockfile as well: the finding it was written for, moved to
+  polars' lockfile, is suppressed by none of the entries written for other
+  packages. A broad entry, pinned to no crate version or lockfile directory,
+  would cover polars' lockfile too, and these controls are what catch it.
 
-The layout holds one more kind of entry: a secret suppression for each
-provenance manifest (``harvest-manifest.json``), pinned to the line of the
-sdist digest. Those excuse a hash in a file the harvest writes, not a crate in
-a lockfile, so the oracle leaves them out, and how many packages the repository
-harvests changes nothing it asserts.
+The layout holds one more kind of entry: the secret suppressions for each
+provenance manifest the harvest writes beside a lockfile (detect-secrets reads
+the manifest's sha256 digest as a secret). Each names that manifest, not a
+lockfile (``names_the_harvest_manifest``), so the oracle leaves them out, and
+the pair each harvested package version adds changes nothing it holds.
 """
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 import yaml
@@ -123,18 +126,33 @@ def assert_linked_crate_is_listed_with_its_parent(
     return locations
 
 
-def _names_a_manifest(path: str) -> bool:
-    """Whether ``path`` ends in the provenance manifest's file name."""
-    return PurePosixPath(path).name == HARVEST_MANIFEST_NAME
+def names_the_harvest_manifest(path: str) -> bool:
+    """Whether a suppression path's last component is the provenance manifest.
+
+    That component is literal (``harvest-manifest.json``, no glob), so such an
+    entry matches only the manifest file the harvest writes beside each
+    lockfile, never a finding at ``sdist-locks/<package>/<version>/<lockfile>``.
+    """
+    return path.replace("\\", "/").rsplit("/", 1)[-1] == HARVEST_MANIFEST_NAME
+
+
+def names_the_linked_lockfile(path: str) -> bool:
+    """Whether a suppression path names polars' harvested lockfile directory.
+
+    Read with ``/`` separators, a backslash taken as one, as
+    ``names_the_harvest_manifest`` reads a path.
+    """
+    return LINKED_LOCKFILE_DIR in path.replace(chr(92), "/")
 
 
 def harvest_layout_suppressions() -> List[AshSuppression]:
     """Every suppression of the repository over the harvested lockfiles.
 
-    The entries whose path names the harvest layout, except the ones that name
-    a provenance manifest (see the module docstring). Anything else over the
-    layout stays in, a broad entry included, because the controls exist to find
-    an entry that reaches polars' lockfile.
+    The entries whose path names the harvest directory, except the ones on the
+    provenance manifest (``names_the_harvest_manifest``), which cannot suppress
+    a lockfile finding. Anything else over the layout stays in, an entry written
+    for another harvested package or a broad one included, because the controls
+    exist to find an entry that reaches polars' lockfile.
     """
     document = yaml.safe_load(
         REPO_ROOT.joinpath(".ash.yaml").read_text(encoding="utf-8")
@@ -143,20 +161,25 @@ def harvest_layout_suppressions() -> List[AshSuppression]:
         AshSuppression.model_validate(raw)
         for raw in document["global_settings"]["suppressions"]
         if HARVEST_DIR_NAME in str(raw.get("path", ""))
-        and not _names_a_manifest(str(raw.get("path", "")))
+        and not names_the_harvest_manifest(str(raw.get("path", "")))
     ]
 
 
 def harvest_suppressions() -> List[AshSuppression]:
-    """The repository's suppressions that name polars' harvested lockfile."""
+    """The repository's suppressions that name polars' harvested lockfile.
+
+    The entries over the harvest layout (``harvest_layout_suppressions``) whose
+    path names polars' lockfile directory (``names_the_linked_lockfile``); they
+    must be the four the oracle holds.
+    """
     entries = [
         entry
         for entry in harvest_layout_suppressions()
-        if LINKED_LOCKFILE_DIR in (entry.path or "")
+        if names_the_linked_lockfile(entry.path)
     ]
     assert sorted(e.rule_id or "" for e in entries) == sorted(
         EXPECTED_SUPPRESSION_RULE_IDS
-    ), "the harvested lockfile's suppressions are not the four the oracle holds"
+    ), "polars' harvested lockfile's suppressions are not the four the oracle holds"
     return entries
 
 
@@ -197,8 +220,11 @@ def assert_suppressions_match_reported_paths(locations: Sequence[str]) -> None:
 
     "None unused" is checked by identity: the entries that matched a finding
     are collected and compared with the full list. The controls are findings
-    no entry over the harvest layout may cover (another crate, another rustls
-    version, a file outside the layout), for each of the four rule ids.
+    no entry over the harvest layout may cover: for each of the four rule ids,
+    another crate or another rustls version at every reported path form of the
+    lockfile, and the same advisory in a file outside the layout; and, for each
+    entry over the layout written for another package, the finding it was
+    written for at every reported path form of polars' lockfile.
     """
     entries = harvest_suppressions()
     layout_entries = harvest_layout_suppressions()
@@ -220,16 +246,44 @@ def assert_suppressions_match_reported_paths(locations: Sequence[str]) -> None:
 
     # Every path form, not only syft's own: an entry spelled for the converted
     # tree's path matches the scanners' forms and not syft's.
+    forms = reported_path_forms(locations[0])
     controls = [
         _finding(rule_id, "uv.lock", LINKED_CRATE, LINKED_CRATE_VERSION)
         for rule_id in EXPECTED_SUPPRESSION_RULE_IDS
     ]
     for rule_id in EXPECTED_SUPPRESSION_RULE_IDS:
-        for path in reported_path_forms(locations[0]):
-            controls.append(_finding(rule_id, path, "tokio", LINKED_CRATE_VERSION))
-            controls.append(_finding(rule_id, path, LINKED_CRATE, "0.23.99"))
+        for path in forms:
+            controls.extend(
+                (
+                    _finding(rule_id, path, "tokio", LINKED_CRATE_VERSION),
+                    _finding(rule_id, path, LINKED_CRATE, "0.23.99"),
+                )
+            )
     for control in controls:
         suppressed, matching = should_suppress_finding(control, layout_entries)
         assert not suppressed, (
             f"control finding was suppressed by {matching}: {control.model_dump()}"
         )
+
+    # An entry written for another harvested package (one for the pyo3 inside
+    # rpds-py 0.30.0, say) is held to its own lockfile: the finding it was
+    # written for, moved to polars' lockfile, is suppressed by none of the
+    # entries written for other packages.
+    others = [
+        entry for entry in layout_entries if not names_the_linked_lockfile(entry.path)
+    ]
+    for other in others:
+        for path in forms:
+            moved = _finding(
+                other.rule_id or EXPECTED_SUPPRESSION_RULE_IDS[0],
+                path,
+                other.package_name or LINKED_CRATE,
+                other.package_version or LINKED_CRATE_VERSION,
+            )
+            suppressed, matching = should_suppress_finding(moved, others)
+            assert not suppressed, (
+                f"{matching and matching.rule_id} at {matching and matching.path}, "
+                "an entry written for another package, suppresses "
+                f"{moved.rule_id} for {moved.package_name} {moved.package_version} "
+                f"at polars' lockfile ({path!r})"
+            )

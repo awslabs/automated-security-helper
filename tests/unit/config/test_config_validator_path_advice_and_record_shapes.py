@@ -158,14 +158,40 @@ class TestPathPatternAdvice:
 
     def test_the_advised_trailing_slash_spelling_gets_no_advice_itself(self, tmp_path):
         # '**/node_modules/' is exactly what the directory advice recommends
-        # (the test above this control), so advising it again would send the
-        # operator in a circle: applying the advice must clear the warning.
+        # for an ignore path (the test above this control), so advising it
+        # again would send the operator in a circle: applying the advice must
+        # clear the warning. For a suppression the advice is
+        # '**/node_modules/**/*', and that spelling clears it.
         root = _tree(tmp_path)
-        for ignore_path in (True, False):
-            assert (
-                path_pattern_advice("**/node_modules/", root, ignore_path=ignore_path)
-                is None
-            )
+        assert path_pattern_advice("**/node_modules/", root, ignore_path=True) is None
+        assert (
+            path_pattern_advice("**/node_modules/**/*", root, ignore_path=False) is None
+        )
+
+    def test_a_suppression_path_ending_in_a_slash_after_a_glob_is_advised(
+        self, tmp_path
+    ):
+        # A suppression path is matched as written: the trailing '/' leaves an
+        # empty last component that no file name matches, so
+        # '**/node_modules/' suppresses nothing below node_modules, where the
+        # same text as an ignore path covers it (ignore_path_pattern reads it
+        # as '**/node_modules/*/**'). The early return that skipped every
+        # pattern ending in '/' hid the one warning for that suppression.
+        from automated_security_helper.utils.suppression_matcher import (
+            file_path_matches,
+            ignore_path_matches,
+        )
+
+        below = "deep/a/node_modules/x.js"
+        assert not file_path_matches(below, "**/node_modules/")
+        assert file_path_matches(below, "**/node_modules/**/*")
+        assert ignore_path_matches(below, "**/node_modules/")
+        assert path_pattern_advice(
+            "**/node_modules/", _tree(tmp_path), ignore_path=False
+        ) == (
+            f"Path '**/node_modules/' {DIRECTORY}. Use '**/node_modules/**/*' to "
+            "suppress the findings in every file inside the directory."
+        )
 
 
 class TestChangedInput:

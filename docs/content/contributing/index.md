@@ -276,7 +276,7 @@ uv run --group dev --extra cdk mypy automated_security_helper/
 
 `uv run ruff format .` and `uv run ruff check --fix .` fix what they can. The ruff
 settings, including the line length of 88, are in `[tool.ruff]` in `pyproject.toml`,
-which also requires ruff 0.16.10 or later: an older ruff exits with code 2 rather than
+which also requires ruff 0.17.4 or later: an older ruff exits with code 2 rather than
 lint with different rules. `tests/test_data/` is excluded, because those files are
 scanner input. mypy checks the package, not the tests or scripts. Its per-module
 overrides in `pyproject.toml` are a baseline that only shrinks: fix a new type error

@@ -361,6 +361,115 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
             "/converters/archive/options/max_total_bytes",
             "/converters/archive/options/max_compression_ratio",
         ),
+        # The list v3.8.0 shipped. Do not edit it: a profile ``ash config init``
+        # wrote at v3.8.0 holds exactly this, and it counts as the default only
+        # while this entry is unchanged (tests/unit/config/
+        # test_a_released_default_denied_paths_list_stays_a_shipped_default.py
+        # pins it from a literal outside this table).
+        (
+            "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
+            "/content_db_staleness_overrides",
+            "/honor_ignore_files",
+            "/content_db_staleness_offline_image_default",
+            "/sandbox",
+            "/sandbox/**",
+            "/ash_plugin_modules",
+            "/ash_plugin_modules/**",
+            "/scanners/detect-secrets/options/scan_settings/filters_used",
+            "/scanners/detect-secrets/options/scan_settings/filters_used/**",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used",
+            "/scanners/detect-secrets/options/scan_settings/plugins_used/**",
+            "/scanners/detect-secrets/options/baseline_file",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/global_settings/mcp",
+            "/global_settings/mcp/**",
+            "/scanners/opengrep/options/exclude_rule",
+            "/scanners/semgrep/options/exclude_rule",
+            "/scanners/bandit/options/confidence_level",
+            "/scanners/checkov/options/frameworks",
+            "/scanners/checkov/options/skip_frameworks",
+            "/scanners/opengrep/options/config",
+            "/scanners/opengrep/options/patterns",
+            "/scanners/opengrep/options/severity",
+            "/scanners/semgrep/options/config",
+            "/scanners/semgrep/options/severity",
+            "/scanners/detect-secrets/options/scan_settings",
+            "/scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks",
+            "/scanners/ferret-scan/options/checks",
+            "/scanners/ferret-scan/options/confidence_levels",
+            "/scanners/ferret-scan/options/disable_ip_types",
+            "/scanners/ferret-scan/options/enable_preprocessors",
+            "/scanners/ferret-scan/options/finding_limit",
+            "/scanners/ferret-scan/options/profile",
+            "/scanners/ferret-scan/options/recursive",
+            "/scanners/ferret-scan/options/respect_gitignore",
+            "/scanners/ferret-scan/options/use_default_config",
+            "/scanners/ferret-scan/options/validator_budget",
+            "/scanners/trivy-repo/options/license_full",
+            "/scanners/trivy-repo/options/scanners",
+            "/scanners/*/options/offline",
+            "/scanners/ferret-scan/options/max_live_bytes",
+            "/scanners/bandit/options/config_file",
+            "/scanners/checkov/options/config_file",
+            "/scanners/ferret-scan/options/config_file",
+            "/scanners/grype/options/config_file",
+            "/scanners/syft/options/config_file",
+            "/scanners/trivy-repo/options/secret_config_file",
+            "/scanners/snyk-code/options/honor_tree_exclusions",
+            "/scanners/*/options/tool_version",
+            "/converters/jupyter/options/tool_version",
+            "/scanners/opengrep/options/version",
+            "/scanners/opengrep/options/sha256",
+            "/scanners/opengrep/options/metrics",
+            "/scanners/semgrep/options/metrics",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**",
+            "/reporters/aws-security-hub/**",
+            "/reporters/bedrock-summary-reporter/options/model_id",
+            "/reporters/bedrock-summary-reporter/options/output_file",
+            "/reporters/bedrock-summary-reporter/options/output_executive_file",
+            "/reporters/bedrock-summary-reporter/options/output_technical_file",
+            "/reporters/s3/**",
+            "/reporters/bedrock-summary-reporter/**",
+            "/reporters/gitlab-sast/options/exclude_suppressed",
+            "/scanners/detect-secrets/**",
+            "/scanners/npm-audit/**",
+            "/scanners/opengrep/**",
+            "/scanners/semgrep/**",
+            "/scanners/snyk-code/**",
+            "/scanners/trivy-repo/**",
+            "/scanners/trivy/**",
+            "/scanners/zizmor/**",
+            "/converters/archive/options/max_members",
+            "/converters/archive/options/max_member_bytes",
+            "/converters/archive/options/max_total_bytes",
+            "/converters/archive/options/max_compression_ratio",
+            "/scanners/cfn-guard/options/rule_sets",
+            "/scanners/cfn-lint/options/ignore_checks",
+            "/scanners/cfn-lint/options/regions",
+            "/scanners/gitleaks/options/baseline_path",
+            "/scanners/trivy/options/scanners",
+            "/scanners/trivy/options/ignore_unfixed",
+            "/scanners/gitleaks/options/max_target_megabytes",
+            "/scanners/trivy-repo/options/config_file",
+            "/scanners/trivy-repo/options/module_dir",
+            "/scanners/trivy/options/config_file",
+            "/scanners/trivy/options/secret_config_file",
+            "/scanners/actionlint/options/config_file",
+            "/scanners/actionlint/options/shellcheck",
+            "/scanners/actionlint/options/pyflakes",
+            "/scanners/cfn-guard/options/rules_paths",
+            "/scanners/cfn-lint/options/config_file",
+            "/scanners/gitleaks/options/config_file",
+            "/scanners/zizmor/options/config_file",
+            "/scanners/zizmor/options/online_audits",
+            "/scanners/cfn-lint/options/honor_inline_ignores",
+            "/scanners/gitleaks/options/honor_inline_ignores",
+            "/scanners/zizmor/options/honor_inline_ignores",
+        ),
         (
             "/fail_on_findings",
             "/fail_on_incomplete_scanners",
@@ -481,8 +590,9 @@ SHIPPED_DEFAULT_DENIED_PATHS: Tuple[FrozenSet[str], ...] = tuple(
 # The default after `/global_settings/exclusions` joined it
 # (issue #894; an exclusion drops findings outright, so a runtime patch must
 # not install one). Derived rather than written out because it differs from
-# the shipped v3.8.0 list by that one entry; the next default change after a
-# release that ships this one appends its own list the same way.
+# the last written-out entry above (the default after the post-v3.8.0 additions;
+# the v3.8.0 list is the entry before that) by that one entry; the next default
+# change after a release that ships this one appends its own list the same way.
 SHIPPED_DEFAULT_DENIED_PATHS = SHIPPED_DEFAULT_DENIED_PATHS + (
     SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/global_settings/exclusions"},
 )
@@ -493,13 +603,21 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
     *SHIPPED_DEFAULT_DENIED_PATHS,
     SHIPPED_DEFAULT_DENIED_PATHS[-1] | {"/scanners/syft/options/sdist_harvest/**"},
 )
-#: The default after the run history's section joined it: ``enabled`` turns on
-#: writes beside the output on every scan, and ``keep_runs`` bounds what pruning
-#: may delete, so neither is a client's to change through a runtime override.
+#: The default after the run history's section and the sdist converter's section
+#: joined it: the history's ``enabled`` turns on writes beside the output on every
+#: scan, its ``keep_runs`` bounds what pruning may delete, and the converter's
+#: ``enabled`` turns the sdist harvest off as ``sdist_harvest.enabled`` does, so
+#: none of them is a client's to change through a runtime override. No release has
+#: shipped this list (v3.8.0, the latest release, predates it), so it is replaced
+#: in place rather than followed by another, as the table's rule says.
 SHIPPED_DEFAULT_DENIED_PATHS = (
     *SHIPPED_DEFAULT_DENIED_PATHS,
     SHIPPED_DEFAULT_DENIED_PATHS[-1]
-    | {"/global_settings/history", "/global_settings/history/**"},
+    | {
+        "/global_settings/history",
+        "/global_settings/history/**",
+        "/converters/sdist-lock-harvester/**",
+    },
 )
 #: The default after mcp-config's checks joined it: each of the four, set false,
 #: drops a whole kind of finding, so a client may not turn one off.
@@ -516,9 +634,11 @@ SHIPPED_DEFAULT_DENIED_PATHS = (
 
 
 class _OptionDefaults(Mapping[Tuple[str, str], Any]):
-    """The ``(scanner, option) -> default`` table, which cannot be changed in place.
+    """A ``(plugin, name) -> default`` table, which cannot be changed in place.
 
-    The answer to "is this delivered value the default?" decides whether a
+    ``PLUGIN_OPTION_DEFAULTS`` keys it by ``(scanner, option)`` and
+    ``CONVERTER_SECTION_DEFAULTS`` by ``(converter, field)``. The answer to "is
+    this delivered value the default?" decides whether a
     client-delivered option is allowed, so a list default must not be reachable
     as a live object: one ``sort`` or ``append`` on it would change that answer
     for the whole process. The table keeps its own deep copies and hands out a
@@ -566,6 +686,17 @@ PLUGIN_OPTION_DEFAULTS: Mapping[Tuple[str, str], Any] = _OptionDefaults(
         for manifest in scanner_manifests()
         for option, default in manifest.denied_option_defaults.items()
     }
+)
+
+
+#: Defaults of the denied fields of converter sections. A default ``AshConfig``
+#: carries no section for a converter, so a delivered value equal to one of these
+#: is accepted as no change, as a scanner option equal to its default is. Used
+#: only where the trusted config has no value of its own.
+#: ``test_the_converter_default_is_the_converters_own`` pins each value to the
+#: converter's config model.
+CONVERTER_SECTION_DEFAULTS: Mapping[Tuple[str, str], Any] = _OptionDefaults(
+    {("sdist-lock-harvester", "enabled"): True}
 )
 
 
@@ -1070,10 +1201,13 @@ def _equals_as_json(value: Any, expected: Any) -> bool:
 
 
 def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
-    """Whether ``denial`` is a plugin option ``document`` sets to its default.
+    """Whether ``denial`` is a plugin setting ``document`` sets to its default.
 
-    Only for an option in ``PLUGIN_OPTION_DEFAULTS`` that the trusted ``base``
+    Only for a scanner option in ``PLUGIN_OPTION_DEFAULTS``, or a converter
+    section field in ``CONVERTER_SECTION_DEFAULTS``, that the trusted ``base``
     has no value for; where it has one, the denial already compared against it.
+    Both are compared as JSON values and found under every spelling of the
+    plugin's section.
     """
     from automated_security_helper.config.ash_config import (
         plugin_key_lookup_names,
@@ -1085,6 +1219,20 @@ def _writes_plugin_default(document: Any, denial: Any, base: AshConfig) -> bool:
     if denial.from_patch:
         return False
     segments = _path_segments(denial.pointer)
+    if len(segments) == 3 and segments[0] == "converters":
+        field = segments[2].replace("-", "_")
+        names = plugin_key_lookup_names(segments[1])
+        for (converter, name), default in CONVERTER_SECTION_DEFAULTS.items():
+            if name != field or reduced_plugin_name(converter) not in names:
+                continue
+            trusted = base.get_plugin_config("converter", converter)
+            if isinstance(trusted, dict) and (
+                _resolve_dict_key(trusted, field) in trusted
+            ):
+                return False
+            present, value = _walk(document, segments)
+            return present and _equals_as_json(value, default)
+        return False
     if len(segments) != 4 or segments[0] != "scanners" or segments[2] != "options":
         return False
     option = segments[3].replace("-", "_")

@@ -58,26 +58,44 @@ def test_a_per_call_profile_file_keeps_no_digest():
     assert Path(path).as_posix() not in session_profiles._written_digests
 
 
-def test_a_default_named_materialization_keeps_no_digest_either():
+def test_a_per_call_write_must_name_its_file():
+    """Red at the tip it was found on: ``filename`` defaulted to the binding's
+    own file name, so a per-call write that named nothing overwrote a live
+    binding's ``config/ash.yaml`` and the collision was cured by digest
+    ordering rather than removed."""
+    with pytest.raises(TypeError, match="filename"):
+        session_profiles.materialize_session_config(
+            None, AshConfig(project_name="plain")
+        )
+
+
+def test_a_binding_named_materialization_keeps_no_digest_either():
     path = session_profiles.materialize_session_config(
-        None, AshConfig(project_name="plain")
+        None,
+        AshConfig(project_name="plain"),
+        filename=session_profiles.SESSION_CONFIG_FILENAME,
     )
 
     assert Path(path).as_posix() not in session_profiles._written_digests
 
 
-def test_a_default_named_materialization_cannot_take_a_bindings_digest_away():
+def test_a_binding_named_materialization_cannot_take_a_bindings_digest_away():
     """Red at the tip it was found on: the per-call write recorded a digest for the
     path the binding had just written, then removed it, so a bind that followed
     copied nothing and the binding was checked for presence only.
 
-    The default file name is the binding's own (``config/ash.yaml``), and
-    ``materialize_session_config`` takes no binding lock, so the two can meet."""
+    The file name is the binding's own (``config/ash.yaml``, which a caller now
+    has to name), and ``materialize_session_config`` takes no binding lock, so
+    the two can meet."""
     registered = AshConfig(project_name="strict")
     config_path, trusted = session_profiles.materialize_session_binding(
         None, registered, None
     )
-    session_profiles.materialize_session_config(None, AshConfig(project_name="other"))
+    session_profiles.materialize_session_config(
+        None,
+        AshConfig(project_name="other"),
+        filename=session_profiles.SESSION_CONFIG_FILENAME,
+    )
 
     session_profiles.bind_session_config(
         None,
@@ -91,6 +109,26 @@ def test_a_default_named_materialization_cannot_take_a_bindings_digest_away():
     assert state is not None
     assert state.config_sha256 is not None
     assert state.trusted_config_sha256 is not None
+
+
+def test_a_wrapper_that_swallows_the_move_return_does_not_drop_the_digest(monkeypatch):
+    """Red at the tip it was found on: the digest was ``_replace_staged``'s
+    return, so a test wrapper that forgot to pass it through recorded None,
+    which dropped the entry and reduced the binding to a presence-only check --
+    indistinguishable from a staged file that could not be read back."""
+    real = session_profiles._replace_staged
+
+    def swallows_the_return(partial, target):
+        real(partial, target)
+
+    monkeypatch.setattr(session_profiles, "_replace_staged", swallows_the_return)
+
+    config_path, trusted = session_profiles.materialize_session_binding(
+        None, AshConfig(project_name="strict"), AshConfig(project_name="patched")
+    )
+
+    assert Path(config_path).as_posix() in session_profiles._written_digests
+    assert Path(trusted).as_posix() in session_profiles._written_digests
 
 
 def test_a_binding_that_fails_between_its_moves_records_no_digest(monkeypatch):

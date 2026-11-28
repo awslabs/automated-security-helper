@@ -6258,9 +6258,9 @@ def check_mcp_contract(
                         ),
                     )
                 )
-    import datetime
+    import datetime as dt
 
-    today = datetime.datetime.now(datetime.timezone.utc).date()
+    today = dt.datetime.now(dt.timezone.utc).date()
     fresh_unused: list[str] = []
     for index, (tool, file, func, fragment, stale_after, _) in enumerate(
         UNREAD_RESPONSE_EXPLAINED
@@ -6268,7 +6268,7 @@ def check_mcp_contract(
         if index in used_explanations:
             continue
         label = f"{tool} {file} {func} ({fragment!r})"
-        if datetime.date.fromisoformat(stale_after) < today:
+        if dt.date.fromisoformat(stale_after) < today:
             # The code the entry explained is gone or has changed; a standing
             # exemption for it must not outlive the convergence window.
             findings.append(

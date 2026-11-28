@@ -792,6 +792,17 @@ class ScanExecutionEngine:
                 self._init_excluded_scanners,
                 self._selection_origin,
             )
+            # Recorded on the context too, in the form the scan phase is handed:
+            # a converter runs before that phase and gets only the context, and
+            # the sdist lock harvester names grype and trivy only when this run
+            # runs them. A stand-in context without the record method gets none.
+            record_selection = getattr(self._context, "record_scanner_selection", None)
+            if callable(record_selection):
+                record_selection(
+                    enabled=self._init_enabled_scanners,
+                    excluded=self._init_excluded_scanners,
+                    python_only=self._python_only,
+                )
 
             # An allowlist that names no registered scanner, refused here as well as
             # in ScanPhase: ASHScanOrchestrator builds the engine before it asks git

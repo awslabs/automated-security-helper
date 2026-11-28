@@ -14,7 +14,7 @@ is by JSON value, the way ``config_document_denials`` compares a changed value.
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -73,7 +73,7 @@ def test_control_a_different_value_is_not_forgiven() -> None:
 
 def test_a_value_that_is_not_json_is_not_the_default_and_does_not_raise() -> None:
     # A YAML date is data the loader can hand over; it is not any default.
-    assert _writes("ferret-scan", "config_file", datetime.date(2026, 1, 1)) is False
+    assert _writes("ferret-scan", "config_file", dt.date(2026, 1, 1)) is False
 
 
 def test_a_value_nested_too_deep_is_not_the_default_and_does_not_raise() -> None:

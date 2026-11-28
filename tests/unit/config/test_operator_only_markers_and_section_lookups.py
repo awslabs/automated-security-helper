@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 from typing import Annotated
 
 import pytest
@@ -301,7 +301,7 @@ def test_a_list_holding_an_environment_read_value_shows_the_reference():
 
 def test_a_date_a_yaml_file_wrote_is_shown_as_text():
     shown = mark_operator_only_options(
-        {"reporters": {SH: {"options": {"findings_scope": datetime.date(2099, 1, 31)}}}}
+        {"reporters": {SH: {"options": {"findings_scope": dt.date(2099, 1, 31)}}}}
     )
 
     marker = shown["reporters"][SH]["options"]["findings_scope"]
@@ -316,7 +316,7 @@ def test_a_date_keyed_mapping_a_yaml_file_wrote_is_shown_as_text():
     shown = mark_operator_only_options(
         {
             "reporters": {
-                SH: {"options": {"findings_scope": {datetime.date(2099, 1, 31): "all"}}}
+                SH: {"options": {"findings_scope": {dt.date(2099, 1, 31): "all"}}}
             }
         }
     )

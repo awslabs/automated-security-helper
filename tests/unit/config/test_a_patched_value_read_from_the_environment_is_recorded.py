@@ -126,13 +126,18 @@ def test_the_materialized_session_config_holds_the_patched_reference(
     """materialize_session_config, the MCP server's own writer of a session's
     config."""
     from automated_security_helper.cli.mcp.profile_registry import (
+        SESSION_CONFIG_FILENAME,
         materialize_session_config,
     )
 
     monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp"))
     config = resolve_config(_patched(tmp_path, "/project_name", VALUE))
 
-    session = Path(materialize_session_config("session-a", config))
+    session = Path(
+        materialize_session_config(
+            "session-a", config, filename=SESSION_CONFIG_FILENAME
+        )
+    )
 
     text = session.read_text(encoding="utf-8")
     assert CANARY not in text, text

@@ -23,8 +23,8 @@ Everything below is importable from `automated_security_helper.utils.symbol_span
 
 | Name | Signature | What it does |
 |---|---|---|
-| `SymbolResolver` | `SymbolResolver(source_dir: Path)` | Answers "is this finding inside that symbol?" for one scan root. Parses lazily, only for a file that a symbol suppression otherwise matches, through a cache shared by every resolver. |
-| `SymbolResolver.contains` | `contains(file_path, line_start, line_end, symbol) -> bool` | True if lines `line_start..line_end` of `file_path` (relative to the scan root, as suppressions match it) lie wholly inside a definition named `symbol`. Returns `False`, never raises, whenever the span cannot be known, and logs each distinct reason once per `(file, reason)` at WARNING. |
+| `SymbolResolver` | `SymbolResolver(source_dir: Path, lock: AshLock \| None = None, lock_error: str \| None = None, noticed: set \| None = None)` | Answers "is this finding inside that symbol?" for one scan root. Parses lazily, only for a file that a symbol suppression otherwise matches, through a cache shared by every resolver. With `lock`, the scan root's `.ash.lock`, a suppression also needs its recorded scope to be current ([the lock's digests](#lock-digests)); `lock_error` is the reason the lock could not be read, which makes every symbol suppression match nothing; `noticed` is the scan's set of notices already printed, so each is printed once per scan. |
+| `SymbolResolver.contains` | `contains(file_path, line_start, line_end, symbol, *, rule_id=None) -> bool` | True if lines `line_start..line_end` of `file_path` (relative to the scan root, as suppressions match it) lie wholly inside a definition named `symbol`, and, with a lock, the lock records the suppression's `(rule_id, symbol)` scope and that scope is current. Returns `False`, never raises, whenever the span cannot be known, and logs each distinct reason once per `(file, reason)` at WARNING. A caller that leaves `rule_id` out is answered for the scope of a suppression with no rule id, so leaving it out fails closed. |
 | `index_symbols` | `index_symbols(source: bytes, grammar: SymbolGrammar) -> dict[str, list[tuple[int, int]]]` | Maps each qualified name defined in `source` to its 1-based inclusive line spans. Raises `SymbolsUnavailableError` if the grammar cannot be loaded and `SymbolParseError` if the parse tree contains an error. |
 | `grammar_for_path` | `grammar_for_path(file_path: str) -> SymbolGrammar \| None` | The grammar for a path, selected by extension (the table below); `None` for an extension with no grammar. |
 | `is_valid_symbol` / `SYMBOL_PATTERN` | `is_valid_symbol(symbol: str) -> bool` | Whether a string is a well-formed dotted qualified name. The pattern is dot-joined segments of `#?(?!\d)[\w$]+`: Unicode identifiers, `$` for JavaScript, a `#` prefix for a JS/TS private member. Matched whole. |
@@ -106,6 +106,8 @@ span. The causes:
 | the symbol is not defined in the file (gone, renamed, or misspelled) | no match; finding visible | nothing is logged: a defined-elsewhere name is indistinguishable from a narrow entry, so staleness surfaces as the finding returning and the entry reported unused |
 | the finding carries no line, or its range ends before it starts | no match; finding visible | nothing; there is no region to test |
 
+A scan's resolver also has the scan root's `.ash.lock`, and fails closed on it the same way: a suppression whose `(rule_id, symbol)` scope the lock does not record, or whose recorded scope is not current (its code changed, its definition or file is gone, or its changed file cannot be digested), matches nothing. A notice names the suppressions and the command to run, once per scan for each file and state, for each symbol of a symbol-scoped suppression, and for each scope the lock never recorded; see [Lock a symbol suppression](../how-to/suppress-findings.md#lock). A lock that cannot be read makes every symbol suppression match nothing, with one warning that says why.
+
 This is the same posture as an expired suppression: a stale reference resurfaces its
 findings loudly instead of silently hiding them. The remediation is also the same -- fix
 the reference or re-triage the finding. `ash config lint` flags an entry whose `symbol` is
@@ -132,6 +134,27 @@ The extension is the only selector; a file whose extension is not here fails clo
 | `.tsx` | TSX | the TypeScript set |
 | `.java` | Java | classes, interfaces, enums, records, annotation types, methods, constructors (annotations are part of the span) |
 
+## The lock's syntax digests {#lock-digests}
+
+`.ash.lock` records digests of the same parse the resolver makes. They are computed by `automated_security_helper/utils/ast_digest.py`, which uses the standard library only and is handed its trees by this module. How to use the lock is in [Lock a symbol suppression](../how-to/suppress-findings.md#lock); this section says what each value covers.
+
+- **One read.** A check reads a file once, and that read gives its spans, its anchor, and its digests. The anchor, `source_sha256`, is the SHA-256 of the bytes with CRLF and lone CR rewritten to LF, a leading byte order mark kept. While the anchor matches, every scope of the entry is current, with no parse.
+- **The file digest** is the SHA-256 of a stream of records from a walk of the whole tree: for every node, its type, whether it is named, and the field it holds in its parent; for every token, named or anonymous (identifiers, keywords, operators, punctuation, numbers, and comments), its text; and every run of bytes between nodes that holds a byte other than a space, tab, or line feed, whole, with the bytes before the first node and after the last. A string-like literal is hashed as its exact text instead of walked.
+- **Line breaks.** In JavaScript, TypeScript, and TSX each token also records whether a line feed comes before it, since a line break can change what the code means there (automatic semicolon insertion, a `return` followed by a line break, and TypeScript's rule that a modifier followed by a line break is an identifier). Python's statement structure is in the tree, and Java gives line breaks no meaning.
+- **The prelude** is a UTF-8 byte order mark; in Python the encoding declaration, the `#!` line, and the `from __future__` imports; in JavaScript and TypeScript the `#!` line and the leading run of comments and directives. It is part of the file digest and of every symbol digest.
+- **The symbol digest** of a name covers each definition that bears it, in file order: every token on the lines of its span (the span's own nodes and the siblings that share its first or last line, or the enclosing node when other code shares those lines), the header of each definition it sits in (decorators, name, parameters, bases, modifiers, and return type, without the body), in JavaScript and TypeScript the leading run of directives at the top of every function it sits in, named or not (such as `"use strict"` in an immediately invoked function or a callback), and the prelude. A name that no definition bears has no digest, and a symbol-scoped suppression of it is gone.
+- **What a digest is bound to.** A digest's input starts with the name of the canonical form (`ash-ast-2`), the grammar's lock id and fingerprint, and what is digested (the file, or a symbol and its name), so a file digest never equals a symbol digest and digests made under two grammars are never equal.
+- **The grammar's identity.** The fingerprint is a SHA-256 over the grammar's tables as the tree-sitter binding reports them: its ABI version, its parse state count, every node kind with its name and its named and visible flags, and every field name. Before it digests a file, ASH checks that the running grammar still has every node type the table below names; a grammar that lacks one makes the changed files of its language unverifiable, rather than digested by rules that no longer fit it.
+
+| Grammar | Hashed as exact text | Left out | Line-feed bit | Prelude |
+|---|---|---|---|---|
+| Python | `string` | `line_continuation` | no | byte order mark, encoding declaration, `#!` line, `from __future__` imports |
+| JavaScript | `string`, `template_string`, `regex` | nothing | yes | byte order mark, `#!` line, leading comments and directives |
+| TypeScript, TSX | `string`, `template_string`, `template_literal_type`, `regex` | nothing | yes | byte order mark, `#!` line, leading comments and directives |
+| Java | `string_literal`, `character_literal` | nothing | no | byte order mark |
+
+The record format, the layout bytes, the prelude, and these tables together are the canonical form `ash-ast-2`. `ast_digest.POLICY_SHA256` pins the tables: when the running tables differ from it, ASH computes no digest at all, so a change to what a digest means has to come with a new name for the form.
+
 ## Limits {#limits}
 
 - **Python module-level assignments are not addressable.** The Python grammar names class
@@ -151,11 +174,15 @@ The extension is the only selector; a file whose extension is not here fails clo
   reported on a decorator line is inside the symbol.
 - **Line endings and BOM are normalized** (CRLF and lone CR to LF, a leading UTF-8 BOM
   dropped) before parsing, so tree-sitter's rows match the file's line numbers as scanners
-  report them. Nothing else is rewritten.
-- **Parses are cached** per resolved path and the stat fields that change when the file
-  does, bounded at 4096 entries, so one scan parses a file once however many times
-  suppressions are applied. A missing extra and an unreadable file are answered but not
-  cached, since both can change without the file changing.
+  report them. Nothing else is rewritten. The lock's digests still count the BOM: adding
+  or removing one is a change.
+- **Analyses are cached** by the SHA-256 of the file's bytes and the grammar, never by the
+  file's stat, so a rewrite that keeps the size and the modification time is a new key.
+  The cache holds at most 512 analyses and 8 MiB of source; an analysis keeps its tree for
+  the lock's digests, and the measured memory is about 16 times its source. One scan reads
+  a file once per resolver and parses each content once, however many times suppressions
+  are applied. A missing extra and an unreadable file are answered but not cached, since
+  both can change without the file changing.
 - **A name no symbol can spell** -- a string-named TS module, a computed or string-keyed
   method, a destructuring pattern -- is kept as an unspellable segment, so neither it nor
   anything defined inside it is reachable under the enclosing scope's name.

@@ -668,3 +668,17 @@ def test_the_syft_harvest_stamps_the_three_provenance_properties_the_page_lists(
     assert f"{sdist_harvest.HARVEST_DIR_NAME}/<package>/<version>/" in page
     assert sdist_harvest.HARVEST_SKIPPED_RULE == "ash-sbom-harvest-skipped"
     assert f"`{sdist_harvest.HARVEST_SKIPPED_RULE}`" in page
+
+
+def test_the_syft_page_names_the_readers_the_harvest_names_packages_for():
+    """With syft off the page names grype and trivy as the harvest's readers, and
+    the converter's table of readers is those two."""
+    assert_on_page(
+        SYFT_PAGE,
+        "With the syft scanner disabled nothing is fetched. grype and trivy still "
+        "read the harvested lockfiles",
+    )
+    assert_on_page(SYFT_PAGE, "with neither running, the harvest records nothing.")
+    from automated_security_helper.utils import sdist_harvest
+
+    assert sdist_harvest.HARVEST_ADVISORY_READERS == ("grype", "trivy")

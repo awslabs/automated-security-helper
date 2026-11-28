@@ -168,6 +168,12 @@
 
 ### Fixes
 
+- **A profile written by v3.8.0's `ash config init` keeps counting as a shipped default
+  for MCP clients.** The unreleased edits to the table of shipped defaults had changed
+  the v3.8.0 `denied_paths` entry in place, so such a profile would have been read as the
+  operator's own list and a client-delivered suppression refused with
+  `config_field_denied`. The v3.8.0 list is its own entry again, and a test pins it from
+  a literal kept outside the table.
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
@@ -274,26 +280,56 @@
 
 ### Features
 
-- **Symbol suppressions are bound to their file's content hash in `.ash.lock`.**
-  A symbol-scoped suppression the lock does not record is refused when the config is
-  validated (`ash scan`, a workspace scan handing the orchestrator a resolved config,
-  `ash config validate`, and the MCP `validate_config`, which used to skip the check
-  without a source directory), with a message that names the command to run. The lock
-  records the reviewed `(rule_id, symbol)` scopes beside each file's hash and both are
-  required: locking a file for one rule does not approve a suppression added to the
-  same file later. When a locked file's bytes change, its symbol suppressions stop
-  applying, their findings return, and the scan prints one notice naming the file, the
-  suppressions and `ash suppress refresh`. The new `ash suppress add`, `refresh` and
-  `verify` commands write the suppression and its lock entry together, record a
-  reviewed change, and fail CI when the lock is out of date; `add` resolves `--file`
-  to the key the scan looks up (a path through a symlink locks the real file), a
-  whole-lock refresh is the explicit `refresh --all`, and `refresh --drop-missing`
-  removes the entry of a locked file that is gone. Line-range suppressions are
+- **Symbol suppressions are bound in `.ash.lock` to the code they were reviewed
+  against.** A symbol-scoped suppression the lock does not record is refused when the
+  config is validated (`ash scan`, a workspace scan handing the orchestrator a resolved
+  config, and `ash config validate`), with a message that names the command to run. The
+  MCP `validate_config` tool, which has no source directory and used to skip the check,
+  reports the same finding as a warning that says the lock was not checked against a
+  source tree: it can read only the lock at the root the config file's location
+  implies, and config content has none, so it cannot say whether a scan refuses the
+  config. For each file a symbol suppression names, the lock records digests of the
+  file's tree-sitter syntax tree and the reviewed `(rule_id, symbol)` scopes, and both
+  are required: locking a file for one rule does not approve a suppression added to the
+  same file later. Each scope has an invalidation scope: `file`, the default, stops the
+  suppression applying when the code of the file changes, and `symbol` only when the
+  code of the suppressed definition does (its lines, every definition bearing its name,
+  the headers of the definitions it sits in, the directives at the top of a JavaScript
+  or TypeScript function it sits in, and the top of the file, such as a Python
+  encoding declaration or `from __future__` imports). A comment between a decorator
+  and its definition does not hide the decorator. Layout does not count: spaces,
+  tabs and line breaks between tokens, and line endings, so a re-indented file and a
+  checkout that converts line endings keep their suppressions. Comments, the spelling of
+  literals and every other token count, and in JavaScript and TypeScript so does a line
+  break before a token. When the code changes, the suppressions bound to it stop
+  applying, their findings return, and each scan prints one notice naming the file, the
+  suppressions and `ash suppress refresh`. The new `ash suppress add`, `refresh`,
+  `verify` and `migrate` commands write the suppression and its lock entry together,
+  choose its invalidation scope (`--invalidation-scope`, or the config's
+  `global_settings.suppression_invalidation_scope` for a new suppression), record a
+  reviewed change or a change of scope, fail CI when the lock is out of date, and
+  convert version 1 entries. `add`, `refresh` and `migrate` need the `symbols` extra;
+  `verify` needs it only for a file that changed. A suppression's path is keyed the way
+  the scan looks it up, so a path through a symlink is locked, verified and checked
+  under the real file. A whole-lock refresh is the explicit `refresh --all`, and
+  `refresh --drop-missing` removes the entry of a locked file that no longer exists and
+  the lock's record of a definition the file no longer has; the suppression in the
+  config is the user's to rename or remove, or the next scan refuses the config. A
+  locked file that is still there but cannot be hashed (unreadable, not a regular
+  file, over 64 MiB, or a link out of the source directory) keeps its entry, and
+  `refresh` and `verify` report it as such. A symbol suppression whose file is gone is
+  advised to be removed from the config, not added again. Line-range suppressions are
   unchanged. This repository's own symbol suppressions are locked in the same change.
+  A version 1 lock, written by main-branch builds before syntax-tree digests (a SHA-256
+  of each file's bytes), is still read with that meaning, any byte change counting, and
+  `ash suppress migrate` converts its entries whose files are unchanged. A build from
+  before version 2 refuses a version 2 lock (its scan exits 3 when it validates the
+  config), so every environment that runs `ash scan` or `ash suppress` on a repository
+  moves together, and going back to such a build needs the earlier `.ash.lock` as well.
   The lock is the root dotfile `.ash.lock`; a lock still at `.ash/ash.lock` is read
   with a deprecation warning (deprecated in v3.9, removed in v4.0) that advises
   `git mv`. See
-  [Lock a symbol suppression to its file](docs/content/how-to/suppress-findings.md#lock).
+  [Lock a symbol suppression to the code you reviewed](docs/content/how-to/suppress-findings.md#lock).
 - **ASFF findings of one secret carry one `ash/correlationId`.** ASH does not
   deduplicate, so a secret that two scanners find is two findings with two Ids in
   Security Hub, and nothing said they were about one secret. Each secret detection now

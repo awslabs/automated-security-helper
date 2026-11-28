@@ -1797,6 +1797,7 @@
                   "/scanners/grype/options/config_file",
                   "/scanners/syft/options/config_file",
                   "/scanners/syft/options/sdist_harvest/**",
+                  "/converters/sdist-lock-harvester/**",
                   "/scanners/trivy-repo/options/secret_config_file",
                   "/scanners/trivy-repo/options/config_file",
                   "/scanners/trivy-repo/options/module_dir",
@@ -1858,6 +1859,7 @@
               }
             },
             "severity_threshold": "MEDIUM",
+            "suppression_invalidation_scope": "file",
             "suppressions": []
           },
           "description": "Global default settings for ASH shared across scanners. If the same setting exists at the scanner level and is set in both places, the scanner level settings take precedence."
@@ -1869,29 +1871,6 @@
           "type": "boolean"
         },
         "mcp-resource-management": {
-          "$ref": "#/$defs/MCPResourceManagementConfig",
-          "default": {
-            "enable_health_checks": true,
-            "enable_resource_logging": true,
-            "health_check_interval_seconds": 60,
-            "log_resource_operations": false,
-            "max_concurrent_scans": 3,
-            "max_concurrent_scans_per_session": 2,
-            "max_concurrent_tasks": 20,
-            "max_directory_size_mb": 1000,
-            "max_message_size_bytes": 10485760,
-            "max_path_length": 4096,
-            "memory_critical_threshold_mb": 2048,
-            "memory_warning_threshold_mb": 1024,
-            "operation_timeout_seconds": 180,
-            "scan_timeout_seconds": 1800,
-            "shutdown_timeout_seconds": 30,
-            "task_count_warning_threshold": 15,
-            "thread_pool_max_workers": 4
-          },
-          "description": "Configuration for MCP server resource management and limits"
-        },
-        "mcp_resource_management": {
           "$ref": "#/$defs/MCPResourceManagementConfig",
           "default": {
             "enable_health_checks": true,
@@ -2528,6 +2507,7 @@
                 "/scanners/grype/options/config_file",
                 "/scanners/syft/options/config_file",
                 "/scanners/syft/options/sdist_harvest/**",
+                "/converters/sdist-lock-harvester/**",
                 "/scanners/trivy-repo/options/secret_config_file",
                 "/scanners/trivy-repo/options/config_file",
                 "/scanners/trivy-repo/options/module_dir",
@@ -2611,6 +2591,10 @@
           "default": "MEDIUM",
           "description": "Global minimum severity level to consider findings as failures across all scanners",
           "title": "Severity Threshold"
+        },
+        "suppression_invalidation_scope": {
+          "description": "The invalidation scope `ash suppress add` records in .ash.lock for a new symbol suppression when --invalidation-scope is not given. 'file': a change to the code of the suppression's file makes it stop applying until it is reviewed again. 'symbol': only a change to the code of the suppressed definition does (its lines, every definition bearing its name, the headers of the definitions it sits in, the file's prelude). Applies to new .ash.lock scopes only: a scan and `ash suppress verify` read the kind recorded in the lock, so editing this never changes a reviewed binding.",
+          "type": "string"
         },
         "suppressions": {
           "default": [],
@@ -2825,6 +2809,7 @@
               "/scanners/grype/options/config_file",
               "/scanners/syft/options/config_file",
               "/scanners/syft/options/sdist_harvest/**",
+              "/converters/sdist-lock-harvester/**",
               "/scanners/trivy-repo/options/secret_config_file",
               "/scanners/trivy-repo/options/config_file",
               "/scanners/trivy-repo/options/module_dir",
