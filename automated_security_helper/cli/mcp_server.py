@@ -2468,7 +2468,10 @@ async def explain_finding(
     Returns:
         Dict with ``success`` and ``finding`` keys containing title, description,
         severity, severity_rationale, cwe_id, cve_id, references, scanner,
-        and scanner_metadata.
+        scanner_metadata and result_kind. ``result_kind`` is the result's SARIF
+        kind, ``fail`` when the scanner states none. A result of kind pass,
+        notApplicable or informational that reports no problem states no
+        finding, and its severity_rationale says it counts at no threshold.
     """
     try:
         session_id = resolve_caller_session_id(ctx)
