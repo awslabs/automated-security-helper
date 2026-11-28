@@ -1413,13 +1413,15 @@ def test_a_profile_list_of_one_reference_entry_is_written_to_a_session_as_that_e
 ):
     """The control: a profile that writes the list itself, with a reference as its
     one entry, has the copy write the list with that entry as the reference. The
-    reference stands where its file wrote it, not at the list."""
+    reference stands where its file wrote it, not at the list. The list is
+    written in block form: in a flow sequence the ``{`` of ``${`` opens a mapping
+    and the file does not parse."""
     from automated_security_helper.cli.mcp import profile_registry
 
     probe_env.setenv("ASH_PROBE_FMT", "sarif")
     _in_a_session_workspace(tmp_path, probe_env)
     profile = _operator_config(
-        tmp_path, "output_formats: [${ASH_PROBE_FMT}]\n", "profile.ash.yaml"
+        tmp_path, "output_formats:\n  - ${ASH_PROBE_FMT}\n", "profile.ash.yaml"
     )
     config = profile_registry.register_profiles([f"probe={profile}"])["probe"].config
 
