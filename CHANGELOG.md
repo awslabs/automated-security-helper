@@ -416,6 +416,42 @@
   scanners only and no longer ends in ", alpha opt-in". An error exits 2 with a message
   on stderr and nothing on stdout. `tests/unit/test_install_routes.py` and
   `tests/unit/test_alpha_doctest_installs.py` cover it.
+- `run_ash_scan` and `run_ash_container` take a `build_engine` parameter, the program
+  that builds the container image, a `BuildEngine` from
+  `automated_security_helper.core.enums`. The default, `BuildEngine.RUNNER`, builds with
+  the container runtime that also runs the scan, so no scan changes. Container mode now
+  finds the programs it starts for each engine: one result names the program that builds
+  the image and the one that runs the scan, a step that a call does not take has none,
+  and a host with no container runtime still fails with "Unable to resolve an OCI
+  runner", as it did. The words an image build passes for ASH's own Dockerfile (the UID
+  and GID, the clone date of a moving revision, the tag, the target, the file, the
+  revision, offline mode, the offline Semgrep rulesets and the build date) come from one
+  function, in the same order as before. A build engine that names none, or one that
+  this version has no code to start, is refused with exit 3 and a message that names the
+  value. `run_ash_scan` checks it before it clears the previous run's output, so a
+  refused scan leaves that output as it was, and `run_ash_container` refuses the same
+  values with that exit code and a result, not an exception, for a caller that reaches
+  it directly. A Nix shell's inner scan is not given the option, as with the other
+  container-only options. The Python API reference lists the parameter.
+  `tests/unit/interactions/test_build_engine_seam.py` and
+  `tests/unit/interactions/test_run_ash_scan_nix_inner_arguments.py` cover it.
+- Added `docs/journeys/getting-started-local.cast.yaml`, the storyboard of the terminal
+  recording that plays the "Run your first scan" tutorial. A scene that runs an `ash`
+  command names the tutorial's block by its `id` and repeats none of its text, so the
+  storyboard cannot drift from the tutorial. A scene types its own command only from a
+  short read-only list (`cat` and `ls`), and the install scene types the README's
+  install line as a shell comment that is never run, found through the new anchor
+  `<a id="quick-start-install"></a>` above that block in `README.md` and its template.
+  No recording is rendered or checked in yet. The four blocks of the first scan journey
+  that the storyboard plays now carry an optional `id` (`version`, `project`, `scan-two`
+  and `report`). An `id` is kebab-case and belongs to one block of the journey, and it is
+  never rendered, so the tutorial page is unchanged. One reader, `scripts/_strict_yaml.py`,
+  now loads the journey files and the storyboard. It refuses what `yaml.safe_load`
+  resolves without a word: anchors, aliases, every explicit tag, merge keys and a key
+  given twice in one mapping, each with its file and line. A tag can make a merge key of
+  any word or hide a repeated key, so a tag is refused whatever it would have made of the
+  node. `tests/unit/docs/test_cast_core.py` and `tests/unit/docs/test_journey_pages.py`
+  cover it.
 
 ### Deprecations
 
