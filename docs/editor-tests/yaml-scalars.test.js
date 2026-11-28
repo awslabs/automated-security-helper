@@ -358,10 +358,16 @@ test('a mapping is a plain object when every key is a string, and a typed map wh
   assert.deepStrictEqual(typed.pairs, [[1, 'x'], ['1', 'y']]);
   assert.ok(makeMap([[null, 'x']]) instanceof TypedMap);
   assert.deepStrictEqual(makeMap([]), {});
-  // A key written again keeps its place and takes the last value; yes and true are one key.
+  // A key written again is its last writing whole, as ASH's loader keeps it: that
+  // writing's key and value, at the place it was written last. yes and true are one key.
   assert.deepStrictEqual(makeMap([['a', 1], ['b', 2], ['a', 3]]), { a: 3, b: 2 });
-  assert.deepStrictEqual(makeMap([[true, 'a'], ['k', 'x'], [1, 'b']]).pairs, [[true, 'b'], ['k', 'x']]);
-  assert.deepStrictEqual(makeMap([[1, 'a'], [new Float(1), 'b']]).pairs, [[1, 'b']]);
+  assert.deepStrictEqual(Object.keys(makeMap([['a', 1], ['b', 2], ['a', 3]])), ['b', 'a']);
+  assert.deepStrictEqual(makeMap([[true, 'a'], ['k', 'x'], [1, 'b']]).pairs, [['k', 'x'], [1, 'b']]);
+  assert.deepStrictEqual(makeMap([[1, 'a'], [new Float(1), 'b']]).pairs, [[new Float(1), 'b']]);
+  assert.deepStrictEqual(makeMap([[1, 'a'], ['x', 'b'], [new Float(1), 'c']]).pairs, [
+    ['x', 'b'],
+    [new Float(1), 'c'],
+  ]);
   const proto = makeMap([['__proto__', 1], ['b', 2]]);
   assert.equal(Object.keys(proto).length, 2);
   assert.equal(Object.getPrototypeOf(proto), Object.prototype);

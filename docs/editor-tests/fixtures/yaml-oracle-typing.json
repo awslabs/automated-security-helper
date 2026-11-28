@@ -238,7 +238,29 @@
           ],
           [
             {
-              "$int": "9007199254740992"
+              "$float": "9007199254740992.0"
+            },
+            "c"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "repeated-key-takes-the-place-and-spelling-of-its-last-writing",
+      "lines": [
+        "1: a",
+        "x: b",
+        "1.0: c"
+      ],
+      "value": {
+        "$map": [
+          [
+            "x",
+            "b"
+          ],
+          [
+            {
+              "$float": "1.0"
             },
             "c"
           ]

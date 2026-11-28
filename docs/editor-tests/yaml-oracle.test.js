@@ -140,17 +140,15 @@ function projectMapping(node) {
   const fail = (code, message) => {
     throw new Error(`${code}: ${message}`);
   };
-  const first = new Map();
-  const pairs = [];
+  // ASH's loader keeps a key written again whole as its last writing: that writing's key
+  // (1.0, where 1 was written before) and value, at the place it was written last.
+  const kept = new Map();
   for (const [key, value] of mappingPairs(node, fail)) {
     const id = keyIdentity(key);
-    if (first.has(id)) {
-      pairs[first.get(id)][1] = value;
-    } else {
-      first.set(id, pairs.length);
-      pairs.push([key, value]);
-    }
+    kept.delete(id);
+    kept.set(id, [key, value]);
   }
+  const pairs = [...kept.values()];
   const plain = pairs.every(([key]) => {
     const text = scalarText(key);
     return typeof text === 'string' && !text.startsWith('$');

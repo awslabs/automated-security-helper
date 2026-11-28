@@ -273,11 +273,16 @@ test('an integer beyond 2**53 is read with every digit, and the integers either 
 test('keys beyond 2**53 are two keys, and the integer key and the float key of one value are one key', () => {
   const doc = read('9007199254740993: a\n9007199254740992: b\n9007199254740992.0: c\n');
   assert.ok(doc.typed instanceof TypedMap);
-  // Python makes the third key the second one (an integer and a float of one value are
-  // one key), and keeps the first key's place and spelling with the last value.
+  // An integer and a float of one value are one key, and ASH's loader keeps the last
+  // writing of a key whole: its spelling (the float) and its value.
   assert.deepStrictEqual(doc.typed.pairs, [
     [9007199254740993n, 'a'],
-    [9007199254740992n, 'c'],
+    [new Float(2 ** 53), 'c'],
+  ]);
+  const placed = read('1: a\nx: b\n1.0: c\n');
+  assert.deepStrictEqual(placed.typed.pairs, [
+    ['x', 'b'],
+    [new Float(1), 'c'],
   ]);
 });
 

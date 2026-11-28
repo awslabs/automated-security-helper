@@ -310,11 +310,13 @@ test('two integers a double cannot tell apart are two values', () => {
   // The largest integer a number holds exactly is one value as a number and as a BigInt.
   assert.equal(sameValue(9007199254740991n, 9007199254740991), true);
   // As keys: two integer keys that differ by one are two keys, and the float key of an
-  // integer key's value is that key, as in Python.
+  // integer key's value is that key, as in Python, written last and so kept as a float.
   assert.equal(sameValue(makeMap([[9007199254740993n, 'a']]), makeMap([[9007199254740992n, 'a']])), false);
   const merged = makeMap([[9007199254740992n, 'a'], [new Float(2 ** 53), 'b']]);
-  assert.deepStrictEqual(merged.pairs, [[9007199254740992n, 'b']]);
-  assert.equal(sameValue(merged, makeMap([[9007199254740992n, 'b']])), true);
+  assert.deepStrictEqual(merged.pairs, [[new Float(2 ** 53), 'b']]);
+  assert.equal(sameValue(merged, makeMap([[new Float(2 ** 53), 'b']])), true);
+  // A key's type is part of what it is, so the integer key is not the float key.
+  assert.equal(sameValue(merged, makeMap([[9007199254740992n, 'b']])), false);
 });
 
 test('a path is written the way people write it', () => {
