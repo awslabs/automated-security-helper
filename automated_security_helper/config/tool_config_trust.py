@@ -638,13 +638,23 @@ def confine_scanner_config_files(
     config_overrides: Optional[Sequence[str]],
     in_tree: Sequence[Path],
     source: UntrustedSource = IN_TREE_OR_DELIVERED,
-) -> None:
+) -> List[Tuple[str, str, str]]:
     """Replace the tool config choices an in-tree or delivered file made with the trusted base's.
 
     A plugin scanner's section the file leaves out (or holds without an options
     mapping) is given the trusted base's values for these options, since the
     file replaces the operator's config rather than adding to it. The warning
     names only an option the file wrote.
+
+    Returns the ``(scanner, key, name)`` of each option the trusted base decided:
+    the scanner, the key of the section in ``config`` that holds it, and the
+    option's name. That is every option whose value came from the trusted base,
+    and every one the file wrote the same value for, so that what a caller
+    does with the list (``resolve_config._take_confined_references`` takes the
+    trusted base's references there) does not depend on whether the file's value
+    equals the trusted one. An option an override set, and a tightening value
+    the file wrote, are not decided by the trusted base and are not in it, nor
+    are the detect-secrets entries ``_confine_settings_files`` drops.
 
     An override the trusted base cannot take (``replay_overrides_onto``) leaves
     the value it set on the resolved config alone, at the one section it
@@ -699,6 +709,7 @@ def confine_scanner_config_files(
         warn_dropped(trusted_config, replay.dropped)
 
     ignored: List[str] = []
+    decided: List[Tuple[str, str, str]] = []
     extra = getattr(config.scanners, "__pydantic_extra__", None)
     for scanner, option_defaults in _confined_options().items():
         trusted_section = trusted_config.get_plugin_config(PluginKind.SCANNER, scanner)
@@ -714,6 +725,7 @@ def confine_scanner_config_files(
         if not sections:
             if trusted_values and isinstance(extra, dict):
                 extra[scanner] = {"options": dict(trusted_values)}
+                decided += [(scanner, scanner, name) for name in trusted_values]
             continue
         for key, section in sections:
             # A value an override the trusted base could not take set is the
@@ -728,6 +740,7 @@ def confine_scanner_config_files(
                     and section.get("options") is None
                 ):
                     section["options"] = dict(trusted_values)
+                    decided += [(scanner, key, name) for name in trusted_values]
                 continue
             for name, default in option_defaults.items():
                 path = ("scanners", key, "options", name)
@@ -746,6 +759,10 @@ def confine_scanner_config_files(
                 wrote = _file_wrote(config, path, written)
                 if wrote and is_tightening_value(scanner, name, current):
                     continue
+                # From here the trusted base decides the value, whether or not
+                # the file wrote the same one, so the answer to a guess does
+                # not depend on which (the returned list).
+                decided.append((scanner, key, name))
                 if _same_option_value(current, _or_default(wanted, default)):
                     if written is None and default is not None:
                         # An explicit null reads as the default here, but the
@@ -766,6 +783,8 @@ def confine_scanner_config_files(
                 ):
                     ignored.append(f"scanners.{key}.options.{name}")
                 _set(options, name, wanted, default)
+    # What _confine_settings_files drops is not in ``decided``: it removes the
+    # detect-secrets entries the trusted base lacks and copies none of its values.
     ignored.extend(_confine_settings_files(config, trusted_config, landings))
     if ignored:
         files = ", ".join(describe_config_path(path) for path in in_tree)
@@ -779,6 +798,7 @@ def confine_scanner_config_files(
             "a scanner's own configuration, which is the operator's choice, and "
             f"{source.reason}. {tail}"
         )
+    return decided
 
 
 def _plugin_sections(segment: Any) -> List[Tuple[str, Any]]:

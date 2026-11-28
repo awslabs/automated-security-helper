@@ -1451,3 +1451,79 @@ def test_a_profiles_list_over_its_bases_reference_is_written_to_a_session_as_the
 
     text = written.read_text(encoding="utf-8")
     assert _as_written(text)["output_formats"] == ["sarif", "html"], text
+
+
+# ---------------------------------------------------------------------------
+# A checkout's config that the operator's file gave a path it read from a variable
+# ---------------------------------------------------------------------------
+
+
+def _a_checkout_given_the_operators_path(
+    tmp_path: Path, probe_env, held: str
+) -> Tuple[Path, Path]:
+    """The operator's file reads bandit's ``config_file`` from a variable that
+    holds ``held``, and ASH_CONFIG names it. ``tree/.ash.yaml`` sets no path, so
+    its config is given the operator's for that option. Returns the operator's
+    file and the checkout's."""
+    probe_env.setenv("ASH_PROBE_RELATIVE", held)
+    operator = _operator_config(tmp_path, RELATIVE_CONFIG)
+    own = tmp_path / "tree" / ".ash.yaml"
+    own.write_text("project_name: tree-own-3c8e\n", encoding="utf-8")
+    probe_env.setenv("ASH_CONFIG", str(operator))
+    return operator, own
+
+
+def test_ash_config_get_shows_a_relative_path_the_trusted_base_gives_by_its_reference(
+    tmp_path, probe_env
+):
+    """The file in the scanned tree sets no ``config_file``, and the operator's
+    file, which ASH_CONFIG names, reads it from a variable. The load gives the
+    tree's config the operator's path, so ``ash config get`` prints the operator's
+    directory and the reference, as it does for the operator's own file, and none
+    of the text the variable held."""
+    _, own = _a_checkout_given_the_operators_path(
+        tmp_path, probe_env, os.path.join("cfg-7a3d", "bandit.yaml")
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["config", "get", str(own), "--source-dir", str(tmp_path / "tree")],
+        env={"COLUMNS": "300"},
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "cfg-7a3d" not in result.output
+    assert "${ASH_PROBE_RELATIVE}" in result.output
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param(os.path.join("cfg-7a3d", "bandit.yaml"), id="kept-whole"),
+        pytest.param("./cfg-7a3d/bandit.yaml", id="dot-dir"),
+    ],
+)
+def test_a_relative_path_the_trusted_base_gives_a_checkouts_config_is_recorded_as_written(
+    tmp_path, probe_env, held
+):
+    """The record of the tree's config holds the operator's directory and the
+    reference where the operator's file read the path: for a path the anchoring
+    kept whole and for one it folded a ``./`` out of."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    operator, own = _a_checkout_given_the_operators_path(tmp_path, probe_env, held)
+
+    config = resolve_config(config_path=own, source_dir=tmp_path / "tree")
+
+    directory = operator.parent.resolve()
+    # The control: the load gave the tree's config the operator's path.
+    assert (
+        Path(str(config.scanners.bandit.options.config_file))
+        == directory / "cfg-7a3d" / "bandit.yaml"
+    )
+    recorded = _recorded(config)
+    assert (
+        recorded["scanners"]["bandit"]["options"]["config_file"]
+        == f"{directory}{os.sep}${{ASH_PROBE_RELATIVE}}"
+    )
+    assert "cfg-7a3d" not in json.dumps(recorded)

@@ -3061,7 +3061,9 @@ def resolve_config(
     # the overrides alone.
     if config._operator_paths is not None and not untrusted_config:
         config._operator_paths.documents.append(trusted.model_dump())
-    confine_scanner_config_files(
+    # The scanner options the trusted base decided, for the references taken at
+    # the end (_take_confined_references).
+    confined_options = confine_scanner_config_files(
         config, trusted, tier_two_overrides, list(in_tree), source=tier_two_source
     )
     confine_tool_versions(
@@ -3253,7 +3255,7 @@ def resolve_config(
             outside=outside_membership,
         ),
     )
-    _take_confined_references(config, trusted, settled, in_tree)
+    _take_confined_references(config, trusted, settled, in_tree, confined_options)
     return config
 
 
@@ -3279,6 +3281,7 @@ def _take_confined_references(
     trusted: AshConfig,
     settled: Collection[SettledOption],
     repository_files: Collection[Path],
+    confined_options: Collection[Tuple[str, str, str]] = (),
 ) -> None:
     """Record the trusted base's references for the settings confinement gave
     ``config`` from it, and drop the references to values it left out.
@@ -3286,14 +3289,17 @@ def _take_confined_references(
     confine_sandbox_grants puts the trusted base's values in place of the
     in-tree file's at every setting in ``_CONFINED_SANDBOX_SETTINGS``, and
     confine_operator_only_options at the operator-only options it returned,
-    *settled* (``settled_locations``). A reference the in-tree file wrote there
-    named a value ``config`` no longer holds, and the value it does hold may be
-    one the operator's file read from the environment. Each value is marked
-    where its file wrote the reference, in the record (record_of_config,
-    ``_written_references``) and in what a message or the MCP get_config tool
-    shows (environment_record, ``_environment_references``), so those settings
-    take the trusted base's references in both, and its values join the ones
-    redacted.
+    *settled* (``settled_locations``), and confine_scanner_config_files at the
+    scanner options it returned, *confined_options* (the ``(scanner, key,
+    name)`` of each it decided from the trusted base, the options whose value
+    the file wrote the same as the trusted one included). A reference the
+    in-tree file wrote there named a value ``config`` no longer holds, and the
+    value it does hold may be one the operator's file read from the
+    environment. Each value is marked where its file wrote the reference, in
+    the record (record_of_config, ``_written_references``) and in what a
+    message or the MCP get_config tool shows (environment_record,
+    ``_environment_references``), so those settings take the trusted base's
+    references in both, and its values join the ones redacted.
 
     An operator-only option an override or a file outside the tree kept holds
     the value that override or file gave it. It takes none of the trusted
@@ -3303,20 +3309,28 @@ def _take_confined_references(
     (RepositorySettings). A reference names its file (``origin``); a rewrite
     does not, so one is dropped there when only such a reference matches it.
 
-    The trusted base's references are taken at the sandbox settings and the
-    settled options only, where they were written. The settle writes the
-    trusted value under the configuration's own spelling of the section, which
-    can differ from the one the trusted base's file wrote; the values the
+    The trusted base's references are taken at the sandbox settings, the
+    settled options and the scanner options in *confined_options*, where they
+    were written. The settle and the scanner step write the trusted value under
+    the configuration's own spelling of the section, which can differ from the
+    one the trusted base's file wrote, so a reference at a scanner option is
+    moved to that spelling (``EnvironmentReference.rebase``), and taken only
+    where the configuration still holds the trusted base's value (an override
+    the step replayed onto a copy of the base set another). The copies at those
+    scanner options carry no mark: the anchoring builds a new string, and
+    validating a built-in section drops the loader's mark. The trusted base's
+    references describe them instead. The destination values the reporter
     confinement copies are described by their own marks, in the step that ends
     this one.
 
-    At the sandbox settings and the settled options every reference and
-    rewrite of ``config``'s own is dropped whatever its origin, and the
-    comparison reads a list index and the unknown index alike, so an entry at
-    the unknown index (a set member the load described, made from a mark and
-    naming no file) goes with the rest. The trusted base's own entries there are
-    taken, a set member's among them: the trusted base is loaded through
-    ``load_config_file_for_run`` too, which describes its set members.
+    At the sandbox settings, the settled options and the scanner options in
+    *confined_options* every reference and rewrite of ``config``'s own is
+    dropped whatever its origin, and the comparison reads a list index and the
+    unknown index alike, so an entry at the unknown index (a set member the
+    load described, made from a mark and naming no file) goes with the rest.
+    The trusted base's own entries there are taken, a set member's among them:
+    the trusted base is loaded through ``load_config_file_for_run`` too, which
+    describes its set members.
 
     The destination options of the built-in off-host reporters
     (``reporter_trust.REPORTER_DESTINATION_OPTIONS``: ``aws_region``,
@@ -3331,11 +3345,16 @@ def _take_confined_references(
     described.
     """
     from automated_security_helper.config import reporter_trust
+    from automated_security_helper.config.client_scanner_exclusions import (
+        _scanner_sections,
+    )
+    from automated_security_helper.config.config_sources import _node_at
     from automated_security_helper.config.config_validator import dumped_path
     from automated_security_helper.config.operator_only_options import (
         operator_only_locations,
         settled_locations,
     )
+    from automated_security_helper.config.tool_config_trust import _same_option_value
 
     def normal(path: Any) -> Tuple[Any, ...]:
         # environment_record's spelling of a path: '-' and '_' alike, any case.
@@ -3362,6 +3381,36 @@ def _take_confined_references(
     theirs_settled = {
         normal(location) for location in settled_locations(trusted, settled)
     }
+    # The scanner options the trusted base decided, at the configuration's
+    # spelling of the section and at the trusted base's. The trusted base's
+    # section can be spelled another way (a plugin scanner's), so each of its
+    # spellings names the configuration's places it was copied to.
+    decided_options = tuple(dict.fromkeys(confined_options))
+    mine_confined = {
+        normal(("scanners", key, "options", name)) for _, key, name in decided_options
+    }
+    mine_decided = mine_settled | mine_confined
+    theirs_confined: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = {}
+    trusted_keys: Dict[str, List[str]] = {}
+    for scanner, key, name in decided_options:
+        if scanner not in trusted_keys:
+            trusted_keys[scanner] = [k for k, _ in _scanner_sections(trusted, scanner)]
+        for trusted_key in trusted_keys[scanner]:
+            theirs_confined.setdefault(
+                normal(("scanners", trusted_key, "options", name)), []
+            ).append(("scanners", key, "options", name))
+    config_dump = config.model_dump() if decided_options else {}
+    trusted_dump = trusted.model_dump() if decided_options else {}
+
+    def same_value(trusted_path: Any, config_path: Any) -> bool:
+        # The configuration still holds the trusted base's value there. An
+        # override the step replayed onto a copy of the base set another (the
+        # copy's value is the one in the configuration, and no reference of the
+        # base names it).
+        there = _node_at(trusted_dump, tuple(trusted_path))
+        return there is not None and _same_option_value(
+            _node_at(config_dump, tuple(config_path)), there
+        )
 
     def in_repository(reference: Any) -> bool:
         return reference.origin is not None and Path(reference.origin[0]) in repository
@@ -3369,18 +3418,27 @@ def _take_confined_references(
     def left_out(reference: Any) -> bool:
         # One of config's own that no longer describes its value there.
         where = place(reference)
-        if where[:2] in sandbox or where[:4] in mine_settled:
+        if where[:2] in sandbox or where[:4] in mine_decided:
             return True
         return where[:4] in mine_kept and in_repository(reference)
 
     def taken_from_trusted(reference: Any) -> Tuple[Any, ...]:
         # The references to take for one of the trusted base's: itself at a
-        # sandbox setting or a settled option. The copied destination values
+        # sandbox setting or a settled option, and, at a scanner option it
+        # decided, moved to the configuration's spelling of the section where
+        # the configuration holds its value. The copied destination values
         # are described by their own marks (references_to_marked_values).
         where = place(reference)
         if where[:2] in sandbox or where[:4] in theirs_settled:
             return (reference,)
-        return ()
+        if reference.key or len(reference.path) < 4:
+            return ()
+        return tuple(
+            moved
+            for target in theirs_confined.get(where[:4], ())
+            for moved in (reference.rebase(4, target),)
+            if same_value(reference.path, moved.path)
+        )
 
     own_places = tuple(getattr(config, "_environment_references", ()) or ())
     their_places = tuple(getattr(trusted, "_environment_references", ()) or ())
@@ -3468,9 +3526,20 @@ def _take_confined_references(
     own = list(config._written_references or [])
     theirs = list(getattr(trusted, "_written_references", None) or [])
     if own or theirs:
-        in_config = confined(config, mine_settled)
+        in_config = confined(config, mine_decided)
         in_trusted = confined(trusted, theirs_settled)
-        taken = [rewrite for rewrite in theirs if in_trusted(rewrite)]
+        taken = [rewrite for rewrite in theirs if in_trusted(rewrite)] + [
+            # At a scanner option the trusted base decided: the rewrite at the
+            # configuration's spelling of the section, where the configuration
+            # holds the trusted base's value.
+            rewrite._replace(path=(*target, *rewrite.path[4:]))
+            for rewrite in theirs
+            if rewrite.kind == "value"
+            and len(rewrite.path) >= 4
+            and not in_trusted(rewrite)
+            for target in theirs_confined.get(normal(rewrite.path[:4]), ())
+            if same_value(rewrite.path, (*target, *rewrite.path[4:]))
+        ]
         config._written_references = [
             rewrite
             for rewrite in own

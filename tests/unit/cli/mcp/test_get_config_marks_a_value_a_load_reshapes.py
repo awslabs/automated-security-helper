@@ -14,6 +14,13 @@ way. The cells run both routes to an operator's file (the call names it, or
 ``ASH_CONFIG`` does) and keep the controls that must not change: a list the file
 wrote as text, a relative path the anchoring keeps whole, and a text field read
 from a variable.
+
+A scanner's own config file is the operator's choice, so the config of a file in a
+checkout takes the operator's value there when ASH_CONFIG names the operator's
+file. The answer shows the operator's reference at that place too, with the
+operator's directory, whether or not the checkout's own value equals the
+operator's. Those cells run the checkout the server searches and a file named in
+another checkout.
 """
 
 import json
@@ -76,6 +83,69 @@ _RELATIVE_PATHS = pytest.mark.parametrize(
         pytest.param("./conf-8e2b/x.yaml", "conf-8e2b", id="dot-dir"),
         pytest.param("conf-1f4c/x.yaml", "conf-1f4c", id="kept-whole"),
     ],
+)
+
+
+def _searched_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operators_body: str,
+    own_body: str,
+) -> Dict[str, Any]:
+    """get_config of the checkout the server searches: ``checkout/.ash.yaml`` holds
+    *own_body* and the process sits in the checkout, while ASH_CONFIG names
+    ``operator/ash.yaml``, which holds *operators_body*, in no checkout. The
+    checkout's file is confined to the operator's for a scanner's config file."""
+    operators_file = tmp_path / "operator" / "ash.yaml"
+    operators_file.parent.mkdir(parents=True)
+    operators_file.write_text(operators_body, encoding="utf-8")
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    (checkout / ".ash.yaml").write_text(own_body, encoding="utf-8")
+    monkeypatch.setenv("ASH_CONFIG", str(operators_file))
+    monkeypatch.chdir(checkout)
+    return mcp_get_config(search_dir=str(checkout))
+
+
+def _another_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operators_body: str,
+    own_body: str,
+) -> Dict[str, Any]:
+    """get_config of ``checkout/.ash.yaml``, which holds *own_body*, named from a
+    working directory elsewhere, while ASH_CONFIG names ``operator/ash.yaml``,
+    which holds *operators_body*, in a plain directory outside every checkout."""
+    operators_file = tmp_path / "operator" / "ash.yaml"
+    operators_file.parent.mkdir(parents=True)
+    operators_file.write_text(operators_body, encoding="utf-8")
+    checkout = tmp_path / "checkout"
+    mark_git_checkout(checkout)
+    named = checkout / ".ash.yaml"
+    named.write_text(own_body, encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setenv("ASH_CONFIG", str(operators_file))
+    monkeypatch.setenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", str(tmp_path))
+    return mcp_get_config(config_path=str(named))
+
+
+_CONFINED_ROUTES = pytest.mark.parametrize(
+    "confined",
+    [
+        pytest.param(_searched_checkout, id="searched-checkout"),
+        pytest.param(_another_checkout, id="another-checkout"),
+    ],
+)
+
+_OPERATOR_READS_CONFIG_FILE = (
+    "scanners:\n  bandit:\n    options:\n      config_file: ${ASH_TEST_BANDIT_CFG}\n"
+)
+
+#: A checkout's file that writes bandit's ``config_file`` itself, as a JSON string.
+_CHECKOUT_WRITES_CONFIG_FILE = (
+    "scanners:\n  bandit:\n    options:\n      config_file: {}\n"
 )
 
 
@@ -244,3 +314,87 @@ def test_a_text_field_from_a_variable_shows_the_reference(
 
     assert result["project_name"] == "<from ${ASH_TEST_PN}>", result
     assert "probe-name-3e1c" not in json.dumps(result, default=str)
+
+
+@_CONFINED_ROUTES
+@_RELATIVE_PATHS
+def test_a_relative_path_the_operators_file_reads_shows_the_directory_and_the_reference_in_a_checkouts_config(
+    tmp_path, monkeypatch, confined, held, canary
+):
+    """The operator's file reads bandit's ``config_file`` from a variable, and the
+    file in a checkout sets nothing there. The load gives the checkout's config
+    the operator's path, anchored at the operator's directory, so the answer shows
+    that directory and the operator's reference, and none of the text the
+    variable held."""
+    monkeypatch.setenv("ASH_TEST_BANDIT_CFG", held)
+
+    result = confined(
+        tmp_path,
+        monkeypatch,
+        _OPERATOR_READS_CONFIG_FILE,
+        "project_name: checkout-own-6a2f\n",
+    )
+
+    directory = os.path.realpath(tmp_path / "operator")
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.join(directory, "") + "<from ${ASH_TEST_BANDIT_CFG}>", shown
+    assert canary not in json.dumps(result, default=str)
+
+
+@_CONFINED_ROUTES
+@pytest.mark.parametrize(
+    "equal",
+    [
+        pytest.param(True, id="the-operators-path"),
+        pytest.param(False, id="another-path"),
+    ],
+)
+def test_a_checkouts_literal_does_not_tell_whether_it_equals_the_operators_relative_path(
+    tmp_path, monkeypatch, confined, equal
+):
+    """The file in a checkout writes its own ``config_file``: the path the
+    operator's variable gives (``the-operators-path``) or another (``another-path``).
+    The load gives the checkout's config the operator's either way, so the answer
+    is the operator's directory and reference in both, and shows nothing of the
+    checkout's text."""
+    monkeypatch.setenv("ASH_TEST_BANDIT_CFG", "conf-1f4c/x.yaml")
+    directory = os.path.realpath(tmp_path / "operator")
+    written = (
+        os.path.normpath(os.path.join(directory, "conf-1f4c/x.yaml"))
+        if equal
+        else "checkout-own-9c4d.yaml"
+    )
+    own = _CHECKOUT_WRITES_CONFIG_FILE.format(json.dumps(written))
+
+    result = confined(tmp_path, monkeypatch, _OPERATOR_READS_CONFIG_FILE, own)
+
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.join(directory, "") + "<from ${ASH_TEST_BANDIT_CFG}>", shown
+    dumped = json.dumps(result, default=str)
+    assert "conf-1f4c" not in dumped
+    assert written not in dumped
+
+
+@_CONFINED_ROUTES
+def test_a_literal_relative_path_the_operators_file_writes_is_shown_anchored_in_a_checkouts_config(
+    tmp_path, monkeypatch, confined
+):
+    """The control: where the operator's file writes the relative path itself,
+    there is no reference to show, and the answer is the path the operator's
+    file anchors it to."""
+    operators_body = (
+        "scanners:\n"
+        "  bandit:\n"
+        "    options:\n"
+        "      config_file: conf-lit-5e2a/bandit.yaml\n"
+    )
+
+    result = confined(
+        tmp_path, monkeypatch, operators_body, "project_name: checkout-own-6a2f\n"
+    )
+
+    directory = os.path.realpath(tmp_path / "operator")
+    shown = result["scanners"]["bandit"]["options"]["config_file"]
+    assert shown == os.path.normpath(
+        os.path.join(directory, "conf-lit-5e2a/bandit.yaml")
+    )
