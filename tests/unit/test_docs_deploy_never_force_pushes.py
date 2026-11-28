@@ -23,9 +23,9 @@ For every file under ``.github/workflows/``, read with ``tests/utils/github_acti
 1. No step runs ``mkdocs gh-deploy`` or ``ghp-import``. Each replaces the whole branch
    with one build.
 2. No step pushes gh-pages with a force spelling: ``--force``, ``-f``,
-   ``--force-with-lease`` or a ``+`` refspec. A push that names another branch is not
-   a push of gh-pages. A push whose branch the text does not name is read as one that
-   could be.
+   ``--force-with-lease``, ``--mirror`` or a ``+`` refspec. A push that names another
+   branch is not a push of gh-pages. A push whose branch the text does not name, or
+   names with a variable or a wildcard, is read as one that could be.
 3. No job that can write gh-pages is reachable from a ``push`` trigger on tags. A job
    can when its token can write repository contents (``contents: write``, or no
    permissions declared, so the repository default applies) or when one of its steps
@@ -500,6 +500,7 @@ def _short_options_include(word: str, letter: str) -> bool:
 def _forces_git_push(arguments: list[str]) -> bool:
     return any(
         word.startswith("--force")
+        or word == "--mirror"
         or _short_options_include(word, "f")
         or (word.startswith("+") and len(word) > 1)
         for word in arguments
@@ -507,9 +508,12 @@ def _forces_git_push(arguments: list[str]) -> bool:
 
 
 def _may_name_gh_pages(refspec: str) -> bool:
-    """Whether a refspec's destination is gh-pages, or cannot be told from its text."""
+    """Whether a refspec's destination is gh-pages, or cannot be told from its text.
+
+    A destination with a variable or a wildcard in it could be any branch.
+    """
     destination = refspec.lstrip("+").rpartition(":")[2].removeprefix("refs/heads/")
-    return destination == "gh-pages" or "$" in destination
+    return destination == "gh-pages" or any(char in destination for char in "$*?[")
 
 
 def _may_push_gh_pages(arguments: list[str]) -> bool:
