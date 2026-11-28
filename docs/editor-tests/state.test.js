@@ -266,6 +266,16 @@ test('the gate refuses a delete that also takes the comment line above the entry
   assert.equal(real.droppedComments, 0);
 });
 
+test('a delete that no line patch can make without losing a comment is written again, and the status line says so', () => {
+  // `{}` cannot go after the colon while a tag follows it, so the entry is written again.
+  const result = applyEdit('a: !!map # note\n  b: 1\nz: 2\n', { op: 'delete', path: ['a', 'b'] });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.text, 'a: {}\nz: 2\n');
+  assert.equal(result.droppedComments, 1);
+  assert.equal(result.message, 'Comments inside a were not kept.');
+});
+
 test('the gate keeps every digit of an integer beyond 2**53', () => {
   const text = 'limit: 9007199254740993\nother: 1\n';
   const edit = { op: 'set', path: ['other'], value: 2 };

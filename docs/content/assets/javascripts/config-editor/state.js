@@ -8,9 +8,12 @@
 //   applied: every integer, float, string, boolean, null, date and reference as ASH's
 //   loader builds it, every mapping key by what it resolves to (the key 1, the key
 //   "1", null and `on` are four keys), and every list and mapping in full.
-// - Every byte outside the lines the edit may reach, which are the lines of the
-//   smallest block that holds it (see `editBound` in yaml-write.js), is as it was,
-//   comments included.
+// - Every byte outside the part of the text the edit may reach is as it was, comments
+//   included. A line patch may reach the lines of the smallest block that holds the edit
+//   (see `patchBound` in yaml-write.js); a delete reaches only the deleted entry's own
+//   lines, the line it pulls up beside a dash, and the empty `{}` or `[]` it leaves after
+//   the key of its parent. An entry written again may reach the lines of that entry or
+//   list item (see `editBound`).
 //
 // A line patch that fails the gate, or that the writer cannot make, is retried by
 // writing the smallest block that holds the edit again; if that fails the gate too,
@@ -19,21 +22,43 @@
 // DOM-free. Imports only its siblings.
 
 import { readYaml } from "./yaml-read.js";
-import { applyToValue, editBound, formatPath, planPatch, planReemit, sameValue } from "./yaml-write.js";
+import { applyToValue, editBound, formatPath, patchBound, planPatch, planReemit, sameValue } from "./yaml-write.js";
 
-// Whether every byte before `from` and from `to` on is as it was.
-function unchangedOutside(before, after, bound) {
-  if (bound === null) {
+// Whether the new text differs from the old one only inside the windows: the spans
+// `[from, to]` of the old text that the edit may change, in order. The text before the
+// first window, the text between two windows and the text after the last one must all
+// still be there, in that order. No windows (null) means the edit may reach the whole file.
+function unchangedOutside(before, after, windows) {
+  if (windows === null) {
     return true;
   }
-  const [from, to] = bound;
-  const tail = before.slice(to);
-  return after.length >= from + tail.length && after.startsWith(before.slice(0, from)) && after.endsWith(tail);
+  const pieces = [];
+  let from = 0;
+  for (const [start, end] of windows) {
+    pieces.push(before.slice(from, start));
+    from = end;
+  }
+  pieces.push(before.slice(from));
+  const head = pieces[0];
+  const tail = pieces[pieces.length - 1];
+  if (after.length < head.length + tail.length || !after.startsWith(head) || !after.endsWith(tail)) {
+    return false;
+  }
+  let at = head.length;
+  const limit = after.length - tail.length;
+  for (const piece of pieces.slice(1, -1)) {
+    const found = after.indexOf(piece, at);
+    if (found === -1 || found + piece.length > limit) {
+      return false;
+    }
+    at = found + piece.length;
+  }
+  return true;
 }
 
-function passesGate(before, text, intended, bound) {
+function passesGate(before, text, intended, windows) {
   const reread = readYaml(text);
-  return reread.ok && sameValue(intended, reread.typed) && unchangedOutside(before, text, bound);
+  return reread.ok && sameValue(intended, reread.typed) && unchangedOutside(before, text, windows);
 }
 
 function refused(reason, message) {
@@ -65,15 +90,15 @@ export function applyEdit(text, edit, options = {}) {
     return refused("unreadable", "The YAML cannot be read, so the form leaves it alone.");
   }
   const intended = applyToValue(doc.typed, edit);
-  const bound = editBound(doc, edit);
-  if (first.ok && passesGate(text, first.text, intended, bound)) {
+  if (first.ok && passesGate(text, first.text, intended, patchBound(doc, edit))) {
     return { ok: true, how: "patch", text: first.text, droppedComments: first.droppedComments };
   }
   const second = reemit(doc, edit);
   if (!second.ok && second.final) {
     return refused(second.reason, second.message);
   }
-  if (second.ok && passesGate(text, second.text, intended, bound)) {
+  const block = editBound(doc, edit);
+  if (second.ok && passesGate(text, second.text, intended, block === null ? null : [block])) {
     const kept = second.droppedComments === 0;
     return {
       ok: true,

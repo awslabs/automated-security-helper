@@ -3,15 +3,16 @@
 // An edit to the form becomes the smallest change to the text: one scalar
 // replaced, a key inserted after its siblings, an entry's own lines removed, a
 // list item appended. Comments, quoting, indentation, line endings and the final
-// newline stay as the file had them. Where a change cannot be made line by line
+// newline stay as the file had them; a deleted entry takes only its own text, so the
+// comments around it stay where they were. Where a change cannot be made line by line
 // (inside a flow collection, or when the patch would not read back as intended),
 // the smallest enclosing entry is written again in block style and the caller
 // is told how many comments that dropped.
 //
 // This module only proposes text. Reading the text back and comparing it with
 // what the edit meant is the caller's job (state.js), which is also why the module
-// exports how far an edit may reach (`editBound`) and how two values are compared
-// (`sameValue`).
+// exports how far a line patch may reach (`patchBound`), how far an entry written again
+// may reach (`editBound`) and how two values are compared (`sameValue`).
 //
 // DOM-free. Imports only its siblings.
 
@@ -851,36 +852,88 @@ function nextChildStart(hit) {
   return next === undefined ? null : next.dash;
 }
 
-function removeChild(doc, hit) {
+// The span a child takes with it when its own lines go: the lines it starts and ends on,
+// with one line break. The last line of a file may have no break after it, and then the
+// break before the child goes instead.
+function ownLines(doc, hit) {
   const text = doc.text;
   const childStart = hit.entry ? hit.entry.start : hit.node.dash;
   const childEnd = hit.entry ? hit.entry.end : nodeEnd(hit.node);
   const start = lineStartOf(text, childStart);
-  if (text.slice(start, childStart).trim() !== "") {
-    // The first key of a list item, or the first item of a list in a list, shares its
-    // line with the dash before it. The child that follows moves up into its place, so
-    // the dash keeps a child and nothing outside the item changes.
-    const next = nextChildStart(hit);
-    return next === null ? UNSUPPORTED : patched(doc, childStart, next, "");
-  }
   const end = lineEndOf(text, childEnd);
   const length = breakLengthAt(text, end);
-  if (length > 0) {
-    return patched(doc, start, end + length, "");
-  }
-  // The last line has no break after it: take the one before it instead.
-  const before = start >= 2 && text.startsWith("\r\n", start - 2) ? 2 : start > 0 ? 1 : 0;
-  return patched(doc, start - before, end, "");
+  return length > 0 ? [start, end + length] : [start - breakLengthBefore(text, start), end];
 }
 
-function emptyParent(doc, loc) {
-  const parent = loc.trail[loc.trail.length - 1].parent;
+// Where what follows a child that shares its line with a dash starts: the first comment
+// line below it, or the next child when no comment comes first. The blank space between
+// goes with the child.
+function pulledUpFrom(doc, hit, childEnd) {
+  const text = doc.text;
+  let at = lineEndOf(text, childEnd);
+  while (at < text.length && " \t\r\n".includes(text[at])) {
+    at += 1;
+  }
+  return Math.min(at, nextChildStart(hit));
+}
+
+// How a line patch takes the child at the end of the trail out of its block parent, as
+// `splices` (`[from, to, insert]`, in the order of the text) and as `reach`, the spans of
+// the text the new text may differ from the old one in. Every other byte stays, comments
+// included, so the comments of the neighbors stay with them. Null where no patch can keep
+// what has to stay, and the entry is written again.
+//
+// - A child on its own lines goes with those lines and their line break.
+// - The first key of a list item, or the first item of a list in a list, shares its line
+//   with the dash before it. It goes with the comment on its line, and what follows moves
+//   up beside the dash: the next key, or the first comment line when one comes first, so
+//   that a comment above the next key stays above it.
+// - The only child of a parent leaves an empty `{}` or `[]` behind. It is written right
+//   after the key (or the dash) that holds the parent, ahead of any comment on that line,
+//   and the child's own lines go. Comment lines between the two stay where they are.
+//   At the top level the file becomes `{}` or `[]`.
+function deletePlan(doc, loc) {
+  const text = doc.text;
+  const hit = loc.trail[loc.trail.length - 1];
+  const parent = hit.parent;
+  const childStart = hit.entry ? hit.entry.start : hit.node.dash;
+  const childEnd = hit.entry ? hit.entry.end : nodeEnd(hit.node);
+  const compact = text.slice(lineStartOf(text, childStart), childStart).trim() !== "";
+  const alone = (parent.kind === "map" ? parent.entries.length : parent.items.length) === 1;
+  if (!alone) {
+    if (!compact) {
+      return { splices: [[...ownLines(doc, hit), ""]], reach: [extentOf(doc, hit)] };
+    }
+    if (nextChildStart(hit) === null) {
+      return null;
+    }
+    const pulledUp = pulledUpFrom(doc, hit, childEnd);
+    return { splices: [[childStart, pulledUp, ""]], reach: [[childStart, pulledUp]] };
+  }
   const empty = parent.kind === "map" ? "{}" : "[]";
   if (loc.trail.length === 1) {
-    return patched(doc, parent.start, parent.end, empty);
+    return { splices: [[parent.start, parent.end, empty]], reach: [[parent.start, parent.end]] };
   }
   const holder = loc.trail[loc.trail.length - 2];
-  return patched(doc, regionStart(holder), parent.end, ` ${empty}`);
+  const at = regionStart(holder);
+  if (compact) {
+    // The child shares its line with the dash of the item that holds it.
+    return holder.entry
+      ? null
+      : { splices: [[at, parent.end, ` ${empty}`]], reach: [[at, parent.end]] };
+  }
+  const rest = text.slice(at, lineEndOf(text, at)).trim();
+  if (rest !== "" && !rest.startsWith("#")) {
+    // Something other than a comment follows the key, such as a tag.
+    return null;
+  }
+  return {
+    splices: [
+      [at, at, ` ${empty}`],
+      [...ownLines(doc, hit), ""],
+    ],
+    reach: [[at, at], extentOf(doc, hit)],
+  };
 }
 
 function patchDelete(doc, loc) {
@@ -888,12 +941,22 @@ function patchDelete(doc, loc) {
     return { ok: true, how: "none", text: doc.text, droppedComments: 0 };
   }
   const hit = loc.trail[loc.trail.length - 1];
-  const parent = hit.parent;
-  if (parent.style === "flow") {
+  if (hit.parent.style === "flow") {
     return UNSUPPORTED;
   }
-  const count = parent.kind === "map" ? parent.entries.length : parent.items.length;
-  return count === 1 ? emptyParent(doc, loc) : removeChild(doc, hit);
+  const plan = deletePlan(doc, loc);
+  if (plan === null) {
+    return UNSUPPORTED;
+  }
+  let text = doc.text;
+  let dropped = 0;
+  // From the end of the text to the start, so that each position is still the one in the
+  // text that was read.
+  for (const [from, to, insert] of [...plan.splices].reverse()) {
+    text = splice(text, from, to, insert);
+    dropped += countComments(doc, from, to);
+  }
+  return { ok: true, how: "patch", text, droppedComments: dropped };
 }
 
 /**
@@ -957,12 +1020,12 @@ function breakLengthBefore(text, index) {
 }
 
 /**
- * How far an edit may reach in the text: `[from, to]`, the lines of the smallest block
- * that holds it, as the writer defines that block (the entry or list item the edit
- * changes, or the one that holds the deleted entry, and not below the outermost flow
- * collection on the path), with the line break on each side. Every byte outside it must
- * stay as it was, comments included. Null when the edit may reach the whole file: a new
- * top-level key, a flow collection as the top level, an unreadable file.
+ * How far writing the smallest block that holds an edit again may reach in the text:
+ * `[from, to]`, the lines of that block as the writer defines it (the entry or list item
+ * the edit changes, or the one that holds the deleted entry, and not below the outermost
+ * flow collection on the path), with the line break on each side. Every byte outside it
+ * must stay as it was, comments included. Null when the edit may reach the whole file: a
+ * new top-level key, a flow collection as the top level, an unreadable file.
  */
 export function editBound(doc, edit) {
   const checked = check(doc, edit);
@@ -974,6 +1037,33 @@ export function editBound(doc, edit) {
     return null;
   }
   return extentOf(doc, loc.trail[Math.max(blockIndex(loc, edit), 0)]);
+}
+
+/**
+ * How far a line patch may reach in the text: the spans `[[from, to], ...]` of the text
+ * that it may change, in order. Every byte outside them, and every piece of text between
+ * two of them, must stay as it was, comments included. For a set or an append that is the
+ * block of `editBound`. A delete may reach less: the lines of the deleted entry, or the
+ * key of a list item that shares its line with the dash, up to the next comment line or key;
+ * and, when it empties its parent, the point after the parent's key where the empty
+ * collection is written, with the lines of the entry. A comment on the parent's key line,
+ * or on a line between that line and the entry, is outside it. Null when the edit may reach
+ * the whole file.
+ */
+export function patchBound(doc, edit) {
+  const checked = check(doc, edit);
+  if (checked.problem || doc.root === null || isFlowCollection(doc.root)) {
+    return null;
+  }
+  const { loc } = checked;
+  if (edit.op === "delete" && !loc.missing && loc.trail[loc.trail.length - 1].parent.style !== "flow") {
+    const plan = deletePlan(doc, loc);
+    if (plan !== null) {
+      return plan.reach;
+    }
+  }
+  const block = editBound(doc, edit);
+  return block === null ? null : [block];
 }
 
 /**

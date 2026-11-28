@@ -23,6 +23,7 @@ import {
   formatScalar,
   formatString,
   newDocumentText,
+  patchBound,
   planPatch,
   planReemit,
   sameValue,
@@ -674,6 +675,42 @@ test('an edit may reach the lines of the smallest block that holds it, and no fu
   assert.equal(bound({ op: 'set', path: ['c'], value: 1 }), null);
   assert.equal(editBound(readYaml('{a: 1}\n'), { op: 'set', path: ['b'], value: 1 }), null);
   assert.equal(editBound(readYaml('a: [\n'), { op: 'set', path: ['a'], value: 1 }), null);
+});
+
+test('a line patch may reach the deleted entry and the one line it pulls up, and no further', () => {
+  const starts = (text) => {
+    const lines = text.split('\n');
+    return (line) => lines.slice(0, line).join('\n').length + (line > 0 ? 1 : 0);
+  };
+  const bound = (text, edit) => patchBound(readYaml(text), edit);
+  // An entry on its own lines: those lines, with the line break before and after.
+  const middle = 'a:\n  b: 1\n  c: 2\nd: 3\n';
+  const m = starts(middle);
+  assert.deepEqual(bound(middle, { op: 'delete', path: ['a', 'b'] }), [[m(1) - 1, m(2)]]);
+  // The first key of a list item: from the key to the first comment line or key below it.
+  const compact = 'l:\n  - a: 1 # one\n    # about b\n    b: 2\n  - c: 3\n';
+  const c = starts(compact);
+  assert.deepEqual(bound(compact, { op: 'delete', path: ['l', 0, 'a'] }), [[c(1) + 4, c(2) + 4]]);
+  const plain = 'l:\n  - a: 1\n    b: 2\n';
+  const p = starts(plain);
+  assert.deepEqual(bound(plain, { op: 'delete', path: ['l', 0, 'a'] }), [[p(1) + 4, p(2) + 4]]);
+  // The only child: the point after the parent key where `{}` is written, and the child's lines.
+  const only = 'scanners:\n  bandit: # keep\n    enabled: false\nz: 1\n';
+  const o = starts(only);
+  assert.deepEqual(bound(only, { op: 'delete', path: ['scanners', 'bandit', 'enabled'] }), [
+    [o(1) + 9, o(1) + 9],
+    [o(2) - 1, o(3)],
+  ]);
+  // The only entry of the file.
+  assert.deepEqual(bound('a: 1\n', { op: 'delete', path: ['a'] }), [[0, 4]]);
+  // Every other edit may reach the block that holds it, which is what `editBound` says.
+  const set = { op: 'set', path: ['a', 'b'], value: 5 };
+  assert.deepEqual(bound(middle, set), [editBound(readYaml(middle), set)]);
+  assert.equal(bound(middle, { op: 'set', path: ['z'], value: 1 }), null);
+  // Inside a flow list the patch is passed on, and the block is the entry that holds the list.
+  const flow = 'list: [a, b]\nz: 1\n';
+  const delFlow = { op: 'delete', path: ['list', 0] };
+  assert.deepEqual(bound(flow, delFlow), [editBound(readYaml(flow), delFlow)]);
 });
 
 test('a flow document is written again as a whole', () => {
