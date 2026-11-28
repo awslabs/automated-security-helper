@@ -4734,6 +4734,39 @@ def _plant(
     return token
 
 
+def _unplant_written_keys(root: Any, pointer: str, keys: Mapping[str, str]) -> None:
+    """Take out of ``root`` the token of each key record whose key the operation
+    at ``pointer`` writes.
+
+    ``keys`` holds, for each token ``_plant`` put in a mapping for a key record,
+    the canonical key the record stands for. An operation writes that key when
+    ``pointer`` names it in the mapping that holds the token: ``add``,
+    ``replace`` and ``copy`` set a value there, ``remove`` takes it away, and
+    ``move`` does either. The key is then the operation's, as the key of a
+    document that writes it itself is (``_survives``), and its record goes with
+    the token. A key no operation writes keeps its token, which stays in the
+    mapping wherever the operations carry it. ``root`` is the copy the operations
+    are followed on, and the token goes before the operation applies.
+    """
+    if not pointer.startswith("/"):
+        return
+    *parents, last = [_unescape(part) for part in pointer[1:].split("/")]
+    holder = root
+    for part in parents:
+        if isinstance(holder, dict):
+            holder = holder.get(_resolve_dict_key(holder, part))
+        elif isinstance(holder, list) and part.isascii() and part.isdigit():
+            holder = holder[int(part)] if int(part) < len(holder) else None
+        else:
+            return
+    if not isinstance(holder, dict):
+        return
+    written = _resolve_dict_key(holder, last)
+    for token, canonical in keys.items():
+        if canonical == written:
+            holder.pop(token, None)
+
+
 def _placed_through_patch(
     document: Any,
     ops: List[Any],
@@ -4761,7 +4794,10 @@ def _placed_through_patch(
     added was shown where the entry at 0 should have been marked.
 
     A reference whose place does not hold what it read (a value the extending
-    file wrote over) is kept as it was.
+    file wrote over) is kept as it was. A record of a key written under an old
+    spelling ends where an operation writes that key (``_unplant_written_keys``):
+    the key is then the operation's, and a message names it by its canonical
+    spelling.
     """
     shadow = copy.deepcopy(document)
     shadow_ops = copy.deepcopy(ops)
@@ -4779,6 +4815,14 @@ def _placed_through_patch(
             planted.append((op_reference, token))
     if not tokens:
         return list(tracked)
+    # The token of each key record, with the key the record stands for: what an
+    # operation that writes the key takes out.
+    written_keys: Dict[str, str] = {}
+    for placed_reference, placed_token in planted:
+        if placed_token is not None and isinstance(
+            placed_reference, spellings.KeySpelling
+        ):
+            written_keys[placed_token] = placed_reference.resolved
     result: Any = shadow
     rewritten = rewritten or {}
     try:
@@ -4792,6 +4836,8 @@ def _placed_through_patch(
                 normalized = dict(op, op=how[0], path=how[1])
             else:
                 normalized = dict(op, path=_normalize_pointer(result, op["path"]))
+            if written_keys:
+                _unplant_written_keys(result, normalized["path"], written_keys)
             result = jsonpatch.apply_patch(result, [normalized], in_place=False)
     except (
         jsonpatch.JsonPatchException,
