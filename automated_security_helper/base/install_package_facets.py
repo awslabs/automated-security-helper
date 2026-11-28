@@ -120,11 +120,11 @@ class HostMatch:
     were read; empty means every version. ``arches`` is set only when the read covered
     one architecture, and is recorded without being matched.
 
-    ``ids`` and ``versions`` are tuples of strings and nothing else. A one-element tuple
-    written without its comma is a string, and ``in`` on a string is a substring test:
-    ``ids=("ubuntu-core")`` would name Ubuntu 24.04 as well, and ``versions=("3.24")``
-    would make every prefix one character long, so Alpine 3.18 matched ``3``. Such a
-    value is refused when the match is built.
+    ``ids``, ``versions`` and ``arches`` are tuples of strings and nothing else. A
+    one-element tuple written without its comma is a string, and ``in`` on a string is a
+    substring test: ``ids=("ubuntu-core")`` would name Ubuntu 24.04 as well, and
+    ``versions=("3.24")`` would make every prefix one character long, so Alpine 3.18
+    matched ``3``. Such a value is refused when the match is built.
     """
 
     ids: Tuple[str, ...]
@@ -132,7 +132,11 @@ class HostMatch:
     arches: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        for name, values in (("ids", self.ids), ("versions", self.versions)):
+        for name, values in (
+            ("ids", self.ids),
+            ("versions", self.versions),
+            ("arches", self.arches),
+        ):
             if not isinstance(values, tuple) or not all(
                 isinstance(value, str) for value in values
             ):
@@ -144,6 +148,8 @@ class HostMatch:
             raise ValueError("a host match names at least one id, and no id is blank")
         if any(not prefix.strip() for prefix in self.versions):
             raise ValueError("a host match names no blank version prefix")
+        if any(not arch.strip() for arch in self.arches):
+            raise ValueError("a host match names no blank architecture")
 
     def matches(self, host: OsRelease) -> bool:
         if host.id not in self.ids:
