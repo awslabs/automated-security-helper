@@ -438,8 +438,10 @@ class TestTheTextAClientMayDisplayIsShownOnOneLine:
             entry for entry in response["projects"] if entry["status"] == "skipped"
         ]
         (skipped,) = response["skipped_projects"]
-        shown = "'a\\x1bb' does not exist as a directory"
-        assert shown in verdict["skip_detail"], verdict["skip_detail"]
+        # What follows the folder is the platform's reason: elsewhere it does not
+        # exist as a directory, and on Windows a name that holds ESC cannot be
+        # examined. The folder, as the workspace file writes it, comes first.
+        assert verdict["skip_detail"].startswith("'a\\x1bb' "), verdict["skip_detail"]
         assert SHOWN_TWICE not in verdict["skip_detail"], verdict["skip_detail"]
         assert ESC not in verdict["skip_detail"], verdict["skip_detail"]
         assert skipped["detail"] == verdict["skip_detail"], skipped
