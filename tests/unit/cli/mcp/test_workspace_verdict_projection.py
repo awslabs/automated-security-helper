@@ -290,3 +290,251 @@ class TestTheEnvelopeSurfacesTheAggregate:
         )
 
         assert response["ceiling_unreachable_findings"] == {"grype": 2}
+
+
+#: ESC, and its escape written twice: what a client must never read.
+ESC = "\x1b"
+SHOWN_TWICE = "\\\\x1b"
+
+
+class TestTheTextAClientMayDisplayIsShownOnOneLine:
+    """A verdict's text written for a reader reaches the client with each
+    control character written as its escape, on one line.
+
+    A project refused for its configuration has the refusal as its ``error``,
+    and the refusal quotes what refused it as written: a lock's key, a
+    suppression's path (utils/ash_lock.py). The response handed the field over
+    as recorded, so a client displaying the error read a raw ESC, where what a
+    client may display holds no control character (cli/mcp_server.py). The
+    other messages, and the reasons the mappings and records carry, are shown
+    the same way. The project's key and paths are not: a client joins on the
+    one and opens the others.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self, monkeypatch):
+        """No confinement, which these cells do not measure, and a registry and
+        a profile state of their own, so another cell's scan or bound profile
+        cannot decide what a scan here reads."""
+        from automated_security_helper.cli.mcp.profile_registry import (
+            clear_all_session_state,
+            clear_profile_registry,
+        )
+        from automated_security_helper.core.resource_management import (
+            scan_registry as scan_registry_module,
+        )
+
+        for name in (
+            "ASH_MCP_ALLOWED_ROOTS",
+            "ASH_MCP_ALLOWED_CONFIG_ROOTS",
+            "ASH_MCP_WORKSPACE_ROOT",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(
+            scan_registry_module, "_scan_registry", scan_registry_module.ScanRegistry()
+        )
+        clear_profile_registry()
+        clear_all_session_state()
+        yield
+        clear_profile_registry()
+        clear_all_session_state()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("lock", "suppression_path", "shown"),
+        [
+            pytest.param(
+                '{"version": 2, "files": {}, "a\\u001bb": 0}',
+                "src/app.py",
+                "has an unknown key 'a\\x1bb' in the document",
+                id="lock-key",
+            ),
+            pytest.param(
+                None,
+                "a\\x1bb.py",
+                "'a\\x1bb.py' no longer exists",
+                id="suppression-path",
+            ),
+        ],
+    )
+    async def test_a_refusal_reaches_the_client_with_its_value_shown_once(
+        self, tmp_path, lock, suppression_path, shown
+    ):
+        """Through the scan: the project's own orchestrator refuses the lock's
+        unknown key, or the suppression whose file is gone, and the response
+        carries the refusal. Red at the base: a raw ESC where the escape is."""
+        from automated_security_helper.utils.ash_lock import LOCK_RELATIVE_PATH
+
+        project = tmp_path / "ws" / "app"
+        (project / "src").mkdir(parents=True)
+        (project / "src" / "app.py").write_text("x = 1\n", encoding="utf-8")
+        (project / ".ash.yaml").write_text(
+            "project_name: demo\n"
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - rule_id: R1\n"
+            f'      path: "{suppression_path}"\n'
+            "      symbol: MyClass.my_method\n"
+            "      reason: probe\n",
+            encoding="utf-8",
+        )
+        if lock is not None:
+            (project / LOCK_RELATIVE_PATH).write_text(lock, encoding="utf-8")
+        workspace = tmp_path / "ws" / "dev.code-workspace"
+        workspace.write_text(
+            json.dumps({"folders": [{"path": "app"}]}), encoding="utf-8"
+        )
+
+        response = await _module().mcp_scan_workspace(
+            workspace_file=str(workspace), output_dir=str(tmp_path / "out")
+        )
+
+        assert response["success"] is True, response
+        (verdict,) = response["projects"]
+        assert verdict["invalid_config"] is True, verdict
+        assert shown in verdict["error"], verdict["error"]
+        assert SHOWN_TWICE not in verdict["error"], verdict["error"]
+        assert ESC not in verdict["error"], verdict["error"]
+
+    @pytest.mark.asyncio
+    async def test_a_missing_projects_detail_reaches_the_client_shown_once(
+        self, tmp_path, monkeypatch
+    ):
+        """A project skipped at resolution, under allow_missing_projects, has a
+        detail quoting its folder as the workspace file writes it. The response
+        carries that text twice, in the verdict's skip_detail and in
+        skipped_projects, and shows it the same way in both. A workspace whose
+        every folder is skipped is refused, so the other folder is a project
+        whose orchestrator refuses it before anything is scanned."""
+        from automated_security_helper.core.exceptions import ASHConfigValidationError
+        from automated_security_helper.workspace import execution as execution_module
+
+        real = execution_module.execute_workspace
+
+        def _refused(**_kwargs):
+            raise ASHConfigValidationError("refused before the scan")
+
+        def _execute(plan, settings, **kwargs):
+            kwargs["orchestrator_factory"] = _refused
+            return real(plan, settings, **kwargs)
+
+        monkeypatch.setattr(_module(), "execute_workspace", _execute)
+        root = tmp_path / "ws"
+        (root / "app").mkdir(parents=True)
+        workspace = root / "dev.code-workspace"
+        workspace.write_text(
+            json.dumps({"folders": [{"path": "app"}, {"path": "a\x1bb"}]}),
+            encoding="utf-8",
+        )
+
+        response = await _module().mcp_scan_workspace(
+            workspace_file=str(workspace),
+            allow_missing_projects=True,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        assert response["success"] is True, response
+        (verdict,) = [
+            entry for entry in response["projects"] if entry["status"] == "skipped"
+        ]
+        (skipped,) = response["skipped_projects"]
+        shown = "'a\\x1bb' does not exist as a directory"
+        assert shown in verdict["skip_detail"], verdict["skip_detail"]
+        assert SHOWN_TWICE not in verdict["skip_detail"], verdict["skip_detail"]
+        assert ESC not in verdict["skip_detail"], verdict["skip_detail"]
+        assert skipped["detail"] == verdict["skip_detail"], skipped
+
+    @pytest.mark.parametrize(
+        ("field", "recorded", "handed"),
+        [
+            pytest.param(
+                "error",
+                "Invalid configuration: key 'a\x1bb'\n  the next line",
+                "Invalid configuration: key 'a\\x1bb'\\x0a  the next line",
+                id="error",
+            ),
+            pytest.param(
+                "error",
+                "cannot read 'a\\x1bb'",
+                "cannot read 'a\\x1bb'",
+                id="error-with-an-escape-already",
+            ),
+            pytest.param(
+                "skip_detail",
+                "skipped: a\x1bb",
+                "skipped: a\\x1bb",
+                id="skip_detail",
+            ),
+            pytest.param(
+                "display_label",
+                "demo\x1b]0;x\x07",
+                "demo\\x1b]0;x\\x07",
+                id="display_label",
+            ),
+        ],
+    )
+    def test_a_message_is_handed_over_on_one_line(self, field, recorded, handed):
+        """The error-with-an-escape-already row is the control: an escape the
+        text holds keeps its one backslash, as the registry's copy of the error
+        reads, where shown_on_one_line would double it."""
+        payload = _payload(_outcome("api", **{field: recorded}))
+
+        verdicts = _module()._project_verdicts(payload, {"api": "scan-1"})
+
+        assert verdicts[0][field] == handed
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "incomplete_converters",
+            "incomplete_scanner_details",
+            "scanner_reasons",
+            "unstoppable_tools",
+        ],
+    )
+    def test_each_reason_of_a_mapping_is_shown(self, field):
+        payload = _payload(_outcome("api", **{field: {"bandit": "stopped: a\x1bb"}}))
+
+        verdicts = _module()._project_verdicts(payload, {"api": "scan-1"})
+
+        assert verdicts[0][field] == {"bandit": "stopped: a\\x1bb"}
+
+    def test_a_records_reason_is_shown_and_its_path_kept(self):
+        from automated_security_helper.models.workspace import (
+            ProjectConverterRefusal,
+            ProjectInputNotScanned,
+        )
+
+        not_scanned = ProjectInputNotScanned(
+            scanner="npm-audit", path="api/a\x1bb.lock", reason="offline: a\x1bb"
+        )
+        refused = ProjectConverterRefusal(
+            converter="archive", path="api/a\x1bb.zip", reason="over: a\x1bb"
+        )
+        payload = _payload(
+            _outcome(
+                "api", inputs_not_scanned=[not_scanned], converter_refusals=[refused]
+            )
+        )
+
+        verdicts = _module()._project_verdicts(payload, {"api": "scan-1"})
+
+        (shown_not_scanned,) = verdicts[0]["inputs_not_scanned"]
+        (shown_refused,) = verdicts[0]["converter_refusals"]
+        assert shown_not_scanned["reason"] == "offline: a\\x1bb"
+        assert shown_not_scanned["path"] == "api/a\x1bb.lock"
+        assert shown_refused["reason"] == "over: a\\x1bb"
+        assert shown_refused["path"] == "api/a\x1bb.zip"
+
+    def test_the_projects_key_and_paths_are_handed_over_as_recorded(self):
+        """A client joins a verdict on its key and opens its paths: an escape
+        written into one would name another project or another file."""
+        key = "a\x1bb"
+        payload = _payload(_outcome(key))
+
+        verdicts = _module()._project_verdicts(payload, {key: "scan-1"})
+
+        assert verdicts[0]["project"] == key
+        assert verdicts[0]["relative_path"] == key
+        assert verdicts[0]["output_path"] == f"projects/{key}"
+        assert verdicts[0]["scan_id"] == "scan-1"
