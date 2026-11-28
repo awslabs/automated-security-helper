@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ToolTranscript format: what it refuses, and the freshness rule (design 4.4)."""
+"""The ToolTranscript format: what it refuses, and the freshness rule."""
 
 import json
 

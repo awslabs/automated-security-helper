@@ -115,8 +115,8 @@ ALL_SPECS: Dict[str, FrameSpec] = {
     **ACCOUNTED_SPECS,
 }
 
-# Population-B frames: the rows are gradings, drafts or prepared values computed
-# on the host, so there is no model to derive a spec from (design section 7).
+# Hand-schema frames: the rows are gradings, drafts or prepared values computed
+# on the host, so there is no model to derive a spec from.
 # The registry pins each one's declared schema dict against the frame its
 # builder constructs, so the schema has one record beyond the builder itself.
 HAND_SCHEMAS: Dict[

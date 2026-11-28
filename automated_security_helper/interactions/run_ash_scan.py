@@ -7506,8 +7506,7 @@ def run_ash_scan(
         )
     if asset is not None and asset.kind == AssetKind.CONTAINER_IMAGE:
         # An image asset runs no convert phase: converters read source files,
-        # which an image asset does not present (the design's C7). The caller's
-        # other phases stand.
+        # which an image asset does not present. The caller's other phases stand.
         phases = [
             phase
             for phase in (phases or list(DEFAULT_EXECUTION_PHASES))

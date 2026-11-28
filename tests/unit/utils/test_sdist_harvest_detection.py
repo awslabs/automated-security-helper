@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Detection contract of the sdist lockfile harvest (design row A1, test row 2).
+"""Detection contract of the sdist lockfile harvest.
 
 A resolved dependency is flagged for harvest exactly when its ``uv.lock`` entry
 names at least one platform wheel: a wheel whose filename carries a platform tag

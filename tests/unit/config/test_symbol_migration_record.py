@@ -313,7 +313,7 @@ def test_a_skip_bound_message_says_to_re_measure_the_lines_with_the_span():
 
 
 def test_old_pinned_lines_lie_inside_the_chosen_symbols_span():
-    """The per-entry migration oracle (design row T7-4).
+    """The per-entry migration oracle.
 
     For every converted entry, the lines the old pin named sit inside the span
     of the symbol the migration chose, resolved from the CURRENT tree. A row whose
@@ -473,7 +473,7 @@ def test_no_symbol_scope_is_wider_than_the_budget_without_an_allowance():
 
 
 def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
-    """Design row T7-3, on this migration's own config shape.
+    """A gone symbol fails closed, on this migration's own config shape.
 
     The first symbol-scoped entry of .ash.yaml, with its symbol replaced
     by a name the file does not define, matches nothing: the finding it used to
@@ -515,7 +515,7 @@ def test_a_gone_symbol_on_a_real_migrated_entry_fails_closed(caplog):
 
 
 def test_config_lints_clean_on_both_migrated_configs():
-    """Design row T7-7: ``ash config lint``'s suppression checks accept both
+    """``ash config lint``'s suppression checks accept both
     migrated configs. The symbol lint classes it guards are the no-grammar path
     and the missing extra (an entry on either is inert, and lint says so before a
     scan does); a malformed symbol name is refused earlier, at model

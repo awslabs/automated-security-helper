@@ -266,10 +266,9 @@ Fingerprints = Tuple[Tuple[str, Tuple[Tuple[str, str], ...]], ...]
 class FindingIdentity(BaseModel):
     """One result's identity, before the run it belongs to is considered.
 
-    A frozen pydantic model; it was a frozen dataclass until the frame-models
-    design's decision R4 converted it, so the frame layer reads one mechanism
-    (``model_fields`` and the drift gate) across every model it projects. What
-    the conversion keeps, pinned by
+    A frozen pydantic model; it was a frozen dataclass until it was converted,
+    so the frame layer reads one mechanism (``model_fields`` and the drift
+    gate) across every model it projects. What the conversion keeps, pinned by
     ``tests/unit/utils/test_finding_identity_model.py``: immutability
     (assignment raises; the one mutation site, :func:`relative_to_scan_root`,
     copies with ``model_copy(update=...)``, which does not re-validate the
@@ -277,9 +276,8 @@ class FindingIdentity(BaseModel):
     before); equality (field-wise and same-class, which the derived join keys
     rely on); and hashing (never hashed at runtime; the generated field-based
     ``__hash__`` raises on the ``Mapping`` base exactly as the dataclass's
-    did). Construction now validates once, on the flatten hot path, which R4
-    accepts knowingly; the unit's record carries the before/after construction
-    read.
+    did). Construction now validates once, on the flatten hot path, which the
+    conversion accepts knowingly.
 
     Attributes:
         base: The key's fields every result has: scanner, rule, file, package,

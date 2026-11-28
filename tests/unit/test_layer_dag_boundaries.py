@@ -1,6 +1,6 @@
 """Architectural guard: the import graph between top-level packages follows the layer order.
 
-The design's libraries (contract, results, config, engine, cli, plus the plugin
+The libraries (contract, results, config, engine, cli, plus the plugin
 packages) are import-boundary-enforced top-level packages in one wheel, held by this
 test. It generalizes the earlier ``core`` must not import ``cli`` test to the whole
 graph.

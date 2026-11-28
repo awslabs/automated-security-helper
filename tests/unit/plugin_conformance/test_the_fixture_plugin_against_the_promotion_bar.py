@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """The conformance harness over the fixture plugin: the positive control, then one
-planted defect per row (design 4.5, unit A6).
+planted defect per row.
 
 The fixture plugin is the smallest plugin that conforms. Every row of the bar that can be
 read without CI is green over it; each planted-defect test breaks exactly one thing in a

@@ -154,7 +154,7 @@ class SandboxNetwork(str, Enum):
 
 
 class NetworkFacet(_Frozen):
-    """One scanner's network row (design section A)."""
+    """One scanner's network row."""
 
     fetch_kind: FetchKind
     fetches: tuple[Fetched, ...]
@@ -255,7 +255,7 @@ class OutputFormat(str, Enum):
 
 
 class OutputFacet(_Frozen):
-    """The tool's output as ASH invokes it (design section B)."""
+    """The tool's output as ASH invokes it."""
 
     native_formats: tuple[OutputFormat, ...]
     #: Extra files the same run writes and ASH reads.
@@ -355,7 +355,7 @@ TOOL_TYPE_SERVED_BY: dict[ScannerToolType, frozenset[TargetKind]] = {
 
 
 class TargetsFacet(_Frozen):
-    """What the scanner scans (design section C)."""
+    """What the scanner scans."""
 
     kinds: tuple[TargetKind, ...]
     #: Mirror of the ``tool_type`` the scanner sets in ``model_post_init``.
@@ -406,7 +406,7 @@ class Invocations(str, Enum):
 
 
 class RuntimeFacet(_Frozen):
-    """The scanner's own runtime needs (design section F)."""
+    """The scanner's own runtime needs."""
 
     kind: RuntimeKind
     #: Programs the scanner needs on the host beyond its tool.
@@ -462,7 +462,7 @@ PLATFORMS_NO_WINDOWS_ARM64: tuple[str, ...] = PLATFORMS_ALL[:-1]
 
 
 class PlatformsFacet(_Frozen):
-    """Where ASH can provision the scanner's tool (design section G)."""
+    """Where ASH can provision the scanner's tool."""
 
     #: ``os/arch`` pairs ``tool_downloads.supported_platforms`` returns for
     #: the scanner's ``tool_versions_key``; empty for a tool ASH does not

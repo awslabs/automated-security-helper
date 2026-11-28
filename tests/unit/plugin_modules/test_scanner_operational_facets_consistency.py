@@ -178,7 +178,7 @@ def test_content_database_join_agrees_both_ways(cls) -> None:
 
 
 def test_the_service_upload_scanner_is_the_one_that_skips_offline() -> None:
-    """E4: snyk-code uploads the source, so its row can never read as a
+    """snyk-code uploads the source, so its row can never read as a
     ruleset fetch, and its declared offline outcome is not_run."""
     uploads = [
         _ops(c).scanner_name
@@ -282,7 +282,7 @@ def test_tool_type_is_one_story_across_four_declarations(cls, _instances) -> Non
     table the reporters read, and the declared target kinds agree.
 
     ``tool_type`` feeds the reporter-side ``exclude_scanner_types``, so a type
-    that contradicts what the scanner scans is behavior-visible (E3).
+    that contradicts what the scanner scans is behavior-visible.
     """
     facets = _ops(cls)
     declared = facets.targets.tool_type
@@ -303,7 +303,7 @@ def test_tool_type_is_one_story_across_four_declarations(cls, _instances) -> Non
 
 
 def test_the_actionlint_zizmor_split_is_recorded_and_unchanged() -> None:
-    """E3: same target kind, two types. Recorded, never silently moved."""
+    """Same target kind, two types. Recorded, never silently moved."""
     by_name = {_ops(c).scanner_name: _ops(c) for c in SCANNER_CLASSES}
     assert by_name["actionlint"].targets.tool_type is ScannerToolType.IAC
     assert by_name["zizmor"].targets.tool_type is ScannerToolType.SAST
@@ -333,7 +333,7 @@ def test_every_target_kind_is_claimed_or_unclaimed_and_never_both() -> None:
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
 def test_covers_is_display_only_and_never_claims_what_is_not_wired(cls) -> None:
-    """E10: ``covers`` is the display string; the register declares the wired
+    """``covers`` is the display string; the register declares the wired
     truth, and the display string may not claim an unwired target."""
     facets = _ops(cls)
     covers = getattr(cls, "covers", None)
@@ -647,7 +647,7 @@ def test_prerequisites_agree_with_the_scanners_own_selection(cls, _instances) ->
 
 @pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
 def test_a_container_image_claim_and_the_image_dispatch_travel_together(cls) -> None:
-    """The C5 iff-rule: claims CONTAINER_IMAGE ⇔ overrides the image dispatch.
+    """The iff-rule: claims CONTAINER_IMAGE ⇔ overrides the image dispatch.
 
     The register row is the one place capability lives, and the dispatch
     (``_execute_image_scan`` for a template scanner, a whole ``scan_image``

@@ -4,7 +4,7 @@
 """Image attribution: stamped on results, keyed into the identity, matched by
 ``image:`` suppressions, and invisible to a filesystem scan.
 
-The rows are the design's C4 and C9 identity, suppression and oracle rows. No
+The tests cover the identity, suppression and oracle cases. No
 tool runs and no image is read: a SARIF result is built here, stamped the way
 the scanner executor stamps it, and read back through the same extractors a
 scan's results go through.
