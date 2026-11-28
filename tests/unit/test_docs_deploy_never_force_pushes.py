@@ -926,6 +926,13 @@ FORCE_CASES = {
     ),
     "to no named destination": "git push --force",
     "of every branch": "git push --force --all origin",
+    "as a mirror": "git push --mirror origin",
+    "as a + refspec with a wildcard destination": (
+        "git push origin '+refs/heads/*:refs/heads/*'"
+    ),
+    "as a forced refspec with a wildcard destination": (
+        "git push --force origin 'refs/heads/*:refs/heads/*'"
+    ),
 }
 
 #: gh-deploy and ghp-import with their force spellings break both rules.
@@ -946,6 +953,9 @@ CLEAN_CASES = {
     "a plain push of gh-pages": "git push origin gh-pages",
     "a plain push of the current branch": 'git push -u origin "$BRANCH"',
     "a forced push of another branch": "git push --force origin refs/heads/preview",
+    "a plain push of every branch by refspec": (
+        "git push origin 'refs/heads/*:refs/heads/*'"
+    ),
     "a force flag on another tool": "docker image prune --all --force",
     "a comment line naming the old command": (
         "# never run mkdocs gh-deploy --force\nuv run mkdocs build"
