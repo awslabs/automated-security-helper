@@ -376,6 +376,11 @@ _EXEMPT.update(
             "The tree this module built under tmp_path_factory.mktemp for one scan "
             "variant; the scans fixture returns it from a cache the guard cannot read."
         ),
+        ("tests/unit/docs/test_docs_feature_coverage.py", "snapshot", "run.data"): (
+            "The coverage data directory the test's own Run makes under its tmp_path, "
+            "holding only what that test wrote; no other worker's per-run directory "
+            "is under it, so the walk never meets one."
+        ),
         (
             "tests/unit/reporters/test_secret_masking_across_reports.py",
             "_written_outside_tool_output",
