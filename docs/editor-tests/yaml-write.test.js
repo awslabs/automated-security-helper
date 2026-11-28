@@ -233,11 +233,68 @@ test('a shape a line patch does not handle is passed on, not refused', () => {
     ['a list in flow style', 'list: [a]\n', { op: 'append', path: ['list'], value: 'b' }],
     ['a new key in a flow mapping', 'a: {x: 1}\n', { op: 'set', path: ['a', 'y'], value: 2 }],
     ['a deletion in a flow list', 'list: [a, b]\n', { op: 'delete', path: ['list', 0] }],
-    ['a first key of a compact item', 'l:\n  - a: 1\n    b: 2\n', { op: 'delete', path: ['l', 0, 'a'] }],
   ];
   for (const [name, text, edit] of cases) {
     assert.deepEqual(patch(text, edit), { ok: false, final: false, reason: 'unsupported' }, name);
   }
+});
+
+test('the first key of a compact list item is taken out where it is, and the next key moves up', () => {
+  const cases = [
+    [
+      'a mapping item',
+      'l:\n  - a: 1\n    b: 2\n  - c: 3\n',
+      { op: 'delete', path: ['l', 0, 'a'] },
+      'l:\n  - b: 2\n  - c: 3\n',
+      0,
+    ],
+    [
+      'comments between the two keys go with it',
+      'l:\n  - a: 1 # one\n    # about b\n    b: 2\n  - c: 3\n',
+      { op: 'delete', path: ['l', 0, 'a'] },
+      'l:\n  - b: 2\n  - c: 3\n',
+      2,
+    ],
+    [
+      'a list in a list',
+      'l:\n  - - 1\n    - 2\n  - 3\n',
+      { op: 'delete', path: ['l', 0, 0] },
+      'l:\n  - - 2\n  - 3\n',
+      0,
+    ],
+    [
+      'comment lines before the item and before the next item stay',
+      'g:\n  s:\n    # group A\n    - r: X1\n      p: a.py\n    # group B\n    - r: X2\n      p: b.py\n',
+      { op: 'delete', path: ['g', 's', 1, 'r'] },
+      'g:\n  s:\n    # group A\n    - r: X1\n      p: a.py\n    # group B\n    - p: b.py\n',
+      0,
+    ],
+  ];
+  for (const [name, text, edit, after, dropped] of cases) {
+    const result = patch(text, edit);
+    assert.equal(result.how, 'patch', name);
+    assert.equal(result.text, after, name);
+    assert.equal(result.droppedComments, dropped, name);
+  }
+});
+
+test('a plain string with a question mark is quoted inside a flow list, where PyYAML ends a plain scalar at it', () => {
+  const result = patch('paths: [a, b] # note\n', { op: 'set', path: ['paths', 1], value: 'src/a?.py' });
+  assert.equal(result.how, 'patch');
+  assert.equal(result.text, 'paths: [a, "src/a?.py"] # note\n');
+  assert.equal(readYaml(result.text).ok, true);
+});
+
+test('a block-only path is written again as the list item that holds the edit, never as the list', () => {
+  const text = 'g:\n  items:\n    # first\n    - a: 1\n      b: 2\n    # second\n    - a: 3\n      b: 4\n';
+  const result = reemit(text, { op: 'delete', path: ['g', 'items', 1, 'a'] });
+  assert.equal(result.ok, true);
+  assert.equal(result.label, 'g.items[1]');
+  assert.equal(
+    result.text,
+    'g:\n  items:\n    # first\n    - a: 1\n      b: 2\n    # second\n    - b: 4\n',
+  );
+  assert.equal(result.droppedComments, 0);
 });
 
 test('writing an entry again names it and counts the comments it held', () => {

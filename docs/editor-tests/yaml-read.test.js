@@ -199,6 +199,23 @@ test('an alias is refused where it is written, in ASH words', () => {
   assert.match(doc.refusal.message, /ASH configuration does not accept YAML aliases/);
 });
 
+test('an anchor written twice is refused at its second writing, as PyYAML refuses it', () => {
+  const cases = [
+    ['two scalars', 'a: &x 1\nb: &x 2\n', { code: 'anchor', line: 2, column: 4 }],
+    ['two collections', 'a: &x {k: 1}\nb: &x [1]\n', { code: 'anchor', line: 2, column: 4 }],
+    ['a scalar and a list item', 'a: &x 1\nl:\n  - &x 2\n', { code: 'anchor', line: 3, column: 5 }],
+    ['an anchor after a tag', 'a: &x 1\nb: !!str &x two\n', { code: 'anchor', line: 2, column: 4 }],
+    ['a tag before an anchor', 'a: !!str &x one\nb: &x 2\n', { code: 'anchor', line: 2, column: 4 }],
+  ];
+  for (const [name, text, expected] of cases) {
+    assert.deepEqual(refusal(text), expected, name);
+  }
+  assert.match(readYaml('a: &x 1\nb: &x 2\n').refusal.message, /found duplicate anchor 'x'/);
+  // Different names, and the same name in a text that is not a second writing, read as before.
+  assert.ok(readYaml('a: &x 1\nb: &y 2\n').ok);
+  assert.ok(readYaml('a: "&x"\nb: &x 2\n').ok);
+});
+
 test('the inputs the editor will not read are refused with a code, a line and a column', () => {
   const cases = [
     ['a second document', 'a: 1\n---\nb: 2\n', { code: 'second-document', line: 2, column: 1 }],

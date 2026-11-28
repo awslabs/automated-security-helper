@@ -135,6 +135,69 @@ test('a core tag whose text cannot be built is an error', () => {
   assert.throws(() => constructTagged('seq', 'x'), ScalarError);
 });
 
+test('an explicit float tag takes the text Python float() takes, and nothing else', () => {
+  const accepted = [
+    ['inf', Infinity],
+    ['+inf', Infinity],
+    ['-Infinity', -Infinity],
+    [' 1.5 ', 1.5],
+    ['1_0.5', 10.5],
+    ['1e3', 1000],
+    ['--1', 1],
+    ['+.5', 0.5],
+    ['1:30', 90],
+    ['7', 7],
+    ['1.e+2', 100],
+  ];
+  for (const [text, value] of accepted) {
+    const found = constructTagged('float', text);
+    assert.equal(found.type, 'float', text);
+    assert.equal(found.value, value, text);
+  }
+  assert.ok(Number.isNaN(constructTagged('float', 'NaN').value));
+  assert.ok(Number.isNaN(constructTagged('float', '-nan').value));
+  assert.ok(Object.is(constructTagged('float', '-0').value, -0));
+  for (const text of ['0x10', '', '-', '_', '+', '1e', '.', 'e5', '1.5.2', 'infinit', '1 2', '0b1', '0o7']) {
+    assert.throws(() => constructTagged('float', text), ScalarError, JSON.stringify(text));
+  }
+});
+
+test('an explicit integer tag takes the text Python int() takes, and nothing else', () => {
+  const arabicIndic = String.fromCodePoint(0x661, 0x662);
+  const fullwidth = String.fromCodePoint(0xff11, 0xff12);
+  const accepted = [
+    [' 12', 12],
+    ['0o17', 15],
+    [arabicIndic, 12],
+    [fullwidth, 12],
+    ['--5', 5],
+    ['0x 1f', 31],
+    ['0x-1f', -31],
+    ['-0x1f', -31],
+    ['0b11', 3],
+    ['1:30', 90],
+    ['0755', 493],
+    ['1_000', 1000],
+    ['+7', 7],
+    ['-0', 0],
+  ];
+  for (const [text, value] of accepted) {
+    const found = constructTagged('int', text);
+    assert.equal(found.type, 'int', JSON.stringify(text));
+    assert.equal(found.value, value, JSON.stringify(text));
+  }
+  for (const text of ['', '0x', '0b', '0b2', '08', '0o8', '1.5', '1 2', '0x1g', 'abc', '_', ' ', '-', '1:', ':1']) {
+    assert.throws(() => constructTagged('int', text), ScalarError, JSON.stringify(text));
+  }
+});
+
+test('a question mark ends a plain scalar inside a flow collection, so it is not written plain there', () => {
+  assert.equal(plainSafe('src/a?.py'), true);
+  assert.equal(plainSafe('src/a?.py', true), false);
+  assert.equal(plainSyntaxOk('a?b', true), false);
+  assert.equal(plainSyntaxOk('a?b'), true);
+});
+
 test('a reference is recognized by its start, as ASH recognizes it', () => {
   assert.deepEqual(matchReference('${HOME}'), { name: 'HOME', colon: false, head: '${HOME}' });
   assert.deepEqual(matchReference('${HOME:default}'), {

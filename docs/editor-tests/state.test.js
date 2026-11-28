@@ -106,6 +106,109 @@ test('a planner that cannot handle the edit passes it on', () => {
   assert.equal(result.text, 'a: 5\n');
 });
 
+test('writing a flow mapping again keeps its floats floats', () => {
+  const result = applyEdit('opts: {ratio: 1.0, list: [a]}\n', {
+    op: 'append',
+    path: ['opts', 'list'],
+    value: 'b',
+  });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.text, 'opts:\n  ratio: 1.0\n  list:\n    - a\n    - b\n');
+});
+
+test('the gate tells an integer from a float', () => {
+  // The patch writes the float 5.0 where the edit meant the integer 5.
+  const patched = applyEdit('a: 1.0\n', SET_A, { patch: writes('a: 5.0\n') });
+  assert.equal(patched.how, 'reemit');
+  assert.equal(patched.text, 'a: 5\n');
+  // A rewrite that turns a float into an integer in a place the edit did not name.
+  const text = 'opts: {ratio: 1.0, list: [a]}\n';
+  const edit = { op: 'append', path: ['opts', 'list'], value: 'b' };
+  const wrong = writes('opts:\n  ratio: 1\n  list:\n    - a\n    - b\n');
+  const result = applyEdit(text, edit, { reemit: wrong });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'gate');
+});
+
+test('a rewrite keeps the type of every key', () => {
+  const edit = { op: 'set', path: ['m', 'z'], value: 1 };
+  const cases = [
+    ['an integer key', 'm: {1: a, l: x}\n', 'm:\n  1: a\n  l: x\n  z: 1\n'],
+    ['null and boolean keys', 'm: {null: a, on: b, l: x}\n', 'm:\n  null: a\n  true: b\n  l: x\n  z: 1\n'],
+    ['a float key', 'm: {1.5: a, l: x}\n', 'm:\n  1.5: a\n  l: x\n  z: 1\n'],
+    ['an integer key and the text of it', 'm: {1: a, "1": b}\n', 'm:\n  1: a\n  "1": b\n  z: 1\n'],
+  ];
+  for (const [name, text, after] of cases) {
+    const result = applyEdit(text, edit);
+    assert.equal(result.how, 'reemit', name);
+    assert.equal(result.text, after, name);
+  }
+});
+
+test('the gate refuses a rewrite that turns a key into text', () => {
+  const edit = { op: 'set', path: ['m', 'z'], value: 1 };
+  const cases = [
+    ['an integer key', 'm: {1: a, l: x}\n', 'm:\n  "1": a\n  l: x\n  z: 1\n'],
+    ['a null key', 'm: {null: a, l: x}\n', 'm:\n  "null": a\n  l: x\n  z: 1\n'],
+    ['a boolean key', 'm: {on: a, l: x}\n', 'm:\n  "on": a\n  l: x\n  z: 1\n'],
+    ['a float key', 'm: {1.5: a, l: x}\n', 'm:\n  "1.5": a\n  l: x\n  z: 1\n'],
+    ['one key where the file had two', 'm: {1: a, "1": b}\n', 'm:\n  "1": b\n  z: 1\n'],
+  ];
+  for (const [name, text, wrong] of cases) {
+    const result = applyEdit(text, edit, { reemit: writes(wrong) });
+    assert.equal(result.ok, false, name);
+    assert.equal(result.reason, 'gate', name);
+  }
+});
+
+test('the gate tells a reference key from the same text in quotes', () => {
+  const text = 'opts:\n  ${KEY}: a\n  list: x\n';
+  const edit = { op: 'set', path: ['opts', 'list'], value: 'y' };
+  const result = applyEdit(text, edit, { patch: writes('opts:\n  "${KEY}": a\n  list: y\n') });
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.text, 'opts:\n  ${KEY}: a\n  list: y\n');
+});
+
+test('a gate trip in a block-only path writes the entry again with its floats and escapes intact', () => {
+  // A new key after a last block scalar that keeps its final blank line moves that line
+  // into the scalar, so the patch fails the gate and the entry is written again.
+  const text = 'scanners:\n  bandit:\n    ratio: 1.0\n    note: |+\n      text\n\nother: 1\n';
+  const result = applyEdit(text, { op: 'set', path: ['scanners', 'bandit', 'extra'], value: 2 });
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.label, 'scanners.bandit');
+  assert.equal(
+    result.text,
+    'scanners:\n  bandit:\n    ratio: 1.0\n    note: "text\\n\\n"\n    extra: 2\n\nother: 1\n',
+  );
+});
+
+test('the gate refuses a patch that loses a comment outside the entry it edits', () => {
+  const text = 'a: 1 # keep this\nb: 2\n';
+  const edit = { op: 'set', path: ['b'], value: 3 };
+  const lossy = writes('a: 1\nb: 3\n');
+  const result = applyEdit(text, edit, { patch: lossy });
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.how, 'reemit');
+  assert.equal(result.text, 'a: 1 # keep this\nb: 3\n');
+  const refused = applyEdit(text, edit, { patch: lossy, reemit: lossy });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.reason, 'gate');
+});
+
+test('the gate refuses a rewrite that touches the lines of a neighbor of the entry it names', () => {
+  const text = 'a:\n  - x: 1\n    y: 2\n  # next\n  - x: 3\n    y: 4\nb: [1]\n';
+  const edit = { op: 'delete', path: ['a', 1, 'x'] };
+  const wholeList = writes('a:\n  - x: 1\n    y: 2\n  - y: 4\nb: [1]\n');
+  const result = applyEdit(text, edit, { patch: wholeList, reemit: wholeList });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'gate');
+  const real = applyEdit(text, edit);
+  assert.equal(real.how, 'patch');
+  assert.equal(real.text, 'a:\n  - x: 1\n    y: 2\n  # next\n  - y: 4\nb: [1]\n');
+  assert.equal(real.droppedComments, 0);
+});
+
 test('the state applies edits and steps back and forward through them', () => {
   const state = createState('a: 1\n');
   assert.equal(state.text, 'a: 1\n');
