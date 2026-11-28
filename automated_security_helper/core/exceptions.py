@@ -4,8 +4,6 @@ from pathlib import Path
 import re
 from typing import Any, Iterable, Optional
 
-from automated_security_helper.utils.short_reason import is_short_reason
-
 #: The ASH logger by name: this module imports no third-party package, and the
 #: logger module that defines ``ASH_LOGGER`` imports several.
 _LOGGER = logging.getLogger("ash")
@@ -165,6 +163,19 @@ DEFAULT_SENTENCES: dict[str, str] = {
 def is_reason_code(code: object) -> bool:
     """Whether ``code`` is written the way a reason code is."""
     return isinstance(code, str) and _REASON_CODE.fullmatch(code) is not None
+
+
+def is_short_reason(text: object) -> bool:
+    """Whether ``text`` may be shown as the reason a scanner failed.
+
+    The rule is ``utils/short_reason.is_short_reason``; this calls it.
+    """
+    # install-pinned-tool loads this file by path before the package is installed.
+    from automated_security_helper.utils.short_reason import (
+        is_short_reason as _is_short_reason,
+    )
+
+    return _is_short_reason(text)
 
 
 @dataclass(frozen=True)
