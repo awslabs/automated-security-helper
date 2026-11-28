@@ -1,9 +1,10 @@
 """``+=`` and ``-=`` on a list whose value means every item are refused.
 
 Three list options hold a value that stands for every item rather than for the
-items it lists: checkov's ``frameworks`` defaults to ``["all"]``, detect-secrets'
+items it lists: checkov's ``frameworks`` defaults to ``["all"]``, and checkov runs a
+written ``frameworks: []`` as ``all`` too; detect-secrets'
 ``scan_settings.plugins_used`` defaults to ``[]``, which runs every detector
-detect-secrets has, and a file that writes trivy-repo's ``scanners: []`` leaves the
+detect-secrets has; and a file that writes trivy-repo's ``scanners: []`` leaves the
 choice of scanners to trivy. ``KEY+=[...]`` on such a value has no list to add to,
 and ``KEY-=[...]`` none to take items out of, so the application that builds the
 run's own configuration (``warn_unread_appends=True``) refuses both, and refuses a
@@ -59,6 +60,14 @@ def _trivy_repo_written_empty() -> AshConfig:
     holds the value that leaves the choice to trivy."""
     return AshConfig.model_validate(
         {"scanners": {"trivy-repo": {"options": {"scanners": []}}}}
+    )
+
+
+def _checkov_written_empty() -> AshConfig:
+    """A configuration whose file writes checkov's ``frameworks: []``, which checkov
+    runs as ``all``, as it runs the default ``["all"]``."""
+    return AshConfig.model_validate(
+        {"scanners": {"checkov": {"options": {"frameworks": []}}}}
     )
 
 
@@ -166,6 +175,13 @@ def test_a_removal_that_would_leave_every_item_is_refused():
             ["vuln"],
             id="trivy-repo",
         ),
+        pytest.param(
+            _checkov_written_empty,
+            f'{CHECKOV}=["terraform"]',
+            _checkov_frameworks,
+            ["terraform"],
+            id="checkov-written-empty",
+        ),
     ],
 )
 def test_a_replacement_of_a_sentinel_is_unchanged(base, override, read, expected):
@@ -251,3 +267,59 @@ def test_the_additions_table_names_checkovs_hosted_service_frameworks():
             {"bitbucket_configuration", "github_configuration", "gitlab_configuration"}
         )
     }
+
+
+@pytest.mark.parametrize(
+    ("operator", "item"),
+    [
+        pytest.param("+=", "terraform", id="append"),
+        pytest.param("+=", "github_configuration", id="append-a-framework-all-omits"),
+        pytest.param("-=", "terraform", id="remove"),
+    ],
+)
+def test_an_edit_of_checkovs_empty_frameworks_is_refused(operator, item):
+    """checkov runs a written ``frameworks: []`` as ``all``, so the empty list
+    stands for every framework, as the default does. An append would narrow the run
+    to the framework it names, one ``all`` leaves out included, since nothing else
+    is in the list, and a removal has no list to take it from."""
+    assert _checkov_frameworks(_checkov_written_empty()) == [], "control: the file"
+
+    with pytest.raises(ASHConfigValidationError) as refused:
+        apply_config_overrides(
+            _checkov_written_empty(),
+            [f'{CHECKOV}{operator}["{item}"]'],
+            warn_unread_appends=True,
+        )
+
+    text = str(refused.value)
+    assert "holds [], which means every item" in text, text
+    assert f"'{CHECKOV}=[...]'" in text, text
+    assert item not in text, text
+
+
+def test_a_removal_that_would_leave_checkovs_frameworks_empty_is_refused():
+    """The first override gives checkov ``["terraform"]``. Taking it out would leave
+    ``[]``, which checkov runs as ``all``, so the run would scan every framework
+    where it scanned one."""
+    with pytest.raises(ASHConfigValidationError) as refused:
+        apply_config_overrides(
+            AshConfig(),
+            [f'{CHECKOV}=["terraform"]', f'{CHECKOV}-=["terraform"]'],
+            warn_unread_appends=True,
+        )
+
+    text = str(refused.value)
+    assert "would leave" in text, text
+    assert "holding [], which means every item" in text, text
+
+
+def test_a_removal_that_leaves_checkov_a_framework_is_applied():
+    """Control: a removal that leaves a framework in the list is applied in the
+    run's own application."""
+    config = apply_config_overrides(
+        AshConfig(),
+        [f'{CHECKOV}=["terraform", "kubernetes"]', f'{CHECKOV}-=["terraform"]'],
+        warn_unread_appends=True,
+    )
+
+    assert _checkov_frameworks(config) == ["kubernetes"]
