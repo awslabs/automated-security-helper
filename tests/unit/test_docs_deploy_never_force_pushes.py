@@ -949,6 +949,40 @@ FORCE_CASES = {
         "git push --force origin gh-pages > push.log 2>&1 && echo done"
     ),
     "with a redirection before its options": "git push 2>&1 --force origin gh-pages",
+    "with its errors discarded": "git push --force origin 2>/dev/null",
+    "with its errors piped to tee": "git push --force origin 2>&1 | tee push.log",
+    "with its output sent away": "git push --force origin > /dev/null 2>&1",
+    "with both outputs sent away at once": "git push -f origin &> /dev/null",
+    "with its output appended to a file": "git push --force origin >> push.log",
+    "with its input read from a file": "git push --force origin < /dev/null",
+    "with a file opened for reading and writing": (
+        "git push --force origin <> /dev/null"
+    ),
+    "to a destination glued to a redirection": (
+        "git push --force origin gh-pages>push.log"
+    ),
+    "to a + refspec glued to a redirection": "git push origin +HEAD:gh-pages>push.log",
+    "with a redirection of both outputs before its options": (
+        "git push &> /dev/null --force origin gh-pages"
+    ),
+    "with a clobbering redirection before its options": (
+        "git push >| push.log --force origin gh-pages"
+    ),
+    "with its input taken from a descriptor, before its options": (
+        "git push <&3 --force origin gh-pages"
+    ),
+    "with its errors discarded, in a shell string": (
+        'bash -c "cd site && git push --force origin 2>/dev/null"'
+    ),
+    "with its errors discarded, in a shell string run with a cluster": (
+        'bash -euo pipefail -c "cd site && git push --force origin 2>/dev/null"'
+    ),
+    "with its errors discarded, in a script a shell reads from a here-document": (
+        "bash <<EOF\ncd site && git push --force origin 2>/dev/null\nEOF"
+    ),
+    "in a shell string that comes after a redirection": (
+        "sh -c 2>/dev/null 'cd site && git push --force origin gh-pages'"
+    ),
     "to a remote with no branch, after a continued line": (
         "git push \\\n  --force origin"
     ),
@@ -987,6 +1021,9 @@ CLEAN_CASES = {
     "a plain push of gh-pages": "git push origin gh-pages",
     "a plain push of the current branch": 'git push -u origin "$BRANCH"',
     "a forced push of another branch": "git push --force origin refs/heads/preview",
+    "a forced push of another branch with its errors discarded": (
+        "git push --force origin preview 2>/dev/null"
+    ),
     "a plain push of every branch by refspec": (
         "git push origin 'refs/heads/*:refs/heads/*'"
     ),
@@ -1033,6 +1070,11 @@ TAG_REACHABLE_CASES = {
         "permissions": READ,
         "run": "sh -c 'cd site && git push origin gh-pages'",
     },
+    "a read token, and a push with its errors discarded": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "git push origin 2>/dev/null",
+    },
 }
 
 #: Each of these publishes the site and is reached by no tag push, or is reached by
@@ -1055,6 +1097,11 @@ TAG_UNREACHABLE_CASES = {
         "on": ON_ANY_TAG,
         "permissions": READ,
         "run": "sh -c 'cd site && git push origin preview'",
+    },
+    "a tag trigger, a read token, and a push of another branch, errors discarded": {
+        "on": ON_ANY_TAG,
+        "permissions": READ,
+        "run": "git push origin preview 2>/dev/null",
     },
 }
 
