@@ -37,7 +37,10 @@ import {
 // Float, a list, a plain object (every key a string) or a TypedMap (a mapping with a key
 // that is not a plain string). A JavaScript number is an integer when it is a safe
 // integer and a float otherwise, which is how it is written; a Float is how a whole
-// float such as 1.0 is asked for and how the reader gives one back.
+// float such as 1.0 is asked for and how the reader gives one back. An integer past
+// 2**53 is a BigInt, which the reader gives back and the writer writes digit for digit;
+// an edit that hands over a whole number that large as a plain number is refused, since
+// its digits are already gone (reason "number").
 
 function isPlainObject(value) {
   return (
@@ -69,6 +72,31 @@ function pairsOf(mapping) {
 
 function isEmptyCollection(value) {
   return Array.isArray(value) ? value.length === 0 : pairsOf(value).length === 0;
+}
+
+// The first whole number in a value that a plain number cannot hold digit for digit, or
+// null. A number past 2**53 has already lost the digits an integer would have had (a
+// file's 9007199254740993 is 9007199254740992 once it is a number), so the editor does
+// not guess what was meant: an integer that large is passed as a BigInt, and a float
+// that large as a Float.
+function lossyNumber(value) {
+  if (typeof value === "number") {
+    return Number.isInteger(value) && !Number.isSafeInteger(value) ? value : null;
+  }
+  if (Array.isArray(value)) {
+    return firstLossyNumber(value);
+  }
+  return isMapping(value) ? firstLossyNumber(pairsOf(value).flat()) : null;
+}
+
+function firstLossyNumber(values) {
+  for (const value of values) {
+    const found = lossyNumber(value);
+    if (found !== null) {
+      return found;
+    }
+  }
+  return null;
 }
 
 function own(object, key) {
@@ -623,6 +651,17 @@ function check(doc, edit) {
   if (!valid) {
     return { problem: refusal("path", "The edit does not name a place in the file.") };
   }
+  if (edit.op === "set" || edit.op === "append") {
+    const lossy = lossyNumber(edit.value);
+    if (lossy !== null) {
+      return {
+        problem: refusal(
+          "number",
+          `The number ${lossy} is a whole number beyond ${Number.MAX_SAFE_INTEGER}, where a plain number no longer holds every digit, so nothing was written. An integer that large is passed as a BigInt, and a float as a Float.`,
+        ),
+      };
+    }
+  }
   const loc = locate(doc.root, path);
   const problem = lockProblem(loc, path);
   return problem === null ? { loc } : { problem };
@@ -862,7 +901,8 @@ function patchDelete(doc, loc) {
  * `{ok: true, how, text, droppedComments}` (how is "patch", or "none" when the
  * text does not change), `{ok: false, final: true, reason, message}` for an edit
  * the editor will not make (an unreadable file, a repeated key, a merge key, a
- * path it cannot create), or `{ok: false, final: false}` where the shape is not
+ * path it cannot create, a whole number past 2**53 given as a plain number), or
+ * `{ok: false, final: false}` where the shape is not
  * one a line patch handles and the entry has to be written again.
  */
 export function planPatch(doc, edit) {
