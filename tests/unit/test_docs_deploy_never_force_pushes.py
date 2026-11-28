@@ -965,6 +965,12 @@ FORCE_CASES = {
     "in a shell string run after a shopt option": (
         'bash -O extglob -c "cd site && git push --force origin gh-pages"'
     ),
+    "in a shell string run after --rcfile": (
+        'bash --rcfile /dev/null -c "cd site && git push --force origin gh-pages"'
+    ),
+    "in a shell string run after --init-file": (
+        'bash --init-file /dev/null -c "cd site && git push --force origin gh-pages"'
+    ),
     "after a here-document with an apostrophe": (
         "cat <<EOF > note.txt\ndon't panic\nEOF\ngit push --force origin 'gh-pages'"
     ),
