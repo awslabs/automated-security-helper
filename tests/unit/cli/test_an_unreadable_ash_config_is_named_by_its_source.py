@@ -56,7 +56,7 @@ def test_report_names_the_ash_config_file_it_could_not_read(runner_env, monkeypa
     named.write_text("project_name: t\n", encoding="utf-8")
 
     try:
-        result = CliRunner().invoke(app, ["report", "--config", str(named)])
+        result = CliRunner().invoke(app, ["results", "report", "--config", str(named)])
     finally:
         operator.chmod(0o600)
 
@@ -71,7 +71,7 @@ def test_report_refuses_an_unreadable_config_file_by_name(runner_env):
     config = _unreadable(runner_env, "unreadable.yaml")
 
     try:
-        result = CliRunner().invoke(app, ["report", "--config", str(config)])
+        result = CliRunner().invoke(app, ["results", "report", "--config", str(config)])
     finally:
         config.chmod(0o600)
 
@@ -90,6 +90,7 @@ def test_merge_refuses_an_unreadable_config_with_exit_3(runner_env):
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(runner_env),
@@ -120,6 +121,7 @@ def test_merge_names_the_ash_config_file_it_could_not_read(runner_env, monkeypat
         result = CliRunner().invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(runner_env),

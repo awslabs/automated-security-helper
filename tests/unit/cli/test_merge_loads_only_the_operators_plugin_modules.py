@@ -61,6 +61,7 @@ def _merge(
         importing_this_checkout(
             "from automated_security_helper.cli.main import app; app()"
         ),
+        "results",
         "merge",
     ]
     for path in write_shards(tmp_path / "artifacts", shards):
@@ -223,6 +224,7 @@ def test_a_refused_config_wins_over_unreadable_shards(tmp_path):
             importing_this_checkout(
                 "from automated_security_helper.cli.main import app; app()"
             ),
+            "results",
             "merge",
             "--results",
             str(tmp_path / "missing-results.json"),

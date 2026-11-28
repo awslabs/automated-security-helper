@@ -49,7 +49,8 @@ def _plain(text: str) -> str:
 
 def _option_help(command: str, name: str) -> str:
     root = typer.main.get_command(app)
-    cmd = root.commands[command]
+    group = root.commands["results"] if command == "merge" else root
+    cmd = group.commands[command]
     return next(
         param.help for param in declared_params(command, cmd) if param.name == name
     )
@@ -330,7 +331,7 @@ class TestPathsArePrintedAsGiven:
             side_effect=ShardCoverageError(f"shard {name} completed none"),
         ):
             result = CliRunner().invoke(
-                app, ["merge", "--output-dir", "merged", "--results", "."]
+                app, ["results", "merge", "--output-dir", "merged", "--results", "."]
             )
 
         assert result.exit_code == 1, result.output

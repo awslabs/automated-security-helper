@@ -184,6 +184,9 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
             mp.setenv(name, value)
         mp.delenv("ASH_PROBE_UNSET", raising=False)
         mp.delenv("ASH_CONFIG", raising=False)
+        # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+        # option, and --add-scanners does not override it.
+        mp.delenv("ASH_SCANNERS", raising=False)
         mp.setattr(log, "get_logger", both)
         env = {"COLUMNS": "300"}
         mp.chdir(defaults_root)
@@ -191,6 +194,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         found["defaults_merge"] = runner.invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(defaults_root / "shard" / "ash_aggregated_results.json"),
@@ -206,15 +210,15 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         def merge(output: str, *extra: str):
             return runner.invoke(
                 app,
-                ["merge", "--results", shard_results, "--output-dir", output]
-                + ["--debug", *extra],
+                ["results", "merge", "--results", shard_results]
+                + ["--output-dir", output, "--debug", *extra],
                 env=env,
             )
 
         def report(*extra: str):
             return runner.invoke(
                 app,
-                ["report", "--format", "gitlab-cyclonedx"]
+                ["results", "report", "--format", "gitlab-cyclonedx"]
                 + ["--output-dir", str(root / "shard"), "--debug", *extra],
                 env=env,
             )

@@ -53,6 +53,7 @@ def _merge_with_config(tmp_path: Path, config_text: str) -> subprocess.Completed
         importing_this_checkout(
             "from automated_security_helper.cli.main import app; app()"
         ),
+        "results",
         "merge",
     ]
     for shard in shards:
@@ -124,6 +125,7 @@ def test_an_invalid_override_is_shown_once(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--output-dir",
             str(tmp_path / "out"),

@@ -91,7 +91,7 @@ try:
     if spec["command"] == "merge":
         from automated_security_helper.cli.main import app
 
-        app(["merge"] + spec["args"], prog_name="ash")
+        app(["results", "merge"] + spec["args"], prog_name="ash")
     else:
         from automated_security_helper.cli.entrypoint import main
 

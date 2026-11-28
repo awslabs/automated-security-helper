@@ -111,6 +111,9 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         mp.setattr(uv_tool_runner, "_uv_command_binary", {})
         mp.setenv("ASH_PROBE_VALUE", CANARY)
         mp.delenv("ASH_CONFIG", raising=False)
+        # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+        # option, and --add-scanners does not override it.
+        mp.delenv("ASH_SCANNERS", raising=False)
         mp.setattr(log, "get_logger", both)
         mp.chdir(root)
         env = {"COLUMNS": "300"}
@@ -138,6 +141,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         merge = runner.invoke(
             app,
             [
+                "results",
                 "merge",
                 "--results",
                 str(shard_results),
@@ -151,6 +155,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory):
         report = runner.invoke(
             app,
             [
+                "results",
                 "report",
                 "--format",
                 "gitlab-cyclonedx",

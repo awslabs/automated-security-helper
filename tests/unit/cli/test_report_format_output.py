@@ -108,6 +108,7 @@ def _report(output_dir, fmt, *extra):
     return CliRunner().invoke(
         app,
         [
+            "results",
             "report",
             "--format",
             fmt,

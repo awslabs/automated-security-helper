@@ -192,6 +192,9 @@ def _cli(cwd: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
         "UV_TOOL_DIR": str(home / ".local" / "share" / "uv" / "tools"),
         "UV_OFFLINE": "1",
     }
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    inherited = {k: v for k, v in os.environ.items() if k != "ASH_SCANNERS"}
     return subprocess.run(  # nosec B603 - fixed interpreter and arguments
         [
             sys.executable,
@@ -201,7 +204,7 @@ def _cli(cwd: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
             *args,
         ],
         cwd=cwd,
-        env={**os.environ, "COLUMNS": "400", "TERMINAL_WIDTH": "400", **homes, **env},
+        env={**inherited, "COLUMNS": "400", "TERMINAL_WIDTH": "400", **homes, **env},
         capture_output=True,
         text=True,
         timeout=300,
@@ -386,7 +389,7 @@ def test_ash_report_without_results_names_the_output_dir_on_one_line(tmp_path):
     out = tmp_path / _FORGED
     out.mkdir()
 
-    result = _cli(tmp_path, "report", "--output-dir", str(out))
+    result = _cli(tmp_path, "results", "report", "--output-dir", str(out))
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "No scan results found" in result.stderr, result.stderr
@@ -400,7 +403,7 @@ def test_ash_report_that_cannot_read_its_results_names_them_on_one_line(tmp_path
     out.mkdir()
     (out / "ash_aggregated_results.json").write_text("{", encoding="utf-8")
 
-    result = _cli(tmp_path, "report", "--output-dir", str(out))
+    result = _cli(tmp_path, "results", "report", "--output-dir", str(out))
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "Could not read the scan results in" in result.stderr, result.stderr
