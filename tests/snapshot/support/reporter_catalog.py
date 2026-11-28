@@ -43,8 +43,14 @@ AWS_REPORTER_NAMES = (
     "s3",
 )
 
-#: The three model shapes every reporter is rendered against.
-MODEL_VARIANTS = ("single", "workspace", "skipped-workspace")
+#: The model shapes every reporter is rendered against. ``support-notices`` is the
+#: single-directory scan of a host ASH supports only in part: the ``single`` model with
+#: the support notices such a run records in its metadata, and nothing else different.
+MODEL_VARIANTS = ("single", "workspace", "skipped-workspace", "support-notices")
+
+#: The shapes that are one project's results, not a workspace's. A reporter that
+#: exports one project at a time (asff) renders these and refuses the others.
+SINGLE_PROJECT_VARIANTS = ("single", "support-notices")
 
 #: Extensions a text snapshot may carry; see tests/snapshot/conftest.py.
 SNAPSHOT_EXTENSIONS = frozenset(

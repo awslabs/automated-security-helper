@@ -72,6 +72,7 @@ body:
 
       Check the install:
   - block:
+      id: version
       lang: bash
       body: |
         ash --version
@@ -117,6 +118,7 @@ body:
       Create a directory with one Python file that has two problems in it, and a
       `.gitignore` that keeps ASH's output out of version control:
   - block:
+      id: project
       twin: {kind: project}
       lang: bash
       body: |
@@ -160,6 +162,7 @@ body:
       The same scan limited to bandit and detect-secrets gives the same result on every
       machine that has those two tools, without the network:
   - block:
+      id: scan-two
       lang: bash
       marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}
       body: |
@@ -261,6 +264,7 @@ body:
       legend, the scanner table, and the files with the most findings, it prints one block
       per actionable finding:
   - block:
+      id: report
       twin: {kind: report, rule-id: B324}
       lang: bash
       body: |

@@ -34,7 +34,7 @@ samples.
 | Language | Unmarked, it is | Checked |
 |----------|-----------------|---------|
 | `bash`, `sh`, `shell`, `console` | `run` | executed by the runner; every `ash` line parsed |
-| `zsh`, `fish`, `powershell`, `pwsh`, `ps1`, `cmd`, `bat` | an error | must be marked `illustrative` |
+| `zsh`, `fish`, `powershell`, `pwsh`, `ps1`, `cmd`, `bat` | an error | rewrite it as a `bash` or `console` block that runs, or in prose: a new `illustrative` marker is refused (see [The illustrative ratchet](#the-illustrative-ratchet)) |
 | `yaml`, `yml`, `json`, `jsonc`, `toml` | `config kind=ash` | parsed, and validated as an ASH config |
 | `python`, `py` | `run` | executed by the runner; must parse; imports must resolve |
 | `dockerfile` | not executed | `ash` in `RUN`, `CMD`, and `ENTRYPOINT` lines parsed |
@@ -74,13 +74,14 @@ Values with spaces go in double quotes. Unknown modes and keys are errors.
 | `<!-- doctest: run env="ASH_OFFLINE=YES,LANG=C" -->` | set these variables for this block only |
 | `<!-- doctest: run fixture=empty -->` | start a new session in another fixture project |
 | `<!-- doctest: run fresh -->` | start a new session in the default fixture |
-| `<!-- doctest: illustrative reason="needs AWS credentials" -->` | do not run the block |
+| `<!-- doctest: illustrative reason="needs AWS credentials" -->` | do not run the block; the marker is closed to new blocks (see [The illustrative ratchet](#the-illustrative-ratchet)) |
 
-`illustrative` needs a reason a reader would accept, such as "needs Docker", "installs
-from the network", "needs AWS credentials", "Windows only", or "runs in CI". "TODO",
-"TBD", and "n/a" are rejected, and so is a reason that names no cause, such as "example"
-or "illustrative example only". An illustrative block is still checked statically: its
-`ash` lines must parse, and a Python block must still parse and import.
+A new `illustrative` marker is refused: write the example so that it runs, or as prose.
+The markers that remain need a reason a reader would accept, such as "needs Docker",
+"installs from the network", "needs AWS credentials", "Windows only", or "runs in CI".
+"TODO", "TBD", and "n/a" are rejected, and so is a reason that names no cause, such as
+"example" or "illustrative example only". An illustrative block is still checked
+statically: its `ash` lines must parse, and a Python block must still parse and import.
 
 The runner treats a page as one session, the way a reader follows a tutorial:
 
@@ -96,9 +97,9 @@ The runner treats a page as one session, the way a reader follows a tutorial:
 - `HOME` is private to the session, `ash` is the one in the project's virtual
   environment, and downloads fail at once: every proxy variable points at a port that
   refuses connections, and uv, pip, and npm run offline. A block that needs the network
-  must be `illustrative`. This is not a sandbox: a program that ignores the proxy
-  variables can still connect, and blocks run as you, so run the examples only on docs
-  you trust.
+  cannot run: show the command in prose, or point the block at a fixture that works
+  offline. This is not a sandbox: a program that ignores the proxy variables can still
+  connect, and blocks run as you, so run the examples only on docs you trust.
 
 This block runs in CI. The default fixture has one finding, so the scan exits with 2:
 
@@ -106,6 +107,94 @@ This block runs in CI. The default fixture has one finding, so the scan exits wi
 ```bash
 ash --source-dir . --scanners detect-secrets --offline --no-progress
 ```
+
+### The illustrative ratchet
+
+The `illustrative` blocks only get fewer, and a new marker is refused. The ones that
+existed when the ratchet was added are listed in
+[`docs/illustrative-seed`](https://github.com/awslabs/automated-security-helper/tree/main/docs/illustrative-seed),
+one file for each page, and that list only shrinks. Two other markers keep a block out of
+the runs in the same way, so the list counts them too: `runner=none`, which keeps a CI
+pipeline from its runner, and a bare `save-as=` on a shell or Python block, which saves
+the block and never runs it (write `run save-as=` to save it and run it). A file is
+named by its page's path written as `urllib.parse.quote(path, safe="")` writes it, then
+`.tsv`: every `/` is `%2F` and every `%` is `%25`, so the page
+`docs/content/how-to/install.md` is listed in `docs%2Fcontent%2Fhow-to%2Finstall.md.tsv`,
+and its template, `install.md.template`, in a file of its own. A line is the page's path,
+a tab, and the marker's reason with its words one space apart; the line of a `runner=none`
+marker has `runner=none: ` before the reason, and that of a bare `save-as=` marker is
+`save-as=<path>`. Each marker that sits directly above a block has one line. A marker
+shown inside an example fence, like the one under [Markers](#markers), or in a table cell
+governs no block and has none.
+
+Two checks hold the list to that:
+
+- `markers`, in the `lint` job, fails on an `illustrative` marker that has no line, and
+  on a line that no marker on its page matches. A commit that converts a block deletes
+  the marker and its line together.
+- The `snapshot-trailers` job runs
+  [`.github/scripts/check-illustrative-ratchet.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-illustrative-ratchet.py),
+  which fails on any line the list did not have where your branch left `main`. That
+  catches the line added to cover a new marker, which the first check cannot, and it
+  also fails a reworded reason, a second copy of a line, and a line moved to another
+  page. It fails too when a seed is gone, where your branch left `main` (what deleting
+  the last page's file does without the `.gitkeep` of step 3) or at your branch's head
+  (what deleting `docs/illustrative-seed`, or the command file named below, does; that
+  file stays, empty, when no line is left in it). A page
+  that moves takes its lines with it only when you move them: do it in a pull request of
+  its own that changes nothing else in the page, because git pairs a moved page with its
+  old path from 50% similarity, and a page moved and rewritten at once reads as new
+  lines. Rename the page's seed file to the new page's name, and write the new path in
+  each of its lines; `markers` fails on both until you do.
+
+A block that cannot run yet is no reason to add a marker. To convert one:
+
+1. Delete the marker above the block. A shell or Python block then runs as `run`, like
+   its neighbors, and a pipeline marked `runner=none` goes to its CI runner. A block
+   saved with `save-as=` alone is only saved, so write `run save-as=` on it. A block in
+   a language the runner has no interpreter for (`zsh`, `fish`, PowerShell) still cannot
+   run: rewrite it as `bash` or `console`, or in prose.
+2. Change what kept it from running: point it at a fixture, add `expect-exit`, make the
+   command work offline, or replace it with one that does. An example that cannot run
+   in the docs job at all is written in prose instead of a block.
+3. Delete the block's line from the page's file in `docs/illustrative-seed`, and the
+   file itself once it has no line left. Keep `docs/illustrative-seed/.gitkeep`: git
+   keeps no empty directory, so without it the last file takes the directory with it, the
+   `markers` check stops holding the pages to a seed, and the ratchet job has nothing to
+   compare later changes with.
+4. Run the page and the static checks, as under
+   [Run the checks locally](#run-the-checks-locally).
+
+Fencing a block as `text` takes it out of the runs with no marker, so the same list has
+a second part. A block in a language nothing runs that shows a command fails `markers`
+unless it is the output sample of the block above it, or sits in a record of a past
+release (`CHANGELOG.md` and the notes under `.github/release-notes/`), or is listed in
+[`scripts/docs_unexecuted_commands_seed.tsv`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/docs_unexecuted_commands_seed.tsv).
+A line shows a command when it follows a `$` prompt, or starts with `ash` (or another
+name of ASH), a container runtime (`docker`, `podman`, `finch`, `nerdctl`), `uv`, `uvx`,
+`pip`, `git` or `aws`, after an optional `%`, `PS>` or `C:\>` prompt, environment
+assignments and a wrapper such as `sudo`. That file holds a line for each such block as
+it was when the check was added: the page's path, a tab, and the block's first command.
+It only shrinks too. Fence the block as `bash` so the runner executes it, or as
+`console` when it shows `$` prompts with their output, or mark it `output`, or write the
+command in prose, and delete its line.
+
+On a page that a generator writes, the check leaves out the usage lines and reads every
+other block. A page is one when `REFERENCE_PAGES` in the freshness test lists it and the
+banner that opens it names the generator listed for it, as
+[Add a generated reference page](#add-a-generated-reference-page) describes. The
+freshness test holds the page's text to that generator's output, and a usage line is
+the program, the command's path, `[OPTIONS]` and a placeholder for each argument, as
+in `ash config get [OPTIONS] [config_path]`. It is no command the page tells a reader to
+run, so the usage line of a new command in the CLI reference needs no line in the seed.
+A block with values or flags is read like any block, because a person wrote it: the
+examples in a command's help text come out as `text` blocks of the CLI reference, so
+the seed lists each of them. A new example in a help text would be a new line the seed
+refuses, so show it where it runs: in a `bash` block of a how-to page, or have the
+generator fence the `Examples:` block of a help text as `bash`. A banner alone is not
+enough: the getting-started pages open with one, but a person writes their blocks in a
+journey file, so they are read like any other page, and so is a page that copies a
+banner.
 
 ### Output samples
 
@@ -223,8 +312,10 @@ earlier blocks changed to. An absolute path, a path containing `..`, and a path 
 goes through a symbolic link are refused, and the block fails; the static check
 reports the first two before CI runs. A marker without a mode may carry nothing but
 `save-as`. An `illustrative` block is never run or saved, so `illustrative` with
-`save-as` is an error: use a marker without a mode to save a block that must not run,
-such as a PowerShell script.
+`save-as` is an error. A shell or Python block saved with no mode is never run either,
+so the illustrative ratchet counts it like an `illustrative` block and refuses a new one
+(see [The illustrative ratchet](#the-illustrative-ratchet)): write `run save-as=<path>`
+to save the block and run it.
 
 The python check knows which modules a page saves. `save-as=my_plugins/scanner.py`
 makes `my_plugins` and `my_plugins.scanner` importable by every Python block of the
@@ -256,7 +347,9 @@ The keys follow these rules:
   GitHub workflow runs for `pull_request` when its `on:` lists that event, and for
   `push` otherwise, and a GitLab pipeline runs for `push`.
 - `runner=` takes only `none`, and then needs a `reason=` that follows the
-  `illustrative` rules. `reason=` goes with `runner=none` only.
+  `illustrative` rules. `reason=` goes with `runner=none` only. A `runner=none` block is
+  listed in the illustrative seed like an `illustrative` block, so a new one is refused
+  (see [The illustrative ratchet](#the-illustrative-ratchet)).
 - `azure-pipelines` blocks and YAML `jenkins` blocks have no runner. They take none of
   these keys and get the static checks only.
 - A `groovy` block must be marked `config kind=jenkinsfile`, with `runner=none` and a
@@ -335,7 +428,7 @@ scanner need no row.
 |-------|--------------|
 | `scanners.bandit`, `reporters.sarif`, `converters.archive` | that plugin's options (the same as adding `.options`) |
 | `scanners.*` | the keys every scanner entry has (`name`, `enabled`, `options`) |
-| `scanners`, `reporters`, `converters` | the plugins of that section, by name, built-in and alpha ones; a column headed Enabled by default or On by default is compared with each plugin's `enabled` default |
+| `scanners`, `reporters`, `converters` | the plugins of that section, by name, built-in and alpha ones; a column headed Enabled by default, On by default or On once loaded is compared with each plugin's `enabled` default, and on `scanners` a column headed Loads by default is compared with the scanner manifest's `default_enabled` |
 | `config` | the top-level keys of an ASH config |
 | `global_settings`, `sandbox`, `global_settings.suppressions`, ... | the keys under that config path; a path through a list means one item of it |
 | `workspace-policy`, `workspace-policy.workspace`, ... | keys of the workspace policy file |
@@ -839,7 +932,7 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | Message contains | Fix |
 |------------------|-----|
 | has no language | name the language; use `text` for output |
-| cannot run in the docs job | mark the Windows, zsh, or fish block `illustrative` with a reason |
+| cannot run in the docs job | the runner has no interpreter for the block's language (Windows shells, zsh, fish): write it as a `bash` or `console` block that runs, or in prose; a new `illustrative` marker is refused |
 | a blank line separates this marker | delete the blank line under the marker |
 | not directly followed by a fenced code block | move the marker to the line above its fence, or delete it |
 | unknown mode, is not a key of | use a mode and key from the tables above |
@@ -857,6 +950,15 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | has no runner, has no merge rule, takes no event=, is not an event of | use the key only on a kind that takes it (see [CI pipelines](#ci-pipelines)) |
 | names no earlier block on this page saved with, can extend only a block of its own kind, cannot also be saved | point `extends=` at a block above it, of its own kind, saved with `save-as=` at that path |
 | runner= takes only none, runner=none needs reason=, reason= goes with runner=none | mark a block no runner can run `runner=none reason="..."`, and give `reason=` only there |
+| is not in the illustrative seed | the list takes no new marker: make the block run, or take it out (see [the illustrative ratchet](#the-illustrative-ratchet)) |
+| the seed has a line for this page | the marker was converted or deleted: delete its line from the page's file in `docs/illustrative-seed`, and the file once it has no line left; keep `docs/illustrative-seed/.gitkeep` |
+| shows a command that nothing runs | fence the block as `bash` so the runner executes it (as `console` when it shows `$` prompts with their output), mark it `output` when it is what the block above prints, or write the command in prose |
+| no block on this page shows this command | the block was converted or deleted: delete its line from `scripts/docs_unexecuted_commands_seed.tsv` |
+| malformed seed line, is not the name of a page's seed file, which belongs in, which does not exist | a seed file has a line in the wrong shape, a name that is not its page's, a line for another page, or a line for a page that is gone: fix the file the finding names |
+| looks like a generated-block marker, marker is repeated, has no end marker, has no begin marker, comes before the begin marker, blocks do not nest, is closed at line, holds a carriage return | a pair of generated-block markers is not well formed: write the begin and end marker exactly as [Generated blocks in a hand-written page](#generated-blocks-in-a-hand-written-page) shows, each alone on its line, begin first, one pair for a name, no pair inside another, and with LF line ends |
+| is not registered in scripts/_matrix_destinations.py | the block names the support-matrix generator, and its registry does not list the block: add the entry to `BLOCKS`, or delete the markers |
+| is registered in scripts/_matrix_destinations.py for this file | the registry lists a block the file does not hold: put its markers in the file, or delete the entry |
+| registers blocks for, the list of generated blocks, BLOCKS, cannot be read | fix the file name in the registry, and keep `BLOCKS` a literal tuple of entries that each name a `file` and a `block` |
 
 ### `cli`
 
@@ -869,7 +971,8 @@ sample line the output lacks, as `'<line>' is not in the output of the block at 
 | takes no positional arguments | pass the path with an option such as the source-directory option |
 | is not an option of any ash command | another program's option: put the program in the code span |
 | a plugin's code wrote this row | put the program in the span, or write `ash --config` for ASH's own; the page is generated, so change the text in the plugin's code |
-| placeholder | a run block cannot contain `<placeholder>`; use a real value or mark it `illustrative` |
+| The row sits between generated-block markers | a generator wrote this row, the one the message names: put the program in the span, or write `ash --config` for ASH's own, and change the text in that generator, not in the page |
+| placeholder | a run block cannot contain `<placeholder>`; use a real value, or show the command in prose |
 | `no __main__` | that module cannot be run with `python -m` |
 | names no action, has no input | a GitHub Actions `uses:` of this repository names a path or input that does not exist |
 
@@ -917,7 +1020,7 @@ to resolve in: save the block inside one with `save-as=<package>/<module>.py`.
 | has no key, ships no scanner named | a dotted config path in a code span does not exist |
 | needs of= / an options marker goes on the line directly above a table | fix the marker |
 | that no row names; the marker says the table is complete | add a row for the key, or drop `complete` |
-| states defaults, but it is not compared | head the column Default, or Enabled by default for whether each plugin is on |
+| states defaults, but it is not compared | head the column Default, or Enabled by default (On once loaded on the scanner reference) for whether each plugin is on, or Loads by default for whether a scanner's module loads without being named |
 
 ### `files`
 
@@ -993,7 +1096,11 @@ tools) is generated, never written by hand. To add one:
    [`tests/unit/test_generated_docs_freshness.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/unit/test_generated_docs_freshness.py).
    That one entry runs `generate_<name>.py --check` in the unit suite, so the suite fails
    when the code changes and the page does not, and checks the banner in the page's
-   first 600 characters.
+   first 600 characters. The docs checks read the same entry: the check for commands
+   shown in blocks that nothing runs
+   ([The illustrative ratchet](#the-illustrative-ratchet)) leaves a page's usage lines
+   out only when this entry names the page and the banner from step 2 names the script
+   the entry gives it.
 4. Add the page to `GOLDEN` in
    [`.github/scripts/check-snapshot-trailers.py`](https://github.com/awslabs/automated-security-helper/blob/main/.github/scripts/check-snapshot-trailers.py),
    so a commit that changes it needs a `Snapshot-Update:` trailer.
@@ -1004,3 +1111,138 @@ The implementation of all of this is in
 and
 [`tests/integration/docs/docs_runner.py`](https://github.com/awslabs/automated-security-helper/blob/main/tests/integration/docs/docs_runner.py).
 Page paths the checks depend on are constants at the top of `docs_checks.py`.
+
+## Generated blocks in a hand-written page
+
+A generated reference page is written whole. Some facts the code owns, such as which
+operating systems a scanner runs on or how its tool is installed, also belong in pages
+that people write, such as the README. Those pages hold a generated block: the lines
+between a pair of markers belong to a script, and everything outside the markers stays
+hand-written. The markers are HTML comments, so they do not render:
+
+```text
+<!-- BEGIN generated: support/scanners.readme (scripts/generate_support_matrices.py) -->
+the lines the script writes
+<!-- END generated: support/scanners.readme -->
+```
+
+- Each marker sits alone on its line and starts in the first column. The begin marker
+  names the block and the script, from the repository root, that writes it. The end
+  marker repeats the name. A name is used once in a file, blocks do not nest, and a
+  marker inside a code fence is text.
+- Do not edit the lines between the markers. The script replaces them on its next run,
+  and its check, `generate_support_matrices.py --check`, fails with a diff of the lines
+  that differ. To change the text, change the generator or the code it reads, then run
+  the generator.
+- A page rendered from a `.md.template` file holds the block in the template, and the
+  generator writes the same lines into the template and the page. A block never holds a
+  release-number placeholder, so it stays correct from one release to the next and a
+  release needs no generator run.
+- Every generator reads and writes its blocks through
+  [`scripts/_generated_blocks.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_generated_blocks.py),
+  so all of them refuse the same mistakes. A missing, repeated, misplaced, or misspelled
+  marker is refused with the file and the block named, and a block the generator has no
+  body for is refused when it writes and reported when it checks.
+- Whichever generator fills a block, its cells come from the code or say what is not
+  known, and are never blank. They hold no `ash` command that someone typed, no release
+  number, and no placeholder. A link is relative to the file the block lands in.
+
+### How the docs checks treat a block
+
+The static checks read the lines between the markers as written by the generator, the way
+they read a generated page:
+
+- A finding on one of those lines names the generator, because the text changes there and
+  not in the page. A bare option such as `--config` in a generated row is reported with the
+  script's name: write the program in the span, in the generator.
+- Every page's markers must parse, whichever generator the begin marker names. A pair that
+  does not is a `markers` finding at the line its message names. [What a failure
+  means](#what-a-failure-means) lists each message.
+- A block of the support-matrix generator must also be listed in
+  `scripts/_matrix_destinations.py`, and a listed block must be in its file. Otherwise a
+  block nobody lists would keep its last body for good, and a listed block that is missing
+  would never be written.
+- A scanner name in a generated table is checked like one in any other table. A fenced
+  block inside a generated block is left out of the count of commands that nothing runs
+  ([The illustrative ratchet](#the-illustrative-ratchet)), whatever it shows, because the
+  freshness test holds it to its generator's output.
+
+### The support matrices
+
+The [support matrix](../reference/support-matrix.md) page is generated by
+[`scripts/generate_support_matrices.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/generate_support_matrices.py).
+It holds one table per family, the [scanners](../reference/support-matrix.md#scanners)
+first, and the blocks of the pages people write hold the same rows with the columns each
+page has room for. The generator names no scanner, mode, or channel. It has three parts
+besides itself:
+
+- A collector is a module `scripts/_matrix_<family>.py` that exposes `COLLECTOR`, an
+  object that reads one family from the code and returns typed matrices. The generator
+  finds every such module, so a new family is a new file, and a module with no
+  `COLLECTOR` is refused by name.
+  [`scripts/_matrix_scan.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_matrix_scan.py)
+  reads the scanners from the manifests, the operational register, and each scanner's own
+  platform refusal.
+- The model,
+  [`scripts/_support_model.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_support_model.py),
+  defines a matrix: its columns (a key, a header, the views the column appears in, and
+  where its values come from), its rows, and the members the rows must cover. A matrix
+  whose rows are not exactly its members is refused, so a scanner added to the code cannot
+  be missing from a table.
+- The destinations,
+  [`scripts/_matrix_destinations.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/_matrix_destinations.py),
+  are plain literals: `PAGES` lists the pages written whole and `BLOCKS` lists the blocks
+  filled in other pages, each with its file, block name, matrix, and view. The file holds
+  no code, so the docs checks read it without importing anything.
+
+What a cell may say:
+
+- A state cell is one phrase from a closed list, `VOCABULARY` in the model: for example
+  `yes`, `provisioned`, `no asset`, `refused: <reason>`, `off by default`,
+  `package-defined (not declared)`, and `not measured`. A cell outside the list is
+  refused, and so is a column whose header says it holds defaults, because the docs checks
+  would read the table as one of option defaults. Write what the column says, such as
+  Loads on its own.
+- A cell that shows an `ash` command is refused unless the model read the command from
+  the CLI, so a renamed command fails the generator instead of leaving old text behind.
+- A per-OS cell never reads the host. A refusal comes from the scanner's own
+  `unsupported_platform_reason()` called under a patched `platform.system`, so the page
+  has the same bytes whether it is regenerated on Linux, macOS, or Windows. A refusal that
+  reads the platform another way, such as `sys.platform` or `os.name`, would escape that
+  patch. A test reads every override and requires it to read the platform only through
+  `platform.system()`.
+- Each family declares two views of its columns: the README view holds the summary
+  columns, and the docs view holds every column. A family with one view only is refused.
+  A README block holds at most six columns and sixteen rows. The row limit is waived only
+  for a destination declared both `row_cap_exempt` and `collapsed`, and the element that
+  collapses it is written by hand, so the generator cannot check it.
+
+To change the support matrix, run `uv run python scripts/generate_support_matrices.py`.
+It writes the page and every registered block, and prints each file it wrote and how long
+the run took. `generate_support_matrices.py --check` writes nothing, prints a diff for
+each page or block that is stale, and exits 1. The `lint` job runs it as one step beside
+the freshness and wrapper-table steps. `generate_support_matrices.py --self-test` plants
+each defect the generator exists to refuse (a cell outside the list, a family with one
+view, `ash` text nobody read from the CLI, a collector with no `COLLECTOR`, a hand edit
+inside a block, a deleted end marker, a block nobody registered) and requires each to be
+refused. It reads no ASH, so it runs anywhere.
+
+`scripts/verify_docs_freshness.py` runs the same self-test, then holds the committed page
+to a second inventory of the scanners, read from the config models and not from the
+manifests the matrix is built from. A renderer that drops a row fails there even though
+the generator's own check would render the same page. The page is a golden page, so the
+commit that regenerates it carries a `Snapshot-Update:` trailer that says why.
+
+### Adding a scanner or changing its tier
+
+A scanner has a row once its manifest is registered and its class declares the facets the
+registry requires. No list in the generator names a scanner. The pull request that admits
+a scanner runs the generator and commits the page, because the `lint` job's check fails
+until it does, and a pull request that admits several scanners runs it once. Promoting a
+scanner is the one-line tier edit in its manifest, and its row moves to the new group the
+next time the generator runs. A scanner that refuses a platform overrides
+`unsupported_platform_reason` and reads the platform only through `platform.system()`;
+its row then shows the refusal for that operating system without anyone writing it into a
+table. The scanner's name links to its own page when `scanner_page` in
+[`scripts/generate_scanner_reference.py`](https://github.com/awslabs/automated-security-helper/blob/main/scripts/generate_scanner_reference.py)
+finds one.

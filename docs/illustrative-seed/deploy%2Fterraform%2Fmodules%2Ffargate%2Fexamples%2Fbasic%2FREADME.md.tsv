@@ -1,0 +1,3 @@
+deploy/terraform/modules/fargate/examples/basic/README.md	needs Terraform, network access and AWS credentials
+deploy/terraform/modules/fargate/examples/basic/README.md	needs an applied Terraform state
+deploy/terraform/modules/fargate/examples/basic/README.md	needs AWS credentials

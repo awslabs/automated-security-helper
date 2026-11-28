@@ -1,0 +1,205 @@
+"""The workspace results file records the support notices of every project, by id.
+
+Why this exists
+---------------
+The metadata of a workspace's unified results file is written fresh, with only the
+keys the writer names, so a key a project's own metadata holds reaches the root only
+if the writer carries it. Each project's scan records what it met: the rows raised at
+the start of a run are the same for every project, and a row raised at a decision (a
+scanner that is skipped, a sandbox backend that falls back) is recorded only by the
+projects that reached the decision. A root that kept the first project's notices alone
+would drop the others'.
+
+The writer takes each project's ``metadata.support_notices`` in workspace-file order
+and records them united by id. A notice that two projects met is recorded once, and
+what it holds of what the projects read, and of the paths the register offered them, is
+what every one of them recorded: the facts they recorded alike, the ``found`` text when
+they recorded the same, and the paths every project was offered. Two projects that meet
+one row can read different things of it (the processor flags that are missing, the
+level the processor is at) and be offered different paths (the compatibility runtime
+goes to a uv tool and not to a Homebrew install), and the first project's record alone
+would publish its read and its offer as the workspace's. The writer says so when it
+leaves something out: one warning for each notice the projects did not read alike,
+naming the notice, the projects that recorded it and what the record leaves out. The
+writer writes no key when no project recorded one, so the results of a workspace on a
+fully supported configuration are written as they were before the field existed.
+
+The controls are the same file with no notice in any project, a project that holds
+none beside one that does, and projects that met a notice alike.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.workspace.aggregation import WorkspaceAggregator
+from automated_security_helper.workspace.plan import WorkspacePlan
+from tests.unit.models._support_notice_helpers import (
+    AGREED_CPU_FACTS,
+    COMPAT_RUNTIME,
+    CPU_ID,
+    OFFERED_EVERYWHERE,
+    POLYFILL_ID,
+    SANDBOX_ID,
+    cpu_notice,
+    cpu_notice_of_two_hosts,
+    cpu_notices_of_two_installs,
+    polyfill_notice,
+    said_about,
+    sandbox_notice,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def _written(tmp_path: Path, per_project, run: int = 1):
+    """The unified file the writer makes for projects holding ``per_project``'s
+    notices, as parsed JSON and as the results model reads it back."""
+    plan = WorkspacePlan(
+        workspace_file=(tmp_path / "platform.code-workspace").as_posix(),
+        workspace_root=tmp_path.as_posix(),
+        projects=[],
+    )
+    aggregator = WorkspaceAggregator(plan=plan, output_dir=tmp_path / f"out{run}")
+    path = aggregator.write(
+        exit_code=0, wall_clock_seconds=1.0, support_notices=per_project
+    )
+    text = path.read_text(encoding="utf-8")
+    return json.loads(text), AshAggregatedResults.model_validate_json(text)
+
+
+def _ids(document: dict) -> list[str]:
+    return [notice["id"] for notice in document["metadata"]["support_notices"]]
+
+
+class TestEveryProjectsNoticesAreRecorded:
+    def test_a_later_projects_notice_reaches_the_root(self, tmp_path):
+        document, model = _written(
+            tmp_path, [[cpu_notice()], [sandbox_notice(), polyfill_notice()]]
+        )
+
+        assert _ids(document) == [CPU_ID, SANDBOX_ID, POLYFILL_ID]
+        assert [notice.id for notice in model.metadata.support_notices] == [
+            CPU_ID,
+            SANDBOX_ID,
+            POLYFILL_ID,
+        ]
+
+    def test_the_root_holds_each_notice_whole(self, tmp_path):
+        document, model = _written(tmp_path, [[], [cpu_notice()]])
+
+        assert document["metadata"]["support_notices"] == [
+            cpu_notice().model_dump(mode="json")
+        ]
+        assert model.metadata.support_notices == [cpu_notice()]
+
+    def test_a_notice_two_projects_met_differently_is_recorded_once_with_what_both_read(
+        self, tmp_path
+    ):
+        near, far = cpu_notice_of_two_hosts()
+
+        document, model = _written(tmp_path, [[near], [far, sandbox_notice()]])
+
+        assert _ids(document) == [CPU_ID, SANDBOX_ID]
+        # What the file says of the row is what both projects read and no more: the
+        # flags and the level the two recorded differently are not in it.
+        record = document["metadata"]["support_notices"][0]
+        assert record.get("found") is None, record
+        assert record["facts"] == AGREED_CPU_FACTS, record
+        assert model.metadata.support_notices[0].found is None
+        assert model.metadata.support_notices[0].facts == AGREED_CPU_FACTS
+
+    def test_a_notice_two_projects_met_differently_is_named_in_the_log(
+        self, tmp_path, capture
+    ):
+        near, far = cpu_notice_of_two_hosts()
+
+        _written(tmp_path, [[near], [far]])
+
+        said = said_about(capture, CPU_ID)
+        assert len(said) == 1, said
+        # No project was added to this aggregator, so they are named by their place in
+        # the list, in workspace-file order.
+        assert "project 1 and project 2" in said[0]
+        assert "found" in said[0]
+        assert "facts.cpu_level" in said[0]
+
+    def test_a_path_only_some_projects_were_offered_is_left_out_of_the_record(
+        self, tmp_path
+    ):
+        uv_tool, homebrew = cpu_notices_of_two_installs()
+
+        document, model = _written(tmp_path, [[uv_tool], [homebrew]])
+
+        # The compatibility runtime was offered to the first project's host and not to
+        # the second's, so the root does not offer it.
+        record = document["metadata"]["support_notices"][0]
+        assert [entry["id"] for entry in record["paths"]] == OFFERED_EVERYWHERE
+        assert COMPAT_RUNTIME not in json.dumps(record)
+        written = model.metadata.support_notices[0]
+        assert [path.id for path in written.paths] == OFFERED_EVERYWHERE
+
+    def test_a_path_only_some_projects_were_offered_is_named_in_the_log(
+        self, tmp_path, capture
+    ):
+        uv_tool, homebrew = cpu_notices_of_two_installs()
+
+        _written(tmp_path, [[uv_tool], [homebrew]])
+
+        said = said_about(capture, CPU_ID)
+        assert len(said) == 1, said
+        assert "project 1 and project 2" in said[0]
+        assert f"paths.{COMPAT_RUNTIME}" in said[0]
+
+    def test_control_projects_that_met_a_notice_alike_record_it_whole(self, tmp_path):
+        near, _ = cpu_notice_of_two_hosts()
+
+        document, model = _written(tmp_path, [[near], [near.model_copy(deep=True)]])
+
+        written = document["metadata"]["support_notices"]
+        assert written == [near.model_dump(mode="json")]
+        assert model.metadata.support_notices == [near]
+
+    def test_control_projects_that_met_a_notice_alike_say_nothing_of_it(
+        self, tmp_path, capture
+    ):
+        near, _ = cpu_notice_of_two_hosts()
+
+        _written(tmp_path, [[near], [near.model_copy(deep=True)]])
+
+        assert said_about(capture, CPU_ID) == []
+
+    def test_the_order_is_the_workspace_file_order_of_the_projects(self, tmp_path):
+        document, _ = _written(
+            tmp_path, [[polyfill_notice()], [sandbox_notice()], [cpu_notice()]]
+        )
+
+        assert _ids(document) == [POLYFILL_ID, SANDBOX_ID, CPU_ID]
+
+    def test_a_project_holding_none_beside_one_that_does_records_the_one(
+        self, tmp_path
+    ):
+        document, _ = _written(tmp_path, [None, [], [cpu_notice()], None])
+
+        assert _ids(document) == [CPU_ID]
+
+
+class TestAWorkspaceOnASupportedConfigurationWritesNoKey:
+    @pytest.mark.parametrize(
+        "per_project",
+        [
+            pytest.param(None, id="no projects given"),
+            pytest.param([], id="no project"),
+            pytest.param([None, None], id="projects that recorded none"),
+            pytest.param([[], []], id="projects that recorded an empty list"),
+        ],
+    )
+    def test_the_key_is_absent_and_the_model_reads_none(self, tmp_path, per_project):
+        document, model = _written(tmp_path, per_project)
+
+        assert "support_notices" not in document["metadata"], sorted(
+            document["metadata"]
+        )
+        assert model.metadata.support_notices is None

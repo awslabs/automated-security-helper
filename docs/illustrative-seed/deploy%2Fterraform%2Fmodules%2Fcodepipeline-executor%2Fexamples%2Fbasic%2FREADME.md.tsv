@@ -1,0 +1,3 @@
+deploy/terraform/modules/codepipeline-executor/examples/basic/README.md	needs Terraform, network access and AWS credentials
+deploy/terraform/modules/codepipeline-executor/examples/basic/README.md	needs an applied Terraform state
+deploy/terraform/modules/codepipeline-executor/examples/basic/README.md	needs an applied Terraform state

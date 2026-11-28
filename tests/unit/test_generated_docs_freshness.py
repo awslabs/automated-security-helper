@@ -109,6 +109,13 @@ REFERENCE_DIR = REPO_ROOT / "docs" / "content" / "reference"
 #: Every generated reference page: generator script -> the page it writes.
 #: generate_mcp_tool_reference.py also owns the agentic-plugins tool-reference.md, and
 #: its --check covers both files.
+#: scripts/docs_checks.py reads this dict as source, with ast.literal_eval, and never
+#: imports this module: its check for commands shown in blocks that nothing runs leaves
+#: a page's usage lines out only when this dict names the page. So keep it one literal
+#: dict of file names, assigned once at the top level of this module. A comprehension or
+#: a ``{**other}`` is refused with a finding; an ``update`` or a ``del`` after the
+#: literal is not seen, and a ``del`` would keep a page left out of that check after
+#: these tests stopped holding it to its generator.
 REFERENCE_PAGES = {
     "generate_cli_docs.py": "cli.md",
     "generate_config_reference.py": "configuration.md",
@@ -118,12 +125,21 @@ REFERENCE_PAGES = {
     "generate_mcp_tool_reference.py": "mcp-tools.md",
     "generate_reporter_docs.py": "reporters.md",
     "generate_scanner_reference.py": "scanners.md",
+    "generate_support_matrices.py": "support-matrix.md",
 }
 #: The pages with plugin options tables, and the config section each one documents.
 OPTIONS_PAGES = {
     "scanners.md": "scanners",
     "reporters.md": "reporters",
     "converters.md": "converters",
+}
+#: The column of each of those pages' inventory table that says whether a plugin is on
+#: by default. The scanner page also has a column that says whether the plugin's module
+#: loads by default, so its enabled column is the one that applies once it is loaded.
+INVENTORY_COLUMNS = {
+    "scanners.md": "On once loaded",
+    "reporters.md": "Enabled by default",
+    "converters.md": "Enabled by default",
 }
 #: Where a docs tree keeps per-scanner pages (as in generate_scanner_reference.py).
 BUILTIN_SCANNER_PAGES = Path("docs/content/docs/plugins/builtin")
@@ -411,8 +427,9 @@ def test_options_tables_carry_the_doctest_marker(page: str) -> None:
 
     The marker is on the line directly above the header, and names the same
     ``<section>.<name>`` that each row's anchor starts with. The page's inventory
-    tables, which say whether each plugin is enabled by default, are marked with the
-    section alone, so the docs checks compare that column with the code.
+    tables, which say whether each plugin is on by default (INVENTORY_COLUMNS names the
+    column), are marked with the section alone, so the docs checks can compare that
+    column with the code.
     """
     section = OPTIONS_PAGES[page]
     text = (REFERENCE_DIR / page).read_text(encoding="utf-8")
@@ -434,7 +451,7 @@ def test_options_tables_carry_the_doctest_marker(page: str) -> None:
     inventories = [
         above
         for _index, above, rows in _tables(text)
-        if "Enabled by default" in _cells(rows[0])
+        if INVENTORY_COLUMNS[page] in _cells(rows[0])
     ]
     assert inventories, f"{page} has no table saying which plugins are on by default"
     assert set(inventories) == {f"<!-- doctest: options of={section} -->"}

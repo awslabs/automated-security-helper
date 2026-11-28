@@ -1,0 +1,1 @@
+tests/test_data/images/README.md	rewrites this repository's committed fixture with a script from its tests/utils directory, so it needs a checkout of this repository

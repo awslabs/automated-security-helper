@@ -181,6 +181,12 @@ _KNOWN_DYNAMIC_READS = sorted(
         "utils/command_safe_stream.py [get] :: name",
         "utils/console.py [get] :: name",
         "utils/get_scan_set.py [get] :: name",
+        # The host-facts reader's live environment source: it reads the name its
+        # reader passes, and every one of those names is a literal at the
+        # reader's own call sites (POLARS_FORCE_PKG, POLARS_PREFER_PKG, the uv,
+        # pipx and XDG directories, APPDATA, LOCALAPPDATA, and ASH_IN_CONTAINER,
+        # which the exclusion set already holds), calls this sweep cannot see.
+        "utils/host_facts.py [get] :: name",
         "utils/log.py [in-environ] :: name",
         "utils/offline_mode_validator.py [get] :: variable",
         "utils/process_env.py [get] :: key",

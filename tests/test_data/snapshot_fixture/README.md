@@ -9,8 +9,9 @@ of the documents a user would open.
 through ASH's own aggregation (`ScanResultProcessor.process_container`, the report
 phase's final suppression pass and `populate_metrics_from_unified_source`). Its
 docstring lists each step. The pytest fixtures `fixture_model`,
-`fixture_workspace_model`, `fixture_skipped_workspace_model` and `fixture_variant` in
-`tests/snapshot/conftest.py` are the way to use it from a test.
+`fixture_workspace_model`, `fixture_skipped_workspace_model`,
+`fixture_support_notices_model` and `fixture_variant` in `tests/snapshot/conftest.py`
+are the way to use it from a test.
 
 ASH's self-scan does not read this tree: `tests/test_data/**` is in the `ignore_paths`
 of the repository's `.ash/.ash.yaml`. The code here is insecure on purpose and is never
@@ -64,6 +65,25 @@ the unused-suppressions report lists it). The global severity threshold is MEDIU
 
 Both are run through `automated_security_helper.workspace.execution.execute_workspace` with only the per-project
 orchestrator replaced, so the unified results file is the one ASH writes.
+
+## The support-notices scan (`support_notices_fixture()`)
+
+The `support-notices` model shape is the single-directory scan above with three support
+notices recorded in its metadata, which is what a run on a host ASH supports only in part
+writes into its results. The notices are written out in
+`tests/snapshot/support/fixture_model.py` and not built from the support register, so a
+change to one of the register's sentences does not move these snapshots.
+
+| Notice | Level | Raised | Upgrade paths |
+| --- | --- | --- | --- |
+| `host.cpu.below-polars-runtime` | unsupported | at the start of the run | one on this machine, two elsewhere |
+| `host.sandbox.landlock-below-6` | degraded | where the sandbox backend is chosen | one on this machine |
+| `scanner.guarddog.sandbox-replaced` | polyfilled | where GuardDog is run | none |
+
+Every reporter is snapshotted against this shape beside the other three. The three
+others record no notice, which `tests/snapshot/reporters/test_snapshot_reporters_support_notices.py`
+holds them to, so a run on a fully supported configuration writes the results it wrote
+before the field existed.
 
 ## Changing the fixture
 

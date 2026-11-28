@@ -597,6 +597,10 @@ class _ProjectRun:
     #: The project's ``metadata.plugin_load_errors``, for the workspace results'
     #: own: the modules its scan could not import, with the error.
     plugin_load_errors: Dict[str, str] = field(default_factory=dict)
+    #: The project's ``metadata.support_notices``, for the workspace results' own: the
+    #: configurations its scan met that ASH supports only in part. None when it
+    #: recorded none.
+    support_notices: Optional[List[Any]] = None
     #: An orchestrator ran for this project this run, so what is under
     #: ``projects/<key>`` is this run's output and the cross-project masking
     #: rewrites it: a finished scan's, a scan that raised after writing its
@@ -1936,6 +1940,9 @@ def _reduce_project_scan(
             getattr(getattr(results, "metadata", None), "plugin_load_errors", None)
             or {}
         ),
+        support_notices=getattr(
+            getattr(results, "metadata", None), "support_notices", None
+        ),
         output_written=True,
     )
 
@@ -3236,6 +3243,14 @@ def execute_workspace(
             for project in plan.projects
             if project.key in collected
         ),
+        # Likewise in workspace-file order, one entry for each project added above: the
+        # aggregator names the projects of a notice they read differently by the place
+        # of their entry, and records that notice once, with what they all recorded.
+        support_notices=[
+            collected[project.key].support_notices
+            for project in plan.projects
+            if project.key in collected
+        ],
     )
     payload = aggregator.results_payload(
         exit_code,

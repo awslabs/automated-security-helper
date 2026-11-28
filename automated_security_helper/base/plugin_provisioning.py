@@ -6,8 +6,10 @@
 A plugin's manifest (``plugin_manifest.ScannerManifest``) says what the plugin is. This
 module holds what the engine needs to PROVISION it, as data the plugin declares and the
 engine iterates: the release pin of the tool it runs (``ToolPin``), the content databases
-it reads and the age bound each is held to (``ContentDatabase``), and the environment
-variables that keep its tool off the network in offline mode (``OfflineEnvRow``). One
+it reads and the age bound each is held to (``ContentDatabase``), the environment
+variables that keep its tool off the network in offline mode (``OfflineEnvRow``), and the
+PyPI distribution an alpha scanner installs, with the reason it is kept out of the
+``alpha`` extra when it is (``PypiPin``, ``Exclusion``). One
 :class:`Provisioning` block per scanner, in :data:`PROVISIONING`; the manifest of a scanner
 carries its block as ``ScannerManifest.provisioning``.
 
@@ -40,13 +42,22 @@ Registry rules, enforced when the tables are first read (:func:`check_registry`)
 * a tool is pinned by one scanner (two scanners that run one tool name the pin once, in the
   scanner that owns the tool) and by the engine at most once, and never by both;
 * a content database name is declared once;
-* two scanners may declare the same offline variable only with the same value.
+* two scanners may declare the same offline variable only with the same value;
+* a PyPI distribution is pinned once, compared by its PEP 503 normalized name;
+* a pin is a member of a known extra or is excluded from it: one of the two, never both
+  and never neither;
+* a pin's specifier is non-empty and holds no ``;`` (a marker has its own field);
+* a pin's runtime is ``uv-tool`` or ``ash-environment``;
+* a cooldown exclusion carries the date the pin leaves the window, an ISO 8601 date, and
+  an exclusion for any other reason carries none.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, timedelta
+from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
 
@@ -122,6 +133,14 @@ class ContentDatabase:
     # its measurements are recorded under its own name. The trivy database is read by
     # both scanners of the Trivy plugin, ``trivy-repo`` and ``trivy``.
     also_read_by: tuple[str, ...] = ()
+    # The environment variable that moves the directory this database is read from,
+    # for a row where ASH reads or sets it. None means no read has been recorded, not
+    # that the tool has no such variable. Where the tool has a default directory
+    # (grype-db, trivy-db), ``cache_path`` is that default, read when the variable is
+    # not set. For the two offline rule caches (semgrep, opengrep) it is the directory
+    # the image provisions: the scanner reads the variable alone, and an unset variable
+    # means no cache directory.
+    cache_env: str | None = None
 
     @property
     def readers(self) -> tuple[str, ...]:
@@ -132,6 +151,92 @@ class ContentDatabase:
     def cacheable(self) -> bool:
         """Only a database with an enforced bound AND the CI age guards may be cached in CI."""
         return self.cacheable_in_ci
+
+
+class ExclusionReason(str, Enum):
+    """Why a PyPI pin is kept out of the ``alpha`` extra."""
+
+    #: A requirement ASH's core also has, at a range that does not overlap.
+    CORE_PIN_CONFLICT = "core_pin_conflict"
+    #: The pin conflicts with the ``cdk`` or ``symbols`` extra.
+    EXTRA_CONFLICT = "extra_conflict"
+    #: On some platform it would install on, the install builds from source.
+    NEEDS_BUILD = "needs_build"
+    #: A dependency publishes neither a wheel nor a source distribution for a
+    #: supported platform.
+    NO_WHEELS = "no_wheels"
+    #: The pin is younger than the project's ``exclude-newer`` window.
+    COOLDOWN = "cooldown"
+    #: Membership waits on a decision that is not the code's to make.
+    OWNER_HOLD = "owner_hold"
+
+
+@dataclass(frozen=True)
+class Exclusion:
+    """The recorded reason a pin is not a member of the ``alpha`` extra.
+
+    ``reason`` is read as an :class:`ExclusionReason`. A plain string that names a
+    member is that member, and a spelling that names none raises when the exclusion is
+    built. A dataclass does not enforce its annotations and :class:`ExclusionReason` is
+    a ``str`` enum, so without that reading the text ``"cooldown"`` is built without
+    error and is not the member the registry tests for.
+    """
+
+    reason: ExclusionReason
+    #: The cause, in the words of whoever measured it.
+    detail: str
+    #: When and how the cause was measured, or that it was not a measurement.
+    measured: str
+    #: ``COOLDOWN`` only: the UTC date the pin leaves the window, an ISO 8601 date such
+    #: as ``2026-12-01``. Empty for every other reason.
+    until: str = ""
+
+    def __post_init__(self) -> None:
+        # A plain string that names a member is that member; any other spelling raises.
+        object.__setattr__(self, "reason", ExclusionReason(self.reason))
+
+
+#: The extras a pin can be a member of. The register holds the PyPI pins of the alpha
+#: scanners, which the ``alpha`` extra installs, so that is the only one.
+PIN_EXTRAS: frozenset[str] = frozenset({"alpha"})
+
+#: The runtimes a pin can name: ``uv-tool`` for a scanner that installs into a uv tool
+#: environment of its own, ``ash-environment`` for one that installs into the
+#: environment ASH runs in.
+PIN_RUNTIMES: frozenset[str] = frozenset({"uv-tool", "ash-environment"})
+
+
+@dataclass(frozen=True)
+class PypiPin:
+    """The PyPI distribution a scanner installs, and the range ASH holds it to.
+
+    ``specifier`` is the scanner's own default constraint, verbatim, so the table and
+    the scanner say one thing. Markers that restrict where the pin applies go in
+    ``python_marker`` and ``platform_marker``, never into the specifier. ``runtime``
+    is one of :data:`PIN_RUNTIMES`: ``"uv-tool"`` for a scanner that installs into a uv
+    tool environment of its own and ``"ash-environment"`` for one that installs into the
+    environment ASH runs in. A pin is a member of the extra named by ``extra`` (one of
+    :data:`PIN_EXTRAS`) or is ``excluded`` from it. The registry refuses a pin that is
+    both, a pin that is neither, an extra it does not know and a runtime it does not
+    know.
+    """
+
+    distribution: str
+    specifier: str
+    runtime: str
+    #: Extra requirements installed with the tool (``uv tool install --with``).
+    with_requirements: tuple[str, ...] = ()
+    python_marker: str = ""
+    platform_marker: str = ""
+    extra: str = ""
+    excluded: Exclusion | None = None
+    note: str = ""
+
+
+def normalize_distribution(name: str) -> str:
+    """A distribution name as PEP 503 compares it: runs of ``-``, ``_`` and ``.``
+    are one ``-``, in lower case."""
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 @dataclass(frozen=True)
@@ -146,6 +251,9 @@ class Provisioning:
     #: Variables the engine adds to every child's environment in offline mode so the
     #: scanner's tool makes no network call of its own.
     offline_env: tuple[OfflineEnvRow, ...] = ()
+    #: The PyPI distributions this scanner installs (an alpha scanner whose tool is a
+    #: Python package). Not release pins: ``tool_versions`` does not list them.
+    pypi_pins: tuple[PypiPin, ...] = ()
 
 
 NO_PROVISIONING = Provisioning()
@@ -234,6 +342,25 @@ _CHECKOV = Provisioning(
     )
 )
 
+#: ferret-scan is a PyPI package installed into the environment ASH runs in. The
+#: specifier is the plugin's default version constraint (a test holds the two equal).
+#: Membership in an extra is held for a maintainer decision, so the pin is excluded.
+_FERRET_SCAN = Provisioning(
+    pypi_pins=(
+        PypiPin(
+            distribution="ferret-scan",
+            specifier=">=2.4.5,<2.7.0",
+            runtime="ash-environment",
+            excluded=Exclusion(
+                reason=ExclusionReason.OWNER_HOLD,
+                detail="membership in an extra waits on a maintainer decision",
+                measured="not a measurement: the pin is held for that decision",
+            ),
+            note="the specifier is the plugin's default version constraint",
+        ),
+    )
+)
+
 _GITLEAKS = Provisioning(tool_pins=(ToolPin("gitleaks", "v8.30.1"),))
 
 # The Go toolchain syft or grype may run: no module proxy, no toolchain download. On a Go
@@ -267,6 +394,10 @@ _GRYPE = Provisioning(
             name="grype-db",
             scanner="grype",
             cache_path="~/.cache/grype/db",
+            # ASH sets this variable for every grype scan, so grype reads the directory
+            # ASH refreshes and checks, and reads it when it decides whether an offline
+            # scan has a database; the image sets it.
+            cache_env="GRYPE_DB_CACHE_DIR",
             max_age=GRYPE_DB_MAX_AGE,
             bound_source=(
                 "grype's own default, `time.Hour * 24 * 5` "
@@ -312,6 +443,33 @@ _GRYPE = Provisioning(
     ),
 )
 
+#: GuardDog installs as a uv tool with an environment of its own. The specifier is the
+#: plugin's default version constraint. The two markers record where that version is
+#: known not to install: no CPython 3.14 wheels for two of its dependencies, and no
+#: Windows build of a third (the scanner's runtime-compatibility row and its
+#: ``unsupported_platform_reason`` say the same, and a test holds them equal).
+#: Membership in an extra is held for a maintainer decision, so the pin is excluded.
+_GUARDDOG = Provisioning(
+    pypi_pins=(
+        PypiPin(
+            distribution="guarddog",
+            specifier="==3.2.0",
+            runtime="uv-tool",
+            python_marker="python_version < '3.14'",
+            platform_marker="sys_platform != 'win32'",
+            excluded=Exclusion(
+                reason=ExclusionReason.OWNER_HOLD,
+                detail="membership in an extra waits on a maintainer decision",
+                measured="not a measurement: the pin is held for that decision",
+            ),
+            note=(
+                "the specifier is the plugin's default version constraint; the "
+                "markers record where that version is known not to install"
+            ),
+        ),
+    )
+)
+
 _HADOLINT = Provisioning(tool_pins=(ToolPin("hadolint", "v2.15.1"),))
 
 _NPM_AUDIT = Provisioning(
@@ -332,6 +490,9 @@ _OPENGREP = Provisioning(
             name="opengrep-offline-rules",
             scanner="opengrep",
             cache_path="/deps/.opengrep",
+            # The scanner names this variable as its offline rule cache and ASH reads it
+            # before an offline scan; the image sets it.
+            cache_env="OPENGREP_RULES_CACHE_DIR",
             max_age=OFFLINE_RULESET_MAX_AGE,
             bound_source=OFFLINE_RULESET_BOUND_REASON,
             bound_is_tool_default=False,
@@ -359,6 +520,9 @@ _SEMGREP = Provisioning(
             name="semgrep-offline-rules",
             scanner="semgrep",
             cache_path="/deps/.semgrep",
+            # The scanner names this variable as its offline rule cache and ASH reads it
+            # before an offline scan; the image sets it.
+            cache_env="SEMGREP_RULES_CACHE_DIR",
             max_age=OFFLINE_RULESET_MAX_AGE,
             bound_source=OFFLINE_RULESET_BOUND_REASON,
             bound_is_tool_default=False,
@@ -464,6 +628,9 @@ _TRIVY_REPO = Provisioning(
             scanner="trivy-repo",
             also_read_by=("trivy",),
             cache_path="~/.cache/trivy",
+            # trivy reads this directory from TRIVY_CACHE_DIR when it is set (the
+            # trivy plugin's README, "Permission errors"), and the image sets it.
+            cache_env="TRIVY_CACHE_DIR",
             max_age=TRIVY_DB_MAX_AGE,
             bound_source=(
                 "trivy's own rule: a database is current until its NextUpdate "
@@ -499,8 +666,10 @@ PROVISIONING: Mapping[str, Provisioning] = MappingProxyType(
         "betterleaks": _BETTERLEAKS,
         "cfn-guard": _CFN_GUARD,
         "checkov": _CHECKOV,
+        "ferret-scan": _FERRET_SCAN,
         "gitleaks": _GITLEAKS,
         "grype": _GRYPE,
+        "guarddog": _GUARDDOG,
         "hadolint": _HADOLINT,
         "npm-audit": _NPM_AUDIT,
         "opengrep": _OPENGREP,
@@ -534,6 +703,7 @@ def check_registry(
         raise ProvisioningRegistryError("the engine pins a tool twice")
     databases: dict[str, str] = {}
     variables: dict[str, tuple[str, str]] = {}
+    distributions: dict[str, str] = {}
     for scanner, block in blocks.items():
         for pin in block.tool_pins:
             if pin.tool in pinned_by:
@@ -562,6 +732,64 @@ def check_registry(
                     f"for {scanner!r}"
                 )
             variables[row.variable] = (scanner, row.value)
+        for pypi_pin in block.pypi_pins:
+            key = normalize_distribution(pypi_pin.distribution)
+            if key in distributions:
+                raise ProvisioningRegistryError(
+                    f"distribution {pypi_pin.distribution!r} is pinned twice, by "
+                    f"{distributions[key]!r} and by {scanner!r}"
+                )
+            distributions[key] = scanner
+            if pypi_pin.extra and pypi_pin.excluded is not None:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} as a member of the "
+                    f"{pypi_pin.extra!r} extra and also excludes it; a pin is one "
+                    "or the other"
+                )
+            if not pypi_pin.extra and pypi_pin.excluded is None:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} as neither a member "
+                    "of an extra nor excluded from one; a pin is one or the other"
+                )
+            if pypi_pin.extra and pypi_pin.extra not in PIN_EXTRAS:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} as a member of the "
+                    f"unknown extra {pypi_pin.extra!r}; the extras are "
+                    f"{', '.join(sorted(PIN_EXTRAS))}"
+                )
+            if pypi_pin.runtime not in PIN_RUNTIMES:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} with the unknown "
+                    f"runtime {pypi_pin.runtime!r}; the runtimes are "
+                    f"{', '.join(sorted(PIN_RUNTIMES))}"
+                )
+            if not pypi_pin.specifier.strip() or ";" in pypi_pin.specifier:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r} pins {pypi_pin.distribution!r} with the specifier "
+                    f"{pypi_pin.specifier!r}, which must be non-empty and hold no "
+                    "';' (a marker has its own field)"
+                )
+            excluded = pypi_pin.excluded
+            if excluded is not None and excluded.reason is ExclusionReason.COOLDOWN:
+                if not excluded.until.strip():
+                    raise ProvisioningRegistryError(
+                        f"{scanner!r}: the cooldown exclusion of "
+                        f"{pypi_pin.distribution!r} carries no 'until' date"
+                    )
+                try:
+                    date.fromisoformat(excluded.until)
+                except ValueError:
+                    raise ProvisioningRegistryError(
+                        f"{scanner!r}: the cooldown exclusion of "
+                        f"{pypi_pin.distribution!r} carries the 'until' value "
+                        f"{excluded.until!r}, which is not an ISO 8601 date"
+                    ) from None
+            elif excluded is not None and excluded.until:
+                raise ProvisioningRegistryError(
+                    f"{scanner!r}: the {excluded.reason.value!r} exclusion of "
+                    f"{pypi_pin.distribution!r} carries an 'until' date; only a "
+                    "cooldown exclusion has one"
+                )
 
 
 # ---------------------------------------------------------------------------

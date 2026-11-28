@@ -181,6 +181,56 @@ def _pinned_host(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     restore_defaults()
 
 
+def _reference_host_reading() -> Any:
+    """The reference host's facts, as a host-facts reading."""
+    from automated_security_helper.base.support_register import REFERENCE_FACTS
+    from automated_security_helper.utils import host_facts
+
+    return host_facts.HostReading(
+        **{
+            name: getattr(REFERENCE_FACTS, name)
+            for name in (*host_facts.FACT_FIELDS, "os_release")
+        }
+    )
+
+
+@pytest.fixture(autouse=True)
+def _pinned_host_facts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read this host's facts as the reference host's, whatever machine runs the suite.
+
+    ``_pinned_host`` makes ``platform.system()`` and ``platform.machine()`` answer as
+    linux-amd64, but the host-facts reader does not go through them. It reads the
+    processor's flags, the C library, the install channel and the rest from the machine
+    itself, so a snapshot of a command that reports the host's support would show
+    whether the runner has AVX2. This pins the reader's live read to
+    ``REFERENCE_FACTS``, the host the support register treats as ASH's CI baseline.
+
+    A read that names its own sources describes a host and reads what it describes. A
+    test that simulates a host patches ``read_host_facts`` again through its own
+    ``monkeypatch``, which runs after this fixture and wins.
+    ``test_snapshot_host_facts_pin.py`` holds the pin to its control.
+
+    A caller reaches the pin through the module attribute,
+    ``host_facts.read_host_facts``, as a call-time import does. A name bound with
+    ``from ... import`` when its module is first imported keeps the real reader.
+    """
+    from automated_security_helper.utils import host_facts
+
+    reference = _reference_host_reading()
+    real = host_facts.read_host_facts
+
+    def pinned(
+        sources: host_facts.Sources | None = None,
+        *,
+        express_supported: Callable[[], bool] | None = None,
+    ) -> host_facts.HostReading:
+        if sources is not None:
+            return real(sources, express_supported=express_supported)
+        return reference
+
+    monkeypatch.setattr(host_facts, "read_host_facts", pinned)
+
+
 #: The host lookups as this process found them, before any snapshot test patched them.
 _REAL_HOST_LOOKUPS = (platform.system, platform.machine)
 
@@ -747,19 +797,44 @@ def fixture_skipped_workspace_model(
 
 
 @pytest.fixture
+def fixture_support_notices_model(pinned_clock, fixture_context, tmp_path: Path):
+    """The single-directory fixture scan of a host ASH supports only in part.
+
+    The ``single`` model with the support notices of ``support_notices_fixture`` in
+    its metadata: one unsupported, one degraded and one polyfilled configuration.
+    """
+    from tests.snapshot.support.fixture_model import (
+        build_fixture_model,
+        support_notices_fixture,
+    )
+
+    return build_fixture_model(
+        tmp_path,
+        fixture_context,
+        metadata={"support_notices": support_notices_fixture()},
+    )
+
+
+@pytest.fixture
 def fixture_variant(request: pytest.FixtureRequest, tmp_path: Path):
-    """``fixture_variant("single" | "workspace" | "skipped-workspace")`` -> (model, context).
+    """``fixture_variant(name)`` -> (model, context), for a name in ``MODEL_VARIANTS``.
 
     The context is the one ASH gives reporters for that shape: the fixture
-    repository's own config for a single scan, and the workspace-level default
-    config ``emit_workspace_reports`` uses for the two workspace shapes.
+    repository's own config for a single scan (``single``, and ``support-notices``,
+    which is that scan with its support notices recorded), and the workspace-level
+    default config ``emit_workspace_reports`` uses for the two workspace shapes.
     """
     from tests.snapshot.support.fixture_model import workspace_reporter_context
 
+    single_scans = {
+        "single": "fixture_model",
+        "support-notices": "fixture_support_notices_model",
+    }
+
     def _for(variant: str):
-        if variant == "single":
+        if variant in single_scans:
             return (
-                request.getfixturevalue("fixture_model"),
+                request.getfixturevalue(single_scans[variant]),
                 request.getfixturevalue("fixture_context"),
             )
         name = {

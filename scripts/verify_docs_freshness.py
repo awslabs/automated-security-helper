@@ -1688,6 +1688,55 @@ def check_doc_journeys() -> list[str]:
     return _journey_pages().check_journeys(REPO_ROOT)
 
 
+SUPPORT_MATRICES = REPO_ROOT / "scripts" / "generate_support_matrices.py"
+_support_matrices_module = None
+
+
+def _support_matrices():
+    """Load scripts/generate_support_matrices.py by path, once.
+
+    Its sibling modules are imported by plain name, so scripts/ goes on sys.path first
+    (a run of this script has it there already). Registered in sys.modules before it
+    runs, so its dataclasses resolve their annotations.
+    """
+    global _support_matrices_module
+    if _support_matrices_module is None:
+        import importlib.util
+
+        name = "_ash_support_matrices"
+        if name in sys.modules:
+            _support_matrices_module = sys.modules[name]
+        else:
+            scripts = str(SUPPORT_MATRICES.parent)
+            if scripts not in sys.path:
+                sys.path.insert(0, scripts)
+            spec = importlib.util.spec_from_file_location(name, SUPPORT_MATRICES)
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"cannot load {SUPPORT_MATRICES}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            spec.loader.exec_module(module)
+            _support_matrices_module = module
+    return _support_matrices_module
+
+
+def check_support_matrices() -> list[str]:
+    """The support-matrix generator still refuses what it must, and its page is whole.
+
+    The page and the blocks are written by scripts/generate_support_matrices.py, and
+    the lint job's ``--check`` holds them to what the generator renders. Both of those
+    read the same rows, so a renderer that dropped a row would drop it from the page and
+    from that check alike. This is the second source, as the scanner and reporter checks
+    above are for their pages: the generator's self-test first (it plants what the
+    generator must refuse, and a generator that accepts it fails here), then the
+    committed page held to the inventory each collector reads from somewhere else.
+    """
+    module = _support_matrices()
+    return module.self_test() + module.second_source_failures(
+        REPO_ROOT, compare_inventories
+    )
+
+
 # ---------------------------------------------------------------------------
 # Docs from one tree, code from another
 # ---------------------------------------------------------------------------
@@ -1775,6 +1824,7 @@ def _check_groups() -> dict[object, str]:
         check_doc_config_blocks: _GROUP_MODELS,
         check_doc_option_tables: _GROUP_MODELS,
         check_doc_scanner_names: _GROUP_MODELS,
+        check_support_matrices: _GROUP_MODELS,
         check_doc_report_files: _GROUP_PACKAGE_AST,
         check_doc_code_links: _GROUP_PACKAGE_AST,
     }
@@ -2214,6 +2264,10 @@ def main(argv: list[str] | None = None) -> int:
             check_doc_workflow_inputs,
         ),
         ("Journey pages match their journey files", check_doc_journeys),
+        (
+            "Support matrices still refuse what they must and list what ASH ships",
+            check_support_matrices,
+        ),
     ]
 
     return run_gate(checks, serial=args.serial)

@@ -4,7 +4,7 @@
 # Customer and either Amazon Web Services, Inc. or Amazon Web Services EMEA SARL
 # or both.
 
-# pre-commit hooks for ASH. docs/content/tutorials/using-ash-with-pre-commit.md
+# pre-commit hooks for ASH. docs/content/how-to/pre-commit.md
 # is the user guide; this comment is for whoever edits the hooks.
 #
 # pre-commit builds a `language: python` hook's environment with

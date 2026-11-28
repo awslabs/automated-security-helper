@@ -25,7 +25,9 @@ mis-parsed universe would pass vacuously.
 
 from __future__ import annotations
 
+import importlib
 import json
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -43,6 +45,7 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.utils import content_databases as cdb
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.scanner_names import SCANNER_TOOL_TYPES
+from tests.unit.base.test_image_register import dockerfile_stages
 from tests.utils.scanner_enumeration import load_scanner_universe
 
 pytestmark = pytest.mark.unit
@@ -675,3 +678,696 @@ def test_the_wired_image_scanners_are_grype_syft_and_trivy() -> None:
         if opsf.TargetKind.CONTAINER_IMAGE in _ops(cls).targets.kinds
     )
     assert wired == ["grype", "syft", "trivy"]
+
+
+# ---------------------------------------------------------------------------
+# G2. Container image route
+# ---------------------------------------------------------------------------
+#
+# How each scanner's tool gets into the image the Dockerfile builds. The seeds were read
+# from the Dockerfile, and these rows read it back: a route, a version check or a note
+# that no longer matches it is a red row here, and not a surprise in a later build.
+# Every name the row adds is read inside a test body, so the rows above keep running
+# where the vocabulary does not exist.
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DOCKERFILE_TEXT = (_REPO_ROOT / "Dockerfile").read_text(encoding="utf-8")
+_DOCKERFILE_LINES = _DOCKERFILE_TEXT.splitlines()
+
+#: scanner -> the route value its row declares, from the Dockerfile.
+_IMAGE_ROUTES = {
+    "actionlint": "release_asset",
+    "bandit": "dependencies_install",
+    "betterleaks": "release_asset",
+    "cdk-nag": "ash_wheel",
+    "cfn-guard": "release_asset",
+    "cfn-lint": "dependencies_install",
+    "cfn-nag": "gem_bundle",
+    "checkov": "dependencies_install",
+    "detect-secrets": "ash_wheel",
+    "ferret-scan": "not_in_image",
+    "gitleaks": "release_asset",
+    "grype": "release_asset",
+    "guarddog": "dependencies_install",
+    "hadolint": "release_asset",
+    "mcp-config": "ash_wheel",
+    "npm-audit": "ash_wheel",
+    "opengrep": "dependencies_install",
+    "semgrep": "dependencies_install",
+    "snyk-code": "not_in_image",
+    "syft": "release_asset",
+    "trivy": "release_asset",
+    "trivy-repo": "shared_tool",
+    "zizmor": "dependencies_install",
+}
+
+#: Words that mark a comment as being about licensing. The GPL family is read as a word
+#: or with a version after it (GPL-3.0, GPLv3, AGPL-3.0, LGPL-2.1), in any case, and
+#: not inside another word.
+_LICENSING = re.compile(
+    r"licen[sc]|copyleft|\b[al]?gpl(?:v?\d|(?![a-z]))|\bmit\b|spdx|\bnotices?\b",
+    re.IGNORECASE,
+)
+
+
+def _ir():
+    return importlib.import_module("automated_security_helper.base.image_register")
+
+
+def _class_named(name: str) -> type:
+    return next(cls for cls in SCANNER_CLASSES if _ops(cls).scanner_name == name)
+
+
+def _tools_other_rows_install(name: str) -> frozenset[str]:
+    """The tools the release-asset rows of every OTHER scanner install."""
+    return frozenset(
+        _ops(cls).image.tool
+        for cls in SCANNER_CLASSES
+        if _ops(cls).scanner_name != name
+        and _ops(cls).image.route is opsf.ImageRoute.RELEASE_ASSET
+    )
+
+
+def _system_package_keys() -> frozenset[str]:
+    return frozenset(package.key for package in _ir().SYSTEM_PACKAGES)
+
+
+def image_route_problems(
+    facets: opsf.ScannerOperationalFacets,
+    installed_by_other_rows: frozenset[str],
+    system_package_keys: frozenset[str],
+) -> list[str]:
+    """What a scanner's runtime says against the route its image row declares.
+
+    Shared by the sweep over the shipped scanners and by the planted rows, so a row
+    that passes the sweep is held to the same rule the planted rows are refused by.
+    """
+    image, runtime = facets.image, facets.runtime
+    problems: list[str] = []
+    if image.route is opsf.ImageRoute.RELEASE_ASSET:
+        if runtime.kind is not opsf.RuntimeKind.PINNED_BINARY:
+            problems.append(
+                "a release asset needs a pinned-binary runtime, not "
+                f"{runtime.kind.value}"
+            )
+        if image.tool != runtime.tool_versions_key:
+            problems.append(
+                f"the release asset {image.tool!r} is not the runtime's "
+                f"TOOL_VERSIONS key {runtime.tool_versions_key!r}"
+            )
+        if image.tool not in tool_downloads.TOOL_VERSIONS:
+            problems.append(f"{image.tool!r} is not pinned in TOOL_VERSIONS")
+        if image.tool not in tool_downloads.downloadable_tools():
+            problems.append(f"{image.tool!r} has no release-asset download table")
+    elif image.route is opsf.ImageRoute.SHARED_TOOL:
+        if image.tool not in installed_by_other_rows:
+            problems.append(f"no other scanner's row installs {image.tool!r}")
+        if image.tool != runtime.tool_versions_key:
+            problems.append(
+                f"the scanner runs {runtime.tool_versions_key!r}, not {image.tool!r}"
+            )
+    elif image.route is opsf.ImageRoute.GEM_BUNDLE:
+        if runtime.kind is not opsf.RuntimeKind.RUBY_GEM:
+            problems.append(
+                f"a gem bundle needs a Ruby gem runtime, not {runtime.kind.value}"
+            )
+    elif image.route is opsf.ImageRoute.ASH_WHEEL:
+        if runtime.kind not in (
+            opsf.RuntimeKind.IN_PROCESS,
+            opsf.RuntimeKind.NODE_SUBCOMMAND,
+        ):
+            problems.append(
+                "an ASH wheel needs an in-process or node-subcommand runtime, not "
+                f"{runtime.kind.value}"
+            )
+    elif image.route is opsf.ImageRoute.OS_PACKAGE:
+        if image.package not in system_package_keys:
+            problems.append(
+                f"the image register names no system package {image.package!r}"
+            )
+    return problems
+
+
+def _planted(name: str, **image) -> opsf.ScannerOperationalFacets:
+    """The register row of scanner *name* with its image row replaced."""
+    facets = _ops(_class_named(name))
+    return facets.model_copy(update={"image": opsf.ImageFacet(**image)})
+
+
+def _planted_pinned(name: str, tool: str) -> opsf.ScannerOperationalFacets:
+    """Scanner *name* as the release asset *tool*, its runtime pinning *tool* too, so
+    that what is left to report is the tool and not the two rows disagreeing."""
+    facets = _planted(name, route=opsf.ImageRoute.RELEASE_ASSET, tool=tool)
+    runtime = facets.runtime.model_copy(update={"tool_versions_key": tool})
+    return facets.model_copy(update={"runtime": runtime})
+
+
+def test_the_image_routes_are_the_seven_the_register_names() -> None:
+    assert [route.value for route in opsf.ImageRoute] == [
+        "release_asset",
+        "dependencies_install",
+        "gem_bundle",
+        "os_package",
+        "ash_wheel",
+        "shared_tool",
+        "not_in_image",
+    ]
+    assert issubclass(opsf.ImageRoute, str)
+
+
+def test_the_image_row_follows_the_platform_row() -> None:
+    names = opsf.OPERATIONAL_FACET_NAMES
+
+    assert names.index("image") == names.index("platforms") + 1
+    assert tuple(opsf.ScannerOperationalFacets.model_fields) == names
+
+
+def test_every_scanner_declares_the_route_the_dockerfile_gives_it() -> None:
+    declared = {
+        _ops(cls).scanner_name: _ops(cls).image.route.value for cls in SCANNER_CLASSES
+    }
+
+    assert len(_IMAGE_ROUTES) == 23
+    assert declared == _IMAGE_ROUTES
+    assert "os_package" not in declared.values(), "no shipped scanner uses it yet"
+
+
+# --- the row's own shape rules, each refused and each beside an accepted sibling ----
+
+
+def _facet(**fields):
+    return opsf.ImageFacet(**fields)
+
+
+_IMAGE_REFUSED = {
+    "not_in_image with no reason": (
+        lambda: _facet(route=opsf.ImageRoute.NOT_IN_IMAGE),
+        "a not_in_image image row states its reason",
+    ),
+    "not_in_image with a blank reason": (
+        lambda: _facet(route=opsf.ImageRoute.NOT_IN_IMAGE, reason="  "),
+        "a not_in_image image row states its reason",
+    ),
+    "not_in_image naming a tool": (
+        lambda: _facet(route=opsf.ImageRoute.NOT_IN_IMAGE, reason="r", tool="syft"),
+        "a not_in_image image row names no tool and no version check",
+    ),
+    "not_in_image with a version check": (
+        lambda: _facet(
+            route=opsf.ImageRoute.NOT_IN_IMAGE,
+            reason="r",
+            version_check=("syft", "--version"),
+        ),
+        "a not_in_image image row names no tool and no version check",
+    ),
+    "release_asset with no tool": (
+        lambda: _facet(route=opsf.ImageRoute.RELEASE_ASSET),
+        "a release_asset image row names its tool",
+    ),
+    "release_asset with a blank tool": (
+        lambda: _facet(route=opsf.ImageRoute.RELEASE_ASSET, tool=" "),
+        "a release_asset image row names its tool",
+    ),
+    "shared_tool with no tool": (
+        lambda: _facet(route=opsf.ImageRoute.SHARED_TOOL),
+        "a shared_tool image row names its tool",
+    ),
+    "os_package with no package": (
+        lambda: _facet(route=opsf.ImageRoute.OS_PACKAGE),
+        "an os_package image row names its package",
+    ),
+    "a note line that is not a comment": (
+        lambda: _facet(route=opsf.ImageRoute.ASH_WHEEL, dockerfile_note=("RUN true",)),
+        "an image note line is a Dockerfile comment",
+    ),
+    "a version check with a blank word": (
+        lambda: _facet(
+            route=opsf.ImageRoute.RELEASE_ASSET,
+            tool="syft",
+            version_check=("syft", " "),
+        ),
+        "an image version check holds no blank word",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_IMAGE_REFUSED))
+def test_an_image_row_that_breaks_its_shape_rule_refuses_construction(
+    case: str,
+) -> None:
+    build, fragment = _IMAGE_REFUSED[case]
+
+    with pytest.raises(ValueError, match=re.escape(fragment)):
+        build()
+
+
+_IMAGE_ACCEPTED = {
+    "a release asset": lambda: _facet(
+        route=opsf.ImageRoute.RELEASE_ASSET,
+        tool="syft",
+        version_check=("syft", "--version"),
+    ),
+    "a shared tool": lambda: _facet(route=opsf.ImageRoute.SHARED_TOOL, tool="trivy"),
+    "a dependencies install": lambda: _facet(
+        route=opsf.ImageRoute.DEPENDENCIES_INSTALL
+    ),
+    "a gem bundle": lambda: _facet(route=opsf.ImageRoute.GEM_BUNDLE),
+    "an ASH wheel": lambda: _facet(route=opsf.ImageRoute.ASH_WHEEL),
+    "an os package": lambda: _facet(route=opsf.ImageRoute.OS_PACKAGE, package="jq"),
+    "a not_in_image row with its reason": lambda: _facet(
+        route=opsf.ImageRoute.NOT_IN_IMAGE, reason="the user installs it"
+    ),
+    "notes that are comments": lambda: _facet(
+        route=opsf.ImageRoute.ASH_WHEEL, dockerfile_note=("# a comment", "#")
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_IMAGE_ACCEPTED))
+def test_an_image_row_that_keeps_its_shape_rules_is_accepted(case: str) -> None:
+    assert isinstance(_IMAGE_ACCEPTED[case](), opsf.ImageFacet)
+
+
+def test_an_image_row_is_a_frozen_value_with_every_optional_field_empty() -> None:
+    facet = _facet(route=opsf.ImageRoute.ASH_WHEEL)
+
+    assert (facet.tool, facet.package, facet.reason) == (None, None, None)
+    assert (facet.version_check, facet.dockerfile_note) == ((), ())
+    with pytest.raises(ValueError):
+        facet.tool = "syft"
+    with pytest.raises(ValueError):
+        _facet(route=opsf.ImageRoute.ASH_WHEEL, unknown_field=1)
+
+
+# --- the route against the scanner's own runtime --------------------------------------
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_the_image_route_agrees_with_the_runtime(cls) -> None:
+    facets = _ops(cls)
+
+    problems = image_route_problems(
+        facets, _tools_other_rows_install(facets.scanner_name), _system_package_keys()
+    )
+
+    assert problems == [], facets.scanner_name
+
+
+def test_a_release_asset_on_bandit_fails() -> None:
+    planted = _planted("bandit", route=opsf.ImageRoute.RELEASE_ASSET, tool="bandit")
+
+    problems = image_route_problems(planted, frozenset(), frozenset())
+
+    assert any("pinned-binary runtime" in problem for problem in problems), problems
+
+
+def test_a_release_asset_for_a_tool_nothing_pins_fails() -> None:
+    planted = _planted(
+        "gitleaks", route=opsf.ImageRoute.RELEASE_ASSET, tool="gitleaks-next"
+    )
+
+    problems = image_route_problems(planted, frozenset(), frozenset())
+
+    assert any("is not pinned in TOOL_VERSIONS" in problem for problem in problems)
+    assert any("is not the runtime's TOOL_VERSIONS key" in p for p in problems)
+
+
+def test_a_shared_tool_that_no_other_row_installs_fails() -> None:
+    planted = _planted("trivy-repo", route=opsf.ImageRoute.SHARED_TOOL, tool="nothing")
+
+    problems = image_route_problems(
+        planted, _tools_other_rows_install("trivy-repo"), frozenset()
+    )
+
+    assert any("no other scanner's row installs 'nothing'" in p for p in problems)
+
+
+def test_a_shared_tool_that_only_the_scanner_itself_installs_fails() -> None:
+    """trivy installs trivy; trivy-repo borrows it. A trivy row that claimed to borrow
+    it would borrow from itself."""
+    planted = _planted("trivy", route=opsf.ImageRoute.SHARED_TOOL, tool="trivy")
+
+    problems = image_route_problems(
+        planted, _tools_other_rows_install("trivy"), frozenset()
+    )
+
+    assert any("no other scanner's row installs 'trivy'" in p for p in problems)
+    assert "trivy" in _tools_other_rows_install("trivy-repo")
+    assert "trivy" not in _tools_other_rows_install("trivy")
+
+
+def test_a_shared_tool_that_is_not_the_one_the_scanner_runs_fails() -> None:
+    """trivy-repo runs trivy, and another row installs syft, so a row that borrowed
+    syft passes the check that someone installs it. Only the runtime says the scanner
+    would run another tool."""
+    other_rows = _tools_other_rows_install("trivy-repo")
+    borrowed = _planted("trivy-repo", route=opsf.ImageRoute.SHARED_TOOL, tool="syft")
+    own = _planted("trivy-repo", route=opsf.ImageRoute.SHARED_TOOL, tool="trivy")
+
+    problems = image_route_problems(borrowed, other_rows, frozenset())
+
+    assert "syft" in other_rows
+    assert len(problems) == 1, problems
+    assert "the scanner runs 'trivy', not 'syft'" in problems[0]
+    assert image_route_problems(own, other_rows, frozenset()) == []
+
+
+def test_a_pinned_tool_with_no_download_table_fails(monkeypatch) -> None:
+    """A pin says which release and the table says which files, so a tool can have
+    the first and not the second. The row is planted without the table, which is
+    reported, and with it, which is not."""
+    monkeypatch.setitem(tool_downloads.TOOL_VERSIONS, "pinned-only", "v1.0.0")
+    planted = _planted_pinned("gitleaks", "pinned-only")
+
+    problems = image_route_problems(planted, frozenset(), frozenset())
+
+    assert len(problems) == 1, problems
+    assert "'pinned-only' has no release-asset download table" in problems[0]
+    monkeypatch.setattr(tool_downloads, "downloadable_tools", lambda: ["pinned-only"])
+    assert image_route_problems(planted, frozenset(), frozenset()) == []
+
+
+def test_a_gem_bundle_on_a_pinned_binary_fails() -> None:
+    planted = _planted("gitleaks", route=opsf.ImageRoute.GEM_BUNDLE)
+
+    problems = image_route_problems(planted, frozenset(), frozenset())
+
+    assert any("Ruby gem runtime" in problem for problem in problems), problems
+
+
+def test_an_ash_wheel_on_a_uv_tool_fails() -> None:
+    planted = _planted("bandit", route=opsf.ImageRoute.ASH_WHEEL)
+
+    problems = image_route_problems(planted, frozenset(), frozenset())
+
+    assert any("in-process or node-subcommand" in problem for problem in problems)
+
+
+def test_an_os_package_the_image_register_does_not_name_fails() -> None:
+    planted = _planted("bandit", route=opsf.ImageRoute.OS_PACKAGE, package="bandit")
+
+    assert image_route_problems(planted, frozenset(), frozenset()) != []
+    assert image_route_problems(planted, frozenset(), frozenset({"bandit"})) == []
+
+
+def has_install_commands(instance, target_platform: str, arch: str) -> bool:
+    return len(instance.get_installation_commands(target_platform, arch)) > 0
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_dependencies_install_means_the_scanner_declares_install_commands(
+    cls, _instances
+) -> None:
+    """``ash dependencies install`` is the route, so a scanner that claims it has
+    something for the command to run."""
+    facets = _ops(cls)
+
+    if facets.image.route is opsf.ImageRoute.DEPENDENCIES_INSTALL:
+        assert has_install_commands(_instances[cls], "linux", "amd64"), (
+            facets.scanner_name
+        )
+
+
+def test_the_install_command_reader_has_a_positive_and_a_negative_control(
+    _instances,
+) -> None:
+    """GuardDog installs nowhere on Windows and says so by declaring no command."""
+    guarddog = _instances[_class_named("guarddog")]
+
+    assert has_install_commands(guarddog, "linux", "amd64")
+    assert not has_install_commands(guarddog, "windows", "amd64")
+
+
+def test_the_two_scanners_left_out_of_the_image_say_why() -> None:
+    reasons = {
+        name: _ops(_class_named(name)).image.reason
+        for name in ("snyk-code", "ferret-scan")
+    }
+
+    assert [n for n, r in sorted(_IMAGE_ROUTES.items()) if r == "not_in_image"] == [
+        "ferret-scan",
+        "snyk-code",
+    ]
+    assert "installed by the user" in reasons["snyk-code"]
+    assert "account" in reasons["snyk-code"]
+    assert "ferret-scan" in reasons["ferret-scan"]
+    assert "another way" in reasons["ferret-scan"]
+
+
+# --- what the image row says against the Dockerfile text -------------------------------
+
+
+def comment_block_above(lines: list[str], prefix: str) -> list[str]:
+    """The consecutive comment lines directly above the first line that starts with
+    *prefix*; empty when a blank line or an instruction sits there."""
+    index = next(i for i, line in enumerate(lines) if line.startswith(prefix))
+    start = index
+    while start > 0 and lines[start - 1].startswith("#"):
+        start -= 1
+    return lines[start:index]
+
+
+def contains_run(lines: list[str], run: tuple[str, ...]) -> bool:
+    """Whether *run* is a stretch of consecutive lines of *lines*."""
+    width = len(run)
+    return width > 0 and any(
+        tuple(lines[start : start + width]) == run
+        for start in range(len(lines) - width + 1)
+    )
+
+
+def version_check_runs(text: str) -> set[tuple[str, ...]]:
+    """The ``RUN <tool> --version`` and ``RUN <tool> version`` argv in a Dockerfile."""
+    return {
+        tuple(match.group(1).split())
+        for match in re.finditer(
+            r"^RUN (\S+ (?:--version|version))(?:\s|$)", text, flags=re.MULTILINE
+        )
+    }
+
+
+def test_the_dockerfile_readers_have_positive_and_negative_controls() -> None:
+    lines = ["# one", "# two", "ARG A_VERSION=1", "", "ARG B_VERSION=2", "# three"]
+
+    assert comment_block_above(lines, "ARG A_VERSION=") == ["# one", "# two"]
+    assert comment_block_above(lines, "ARG B_VERSION=") == []
+    assert contains_run(lines, ("# one", "# two"))
+    assert not contains_run(lines, ("# two", "# one"))
+    assert not contains_run(lines, ("# one", "# tw0"))
+    assert not contains_run(lines, ())
+    planted = "RUN foo --version\nRUN bar version\n# RUN baz --version\nRUN qux -v\n"
+    assert version_check_runs(planted) == {("foo", "--version"), ("bar", "version")}
+    assert _LICENSING.search("# MIT-licensed, so its entry in THIRD_PARTY_LICENSES")
+    assert _LICENSING.search("# links to it. It is GPL-3.0-only, so")
+    assert not _LICENSING.search("# gitleaks backs the builtin gitleaks scanner.")
+    assert not _LICENSING.search("# Some gems ship files mode 777 (lightly, which")
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "GPLv3",
+        "gplv3",
+        "GPLV3",
+        "AGPL-3.0",
+        "agpl-3.0",
+        "Agpl-3.0",
+        "LGPL-2.1",
+        "lgpl-2.1",
+        "Lgpl-2.1",
+    ],
+)
+def test_the_licensing_filter_catches_each_spelling_of_a_gpl_family_license(
+    spelling: str,
+) -> None:
+    assert _LICENSING.search(f"# It is {spelling}, so")
+    assert _LICENSING.search(f"# {spelling} only.")
+
+
+def test_the_licensing_filter_leaves_gpl_letters_inside_another_word_alone() -> None:
+    assert not _LICENSING.search("# gplot draws the graph.")
+    assert not _LICENSING.search("# The xagpl cache is private.")
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_an_image_note_is_a_verbatim_run_of_dockerfile_comments(cls) -> None:
+    note = _ops(cls).image.dockerfile_note
+
+    if note:
+        assert all(line.startswith("#") for line in note)
+        assert contains_run(_DOCKERFILE_LINES, note), _ops(cls).scanner_name
+
+
+def test_no_image_note_says_anything_about_licensing() -> None:
+    notes = [
+        line for cls in SCANNER_CLASSES for line in _ops(cls).image.dockerfile_note
+    ]
+    licensing_lines = {
+        line
+        for line in _DOCKERFILE_LINES
+        if line.startswith("#") and _LICENSING.search(line)
+    }
+
+    assert notes, "no scanner carries a note, so the check below would pass on nothing"
+    assert licensing_lines, "the Dockerfile has licensing comments to keep out"
+    assert [line for line in notes if _LICENSING.search(line)] == []
+    assert not licensing_lines & set(notes)
+
+
+@pytest.mark.parametrize("name", ["betterleaks", "hadolint"])
+def test_a_scanner_whose_dockerfile_comment_is_about_licensing_carries_no_note(
+    name: str,
+) -> None:
+    block = comment_block_above(_DOCKERFILE_LINES, f"ARG {name.upper()}_VERSION=")
+
+    assert any(_LICENSING.search(line) for line in block), name
+    assert _ops(_class_named(name)).image.dockerfile_note == ()
+
+
+#: The note each release-asset scanner's row carries, written out. A scanner whose
+#: Dockerfile comment is about licensing, or that has none, carries no note.
+_RELEASE_ASSET_NOTES: dict[str, tuple[str, ...]] = {
+    "actionlint": (
+        "# actionlint backs the builtin actionlint scanner. Same pinned-asset path as syft and",
+        "# grype.",
+    ),
+    "betterleaks": (),
+    "cfn-guard": (
+        "# cfn-guard, a builtin scanner, and the AWS Guard Rules Registry it evaluates",
+        "# templates against. The binary comes from its pinned release asset like the tools",
+        "# above. The rules archive is pinned the same way (RULES_BUNDLES in",
+        "# utils/tool_downloads.py) and installed here as root, mode 0755/0644, so the scan",
+        "# user cannot rewrite the rules a later scan trusts. `ash dependencies install`",
+        "# below finds the bundle already in place, its rule files matching the contents",
+        "# pinned beside the archive digest, and leaves it alone.",
+        "# Under /usr/share rather than /deps, whose cache directories stay writable for the",
+        "# scanners: the bundle and every directory above it are root's and writable by no one",
+        "# else, which `--assert-root-only` checks here and again in the final stage.",
+    ),
+    "gitleaks": (
+        "# gitleaks backs the builtin gitleaks scanner, which runs beside detect-secrets.",
+    ),
+    "grype": (),
+    "hadolint": (),
+    "syft": (),
+    "trivy": (),
+}
+
+
+def test_the_written_out_notes_name_every_release_asset_scanner() -> None:
+    assert sorted(_RELEASE_ASSET_NOTES) == [
+        name
+        for name, route in sorted(_IMAGE_ROUTES.items())
+        if route == "release_asset"
+    ]
+
+
+@pytest.mark.parametrize("name", sorted(_RELEASE_ASSET_NOTES))
+def test_a_release_asset_note_is_the_comment_above_its_version_argument(
+    name: str,
+) -> None:
+    """The note is what the Dockerfile says directly above the scanner's version
+    argument, unless that comment is about licensing or there is none, when it is
+    nothing. The notes are written out above, so the filter that keeps licensing
+    words out of a note is not also what decides which note is expected."""
+    image = _ops(_class_named(name)).image
+    block = comment_block_above(
+        _DOCKERFILE_LINES, f"ARG {image.tool.upper().replace('-', '_')}_VERSION="
+    )
+    expected = _RELEASE_ASSET_NOTES[name]
+
+    assert image.dockerfile_note == expected, name
+    if expected:
+        assert tuple(block) == expected, name
+    else:
+        assert not block or any(_LICENSING.search(line) for line in block), name
+    assert image.version_check == (image.tool, "--version"), name
+
+
+#: The stage the pinned tools are installed in. ``ci`` and ``non-root`` are built on
+#: it. ``uv-reqs`` builds the wheel and installs only uv, so a tool installed in that
+#: stage is not in the image.
+_TOOL_STAGE = "core"
+
+
+def stage_installs(text: str, stage: str, tool: str) -> bool:
+    """Whether a line of *stage* in the Dockerfile *text* installs *tool* with the
+    pinned-tool installer. A comment installs nothing, a continued line is one line,
+    and a stage the file does not have installs nothing."""
+    body = dockerfile_stages(text).get(stage.lower(), "")
+    lines = [line for line in body.splitlines() if not line.lstrip().startswith("#")]
+    return f"install-pinned-tool {tool} -b " in "\n".join(lines).replace("\\\n", " ")
+
+
+def test_the_install_reader_has_controls_for_a_comment_and_for_another_stage() -> None:
+    planted = (
+        "FROM base AS builder\n"
+        "RUN with-retry 'install-pinned-tool only-in-builder -b /usr/local/bin'\n"
+        "FROM base AS core\n"
+        "RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'\n"
+        "# RUN with-retry 'install-pinned-tool commented -b /usr/local/bin'\n"
+        "  # RUN with-retry 'install-pinned-tool indented -b /usr/local/bin'\n"
+        "RUN with-retry 'install-pinned-tool grype -b /usr/local/bin' && \\\n"
+        "    with-retry 'install-pinned-tool crane -b /usr/local/bin'\n"
+        "RUN with-retry 'install-pinned-tool syft-extra -b /usr/local/bin'\n"
+    )
+
+    for tool in ("syft", "grype", "crane", "syft-extra"):
+        assert stage_installs(planted, "core", tool), tool
+    # A commented line is not an install, and neither is a line of another stage.
+    for tool in ("commented", "indented", "only-in-builder", "syft-extr"):
+        assert not stage_installs(planted, "core", tool), tool
+    assert stage_installs(planted, "builder", "only-in-builder")
+    assert not stage_installs(planted, "builder", "syft")
+    assert not stage_installs(planted, "missing", "syft")
+
+
+def test_ci_and_non_root_are_built_on_the_stage_that_installs_the_tools() -> None:
+    built_on = {
+        name.lower(): base
+        for base, name in re.findall(
+            r"^FROM\s+(?:--\S+\s+)*(\S+)\s+AS\s+(\S+)\s*$",
+            _DOCKERFILE_TEXT,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+    }
+
+    assert built_on["ci"] == _TOOL_STAGE
+    assert built_on["non-root"] == _TOOL_STAGE
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_release_asset_is_installed_by_the_pinned_tool_installer_and_no_other_is(
+    cls,
+) -> None:
+    facets = _ops(cls)
+    key = facets.runtime.tool_versions_key
+
+    if facets.image.route is opsf.ImageRoute.RELEASE_ASSET:
+        assert stage_installs(_DOCKERFILE_TEXT, _TOOL_STAGE, facets.image.tool)
+    elif facets.image.route is opsf.ImageRoute.DEPENDENCIES_INSTALL and key:
+        installed_in = [
+            stage
+            for stage in dockerfile_stages(_DOCKERFILE_TEXT)
+            if stage_installs(_DOCKERFILE_TEXT, stage, key)
+        ]
+        assert installed_in == [], (
+            f"{facets.scanner_name} gets the pinned {key} from dependencies install"
+        )
+
+
+@pytest.mark.parametrize("cls", SCANNER_CLASSES, ids=lambda c: c.__name__)
+def test_a_version_check_is_a_run_line_of_the_dockerfile(cls) -> None:
+    check = _ops(cls).image.version_check
+
+    if check:
+        assert check in version_check_runs(_DOCKERFILE_TEXT), _ops(cls).scanner_name
+
+
+def test_every_version_check_the_dockerfile_runs_is_declared() -> None:
+    declared = {tuple(_ops(cls).image.version_check) for cls in SCANNER_CLASSES}
+    declared |= {tuple(step.version_check) for step in _ir().ENGINE_IMAGE_STEPS}
+    found = version_check_runs(_DOCKERFILE_TEXT)
+
+    assert len(found) >= 12, sorted(found)
+    assert found <= declared, sorted(found - declared)

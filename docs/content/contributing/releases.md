@@ -203,10 +203,13 @@ tag, publishes a version named after the release: `v3.8.0` publishes `3.8.0`.
 The newest release also moves the `latest` alias, which is where the site root and
 search engines send readers, so a release changes what most readers see. A patch
 release for an older line, built outside the workflow as described under
-[Tags](#tags), publishes its version when the docs workflow is run on its tag and
-leaves `latest` where it is. The frozen `v3` major tag publishes nothing. How the
-versions are built and checked is in
-[Testing the documentation](documentation.md#versioned-docs).
+[Tags](#tags), publishes its version when the docs workflow is run on its tag, if the
+tagged commit carries the current workflow, and leaves `latest` where it is. A tag
+runs the workflow file of the commit it points at, so what a tag push does depends on
+that commit: on one that carries the current workflow it publishes nothing, the
+frozen `v3` major tag included, and on one that carries the old workflow it replaces
+the whole site, as the end of this section describes. How the versions are built and
+checked is in [Testing the documentation](documentation.md#versioned-docs).
 
 A tag that the tag workflow creates is created with `GITHUB_TOKEN`, and a push made with
 that token starts no workflow, so the docs workflow never runs on it, and the tag
@@ -219,11 +222,74 @@ A tag pushed by hand runs the docs workflow as it is at the tagged commit. For a
 a commit from before the site was versioned, that is the old workflow, whose
 `mkdocs gh-deploy --force` force-pushes a single unversioned build as a commit with no
 parent, so every published version disappears from `gh-pages` along with its history.
-That applies to any tag pushed by hand while it points at such a commit,
-and to a patch release built on a release from before versioning. A ruleset on `gh-pages` that blocks force
-pushes stops it; the versioned deploy only ever fast-forwards the branch. Without one,
-recover by running the docs workflow again on `main` and on each release tag whose
-version should exist, in any order: whichever release is newest takes `latest`.
+That applies to any tag pushed by hand, or moved, while it points at such a commit, and
+to a patch release built on a release from before versioning. A tag push on 2026-11-12
+did this.
+
+Never push or move a tag onto a commit whose `ash-repo-docs.yml` runs `gh-deploy` in a
+job that a tag push starts. Every release tag from v3.1.1 through v3.7.1 names such a
+commit, 37 in all:
+
+| Tag | Commit |
+|-----|--------|
+| v3.1.1 | `70b73dba8c9a40f9d5046c0a86e6201b7e399536` |
+| v3.1.2 | `e73de85c1db7f443276370c4a6f7501815756780` |
+| v3.1.3 | `bf1685b0084e8ffb19b6c750fbc3322d9677175e` |
+| v3.1.4 | `692954641876c6358aa54af4e9dc54c872952743` |
+| v3.1.5 | `726729568918f2b9a64845cb4ec24e7f2e11ea2e` |
+| v3.1.6 | `e7d6b7c6787fc9e895e406b4d0102b224e4de060` |
+| v3.1.7 | `ae0e0b4ffbaa21f6fdeb089cac94ab27b6da84bb` |
+| v3.1.8 | `4ce2c3aa1ceeb547106018171369fc30e1806dbb` |
+| v3.1.9 | `822d93502e0cd11c0bb4e57286c196aab465ad91` |
+| v3.1.10 | `cc5b6a957bfc4fc3b847b531c7e07858ac332e96` |
+| v3.1.11 | `9a5852b9f8e684bdabca7818b9b9dc15f414748e` |
+| v3.1.12 | `c0ef68512fb4935c20b4356f303063d2f0ed4a31` |
+| v3.1.13 | `e4dc5060c4455d07d304b7be19f6a36473750d21` |
+| v3.2.0 | `bfc5a160220c3ed80ac6f794eaa11f3b43e36c7a` |
+| v3.2.1 | `b4b64ac2391ea9b10f566b13fb3fc61f00d17134` |
+| v3.2.2 | `65ac41970da8207d4457aeada0ba27065aaf43a8` |
+| v3.2.3 | `82c7daf64ddbe2f0993591bb49fc5a977842a2df` |
+| v3.2.4 | `ccf712420ec4fc1f20da445236544cce6e900f2e` |
+| v3.2.5 | `968c5f8ce337499577f97e62afcf66c0a2bb9a84` |
+| v3.2.6 | `1dca6b3d10ff274115a159d869bdff8b98624b62` |
+| v3.2.7 | `f4a061db030b8b0a8cb4370e9bfe82f1b59cfc62` |
+| v3.3.0 | `db71e64459de4435a7ac6b79fd0555b860dab19e` |
+| v3.4.0 | `f7d3ca4e8028c05189b952be19d854fd30c7468a` |
+| v3.5.0 | `b5d2f382794cf1d9df6f1f47abeec684c7f393a0` |
+| v3.5.1 | `50e5704122ea099577d41bfb0d9fca0a45c29509` |
+| v3.5.2 | `38f631af37628a48de6730f9fb07e32db2260717` |
+| v3.5.3 | `aff1f55fc208fa18aa3e7e5aae1f54bbb771593f` |
+| v3.5.4 | `ea5c6ad87d41ea7e0595a254cb80f7a7ee9b6020` |
+| v3.5.5 | `9891c465602507d7b698c336a4968c643d00d2fa` |
+| v3.5.6 | `b8c8fbead9cb6698434fa4af04f29941ea4ae947` |
+| v3.5.7 | `11a0768011e4ae035bf2de9d5d46732932a96bc7` |
+| v3.5.8 | `77c85f2801123196689eddb6509d8bf0789bd833` |
+| v3.5.9 | `60d2a8c1be4a57211925d127be1699b6a609bc60` |
+| v3.6.0 | `beae9ff74ebc5a0bbb0c865ba8269ad5f2350334` |
+| v3.6.1 | `fa134b79ab492f5525d3375e7486b4d70395e90e` |
+| v3.7.0 | `3a86cc996027b94d1e88aa3aea65021b9f02a265` |
+| v3.7.1 | `af1206aff596f1288ad066828058b3011de2a998` |
+
+A tag on any other commit that carries the same workflow shape is covered by the same
+rule, a commit of `main` from before the docs moved to mike among them. A change to the
+workflow on `main` cannot reach any of these commits. A ruleset on `gh-pages` that refuses
+non-fast-forward updates and deletion is the repository setting that catches such a
+push, since the versioned deploy only ever fast-forwards the branch. The maintainers
+configure that ruleset in the repository settings; nothing here sets it up, and this
+page does not assume it is in place.
+
+To bring back versions that such a push removed, run the docs workflow again on `main`
+and on each release tag whose commit carries the current workflow, in any order:
+whichever release is newest takes `latest`. That run cannot publish a tag that carries
+the old workflow, such as v3.7.1, because the old file starts no job on a manual run.
+Publish that version with the deploy script instead, from a checkout of a commit that
+has `scripts/docs_versions.py`, by running
+`uv run python scripts/docs_versions.py deploy --ref refs/tags/v3.7.1 --push`.
+
+The ref only names the version, so the pages are those of the checkout: the version
+shows the docs of the commit checked out, which for an old release is not the tagged
+commit. The script publishes with mike, pushes `gh-pages` without force, and publishes
+nothing for a ref that is neither `main` nor a release tag.
 
 ## Version-pinned pages
 

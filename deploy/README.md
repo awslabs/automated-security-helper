@@ -3,9 +3,13 @@
 Infrastructure as code for running ASH as a service in your own AWS account. Four
 deployment targets, each available as a CDK stack with a committed CloudFormation
 template and as a Terraform module. The two implementations take mostly the same
-parameters, under the same names in snake case, and produce the same shape, so the
-choice between them is a question of which tool your organization already runs, not
-which one gets you more.
+parameters, under the same names in snake case, but they do not produce the same
+infrastructure. They differ in the source of the CodePipeline distributed executor (an
+S3 object in CDK, a CodeCommit repository in Terraform), in how the image architecture
+is chosen (fixed per target in CDK, a variable in Terraform), in the default x86 build
+image, and in the default rebuild schedule. Which tool your organization already runs
+is still the main question; read those differences before you assume the two behave
+alike.
 
 ## Why this directory exists
 

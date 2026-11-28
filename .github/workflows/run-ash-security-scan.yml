@@ -1133,7 +1133,16 @@ jobs:
               echo "::error::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), so the config this scan was asked to use does not exist there; refusing to scan with ASH's defaults instead. Check the config input, or set config-ref-missing: defaults for the pull request that adds the first config."
               exit 1
             fi
-            printf '{}\n' > "${DEST}"
+            # An empty config, in the format ASH reads the file as. ASH takes that from
+            # the name's suffix in any letter case. `{}` is an empty mapping in YAML and
+            # JSON but not a TOML document, so a TOML name gets an empty file. A
+            # pyproject.toml is read through its [tool.ash] table, and ASH refuses one
+            # without it, so that name gets the empty table.
+            case "$(printf '%s' "${RELATIVE##*/}" | tr '[:upper:]' '[:lower:]')" in
+              pyproject.toml) printf '[tool.ash]\n' > "${DEST}" ;;
+              *.toml) : > "${DEST}" ;;
+              *) printf '{}\n' > "${DEST}" ;;
+            esac
             echo "::warning::$(one_line "${CONFIG_REF}") has no $(one_line "${RELATIVE}"), and config-ref-missing is defaults, so this scan uses ASH's default config, not the checkout's."
           else
             ENTRY="${ENTRIES[0]}"
@@ -1234,6 +1243,7 @@ jobs:
           # the checkout off sys.path and --no-config keeps uv from reading its
           # settings, as for every other helper in this job.
           uv run --no-config --no-project --with "${ASH_UVX_SOURCE}" -- python -I - <<'PY'
+          import importlib
           import json
           import os
           import re
@@ -1433,20 +1443,30 @@ jobs:
           if config_file.name.endswith(".json"):
               document = json.loads(text)
           elif config_file.name.endswith(".toml"):
-              try:
+              # tomllib is standard library from Python 3.11, the floor of
+              # requires-python at this commit, so for this commit's ASH the first
+              # import succeeds. The python-version input reaches setup-python as
+              # given, so it can still name 3.10, for an ash-version whose
+              # requires-python admits it. There the uv environment above holds the
+              # TOML reader that release declares: `toml` in every release from
+              # v3.0.0 through v3.7.1, and `tomli` (for Python below 3.11) in
+              # v3.8.0, which keeps `toml` as a development dependency only. So the
+              # fallback tries tomli, then toml. tomli goes first because it reads
+              # TOML 1.0, as tomllib does.
+              parse_toml = None
+              for module_name in ("tomllib", "tomli", "toml"):
                   try:
-                      import tomllib
+                      parse_toml = importlib.import_module(module_name).loads
                   except ModuleNotFoundError:
-                      import tomli as tomllib
-
-                  parse_toml = tomllib.loads
-              except ModuleNotFoundError:
-                  # tomllib is standard library from Python 3.11, and the python-version
-                  # input accepts 3.10. There ASH reads TOML with the `toml` package it
-                  # declares as a dependency, which the uv environment above installs.
-                  import toml
-
-                  parse_toml = toml.loads
+                      continue
+                  break
+              if parse_toml is None:
+                  fail(
+                      "None of tomllib, tomli or toml can be imported, so the TOML "
+                      "config cannot be read; refusing to scan without it. tomllib "
+                      "is part of Python 3.11 and later: use a python-version of "
+                      "3.11 or later, or a YAML or JSON config."
+                  )
 
               document = parse_toml(text)
               if config_file.name == "pyproject.toml":

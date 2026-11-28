@@ -39,6 +39,12 @@ tests/test_data/snapshot_fixture/workspace, resolving the plan with
 ``execute_workspace`` exposes for exactly this. The unified file is then loaded the way
 ``workspace.reporting`` loads it for the merged reporters.
 
+The ``support-notices`` variant is the single-directory scan with
+:func:`support_notices_fixture` recorded in its metadata, which is what a run on a host
+ASH supports only in part writes into its results. It takes the same steps as the
+``single`` scan and differs from it in that one field, so a reporter's snapshot of this
+variant differs from its ``single`` one by what the reporter does with the notices.
+
 What is pinned, and how
 -----------------------
 Time is pinned at the source rather than masked afterwards: :func:`pin_clock` swaps the
@@ -359,7 +365,7 @@ def _scan_phase(model, manifest_dir: Path, context):
 
 
 def _build_model(
-    manifest_dir: Path, context, *, metadata: dict[str, str] | None = None
+    manifest_dir: Path, context, *, metadata: dict[str, Any] | None = None
 ):
     """Steps 1-3 of the module docstring, for any manifest and source tree."""
     from automated_security_helper.core.unified_metrics import (
@@ -379,7 +385,9 @@ def _build_model(
         description="Aggregated security scan results",
         ash_config=context.config,
     )
-    # ASHScanOrchestrator._apply_metadata, for a workspace project.
+    # ASHScanOrchestrator._apply_metadata, for a workspace project. The same seam
+    # records the support notices of the ``support-notices`` variant, which a run
+    # writes into its metadata as it meets each row.
     for key, value in (metadata or {}).items():
         setattr(model.metadata, key, value)
 
@@ -415,14 +423,139 @@ def finalize_fixture_model(model):
     return populate_metrics_from_unified_source(aggregated_results=model)
 
 
-def build_fixture_model(tmp_path: Path, context=None):
+def build_fixture_model(
+    tmp_path: Path, context=None, *, metadata: dict[str, Any] | None = None
+):
     """The single-directory fixture scan, as the report phase hands it to reporters.
 
     Call :func:`pin_clock` first (the ``fixture_model`` fixture does), or the
-    model carries the real time of the run.
+    model carries the real time of the run. ``metadata`` is set on the model's
+    metadata before the scan phase, as a workspace project's is; the
+    ``fixture_support_notices_model`` fixture records the support notices this way.
     """
     context = context or fixture_plugin_context(tmp_path)
-    return _build_model(SCANNER_OUTPUTS, context)
+    return _build_model(SCANNER_OUTPUTS, context, metadata=metadata)
+
+
+def support_notices_fixture() -> list[Any]:
+    """The support notices of the ``support-notices`` variant: one of each level.
+
+    The run is on an x86-64 Linux host whose processor lacks what polars is built
+    for (unsupported, noticed at the start of the run), whose kernel's Landlock ABI
+    is below 6 (degraded, noticed where the sandbox backend is chosen) and which
+    scans with GuardDog inside ASH's own sandbox (polyfilled, noticed where
+    GuardDog is run). The first lists upgrade paths on this machine and elsewhere,
+    the second only paths on this machine, and the third none, which are the three
+    shapes a notice's ``paths`` takes.
+
+    Written out here, not built from the support register: the register's
+    sentences are the register's to change, and what a results file carries must
+    not move in these snapshots when one of them does.
+    """
+    from automated_security_helper.models.asharp_model import SupportNotice
+
+    docs = "how-to/supported-configurations.md"
+    notices = [
+        {
+            "id": "host.cpu.below-polars-runtime",
+            "scope": "ash",
+            "dimension": "cpu",
+            "level": "unsupported",
+            "behavior": "continues",
+            "message": (
+                "This x86-64 processor lacks instructions the installed polars "
+                "runtime is built for, and polars warns that running on it will "
+                "likely crash."
+            ),
+            "found": "avx2, bmi2 and fma are missing (polars-runtime-32 1.44.2).",
+            "facts": {
+                "arch": "amd64",
+                "cpu_level": "compat-only",
+                "polars_runtime": "runtime-32",
+            },
+            "raised": "start",
+            "docs": f"{docs}#host-cpu-below-polars-runtime",
+            "paths": [
+                {
+                    "id": "polars-compat-runtime",
+                    "group": "this-machine",
+                    "kind": "same-os",
+                    "summary": (
+                        "Add polars' compatibility runtime (its rtcompat extra) to "
+                        "ASH's environment, at the polars version ASH uses."
+                    ),
+                    "docs": f"{docs}#polars-compat-runtime",
+                },
+                {
+                    "id": "arm64-host",
+                    "group": "elsewhere",
+                    "kind": "other-host",
+                    "summary": (
+                        "Run ASH on an arm64 machine: Linux on arm64 or a Mac with "
+                        "Apple silicon."
+                    ),
+                    "docs": f"{docs}#arm64-host",
+                },
+                {
+                    "id": "ci-runner",
+                    "group": "elsewhere",
+                    "kind": "ci-runner",
+                    "summary": (
+                        "Run the scan in CI on a hosted runner; ASH's reusable "
+                        "GitHub workflow runs on ubuntu-latest by default."
+                    ),
+                    "docs": f"{docs}#ci-runner",
+                },
+            ],
+        },
+        {
+            "id": "host.sandbox.landlock-below-6",
+            "scope": "ash",
+            "dimension": "sandbox",
+            "level": "degraded",
+            "behavior": "continues",
+            "message": (
+                "Abstract Unix sockets and signals to processes outside the sandbox "
+                "are not restricted, because the kernel's Landlock ABI is below 6."
+            ),
+            "found": "Landlock ABI 5.",
+            "facts": {
+                "sandbox_mode": "auto",
+                "sandbox_backend": "landlock",
+                "sandbox_loss": "landlock-below-6",
+            },
+            "raised": "decision",
+            "docs": f"{docs}#host-sandbox-landlock-below-6",
+            "paths": [
+                {
+                    "id": "newer-kernel-landlock",
+                    "group": "this-machine",
+                    "kind": "same-os",
+                    "summary": (
+                        "Use a Linux kernel whose Landlock ABI is 6 or later, or the "
+                        "bwrap backend."
+                    ),
+                    "docs": f"{docs}#newer-kernel-landlock",
+                },
+            ],
+        },
+        {
+            "id": "scanner.guarddog.sandbox-replaced",
+            "scope": "guarddog",
+            "dimension": "tool sandbox",
+            "level": "polyfilled",
+            "behavior": "continues",
+            "message": (
+                "GuardDog runs inside ASH's sandbox-exec confinement instead of its "
+                "own kernel sandbox."
+            ),
+            "polyfill": "guarddog-ash-sandbox",
+            "facts": {"tool_sandbox": "replaced"},
+            "raised": "decision",
+            "docs": f"{docs}#scanner-guarddog-sandbox-replaced",
+        },
+    ]
+    return [SupportNotice.model_validate(notice) for notice in notices]
 
 
 # --------------------------------------------------------------------------- #
@@ -533,5 +666,6 @@ __all__ = [
     "fixture_config",
     "fixture_plugin_context",
     "pin_clock",
+    "support_notices_fixture",
     "workspace_reporter_context",
 ]

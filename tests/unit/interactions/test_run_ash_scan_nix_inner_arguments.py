@@ -553,6 +553,7 @@ _NOT_FORWARDED_ON_PURPOSE = {
     "run": "container only; no shell reads it",
     "force": "container only; no shell reads it",
     "oci_runner": "container only; no shell reads it",
+    "build_engine": "container only; no shell reads it",
     "build_target": "container only; no shell reads it",
     "container_uid": "container only; no shell reads it",
     "container_gid": "container only; no shell reads it",

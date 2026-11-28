@@ -1023,6 +1023,17 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 provisionable=(),
                 note="a PyPI package run through uv; it is not installable offline and the remedy (pre-install) is named by the scanner",
             ),
+            image=opsf.ImageFacet(
+                route=opsf.ImageRoute.DEPENDENCIES_INSTALL,
+                version_check=("guarddog", "--version"),
+                dockerfile_note=(
+                    "# GuardDog (alpha scanner). Installed by `ash dependencies install` above through",
+                    "# uv, with the version and interpreter the scanner pins",
+                    "# (GUARDDOG_DEFAULT_VERSION_CONSTRAINT, GUARDDOG_PYTHON_REQUEST in",
+                    "# guarddog_scanner.py). Checked here so a failed install fails the build instead",
+                    "# of the first scan that enables the scanner.",
+                ),
+            ),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="a risk ladder",

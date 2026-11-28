@@ -54,6 +54,7 @@ CANCEL_OUTSIDE_MAIN_AND_TAGS = (
 SUPERSEDING = {
     "ash-actions-pinned.yml",
     "ash-agent-plugins-drift.yml",
+    "ash-alpha-extra-drift.yml",
     "ash-cdk-extra-drift.yml",
     "ash-docs-ci-runners.yml",
     "ash-iac-drift.yml",
@@ -61,6 +62,10 @@ SUPERSEDING = {
     "ash-install-methods.yml",
     "ash-offline-scanners.yml",
     "ash-package.yml",
+    # Pull request, weekly schedule and dispatch, like the benchmark below: a pull
+    # request run is superseded by a newer push, and the weekly run is on main, so it
+    # is never cancelled.
+    "ash-platform-wheels.yml",
     "ash-pr-title-check.yml",
     "ash-repo-scan-pr-head.yml",
     "ash-repo-scan.yml",

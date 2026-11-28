@@ -48,7 +48,6 @@ is the only authority on what ASH will actually try.
 
 from __future__ import annotations
 
-import itertools
 import re
 from pathlib import Path
 from typing import Any
@@ -59,6 +58,7 @@ import yaml
 from automated_security_helper.interactions.run_ash_container import (
     _OCI_RUNNER_CANDIDATES,
 )
+from tests.utils.ci_matrix_loader import load_ci_matrix
 
 pytestmark = pytest.mark.unit
 
@@ -81,6 +81,14 @@ _EXCLUSIONS: dict[str, str] = {}
 _MINIMUM_CANDIDATES = 3
 
 
+ci_matrix = load_ci_matrix()
+
+#: The event whose matrix is the static axes less the static excludes: the pull-request
+#: overlay is void on a manual run, and this file reads the full matrix, as it did when it
+#: compared an exclude entry's overlay text with a cell's value and never matched.
+_STATIC_EVENT = "workflow_dispatch"
+
+
 def _workflow() -> dict[str, Any]:
     return yaml.safe_load(UNIFIED_CI.read_text(encoding="utf-8"))
 
@@ -88,24 +96,16 @@ def _workflow() -> dict[str, Any]:
 def _effective_matrix(job: dict[str, Any]) -> list[dict[str, Any]]:
     """The cells a job actually runs: axis product minus excludes, plus includes.
 
-    ``include`` entries that only add keys to existing cells (the ``arch`` labels on
-    the unit-test job) versus ones that define whole cells (scan-validation) are not
-    distinguished here, because for this file's purpose -- does any cell name this
-    runner -- over-counting an include is harmless and under-counting is not.
+    The product and the excludes are the shared reader's, read for ``_STATIC_EVENT``.
+    Every ``include`` entry is then appended whole. ``include`` entries that only add keys
+    to existing cells (the ``arch`` labels on the unit-test job) versus ones that define
+    whole cells (scan-validation) are not distinguished here, because for this file's
+    purpose -- does any cell name this runner -- over-counting an include is harmless and
+    under-counting is not.
     """
     matrix = (job.get("strategy") or {}).get("matrix") or {}
-    axes = {k: v for k, v in matrix.items() if k not in ("include", "exclude")}
-    cells: list[dict[str, Any]] = []
-    if axes:
-        cells = [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
-        for excluded in matrix.get("exclude") or []:
-            cells = [
-                cell
-                for cell in cells
-                if not all(cell.get(k) == v for k, v in excluded.items())
-            ]
-    cells.extend(matrix.get("include") or [])
-    return cells
+    legs = ci_matrix.axis_cells(matrix, _STATIC_EVENT)
+    return legs + list(matrix.get("include") or [])
 
 
 def _covered_runners() -> set[str]:

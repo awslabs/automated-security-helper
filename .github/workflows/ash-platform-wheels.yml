@@ -1,0 +1,187 @@
+name: ASH - Platform Wheels
+
+# WHAT THIS CHECKS
+#
+# ASH installs from wheels. Nothing in its install path builds a package from source
+# on the platforms the install page names, so a release that publishes no wheel for
+# one of them breaks the install there even though nothing in this repository changed.
+# CI installs on a few of those platforms; the rest only show up when a person on one
+# of them runs the install.
+#
+# scripts/check_platform_wheels.py resolves ASH's requirements with
+# `uv pip compile --no-build` for eight platforms (Linux on x86_64 and aarch64, each
+# with glibc and with musl, macOS on both architectures, Windows on both) and for
+# every Python minor version requires-python allows. It keeps the outcome of each
+# cell in scripts/platform_wheels.json and fails when a measured cell no longer
+# matches its record, or when a measured row has no recorded row at all: a new extra
+# or a new alpha candidate is recorded in the pull request that adds it. It also
+# resolves the base install universally with and without the alpha requirements, and
+# fails when adding them moves a version the base install resolves.
+#
+# The cutoff of every resolution is the cooldown uv.lock records, counted back from
+# the moment the job starts, so the job sees what `uv lock` could lock today and not
+# what PyPI published an hour ago.
+#
+# WHEN IT RUNS
+#
+# Pull requests that touch one of the inputs, and every week. What PyPI publishes
+# changes without a commit here, so a pull request check alone would read green until
+# the next change to one of the inputs. The weekly run is the one that sees PyPI move.
+#
+#   - pyproject.toml holds the requirements and the extras.
+#   - uv.lock holds the cooldown the cutoff comes from.
+#   - plugin_provisioning.py is the register that says which pins are candidates for
+#     the alpha extra.
+#   - the script, the record and this file, so a change to the check is run by itself.
+#
+# THE CONTROLS
+#
+# A check that passes today proves nothing about whether it can fail. The second step
+# plants a package with no musl wheels and a pin below the base install's version, and
+# fails when either one goes unnoticed.
+#
+# THE COOLDOWN REPORT
+#
+# A pin the register holds back because it is younger than the cooldown can go in once
+# the window has passed. Nothing else says so, so the weekly run lists every such pin
+# whose window has ended. The list depends on the date, not on the change under review,
+# so only the scheduled and dispatched runs build it: a pull request check that read
+# the date would turn red on the day a window ends, on a change that did not cause it.
+#
+# WHEN IT FAILS
+#
+# A cell that moved is usually PyPI publishing or withdrawing a wheel, so the failure is
+# a re-record and not a defect in the change under review. Read the summary, then
+# decide whether the change is wanted. If it is, re-record with
+# `python scripts/check_platform_wheels.py --record` on a machine with network access,
+# read the diff of scripts/platform_wheels.json, and commit it. A difference in the
+# base install's closure is not in the record, so a re-record does not clear it. A run
+# that could not reach the index fails with a different message and is never recorded
+# as a cell.
+
+on:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "automated_security_helper/base/plugin_provisioning.py"
+      - "scripts/check_platform_wheels.py"
+      - "scripts/platform_wheels.json"
+      - ".github/workflows/ash-platform-wheels.yml"
+  schedule:
+    # Wednesdays 05:43 UTC. Off the hour so it does not queue behind every other
+    # scheduled workflow on GitHub.
+    - cron: "43 5 * * 3"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a pull request or a branch makes the previous head's run moot.
+  # Runs on main and on tags are never cancelled: the weekly run is on main, and it is
+  # the only report that week gets.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  platform-wheels:
+    name: Requirements resolve from wheels on every platform
+    # The job names each platform it resolves for, so the runner's architecture changes
+    # no cell. The arm pool is the one this repository's longer CI jobs already use.
+    runs-on: ubuntu-24.04-arm
+    # One resolution per requirement set, platform and Python version, a couple of
+    # hundred today. Each takes seconds once uv has the index metadata cached; the cap
+    # leaves room for a cold start.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    # THIRD-PARTY ACTIONS ARE PINNED BY COMMIT SHA, NOT BY TAG. A tag can be moved to
+    # any commit by whoever controls the action's repository; a SHA cannot. The
+    # trailing comment is what Dependabot reads to keep the pin current.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The script is standard library only; it needs Python 3.11 or later for tomllib.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      # uv is pinned to the version the recorded cells were measured with, so a uv
+      # release cannot move a cell. The record names the version it was taken with,
+      # and a run with another one prints a note. Bump the pin together with a
+      # re-record. No cache: this job reads index metadata, not packages, and
+      # setup-uv's default cache saves from every ref.
+      - name: Install uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          version: "0.13.0"
+          enable-cache: false
+
+      - name: Compare the resolution with the record
+        run: |
+          report="${RUNNER_TEMP}/platform-wheels-check.md"
+          status=0
+          python scripts/check_platform_wheels.py --check --require-complete \
+            --measured-out "${RUNNER_TEMP}/platform_wheels.measured.json" \
+            > "$report" || status=$?
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+          exit "$status"
+
+      # Runs whether or not the comparison failed: a red comparison and a dead control
+      # are two separate facts, and the run should report both.
+      - name: Plant what must be flagged
+        if: ${{ !cancelled() }}
+        run: |
+          report="${RUNNER_TEMP}/platform-wheels-controls.md"
+          status=0
+          python scripts/check_platform_wheels.py --controls > "$report" || status=$?
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+          exit "$status"
+
+      # What the comparison measured, in the record's own format. After a red run it
+      # can be committed in place of scripts/platform_wheels.json when the change is
+      # wanted, without a second round of resolutions.
+      - name: Keep what was measured
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: platform-wheels-measured
+          path: ${{ runner.temp }}/platform_wheels.measured.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  cooldown-report:
+    name: Cooldown exclusions whose window has ended
+    # Never on a pull request; see THE COOLDOWN REPORT above.
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    # ubuntu-slim: the step reads the register and the clock and runs no resolver.
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: List the cooldowns that have ended
+        run: |
+          report="${RUNNER_TEMP}/platform-wheels-cooldowns.md"
+          status=0
+          python scripts/check_platform_wheels.py --cooldown-report > "$report" || status=$?
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          cat "$report"
+          exit "$status"

@@ -225,6 +225,7 @@ automated_security_helper/interactions/run_ash_container.py (_write_env_file) [e
 automated_security_helper/interactions/run_ash_container.py (_write_env_file) [presence check] if name in environ:
 automated_security_helper/interactions/run_ash_container.py (_write_env_file) [subscript] handle.write(f"{name}={environ[name]}\n")
 automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py (_declared_grype_db_bound) [presence check] if name not in environ and config_key_for_env.get(name) not in user_config_keys
+automated_security_helper/utils/host_facts.py (_live_getenv) [environ.get] return os.environ.get(name)
 automated_security_helper/utils/install_providers.py (in_tree_path_refusal) [environ.get] if parse_allow_in_tree_tools(os.environ.get(ALLOW_IN_TREE_TOOLS_ENV)):
 automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.get] previous = {key: os.environ.get(key) for key in overrides}
 automated_security_helper/utils/process_env.py (apply_environ_overrides) [environ.pop] os.environ.pop(key, None)

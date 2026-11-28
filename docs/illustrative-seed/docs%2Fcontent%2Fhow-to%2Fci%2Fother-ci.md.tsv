@@ -1,0 +1,4 @@
+docs/content/how-to/ci/other-ci.md	installs ASH and scanner tools from the network
+docs/content/how-to/ci/other-ci.md	installs ASH and scanner tools from the network
+docs/content/how-to/ci/other-ci.md	installs ASH from GitHub and needs Nix and the network
+docs/content/how-to/ci/other-ci.md	runs a full scan with every scanner, which needs the network

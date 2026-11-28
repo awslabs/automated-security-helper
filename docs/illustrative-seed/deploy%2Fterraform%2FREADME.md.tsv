@@ -1,0 +1,3 @@
+deploy/terraform/README.md	needs AWS credentials and an applied Terraform state
+deploy/terraform/README.md	needs Terraform and network access; run in each module and example directory
+deploy/terraform/README.md	runs in a checkout of this repository and needs Terraform

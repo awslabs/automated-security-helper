@@ -15,33 +15,33 @@ This page is generated from the scanner plugins in the ASH source code by `scrip
 ASH ships 23 scanners. The built-in ones are loaded on every scan. The others are alpha scanners, each in a plugin module that `ash scan` loads only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names the module; for the MCP server, see [What a plugin can do](../plugins/index.md#what-a-plugin-can-do).
 
 <!-- doctest: options of=scanners -->
-| Scanner | Tool type | Enabled by default | Provided by | Command | Runs with `--python-only` |
-|---------|-----------|--------------------|-------------|---------|---------------------------|
-| [`actionlint`](#actionlint) | IAC | yes | built in | `actionlint` | no |
-| [`bandit`](#bandit) | SAST | yes | built in | `bandit` | yes |
-| [`cdk-nag`](#cdk-nag) | IAC | yes | built in | `python` | no |
-| [`cfn-guard`](#cfn-guard) | IAC | yes | built in | `cfn-guard` | no |
-| [`cfn-lint`](#cfn-lint) | IAC | yes | built in | `cfn-lint` | yes |
-| [`cfn-nag`](#cfn-nag) | IAC | yes | built in | `cfn_nag_scan` | no |
-| [`checkov`](#checkov) | IAC | yes | built in | `checkov` | yes |
-| [`detect-secrets`](#detect-secrets) | SECRETS | yes | built in | `detect-secrets` | yes |
-| [`gitleaks`](#gitleaks) | SECRETS | yes | built in | `gitleaks` | no |
-| [`grype`](#grype) | SCA | yes | built in | `grype` | no |
-| [`mcp-config`](#mcp-config) | SAST | yes | built in | `ash-mcp-config-scanner` | yes |
-| [`npm-audit`](#npm-audit) | SCA | yes | built in | `npm` | no |
-| [`opengrep`](#opengrep) | SAST | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
-| [`semgrep`](#semgrep) | SAST | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
-| [`syft`](#syft) | SBOM | yes | built in | `syft` | no |
-| [`trivy`](#trivy) | SCA | yes | built in | `trivy` | no |
-| [`zizmor`](#zizmor) | SAST | yes | built in | `zizmor` | yes |
-| [`betterleaks`](#betterleaks) | SECRETS | yes | alpha module `ash_betterleaks_plugins` | `betterleaks` | no |
-| [`ferret-scan`](#ferret-scan) | SECRETS | yes | alpha module `ash_ferret_plugins` | `ferret-scan` | no |
-| [`guarddog`](#guarddog) | SCA | yes | alpha module `ash_guarddog_plugins` | `guarddog` | yes |
-| [`hadolint`](#hadolint) | IAC | yes | alpha module `ash_hadolint_plugins` | `hadolint` | no |
-| [`snyk-code`](#snyk-code) | SAST | yes | alpha module `ash_snyk_plugins` | `snyk` | no |
-| [`trivy-repo`](#trivy-repo) | SCA | yes | alpha module `ash_trivy_plugins` | `trivy` | no |
+| Scanner | Tier | Tool type | Loads by default | On once loaded | Provided by | Command | Runs with `--python-only` |
+|---------|------|-----------|------------------|----------------|-------------|---------|---------------------------|
+| [`actionlint`](#actionlint) | supported | IAC | yes | yes | built in | `actionlint` | no |
+| [`bandit`](#bandit) | supported | SAST | yes | yes | built in | `bandit` | yes |
+| [`cdk-nag`](#cdk-nag) | supported | IAC | yes | yes | built in | `python` | no |
+| [`cfn-guard`](#cfn-guard) | supported | IAC | yes | yes | built in | `cfn-guard` | no |
+| [`cfn-lint`](#cfn-lint) | supported | IAC | yes | yes | built in | `cfn-lint` | yes |
+| [`cfn-nag`](#cfn-nag) | supported | IAC | yes | yes | built in | `cfn_nag_scan` | no |
+| [`checkov`](#checkov) | supported | IAC | yes | yes | built in | `checkov` | yes |
+| [`detect-secrets`](#detect-secrets) | supported | SECRETS | yes | yes | built in | `detect-secrets` | yes |
+| [`gitleaks`](#gitleaks) | supported | SECRETS | yes | yes | built in | `gitleaks` | no |
+| [`grype`](#grype) | supported | SCA | yes | yes | built in | `grype` | no |
+| [`mcp-config`](#mcp-config) | supported | SAST | yes | yes | built in | `ash-mcp-config-scanner` | yes |
+| [`npm-audit`](#npm-audit) | supported | SCA | yes | yes | built in | `npm` | no |
+| [`opengrep`](#opengrep) | supported | SAST | yes | yes on Linux and macOS; no on Windows | built in | `opengrep` | no |
+| [`semgrep`](#semgrep) | deprecated | SAST | yes | yes on Linux and macOS; no on Windows | built in | `semgrep` | yes |
+| [`syft`](#syft) | supported | SBOM | yes | yes | built in | `syft` | no |
+| [`trivy`](#trivy) | supported | SCA | yes | yes | built in | `trivy` | no |
+| [`zizmor`](#zizmor) | supported | SAST | yes | yes | built in | `zizmor` | yes |
+| [`betterleaks`](#betterleaks) | alpha | SECRETS | no | yes | alpha module `ash_betterleaks_plugins` | `betterleaks` | no |
+| [`ferret-scan`](#ferret-scan) | alpha | SECRETS | no | yes | alpha module `ash_ferret_plugins` | `ferret-scan` | no |
+| [`guarddog`](#guarddog) | alpha | SCA | no | yes | alpha module `ash_guarddog_plugins` | `guarddog` | yes |
+| [`hadolint`](#hadolint) | alpha | IAC | no | yes | alpha module `ash_hadolint_plugins` | `hadolint` | no |
+| [`snyk-code`](#snyk-code) | alpha | SAST | no | yes | alpha module `ash_snyk_plugins` | `snyk` | no |
+| [`trivy-repo`](#trivy-repo) | alpha | SCA | no | yes | alpha module `ash_trivy_plugins` | `trivy` | no |
 
-Tool type is the scanner's own `ScannerToolType`. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
+Tier is the maturity the scanner's manifest declares: `supported`, `alpha` or `deprecated`. Tool type is the scanner's own `ScannerToolType`. Loads by default says whether `ash scan` loads the scanner's plugin module on every scan, as the manifest declares it; where it says no, `ash scan` runs the scanner only when the configuration's `ash_plugin_modules` (or `--ash-plugin-modules`) names its module. On once loaded is the scanner's `enabled` default once its module is loaded. `--python-only` keeps a scanner when its `is_python_only()` is true: the scanner class's own `python_only` when it states one; otherwise only when the scanner runs its tool through uv, declares no install commands, and has only pip dependencies. A scanner it does not keep is SKIPPED.
 
 ## Environment in the sandbox
 
@@ -54,7 +54,9 @@ The network entry of each scanner below is its default. `sandbox.network_scanner
 - Scanner page: [`actionlint` scanner page](../docs/plugins/builtin/actionlint.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.actionlint_scanner.ActionlintScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: IAC
 - Command: `actionlint`
 - Install: pinned, checksum-verified release of `actionlint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
@@ -81,7 +83,9 @@ Bandit is a Python source code security analyzer.
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner.BanditScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SAST
 - Command: `bandit`
 - Install: `uv tool install` on first use (`bandit[sarif,toml]>=1.7.8,<2.0.0`)
@@ -112,7 +116,9 @@ CDK Nag is a security scanner for AWS CloudFormation templates that applies indu
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner.CdkNagScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: IAC
 - Command: `python`
 - Install: none declared
@@ -137,7 +143,9 @@ Options, under `scanners.cdk-nag.options`. An option not listed here refuses the
 - Scanner page: [`cfn-guard` scanner page](../docs/plugins/builtin/cfn-lint-and-cfn-guard.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_guard_scanner.CfnGuardScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: IAC
 - Command: `cfn-guard`
 - Install: pinned, checksum-verified release of `cfn-guard`; custom command by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
@@ -162,7 +170,9 @@ Options, under `scanners.cfn-guard.options`. An option not listed here refuses t
 - Scanner page: [`cfn-lint` scanner page](../docs/plugins/builtin/cfn-lint-and-cfn-guard.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_lint_scanner.CfnLintScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: IAC
 - Command: `cfn-lint`
 - Install: `uv tool install` on first use (`cfn-lint[sarif]>=1.43.3,<2.0.0`)
@@ -191,7 +201,9 @@ Options, under `scanners.cfn-lint.options`. An option not listed here refuses th
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner.CfnNagScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: IAC
 - Command: `cfn_nag_scan`
 - Install: `gem install cfn-nag -v 0.8.10` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
@@ -213,7 +225,9 @@ Options, under `scanners.cfn-nag.options`. An option not listed here refuses the
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner.CheckovScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: IAC
 - Command: `checkov`
 - Install: `uv tool install` on first use (`checkov>=3.2.0,<4.0.0` with Python `>=3.10,<3.15`)
@@ -243,7 +257,9 @@ Options, under `scanners.checkov.options`. An option not listed here refuses the
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner.DetectSecretsScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SECRETS
 - Command: `detect-secrets`
 - Install: none declared
@@ -270,7 +286,9 @@ Options, under `scanners.detect-secrets.options`. An option not listed here refu
 - Scanner page: [`gitleaks` scanner page](../docs/plugins/builtin/gitleaks.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scanner.GitleaksScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SECRETS
 - Command: `gitleaks`
 - Install: pinned, checksum-verified release of `gitleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
@@ -296,7 +314,9 @@ Options, under `scanners.gitleaks.options`. An option not listed here refuses th
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner.GrypeScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SCA
 - Command: `grype`
 - Install: pinned, checksum-verified release of `grype` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
@@ -320,7 +340,9 @@ Options, under `scanners.grype.options`. An option not listed here refuses the c
 - Scanner page: [`mcp-config` scanner page](../docs/plugins/builtin/mcp-config.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.mcp_config_scanner.McpConfigScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SAST
 - Command: `ash-mcp-config-scanner`
 - Install: none declared
@@ -349,7 +371,9 @@ Options, under `scanners.mcp-config.options`. An option not listed here refuses 
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner.NpmAuditScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SCA
 - Command: `npm`
 - Install: none declared
@@ -371,7 +395,9 @@ Options, under `scanners.npm-audit.options`. An option not listed here refuses t
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner.OpengrepScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes on Linux and macOS; no on Windows
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `opengrep`
 - Install: pinned, checksum-verified release of `opengrep` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
@@ -401,7 +427,9 @@ Options, under `scanners.opengrep.options`. An option not listed here refuses th
 
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner.SemgrepScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes on Linux and macOS; no on Windows
+- Tier: deprecated
+- Loads by default: yes
+- On once loaded: yes on Linux and macOS; no on Windows
 - Tool type: SAST
 - Command: `semgrep`
 - Install: `uv tool install` on first use (`semgrep>=1.125.0,<2.0.0`)
@@ -431,7 +459,9 @@ Options, under `scanners.semgrep.options`. An option not listed here refuses the
 - Scanner page: [`syft` scanner page](../docs/plugins/builtin/syft.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner.SyftScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SBOM
 - Command: `syft`
 - Install: pinned, checksum-verified release of `syft` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
@@ -458,7 +488,9 @@ Options, under `scanners.syft.options`. An option not listed here refuses the co
 - Scanner page: [`trivy` scanner page](../docs/plugins/builtin/trivy.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.trivy_scanner.TrivyScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SCA
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
@@ -490,7 +522,9 @@ zizmor finds security issues in GitHub Actions workflows and composite actions.
 - Scanner page: [`zizmor` scanner page](../docs/plugins/builtin/zizmor.md)
 - Class: `automated_security_helper.plugin_modules.ash_builtin.scanners.zizmor_scanner.ZizmorScanner`
 - Provided by: built in, loaded on every scan
-- Enabled by default: yes
+- Tier: supported
+- Loads by default: yes
+- On once loaded: yes
 - Tool type: SAST
 - Command: `zizmor`
 - Install: `uv tool install` on first use (`zizmor>=1.29.0,<2.0.0`)
@@ -519,7 +553,9 @@ Options, under `scanners.zizmor.options`. An option not listed here refuses the 
 - Scanner page: [`betterleaks` scanner page](../docs/plugins/alpha/betterleaks-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_betterleaks_plugins.betterleaks_scanner.BetterleaksScanner`
 - Provided by: alpha module `ash_betterleaks_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_betterleaks_plugins`
-- Enabled by default: yes
+- Tier: alpha
+- Loads by default: no
+- On once loaded: yes
 - Tool type: SECRETS
 - Command: `betterleaks`
 - Install: pinned, checksum-verified release of `betterleaks` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64, windows/arm64
@@ -547,7 +583,9 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 - Scanner page: [`ferret-scan` scanner page](../docs/plugins/alpha/ferret-scan-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.FerretScanScanner`
 - Provided by: alpha module `ash_ferret_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_ferret_plugins`
-- Enabled by default: yes
+- Tier: alpha
+- Loads by default: no
+- On once loaded: yes
 - Tool type: SECRETS
 - Command: `ferret-scan`
 - Install: none declared
@@ -592,7 +630,9 @@ GuardDog detects malicious-package heuristics in PyPI, npm, Go, GitHub Action, R
 - Scanner page: [`guarddog` scanner page](../docs/plugins/alpha/guarddog-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_guarddog_plugins.guarddog_scanner.GuardDogScanner`
 - Provided by: alpha module `ash_guarddog_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_guarddog_plugins`
-- Enabled by default: yes
+- Tier: alpha
+- Loads by default: no
+- On once loaded: yes
 - Tool type: SCA
 - Command: `guarddog`
 - Install: `uv tool install` on first use (`guarddog==3.2.0` with Python `>=3.10,<3.14`)
@@ -627,7 +667,9 @@ Options, under `scanners.guarddog.options`. An option not listed here refuses th
 - Scanner page: [`hadolint` scanner page](../docs/plugins/alpha/hadolint-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_hadolint_plugins.hadolint_scanner.HadolintScanner`
 - Provided by: alpha module `ash_hadolint_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_hadolint_plugins`
-- Enabled by default: yes
+- Tier: alpha
+- Loads by default: no
+- On once loaded: yes
 - Tool type: IAC
 - Command: `hadolint`
 - Install: pinned, checksum-verified release of `hadolint` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64
@@ -651,7 +693,9 @@ Options, under `scanners.hadolint.options`. An option not listed here refuses th
 - Scanner page: [`snyk-code` scanner page](../docs/plugins/alpha/snyk-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner.SnykCodeScanner`
 - Provided by: alpha module `ash_snyk_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_snyk_plugins`
-- Enabled by default: yes
+- Tier: alpha
+- Loads by default: no
+- On once loaded: yes
 - Tool type: SAST
 - Command: `snyk`
 - Install: none declared
@@ -675,7 +719,9 @@ Options, under `scanners.snyk-code.options`. An option not listed here refuses t
 - Scanner page: [`trivy-repo` scanner page](../docs/plugins/alpha/trivy-plugin.md)
 - Class: `automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner.TrivyRepoScanner`
 - Provided by: alpha module `ash_trivy_plugins`, which `ash scan` loads when `ash_plugin_modules` names `automated_security_helper.plugin_modules.ash_trivy_plugins`
-- Enabled by default: yes
+- Tier: alpha
+- Loads by default: no
+- On once loaded: yes
 - Tool type: SCA
 - Command: `trivy`
 - Install: pinned, checksum-verified release of `trivy` by `ash dependencies install`, for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64, windows/amd64

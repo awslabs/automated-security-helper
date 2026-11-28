@@ -151,6 +151,10 @@ GOLDEN: tuple[tuple[str, str], ...] = (
     ("docs/content/reference/reporters.md", "generated reporter reference"),
     ("docs/content/reference/scanners.md", "generated scanner reference"),
     (
+        "docs/content/reference/support-matrix.md",
+        "generated support matrix reference",
+    ),
+    (
         "docs/overrides/partials/generated/plugin-data.html",
         "generated plugin data partial",
     ),

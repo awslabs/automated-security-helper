@@ -1,0 +1,2655 @@
+additional_reports:
+  bandit:
+    source:
+      duration: 1.25
+      end_time: '2026-01-15T12:00:01.250000Z'
+      exit_code: 0
+      finding_count: 2
+      metadata:
+        scanner_version: 1.8.6
+      report_type: sarif
+      scanner_name: bandit
+      severity_counts:
+        high: 1
+        low: 1
+      start_time: '2026-01-15T12:00:00Z'
+      status: PASSED
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+  cdk-nag:
+    None:
+      excluded: true
+      raw_results: null
+      scanner_name: cdk-nag
+      status: SKIPPED
+  cfn-nag:
+    source:
+      duration: 0.25
+      end_time: '2026-01-15T12:00:18.500000Z'
+      errors:
+      - 'infra/main.tf: cfn_nag_scan exited 1: infra/main.tf is not a CloudFormation
+        template'
+      exit_code: 1
+      finding_count: 0
+      metadata:
+        scanner_version: 0.8.10
+      report_type: sarif
+      scanner_name: cfn-nag
+      severity_counts: {}
+      start_time: '2026-01-15T12:00:18.250000Z'
+      status: ERROR
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+      targets_attempted: 1
+      targets_failed: 1
+  checkov:
+    source:
+      duration: 7.5
+      end_time: '2026-01-15T12:00:08.750000Z'
+      exit_code: 0
+      finding_count: 4
+      metadata:
+        scanner_version: 3.2.469
+      report_type: sarif
+      scanner_name: checkov
+      severity_counts:
+        high: 1
+        low: 1
+        medium: 2
+      start_time: '2026-01-15T12:00:01.250000Z'
+      status: PASSED
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+  detect-secrets:
+    source:
+      duration: 0.5
+      end_time: '2026-01-15T12:00:13.250000Z'
+      exit_code: 0
+      finding_count: 1
+      metadata:
+        scanner_version: 1.5.0
+      report_type: sarif
+      scanner_name: detect-secrets
+      severity_counts:
+        suppressed: 1
+      start_time: '2026-01-15T12:00:12.750000Z'
+      status: PASSED
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+  grype:
+    source:
+      duration: 3.0
+      end_time: '2026-01-15T12:00:16.250000Z'
+      exit_code: 0
+      finding_count: 2
+      metadata:
+        scanner_version: 0.100.0
+      report_type: sarif
+      scanner_name: grype
+      severity_counts:
+        critical: 1
+        medium: 1
+      start_time: '2026-01-15T12:00:13.250000Z'
+      status: PASSED
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+  npm-audit:
+    None:
+      dependencies_satisfied: false
+      raw_results: null
+      scanner_name: npm-audit
+      status: MISSING
+  semgrep:
+    source:
+      duration: 4.0
+      end_time: '2026-01-15T12:00:12.750000Z'
+      exit_code: 0
+      finding_count: 2
+      metadata:
+        scanner_version: 1.140.0
+      report_type: sarif
+      scanner_name: semgrep
+      severity_counts:
+        info: 1
+        low: 1
+      start_time: '2026-01-15T12:00:08.750000Z'
+      status: PASSED
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+  syft:
+    source:
+      duration: 2.0
+      end_time: '2026-01-15T12:00:18.250000Z'
+      exit_code: 0
+      metadata:
+        scanner_version: 1.33.0
+      report_type: cyclonedx
+      scanner_name: syft
+      start_time: '2026-01-15T12:00:16.250000Z'
+      status: PASSED
+      target: <REPO>/tests/test_data/snapshot_fixture/repo
+      target_type: source
+ash_config:
+  ash_plugin_modules: []
+  build: null
+  content_db_staleness: fail
+  content_db_staleness_offline_image_default: true
+  content_db_staleness_overrides: []
+  converters:
+    archive:
+      enabled: true
+      name: archive
+      options:
+        max_compression_ratio: 100
+        max_member_bytes: 268435456
+        max_members: 100000
+        max_total_bytes: 1073741824
+    jupyter:
+      enabled: true
+      name: jupyter
+      options:
+        install_timeout: 300
+        tool_version: '>=7.16.0,<8.0.0'
+    mcp_config:
+      enabled: true
+      name: mcp_config
+      options: {}
+  default_scanners:
+    add: []
+    only: []
+  external_reports_to_include: []
+  fail_on_findings: true
+  fail_on_incomplete_scanners: true
+  fail_on_unknown_keys: false
+  global_settings:
+    deduplication:
+      annotate: false
+      fold: false
+    exclusions: []
+    history:
+      enabled: false
+      keep_runs: 50
+    ignore_paths: []
+    mcp:
+      runtime_overrides:
+        allowed_paths: []
+        denied_paths:
+        - /fail_on_findings
+        - /fail_on_incomplete_scanners
+        - /content_db_staleness
+        - /content_db_staleness_overrides
+        - /honor_ignore_files
+        - /content_db_staleness_offline_image_default
+        - /sandbox
+        - /sandbox/**
+        - /ash_plugin_modules
+        - /ash_plugin_modules/**
+        - /default_scanners
+        - /default_scanners/**
+        - /scanners/detect-secrets/options/scan_settings/filters_used
+        - /scanners/detect-secrets/options/scan_settings/filters_used/**
+        - /scanners/detect-secrets/options/scan_settings/plugins_used
+        - /scanners/detect-secrets/options/scan_settings/plugins_used/**
+        - /scanners/detect-secrets/options/baseline_file
+        - /global_settings/ignore_paths
+        - /global_settings/suppressions
+        - /global_settings/exclusions
+        - /global_settings/mcp
+        - /global_settings/mcp/**
+        - /global_settings/history
+        - /global_settings/history/**
+        - /scanners/opengrep/options/exclude_rule
+        - /scanners/semgrep/options/exclude_rule
+        - /scanners/bandit/options/confidence_level
+        - /scanners/checkov/options/frameworks
+        - /scanners/checkov/options/skip_frameworks
+        - /scanners/opengrep/options/config
+        - /scanners/opengrep/options/patterns
+        - /scanners/opengrep/options/severity
+        - /scanners/semgrep/options/config
+        - /scanners/semgrep/options/severity
+        - /scanners/detect-secrets/options/scan_settings
+        - /scanners/cdk-nag/options/nag_packs/AwsSolutionsChecks
+        - /scanners/ferret-scan/options/checks
+        - /scanners/ferret-scan/options/confidence_levels
+        - /scanners/ferret-scan/options/disable_ip_types
+        - /scanners/ferret-scan/options/enable_preprocessors
+        - /scanners/ferret-scan/options/finding_limit
+        - /scanners/ferret-scan/options/profile
+        - /scanners/ferret-scan/options/recursive
+        - /scanners/ferret-scan/options/respect_gitignore
+        - /scanners/ferret-scan/options/use_default_config
+        - /scanners/ferret-scan/options/validator_budget
+        - /scanners/trivy-repo/options/license_full
+        - /scanners/trivy-repo/options/scanners
+        - /scanners/cfn-guard/options/rule_sets
+        - /scanners/cfn-lint/options/ignore_checks
+        - /scanners/cfn-lint/options/regions
+        - /scanners/gitleaks/options/baseline_path
+        - /scanners/trivy/options/scanners
+        - /scanners/trivy/options/ignore_unfixed
+        - /scanners/mcp-config/options/forbid_privilege_escalation
+        - /scanners/mcp-config/options/forbid_unpinned_runners
+        - /scanners/mcp-config/options/forbid_auto_approval
+        - /scanners/mcp-config/options/flag_env_secrets
+        - /scanners/*/options/offline
+        - /scanners/ferret-scan/options/max_live_bytes
+        - /scanners/gitleaks/options/max_target_megabytes
+        - /scanners/bandit/options/config_file
+        - /scanners/checkov/options/config_file
+        - /scanners/ferret-scan/options/config_file
+        - /scanners/grype/options/config_file
+        - /scanners/syft/options/config_file
+        - /scanners/syft/options/sdist_harvest/**
+        - /scanners/trivy-repo/options/secret_config_file
+        - /scanners/trivy-repo/options/config_file
+        - /scanners/trivy-repo/options/module_dir
+        - /scanners/trivy/options/config_file
+        - /scanners/trivy/options/secret_config_file
+        - /scanners/actionlint/options/config_file
+        - /scanners/actionlint/options/shellcheck
+        - /scanners/actionlint/options/pyflakes
+        - /scanners/cfn-guard/options/rules_paths
+        - /scanners/cfn-lint/options/config_file
+        - /scanners/gitleaks/options/config_file
+        - /scanners/zizmor/options/config_file
+        - /scanners/zizmor/options/online_audits
+        - /scanners/hadolint/options/config_file
+        - /scanners/betterleaks/options/config_file
+        - /scanners/betterleaks/options/honor_tree_ignore_files
+        - /scanners/guarddog/options/ecosystems
+        - /scanners/guarddog/options/rules
+        - /scanners/guarddog/options/exclude_rules
+        - /scanners/guarddog/options/verify
+        - /scanners/guarddog/options/sandbox
+        - /scanners/snyk-code/options/honor_tree_exclusions
+        - /scanners/betterleaks/options/honor_inline_ignores
+        - /scanners/cfn-lint/options/honor_inline_ignores
+        - /scanners/gitleaks/options/honor_inline_ignores
+        - /scanners/zizmor/options/honor_inline_ignores
+        - /scanners/*/options/tool_version
+        - /converters/jupyter/options/tool_version
+        - /scanners/opengrep/options/version
+        - /scanners/opengrep/options/sha256
+        - /scanners/opengrep/options/metrics
+        - /scanners/semgrep/options/metrics
+        - /reporters/bedrock-summary-reporter/options/aws_*
+        - /reporters/cloudwatch-logs/**
+        - /reporters/aws-security-hub/**
+        - /reporters/bedrock-summary-reporter/options/model_id
+        - /reporters/bedrock-summary-reporter/options/output_file
+        - /reporters/bedrock-summary-reporter/options/output_executive_file
+        - /reporters/bedrock-summary-reporter/options/output_technical_file
+        - /reporters/s3/**
+        - /reporters/bedrock-summary-reporter/**
+        - /reporters/gitlab-sast/options/exclude_suppressed
+        - /scanners/detect-secrets/**
+        - /scanners/npm-audit/**
+        - /scanners/opengrep/**
+        - /scanners/semgrep/**
+        - /scanners/snyk-code/**
+        - /scanners/trivy-repo/**
+        - /scanners/trivy/**
+        - /scanners/zizmor/**
+        - /converters/archive/options/max_members
+        - /converters/archive/options/max_member_bytes
+        - /converters/archive/options/max_total_bytes
+        - /converters/archive/options/max_compression_ratio
+        denied_value_patterns: {}
+        enabled: false
+        replace_default_denied_paths: false
+    severity_threshold: MEDIUM
+    suppressions:
+    - client_supplied: false
+      expires: null
+      image: null
+      line_end: 5
+      line_start: 5
+      package_name: null
+      package_path: null
+      package_version: null
+      path: app/app.py
+      reason: Fixture placeholder credential, not a real secret
+      resource_id: null
+      rule_id: SECRET-SECRET-KEYWORD
+      scope: null
+      symbol: null
+    - client_supplied: false
+      expires: '2099-12-31'
+      image: null
+      line_end: null
+      line_start: null
+      package_name: null
+      package_path: null
+      package_version: null
+      path: infra/main.tf
+      reason: Stale suppression for a check that no longer exists
+      resource_id: null
+      rule_id: CKV_AWS_999
+      scope: null
+      symbol: null
+  honor_ignore_files: true
+  mcp-resource-management:
+    enable_health_checks: true
+    enable_resource_logging: true
+    health_check_interval_seconds: 60
+    log_resource_operations: false
+    max_concurrent_scans: 3
+    max_concurrent_scans_per_session: 2
+    max_concurrent_tasks: 20
+    max_directory_size_mb: 1000
+    max_message_size_bytes: 10485760
+    max_path_length: 4096
+    memory_critical_threshold_mb: 2048
+    memory_warning_threshold_mb: 1024
+    operation_timeout_seconds: 180
+    scan_timeout_seconds: 1800
+    shutdown_timeout_seconds: 30
+    task_count_warning_threshold: 15
+    thread_pool_max_workers: 4
+  output_formats: []
+  precommit:
+    add_scanners: []
+    only_scanners: []
+  project_name: snapshot-fixture
+  reporters:
+    asff:
+      enabled: false
+      extension: asff.json
+      name: asff
+      options:
+        account_id: null
+        aws_region: null
+        findings_scope: null
+        scan_root: null
+    csv:
+      enabled: true
+      extension: csv
+      name: csv
+      options: {}
+    cyclonedx:
+      enabled: true
+      extension: cdx.json
+      name: cyclonedx
+      options: {}
+    flat-json:
+      enabled: true
+      extension: flat.json
+      name: flat-json
+      options:
+        include_metadata: true
+        include_scanner_metrics: true
+        include_summary_metrics: true
+    github-ghas:
+      enabled: true
+      extension: ghas.sarif
+      name: github-ghas
+      options:
+        emit_automation_details: false
+        exclude_suppressed: true
+    gitlab-cyclonedx:
+      enabled: true
+      extension: gl-dependency-scanning-report.cdx.json
+      name: gitlab-cyclonedx
+      options:
+        category: production
+        input_file_path_override: null
+        language_override: null
+        package_manager_override: null
+    gitlab-sast:
+      enabled: true
+      extension: gl-sast-report.json
+      name: gitlab-sast
+      options:
+        exclude_suppressed: false
+    html:
+      enabled: true
+      extension: html
+      name: html
+      options: {}
+    junitxml:
+      enabled: true
+      extension: junit.xml
+      name: junitxml
+      options:
+        respect_severity_threshold: true
+    markdown:
+      enabled: true
+      extension: summary.md
+      name: markdown
+      options:
+        compact: false
+        include_detailed_findings: true
+        include_findings_table: false
+        include_summary: true
+        max_detailed_findings: 20
+        top_hotspots_limit: 10
+        use_collapsible_details: true
+    ocsf:
+      enabled: true
+      extension: ocsf.json
+      name: ocsf
+      options: {}
+    sarif:
+      enabled: true
+      extension: sarif
+      name: sarif
+      options: {}
+    spdx:
+      enabled: false
+      extension: spdx.json
+      name: spdx
+      options: {}
+    text:
+      enabled: true
+      extension: summary.txt
+      name: text
+      options:
+        include_detailed_findings: false
+        include_findings_table: false
+        include_summary: true
+        max_detailed_findings: 20
+        top_hotspots_limit: 20
+    unused-suppressions:
+      enabled: true
+      extension: unused-suppressions.json
+      name: unused-suppressions
+      options:
+        output_format: both
+    yaml:
+      enabled: false
+      extension: yaml
+      name: yaml
+      options: {}
+  sandbox:
+    env_scanners: []
+    environment:
+    - ALL_PROXY
+    - HTTPS_PROXY
+    - HTTP_PROXY
+    - NO_PROXY
+    - all_proxy
+    - http_proxy
+    - https_proxy
+    - no_proxy
+    - SSL_CERT_FILE
+    - REQUESTS_CA_BUNDLE
+    - CURL_CA_BUNDLE
+    - NODE_EXTRA_CA_CERTS
+    - SSL_CERT_DIR
+    extra_read_paths: []
+    mode: 'off'
+    network_scanners: null
+    read_path_scanners: []
+  scanners:
+    actionlint:
+      enabled: true
+      name: actionlint
+      options:
+        config_file: null
+        offline: false
+        pyflakes: null
+        scan_timeout: 1800
+        severity_threshold: null
+        shellcheck: null
+    bandit:
+      enabled: true
+      name: bandit
+      options:
+        additional_formats: []
+        confidence_level: all
+        config_file: null
+        excluded_paths: []
+        ignore_nosec: false
+        install_timeout: 300
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.7.8,<2.0.0'
+    cdk-nag:
+      enabled: true
+      name: cdk-nag
+      options:
+        include_compliant_checks: false
+        nag_packs:
+          AwsSolutionsChecks: true
+          HIPAASecurityChecks: false
+          NIST80053R4Checks: false
+          NIST80053R5Checks: false
+          PCIDSS321Checks: false
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    cfn-guard:
+      enabled: true
+      name: cfn-guard
+      options:
+        offline: false
+        rule_sets:
+        - wa-Security-Pillar
+        rules_paths: []
+        scan_timeout: 1800
+        severity_threshold: null
+    cfn-lint:
+      enabled: true
+      name: cfn-lint
+      options:
+        config_file: null
+        honor_inline_ignores: false
+        ignore_checks: []
+        include_checks: []
+        install_timeout: 300
+        offline: false
+        regions: []
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.43.3,<2.0.0'
+    cfn-nag:
+      enabled: true
+      name: cfn-nag
+      options:
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    checkov:
+      enabled: true
+      name: checkov
+      options:
+        additional_formats:
+        - cyclonedx_json
+        config_file: null
+        frameworks:
+        - all
+        install_timeout: 300
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+        skip_ash_output_dir: true
+        skip_frameworks: []
+        skip_path: []
+        tool_version: null
+    detect-secrets:
+      enabled: true
+      name: detect-secrets
+      options:
+        baseline_file: null
+        max_worker_output_mib: 256
+        offline: false
+        scan_settings:
+          filters_used: []
+          generated_at: null
+          plugins_used: []
+          results: {}
+          version: null
+        scan_timeout: 1800
+        severity_threshold: null
+        skip_generated_lockfiles: true
+    gitleaks:
+      enabled: true
+      name: gitleaks
+      options:
+        baseline_path: null
+        config_file: null
+        honor_inline_ignores: false
+        max_target_megabytes: null
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    grype:
+      enabled: true
+      name: grype
+      options:
+        config_file: null
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    mcp-config:
+      enabled: true
+      name: mcp-config
+      options:
+        allowed_command_prefixes: []
+        flag_env_secrets: true
+        forbid_auto_approval: true
+        forbid_privilege_escalation: true
+        forbid_unpinned_runners: true
+        offline: false
+        remote_url_prefixes: []
+        require_local: false
+        scan_timeout: 1800
+        severity_threshold: null
+    npm-audit:
+      enabled: true
+      name: npm-audit
+      options:
+        offline: false
+        scan_timeout: 1800
+        severity_threshold: null
+    opengrep:
+      enabled: true
+      name: opengrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        metrics: auto
+        offline: false
+        patterns: []
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: null
+        sha256: {}
+        version: v2.0.0
+    semgrep:
+      enabled: true
+      name: semgrep
+      options:
+        config: p/ci
+        exclude:
+        - '*-converted.py'
+        - '*_report_result.txt'
+        exclude_rule: []
+        install_timeout: 300
+        metrics: auto
+        offline: false
+        scan_timeout: 1800
+        severity: []
+        severity_threshold: null
+        tool_version: null
+    syft:
+      enabled: true
+      name: syft
+      options:
+        additional_outputs:
+        - syft-table
+        config_file: null
+        exclude: []
+        offline: false
+        scan_timeout: 1800
+        sdist_harvest:
+          cache_dir: null
+          ecosystems:
+          - cargo
+          - gomod
+          - npm
+          enabled: true
+          lockfiles:
+          - uv.lock
+          max_sdist_mb: 100
+        severity_threshold: null
+    trivy:
+      enabled: true
+      name: trivy
+      options:
+        config_file: null
+        disable_telemetry: true
+        ignore_file: null
+        ignore_unfixed: false
+        license_full: false
+        offline: false
+        scan_timeout: 1800
+        scanners:
+        - vuln
+        secret_config_file: null
+        severity_threshold: null
+    zizmor:
+      enabled: true
+      name: zizmor
+      options:
+        config_file: null
+        honor_inline_ignores: false
+        install_timeout: 300
+        offline: false
+        online_audits: false
+        persona: regular
+        scan_timeout: 1800
+        severity_threshold: null
+        tool_version: '>=1.29.0,<2.0.0'
+  workspace:
+    max_parallel_projects: null
+    project_timeout: null
+converter_results: {}
+cyclonedx:
+  $schema: null
+  annotations: null
+  bomFormat: CycloneDX
+  components:
+  - author: null
+    authors: null
+    bom-ref: pkg:pypi/requests@2.19.1
+    components: null
+    copyright: null
+    cpe: null
+    cryptoProperties: null
+    data: null
+    description: null
+    evidence: null
+    externalReferences: null
+    group: null
+    hashes: null
+    licenses:
+    - license:
+        acknowledgement: null
+        bom-ref: null
+        id: Apache-2.0
+        licensing: null
+        name: null
+        properties: null
+        text: null
+        url: null
+    manufacturer: null
+    mime-type: null
+    modelCard: null
+    modified: null
+    name: requests
+    omniborId: null
+    pedigree: null
+    properties:
+    - name: syft:package:language
+      value: python
+    - name: syft:location:0:path
+      value: /requirements.txt
+    publisher: null
+    purl: pkg:pypi/requests@2.19.1
+    releaseNotes: null
+    scope: null
+    signature: null
+    supplier: null
+    swhid: null
+    swid: null
+    tags: null
+    type: library
+    version: 2.19.1
+  - author: null
+    authors: null
+    bom-ref: pkg:docker/python@3.12-slim
+    components: null
+    copyright: null
+    cpe: null
+    cryptoProperties: null
+    data: null
+    description: null
+    evidence: null
+    externalReferences: null
+    group: null
+    hashes: null
+    licenses: null
+    manufacturer: null
+    mime-type: null
+    modelCard: null
+    modified: null
+    name: python
+    omniborId: null
+    pedigree: null
+    properties:
+    - name: syft:location:0:path
+      value: /Dockerfile
+    publisher: null
+    purl: pkg:docker/python@3.12-slim
+    releaseNotes: null
+    scope: null
+    signature: null
+    supplier: null
+    swhid: null
+    swid: null
+    tags: null
+    type: container
+    version: 3.12-slim
+  compositions: null
+  declarations: null
+  definitions: null
+  dependencies: null
+  externalReferences: null
+  formulation: null
+  metadata:
+    authors: null
+    component:
+      author: null
+      authors: null
+      bom-ref: snapshot-fixture
+      components: null
+      copyright: null
+      cpe: null
+      cryptoProperties: null
+      data: null
+      description: null
+      evidence: null
+      externalReferences: null
+      group: null
+      hashes: null
+      licenses: null
+      manufacturer: null
+      mime-type: null
+      modelCard: null
+      modified: null
+      name: snapshot-fixture
+      omniborId: null
+      pedigree: null
+      properties: null
+      publisher: null
+      purl: null
+      releaseNotes: null
+      scope: null
+      signature: null
+      supplier: null
+      swhid: null
+      swid: null
+      tags: null
+      type: file
+      version: null
+    licenses: null
+    lifecycles: null
+    manufacture: null
+    manufacturer: null
+    properties: null
+    supplier: null
+    timestamp: '2026-01-15T12:00:00Z'
+    tools:
+      components:
+      - author: anchore
+        authors: null
+        bom-ref: null
+        components: null
+        copyright: null
+        cpe: null
+        cryptoProperties: null
+        data: null
+        description: null
+        evidence: null
+        externalReferences: null
+        group: null
+        hashes: null
+        licenses: null
+        manufacturer: null
+        mime-type: null
+        modelCard: null
+        modified: null
+        name: syft
+        omniborId: null
+        pedigree: null
+        properties: null
+        publisher: null
+        purl: null
+        releaseNotes: null
+        scope: null
+        signature: null
+        supplier: null
+        swhid: null
+        swid: null
+        tags: null
+        type: application
+        version: 1.33.0
+      services: null
+  properties: null
+  serialNumber: urn:uuid:<UUID>
+  services: null
+  signature: null
+  specVersion: '1.6'
+  version: 1
+  vulnerabilities: null
+description: Aggregated security scan results
+metadata:
+  description: Automated Security Helper Aggregated Report Post-processor
+  execution_discrepancy_report: {}
+  expected_scanners: []
+  generated_at: '2026-01-15T12:00:00+00:00'
+  ignore_file_exclusions: null
+  inputs_not_scanned: null
+  plugin_load_errors: {}
+  project_name: ASH
+  report_id: ASH-20260115120000-000000000001
+  requested_scanners_not_run: null
+  shard: null
+  summary_stats:
+    actionable: 6
+    duration: 0.0
+    end: null
+    error: 1
+    failed: 3
+    missing: 1
+    passed: 3
+    severity_counts:
+      critical: 1
+      high: 2
+      info: 1
+      low: 3
+      medium: 3
+      suppressed: 1
+    skipped: 1
+    start: null
+    total: 10
+  support_notices:
+  - behavior: continues
+    dimension: cpu
+    docs: how-to/supported-configurations.md#host-cpu-below-polars-runtime
+    facts:
+      arch: amd64
+      cpu_level: compat-only
+      polars_runtime: runtime-32
+    found: avx2, bmi2 and fma are missing (polars-runtime-32 1.44.2).
+    id: host.cpu.below-polars-runtime
+    level: unsupported
+    message: This x86-64 processor lacks instructions the installed polars runtime
+      is built for, and polars warns that running on it will likely crash.
+    paths:
+    - docs: how-to/supported-configurations.md#polars-compat-runtime
+      group: this-machine
+      id: polars-compat-runtime
+      kind: same-os
+      summary: Add polars' compatibility runtime (its rtcompat extra) to ASH's environment,
+        at the polars version ASH uses.
+    - docs: how-to/supported-configurations.md#arm64-host
+      group: elsewhere
+      id: arm64-host
+      kind: other-host
+      summary: 'Run ASH on an arm64 machine: Linux on arm64 or a Mac with Apple silicon.'
+    - docs: how-to/supported-configurations.md#ci-runner
+      group: elsewhere
+      id: ci-runner
+      kind: ci-runner
+      summary: Run the scan in CI on a hosted runner; ASH's reusable GitHub workflow
+        runs on ubuntu-latest by default.
+    polyfill: null
+    raised: start
+    scope: ash
+  - behavior: continues
+    dimension: sandbox
+    docs: how-to/supported-configurations.md#host-sandbox-landlock-below-6
+    facts:
+      sandbox_backend: landlock
+      sandbox_loss: landlock-below-6
+      sandbox_mode: auto
+    found: Landlock ABI 5.
+    id: host.sandbox.landlock-below-6
+    level: degraded
+    message: Abstract Unix sockets and signals to processes outside the sandbox are
+      not restricted, because the kernel's Landlock ABI is below 6.
+    paths:
+    - docs: how-to/supported-configurations.md#newer-kernel-landlock
+      group: this-machine
+      id: newer-kernel-landlock
+      kind: same-os
+      summary: Use a Linux kernel whose Landlock ABI is 6 or later, or the bwrap backend.
+    polyfill: null
+    raised: decision
+    scope: ash
+  - behavior: continues
+    dimension: tool sandbox
+    docs: how-to/supported-configurations.md#scanner-guarddog-sandbox-replaced
+    facts:
+      tool_sandbox: replaced
+    found: null
+    id: scanner.guarddog.sandbox-replaced
+    level: polyfilled
+    message: GuardDog runs inside ASH's sandbox-exec confinement instead of its own
+      kernel sandbox.
+    paths: []
+    polyfill: guarddog-ash-sandbox
+    raised: decision
+    scope: guarddog
+  tool_version: <ASH_VERSION>
+  validation_summary: {}
+name: ASH Scan 2026-01-15T12:00:00
+sarif:
+  $schema: https://json.schemastore.org/sarif-2.1.0.json
+  inlineExternalProperties: []
+  properties:
+    tags: []
+  runs:
+  - addresses: []
+    artifacts: null
+    automationDetails: null
+    baselineGuid: null
+    columnKind: null
+    conversion: null
+    defaultEncoding: null
+    defaultSourceLanguage: null
+    externalPropertyFileReferences: null
+    graphs: []
+    invocations: []
+    language: en-US
+    logicalLocations: []
+    newlineSequences:
+    - "\r\n"
+    - '
+
+      '
+    originalUriBaseIds: null
+    policies: []
+    properties:
+      ash_occurrence_context_version: 1
+      tags: []
+    redactionTokens: []
+    results:
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: app/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 9
+            message: null
+            properties: null
+            snippet:
+              binary: null
+              properties: null
+              rendered: null
+              text: '    return subprocess.run(f"pg_dump orders --where id={customer_id}",
+                shell=True)'
+            sourceLanguage: null
+            startColumn: null
+            startLine: 9
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: subprocess call with shell=True identified, security issue.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: bandit
+          message:
+            state: resolved
+            text: subprocess call with shell=True identified, security issue.
+          resolved_rule:
+            id: B602
+          rule_index: 0
+          version: 1
+        issue_confidence: HIGH
+        issue_severity: HIGH
+        scanner_details:
+          tool_invocation:
+            duration: 1.25
+            end_time: '2026-01-15T12:00:01.250000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: bandit
+          tool_version: 1.8.6
+        scanner_name: bandit
+        scanner_version: 1.8.6
+        tags:
+        - bandit
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B602
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: note
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: app/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 5
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 5
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: 'Possible hardcoded password: ''hu**********************t'''
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: bandit
+          message:
+            state: resolved
+            text: 'Possible hardcoded password: ''hu**********************t'''
+          resolved_rule:
+            id: B105
+          rule_index: 1
+          version: 1
+        issue_confidence: MEDIUM
+        issue_severity: LOW
+        scanner_details:
+          tool_invocation:
+            duration: 1.25
+            end_time: '2026-01-15T12:00:01.250000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:00+00:00'
+          tool_name: bandit
+          tool_version: 1.8.6
+        scanner_name: bandit
+        scanner_version: 1.8.6
+        tags:
+        - bandit
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: B105
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: infra/main.tf
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 9
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 6
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: S3 Bucket has an ACL defined which allows public READ access.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: S3 Bucket has an ACL defined which allows public READ access.
+          resolved_rule:
+            id: CKV_AWS_20
+          rule_index: 0
+          version: 1
+        issue_severity: HIGH
+        scanner_details:
+          tool_invocation:
+            duration: 7.5
+            end_time: '2026-01-15T12:00:08.750000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:01.250000+00:00'
+          tool_name: checkov
+          tool_version: 3.2.469
+        scanner_name: checkov
+        scanner_version: 3.2.469
+        tags:
+        - checkov
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_AWS_20
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: infra/main.tf
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 4
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 2
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Ensure the S3 bucket has access logging enabled
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure the S3 bucket has access logging enabled
+          resolved_rule:
+            id: CKV_AWS_18
+          rule_index: 1
+          version: 1
+        issue_severity: MEDIUM
+        scanner_details:
+          tool_invocation:
+            duration: 7.5
+            end_time: '2026-01-15T12:00:08.750000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:01.250000+00:00'
+          tool_name: checkov
+          tool_version: 3.2.469
+        scanner_name: checkov
+        scanner_version: 3.2.469
+        tags:
+        - checkov
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_AWS_18
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: Dockerfile
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 5
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 5
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Ensure the last USER is not root
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure the last USER is not root
+          resolved_rule:
+            id: CKV_DOCKER_8
+          rule_index: 2
+          version: 1
+        issue_severity: MEDIUM
+        scanner_details:
+          tool_invocation:
+            duration: 7.5
+            end_time: '2026-01-15T12:00:08.750000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:01.250000+00:00'
+          tool_name: checkov
+          tool_version: 3.2.469
+        scanner_name: checkov
+        scanner_version: 3.2.469
+        tags:
+        - checkov
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_DOCKER_8
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: note
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: Dockerfile
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 6
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 1
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Ensure that HEALTHCHECK instructions have been added to container images
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: checkov
+          message:
+            state: resolved
+            text: Ensure that HEALTHCHECK instructions have been added to container
+              images
+          resolved_rule:
+            id: CKV_DOCKER_2
+          rule_index: 3
+          version: 1
+        issue_severity: LOW
+        scanner_details:
+          tool_invocation:
+            duration: 7.5
+            end_time: '2026-01-15T12:00:08.750000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:01.250000+00:00'
+          tool_name: checkov
+          tool_version: 3.2.469
+        scanner_name: checkov
+        scanner_version: 3.2.469
+        tags:
+        - checkov
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CKV_DOCKER_2
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: note
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: Dockerfile
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 5
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 5
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: The last user in the container is 'root'. Switch back to an unprivileged
+          user.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: semgrep
+          message:
+            state: resolved
+            text: The last user in the container is 'root'. Switch back to an unprivileged
+              user.
+          resolved_rule:
+            id: dockerfile.security.last-user-is-root.last-user-is-root
+          rule_index: 0
+          version: 1
+        issue_severity: LOW
+        scanner_details:
+          tool_invocation:
+            duration: 4.0
+            end_time: '2026-01-15T12:00:12.750000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:08.750000+00:00'
+          tool_name: semgrep
+          tool_version: 1.140.0
+        scanner_name: semgrep
+        scanner_version: 1.140.0
+        tags:
+        - semgrep
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: dockerfile.security.last-user-is-root.last-user-is-root
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: none
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: app/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 9
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 9
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Command string built with an f-string; prefer an argument list.
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: semgrep
+          message:
+            state: resolved
+            text: Command string built with an f-string; prefer an argument list.
+          resolved_rule:
+            id: python.lang.best-practice.unpinned-shell-command
+          rule_index: 1
+          version: 1
+        issue_severity: INFO
+        scanner_details:
+          tool_invocation:
+            duration: 4.0
+            end_time: '2026-01-15T12:00:12.750000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:08.750000+00:00'
+          tool_name: semgrep
+          tool_version: 1.140.0
+        scanner_name: semgrep
+        scanner_version: 1.140.0
+        tags:
+        - semgrep
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: python.lang.best-practice.unpinned-shell-command
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: app/app.py
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 5
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 5
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: Secret of type Secret Keyword detected in file app/app.py at line 5
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: detect-secrets
+          message:
+            state: resolved
+            text: Secret of type Secret Keyword detected in file app/app.py at line
+              5
+          resolved_rule:
+            id: SECRET-SECRET-KEYWORD
+          rule_index: 0
+          version: 1
+        issue_severity: HIGH
+        scanner_details:
+          tool_invocation:
+            duration: 0.5
+            end_time: '2026-01-15T12:00:13.250000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:12.750000+00:00'
+          tool_name: detect-secrets
+          tool_version: 1.5.0
+        scanner_name: detect-secrets
+        scanner_version: 1.5.0
+        tags:
+        - detect-secrets
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: SECRET-SECRET-KEYWORD
+      ruleIndex: -1
+      stacks: []
+      suppressions:
+      - guid: null
+        justification: '(ASH) Suppressing finding for rule ''SECRET-SECRET-KEYWORD''
+          in ''app/app.py'' with reason: Fixture placeholder credential, not a real
+          secret'
+        kind: inSource
+        location: null
+        properties:
+          ashApplied: true
+          tags: []
+        state: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: error
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 1
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 1
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was found
+          at requirements.txt
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: grype
+          message:
+            state: resolved
+            text: A critical vulnerability in requests 2.19.1 (fixed in 2.20.0) was
+              found at requirements.txt
+          resolved_rule:
+            id: CVE-2018-18074-requests
+          rule_index: 0
+          version: 1
+        issue_severity: CRITICAL
+        scanner_details:
+          tool_invocation:
+            duration: 3.0
+            end_time: '2026-01-15T12:00:16.250000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:13.250000+00:00'
+          tool_name: grype
+          tool_version: 0.100.0
+        scanner_name: grype
+        scanner_version: 0.100.0
+        tags:
+        - grype
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2018-18074-requests
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    - analysisTarget: null
+      attachments: []
+      baselineState: null
+      codeFlows: []
+      correlationGuid: null
+      fingerprints: null
+      fixes: []
+      graphTraversals: []
+      graphs: []
+      guid: null
+      hostedViewerUri: null
+      kind: fail
+      level: warning
+      locations:
+      - annotations: []
+        id: -1
+        logicalLocations: []
+        message: null
+        physicalLocation:
+          address: null
+          artifactLocation:
+            description: null
+            index: -1
+            properties: null
+            uri: requirements.txt
+            uriBaseId: null
+          contextRegion: null
+          properties: null
+          region:
+            byteLength: null
+            byteOffset: -1
+            charLength: null
+            charOffset: -1
+            endColumn: null
+            endLine: 1
+            message: null
+            properties: null
+            snippet: null
+            sourceLanguage: null
+            startColumn: null
+            startLine: 1
+        properties: null
+        relationships: []
+      message:
+        arguments: []
+        id: null
+        markdown: null
+        properties: null
+        text: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was found
+          at requirements.txt
+      occurrenceCount: null
+      partialFingerprints: null
+      properties:
+        ash_occurrence_context:
+          component:
+            name: grype
+          message:
+            state: resolved
+            text: A medium vulnerability in requests 2.19.1 (fixed in 2.31.0) was
+              found at requirements.txt
+          resolved_rule:
+            id: CVE-2023-32681-requests
+          rule_index: 1
+          version: 1
+        issue_severity: MEDIUM
+        scanner_details:
+          tool_invocation:
+            duration: 3.0
+            end_time: '2026-01-15T12:00:16.250000+00:00'
+            exit_code: 0
+            start_time: '2026-01-15T12:00:13.250000+00:00'
+          tool_name: grype
+          tool_version: 0.100.0
+        scanner_name: grype
+        scanner_version: 0.100.0
+        tags:
+        - grype
+      provenance: null
+      rank: -1.0
+      relatedLocations: []
+      rule: null
+      ruleId: CVE-2023-32681-requests
+      ruleIndex: -1
+      stacks: []
+      suppressions: null
+      taxa: []
+      webRequest: null
+      webResponse: null
+      workItemUris: null
+    runAggregates: []
+    specialLocations: null
+    taxonomies: []
+    threadFlowLocations: []
+    tool:
+      driver:
+        associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: https://github.com/awslabs/automated-security-helper
+        fullDescription: null
+        fullName: awslabs/automated-security-helper
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://awslabs.github.io/automated-security-helper
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: AWS Labs - Automated Security Helper
+        notifications: []
+        organization: Amazon Web Services
+        product: null
+        productSuite: null
+        properties: null
+        releaseDateUtc: null
+        rules: []
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: <ASH_VERSION>
+      extensions:
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://bandit.readthedocs.io/
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: bandit
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 1.25
+              end_time: '2026-01-15T12:00:01.250000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:00+00:00'
+            tool_name: bandit
+            tool_version: 1.8.6
+          tags:
+          - bandit
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html
+          id: B602
+          messageStrings: null
+          name: subprocess_popen_with_shell_equals_true
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: subprocess call with shell=True identified, security issue.
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: https://bandit.readthedocs.io/en/latest/plugins/b105_hardcoded_password_string.html
+          id: B105
+          messageStrings: null
+          name: hardcoded_password_string
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Possible hardcoded password.
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 1.8.6
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://checkov.io/
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: checkov
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 7.5
+              end_time: '2026-01-15T12:00:08.750000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:01.250000+00:00'
+            tool_name: checkov
+            tool_version: 3.2.469
+          tags:
+          - checkov
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-1-acl-read-permissions-everyone
+          id: CKV_AWS_20
+          messageStrings: null
+          name: S3 Bucket has an ACL defined which allows public READ access.
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: S3 Bucket has an ACL defined which allows public READ access.
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: https://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-13-enable-logging
+          id: CKV_AWS_18
+          messageStrings: null
+          name: Ensure the S3 bucket has access logging enabled
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Ensure the S3 bucket has access logging enabled
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: CKV_DOCKER_8
+          messageStrings: null
+          name: Ensure the last USER is not root
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Ensure the last USER is not root
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: CKV_DOCKER_2
+          messageStrings: null
+          name: Ensure that HEALTHCHECK instructions have been added to container
+            images
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Ensure that HEALTHCHECK instructions have been added to container
+              images
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 3.2.469
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: null
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: semgrep
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 4.0
+              end_time: '2026-01-15T12:00:12.750000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:08.750000+00:00'
+            tool_name: semgrep
+            tool_version: 1.140.0
+          tags:
+          - semgrep
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: dockerfile.security.last-user-is-root.last-user-is-root
+          messageStrings: null
+          name: dockerfile.security.last-user-is-root.last-user-is-root
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: The last user in the container is 'root'.
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: python.lang.best-practice.unpinned-shell-command
+          messageStrings: null
+          name: python.lang.best-practice.unpinned-shell-command
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Command string built with an f-string.
+        semanticVersion: 1.140.0
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 1.140.0
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: null
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: detect-secrets
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 0.5
+              end_time: '2026-01-15T12:00:13.250000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:12.750000+00:00'
+            tool_name: detect-secrets
+            tool_version: 1.5.0
+          tags:
+          - detect-secrets
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: null
+          id: SECRET-SECRET-KEYWORD
+          messageStrings: null
+          name: Secret Keyword
+          properties: null
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: Secret Keyword
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 1.5.0
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: https://github.com/anchore/grype
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: grype
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 3.0
+              end_time: '2026-01-15T12:00:16.250000+00:00'
+              exit_code: 0
+              start_time: '2026-01-15T12:00:13.250000+00:00'
+            tool_name: grype
+            tool_version: 0.100.0
+          tags:
+          - grype
+        releaseDateUtc: null
+        rules:
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: https://github.com/advisories/GHSA-x84v-xcm2-53pg
+          id: CVE-2018-18074-requests
+          messageStrings: null
+          name: PythonMatcherExactDirectMatch
+          properties:
+            security-severity: '9.8'
+            tags: []
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: CVE-2018-18074 critical vulnerability for requests package
+        - defaultConfiguration: null
+          deprecatedGuids: null
+          deprecatedIds: null
+          deprecatedNames: null
+          fullDescription: null
+          guid: null
+          help: null
+          helpUri: https://github.com/advisories/GHSA-j8r2-6x86-q33q
+          id: CVE-2023-32681-requests
+          messageStrings: null
+          name: PythonMatcherExactDirectMatch
+          properties:
+            security-severity: '6.1'
+            tags: []
+          relationships: []
+          shortDescription:
+            markdown: null
+            properties: null
+            text: CVE-2023-32681 medium vulnerability for requests package
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 0.100.0
+      - associatedComponent: null
+        contents:
+        - localizedData
+        - nonLocalizedData
+        dottedQuadFileVersion: null
+        downloadUri: null
+        fullDescription: null
+        fullName: null
+        globalMessageStrings: null
+        guid: null
+        informationUri: null
+        isComprehensive: false
+        language: en-US
+        localizedDataSemanticVersion: null
+        locations: []
+        minimumRequiredLocalizedDataSemanticVersion: null
+        name: cfn-nag
+        notifications: []
+        organization: null
+        product: null
+        productSuite: null
+        properties:
+          scanner_details:
+            tool_invocation:
+              duration: 0.25
+              end_time: '2026-01-15T12:00:18.500000+00:00'
+              exit_code: 1
+              start_time: '2026-01-15T12:00:18.250000+00:00'
+            tool_name: cfn-nag
+            tool_version: 0.8.10
+          tags:
+          - cfn-nag
+        releaseDateUtc: null
+        rules: []
+        semanticVersion: null
+        shortDescription: null
+        supportedTaxonomies: []
+        taxa: []
+        translationMetadata: null
+        version: 0.8.10
+      properties: null
+    translations: []
+    versionControlProvenance: []
+    webRequests: []
+    webResponses: []
+  version: 2.1.0
+scanner_results:
+  bandit:
+    actionable_finding_count: 1
+    dependencies_satisfied: true
+    duration: 1.25
+    excluded: false
+    exit_code: 0
+    finding_count: 2
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 1
+      info: 0
+      low: 1
+      medium: 0
+      suppressed: 0
+    skipped_reason: null
+    status: FAILED
+    suppressed_finding_count: 0
+  cdk-nag:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: null
+    excluded: true
+    exit_code: null
+    finding_count: 0
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    skipped_reason: left out of this run
+    status: SKIPPED
+    suppressed_finding_count: 0
+  cfn-nag:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.25
+    excluded: false
+    exit_code: 1
+    finding_count: 0
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    skipped_reason: null
+    status: ERROR
+    suppressed_finding_count: 0
+  checkov:
+    actionable_finding_count: 3
+    dependencies_satisfied: true
+    duration: 7.5
+    excluded: false
+    exit_code: 0
+    finding_count: 4
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 1
+      info: 0
+      low: 1
+      medium: 2
+      suppressed: 0
+    skipped_reason: null
+    status: FAILED
+    suppressed_finding_count: 0
+  detect-secrets:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 0.5
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 1
+    skipped_reason: null
+    status: PASSED
+    suppressed_finding_count: 1
+  grype:
+    actionable_finding_count: 2
+    dependencies_satisfied: true
+    duration: 3.0
+    excluded: false
+    exit_code: 0
+    finding_count: 2
+    missing_reason: null
+    severity_counts:
+      critical: 1
+      high: 0
+      info: 0
+      low: 0
+      medium: 1
+      suppressed: 0
+    skipped_reason: null
+    status: FAILED
+    suppressed_finding_count: 0
+  npm-audit:
+    actionable_finding_count: 0
+    dependencies_satisfied: false
+    duration: null
+    excluded: false
+    exit_code: null
+    finding_count: 0
+    missing_reason: its dependencies were not available; no reason was recorded, and
+      ash.log has the scanner's own message
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    skipped_reason: null
+    status: MISSING
+    suppressed_finding_count: 0
+  semgrep:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 4.0
+    excluded: false
+    exit_code: 0
+    finding_count: 2
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 1
+      low: 1
+      medium: 0
+      suppressed: 0
+    skipped_reason: null
+    status: PASSED
+    suppressed_finding_count: 0
+  syft:
+    actionable_finding_count: 0
+    dependencies_satisfied: true
+    duration: 2.0
+    excluded: false
+    exit_code: 0
+    finding_count: 0
+    missing_reason: null
+    severity_counts:
+      critical: 0
+      high: 0
+      info: 0
+      low: 0
+      medium: 0
+      suppressed: 0
+    skipped_reason: null
+    status: PASSED
+    suppressed_finding_count: 0
+secret_value_shapes:
+- length: 25
+  prefix: hu
+  spans_whitespace: false
+  suffix: t
+used_suppressions:
+- app/app.py|SECRET-SECRET-KEYWORD|5|5
+validation_checkpoints: []
+workspace: null

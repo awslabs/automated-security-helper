@@ -872,6 +872,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 provisionable=(),
                 note="a PyPI package run through uv; platform support is the package's and was not read here",
             ),
+            image=opsf.ImageFacet(route=opsf.ImageRoute.DEPENDENCIES_INSTALL),
             severity=opsf.SeverityFacet(
                 severity_class=opsf.SeverityClass.DERIVED,
                 note="computed from the rule-letter table",

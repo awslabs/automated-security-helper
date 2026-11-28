@@ -758,16 +758,16 @@ kept:
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/utils/tool_downloads.py
-  line_start: 397
-  line_end: 549
-  remeasured_at: c15148192f4
+  line_start: 448
+  line_end: 600
+  remeasured_at: 397513a37e7
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: API_KEY_OR_SECRET
   path: automated_security_helper/utils/tool_downloads.py
-  line_start: 1033
-  line_end: 1079
-  remeasured_at: f5ef4f50231
+  line_start: 1128
+  line_end: 1174
+  remeasured_at: 397513a37e7
   kept_because: module-level code; the Python grammar addresses class and function definitions only
 - config: .ash/.ash_alpha_plugins.yaml
   rule_id: B311

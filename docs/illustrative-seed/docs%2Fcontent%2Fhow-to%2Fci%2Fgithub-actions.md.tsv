@@ -1,0 +1,2 @@
+docs/content/how-to/ci/github-actions.md	runner=none: requires a pinned artifact from a trusted default-branch run
+docs/content/how-to/ci/github-actions.md	runner=none: installs a released ASH, which the runner cannot swap for the pull request's build

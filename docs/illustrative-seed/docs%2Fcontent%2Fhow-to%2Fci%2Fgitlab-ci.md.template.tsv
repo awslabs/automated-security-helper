@@ -1,0 +1,2 @@
+docs/content/how-to/ci/gitlab-ci.md.template	runner=none: installs uv and runs ASH through uvx from a git specification, which the runner cannot swap for the pull request's wheel
+docs/content/how-to/ci/gitlab-ci.md.template	runner=none: installs a released ASH, which the runner cannot swap for the pull request's wheel

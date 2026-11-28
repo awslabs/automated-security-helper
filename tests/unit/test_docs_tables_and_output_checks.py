@@ -520,6 +520,12 @@ CLEAN_DEFAULTS = """# Defaults
 |---|---|
 | [`bandit`](#bandit) | yes on Linux and macOS; yes on Windows |
 | `ferret-scan` | yes |
+
+<!-- doctest: options of=scanners -->
+| Scanner | Tier | Loads by default | On once loaded |
+|---|---|---|---|
+| [`bandit`](#bandit) | supported | yes | yes |
+| `ferret-scan` | alpha | no | yes |
 """
 
 DEFAULT_DEFECTS = [
@@ -598,6 +604,32 @@ DEFAULT_DEFECTS = [
         4,
     ),
     (
+        "a scanner said to be off once loaded that is on",
+        _table("of=scanners", "| Scanner | On once loaded |", "| `bandit` | no |"),
+        "'bandit' on once loaded says no, but its enabled default is `true`",
+        4,
+    ),
+    (
+        "a scanner said to load by default that does not",
+        _table(
+            "of=scanners", "| Scanner | Loads by default |", "| `ferret-scan` | yes |"
+        ),
+        "'ferret-scan' loads by default says yes, but its manifest's default_enabled is `false`",
+        4,
+    ),
+    (
+        "a scanner said not to load by default that does",
+        _table("of=scanners", "| Scanner | Loads by default |", "| `bandit` | no |"),
+        "'bandit' loads by default says no, but its manifest's default_enabled is `true`",
+        4,
+    ),
+    (
+        "a loads column for keys that are not scanners",
+        _table("of=reporters", "| Key | Loads by default |", "| `spdx` | yes |"),
+        "states whether each scanner's module loads by default, but of=reporters names no scanners section",
+        1,
+    ),
+    (
         "an enabled column for keys that are not plugins",
         _table("of=global_settings", "| Key | Enabled by default |", "| `mcp` | yes |"),
         "states whether each plugin is enabled, but of=global_settings names no plugin section",
@@ -619,6 +651,95 @@ def test_default_columns_pass_every_valid_form(tmp_path):
 def test_default_columns_can_fail(tmp_path, case, text, expected, line):
     page = _write(tmp_path, "docs/page.md", text)
     _assert_reports(dc.check_option_tables([page], tmp_path), expected, line)
+
+
+def _planted_scanner_models(without=(), extra=None):
+    """The real config models with the scanners' plugin classes changed: the plugins
+    named in ``without`` left out, as when the module that defines one did not import
+    (an optional extra that is not installed), and the ``{name: config class}`` of
+    ``extra`` added."""
+    import dataclasses
+
+    models = dc.load_config_models()
+    scanners = {
+        name: config_cls
+        for name, config_cls in models.plugin_configs["scanners"].items()
+        if name not in without
+    }
+    scanners.update(extra or {})
+    return dataclasses.replace(
+        models, plugin_configs={**models.plugin_configs, "scanners": scanners}
+    )
+
+
+def _loads_page(tmp_path, *rows):
+    """A page whose one scanners table has a Loads by default column and these rows."""
+    table = _table("of=scanners", "| Scanner | Loads by default |", *rows)
+    return _write(tmp_path, "docs/page.md", table)
+
+
+@pytest.mark.unit
+def test_a_loads_row_may_name_a_scanner_by_its_field_name(tmp_path):
+    """A row may name cdk-nag as cdk_nag, its section's field name: the enabled
+    column reads both through the one plugin. The loads column asked the manifests
+    for the row's text as written, found none for the field name, and reported a
+    correct row. It reads the manifest of the plugin the row names."""
+    section, problem = dc.options_section("scanners", dc.load_config_models())
+    assert problem is None
+    spec = section.keys["cdk-nag"]
+    assert section.keys["cdk_nag"] is spec
+    assert spec.plugin is not None, "cdk-nag's module did not import here"
+    page = _loads_page(tmp_path, "| `cdk_nag` | yes |")
+    assert dc.check_option_tables([page], tmp_path) == []
+    # Control: the row is compared with the manifest, not skipped.
+    page = _loads_page(tmp_path, "| `cdk_nag` | no |")
+    _assert_reports(
+        dc.check_option_tables([page], tmp_path),
+        "'cdk_nag' loads by default says no, but its manifest's default_enabled is "
+        "`true`",
+        4,
+    )
+
+
+@pytest.mark.unit
+def test_a_loads_row_for_a_key_no_plugin_backs_is_skipped(tmp_path, monkeypatch):
+    """A key of the scanners section that no plugin class stands behind has no
+    manifest to compare with, and the enabled column already skips it. Here the module
+    that defines cdk-nag did not import, so its field is still a key of the section
+    and no plugin backs it: the loads column skips the row too, where it reported
+    that no manifest is named for the text the row happens to use."""
+    planted = _planted_scanner_models(without={"cdk-nag"})
+    monkeypatch.setattr(dc, "load_config_models", lambda: planted)
+    section, problem = dc.options_section("scanners", planted)
+    assert problem is None
+    assert section.keys["cdk_nag"].plugin is None
+    page = _loads_page(tmp_path, "| `cdk_nag` | yes |")
+    assert dc.check_option_tables([page], tmp_path) == []
+
+
+@pytest.mark.unit
+def test_a_loads_row_for_a_plugin_with_no_manifest_says_so(tmp_path, monkeypatch):
+    """A scanner plugin with no manifest (one loaded from outside ASH) has no
+    default_enabled for a Loads cell to state, so a row for it is reported, by the
+    plugin's own name."""
+    from pydantic import create_model
+
+    from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+
+    acme = create_model(
+        "AcmeScanConfig", __base__=ScannerPluginConfigBase, name=(str, "acme-scan")
+    )
+    planted = _planted_scanner_models(extra={"acme-scan": acme})
+    monkeypatch.setattr(dc, "load_config_models", lambda: planted)
+    page = _loads_page(tmp_path, "| `acme-scan` | yes |")
+    findings = dc.check_option_tables([page], tmp_path)
+    assert len(findings) == 1, _messages(findings)
+    _assert_reports(
+        findings,
+        "'acme-scan' loads by default says yes, but no scanner manifest is named "
+        "acme-scan",
+        4,
+    )
 
 
 @pytest.mark.unit

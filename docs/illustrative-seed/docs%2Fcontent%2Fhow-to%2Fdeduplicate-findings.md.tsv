@@ -1,0 +1,2 @@
+docs/content/how-to/deduplicate-findings.md	needs two scanners that report the same finding, such as grype and trivy
+docs/content/how-to/deduplicate-findings.md	needs the output of an earlier scan with findings from two scanners

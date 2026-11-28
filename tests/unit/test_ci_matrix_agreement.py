@@ -54,13 +54,14 @@ people to edit the test rather than read it.
 
 from __future__ import annotations
 
-import itertools
 import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+
+from tests.utils.ci_matrix_loader import load_ci_matrix
 
 # The unit-test matrix is three jobs, one per runner pool, so each pool has its own
 # max-parallel cap. tests/unit/test_unit_test_shards.py holds the three to one another.
@@ -76,6 +77,14 @@ UNIFIED_CI = WORKFLOWS / "ash-unified-ci.yml"
 INSTALL_METHODS = WORKFLOWS / "ash-install-methods.yml"
 RUN_SCAN_TEST = ACTIONS / "run-scan-test" / "action.yml"
 RUN_UNIT_TESTS = ACTIONS / "run-unit-tests" / "action.yml"
+
+
+ci_matrix = load_ci_matrix()
+
+#: The event whose matrix is the static axes less the static excludes: the pull-request
+#: overlay is void on a manual run, and these tests read the full matrix (the note on the
+#: cover in ash-install-methods.yml).
+_STATIC_EVENT = "workflow_dispatch"
 
 # The two install-validation surfaces, as (label, workflow path, job key). Both are
 # checked by everything in TestInstallMethodRoutingIsClosed; a check that ran on only one
@@ -203,24 +212,16 @@ def _axes(job: dict[str, Any]) -> dict[str, list[Any]]:
 def _effective_matrix(job: dict[str, Any]) -> list[dict[str, Any]]:
     """The cells a job actually runs: axis product minus excludes, plus includes.
 
-    Same computation as ``tests/unit/test_oci_runner_ci_coverage.py``. An ``include``
-    entry that only adds keys to matching cells and one that defines a whole cell are not
-    distinguished, because no check here is a count -- over-counting an include would
-    only make an agreement test stricter, never looser.
+    The product and the excludes are the shared reader's, read for ``_STATIC_EVENT``.
+    Same computation as ``tests/unit/test_oci_runner_ci_coverage.py``: every ``include``
+    entry is then appended whole. An ``include`` entry that only adds keys to matching
+    cells and one that defines a whole cell are not distinguished, because no check here
+    is a count -- over-counting an include would only make an agreement test stricter,
+    never looser.
     """
     matrix = _matrix(job)
-    axes = _axes(job)
-    cells: list[dict[str, Any]] = []
-    if axes:
-        cells = [dict(zip(axes, combo)) for combo in itertools.product(*axes.values())]
-        for excluded in matrix.get("exclude") or []:
-            cells = [
-                cell
-                for cell in cells
-                if not all(cell.get(k) == v for k, v in excluded.items())
-            ]
-    cells.extend(matrix.get("include") or [])
-    return cells
+    legs = ci_matrix.axis_cells(matrix, _STATIC_EVENT)
+    return legs + list(matrix.get("include") or [])
 
 
 def _validator_steps(job: dict[str, Any]) -> list[dict[str, Any]]:

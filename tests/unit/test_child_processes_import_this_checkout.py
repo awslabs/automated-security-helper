@@ -232,6 +232,12 @@ ALLOWED: Dict[str, str] = {
     "tests/unit/assets/test_install_pinned_tool.py"
     "::TestUvToolPins.test_the_mode_prints_them_under_a_bare_interpreter"
     "::isolated-script#1@run": (_BARE_INTERPRETER),
+    "tests/unit/base/test_image_register.py::_load_by_path::code#1@run": (
+        "an isolated child (-I -B) that loads image_register.py by file path and "
+        "imports nothing from the package; the planted control, "
+        "test_the_probe_sees_a_planted_package_import, shows the probe sees a "
+        "package import when the module makes one"
+    ),
     "tests/unit/cli/mcp/test_mcp_resource_limits.py"
     "::_child_process_scans._ChildProcessScan.execute_scan::unread-code#1@run_command": (
         "the child is _child() or _slow_to_stop(), standard-library code that "
@@ -603,6 +609,23 @@ ALLOWED: Dict[str, str] = {
         "runs the license table's own version probe over a planted site; the "
         "probes import the standard library and the probed distribution only, "
         "never ASH"
+    ),
+    "tests/unit/docs/test_illustrative_ratchet.py"
+    "::_run_script::isolated-script#1@run": (
+        "-I -B children of scripts/docs_checks.py, run as write-seeds (refused "
+        "where the seeds exist) or as a command it rejects, and of "
+        "check-illustrative-ratchet.py; docs_checks.py imports ASH only inside "
+        "check functions neither command calls, and the ratchet script and the "
+        "trailer script it loads by path import the standard library alone"
+    ),
+    "tests/unit/test_alpha_extra_sync_gate.py"
+    "::TestTheCommittedStateIsClean.test_the_command_line_exits_zero_on_the_real_files"
+    "::isolated-script#1@run": (
+        "scripts/sync_alpha_extra.py runs under -I on the standard library alone "
+        "(test_the_script_needs_only_the_standard_library holds its imports to "
+        "it) and loads automated_security_helper/base/plugin_provisioning.py by "
+        "file path, a module that imports the standard library only; nothing "
+        "from the package is imported"
     ),
 }
 
