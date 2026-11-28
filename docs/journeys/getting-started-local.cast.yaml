@@ -4,8 +4,10 @@
 # docs/journeys/getting-started-local.journey.yaml that holds it by the block's `id`
 # and repeats none of its text, so the storyboard cannot drift from the tutorial. A
 # scene types its own command only from a short read-only list (`cat` and `ls`). The
-# install scene types a line of the README, named by `comment_from`, as a shell comment
-# that is never run.
+# install scene types a line of the README as a shell comment that is never run.
+# `comment_from: <file>#<anchor>` names it: the anchor is the line
+# `<a id="<anchor>"></a>` of the file, and the line is the first line of the first code
+# block after it.
 #
 # scripts/_cast.py reads this file. It refuses unknown keys, YAML anchors, aliases,
 # tags and merge keys, and a key given twice. It checks every caption against the copy
