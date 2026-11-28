@@ -806,7 +806,8 @@ def _env_problems(env):
 
 
 def test_the_environment_rule_and_its_vectors_equal_ashs_own(built):
-    assert _env_problems(built.block["env"]) == []
+    problems = _env_problems(built.block["env"])
+    assert problems == []
 
 
 @pytest.mark.parametrize(
