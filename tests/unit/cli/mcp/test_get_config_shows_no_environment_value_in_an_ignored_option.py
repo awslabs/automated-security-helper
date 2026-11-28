@@ -754,6 +754,23 @@ def test_a_key_that_resolves_to_nothing_is_shown_as_null(
     assert not _wrong(result, _scope(result), expected, _SERVER_TEXT), result
 
 
+@_BOTH_ROUTES
+def test_a_list_entry_that_resolves_to_nothing_is_shown_as_null_in_its_place(
+    tmp_path, monkeypatch, answer
+):
+    """A reference inside a list that resolves to nothing leaves None at its
+    entry, which carries no mark, so the marker shows the list with ``null`` in
+    that place and the entries beside it as written."""
+    monkeypatch.delenv(_BLANK_VAR, raising=False)
+    body = _section(
+        "findings_scope:\n  - literal-entry\n  - ${ASH_TEST_BLANK_SCOPE:}\n"
+    )
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    assert _scope(result) == _IGNORED + '["literal-entry", null]>', result
+
+
 def test_aws_region_read_from_the_environment_is_left_out_and_not_marked(
     tmp_path, monkeypatch
 ):

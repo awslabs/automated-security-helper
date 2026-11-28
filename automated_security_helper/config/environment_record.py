@@ -83,6 +83,7 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 from automated_security_helper.config.ash_config import (
@@ -153,6 +154,13 @@ class EnvironmentReference:
     length: Optional[int] = None
     #: Where in ``path`` the index of that list entry sits; set with ``length``.
     index_at: Optional[int] = None
+    #: For a relative path the load anchored at its file's directory and
+    #: normalized, so that the text holds neither ``resolved`` nor ``resolved``
+    #: after a path prefix (a ``..`` or ``./`` folded): that text, and the
+    #: directory it was anchored at, recorded at the anchoring
+    #: (``with_anchored_forms``). A view shows such a text as the directory and
+    #: the reference. None otherwise. Not compared.
+    anchored: Optional[Tuple[str, str]] = dataclass_field(default=None, compare=False)
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
@@ -514,6 +522,38 @@ def _anchored(text: str, reference: EnvironmentReference) -> bool:
     return prefix.endswith(("/", os.sep))
 
 
+def with_anchored_forms(
+    references: Sequence[EnvironmentReference], document: Any, base_dir: str
+) -> List[EnvironmentReference]:
+    """``references``, one file's, each with the text the anchoring made of its
+    value recorded (``EnvironmentReference.anchored``) where ``document``, that
+    file's own document after its relative paths were anchored at ``base_dir``,
+    holds a string at the reference's place that ``_anchored`` does not
+    recognize: the anchoring normalized it. Every other reference, keys
+    included, is returned as it is."""
+    found: List[EnvironmentReference] = []
+    for reference in references:
+        node = _node_at(document, reference.path)
+        if reference.key or not isinstance(node, str) or _anchored(node, reference):
+            found.append(reference)
+        else:
+            found.append(replace(reference, anchored=(str(node), base_dir)))
+    return found
+
+
+def _node_at(document: Any, path: Sequence[PathSegment]) -> Any:
+    """The value at ``path`` in ``document``, or None when the place is gone."""
+    node = document
+    for segment in path:
+        if not isinstance(node, (dict, list)):
+            return None
+        try:
+            node = cast(Any, node)[segment]
+        except (TypeError, KeyError, IndexError):
+            return None
+    return node
+
+
 def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:
     """``text`` as the file wrote it, where ``candidates`` are the references that
     apply at its position (``_Index.pending``).
@@ -785,6 +825,27 @@ class _Index:
             if all(names(reference, depth, key) for depth, key in pinned)
         ]
 
+    def _list_made_from(
+        self,
+        path: Tuple[PathSegment, ...],
+        exact: Tuple[PathSegment, ...],
+        pinned: Tuple[Tuple[int, str], ...],
+    ) -> Optional[EnvironmentReference]:
+        """In a view (``mark``, not ``whole_only``), the reference a file wrote at
+        the place of a list itself, which resolved to one string: the load made
+        the list of that string. None in a record, and for a list the file wrote
+        as a list (its references sit at its entries)."""
+        if self.mark is None or self.whole_only:
+            return None
+        for reference in self._references_at(self.values, path, pinned):
+            if (
+                not reference.key
+                and isinstance(reference.resolved, str)
+                and _exact_path(reference.path) == exact
+            ):
+                return reference
+        return None
+
     def record(
         self,
         item: Any,
@@ -818,6 +879,13 @@ class _Index:
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
+            whole = self._list_made_from(path, exact, pinned)
+            if whole is not None:
+                # A view of a list the load made of one reference's text
+                # (``output_formats`` splits "sarif,html" into names): every entry
+                # is part of the value, so each is shown as the reference, and no
+                # entry is shown in clear. A record walks the entries as before.
+                return type(item)(self._whole(whole) for _ in item)
             return type(item)(
                 self.record(
                     value,
@@ -971,6 +1039,12 @@ class _Index:
                         referenced_name(reference.written) or "?",
                     )
             return text
+        for reference in candidates:
+            if reference.anchored is not None and text == reference.anchored[0]:
+                # A relative path the load anchored and normalized holds none of
+                # the value's text: shown as its file's directory and the
+                # reference, the shape a path anchored whole is shown in.
+                return os.path.join(reference.anchored[1], "") + self._whole(reference)
         for reference in candidates:
             if reference.value in text:
                 # The value's part alone takes the reference alone, as the

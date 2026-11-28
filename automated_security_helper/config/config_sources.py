@@ -290,6 +290,7 @@ from automated_security_helper.config.environment_record import (
     EnvironmentReference,
     environment_references,
     referenced_name,
+    with_anchored_forms,
     with_environment_values_shown,
     written_without_tag,
 )
@@ -4466,7 +4467,9 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     (``ResolvedConfigDocument.displayed_environment_references``); it stays an
     environment read (``environment_references``), so redaction still masks
     its value. A value that still contains the environment's part is kept,
-    erring toward keeping.
+    erring toward keeping. A relative path the load anchored and normalized
+    still describes the place when it holds the text recorded at the anchoring
+    (``EnvironmentReference.anchored``).
     """
     node = document
     for segment in reference.path:
@@ -4496,8 +4499,10 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     if reference.key:
         return isinstance(node, dict) and reference.resolved in node
     text = node if isinstance(node, str) else str(node)
-    return text == reference.resolved or (
-        bool(reference.value) and reference.value in text
+    return (
+        text == reference.resolved
+        or (reference.anchored is not None and text == reference.anchored[0])
+        or (bool(reference.value) and reference.value in text)
     )
 
 
@@ -5059,6 +5064,14 @@ def _resolve(
         )
 
         data = anchor_relative_paths(data, real.parent)
+        # A relative path the anchoring normalized no longer holds what its
+        # reference resolved to: the reference records the anchored text, so
+        # the displayed view still finds and marks it (_still_describes,
+        # environment_record._Index._string).
+        own_references = with_anchored_forms(
+            own_references, data, os.fspath(real.parent)
+        )
+        state.references[first:] = own_references
 
     repository_file = state.repository_file
     operator_file = (
