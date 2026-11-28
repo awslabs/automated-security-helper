@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import pytest
 
+from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
     OpengrepScanner,
@@ -386,3 +387,66 @@ def test_release_download_still_refuses_a_command_of_a_tool_it_cannot_download(
     assert scene.result.exit_code == 1, scene.text
     assert "REFUSED BY PROVIDER" in scene.text, scene.text
     assert "has no pinned release asset" in " ".join(scene.text.split()), scene.text
+
+
+#: A plugin's own install command, run through the shell: the shape a plugin from
+#: outside ASH may declare. The recorder runs nothing.
+_OWN_SHELL_INSTALL = "curl -fsSL https://vendor.example/install.sh | sh"
+
+
+def _own_command_scene(tmp_path, monkeypatch):
+    """A scene whose one plugin, for gitleaks, declares a shell command of its own.
+
+    gitleaks has a pinned release download on every platform pair ASH pins, so
+    which provider serves the command does not depend on this host.
+    """
+    own = CustomCommand(args=[_OWN_SHELL_INSTALL], shell=True)
+    scene = build_scene(
+        monkeypatch,
+        tmp_path,
+        name="gitleaks",
+        command="gitleaks",
+        uv_managed=False,
+        declared=[own],
+        find_on_path=lambda c: f"/x/{c}",
+    )
+    return scene, list(own.args)
+
+
+def test_release_download_refuses_a_plugins_own_shell_command(tmp_path, monkeypatch):
+    """Only the listed providers may install anything.
+
+    release-download installs ASH's pinned, digest-verified downloads. A plugin's
+    own shell or download command is what the custom provider runs, so with only
+    release-download listed it is refused, with a reason that names custom, and
+    nothing runs.
+    """
+    scene, _own = _own_command_scene(tmp_path, monkeypatch)
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "release-download")
+
+    assert scene.calls == [], scene.calls
+    assert scene.result.exit_code == 1, scene.text
+    assert "REFUSED BY PROVIDER" in scene.text, scene.text
+    text = " ".join(scene.text.split())
+    assert "release-download does not support custom install commands" in text, text
+    assert "list custom to run it as declared" in text, text
+
+
+def test_with_custom_listed_a_plugins_own_shell_command_runs_through_custom(
+    tmp_path, monkeypatch
+):
+    """With custom listed after release-download, custom runs the command.
+
+    release-download is tried first and skipped with its reason; custom runs the
+    command as declared, through the shell.
+    """
+    scene, own = _own_command_scene(tmp_path, monkeypatch)
+
+    run_install(scene, monkeypatch, tmp_path, "--providers", "release-download,custom")
+
+    assert scene.calls == [(own, True)], scene.calls
+    text = " ".join(scene.text.split())
+    assert "Skipped provider release-download for gitleaks:" in text, text
+    assert "list custom to run it as declared" in text, text
+    assert scene.result.exit_code == 0, scene.text
