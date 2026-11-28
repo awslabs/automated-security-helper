@@ -1392,6 +1392,100 @@ def test_an_alpha_scanner_loads_only_when_its_module_is_listed():
     assert rows["bandit"].cells["module"] == "built in"
 
 
+LOADS_WHEN_LISTED = "loads only when its module is listed"
+#: The tiers the manifest model defines, which the loading tests below run once each.
+LOADING_TIERS = ("supported", "deprecated", "alpha")
+
+
+def opt_in(name, tier, **overrides):
+    """A scanner of ``tier`` that does not load on its own, with a module to list."""
+    module = f"automated_security_helper.plugin_modules.ash_{name.replace('-', '_')}"
+    return scanner(
+        name, tier=tier, default_enabled=False, plugin_module=module, **overrides
+    )
+
+
+def loading_text(matrix):
+    """The three places a scanners table explains a scanner that loads only when listed.
+
+    They are the note under the table for ``loads only when its module is listed``, the
+    line that says where the Module to list column comes from, and the sentence of the
+    intro that names ash_plugin_modules. Each must be there exactly once, so a table that
+    lost one of them cannot read as clean because it has nothing left to say.
+    """
+    notes = [n for n in matrix.notes if n.startswith(f"`{LOADS_WHEN_LISTED}`:")]
+    sources = [c.source for c in matrix.columns if c.key == "module"]
+    intro = [
+        sentence
+        for sentence in re.split(r"(?<=\.) ", matrix.intro)
+        if "ash_plugin_modules" in sentence
+    ]
+    assert (len(notes), len(sources), len(intro)) == (1, 1, 1), (notes, sources, intro)
+    return {"note": notes[0], "source": sources[0], "intro": intro[0]}
+
+
+@pytest.mark.unit
+def test_a_supported_scanner_that_is_opt_in_is_not_called_alpha():
+    s = scan()
+    matrix = s.scanner_matrix([scanner("bandit"), opt_in("optional-tool", "supported")])
+    row = rows_by_key(matrix)["optional-tool"]
+    assert row.cells["tier"] == "supported"
+    assert row.cells["loads"] == LOADS_WHEN_LISTED
+    assert not [cell for cell in row.cells.values() if "alpha" in cell.lower()]
+    text = loading_text(matrix)
+    assert "opt-in" in text["note"], text
+    assert not {key: value for key, value in text.items() if "alpha" in value.lower()}
+
+
+@pytest.mark.unit
+def test_an_alpha_scanner_that_is_opt_in_keeps_the_alpha_wording_in_its_note():
+    s = scan()
+    matrix = s.scanner_matrix([scanner("bandit"), opt_in("snyk-code", "alpha")])
+    assert rows_by_key(matrix)["snyk-code"].cells["tier"] == "alpha"
+    note = loading_text(matrix)["note"]
+    assert note.startswith(f"`{LOADS_WHEN_LISTED}`: the scanner is in an alpha module")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("tier", LOADING_TIERS)
+def test_the_loading_text_calls_a_scanner_alpha_only_when_its_tier_is_alpha(tier):
+    s = scan()
+    extra = {"superseded_by": "bandit"} if tier == "deprecated" else {}
+    matrix = s.scanner_matrix(
+        [scanner("bandit"), opt_in("optional-tool", tier, **extra)]
+    )
+    text = loading_text(matrix)
+    says_alpha = [key for key, value in text.items() if "alpha" in value.lower()]
+    assert bool(says_alpha) == (tier == "alpha"), text
+
+
+@pytest.mark.unit
+def test_one_note_for_an_alpha_and_a_supported_opt_in_scanner_says_nothing_of_either_tier():
+    s = scan()
+    matrix = s.scanner_matrix(
+        [
+            scanner("bandit"),
+            opt_in("optional-tool", "supported"),
+            opt_in("snyk-code", "alpha"),
+        ]
+    )
+    rows = rows_by_key(matrix)
+    assert rows["optional-tool"].cells["tier"] == "supported"
+    assert rows["snyk-code"].cells["tier"] == "alpha"
+    note = loading_text(matrix)["note"]
+    assert "opt-in" in note and "alpha" not in note.lower(), note
+
+
+@pytest.mark.unit
+def test_every_tier_the_manifest_model_defines_has_a_loading_wording():
+    from automated_security_helper.base.plugin_manifest import PluginTier
+
+    s = scan()
+    assert set(LOADING_TIERS) == {tier.value for tier in PluginTier}
+    assert set(s.LOADING_WORDING) == set(LOADING_TIERS)
+    assert set(s.LOADING_WORDING.values()) <= {"alpha", "opt-in"}
+
+
 @pytest.mark.unit
 def test_rows_are_sorted_by_tier_then_name_whatever_order_they_arrive_in():
     s = scan()
