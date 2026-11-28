@@ -41,6 +41,7 @@ from automated_security_helper.config.ash_config import (
     _PluginConfigSegment,
     env_reference_left_as_written,
     env_reference_value,
+    list_made_of,
     load_config_yaml,
     plugin_key_lookup_names,
     read_env_reference,
@@ -2700,7 +2701,9 @@ class EnvironmentRewrite(typing.NamedTuple):
     variable's value gave, and ``reference`` the text the file wrote for that
     part: where the record's string is not ``resolved`` as a whole (a value
     the model normalized), only that part is replaced. A path is a tuple of
-    the file's keys and list indices.
+    the file's keys and list indices. ``anchored`` is set for a relative path
+    the load took from its file's directory: where the record's string is that
+    text, whole, it is written as the directory and the reference.
     """
 
     kind: str
@@ -2709,6 +2712,11 @@ class EnvironmentRewrite(typing.NamedTuple):
     written: str
     environment_part: str
     reference: str
+    #: For a relative path the load took from its file's directory: the text the
+    #: anchoring made of it and that directory
+    #: (``environment_record.EnvironmentReference.anchored``), at the place this
+    #: rewrite names. None otherwise.
+    anchored: Optional[Tuple[str, str]] = None
 
 
 def _rewrite_for(
@@ -2720,6 +2728,17 @@ def _rewrite_for(
         return EnvironmentRewrite(kind, path, resolved, written, resolved, written)
     part = _environment_part(resolved, reference.rest)
     return EnvironmentRewrite(kind, path, resolved, written, part, reference.text)
+
+
+def anchored_needles(rewrite: EnvironmentRewrite) -> List[str]:
+    """The text the anchoring made of a relative path, as a needle, where it no
+    longer contains the variable's part (a ".." or "./" folded, or a separator
+    the platform rewrote): the needles of the resolved string and the part miss
+    it there."""
+    if rewrite.anchored is None or not rewrite.environment_part:
+        return []
+    text = rewrite.anchored[0]
+    return [] if rewrite.environment_part in text else [text]
 
 
 def _environment_part(resolved: str, rest: str) -> str:
@@ -3205,7 +3224,11 @@ def _record_unknown_position(
 
 
 def record_of_config(
-    config: Any, dumped: Any, mark: Optional[Callable[[str], Any]] = None
+    config: Any,
+    dumped: Any,
+    mark: Optional[Callable[[str], Any]] = None,
+    *,
+    for_results: bool = False,
 ) -> Any:
     """``dumped``, a dump of ``config``, as the record of ``config``: each value
     and key its files read from the environment as the file wrote it, never the
@@ -3228,6 +3251,25 @@ def record_of_config(
     loaded any other way (AshConfig.from_file, a results file) has no rewrites,
     so only the paragraph below changes its dump, and one that holds no marked
     string is returned as it is.
+
+    A relative path the load took from its file's directory, whose text no
+    longer holds the variable's part (a ``..`` or ``./`` folded, a separator the
+    platform rewrote), is matched as a whole by the text its rewrite recorded at
+    the anchoring (``EnvironmentRewrite.anchored``). Without ``mark`` it is
+    recorded as that directory and the reference, the shape a path kept whole
+    has. With ``mark`` the text stays, and the writer refuses it
+    (config_writer): a file loaded again reads a reference only at the start of
+    a string.
+
+    ``for_results``, for the results file and the off-host payload, records a
+    list the field made of one reference's text (``output_formats: ${VAR}``) as
+    a list that holds the reference in place of the entries its text made,
+    followed by any entry a later step appended. Those are read back with
+    nothing resolved, where the reference is one entry the field refuses
+    (``recorded_config``) and never the names, and a scalar would split at a
+    comma in a default and leave pieces that are not references. A JSON file
+    written to be loaded again (config_writer) is not recorded this way: it is
+    not interpolated, and that list would not load.
 
     ``mark``, for a file written to be loaded again (config_writer), is applied
     to each string a rewrite puts in the record, value or key, and to each
@@ -3320,6 +3362,24 @@ def record_of_config(
                 # it is written plain.
                 container[key] = mark("!ENV " + replaced)
         elif (
+            isinstance(current, str)
+            and rewrite.anchored is not None
+            and current == rewrite.anchored[0]
+        ):
+            # A relative path the load took from its file's directory, whose text
+            # no longer holds the variable's part (a ".." or "./" folded, a
+            # separator the platform rewrote): matched as a whole, and recorded
+            # as that directory and the reference, the shape a path kept whole
+            # has. A file written to be loaded again (``mark``) cannot hold that
+            # (a reference is read only at a string's start), so there the text
+            # stays and the writer refuses it.
+            if mark is None:
+                container[key] = (
+                    os.path.join(rewrite.anchored[1], "")
+                    + rewrite.reference
+                    + rewrite.resolved[len(rewrite.environment_part) :]
+                )
+        elif (
             mark is not None
             and current is not None
             and not isinstance(current, str)
@@ -3329,6 +3389,21 @@ def record_of_config(
             # A value the model made something else of, a list from one string
             # (output_formats: ${VAR}): the reference, which loads back as it.
             container[key] = mark(rewrite.written)
+        elif (
+            mark is None
+            and for_results
+            and isinstance(current, (list, tuple))
+            and list_made_of(rewrite.resolved, current)
+        ):
+            # A list the field made of one reference's text (output_formats:
+            # ${VAR}), in a results file or an off-host payload: a list holding
+            # the reference in place of the entries its text made, then any entry
+            # a later step appended. Read back with nothing resolved, the
+            # reference is one refused entry (recorded_config), never the names;
+            # a scalar would split at a comma in a default and leave pieces that
+            # are not references.
+            count = list_made_of(rewrite.resolved, current)
+            container[key] = [rewrite.written, *list(current)[count:]]
     # Keys last, deepest first: a value's path holds the key as it was read.
     keys = [rewrite for rewrite in rewrites if rewrite.kind == "key"]
     for rewrite in sorted(keys, key=lambda item: len(item.path), reverse=True):
@@ -3528,7 +3603,9 @@ def environment_record_read(
     chain: Iterable[Path],
     reads: Dict[Path, Any],
     texts: Optional[Dict[Path, str]] = None,
-    places: Optional[Dict[Tuple[Any, ...], List[Tuple[Any, ...]]]] = None,
+    places: Optional[
+        Dict[Tuple[Any, ...], List[Tuple[Tuple[Any, ...], Optional[Tuple[str, str]]]]]
+    ] = None,
 ) -> Tuple[List[str], List[EnvironmentRewrite]]:
     """The values and keys the files of a resolved chain read from the
     environment, and how to record each value as the file wrote it, for a chain
@@ -3603,7 +3680,9 @@ def environment_record_read(
         for rewrite in _written_rewrites(written, resolved):
             place = ((key, tuple(rewrite.path)), rewrite.kind == "key", rewrite.written)
             if places is not None and place in places:
-                rewrites += [rewrite._replace(path=at) for at in places[place]]
+                for at, anchored in places[place]:
+                    rewrites.append(rewrite._replace(path=at, anchored=anchored))
+                    values += anchored_needles(rewrites[-1])
             else:
                 rewrites += _placed_rewrites([rewrite], resolved)
     return values, rewrites
@@ -3633,12 +3712,13 @@ def environment_record_of_references(
             tuple(reference.path),
             reference.written,
             reference.resolved,
-        )
+        )._replace(anchored=getattr(reference, "anchored", None))
         rewrites.append(rewrite)
         for value in dict.fromkeys((rewrite.resolved, rewrite.environment_part)):
             if value:
                 values.append(value)
                 values += _typed_spellings(value)
+        values += anchored_needles(rewrite)
     return values, rewrites
 
 

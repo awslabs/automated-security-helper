@@ -178,6 +178,7 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from automated_security_helper.config.config_validator import (
     _string_leaves,
+    anchored_needles,
     describe_validation_error,
     environment_record_of_references,
     environment_record_read,
@@ -3475,13 +3476,19 @@ def _take_confined_references(
             for rewrite in own
             if not in_config(rewrite) and not left_out_where_kept(rewrite)
         ] + taken
-        # The values of the rewrites taken from the trusted base are redacted.
+        # The values of the rewrites taken from the trusted base are redacted,
+        # with the text the anchoring made of a relative path where it no longer
+        # holds the variable's part.
         config._environment_values = list(config._environment_values or []) + [
             value
             for value in dict.fromkeys(
                 part
                 for rewrite in taken
-                for part in (rewrite.resolved, rewrite.environment_part)
+                for part in (
+                    rewrite.resolved,
+                    rewrite.environment_part,
+                    *anchored_needles(rewrite),
+                )
             )
             if value
         ]

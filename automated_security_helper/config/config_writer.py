@@ -218,9 +218,16 @@ def _refuse_a_value_left_as_text(data: Any, ash_config: AshConfig) -> None:
                 ash_config, dumped, rewrite.path, rewrite.resolved, leaf
             )
         else:
-            left = leaf == rewrite.resolved or bool(
-                rewrite.environment_part
-                and rewrite.environment_part in _without_references(leaf, rewrite)
+            # The text the anchoring made of a relative path counts too: with a
+            # mark, record_of_config leaves it as it is where it no longer holds
+            # the variable's part, and it is the value as text.
+            left = (
+                leaf == rewrite.resolved
+                or (rewrite.anchored is not None and leaf == rewrite.anchored[0])
+                or bool(
+                    rewrite.environment_part
+                    and rewrite.environment_part in _without_references(leaf, rewrite)
+                )
             )
         if left:
             raise RuntimeError(

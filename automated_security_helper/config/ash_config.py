@@ -3247,7 +3247,10 @@ class AshConfig(RedactedSection):
         changed after reading it (a relative path taken from the file's
         directory) is refused, naming the variable
         (``environment_record.EnvironmentValueInPath``), and any other string
-        that reads as an ``!ENV`` reference is written quoted. A value read from
+        that reads as an ``!ENV`` reference is written quoted. A list the field
+        made of one reference's text (``output_formats: ${VAR}``) is written as
+        that reference, which loads back as the list; one that holds an entry a
+        later step appended beside it is refused in the same way. A value read from
         the environment that the dump still holds as text where no reference
         was written is refused too, naming only the variable. Without
         ``as_written`` such a value is written as text, as render_config_file

@@ -1478,7 +1478,7 @@ class AshAggregatedResults(RecordModel):
             record_of_config,
         )
 
-        return record_of_config(value, handler(value))
+        return record_of_config(value, handler(value), for_results=True)
 
     @field_serializer("metadata", mode="wrap")
     def _record_metadata(self, value: Any, handler: Any) -> Any:
@@ -1557,6 +1557,7 @@ class AshAggregatedResults(RecordModel):
             conf = record_of_config(
                 self.ash_config,
                 self.ash_config.model_dump(by_alias=True, exclude_unset=True),
+                for_results=True,
             )
         # Results that record no configuration send None, as the results file
         # keeps them; a stored configuration that sets nothing sends {}. ASH's

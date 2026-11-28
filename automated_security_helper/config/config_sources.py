@@ -3012,14 +3012,17 @@ class ResolvedConfigDocument:
     #: Where each reference a file of ``chain`` wrote ended up in ``data``, by
     #: ``EnvironmentReference.place_key`` (the file, the path it holds in the
     #: file's own document, value or key, its text): the places of
-    #: ``environment_references`` it is now at, none for one a ``patch`` wrote
-    #: over or that sets no value, and none for one a later document of the
-    #: chain wrote over (``EnvironmentReference.written_over``). For the record
-    #: of the configuration (config_validator.environment_record_read), which
-    #: reads each file's references in the file's own terms.
-    reference_places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = field(
-        default_factory=dict
-    )
+    #: ``environment_references`` it is now at, each with the text the load made
+    #: of a relative path there and the directory it was anchored at
+    #: (``EnvironmentReference.anchored``, None for any other value), none for
+    #: one a ``patch`` wrote over or that sets no value, and none for one a later
+    #: document of the chain wrote over (``EnvironmentReference.written_over``).
+    #: For the record of the configuration
+    #: (config_validator.environment_record_read), which reads each file's
+    #: references in the file's own terms.
+    reference_places: Dict[
+        Tuple[Any, ...], List[Tuple[Tuple[Any, ...], Optional[Tuple[str, str]]]]
+    ] = field(default_factory=dict)
     #: What a load that filled the files of ``documents`` from the operator's
     #: profile read in each (``load_config_file``'s ``fill``: the copy of a
     #: profile a client patched holds each value the profile read from the
@@ -3048,12 +3051,25 @@ def _shown_chain_path(path: Path, environment_paths: Collection[Path]) -> str:
 
 
 def _values_of(references: List[EnvironmentReference]) -> List[str]:
-    """``ResolvedConfigDocument.environment_values`` for ``references``."""
+    """``ResolvedConfigDocument.environment_values`` for ``references``.
+
+    The text the load made of a relative path (``EnvironmentReference.anchored``)
+    joins where it no longer contains the variable's part, a ``..`` or ``./``
+    folded out of it: the needles of the resolved string and the part miss it
+    there."""
     values: List[str] = []
     for reference in references:
         for text in (reference.resolved, reference.value):
             if text and text not in values:
                 values.append(text)
+        anchored = reference.anchored
+        if (
+            anchored is not None
+            and reference.value
+            and reference.value not in anchored[0]
+            and anchored[0] not in values
+        ):
+            values.append(anchored[0])
     return values
 
 
@@ -5504,15 +5520,17 @@ def resolve_config_document(
         # raise, so the error leaves with a frame that holds no value.
         del state, blind_for
         raise blind from None
-    places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = {
-        reference.place_key: [] for reference in state.read
-    }
+    places: Dict[
+        Tuple[Any, ...], List[Tuple[Tuple[Any, ...], Optional[Tuple[str, str]]]]
+    ] = {reference.place_key: [] for reference in state.read}
     for reference in state.references:
         if reference.written_over:
             # A later document of the chain wrote this place: the configuration
             # holds that document's value, which the record keeps as it is.
             continue
-        places.setdefault(reference.place_key, []).append(tuple(reference.path))
+        places.setdefault(reference.place_key, []).append(
+            (tuple(reference.path), reference.anchored)
+        )
     return ResolvedConfigDocument(
         data=data,
         chain=state.order,
@@ -5531,7 +5549,8 @@ def resolve_config_document(
             if _still_describes(data, reference)
         ],
         environment_paths=frozenset(state.environment_paths),
-        environment_values=_values_of(state.read),
+        # The references carry the anchored form; the reads do not.
+        environment_values=_values_of([*state.read, *state.references]),
         reference_places=places,
     )
 

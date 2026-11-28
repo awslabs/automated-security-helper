@@ -689,9 +689,13 @@ class EnvironmentValueInPath(RuntimeError):
     written for a session could not hold it as the reference.
 
     Raised by ``record_environment_references(..., whole_only=True)`` where a
-    string is a path the load anchored on the value (``_anchored``) and not the
-    value itself: written as it is, the copy would hold the value. The message
-    names the key path and the variable, never the value.
+    string is a path the load anchored on the value (``_anchored``), or the text
+    the anchoring made of one (a ``..`` or ``./`` folded out of it,
+    ``EnvironmentReference.anchored``), and not the value itself: written as it
+    is, the copy would hold the value. It is also raised where a list the field
+    made of one reference's text holds an entry a later step appended beside it,
+    which written as names would be the value. The message names the key path
+    and the variable, never the value.
     """
 
     def __init__(self, key_path: str, variable: str) -> None:
@@ -863,8 +867,10 @@ class _Index:
         that string (``ash_config.list_made_of``). None in an unmarked record, for
         a list the file wrote as a list (its references sit at its entries), and
         for a list that does not start with those entries (a later file's list, a
-        replacing override's), which is walked as written."""
-        if self.mark is None or self.whole_only:
+        replacing override's), which is walked as written. A copy written to be
+        loaded again (``whole_only``) finds it too: it writes the reference
+        itself, which loads back as the list."""
+        if self.mark is None:
             return None
         entries = list(item)
         for reference in self._references_at(self.values, path, pinned):
@@ -913,6 +919,17 @@ class _Index:
             made = self._list_made_from(item, path, exact, pinned)
             if made is not None:
                 whole, count = made
+                if self.whole_only:
+                    if count < len(item):
+                        # A copy cannot hold entries a later step appended
+                        # beside the reference: written as names, they would
+                        # be the value.
+                        raise EnvironmentValueInPath(
+                            self._key_path(exact),
+                            referenced_name(whole.written) or "?",
+                        )
+                    # The reference itself, which loads back as the list.
+                    return self._whole(whole)
                 if self.list_as_reference:
                     # Written to be loaded again (`ash config get`): the
                     # reference once, which loads back as the entries it made,
@@ -1084,7 +1101,7 @@ class _Index:
                 return self._whole(reference)
         if self.whole_only:
             for reference in candidates:
-                if _anchored(text, reference):
+                if holds_reference(text, reference):
                     # Written as the text, the copy would hold the value.
                     raise EnvironmentValueInPath(
                         self._key_path(exact),

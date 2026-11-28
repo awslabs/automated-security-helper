@@ -14,11 +14,20 @@ as text is the control. Measured, the operation answers a right and a wrong
 guess byte for byte alike at every setting, a literal-written one included, so
 the control pins the same uniformity there: the answer carries no information
 about the guess wherever the op lands.
+
+The last cell aims a ``test`` op at a setting no policy entry denies, bandit's
+``config_file``, which a profile reads from the environment as a relative path
+the load anchors at the profile's directory and folds a ``..`` out of. Its control
+is the profile that writes the same path as text: there a right guess binds the
+profile and a wrong one is refused, as it is for any setting nothing denies, so
+the uniform answer for the path read from the environment is the reading of the
+reference and not a refusal made before the op is read.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List
 
 import pytest
@@ -327,3 +336,114 @@ def test_a_value_copied_or_moved_is_answered_as_a_wrong_guess(
     assert _is_a_patch_answer(select(literal_ops(OTHER))), (
         "the control: the wrong guess got no patch answer"
     )
+
+
+CONFIG_FILE = "/scanners/bandit/options/config_file"
+FOLDED = "../shared-6d0a/x-6d0a.yaml"
+
+
+def _scanner_profile(config_file: str) -> str:
+    """A profile that sets bandit's ``config_file`` and lets a client aim ops at
+    it. ``replace_default_denied_paths`` lifts the shipped denial of a scanner's own
+    config file, which would refuse every op there before the op is read."""
+    return (
+        "scanners:\n"
+        "  bandit:\n"
+        "    options:\n"
+        f"      config_file: {config_file}\n"
+        "global_settings:\n"
+        "  mcp:\n"
+        "    runtime_overrides:\n"
+        "      enabled: true\n"
+        "      allowed_paths:\n"
+        f"        - {CONFIG_FILE}\n"
+        "      denied_paths: []\n"
+        "      replace_default_denied_paths: true\n"
+    )
+
+
+@pytest.fixture
+def select_for(tmp_path, monkeypatch):
+    """``select``, for a profile the cell writes itself: called with the profile's
+    text, it returns the function that sends ops to that profile."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+
+    monkeypatch.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    monkeypatch.setenv("ASH_MCP_TRANSPORT", "stdio")
+    monkeypatch.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
+    monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+
+    def _for(text: str):
+        profile = tmp_path / "scanner.ash.yaml"
+        profile.write_text(text, encoding="utf-8")
+
+        def _select(ops: List[Dict[str, Any]]) -> Dict[str, Any]:
+            profile_registry.clear_profile_registry()
+            profile_registry.clear_all_session_state()
+            profile_registry.set_profile_registry(
+                profile_registry.register_profiles([f"op={profile}"])
+            )
+            try:
+                return mcp_select_profile("op", patch_ops=ops, session_id="session-a")
+            finally:
+                profile_registry.clear_profile_registry()
+                profile_registry.clear_all_session_state()
+
+        return _select
+
+    return _for
+
+
+@pytest.mark.parametrize(
+    "from_the_environment",
+    [
+        pytest.param(True, id="folded-path-read-from-the-environment"),
+        pytest.param(False, id="literal-path-control"),
+    ],
+)
+def test_a_test_op_at_a_folded_operator_path_answers_the_same_for_any_guess(
+    select_for, tmp_path, monkeypatch, from_the_environment
+):
+    """A profile reads bandit's ``config_file`` from a variable that holds
+    ``../shared-6d0a/x-6d0a.yaml``. The load anchors it at the profile's directory
+    and folds the ``..`` out, so the configuration holds an absolute path that
+    contains neither the variable's text nor its reference. A ``test`` op reads the
+    configuration as its file wrote it, which is that directory and the reference,
+    so the op names the setting the same way for the path the configuration holds
+    (the right guess) and for another of its length (the wrong one), and the two
+    answers are alike. The control is the profile that writes the same path as
+    text: a right guess binds it and a wrong one is refused, so the answers at
+    this setting can tell the guesses apart, where nothing hides the value."""
+    monkeypatch.setenv("ASH_PROBE_FOLDED", FOLDED)
+    right = os.path.normpath(os.path.join(os.path.realpath(tmp_path), FOLDED))
+    wrong = right.replace("6d0a", "0000")
+    select = select_for(
+        _scanner_profile("${ASH_PROBE_FOLDED}" if from_the_environment else right)
+    )
+
+    def ops_for(guess: str) -> List[Dict[str, Any]]:
+        return [{"op": "test", "path": CONFIG_FILE, "value": guess}]
+
+    # A boolean, so a failure does not print the value.
+    same = _answers_the_same(select, ops_for, right, wrong)
+    if from_the_environment:
+        assert same, "the response tells a right guess from a wrong one"
+        # The uniform answer is the pipeline's own: the patch's refusal, for
+        # both, and not a refusal made before the op is read.
+        assert _is_a_patch_answer(select(ops_for(right))), (
+            "the right guess got no patch answer"
+        )
+        assert _is_a_patch_answer(select(ops_for(wrong))), (
+            "the wrong guess got no patch answer"
+        )
+        assert select(ops_for(right))["success"] is False
+    else:
+        assert not same, "the control: the answer does not depend on the guess"
+        assert select(ops_for(right))["success"] is True, (
+            "the control: the right guess did not bind the profile"
+        )
+        assert select(ops_for(wrong))["success"] is False, (
+            "the control: the wrong guess was not refused"
+        )
