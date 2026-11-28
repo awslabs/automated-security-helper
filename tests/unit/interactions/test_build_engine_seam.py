@@ -17,6 +17,9 @@ runner), and ``_resolve_engines`` finds the programs a call needs. These tests p
 * ``ScanOptions.build_engine`` reaches ``run_ash_container``, and ``run_ash_scan``, the
   library entry point, takes the same ``build_engine`` and builds its ``ScanOptions``
   with it.
+* A build engine that names none, or none that can be started, is refused with exit 3.
+  ``run_ash_container`` returns the refusal rather than raising, and a scan refuses it
+  before it clears the previous run's output.
 
 No container tool runs. ``run_cmd_direct`` is the one call that starts a program, and
 a recorder takes its place.
@@ -28,6 +31,7 @@ import contextlib
 import inspect
 import os
 import re
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
 from unittest.mock import MagicMock
@@ -822,6 +826,135 @@ class TestResolveEngines:
 
 
 # ---------------------------------------------------------------------------
+# A build engine that names none, or none that can be started, is a refusal
+# ---------------------------------------------------------------------------
+
+#: Values that name no build engine: a name no engine has, the member's name in
+#: capitals (its value is lower case), the value and a space, nothing, and values
+#: that are not text.
+NO_SUCH_ENGINES = [
+    pytest.param("no-such-engine", id="a-name-no-engine-has"),
+    pytest.param("RUNNER", id="the-member-name"),
+    pytest.param("runner ", id="the-value-and-a-space"),
+    pytest.param("", id="nothing"),
+    pytest.param(None, id="none"),
+    pytest.param(4, id="a-number"),
+]
+
+
+class TestBuildEngineRefusal:
+    @pytest.mark.parametrize("named", NO_SUCH_ENGINES)
+    def test_a_value_that_names_no_engine_is_refused_and_named(self, named):
+        refusal = rac.build_engine_refusal(named)
+
+        assert refusal is not None
+        code, message = refusal
+        assert code == 3
+        assert repr(named) in message
+        for engine in BuildEngine:
+            assert engine.value in message
+
+
+class TestEveryMemberIsResolvedOrRefusedByName:
+    @pytest.mark.parametrize(
+        "engine", list(BuildEngine), ids=[engine.name for engine in BuildEngine]
+    )
+    def test_each_member(self, engine, lookups):
+        refusal = rac.build_engine_refusal(engine)
+
+        if refusal is None:
+            engines = rac._resolve_engines(engine, None, build=True, run=True)
+            assert engines.build_kind is engine
+            assert engines.build_path is not None
+            assert engines.run_path is not None
+        else:
+            code, message = refusal
+            assert code == 3
+            assert repr(engine.value) in message
+            with pytest.raises(ValueError, match=re.escape(message)):
+                rac._resolve_engines(engine, None, build=True, run=True)
+
+
+@pytest.fixture
+def an_engine_with_no_code(monkeypatch) -> Enum:
+    """A member ``BuildEngine`` might gain before the code that starts it exists.
+
+    The module sees an enum with ``runner`` and ``other``; only ``runner`` has code.
+    """
+
+    class Engines(str, Enum):
+        RUNNER = "runner"
+        OTHER = "other"
+
+    monkeypatch.setattr(rac, "BuildEngine", Engines)
+    return Engines.OTHER
+
+
+class TestAMemberWithNoCode:
+    def test_it_is_refused_by_name_and_no_program_is_looked_up(
+        self, an_engine_with_no_code, lookups
+    ):
+        with pytest.raises(ValueError, match="'other'"):
+            rac._resolve_engines(an_engine_with_no_code, None, build=True, run=True)
+
+        assert lookups == []
+
+    def test_the_refusal_names_it(self, an_engine_with_no_code):
+        refusal = rac.build_engine_refusal(an_engine_with_no_code)
+
+        assert refusal is not None
+        code, message = refusal
+        assert code == 3
+        assert "'other'" in message
+
+    def test_a_call_that_takes_it_returns_the_refusal_and_starts_nothing(
+        self, an_engine_with_no_code, lookups, commands, packaged
+    ):
+        result = rac.run_ash_container(
+            source_dir="src",
+            output_dir="out",
+            build=True,
+            run=True,
+            ash_revision_to_install="v3.7.0",
+            build_engine=an_engine_with_no_code,
+        )
+
+        assert result.returncode == 3, result.stderr
+        assert "'other'" in result.stderr
+        assert not rac.container_was_started(result)
+        assert lookups == []
+        assert commands == []
+
+
+class TestADirectCallWithAnEngineThatNamesNone:
+    @pytest.mark.parametrize(
+        "build, run",
+        [
+            pytest.param(True, True, id="build-and-run"),
+            pytest.param(False, False, id="neither"),
+        ],
+    )
+    @pytest.mark.parametrize("named", NO_SUCH_ENGINES)
+    def test_it_returns_the_refusal_and_starts_nothing(
+        self, named, build, run, lookups, commands, packaged
+    ):
+        result = rac.run_ash_container(
+            source_dir="src",
+            output_dir="out",
+            build=build,
+            run=run,
+            ash_revision_to_install="v3.7.0",
+            build_engine=named,
+        )
+
+        assert result.returncode == 3, result.stderr
+        assert repr(named) in result.stderr
+        assert not rac.container_was_started(result)
+        assert lookups == []
+        assert commands == []
+
+
+# ---------------------------------------------------------------------------
 # Each job gets its own program
 # ---------------------------------------------------------------------------
 
@@ -1151,6 +1284,84 @@ class TestTheOptionReachesTheContainerRun:
             )
 
         assert handed_over["build_engine"] is BuildEngine.RUNNER
+
+
+#: What an earlier run leaves in the output directory, which a scan clears first.
+PRIOR_RUN = ("ash_aggregated_results.json", "reports/ash.sarif")
+
+
+def _prior_run(output: Path) -> None:
+    for name in PRIOR_RUN:
+        (output / name).parent.mkdir(parents=True, exist_ok=True)
+        (output / name).write_text("from the previous run\n", encoding="utf-8")
+
+
+def _the_prior_run_is_kept(output: Path) -> None:
+    for name in PRIOR_RUN:
+        assert (output / name).read_text(encoding="utf-8") == "from the previous run\n"
+
+
+def _container_options(tmp_path: Path, **updates: Any) -> ras.ScanOptions:
+    """Options for a scan that builds and runs, with ``updates`` put in unchecked.
+
+    ``model_copy`` does not validate, so a value no engine has reaches the scan.
+    """
+    (tmp_path / "src").mkdir(exist_ok=True)
+    options = ras.ScanOptions(
+        source_dir=tmp_path / "src",
+        output_dir=tmp_path / "out",
+        mode=RunMode.container,
+        build=True,
+        run=True,
+        progress=False,
+        show_summary=False,
+    )
+    return options.model_copy(update=updates)
+
+
+class TestTheScanRefusesAnEngineThatNamesNoneBeforeClearingAnything:
+    @pytest.fixture
+    def shown(self, monkeypatch) -> List[str]:
+        """What the scan prints, in place of printing it."""
+        printed: List[str] = []
+        monkeypatch.setattr(
+            ras, "secho", lambda message, **_style: printed.append(message)
+        )
+        return printed
+
+    @pytest.mark.parametrize("host_ids", ["readable", "unreadable"])
+    def test_the_previous_run_is_kept(
+        self, host_ids, handed_over, shown, monkeypatch, tmp_path
+    ):
+        if host_ids == "unreadable":
+            unreadable = MagicMock(side_effect=OSError("id unavailable"))
+            monkeypatch.setattr(subprocess_utils, "get_host_uid", unreadable)
+        output = tmp_path / "out"
+        _prior_run(output)
+        options = _container_options(tmp_path, build_engine="no-such-engine")
+
+        with pytest.raises(SystemExit) as stopped:
+            ras._run_container_mode(options, MagicMock())
+
+        assert stopped.value.code == 3
+        assert any("'no-such-engine'" in line for line in shown)
+        assert handed_over == {}
+        _the_prior_run_is_kept(output)
+
+    def test_a_scan_with_an_engine_that_names_one_still_clears_the_previous_run(
+        self, handed_over, tmp_path
+    ):
+        """Control: the clearing that the refusal comes before is still done."""
+        output = tmp_path / "out"
+        _prior_run(output)
+        options = _container_options(tmp_path)
+
+        with _stopped_by_the_hand_over():
+            ras._run_container_mode(options, MagicMock())
+
+        assert handed_over["build_engine"] is BuildEngine.RUNNER
+        for name in PRIOR_RUN:
+            assert not (output / name).exists()
 
 
 # ---------------------------------------------------------------------------
