@@ -655,7 +655,11 @@ with `raw` the reference appears as the file wrote it. How each case is shown:
 - A list the load makes of the variable's text, such as `output_formats: ${VAR}`, shows the marker
   for each entry.
 - A relative path the load anchors at its file's directory shows that directory and the marker,
-  also where a `patch` operation sets the path or moves it.
+  also where a `patch` operation sets the path or moves it. When a variable named that file, as
+  `extends: ${VAR}` does, the directory is shown as `<value>`, and so is the directory of each
+  relative path the file writes itself.
+- A value that a later file of the chain writes at the same place is shown as that file wrote it,
+  whatever the variable holds.
 - Where the variable gives no text, the answer shows the file's own text: the default followed by
   any text after the reference, when the variable is not set, or that text alone, when the
   variable is set to blank text. In a section the config does not declare, such as an external
