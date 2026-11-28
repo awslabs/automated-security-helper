@@ -54,6 +54,8 @@ WINDOWS = {"os": "windows", "host_os": "windows", "express_available": "no"}
 MACOS = {"os": "darwin", "host_os": "darwin"}
 #: A Windows host that runs the container image: the scanners run in the image's Linux.
 WINDOWS_IMAGE = {"os": "linux", "host_os": "windows", "express_available": "no"}
+#: A Mac that runs the container image: the scanners run in the image's Linux.
+MACOS_IMAGE = {"os": "linux", "host_os": "darwin"}
 
 CPU = ("host.cpu.below-polars-runtime", "unsupported", "continues")
 CPU_COMPAT = ("host.cpu.below-polars-compat", "unsupported", "continues")
@@ -278,6 +280,18 @@ SCANNER_CASES: list[tuple[str, str, dict[str, str], list[tuple[str, str, str]]]]
         "guarddog without its kernel sandbox on linux",
         "guarddog",
         {"tool_sandbox": "unavailable"},
+        [GUARDDOG_NO_SANDBOX],
+    ),
+    (
+        "guarddog without its kernel sandbox in the image on a mac",
+        "guarddog",
+        {**MACOS_IMAGE, "run_mode": "container", "tool_sandbox": "unavailable"},
+        [GUARDDOG_NO_SANDBOX],
+    ),
+    (
+        "guarddog without its kernel sandbox in the image on windows",
+        "guarddog",
+        {**WINDOWS_IMAGE, "run_mode": "container", "tool_sandbox": "unavailable"},
         [GUARDDOG_NO_SANDBOX],
     ),
     (
@@ -610,9 +624,11 @@ def test_guarddog_without_its_kernel_sandbox_is_degraded_and_always_shown() -> N
 def test_guarddog_without_its_kernel_sandbox_is_never_raised_without_a_way_out() -> (
     None
 ):
-    """GuardDog's own sandbox is unavailable only where Landlock is, and the one way
-    out is a Linux kernel setting, so a Mac run raises nothing here: a row that a
-    run raises always has a way out on the machine that raises it."""
+    """GuardDog's own sandbox is unavailable only on a Linux kernel without Landlock.
+    A local run on a Mac or on Windows has no Linux kernel to run the scanner on, so it
+    raises nothing here, and a run in the container image has the engine's own way out
+    (the tests below): a row that a run raises always has a way out on the machine that
+    raises it."""
     others = {"os": "other", "host_os": "other"}
     for host in ({}, MACOS, WINDOWS, others):
         facts = _facts(**host, tool_sandbox="unavailable")
@@ -622,6 +638,80 @@ def test_guarddog_without_its_kernel_sandbox_is_never_raised_without_a_way_out()
         for found in raised:
             assert found.paths, (host, found.row.id)
     assert _raised(_facts(**MACOS, tool_sandbox="unavailable"), "guarddog") == []
+
+
+#: Where GuardDog's own kernel sandbox is missing, the kernel to change is the one that
+#: runs the scanner: this machine's on a Linux host, and the container engine's virtual
+#: machine anywhere else, where the image's Linux runs in a virtual machine of its own.
+#: The way out says which, so it never tells a Mac or a Windows user to change a Mac or
+#: a Windows PC.
+GUARDDOG_KERNEL: list[tuple[str, dict[str, str], list[str]]] = [
+    ("linux, local mode", {}, ["enable-landlock"]),
+    ("linux, container mode", {"run_mode": "container"}, ["enable-landlock"]),
+    (
+        "a mac, container mode",
+        {**MACOS_IMAGE, "run_mode": "container"},
+        ["engine-landlock"],
+    ),
+    (
+        "windows, container mode",
+        {**WINDOWS_IMAGE, "run_mode": "container"},
+        ["engine-landlock"],
+    ),
+    (
+        "another system, container mode",
+        {"os": "linux", "host_os": "other", "run_mode": "container"},
+        ["engine-landlock"],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("overlay", "expected"),
+    [pytest.param(o, e, id=name) for name, o, e in GUARDDOG_KERNEL],
+)
+def test_guarddog_without_its_kernel_sandbox_is_offered_the_kernel_that_runs_it(
+    overlay: dict[str, str], expected: list[str]
+) -> None:
+    facts = _facts(**overlay, tool_sandbox="unavailable")
+    assert _raised(facts, "guarddog") == [GUARDDOG_NO_SANDBOX]
+    assert _offered(facts, GUARDDOG_NO_SANDBOX[0], "guarddog") == expected
+
+
+def test_a_kernel_setting_of_this_machine_is_offered_on_a_linux_host_only() -> None:
+    """``os`` is where the scanners run and ``host_os`` is where ASH was started. A
+    kernel parameter of this machine is a way out only where this machine is the Linux
+    that runs the scanner, so a Mac or a Windows host in container mode is never told
+    to change itself, and the engine's virtual machine is offered in container mode
+    only."""
+    for host_os in sr.VOCABULARY["host_os"]:
+        for mode in sr.VOCABULARY["run_mode"]:
+            facts = _facts(
+                os="linux", host_os=host_os, run_mode=mode, tool_sandbox="unavailable"
+            )
+            offered = _offered(facts, GUARDDOG_NO_SANDBOX[0], "guarddog")
+            where = (host_os, mode)
+            engine_in_image = host_os != "linux" and mode == "container"
+            assert offered is not None, where
+            assert ("enable-landlock" in offered) == (host_os == "linux"), where
+            assert ("engine-landlock" in offered) == engine_in_image, where
+
+
+def test_a_run_the_row_can_have_is_always_offered_a_way_out() -> None:
+    """A run has the scanners on another operating system than its host only in
+    container mode, and every run the row can match has a way out: on a Linux host
+    whatever the mode, and on any other host in container mode."""
+    count = 0
+    for host_os in sr.VOCABULARY["host_os"]:
+        for mode in sr.VOCABULARY["run_mode"]:
+            if host_os != "linux" and mode != "container":
+                continue
+            facts = _facts(
+                os="linux", host_os=host_os, run_mode=mode, tool_sandbox="unavailable"
+            )
+            assert _offered(facts, GUARDDOG_NO_SANDBOX[0], "guarddog"), (host_os, mode)
+            count += 1
+    assert count == len(sr.VOCABULARY["host_os"]) + len(sr.VOCABULARY["run_mode"]) - 1
 
 
 def test_guarddog_under_sandbox_exec_and_betterleaks_are_polyfilled() -> None:
@@ -1061,7 +1151,7 @@ DECLARED: list[tuple[str, str, str, str, str, bool, tuple[str, ...]]] = [
         "decision",
         "tool sandbox",
         True,
-        ("enable-landlock",),
+        ("enable-landlock", "engine-landlock"),
     ),
     (
         "scanner.betterleaks.private-home",
