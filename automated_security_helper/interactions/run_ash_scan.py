@@ -180,6 +180,7 @@ from automated_security_helper.utils.output_dir_links import (
     OUTPUT_RESULT_FILES,
     OUTPUT_WORKING_DIRS,
 )
+from automated_security_helper.utils.override_key import REMOVE, split_override_key
 from automated_security_helper.utils.process_env import (
     hold_environ,
     release_environ,
@@ -1826,8 +1827,9 @@ def _host_config_value(opts: ScanOptions, name: str) -> Any:
     except Exception:
         return None
     overridden = {
-        override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        split_override_key(override)[0].strip().replace("-", "_")
         for override in opts.config_overrides or []
+        if split_override_key(override)[1] != REMOVE
     }
     if from_file or name in overridden:
         return getattr(config, name, None)
@@ -3792,7 +3794,7 @@ def _sandbox_overrides(config_overrides: Optional[List[str]]) -> List[str]:
     return [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").split(".")[0] == "sandbox"
+        if split_override_key(override)[0].split(".")[0] == "sandbox"
     ]
 
 
@@ -5202,7 +5204,7 @@ def _resolved_precommit_config(opts: ScanOptions):
     except Exception:
         return None
     overridden = {
-        override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        split_override_key(override)[0].strip().replace("-", "_")
         for override in opts.config_overrides or []
     }
     if from_file or any(
@@ -5385,7 +5387,7 @@ def _config_chooses_reports(opts: ScanOptions) -> bool:
     config with exit 3 before any reporter matters.
     """
     overridden = {
-        override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        split_override_key(override)[0].strip().replace("-", "_")
         for override in opts.config_overrides or []
     }
     if any(

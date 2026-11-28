@@ -116,6 +116,11 @@ from automated_security_helper.core.exceptions import (
     ASHRespelledOverrideError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.override_key import (
+    APPEND,
+    REMOVE,
+    split_override_key,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -256,10 +261,12 @@ def replay_overrides_onto(
     The result lists the dropped overrides. The value such an override set is
     the operator's own on the resolved config, and the confinement leaves it
     alone (``_covered``, by where ``landings_of`` says the override landed), so
-    a dropped override never turns into a replaced value. ``warn_dropped`` says which ones were dropped. A respelled section
-    (``ASHRespelledOverrideError``) is still refused, as the reporters replay
-    refuses it: the scan does not resolve under a spelling the operator did
-    not type
+    a dropped override never turns into a replaced value. A dropped removal
+    (``key-=item``) set no value, so it leaves nothing alone: its path takes the
+    trusted base's value. ``warn_dropped`` says which ones were dropped. A
+    respelled section (``ASHRespelledOverrideError``) is still refused, as the
+    reporters replay refuses it: the scan does not resolve under a spelling the
+    operator did not type
     (tests/unit/config/test_a_respelled_reporter_override_fails_the_scan.py).
     """
     from automated_security_helper.config.resolve_config import (
@@ -320,10 +327,15 @@ def warn_dropped(
 ) -> None:
     """One warning for each override the trusted base could not take.
 
+    A removal (``key-=item``) set no value of its own, so its warning says the
+    trusted configuration's value applies where it would have removed items
+    (``_covered`` gives its path that value); any other override's says the
+    value it set stays as the operator wrote it.
+
     The key and the refusal's text can name a section key the trusted file
     read from the environment (the fold rewrites an override onto it), so both
-    are redacted with that file's values. The value the override set is never
-    printed.
+    are redacted with that file's values. The value the override set or
+    removed is never printed.
     """
     if not dropped:
         return
@@ -333,11 +345,20 @@ def warn_dropped(
 
     values = config_environment_values(trusted_config)
     for item in dropped:
+        if split_override_key(item.key)[1] == REMOVE:
+            # A removal set no value of its own: the confinement gives its path
+            # the trusted base's value (_covered), so nothing stays as written.
+            outcome = (
+                "the trusted configuration's value applies where it would have "
+                "removed items"
+            )
+        else:
+            outcome = "the value it set stays as the operator wrote it"
         ASH_LOGGER.warning(
             f"The override at {redact_values(item.key, values)} is one the trusted "
             f"configuration cannot take ({redact_values(item.reason, values)}), so "
-            "it is not replayed onto it; the value it set stays as the operator "
-            "wrote it, and the other overrides are replayed.",
+            f"it is not replayed onto it; {outcome}, and the other overrides are "
+            "replayed.",
             extra=NO_MARKUP,
         )
 
@@ -357,11 +378,16 @@ class Landing(NamedTuple):
     sections: Optional[FrozenSet[str]]
     #: The key path below the section, as the override wrote it.
     below: Tuple[str, ...]
-    #: Whether it appended to a list (``key+=item``) rather than set.
+    #: Whether it appended to a list (``key+=item``) rather than set a value or
+    #: removed items.
     append: bool
-    #: The value it set or appended, parsed. The operator's own, so it is never
-    #: printed or logged.
+    #: The value it set, appended or removed, parsed. The operator's own, so it
+    #: is never printed or logged.
     value: Any
+    #: Whether it removed items from a list (``key-=item``). What is left is the
+    #: list the chain held less those items, never a value of the operator's
+    #: own, so it covers no path (``_covered``).
+    remove: bool = False
 
 
 def _landed_key(held: Sequence[str], typed: str) -> Optional[str]:
@@ -400,8 +426,8 @@ def landings_of(
         if not 0 <= item.index < len(typed):
             continue
         written, _separator, raw = typed[item.index].partition("=")
-        written_parts = written.removesuffix("+").strip().split(".")
-        replayed_parts = item.key.removesuffix("+").strip().split(".")
+        written_parts = split_override_key(written)[0].strip().split(".")
+        replayed_parts = split_override_key(item.key)[0].strip().split(".")
         segment = replayed_parts[0]
         sections: Optional[FrozenSet[str]] = None
         if len(replayed_parts) > 1:
@@ -416,13 +442,17 @@ def landings_of(
                 landed = _landed_key(same, written_parts[1])
                 same = [landed] if landed else same
             sections = frozenset(same or [replayed_parts[1]])
+        # The operator as the scan's own apply read it: the typed text, which
+        # the fold onto the trusted base's section key does not respell.
+        op = split_override_key(written.rstrip())[1]
         found.append(
             Landing(
                 segment,
                 sections,
                 tuple(replayed_parts[2:]),
-                item.key.rstrip().endswith("+"),
+                op == APPEND,
                 _parse_config_value(raw),
+                op == REMOVE,
             )
         )
     return found
@@ -463,9 +493,14 @@ def _covered(
     holds nothing to put in its place, so the confinement leaves it. With
     ``except_appends``, an override that appended to a list at exactly
     ``segments`` does not count: the list holds the repository's items too,
-    which ``_appended`` and ``_with_appended`` confine.
+    which ``_appended`` and ``_with_appended`` confine. An override that removed
+    items from a list (``key-=item``) never counts: it set no value, and what it
+    left is the list the chain held less its items, which can be the
+    repository's, so its path takes the trusted base's value.
     """
     for landing in landings:
+        if landing.remove:
+            continue
         relation = _relation(landing, segments)
         if relation is None:
             continue
@@ -651,7 +686,10 @@ def confine_scanner_config_files(
     landed on (``landings_of``). An override that only appended to a list
     (``key+=item``) leaves the repository's own items in that list too, so the
     list is confined as for any other override, with the operator's appended
-    items put back after the trusted base's.
+    items put back after the trusted base's. One that removed items from a
+    list (``key-=item``) set no value: what it left can be the repository's
+    own items, so the path is confined as if it were not there, to the
+    trusted base's value.
 
     Args:
         config: The resolved AshConfig, changed in place.
@@ -672,8 +710,7 @@ def confine_scanner_config_files(
     scanner_overrides = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").strip().split(".")[0]
-        == "scanners"
+        if split_override_key(override)[0].strip().split(".")[0] == "scanners"
     ]
     landings: List[Landing] = []
     if scanner_overrides:
@@ -871,8 +908,7 @@ def confine_tool_versions(
     replayed = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").strip().split(".")[0]
-        in sections
+        if split_override_key(override)[0].strip().split(".")[0] in sections
     ]
     landings: List[Landing] = []
     if replayed:
@@ -899,7 +935,7 @@ def confine_tool_versions(
             [
                 item
                 for item in replay.dropped
-                if item.key.removesuffix("+").strip().split(".")[0] != "scanners"
+                if split_override_key(item.key)[0].strip().split(".")[0] != "scanners"
             ],
         )
 

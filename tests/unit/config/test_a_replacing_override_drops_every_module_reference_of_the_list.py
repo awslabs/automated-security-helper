@@ -274,7 +274,9 @@ def test_the_load_reads_whether_the_list_was_replaced_from_the_apply_not_the_tex
 
     def reports_an_append(*args, **kwargs):
         keys, value, _ = real(*args, **kwargs)
-        return keys, value, True
+        # The apply's third item is its operator ("+=" is APPEND), written as
+        # text so this file collects where the operator module is absent.
+        return keys, value, "+="
 
     monkeypatch.setattr(module, "_apply_config_override", reports_an_append)
     config = _run_load(layout, [f"ash_plugin_modules=[{FROM_ENV}, {FIRST}]"])
@@ -282,6 +284,63 @@ def test_the_load_reads_whether_the_list_was_replaced_from_the_apply_not_the_tex
     assert ("_environment_references", ("ash_plugin_modules", 0)) in [
         (attribute, path[:2]) for attribute, path in _module_references(config)
     ]
+
+
+def test_the_load_drops_the_references_when_the_apply_reports_a_replace(
+    layout: Dict[str, Path], monkeypatch: pytest.MonkeyPatch
+):
+    """The other half of the test above: the apply's operator, not the override
+    text, decides. An apply that reports a replace (here forced, for a key whose
+    text reads as an append) leaves no reference of the list, though the list
+    still holds the environment-read entry at index 0."""
+    from automated_security_helper.config import resolve_config as module
+
+    real = module._apply_config_override
+
+    def reports_a_replace(*args, **kwargs):
+        keys, value, _ = real(*args, **kwargs)
+        # "=" is REPLACE, written as text for the reason given above.
+        return keys, value, "="
+
+    monkeypatch.setattr(module, "_apply_config_override", reports_a_replace)
+    config = _run_load(layout, [f"ash_plugin_modules+=[{REPLACED}]"])
+    assert list(config.ash_plugin_modules) == [FROM_ENV, FIRST, REPLACED]
+    assert not _module_references(config), _module_references(config)
+
+
+def test_a_removal_of_another_entry_keeps_the_read_entrys_references(
+    layout: Dict[str, Path],
+):
+    """A removal is no replace: the entry the file read from the environment
+    stays at index 0, so its reference stays there in all three lists, and the
+    record writes it back as the reference."""
+    from automated_security_helper.config.config_validator import record_of_config
+
+    config = _loaded(layout, [f"ash_plugin_modules-=[{FIRST}]"])
+    assert list(config.ash_plugin_modules) == [FROM_ENV]
+    for attribute in REFERENCE_LISTS:
+        paths = {
+            tuple(reference.path[:2])
+            for reference in getattr(config, attribute, ()) or ()
+            if tuple(reference.path[:1]) == ("ash_plugin_modules",)
+        }
+        assert paths == {("ash_plugin_modules", 0)}, (attribute, paths)
+    record = record_of_config(config, config.model_dump(mode="json"))
+    assert record["ash_plugin_modules"] == ["${ASH_REPL_ENV}"], record
+
+
+def test_a_removal_of_the_read_entry_takes_its_references_with_it(
+    layout: Dict[str, Path],
+):
+    """Removing the entry the file read from the environment drops its
+    references: FIRST moves to index 0, and no reference names it."""
+    from automated_security_helper.config.config_validator import record_of_config
+
+    config = _loaded(layout, [f"ash_plugin_modules-=[{FROM_ENV}]"])
+    assert list(config.ash_plugin_modules) == [FIRST]
+    assert not _module_references(config), _module_references(config)
+    record = record_of_config(config, config.model_dump(mode="json"))
+    assert record["ash_plugin_modules"] == [FIRST], record
 
 
 def test_control_an_appending_override_keeps_the_read_entrys_references(

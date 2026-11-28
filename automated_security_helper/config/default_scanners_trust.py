@@ -17,13 +17,14 @@ from automated_security_helper.config.untrusted_source import (
     UntrustedSource,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.override_key import split_override_key
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
 
 def _is_selection_override(override: str) -> bool:
-    key = override.partition("=")[0].removesuffix("+").strip().split(".")[0]
+    key = split_override_key(override)[0].strip().split(".")[0]
     return key.replace("-", "_") == DEFAULT_SCANNERS_FIELD
 
 
@@ -37,12 +38,21 @@ def confine_default_scanners(
 ) -> None:
     from automated_security_helper.config.config_sources import describe_config_path
     from automated_security_helper.config.resolve_config import (
+        _raise_a_held_refusal,
         apply_config_overrides,
     )
 
     replayed = [o for o in config_overrides or [] if _is_selection_override(o)]
     if replayed:
-        trusted_config = apply_config_overrides(trusted_config, replayed)
+        # The run's selection is this replay's result, so an edit of it is judged
+        # here, against the operator's selection: the command's own build judged
+        # it against a document the run does not take default_scanners from, and
+        # resolve_config set that refusal aside.
+        refused: List[str] = []
+        trusted_config = apply_config_overrides(
+            trusted_config, replayed, selection_refusals=refused
+        )
+        _raise_a_held_refusal(trusted_config, refused)
 
     wanted = trusted_config.default_scanners
     written = dict(repository.selection_written) if repository is not None else {}

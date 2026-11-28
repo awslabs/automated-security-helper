@@ -254,6 +254,11 @@ from automated_security_helper.utils.output_dir_links import (
     ignore_output_dir_in_git,
     refuse_linked_output_dir,
 )
+from automated_security_helper.utils.override_key import (
+    APPEND,
+    REMOVE,
+    split_override_key,
+)
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 #: The remedy for this tool's caller, which names the output tree with output_dir.
@@ -880,8 +885,9 @@ def _gate_client_overrides(
     without a profile that enables them no override is accepted.
 
     Each override is checked twice: by the key it names (``check_runtime_ops``
-    on an ``add`` at the pointer it resolves to in the session config), and by
-    the change it makes to the session config (``apply_runtime_override``).
+    on an ``add`` at the pointer it resolves to in the session config, past its
+    end for a ``+=``, or a ``remove`` there for a ``-=``), and by the change it
+    makes to the session config (``apply_runtime_override``).
 
     Raises:
         RuntimePatchDeniedError: An override is not allowed.
@@ -976,20 +982,29 @@ def _gate_client_overrides(
                 f"Invalid config override: {_override_shown(str(override))}. "
                 "Expected format: key.path=value"
             )
-        append = key.endswith("+")
+        key_path, override_op = split_override_key(key)
         resolved = _resolve_override_key(
             base_dump,
-            (key[:-1] if append else key).split("."),
+            key_path.split("."),
             config_environment_values(base),
         )
         pointer = "/" + "/".join(
             segment.replace("~", "~0").replace("/", "~1") for segment in resolved
         )
-        op = {
-            "op": "add",
-            "path": pointer + ("/-" if append else ""),
-            "value": _parse_config_value(raw),
-        }
+        op: Dict[str, Any]
+        if override_op == REMOVE:
+            # A removal rewrites the list at its own path, as a replacement
+            # does, and writes no value: checked as a remove there, every
+            # denied_paths entry applies to it, and neither exemption for a
+            # written value (a reporter's enabled: false, a moved scanner
+            # exclusion) does.
+            op = {"op": "remove", "path": pointer}
+        else:
+            op = {
+                "op": "add",
+                "path": pointer + ("/-" if override_op == APPEND else ""),
+                "value": _parse_config_value(raw),
+            }
         check_runtime_ops([op], allowlist=allowlist, config=base)
         if _turns_an_off_host_reporter_off(op, base):
             ignored.append(key)

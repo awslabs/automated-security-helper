@@ -41,6 +41,7 @@ from automated_security_helper.config.config_sources import describe_config_path
 from automated_security_helper.config.confinement_remedy import KEEP_A_SETTING
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.override_key import split_override_key
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -65,7 +66,7 @@ def _sets_a_limit(override: str) -> bool:
         folded_section_name,
     )
 
-    key = override.partition("=")[0].removesuffix("+").strip()
+    key = split_override_key(override)[0].strip()
     parts = [part.strip().replace("-", "_") for part in key.split(".")]
     depth = min(len(parts), len(_LIMITS_SECTION))
     for index in range(depth):

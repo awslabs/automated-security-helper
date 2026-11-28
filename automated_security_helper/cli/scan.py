@@ -1157,8 +1157,15 @@ def run_ash_scan_cli_command(
         typer.Option(
             "--config-overrides",
             rich_help_panel="Configuration and plugins",
-            help="Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2'). "
-            "Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. See https://awslabs.github.io/automated-security-helper/latest/how-to/configure/",
+            help=(
+                "Configuration overrides specified as key-value pairs (e.g., "
+                "'reporters.cloudwatch-logs.options.aws_region=us-west-2'). "
+                'Supports lists with ["item1","item2"], append mode with '
+                'key+=["value"], remove mode with key-=["value"], which removes '
+                "every occurrence of each item, and JSON syntax. See "
+                "https://awslabs.github.io/automated-security-helper/latest/"
+                "how-to/configure/"
+            ),
         ),
     ] = None,
     offline: Annotated[

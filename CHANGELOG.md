@@ -111,6 +111,48 @@
   and Bitbucket configuration frameworks, every time it starts, whichever frameworks
   run. Each is now left out of checkov's environment in an offline scan and when its
   framework does not run, and a framework that runs online gets its token as before.
+- **`--config-overrides` and `ash config update --set` remove items from a list with
+  `-=`.** `key-=[a, b]` removes every occurrence of each listed item from the list the
+  key holds, and `key-=a` every occurrence of one item; `=` still replaces and `+=`
+  still appends. On an option no config file sets, `+=` and `-=` edit the option's
+  default. The overrides apply in the order given and the configuration is validated
+  once, after the last of them, so a removal that leaves a list shorter than its option
+  allows is refused. `-=` on a single value or a mapping is refused with a message that
+  names the key, and so is `-=` at an option that a plugin ASH ships does not have,
+  such as a misspelled option name. A `-=` that would empty `default_scanners.only`,
+  `precommit.only_scanners`, `output_formats`, checkov's `frameworks`, trivy-repo's
+  `scanners` or detect-secrets' `scan_settings.plugins_used` is refused, because an
+  empty list there means more than none: the default selection of scanners, every
+  enabled reporter's format, checkov's `all`, the scanners trivy chooses, or every
+  detector. An `output_formats-=` with an item that names no format is refused, and the
+  message lists the valid formats.
+- **`+=` is refused on list values that stand for more than the items they list.** In
+  3.8 these were applied as appends. checkov's `frameworks+=[x]` on the default
+  `["all"]` made `["all", x]`, which still ran every framework, so the append changed
+  nothing; where a config file wrote `frameworks: []`, which also ran every framework,
+  it made `[x]` and ran `x` alone, a narrowing. detect-secrets'
+  `scan_settings.plugins_used+=[...]` on the default `[]` ran only the listed
+  detectors. trivy-repo's `scanners+=[...]`, where a config file wrote `scanners: []`,
+  ran only the listed scanners instead of the ones trivy chooses on its own. Each is
+  now refused, and the run stops with an error that names the `=` form to write
+  instead, which sets the whole list; `-=` on these values is refused the same way.
+  `+=` and `-=` are refused on an empty `default_scanners.only` or
+  `precommit.only_scanners` too: empty, each runs the default selection of scanners,
+  and an append would narrow the run to the scanners it names. The error names
+  `default_scanners.only=[...]` (or `precommit.only_scanners=[...]`) to run exactly the
+  scanners listed, or `--exclude-scanners` to leave scanners out of it, and for
+  precommit mode `default_scanners.add=[...]` (or `precommit.add_scanners=[...]`) to
+  add scanners to that selection; outside precommit mode `default_scanners.add` has no
+  effect. 3.8 has no `default_scanners` or `precommit` section: an override of either
+  key was accepted there and changed nothing. On `["all"]`, a `+=` that adds only
+  frameworks checkov's `all` leaves out (`bitbucket_configuration`,
+  `github_configuration`, `gitlab_configuration`) is still applied.
+- **`+=` on a value that is not a list, and on an empty `output_formats`, is
+  deprecated.** `+=` on a single value or a mapping still replaces it, as in 3.8, and
+  now prints a deprecation warning that names the key; ASH 4.0 refuses it.
+  `output_formats+=[x]` while `output_formats` is unset, `null`, `[]` or an empty
+  string still writes `x` alone, as in 3.8, and now prints a deprecation warning; from
+  ASH 4.0 it adds `x` to the formats of every enabled reporter.
 
 ### Maintenance
 

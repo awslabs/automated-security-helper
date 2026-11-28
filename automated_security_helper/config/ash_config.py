@@ -2667,13 +2667,17 @@ class AshConfig(RedactedSection):
     # overrides' fold for the ownership views.
     _scanners_before_overrides: Optional[Tuple[str, ...]] = PrivateAttr(default=None)
 
-    # Whether an application of --config-overrides REPLACED ``ash_plugin_modules``
-    # (an override of the key without the trailing ``+``), stamped by
-    # apply_config_overrides from the key paths its overrides landed on, never
-    # from the override text. The load path (load_config_file_for_run) reads it
-    # after attaching the file's references, to drop every reference of a list
-    # the file no longer describes. Once set it stays set.
-    _plugin_modules_replaced: bool = PrivateAttr(default=False)
+    # What each application of --config-overrides did to a list, in the order
+    # the overrides applied: one config.list_references.ListChange for each
+    # override that replaced a value (``=``, or ``+=`` onto a value that is no
+    # list) and one for each removal (``-=``) from a list the document held.
+    # Stamped by apply_config_overrides from the operator each apply returned,
+    # never from the override text, and kept through later applications. The
+    # load path (load_config_file_for_run) reads it to reconcile the records it
+    # attaches after the overrides were applied: a replaced value keeps none of
+    # the file's records, a removal moves a kept entry's to its new index.
+    # Empty means no override changed which entry a record names.
+    _override_list_changes: Tuple[Any, ...] = PrivateAttr(default=())
 
     # The dotted field paths this configuration's operator supplied, stamped by
     # apply_config_overrides: the paths the input model was written with (its

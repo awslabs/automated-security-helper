@@ -109,6 +109,11 @@ from automated_security_helper.utils.log import (
     show_debug_locals,
 )
 from automated_security_helper.utils.output_dir_links import OutputDirLinkRefused
+from automated_security_helper.utils.override_key import (
+    APPEND,
+    REMOVE,
+    split_override_key,
+)
 from automated_security_helper.utils.path_stat import (
     UNREADABLE,
     StatProblem,
@@ -1402,7 +1407,7 @@ def _refuse_a_reference_shaped_value(key_path: str, value: str) -> None:
         # own typed text, which the load never resolved, so the usual
         # keys-only message may name the path.
         raise ASHConfigValidationError(
-            f"--set '{key_path.removesuffix('+')}' gives a key segment shaped "
+            f"--set '{split_override_key(key_path)[0]}' gives a key segment shaped "
             "like an environment reference (${VAR} or !ENV), which this "
             "command does not write: edit the config file to add a reference, "
             "so the load reads it as one"
@@ -1417,7 +1422,7 @@ def _refuse_a_reference_shaped_value(key_path: str, value: str) -> None:
         return
     if _reference_shaped(parsed):
         raise ASHConfigValidationError(
-            f"--set '{key_path.removesuffix('+')}' gives a value shaped like "
+            f"--set '{split_override_key(key_path)[0]}' gives a value shaped like "
             "an environment reference (${VAR} or !ENV), which this command "
             "does not write: edit the config file to add a reference, so the "
             "load reads it as one"
@@ -1433,7 +1438,7 @@ def _refuse_an_unknown_top_level_key(key_path: str) -> None:
     '_' (``_apply_config_override`` follows either to the dumped section). Only the
     key is named, never the value.
     """
-    first = key_path.removesuffix("+").split(".", 1)[0]
+    first = split_override_key(key_path)[0].split(".", 1)[0]
     known = [
         spelling
         for name, field in AshConfig.model_fields.items()
@@ -1469,7 +1474,13 @@ def update(
         List[str],
         typer.Option(
             "--set",
-            help="Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax.",
+            help=(
+                "Configuration modifications specified as key-value pairs (e.g., "
+                "'global_settings.severity_threshold=LOW'). Supports lists with "
+                '["item1","item2"], append mode with key+=["value"], remove mode '
+                'with key-=["value"], which removes every occurrence of each item, '
+                "and JSON syntax."
+            ),
         ),
     ] = [],
     source_dir: Annotated[
@@ -1655,10 +1666,13 @@ def _update_config_file(
         )
         raise typer.Exit(INVALID_CONFIG_EXIT_CODE)
     for mod in modifications:
-        # The key only: the value can be a credential. `key+=` appends.
-        key_path = mod.partition("=")[0]
-        if key_path.endswith("+"):
-            logger.info(f"Appended to {key_path[:-1]}")
+        # The key only: the value can be a credential. `key+=` appends and
+        # `key-=` removes.
+        key_path, override_op = split_override_key(mod)
+        if override_op == APPEND:
+            logger.info(f"Appended to {key_path}")
+        elif override_op == REMOVE:
+            logger.info(f"Removed from {key_path}")
         else:
             logger.info(f"Applied a modification to {key_path}")
 

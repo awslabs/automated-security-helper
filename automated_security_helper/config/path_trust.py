@@ -100,6 +100,7 @@ from automated_security_helper.config.confinement_remedy import (
 from automated_security_helper.utils.display_text import escape_controls
 from automated_security_helper.utils.link_locations import link_locations
 from automated_security_helper.utils.log import ASH_LOGGER, current_run_log_scope
+from automated_security_helper.utils.override_key import REMOVE, split_override_key
 
 if TYPE_CHECKING:
     from automated_security_helper.config.sandbox_grants import WalkJudgment
@@ -293,7 +294,8 @@ class OperatorPaths:
 
 def parse_overrides(config_overrides: Optional[List[str]]) -> List[Tuple[str, Any]]:
     """``key=value`` and ``key+=value`` overrides as (key, parsed value), parsed
-    the way ``resolve_config.apply_config_overrides`` applies them."""
+    the way ``resolve_config.apply_config_overrides`` applies them; a
+    ``key-=value`` removal is left out: it names no path."""
     # Imported here: resolve_config imports this module.
     from automated_security_helper.config.resolve_config import _parse_config_value
 
@@ -309,7 +311,12 @@ def parse_overrides(config_overrides: Optional[List[str]]) -> List[Tuple[str, An
             # (``resolve_config._validated_with_overrides``), so a path named
             # that way is compared as written.
             value = raw
-        parsed.append((key.removesuffix("+"), value))
+        key, op = split_override_key(key)
+        if op == REMOVE:
+            # A removal names entries the operator takes out of a list, never a
+            # path the operator named for a tool to read.
+            continue
+        parsed.append((key, value))
     return parsed
 
 

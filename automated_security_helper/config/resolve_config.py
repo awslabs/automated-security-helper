@@ -30,7 +30,7 @@ from typing import (
     get_origin,
 )
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 import yaml
 from automated_security_helper.config.ash_config import (
     AshConfig,
@@ -47,7 +47,11 @@ from automated_security_helper.config.patch_ops import (
     VALUE_WRITING_OPS,
 )
 from automated_security_helper.models.vocab import PluginKind
-from automated_security_helper.plugin_manifests import UNTYPED_LIST_OPTION_DEFAULTS
+from automated_security_helper.plugin_manifests import (
+    OVERRIDE_EDIT_SENTINEL_ADDITIONS,
+    OVERRIDE_EDIT_SENTINELS,
+    UNTYPED_LIST_OPTION_DEFAULTS,
+)
 from automated_security_helper.utils import unknown_keys as _unknown_keys
 from automated_security_helper.utils.unknown_keys import WARN_UNKNOWN_KEYS
 from automated_security_helper.config.plugin_section_names import (
@@ -149,6 +153,7 @@ from automated_security_helper.config.environment_record import (
     mappings_with_written_reference_keys,
 )
 from automated_security_helper.config.default_config import get_default_config
+from automated_security_helper.config.wire_enum import wire_value
 from automated_security_helper.config.recorded_config import (
     override_field_paths,
     written_field_paths,
@@ -164,6 +169,11 @@ from automated_security_helper.config.operator_only_options import (
 from automated_security_helper.config.plugin_module_trust import (
     confine_plugin_modules,
     drop_plugin_module_references_past_the_list,
+)
+from automated_security_helper.config.list_references import (
+    ListChange,
+    reconcile_list_references,
+    reconciled_list_references,
 )
 from automated_security_helper.config.sandbox_grants import (
     REPOSITORY_WRITTEN,
@@ -195,7 +205,7 @@ from automated_security_helper.core.constants import (
     ASH_PYPROJECT_FILE_NAME,
     ASH_RC_FILE_NAMES,
 )
-from automated_security_helper.core.enums import SandboxMode
+from automated_security_helper.core.enums import ExportFormat, SandboxMode
 from automated_security_helper.core.exceptions import (
     ASHConfigFileNotFoundError,
     ASHConfigInputNotPermittedError,
@@ -213,6 +223,13 @@ from automated_security_helper.utils.log import (
     ASH_LOGGER,
     NO_MARKUP,
     current_run_log_scope,
+)
+from automated_security_helper.utils.override_key import (
+    APPEND,
+    REMOVE,
+    REPLACE,
+    OverrideOp,
+    split_override_key,
 )
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
@@ -382,10 +399,11 @@ def _rules_value_needs_the_directory(override: str) -> bool:
     ``operator_paths.anchored_path`` never rewrites; a list, which the live
     anchoring leaves as written too (``anchored_path`` reads a string only);
     and an append (``config+=``), whose value the live anchoring places in a
-    list.
+    list; and a removal (``config-=``), which places no value for the scanner to
+    read (the rules option is text, which a removal does not edit).
     """
     key, separator, raw = override.partition("=")
-    if not separator or key.endswith("+"):
+    if not separator or split_override_key(key)[1] in (APPEND, REMOVE):
         return False
     segments = [segment.strip() for segment in key.split(".")]
     if segments[0] != "scanners":
@@ -451,9 +469,10 @@ def _relative_rules_file(value: Any) -> bool:
 
 def _override_key_as_written(override: str) -> str:
     """The key of a ``--config-overrides`` entry for a refusal: ``key`` for a
-    setting override, ``key+=`` for an appending one, never the value."""
+    setting override, ``key+=`` for an appending one, ``key-=`` for a removing
+    one, never the value."""
     key = str(override).partition("=")[0].strip()
-    return f"{key}=" if key.endswith("+") else key
+    return f"{key}=" if split_override_key(key)[1] in (APPEND, REMOVE) else key
 
 
 def _sets_network_scanners(override: str) -> bool:
@@ -463,9 +482,14 @@ def _sets_network_scanners(override: str) -> bool:
     holds it, with either separator spelling, the way ``_apply_config_override``
     reads keys. The operator's own list replaces the limit a file in another
     checkout kept (``restrictions_kept``), as an override replaces any base value.
+    A removal (``-=``) only takes network away, so the limit stays: read as a
+    write of the list, it would drop the limit and give network back to every
+    scanner the limit left out.
     """
-    key = override.partition("=")[0].removesuffix("+").strip()
-    parts = [part.strip().replace("-", "_") for part in key.split(".")]
+    key, operator = split_override_key(override)
+    if operator == REMOVE:
+        return False
+    parts = [part.strip().replace("-", "_") for part in key.strip().split(".")]
     return parts[0] == "sandbox" and (len(parts) == 1 or parts[1] == "network_scanners")
 
 
@@ -766,6 +790,466 @@ def warn_of_appends_an_off_host_reporter_runs_with(
                 )
 
 
+#: The notices ``_say_once_per_run`` has given, each as (the run log scope, the
+#: kind of notice, the key as logged). A run gives each notice once for each key
+#: however often its own overrides are applied; a later run in the same process
+#: gives it again; None is the scope outside every run. Bounded as
+#: ``_APPEND_TO_UNREAD_SECTION_WARNED`` is.
+_OVERRIDE_NOTICES_GIVEN: Set[Tuple[Optional[str], str, str]] = set()
+_OVERRIDE_NOTICES_LOCK = threading.Lock()
+
+
+def _say_once_per_run(kind: str, logged_path: str, text: str) -> None:
+    """Log *text* as a warning the first time this run gives the notice *kind* for
+    the key *logged_path*. Only the application that builds a command's own
+    configuration calls this (``warn_unread_appends``)."""
+    given = (current_run_log_scope(), kind, logged_path)
+    with _OVERRIDE_NOTICES_LOCK:
+        if given in _OVERRIDE_NOTICES_GIVEN:
+            return
+        if len(_OVERRIDE_NOTICES_GIVEN) >= _APPEND_TO_UNREAD_SECTION_BOUND:
+            _OVERRIDE_NOTICES_GIVEN.clear()
+        _OVERRIDE_NOTICES_GIVEN.add(given)
+    ASH_LOGGER.warning(text, extra=NO_MARKUP)
+
+
+#: The selection lists whose empty value is no selection, by resolved key, each
+#: with the set its empty value runs and the key that adds scanners to that set in
+#: precommit mode (outside it, ``SelectionLayers.fold`` drops that key).
+#: Empty, ``default_scanners.only`` runs the mode's default set, which outside
+#: precommit mode is every enabled scanner, and ``precommit.only_scanners`` the
+#: selection below it (``SelectionLayers.fold``, core/scanner_selection.py). The
+#: empty value is the default, not a list of names: ``+=`` onto it would narrow
+#: the run to the names it adds and ``-=`` from it would remove nothing, and a
+#: ``-=`` that would empty a list would run the default set where the list named
+#: the scanners to run, as an exclusion that empties a selection would
+#: (``selection_after_exclusions``). Each is refused, naming the replace form
+#: (``_refuse_an_edit_of_a_scanner_selection``).
+_EMPTY_MEANS_THE_DEFAULT_SELECTION: Mapping[Tuple[str, ...], Tuple[str, str]] = {
+    ("default_scanners", "only"): (
+        "the mode's default set of scanners",
+        "default_scanners.add",
+    ),
+    ("precommit", "only_scanners"): (
+        "the selection below it (default_scanners over the mode's default set)",
+        "precommit.add_scanners",
+    ),
+}
+
+#: The selection list a run takes from the operator's own configuration whenever
+#: ``resolve_config`` confines the load (a file of the chain is the repository's,
+#: or a client supplied the overrides): the run gets the trusted base's
+#: ``default_scanners`` with the operator's selection overrides replayed onto it
+#: (config/default_scanners_trust.py), which judges an edit it makes. So the
+#: command's own build holds its refusal of an edit of this list until the load
+#: knows which of the two the run uses (``selection_refusals``).
+_CONFINED_SELECTION: Tuple[str, ...] = ("default_scanners", "only")
+
+
+def _raise_a_held_refusal(config: AshConfig, refusals: Sequence[str]) -> None:
+    """Raise the first refusal *refusals* holds (``selection_refusals``), when it
+    holds one, redacted as ``load_config_file`` redacts an override's refusal."""
+    if refusals:
+        raise ASHConfigValidationError(
+            redact_values(refusals[0], config_environment_values(config))
+        )
+
+
+def _sentinel_of(resolved_keys: Sequence[str]) -> Optional[List[Any]]:
+    """The value that means "every item" for the list option an edit landed on, or
+    None when the option has none: an empty ``output_formats`` (every enabled
+    reporter's format), and the plugin options of ``OVERRIDE_EDIT_SENTINELS``,
+    whose section is found by its folded name, as the document loader folds it."""
+    if list(resolved_keys) == ["output_formats"]:
+        return []
+    sentinel = _plugin_option_entry(OVERRIDE_EDIT_SENTINELS, resolved_keys)
+    return None if sentinel is None else list(sentinel)
+
+
+def _plugin_option_entry(
+    table: Mapping[str, Mapping[str, Mapping[Tuple[str, ...], Any]]],
+    resolved_keys: Sequence[str],
+) -> Any:
+    """The entry of a plugin-option table of plugin_manifests
+    (``OVERRIDE_EDIT_SENTINELS``, ``OVERRIDE_EDIT_SENTINEL_ADDITIONS``) for the
+    option an edit landed on, or None; the section is found by its folded name, as
+    the document loader folds it."""
+    if len(resolved_keys) < 3:
+        return None
+    for plugin, row in table.get(resolved_keys[0], {}).items():
+        if folded_section_name(plugin) == folded_section_name(resolved_keys[1]):
+            return row.get(tuple(resolved_keys[2:]))
+    return None
+
+
+#: The options of ``OVERRIDE_EDIT_SENTINELS`` whose plugin reads an empty list as
+#: the value that means every item too, keyed as that table: checkov runs an empty
+#: ``frameworks`` as ``all`` (``CheckovScanner``), so a written ``frameworks: []``
+#: stands for every framework as the default does, and ``+=`` onto it would run
+#: only the frameworks it adds.
+_EMPTY_READ_AS_THE_SENTINEL: Mapping[
+    str, Mapping[str, Mapping[Tuple[str, ...], bool]]
+] = {"scanners": {"checkov": {("options", "frameworks"): True}}}
+
+
+def _refuse_an_edit_of_a_scanner_selection(
+    resolved_keys: Sequence[str],
+    held: List[Any],
+    result: Optional[List[Any]],
+    logged_path: str,
+    operator: OverrideOp,
+    refusals: Optional[List[str]] = None,
+) -> None:
+    """Refuse a ``+=`` or ``-=`` on an empty list of
+    ``_EMPTY_MEANS_THE_DEFAULT_SELECTION``, naming the replace form, the flag that
+    leaves scanners out of the default set and, for precommit mode only, the key
+    that adds to it (outside that mode ``SelectionLayers.fold`` drops the key), and
+    a ``-=`` whose *result* would leave such a list empty. The refusal names the
+    key, never an item.
+
+    With *refusals*, a refusal of an edit of ``_CONFINED_SELECTION`` is appended to
+    it instead of raised (``apply_config_overrides``'s ``selection_refusals``). The
+    precommit selection is read from the configuration the edit applies to, so its
+    refusal is raised in every application that judges it."""
+    selection = _EMPTY_MEANS_THE_DEFAULT_SELECTION.get(tuple(resolved_keys))
+    if selection is None:
+        return
+    runs, add_key = selection
+    if not held:
+        verb = "add to" if operator == APPEND else "remove items from"
+        text = (
+            f"Invalid config override: '{logged_path}{operator}'. {logged_path} is "
+            f"empty, which runs {runs}, so there is no list to {verb}. Write "
+            f"'{logged_path}=[...]' to run exactly the scanners you list, or "
+            "--exclude-scanners to leave scanners out of it; in precommit mode, "
+            f"'{add_key}=[...]' adds scanners to that set."
+        )
+    elif operator == REMOVE and not result:
+        text = (
+            f"Invalid config override: '{logged_path}-='. The removal would leave "
+            f"{logged_path} empty, and an empty list runs {runs}. Write the whole "
+            f"list with '{logged_path}=[...]'."
+        )
+    else:
+        return
+    if refusals is not None and tuple(resolved_keys) == _CONFINED_SELECTION:
+        refusals.append(text)
+        return
+    raise ASHConfigValidationError(text)
+
+
+def _refuse_an_edit_of_every_item(
+    resolved_keys: Sequence[str],
+    held: List[Any],
+    result: Optional[List[Any]],
+    logged_path: str,
+    operator: OverrideOp,
+    items: Sequence[Any] = (),
+) -> None:
+    """Refuse a ``+=`` or ``-=`` on a list that holds the value meaning every item
+    (``_sentinel_of``, or an empty list where the plugin reads one as that value,
+    ``_EMPTY_READ_AS_THE_SENTINEL``), naming the replace form to write instead, and
+    a ``-=`` whose *result* would hold such a value. Called only in the application
+    that builds a command's own configuration; an empty ``output_formats`` reaches
+    this for a removal only (its append keeps the 3.x meaning, with a
+    deprecation)."""
+    sentinel = _sentinel_of(resolved_keys)
+    if sentinel is None:
+        return
+    every_item = [sentinel]
+    if sentinel and _plugin_option_entry(_EMPTY_READ_AS_THE_SENTINEL, resolved_keys):
+        every_item.append([])
+    if held in every_item:
+        shown = json.dumps(held)
+        # The items the sentinel leaves out may be added to it, not to an empty
+        # list read as it, where they would be all the plugin runs.
+        additions = (
+            _plugin_option_entry(OVERRIDE_EDIT_SENTINEL_ADDITIONS, resolved_keys)
+            if held == sentinel
+            else None
+        ) or frozenset()
+        if (
+            operator == APPEND
+            and items
+            and all(isinstance(item, str) and item in additions for item in items)
+        ):
+            # An item the value leaves out (checkov's hosted-service frameworks):
+            # adding it is an append, as the scanner's own help describes.
+            return
+        verb = "add to" if operator == APPEND else "remove items from"
+        raise ASHConfigValidationError(
+            f"Invalid config override: '{logged_path}{operator}'. {logged_path} "
+            f"holds {shown}, which means every item, so there is no list to {verb}. "
+            f"Write the whole list with '{logged_path}=[...]'."
+        )
+    # Only an empty value is reached by taking items out of a list that did not mean
+    # every item; a removal that leaves ["all"] started from a list that held it.
+    if operator == REMOVE and result == [] and [] in every_item:
+        raise ASHConfigValidationError(
+            f"Invalid config override: '{logged_path}-='. The removal would leave "
+            f"{logged_path} holding [], which means every item. Write the "
+            f"whole list with '{logged_path}=[...]'."
+        )
+
+
+def _removal_matches(entry: Any, item: Any) -> bool:
+    """Whether a ``-=`` item names a list entry: an equal value, or, for a
+    mapping item with at least one key, a mapping entry that holds every key
+    the item names with an equal value (an entry as dumped also carries the
+    defaults of its model, which the operator does not write)."""
+    if isinstance(item, dict) and item and isinstance(entry, dict):
+        return all(key in entry and entry[key] == value for key, value in item.items())
+    return entry == item
+
+
+def _items_as_the_list_holds(
+    resolved_keys: Sequence[str],
+    items: List[Any],
+    logged_path: str,
+    own_configuration: bool,
+) -> List[Any]:
+    """The items of a ``-=``, spelled as the list holds its entries where the list's
+    items are a closed domain, else as written.
+
+    ``output_formats`` holds format names (its serializer dumps each member's
+    name). Each item goes through the field's own type, the conversion an entry of
+    the list gets, and comes back as the name its member is dumped as, so an item
+    is matched as the entry it converts to is. An item the type refuses names no
+    format: a command's own build refuses the removal, as ``=`` and ``+=`` of the
+    same item are refused, naming the key and the valid formats, not the item,
+    which may have been read from the environment (the field's own refusal leaves
+    the item out for the same reason). Any other application keeps the item as
+    written, where it matches no entry.
+    """
+    if list(resolved_keys) != ["output_formats"]:
+        return items
+    adapter: TypeAdapter[Any] = TypeAdapter(
+        AshConfig.model_fields["output_formats"].annotation
+    )
+    spelled: List[Any] = []
+    for item in items:
+        try:
+            (member,) = adapter.validate_python([item])
+        except ValidationError:
+            if own_configuration:
+                valid = ", ".join(wire_value(fmt) for fmt in ExportFormat)
+                raise ASHConfigValidationError(
+                    f"Invalid config override: '{logged_path}-='. An item to "
+                    f"remove names no format. Valid formats are: {valid}."
+                ) from None
+            spelled.append(item)
+        else:
+            spelled.append(wire_value(member))
+    return spelled
+
+
+def _removed_from_a_list(
+    config_dict: Dict[str, Any],
+    key_path: str,
+    value: str,
+    environment_values: Sequence[str] = (),
+    *,
+    own_configuration: bool = False,
+    list_changes: Optional[List[ListChange]] = None,
+    selection_refusals: Optional[List[str]] = None,
+) -> Tuple[List[str], Any, OverrideOp]:
+    """Apply one ``key-=value`` override: each item of the parsed value (the
+    items of a list value, any other value as one item) is taken out of the list
+    at *key_path* (the ``-`` already removed). Every entry the item names
+    (``_removal_matches``) goes, and the others stay in order. Where the list's
+    items are a closed domain, each item is first spelled as the list holds its
+    entries (``_items_as_the_list_holds``).
+
+    The segments resolve as the set and the append resolve them
+    (``resolve_override_segment``), but the walk makes no section it does not
+    find: a removal takes items out of a list the document holds. Inside the
+    section of a plugin the configuration does not type, an option the file left
+    out starts from the default the shipped plugin's row gives it
+    (``UNTYPED_LIST_OPTION_DEFAULTS``), as an append does, so the removal
+    reaches the list the plugin reads; with no such default nothing is written.
+    A typed setting that holds None holds no list and keeps None.
+
+    With *own_configuration* (the application that builds a command's own
+    configuration), what the document holds decides what is refused and said. A
+    removal from a list whose value means every item (``_sentinel_of``) or from an
+    empty selection of scanners (``_EMPTY_MEANS_THE_DEFAULT_SELECTION``), or one
+    that would empty a list whose empty value means every item or the default
+    selection of scanners, is refused. So
+    is a removal from a value that is no list, at an option of such a section that
+    the shipped plugin's row does not name (it has no list option of that name), at
+    a key the document does not hold outside such a section, or of an item that
+    names nothing in a closed domain, naming the key and never the value. A
+    removal from a typed setting that holds None, or in a section no shipped plugin
+    reads, warns once per run. Every other application of the same overrides
+    applies them to a base that can hold less than the real document, so there a
+    removal that finds no list changes nothing and nothing is refused or said above
+    debug.
+
+    *selection_refusals* is ``apply_config_overrides``'s: an edit of a selection
+    of scanners is judged in every application that passes it, and a refusal of
+    an edit of ``_CONFINED_SELECTION`` is appended there instead of raised.
+
+    *list_changes*, when given, gets one ``ListChange`` for a removal from a
+    list the document holds: the list's old length and the old index of each
+    entry kept. The other branches change no entry a record names (an untyped
+    option no file wrote holds no record, and a typed None and the refusals
+    change nothing), so they append nothing.
+    """
+    keys = key_path.split(".")
+    current: Any = config_dict
+    parent: "str | None" = None
+    resolved_keys: List[str] = []
+    for key in keys[:-1]:
+        resolved = (
+            resolve_override_segment(current, parent, key, environment_values)
+            if isinstance(current, dict)
+            else key
+        )
+        resolved_keys.append(resolved)
+        current = current.get(resolved) if isinstance(current, dict) else None
+        parent = resolved
+    final_key = (
+        resolve_override_segment(current, parent, keys[-1], environment_values)
+        if isinstance(current, dict)
+        else keys[-1]
+    )
+    resolved_keys.append(final_key)
+    parsed_value = _parse_config_value(value)
+    items = list(parsed_value) if isinstance(parsed_value, list) else [parsed_value]
+    logged_path = redact_values(key_path, environment_values)
+    items = _items_as_the_list_holds(
+        resolved_keys, items, logged_path, own_configuration
+    )
+    held = current.get(final_key) if isinstance(current, dict) else None
+    # held is a list only when current is a mapping; testing both lets the type
+    # checker see the mapping the kept entries are written back into.
+    if isinstance(current, dict) and isinstance(held, list):
+        kept_at = tuple(
+            index
+            for index, entry in enumerate(held)
+            if not any(_removal_matches(entry, item) for item in items)
+        )
+        kept = [held[index] for index in kept_at]
+        if own_configuration or selection_refusals is not None:
+            _refuse_an_edit_of_a_scanner_selection(
+                resolved_keys, held, kept, logged_path, REMOVE, selection_refusals
+            )
+        if own_configuration:
+            _refuse_an_edit_of_every_item(
+                resolved_keys, held, kept, logged_path, REMOVE
+            )
+        if list_changes is not None:
+            # One predicate makes the list and the map of its records: the
+            # entry that was at kept_at[n] is at index n now.
+            list_changes.append(
+                ListChange(
+                    path=tuple(resolved_keys),
+                    op=REMOVE,
+                    old_length=len(held),
+                    kept=kept_at,
+                )
+            )
+        current[final_key] = kept
+        ASH_LOGGER.debug(f"Removed from the list at {logged_path}", extra=NO_MARKUP)
+        return resolved_keys, parsed_value, REMOVE
+    untyped = _is_in_an_untyped_plugin_section(resolved_keys)
+    if held is None and untyped:
+        # The append makes the override's section before it asks which shipped
+        # plugin reads it, and a removal makes nothing it does not find: asked
+        # of the segment as the append's walk leaves it, the two choose alike.
+        # The copy holds the section; the document is written only below, when
+        # the row gives the option a default.
+        segment = config_dict[resolved_keys[0]]
+        if isinstance(segment, dict) and resolved_keys[1] not in segment:
+            segment = {**segment, resolved_keys[1]: {}}
+        row = _row_of_the_shipped_plugin_reading(segment, resolved_keys)
+        default = None if row is None else row.get(tuple(resolved_keys[2:]))
+        if default is not None:
+            # Copied, as the append copies the table's.
+            start = copy.deepcopy(list(default))
+            kept = [
+                entry
+                for entry in start
+                if not any(_removal_matches(entry, item) for item in items)
+            ]
+            if own_configuration:
+                _refuse_an_edit_of_every_item(
+                    resolved_keys, start, kept, logged_path, REMOVE
+                )
+            # The containers the set walk would make, so the list lands where
+            # the plugin reads it.
+            container = config_dict
+            for resolved in resolved_keys[:-1]:
+                if not isinstance(container.get(resolved), dict):
+                    container[resolved] = {}
+                container = container[resolved]
+            container[final_key] = kept
+            ASH_LOGGER.debug(
+                f"Removed from the list at {logged_path}, from the option's default",
+                extra=NO_MARKUP,
+            )
+            return resolved_keys, parsed_value, REMOVE
+        if row is not None and own_configuration:
+            # The row names every list option the shipped plugin has (a test holds
+            # UNTYPED_LIST_OPTION_DEFAULTS equal to the plugins' option models, and
+            # another every option they type as a list to a row entry), so the
+            # option is misspelled or holds a single value: no list to remove from.
+            parts = key_path.split(".")
+            section = redact_values(".".join(parts[:2]), environment_values)
+            option = redact_values(".".join(parts[2:]), environment_values)
+            raise ASHConfigValidationError(
+                f"Invalid config override: '{logged_path}-='. '-=' removes items "
+                f"from a list, and {section} has no list option {option}. Check "
+                "the option name."
+            )
+        if row is None and own_configuration:
+            section = redact_values(
+                ".".join(key_path.split(".")[:2]), environment_values
+            )
+            _say_once_per_run(
+                "remove-unread-section",
+                logged_path,
+                f"No plugin ASH ships reads {section} (a plugin from a module "
+                "outside ASH is read after the overrides are applied), so "
+                f"'{logged_path}-=' has no default to remove items from: nothing "
+                "is removed. Check the section name, or set the whole list with "
+                f"'{logged_path}=[...]'.",
+            )
+        ASH_LOGGER.debug(
+            f"Found no list to remove from at {logged_path}", extra=NO_MARKUP
+        )
+        return resolved_keys, parsed_value, REMOVE
+    if held is None and isinstance(current, dict) and final_key in current:
+        # A typed setting holding None (sandbox.network_scanners: each scanner's
+        # default applies): nothing is listed, nothing is removed.
+        if own_configuration:
+            _say_once_per_run(
+                "remove-from-none",
+                logged_path,
+                f"'{logged_path}-=' removes nothing from this configuration: "
+                f"{logged_path} is not set in it, so it holds no list. Set the "
+                f"whole list with '{logged_path}=[...]'.",
+            )
+        ASH_LOGGER.debug(
+            f"Found no list to remove from at {logged_path}", extra=NO_MARKUP
+        )
+        return resolved_keys, parsed_value, REMOVE
+    if not own_configuration:
+        ASH_LOGGER.debug(
+            f"Found no list to remove from at {logged_path}", extra=NO_MARKUP
+        )
+        return resolved_keys, parsed_value, REMOVE
+    if held is not None:
+        raise ASHConfigValidationError(
+            f"Invalid config override: '{logged_path}-='. '-=' removes items from "
+            f"a list, and {logged_path} is not a list."
+        )
+    raise ASHConfigValidationError(
+        f"Invalid config override: '{logged_path}-='. '-=' removes items from a "
+        f"list, and the configuration has no setting {logged_path}."
+    )
+
+
 def _apply_config_override(
     config_dict: Dict[str, Any],
     key_path: str,
@@ -774,7 +1258,9 @@ def _apply_config_override(
     *,
     warn_unread_appends: bool = False,
     started_lists: Optional[List[Tuple[Tuple[str, ...], str, str]]] = None,
-) -> Tuple[List[str], Any, bool]:
+    list_changes: Optional[List[ListChange]] = None,
+    selection_refusals: Optional[List[str]] = None,
+) -> Tuple[List[str], Any, OverrideOp]:
     """
     Apply a single config override to a configuration dictionary.
 
@@ -787,27 +1273,51 @@ def _apply_config_override(
             (resolve_override_segment reads them at each segment, and refuses
             a single-use iterator: a caller reusing an exhausted one across
             calls would print an env-read key unredacted).
+        list_changes: Where a removal from a list the configuration holds
+            appends what it did (a ``ListChange``: the list's old length and
+            the old index of each entry it kept), for the records of the list
+            (config/list_references.py). A replacement is not appended here:
+            the caller reads it from the operator returned. An append moves no
+            entry and appends nothing.
         warn_unread_appends: Log the warning for an append that lands in a
             section no plugin ASH ships reads (``_warn_that_no_shipped_plugin_reads``),
             where the list starts from the appended items. Set only for the
-            application that builds a command's own configuration.
+            application that builds a command's own configuration. It also
+            enables the refusals and notices that depend on what the document
+            holds (an edit of a list whose value means every item, a removal
+            that finds no list, and the two deprecation lines of a ``+=``); a
+            replay, view or gate never raises or says them.
         started_lists: When given, each append that starts a list in a section no
             plugin ASH ships reads is added to it as (the keys it landed on, the key
             as logged, the section as logged); ``apply_config_overrides`` records
             them on the model it returns.
+        selection_refusals: ``apply_config_overrides``'s: an edit of a selection
+            of scanners is judged where it is given, and a refusal of an edit of
+            ``default_scanners.only`` is appended to it instead of raised.
 
     Returns:
         The key segments the override landed on, as this apply resolved them
         (a folded spelling resolves to the key the document holds, so the
         caller's record of what the override wrote matches what it wrote),
-        the parsed value, and whether the override appended rather than
-        replaced.
+        the parsed value, and the operator the override applied: ``REPLACE``
+        for a set (a ``+=`` onto a value that is no list included), ``APPEND``
+        for a list append or a list started, ``REMOVE`` for a removal.
     """
-    # Check if this is an append operation (key_path ends with +)
-    append_mode = False
-    if key_path.endswith("+"):
-        append_mode = True
-        key_path = key_path[:-1]  # Remove the + from the key path
+    # The operator the key ends with (split_override_key): "+" appends, "-"
+    # removes, anything else sets. A removal edits a list in place and creates
+    # nothing, so it takes its own walk (_removed_from_a_list).
+    key_path, operator = split_override_key(key_path)
+    if operator == REMOVE:
+        return _removed_from_a_list(
+            config_dict,
+            key_path,
+            value,
+            environment_values,
+            own_configuration=warn_unread_appends,
+            list_changes=list_changes,
+            selection_refusals=selection_refusals,
+        )
+    append_mode = operator == APPEND
 
     # Split the key path into components
     keys = key_path.split(".")
@@ -847,12 +1357,43 @@ def _apply_config_override(
     # print where the file used it as its own key.
     logged_path = redact_values(key_path, environment_values)
     if append_mode and final_key in current and isinstance(current[final_key], list):
+        if warn_unread_appends or selection_refusals is not None:
+            _refuse_an_edit_of_a_scanner_selection(
+                resolved_keys,
+                current[final_key],
+                None,
+                logged_path,
+                APPEND,
+                selection_refusals,
+            )
+        if warn_unread_appends:
+            if resolved_keys == ["output_formats"]:
+                if not current[final_key]:
+                    _say_once_per_run(
+                        "output-formats-append",
+                        logged_path,
+                        f"Deprecated: '{logged_path}+=' while output_formats is "
+                        "empty writes only the formats it lists; from 4.0 it adds "
+                        "them to every enabled reporter's format. To keep writing "
+                        "only these formats, write 'output_formats=[...]'.",
+                    )
+            else:
+                _refuse_an_edit_of_every_item(
+                    resolved_keys,
+                    current[final_key],
+                    None,
+                    logged_path,
+                    APPEND,
+                    items=parsed_value
+                    if isinstance(parsed_value, list)
+                    else [parsed_value],
+                )
         if isinstance(parsed_value, list):
             current[final_key].extend(parsed_value)
         else:
             current[final_key].append(parsed_value)
         ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
-        return resolved_keys, parsed_value, True
+        return resolved_keys, parsed_value, APPEND
     elif append_mode and current.get(final_key) is None:
         # An append onto a list the document does not hold yet, or holds as
         # None, starts the list: as a plain set, a scalar appended stored a
@@ -920,12 +1461,20 @@ def _apply_config_override(
         else:
             current[final_key] = items
             ASH_LOGGER.debug(f"Appended to the list at {logged_path}", extra=NO_MARKUP)
-        return resolved_keys, parsed_value, True
+        return resolved_keys, parsed_value, APPEND
     else:
         # Set the value
+        if append_mode and warn_unread_appends:
+            _say_once_per_run(
+                "append-to-a-value",
+                logged_path,
+                f"Deprecated: '{logged_path}+=' on a value that is not a list "
+                f"replaces it, as '{logged_path}=' does; from 4.0 '+=' on such a "
+                f"value is refused. Write '{logged_path}=' to set it.",
+            )
         current[final_key] = parsed_value
         ASH_LOGGER.debug(f"Applied a config override to {logged_path}", extra=NO_MARKUP)
-        return resolved_keys, parsed_value, False
+        return resolved_keys, parsed_value, REPLACE
 
 
 def _parsed_list_item(item: str) -> Any:
@@ -1034,7 +1583,7 @@ def _parse_config_value(value: str) -> Any:
 
 def _validated_with_overrides(
     config_dict: Dict[str, Any],
-    applied: List[Tuple[List[str], Any, bool]],
+    applied: List[Tuple[List[str], Any, OverrideOp]],
     raw_values: Sequence[str],
     context: Optional[Dict[str, Any]] = None,
 ) -> AshConfig:
@@ -1063,11 +1612,11 @@ def _validated_with_overrides(
             if item.get("type") != "string_type":
                 continue
             place = tuple(str(part) for part in item.get("loc", ()))
-            for index, ((segments, parsed, appended), raw) in enumerate(
+            for index, ((segments, parsed, operator), raw) in enumerate(
                 zip(applied, raw_values)
             ):
                 if (
-                    appended
+                    operator in (APPEND, REMOVE)
                     or isinstance(parsed, (str, list, dict))
                     or tuple(segments) != place
                 ):
@@ -1082,7 +1631,7 @@ def _validated_with_overrides(
                     and container.get(segments[-1]) == parsed
                 ):
                     container[segments[-1]] = raw
-                    applied[index] = (segments, raw, appended)
+                    applied[index] = (segments, raw, operator)
                     retyped = True
         if not retyped:
             raise
@@ -1098,6 +1647,7 @@ def apply_config_overrides(
     config_overrides: List[str],
     *,
     warn_unread_appends: bool = False,
+    selection_refusals: Optional[List[str]] = None,
 ) -> AshConfig:
     """
     Apply configuration overrides to an AshConfig object.
@@ -1118,7 +1668,23 @@ def apply_config_overrides(
             flag or without it, the application records on the model it returns the
             lists it started that way (``_lists_started_from_appended_items``), and
             ``reporter_section`` names one when the section it gives a reporter that
-            sends findings off the host holds it.
+            sends findings off the host holds it. The flag also enables the refusals
+            and notices that depend on what the document holds (an edit of a list
+            whose value means every item, a removal that finds no list, and the two
+            deprecation lines of a ``+=``); a replay, view or gate never raises or
+            says them.
+        selection_refusals: Judge an edit of a selection of scanners
+            (``_refuse_an_edit_of_a_scanner_selection``: a ``+=`` or ``-=`` on an
+            empty ``default_scanners.only`` or ``precommit.only_scanners``, or a
+            ``-=`` that would empty one) with the flag or without it, and append a
+            refusal of an edit of ``default_scanners.only`` to this list instead
+            of raising it; a refusal of ``precommit.only_scanners`` is raised.
+            ``resolve_config`` gives one to the build of the command's own
+            configuration, whose ``default_scanners`` is the run's only when the
+            load confines nothing, and one to the replay of the selection
+            overrides onto the operator's selection (``confine_default_scanners``),
+            which is the run's otherwise; ``ash config validate`` gives one to its
+            own load.
 
     Returns:
         The modified AshConfig object
@@ -1183,13 +1749,18 @@ def apply_config_overrides(
     # resolver redacts these in the refusal it raises.
     environment_values = config_environment_values(config)
     keys: List[str] = []
-    applied: List[Tuple[List[str], Any, bool]] = []
+    applied: List[Tuple[List[str], Any, OverrideOp]] = []
     # The lists this application starts from an append's items in a section no
     # plugin ASH ships reads, and the keys its replacing overrides land on, for the
     # record set on the rebuilt model below.
     started: List[Tuple[Tuple[str, ...], str, str]] = []
     replaced_paths: List[Tuple[str, ...]] = []
     raw_values: List[str] = []
+    # What each override did to a list, in override order: a replacement, read
+    # from the operator the apply returned, and a removal, from the list it
+    # took items out of (config/list_references.py). The rebuilt model's
+    # records are reconciled with these and the model is stamped with them.
+    changes: List[ListChange] = []
     for override in config_overrides:
         key_path, separator, value = override.partition("=")
         if not separator or not key_path.strip():
@@ -1204,7 +1775,7 @@ def apply_config_overrides(
         # leading or trailing "."), a character that does not print (a zero-width
         # space, a byte order mark) and a space inside a part ("aws security hub"
         # is a section of its own).
-        segments = key_path.removesuffix("+").split(".")
+        segments = split_override_key(key_path)[0].split(".")
         if any(
             not segment
             or not segment.isprintable()
@@ -1218,6 +1789,7 @@ def apply_config_overrides(
                 "the key is empty, holds whitespace, or holds a character that "
                 "does not print; write it as key.path=value."
             )
+        removals: List[ListChange] = []
         try:
             applied.append(
                 _apply_config_override(
@@ -1227,6 +1799,8 @@ def apply_config_overrides(
                     environment_values,
                     warn_unread_appends=warn_unread_appends,
                     started_lists=started,
+                    list_changes=removals,
+                    selection_refusals=selection_refusals,
                 )
             )
             raw_values.append(value)
@@ -1240,10 +1814,19 @@ def apply_config_overrides(
                 f"Failed to apply the config override for '{key_path}': "
                 f"{type(e).__name__}"
             ) from e
+        # The operator the apply returned is the one reading of what the
+        # override did: a replacement drops every record at the key it landed
+        # on or under it, whatever the text of the key, and a removal is what
+        # the removal reported.
+        landed_on, _, operator = applied[-1]
+        if operator == REPLACE:
+            changes.append(ListChange(path=tuple(landed_on), op=REPLACE))
+        elif operator == REMOVE:
+            changes.extend(removals)
         # A replacing override sets the value itself: a list an earlier append
         # started at or under the key it landed on is gone.
-        landed, _, appended = applied[-1]
-        if not appended:
+        landed, _, operator = applied[-1]
+        if operator == REPLACE:
             path = tuple(landed)
             replaced_paths.append(path)
             started[:] = [entry for entry in started if entry[0][: len(path)] != path]
@@ -1329,22 +1912,17 @@ def apply_config_overrides(
         ),
         *started,
     )
-    # A model that already carries references (a second application) can
-    # have its module list shortened here: the references it carried then
-    # name entries the list no longer has.
-    # A replacing override of the list (not an append) also leaves a reference
-    # at an index the new list still has, naming an entry it replaced: the
-    # applied tuples tell the two apart, so every reference of the list goes.
-    # The answer is stamped on the model as well, for the load path, which
-    # attaches its references after this application and reads the fact from
-    # here instead of parsing the override text again.
-    replaced = any(
-        resolved_keys[0] == "ash_plugin_modules" and not appended
-        for resolved_keys, _, appended in applied
-    )
-    if replaced:
-        rebuilt._plugin_modules_replaced = True
-    drop_plugin_module_references_past_the_list(rebuilt, replaced=replaced)
+    # A model that already carries references (a second application) has them
+    # at the places its lists held before this application's overrides: a
+    # replaced value keeps none of them, and a removal moves each kept entry's
+    # to its new index and drops a removed entry's (config/list_references.py).
+    # What this application did is stamped after what earlier applications
+    # did, for the load path, which attaches the file's records after the
+    # overrides and reconciles them from the stamp instead of parsing the
+    # override text again.
+    reconcile_list_references(rebuilt, changes)
+    rebuilt._override_list_changes = (*rebuilt._override_list_changes, *changes)
+    drop_plugin_module_references_past_the_list(rebuilt)
     rebuilt._reporters_before_overrides = reporters_before_overrides
     rebuilt._scanners_before_overrides = scanners_before_overrides
     # The record is built from the segments each override actually landed on
@@ -1469,14 +2047,17 @@ def _unknown_entry_keys_are_fatal(
     constant the v4 bump flips; AshConfig's field default reads it too, so the
     raw read and the validated model cannot disagree). An override that sets
     the flag counts too, last one wins, so ``--config-overrides
-    fail_on_unknown_keys=true`` adopts the refusal for one run.
+    fail_on_unknown_keys=true`` adopts the refusal for one run. A removal
+    (``-=``) sets no value and is not read here: the flag is no list, and the
+    apply refuses it.
     """
     fatal = _unknown_keys.UNKNOWN_ENTRY_KEYS_ARE_FATAL_BY_DEFAULT
     if isinstance(data, dict) and isinstance(data.get("fail_on_unknown_keys"), bool):
         fatal = data["fail_on_unknown_keys"]
     for override in config_overrides or []:
         key_path, separator, value = override.partition("=")
-        if separator and key_path.strip().removesuffix("+") == "fail_on_unknown_keys":
+        key, operator = split_override_key(key_path.strip())
+        if separator and operator != REMOVE and key == "fail_on_unknown_keys":
             fatal = value.strip().lower() in ("true", "1", "yes")
     return fatal
 
@@ -1507,12 +2088,17 @@ def _entry_warn_context(
     return context, warned
 
 
-def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> AshConfig:
+def build_config(
+    data: Any,
+    config_overrides: Optional[List[str]] = None,
+    selection_refusals: Optional[List[str]] = None,
+) -> AshConfig:
     """The AshConfig a scan builds from a resolved document.
 
     Strict validation, then ``--config-overrides``. Raises pydantic's
     ValidationError for the document and ASHConfigValidationError for an
     override; see ``load_config_file``, which every config file goes through.
+    ``selection_refusals`` is ``apply_config_overrides``'s.
     """
     context, warned = _entry_warn_context(data, config_overrides)
     config = AshConfig.model_validate(data, strict=True, context=context)
@@ -1530,7 +2116,10 @@ def build_config(data: Any, config_overrides: Optional[List[str]] = None) -> Ash
         # reporter_section names such a list where a reporter that sends findings
         # off the host is built from one.
         config = apply_config_overrides(
-            config, config_overrides, warn_unread_appends=True
+            config,
+            config_overrides,
+            warn_unread_appends=True,
+            selection_refusals=selection_refusals,
         )
     return config
 
@@ -1699,11 +2288,17 @@ def load_config_file_for_run(
     config._environment_values = list(
         dict.fromkeys([*filled_values, *values, *config._environment_values])
     )
+    # What each override did to a list (apply_config_overrides stamped it),
+    # applied to the records this load read before the overrides: a replaced
+    # value keeps none, a removal moves each kept entry's record to its new
+    # index and drops a removed entry's.
+    changes = config._override_list_changes
     # An append the load did not follow gets its index from the configuration
-    # built.
+    # built, after the changes: a patch append under a replaced list names no
+    # entry, and placed first it would land on an equal operator literal.
     config._written_references = [
-        *filled_rewrites,
-        *placed_at_appends(config, rewrites),
+        *reconciled_list_references(filled_rewrites, changes),
+        *placed_at_appends(config, reconciled_list_references(rewrites, changes)),
     ]
     config._written_key_mappings = _written_key_mappings(document.chain, texts)
     # Each value and key the chain read from the environment, at its place in
@@ -1713,16 +2308,16 @@ def load_config_file_for_run(
     # references the fill read are among them: the client's copy holds each as
     # text, so no file of the chain wrote them, and a view that leaves them out
     # shows the value.
-    config._environment_references = (
-        *filled,
-        *document.environment_references,
+    config._environment_references = tuple(
+        reconciled_list_references((*filled, *document.environment_references), changes)
     )
     # The ones the merged document still shows at their places: what a view of
     # the config writes back as the file wrote it (`ash config get`, the MCP
     # get_config tool). The filled ones stand at the places the fill put them.
-    config._displayed_environment_references = (
-        *filled,
-        *document.displayed_environment_references,
+    config._displayed_environment_references = tuple(
+        reconciled_list_references(
+            (*filled, *document.displayed_environment_references), changes
+        )
     )
     overlay = kwargs.get("overlay")
     if overlay is not None:
@@ -1734,19 +2329,13 @@ def load_config_file_for_run(
         # resolved values in clear while only _environment_references held
         # its reads.
         _record_overlay_reads(config, overlay, reads, texts)
-    # The references above are the file's own document's, and the config's
-    # overrides were applied before they were attached: an override that
-    # replaced ash_plugin_modules with a shorter list leaves a reference
-    # past its end, which the module movers (ash plugin's split, the trust
-    # confinement) refuse by design. An override that REPLACED the list also
-    # leaves a reference on an index the new list still has, so the drop takes
-    # every reference of the list. Whether one replaced it is what the apply
-    # stamped on the model from the key paths its overrides landed on (the
-    # one place that resolves an override key), not a second reading of the
-    # override text.
-    drop_plugin_module_references_past_the_list(
-        config, replaced=config._plugin_modules_replaced
-    )
+    # The records above were reconciled with what the overrides did to each
+    # list (config._override_list_changes, stamped by the apply from the
+    # operator it returned, not by a second reading of the override text), so
+    # no module reference is left past the end of ash_plugin_modules, which the
+    # module movers (ash plugin's split, the trust confinement) refuse by
+    # design. The drop is the guard that keeps that true.
+    drop_plugin_module_references_past_the_list(config)
     return document, config
 
 
@@ -1809,12 +2398,17 @@ def _record_overlay_reads(
     values, rewrites = environment_record_read(
         overlay.chain, reads, texts, places=overlay.reference_places
     )
+    # The overlay's files were merged over the document before the overrides
+    # were applied, so its records are reconciled with what each override did
+    # to a list, as the chain's are (load_config_file_for_run). Called by
+    # overlaid_fallback before any override is applied, the stamp is empty.
+    changes = config._override_list_changes
     config._environment_values = list(
         dict.fromkeys([*config._environment_values, *values])
     )
     config._written_references = [
         *config._written_references,
-        *placed_at_appends(config, rewrites),
+        *placed_at_appends(config, reconciled_list_references(rewrites, changes)),
     ]
     config._written_key_mappings = (
         *tuple(config._written_key_mappings or ()),
@@ -1822,11 +2416,11 @@ def _record_overlay_reads(
     )
     config._environment_references = (
         *tuple(config._environment_references or ()),
-        *tuple(overlay.environment_references),
+        *reconciled_list_references(overlay.environment_references, changes),
     )
     config._displayed_environment_references = (
         *tuple(config._displayed_environment_references or ()),
-        *tuple(overlay.displayed_environment_references),
+        *reconciled_list_references(overlay.displayed_environment_references, changes),
     )
 
 
@@ -1865,6 +2459,7 @@ def load_config_file(
     filled_out: Optional[List[Any]] = None,
     anchor_relative_paths: Optional[AnchorPaths] = None,
     expect: Optional[FileIdentity] = None,
+    selection_refusals: Optional[List[str]] = None,
 ) -> Tuple[ResolvedConfigDocument, AshConfig]:
     """Load a config file the way every scan loads one.
 
@@ -1907,6 +2502,8 @@ def load_config_file(
     ``scan_repository_settings`` or ``repository_settings_for_root``),
     classifies it as a scan does: the operator-only writes of every checkout
     file are left out.
+
+    ``selection_refusals`` is ``apply_config_overrides``'s, for ``build_config``.
 
     ``fill`` is the references the operator's copy of a profile a client patched
     read from the environment: the client's copy holds each as text, and the
@@ -1985,7 +2582,7 @@ def load_config_file(
         # error is still raised rather than replaced by the overlay's content.
         data = _layered_over(data, overlay)
     try:
-        return document, build_config(data, config_overrides)
+        return document, build_config(data, config_overrides, selection_refusals)
     except ValidationError as e:
         if _has_a_client_file(document):
             # A chain that holds a file an MCP client supplied, by any name on
@@ -2613,6 +3210,13 @@ def resolve_config(
     # The selected chain's merged document, before overrides, carried out of
     # the one load for the operator-paths record (_operator_paths).
     merged_documents: List[Any] = []
+    # What the build of the command's own configuration refuses in an edit of
+    # default_scanners.only, held until the load knows where the run's selection
+    # comes from: raised at the two returns below where nothing of the load is
+    # confined (the build is then the run's selection), and set aside where
+    # something is (the run's selection is then the operator's, and the replay of
+    # the operator's overrides onto it judges the edit, confine_default_scanners).
+    selection_refusals: List[str] = []
     config = _resolve_config(
         config_path,
         source_dir,
@@ -2641,6 +3245,7 @@ def resolve_config(
         names_out=client_names,
         filled_references_out=client_filled,
         expect=expect,
+        selection_refusals=selection_refusals,
     )
     # The ASH_CONFIG slice of the files read: the one load's own chain, or
     # none when the load never read one -- never a fresh resolution, which
@@ -3009,6 +3614,8 @@ def resolve_config(
             # The chain is wholly the operator's own, so the confinement
             # steps below are skipped and the trusted-base build never walks
             # this chain. The junk pass above already ran over both chains.
+            # The build is the run's selection, so what it refused stands.
+            _raise_a_held_refusal(config, selection_refusals)
             record_provenance(config, in_tree=[])
             return config
     else:
@@ -3075,7 +3682,9 @@ def resolve_config(
             if warn_pending:
                 warn_fail_closed()
             # The ASH_CONFIG chain is wholly the operator's own: the junk
-            # pass above ran over it, and nothing below confines it.
+            # pass above ran over it, and nothing below confines it, so the build
+            # is the run's selection and what it refused stands.
+            _raise_a_held_refusal(config, selection_refusals)
             record_provenance(config, in_tree=[])
             return config
         # The configuration IS the ASH_CONFIG chain and its files are in the
@@ -3278,7 +3887,7 @@ def resolve_config(
     sandbox_overrides = [
         override
         for override in operator_overrides
-        if override.partition("=")[0].removesuffix("+").split(".")[0] == "sandbox"
+        if split_override_key(override)[0].split(".")[0] == "sandbox"
     ]
     if sandbox_overrides:
         trusted = apply_config_overrides(trusted, sandbox_overrides)
@@ -3859,8 +4468,9 @@ def _folded_onto_trusted(
         parts = key_path.split(".")
         if len(parts) >= 2 and parts[0] == section:
             segment = parts[1]
-            appends = len(parts) == 2 and segment.endswith("+")
-            name = segment.removesuffix("+") if appends else segment
+            # The operator character ("+" or "-") is on this segment only when
+            # the key ends here (split_override_key); the rewrite keeps it.
+            name = split_override_key(segment)[0] if len(parts) == 2 else segment
             actual = by_fold.get(section_fold_key(name))
             # The pair key already requires the reduced plugin names to
             # agree, so the separate reduced-name gate this check carried is
@@ -3870,7 +4480,7 @@ def _folded_onto_trusted(
                 and actual != name
                 and section_fold_key(name) in repository_folds
             ):
-                parts[1] = actual + ("+" if appends else "")
+                parts[1] = actual + segment[len(name) :]
                 key_path = ".".join(parts)
         rewritten.append(key_path + separator + value)
     return rewritten
@@ -4724,7 +5334,7 @@ def _with_reporter_overrides(
     reporter_overrides = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").split(".")[0] == "reporters"
+        if split_override_key(override)[0].split(".")[0] == "reporters"
     ]
     if reporter_overrides:
         reporter_overrides = _folded_onto_trusted(trusted, reporter_overrides, resolved)
@@ -4799,7 +5409,7 @@ def _with_reporter_overrides(
             # group (_reporter_overrides_by_section), so there is no other
             # section whose overrides still apply, and the warning says so.
             whole_set = any(
-                len(override.partition("=")[0].removesuffix("+").strip().split(".")) < 2
+                len(split_override_key(override)[0].strip().split(".")) < 2
                 for override in section_overrides
             )
             scope = (
@@ -4846,7 +5456,7 @@ def _reporter_overrides_by_section(
     values = config_environment_values(trusted)
     groups: Dict[str, List[str]] = {}
     for override in overrides:
-        segments = override.partition("=")[0].removesuffix("+").strip().split(".")
+        segments = split_override_key(override)[0].strip().split(".")
         if len(segments) < 2:
             return [list(overrides)]
         section = resolve_override_segment(
@@ -4871,9 +5481,10 @@ def _disables_a_reporter(override: str) -> bool:
     ``0``, ``off``, ``no``, ``f``, ``n``, in any case, blanks stripped). A value
     admitted here that the model then refuses is attempted alone by the
     always-apply arm, fails validation there and is dropped, named among the
-    section's keys in the warning and not as an applied disable."""
+    section's keys in the warning and not as an applied disable. An append or a
+    removal (``+=``, ``-=``) sets nothing to false."""
     key, separator, value = override.partition("=")
-    if not separator or key.endswith("+"):
+    if not separator or split_override_key(key)[1] in (APPEND, REMOVE):
         return False
     segments = [segment.strip().replace("-", "_") for segment in key.split(".")]
     if not (
@@ -5036,7 +5647,7 @@ def _with_scanner_overrides(
     scanner_overrides = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").split(".")[0] == "scanners"
+        if split_override_key(override)[0].split(".")[0] == "scanners"
     ]
     if not scanner_overrides:
         return view
@@ -5121,9 +5732,13 @@ def _sets_a_path(override: str) -> bool:
     segment carries none of the tails is not counted, so that override's drop
     is logged at debug level only, not warned."""
     key_path, _, value = override.partition("=")
+    key, operator = split_override_key(key_path)
+    if operator == REMOVE:
+        # A removal sets no path: dropped, it changes no path judgment.
+        return False
     if "/" in value or "\\" in value:
         return True
-    last = key_path.removesuffix("+").rsplit(".", 1)[-1].lower()
+    last = key.rsplit(".", 1)[-1].lower()
     return last.endswith(_PATH_OPTION_TAILS)
 
 
@@ -5504,6 +6119,7 @@ def _resolve_config(
     names_out: Optional[Dict[Path, Tuple[Path, ...]]] = None,
     filled_references_out: Optional[Dict[Path, Tuple[Any, ...]]] = None,
     expect: Optional[FileIdentity] = None,
+    selection_refusals: Optional[List[str]] = None,
 ) -> AshConfig:
     """resolve_config without the sandbox confinement.
 
@@ -5534,7 +6150,9 @@ def _resolve_config(
     receive the selected chain's per-file documents and the paths each file
     was reached by, and ``filled_references_out`` the references the fill read
     in each (``ResolvedConfigDocument.filled_references``), for the client
-    config rules.
+    config rules. ``selection_refusals`` rides into each build of the command's
+    own configuration here (``apply_config_overrides``), for the caller to raise
+    or set aside.
     """
 
     def overlaid_fallback(
@@ -5672,7 +6290,10 @@ def _resolve_config(
             # (build_config's rule).
             if config_overrides:
                 return apply_config_overrides(
-                    config, config_overrides, warn_unread_appends=True
+                    config,
+                    config_overrides,
+                    warn_unread_appends=True,
+                    selection_refusals=selection_refusals,
                 )
             return config
 
@@ -5757,7 +6378,10 @@ def _resolve_config(
                 # is named (build_config's rule).
                 if config_overrides:
                     return apply_config_overrides(
-                        config, config_overrides, warn_unread_appends=True
+                        config,
+                        config_overrides,
+                        warn_unread_appends=True,
+                        selection_refusals=selection_refusals,
                     )
                 return config  # Return default config if no config file found
             else:
@@ -5852,6 +6476,7 @@ def _resolve_config(
                     fill=fill,
                     anchor_relative_paths=anchor_paths,
                     expect=expect,
+                    selection_refusals=selection_refusals,
                 )
             except ConfigFileRefused as refusal:
                 if not refusal.after_overrides:
@@ -6554,12 +7179,15 @@ CLIENT_OVERRIDES_SOURCE = Path("config_overrides")
 
 def _honor_ignore_files_overrides(overrides: Optional[Sequence[str]]) -> List[str]:
     """The entries of *overrides* that set ``honor_ignore_files``, in either
-    separator spelling and with ``+=`` allowed."""
+    separator spelling and with ``+=`` allowed; a ``-=`` removal is never
+    selected: a replay leaves the bool as it is, so a removal never makes the
+    operator the decider."""
     return [
         override
         for override in overrides or []
-        if override.partition("=")[0].removesuffix("+").strip().replace("-", "_")
+        if split_override_key(override)[0].strip().replace("-", "_")
         == "honor_ignore_files"
+        and split_override_key(override)[1] != REMOVE
     ]
 
 
@@ -6788,7 +7416,7 @@ def confine_to_trusted_base(
     sandbox_overrides = [
         override
         for override in operator_overrides
-        if override.partition("=")[0].removesuffix("+").split(".")[0] == "sandbox"
+        if split_override_key(override)[0].split(".")[0] == "sandbox"
     ]
     # Read before the overrides are replayed: that rebuild does not carry the
     # network limit (a private attribute), and an override of the list replaces it.

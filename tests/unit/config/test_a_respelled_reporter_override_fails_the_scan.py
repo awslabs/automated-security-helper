@@ -425,6 +425,7 @@ _REWRITES = [
     ("reporters.AWS_SECURITY_HUB.enabled=false", f"{SH}.enabled=false"),
     (f"{SH}.enabled=false", f"{SH}.enabled=false"),
     ("reporters.AwsSecurityHub+=[1]", f"{SH}+=[1]"),
+    ("reporters.AwsSecurityHub-=[1]", f"{SH}-=[1]"),
     ("reporters.AwsSecurityHub", SH),
     (f"reporters.aws{chr(0x17F)}ecurityhub.enabled=false", None),
     (f"reporters.AWS-SECUR{chr(0x130)}TY-HUB.enabled=false", None),
@@ -441,8 +442,10 @@ def test_the_rewrite_table(tmp_path, override, expected):
     """The fold rewrites exactly the lockout rows. The non-ASCII rows pin the
     ASCII-only fold (a casefold or normalizing fold would read a long s, a
     dotted I, a fullwidth letter or a zero-width space as the section); the
-    append row keeps its suffix; a non-reporters key is left as written by the
-    function itself, not only by its caller's filter."""
+    append and removal rows keep their operator, so a removal of a respelled
+    section is never rewritten into a replace of the trusted one; a
+    non-reporters key is left as written by the function itself, not only by its
+    caller's filter."""
     got = _folded(tmp_path, OP_ONE, [override], REPO_ONE)
     assert got == [override if expected is None else expected], got
 

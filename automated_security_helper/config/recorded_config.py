@@ -29,6 +29,7 @@ import copy
 from typing import Any, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
 
 from automated_security_helper.core.exceptions import ASHConfigValidationError
+from automated_security_helper.utils.override_key import APPEND, REMOVE, OverrideOp
 
 #: (field, reference): the field as a dotted path of the record's keys.
 UnreadableReference = Tuple[str, str]
@@ -282,7 +283,7 @@ def _written_under(node: Any, prefix: Tuple[str, ...], paths: Set[str]) -> None:
 def override_field_paths(
     model: Any,
     written_before: Iterable[str],
-    applied: Iterable[Tuple[Sequence[str], Any, bool]],
+    applied: Iterable[Tuple[Sequence[str], Any, OverrideOp]],
 ) -> FrozenSet[str]:
     """The written-field record after a set of applied overrides.
 
@@ -290,7 +291,7 @@ def override_field_paths(
     ``applied`` is what ``_apply_config_override`` reported: the key segments
     it resolved and wrote to (so a folded spelling counts as the key it
     landed on, which is the spelling ``_sets`` resolves a query to), the
-    parsed value, and whether it appended. A replacing override overwrote the
+    parsed value, and the operator it applied. A replacing override overwrote the
     whole subtree under its key, so the record drops what the file wrote
     under it, which is gone, and takes the string-keyed paths inside the
     parsed value, which are written now. Every prefix is written too, as a
@@ -298,12 +299,14 @@ def override_field_paths(
     place: it unwrites nothing, and it writes nothing either, because the list it
     adds to is whatever the operator's configuration held, the field's default
     when the file did not write it. So an append leaves the record as it was, and
-    a field the file did not write stays unsupplied. Spellings are canonicalized
+    a field the file did not write stays unsupplied. A removal (``-=``) takes
+    items out of the list the configuration held, as an append adds to it, so it
+    unwrites nothing and writes nothing either. Spellings are canonicalized
     against ``model`` (the rebuilt configuration), as ``_sets`` canonicalizes its
     queries."""
     paths: Set[str] = set(written_before)
-    for segments, parsed_value, appended in applied:
-        if appended:
+    for segments, parsed_value, operator in applied:
+        if operator in (APPEND, REMOVE):
             continue
         canonical = _canonical_segments(model, list(segments))
         under = ".".join(canonical) + "."

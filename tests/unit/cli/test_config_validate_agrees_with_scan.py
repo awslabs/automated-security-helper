@@ -823,12 +823,12 @@ def test_a_refusal_in_the_shared_loader_reaches_every_command(
         expected = "Invalid value at 'fail_on_findings'"
         build_config = loader.build_config
 
-        def refuse(data, config_overrides=None):
+        def refuse(data, *args, **kwargs):
             if isinstance(data, dict) and data.get("project_name") == (
                 "refused-by-the-loader"
             ):
                 data = {**data, "fail_on_findings": "maybe"}
-            return build_config(data, config_overrides)
+            return build_config(data, *args, **kwargs)
 
         monkeypatch.setattr(loader, "build_config", refuse)
 

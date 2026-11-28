@@ -104,6 +104,7 @@ from automated_security_helper.config.untrusted_source import (
     UntrustedSource,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.override_key import split_override_key
 
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
@@ -325,8 +326,7 @@ def confine_reporter_destinations(
     reporter_overrides = [
         override
         for override in config_overrides or []
-        if override.partition("=")[0].removesuffix("+").strip().split(".")[0]
-        == "reporters"
+        if split_override_key(override)[0].strip().split(".")[0] == "reporters"
     ]
     if reporter_overrides:
         # The replay the operator view uses. An override the scan's own apply

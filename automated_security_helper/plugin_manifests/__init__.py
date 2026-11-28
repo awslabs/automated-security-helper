@@ -287,6 +287,62 @@ UNTYPED_LIST_OPTION_DEFAULTS: Mapping[
 )
 
 
+#: The list options whose value means "every item", by plugin segment and by the
+#: plugin's own name; each maps the option's key below the section (keyed as
+#: ``UNTYPED_LIST_OPTION_DEFAULTS`` keys it) to that value. A ``--config-overrides``
+#: ``+=`` or ``-=`` on the option while it holds the value is refused, and so is a
+#: ``-=`` that would leave it there (config/resolve_config.py,
+#: ``_refuse_an_edit_of_every_item``): adding to or removing from "every item" has
+#: no list to act on, so the refusal names the replace form to write instead.
+#: checkov's ``frameworks`` defaults to ["all"]; trivy-repo's ``scanners: []`` lets
+#: trivy decide (its unwritten default is the four-item list above, so only a file
+#: that writes [] holds this value); detect-secrets' ``scan_settings.plugins_used``
+#: defaults to [], every plugin.
+OVERRIDE_EDIT_SENTINELS: Mapping[
+    str, Mapping[str, Mapping[tuple[str, ...], tuple[Any, ...]]]
+] = MappingProxyType(
+    {
+        "scanners": MappingProxyType(
+            {
+                "checkov": MappingProxyType({("options", "frameworks"): ("all",)}),
+                "detect-secrets": MappingProxyType(
+                    {("options", "scan_settings", "plugins_used"): ()}
+                ),
+                "trivy-repo": MappingProxyType({("options", "scanners"): ()}),
+            }
+        ),
+    }
+)
+
+
+#: Items the "every item" value of an option in ``OVERRIDE_EDIT_SENTINELS`` leaves
+#: out, which a ``+=`` may still add to it: checkov's ``all`` leaves out the
+#: frameworks that read a hosted service's repository settings, and checkov's help
+#: says to name one with or without ``all``. A ``+=`` whose every item is one of
+#: these is applied as an append; any other edit of the value is refused.
+OVERRIDE_EDIT_SENTINEL_ADDITIONS: Mapping[
+    str, Mapping[str, Mapping[tuple[str, ...], frozenset[str]]]
+] = MappingProxyType(
+    {
+        "scanners": MappingProxyType(
+            {
+                "checkov": MappingProxyType(
+                    {
+                        ("options", "frameworks"): frozenset(
+                            {
+                                "bitbucket_configuration",
+                                "github_configuration",
+                                "gitlab_configuration",
+                            }
+                        )
+                    }
+                ),
+            }
+        ),
+    }
+)
+
+
 @functools.lru_cache(maxsize=1)
 def exclusion_options() -> tuple[tuple[str, ExclusionOption], ...]:
     """``(scanner name, option)`` for every option a client config may exclude by.

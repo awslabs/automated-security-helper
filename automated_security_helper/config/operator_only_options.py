@@ -116,6 +116,7 @@ from automated_security_helper.config.sandbox_grants import (
 )
 from automated_security_helper.utils.error_text import config_environment_values
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.override_key import REMOVE, split_override_key
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -208,7 +209,7 @@ def _set_by_override(
     counted an override that wrote an empty decoy section, ``aws_security_hub``,
     as an override of the ``aws-security-hub`` section next to it, which the
     scan reads. The key is not stripped either: the override is applied to the
-    key exactly as written.
+    key exactly as written. A ``key-=`` removal writes nothing and never counts.
     """
     section = reporters.get(section_key)
     options = section.get("options") if isinstance(section, dict) else None
@@ -221,7 +222,12 @@ def _set_by_override(
     parents = [None, kind, section_key, "options"]
     target = [kind, section_key, "options", option]
     for override in config_overrides or []:
-        key_path = override.partition("=")[0].removesuffix("+")
+        key_path, op = split_override_key(override)
+        if op == REMOVE:
+            # A removal takes items out of the value the chain holds and writes
+            # none of its own: what is left is what the repository's file
+            # wrote, so it never makes the option the operator's.
+            continue
         parts = key_path.split(".")
         if not parts or len(parts) > len(target):
             continue
