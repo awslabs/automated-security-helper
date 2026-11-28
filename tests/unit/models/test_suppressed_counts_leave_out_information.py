@@ -29,6 +29,9 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerTargetStatusInfo,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
+    ReportContentEmitter,
+)
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 pytestmark = pytest.mark.unit
@@ -146,3 +149,18 @@ def test_the_suppressed_counts_agree_when_the_flatten_runs_first():
     populate_metrics_from_unified_source(aggregated_results=model)
 
     _assert_the_suppressed_counts_agree(model)
+
+
+def test_the_scan_summary_counts_the_suppressed_results_the_scanner_row_counts():
+    """Guard: the report's scan summary, read from the scanner row, counts the two
+    suppressed results that state a finding and leaves the note out, as the row
+    does."""
+    model = _model_with_a_scanner_row()
+    populate_metrics_from_unified_source(aggregated_results=model)
+    model.to_flat_vulnerabilities()
+
+    summary = ReportContentEmitter(model, human_presentation=True).get_scan_summary()
+    row = model.scanner_results["bandit"]
+
+    assert row.suppressed_finding_count == 2
+    assert summary["suppressed"] == row.suppressed_finding_count

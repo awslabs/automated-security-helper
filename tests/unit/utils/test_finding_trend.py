@@ -3,6 +3,7 @@
 
 import json
 import random
+from pathlib import Path
 
 import pytest
 
@@ -168,6 +169,66 @@ def test_a_like_for_like_boundary_has_no_warnings():
     trend = series(results(finding("B101"), second=1), results(second=2))
     assert trend.boundaries[0]["like_for_like"] is True
     assert trend.boundaries[0]["coverage_warnings"] == []
+
+
+def _passed(rule="R-PASS"):
+    """A check that passed: a result that states no finding."""
+    result = finding(rule, severity="INFO")
+    result["kind"] = "pass"
+    result["level"] = "none"
+    return result
+
+
+def _without_kinds(run):
+    """*run* as a record written before ASH stored each row's result kind."""
+    for row in run.record["findings"]:
+        row.pop("result_kind", None)
+        row.pop("is_finding", None)
+    return run
+
+
+def _run(second, *, kinds=True):
+    run = run_from_results(
+        results(finding("B602"), _passed(), second=second), f"run{second}.json"
+    )
+    return run if kinds else _without_kinds(run)
+
+
+def test_a_boundary_from_a_record_without_kinds_is_not_like_for_like():
+    boundary = build_trend([_run(1, kinds=False), _run(2)]).boundaries[0]
+
+    assert boundary["like_for_like"] is False
+    assert any("result kind" in warning for warning in boundary["coverage_warnings"])
+
+
+def test_a_boundary_back_to_a_record_without_kinds_is_not_like_for_like():
+    boundary = build_trend([_run(1), _run(2, kinds=False)]).boundaries[0]
+
+    assert boundary["like_for_like"] is False
+
+
+def test_a_boundary_between_two_records_without_kinds_stays_like_for_like():
+    """Control, green before and after: neither record names a kind."""
+    boundary = build_trend([_run(1, kinds=False), _run(2, kinds=False)]).boundaries[0]
+
+    assert boundary["like_for_like"] is True
+    assert boundary["coverage_warnings"] == []
+
+
+def test_the_trend_page_says_such_a_boundary_is_not_like_for_like():
+    page = (
+        Path(__file__).resolve().parents[3]
+        / "docs"
+        / "content"
+        / "how-to"
+        / "track-findings-over-time.md"
+    )
+    text = " ".join(page.read_text(encoding="utf-8").split())
+
+    assert (
+        "the boundary carries a warning that says so, and its `like_for_like` is false"
+        in text
+    )
 
 
 @pytest.mark.parametrize(

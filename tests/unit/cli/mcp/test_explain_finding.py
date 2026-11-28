@@ -4,6 +4,7 @@
 """Tests for mcp_explain_finding."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -115,6 +116,62 @@ class TestSeverityRationale:
         assert expected_fragment in rationale, (
             f"Expected '{expected_fragment}' in rationale '{rationale}'"
         )
+
+
+def _descriptions_of(node, name):
+    """The description of every tool named *name* anywhere in *node*."""
+    if isinstance(node, dict):
+        if node.get("name") == name and isinstance(node.get("description"), str):
+            yield node["description"]
+        for value in node.values():
+            yield from _descriptions_of(value, name)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _descriptions_of(value, name)
+
+
+class TestAResultThatStatesNoFinding:
+    @pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
+    def test_its_rationale_says_it_counts_at_no_threshold(self, tmp_path, kind):
+        vuln = _make_vuln(severity="INFO", result_kind=kind)
+        with _patch_flat_list([vuln]):
+            result = mcp_explain_finding(
+                finding_id="bandit-B601-deadbeef",
+                results_path=str(tmp_path),
+            )
+        rationale = result["finding"]["severity_rationale"]
+
+        assert "below default threshold" not in rationale
+        assert "states no finding" in rationale.lower()
+        assert result["finding"]["result_kind"] == kind
+
+    def test_a_result_of_such_a_kind_that_reports_a_problem_keeps_its_rationale(
+        self, tmp_path
+    ):
+        """Control: graded HIGH, the result is a finding whatever its kind."""
+        vuln = _make_vuln(severity="HIGH", result_kind="informational")
+        with _patch_flat_list([vuln]):
+            result = mcp_explain_finding(
+                finding_id="bandit-B601-deadbeef",
+                results_path=str(tmp_path),
+            )
+
+        assert "above MEDIUM threshold" in result["finding"]["severity_rationale"]
+
+    def test_the_recorded_tool_description_names_result_kind(self):
+        golden = json.loads(
+            (
+                Path(__file__).resolve().parents[4]
+                / ".github"
+                / "actions"
+                / "validate-mcp"
+                / "tool_surface.golden.json"
+            ).read_text(encoding="utf-8")
+        )
+        descriptions = list(_descriptions_of(golden, "explain_finding"))
+
+        assert descriptions
+        assert all("result_kind" in description for description in descriptions)
 
 
 class TestReferencesListParsed:

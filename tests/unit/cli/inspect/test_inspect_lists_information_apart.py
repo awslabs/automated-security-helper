@@ -27,17 +27,20 @@ screens read it.
 from types import SimpleNamespace
 
 import pytest
+from rich.console import Console
 from textual.widgets import Static
 
 from automated_security_helper.cli.inspect.inspect_findings_app import (
     FindingDetailScreen,
     FindingsExplorerApp,
     _finding_cells,
+    _metadata_table,
     _named_finding,
     _summary_line,
     extract_findings,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.utils.severity_ladder import is_not_a_finding
 from automated_security_helper.utils.ui_theme import COLORS
 
 pytestmark = pytest.mark.unit
@@ -202,6 +205,63 @@ def _pair_findings(kind):
         }
     )
     return extract_findings(SimpleNamespace(sarif=report))
+
+
+def _extracted_note():
+    """The finding ``extract_findings`` builds from a SARIF model's informational note."""
+    report = SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "bandit"}},
+                    "results": [
+                        {
+                            "ruleId": NOTE,
+                            "kind": "informational",
+                            "level": "none",
+                            "message": {"text": "image example:1 was not scanned"},
+                            "properties": {"scanner_name": "bandit"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    (note,) = extract_findings(SimpleNamespace(sarif=report))
+    return note
+
+
+def test_a_note_extract_findings_builds_from_the_model_reads_information():
+    """Guard: the dict holds the model's own kind, and both the kind rule and the
+    stored verdict read it as a result that states no finding."""
+    note = _extracted_note()
+
+    assert is_not_a_finding(note)
+    assert note["states_no_finding"] is True
+    assert _summary_line([note]).plain == "0 active  ·  1 information"
+
+
+def _shown(table) -> str:
+    console = Console(record=True, width=120)
+    console.print(table)
+    return console.export_text()
+
+
+def test_the_detail_context_of_a_note_names_its_kind_and_not_its_severity():
+    shown = _shown(_metadata_table(_finding(NOTE, "info", kind="informational")))
+
+    assert "Result kind" in shown
+    assert "informational" in shown
+    assert "Severity" not in shown
+
+
+def test_the_detail_context_of_a_finding_still_names_its_severity():
+    """Control, green before and after."""
+    shown = _shown(_metadata_table(_finding("B602", "high", kind="fail")))
+
+    assert "Severity" in shown
+    assert "Result kind" not in shown
 
 
 @pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])

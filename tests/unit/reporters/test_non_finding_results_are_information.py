@@ -20,6 +20,7 @@ which the note reaches the gate; at the default threshold it is below it either 
 import csv
 import io
 import json
+from pathlib import Path
 
 import pytest
 
@@ -53,10 +54,14 @@ from tests.utils.scanner_thresholds import without_scanner_thresholds
 pytestmark = pytest.mark.unit
 
 NOTE = "ASH-container-image-not-scanned"
+MESSAGE = "container image example:1 was not scanned"
 
 
 def _model(
-    *, scanner_rows: bool = True, with_note: bool = True
+    *,
+    scanner_rows: bool = True,
+    with_note: bool = True,
+    note_message: str = MESSAGE,
 ) -> AshAggregatedResults:
     """One bandit result, and the note ASH writes when nothing scanned an image.
 
@@ -85,7 +90,7 @@ def _model(
                 "ruleId": NOTE,
                 "kind": "informational",
                 "level": "none",
-                "message": {"text": "container image example:1 was not scanned"},
+                "message": {"text": note_message},
             }
         )
     model = AshAggregatedResults()
@@ -296,6 +301,99 @@ def test_the_text_report_lists_the_note_after_the_overview_and_not_in_it(
     assert "B602" in overview
     assert cut not in overview
     assert cut in text[information_at:]
+
+
+# --- the information row --------------------------------------------------------
+
+
+def test_the_information_rows_name_the_message_and_the_kind_and_no_severity():
+    (row,) = _emitter().get_information_overview()
+
+    assert set(row) == {"scanner", "rule_id", "message", "file_path", "result_kind"}
+    assert row["message"] == MESSAGE
+    assert row["result_kind"] == "informational"
+
+
+def test_an_information_message_is_cut_to_two_hundred_characters():
+    (row,) = _emitter(note_message="x" * 1000).get_information_overview()
+
+    assert row["message"] == "x" * 200
+
+
+def test_the_html_information_section_shows_the_message_and_the_kind(
+    test_plugin_context,
+):
+    document = HtmlReporter(context=test_plugin_context).report(_model())
+
+    section = document.split('id="information"', 1)[1].split("</section>", 1)[0]
+    assert '<th scope="col">Message</th>' in section
+    assert '<th scope="col">Result kind</th>' in section
+    assert f"<td>{MESSAGE}</td>" in section
+    assert "<td>informational</td>" in section
+
+
+def test_the_markdown_information_table_shows_the_message_and_no_severity(
+    test_plugin_context,
+):
+    text = _markdown(test_plugin_context, _model())
+
+    section = text[text.index("## Information") :].split("\n## ", 1)[0]
+    assert "| Scanner | Rule ID | Message | File | Result kind |" in section
+    assert "was not scanned" in section
+    assert "informational" in section
+    assert "| INFO |" not in section
+
+
+def test_the_text_information_table_shows_the_message_and_no_severity(
+    test_plugin_context,
+):
+    text = _text(test_plugin_context, _model())
+
+    heading = "\nINFORMATION\n-----------\n"
+    section = text[text.index(heading) :].split("DETAILED FINDINGS", 1)[0]
+    assert MESSAGE in section
+    assert "Result kind" in section
+    assert not any(line.startswith("INFO ") for line in section.splitlines())
+
+
+def test_with_default_options_the_markdown_and_text_reports_list_no_information(
+    test_plugin_context,
+):
+    """Guard: the Information table is part of the findings table, which is off
+    by default in both reports."""
+    markdown = MarkdownReporter(
+        context=test_plugin_context,
+        config=MarkdownReporterConfig(options=MarkdownReporterConfigOptions()),
+    ).report(_model())
+    text = TextReporter(
+        context=test_plugin_context,
+        config=TextReporterConfig(options=TextReporterConfigOptions()),
+    ).report(_model())
+
+    assert "## Information" not in markdown
+    assert "\nINFORMATION\n-----------\n" not in text
+
+
+def test_the_findings_table_option_describes_the_information_table():
+    markdown = MarkdownReporterConfigOptions.model_fields["include_findings_table"]
+    text = TextReporterConfigOptions.model_fields["include_findings_table"]
+
+    assert "an Information table" in markdown.description
+    assert "an INFORMATION table" in text.description
+
+
+def test_the_image_page_ties_the_markdown_and_text_listing_to_the_table_option():
+    page = (
+        Path(__file__).resolve().parents[3]
+        / "docs"
+        / "content"
+        / "how-to"
+        / "scan-container-images.md"
+    )
+    text = " ".join(page.read_text(encoding="utf-8").split())
+
+    assert "the HTML, Markdown and text reports list it under Information" not in text
+    assert "only when their `include_findings_table` option is on" in text
 
 
 # --- a result that contradicts its kind ----------------------------------------

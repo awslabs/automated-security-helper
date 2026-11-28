@@ -27,6 +27,7 @@ import pytest
 
 from automated_security_helper.core.resource_management.result_filters import (
     _counts_toward_exit_2,
+    add_findings_list,
     apply_content_filters,
     filter_actionable_only,
 )
@@ -164,6 +165,18 @@ def test_the_actionable_view_counts_a_result_that_states_no_finding_in_no_bucket
     ]
 
     assert (counts["high"], counts["info"]) == (1, 0)
+
+
+@pytest.mark.parametrize("kind", NON_FINDING)
+def test_the_findings_list_of_the_actionable_view_holds_the_finding_alone(kind):
+    """Guard: the server builds the findings list after the actionable filter, so
+    the note never reaches it, each entry names a kind that asserts a finding, and
+    findings_count is the number of entries."""
+    listed = add_findings_list(filter_actionable_only(_document(_note(kind))))
+
+    assert [entry["rule_id"] for entry in listed["findings"]] == ["R-HIGH"]
+    assert [entry["result_kind"] for entry in listed["findings"]] == ["fail"]
+    assert listed["findings_count"] == len(listed["findings"])
 
 
 @pytest.mark.parametrize("kind", ANY_FINDING)
