@@ -109,7 +109,7 @@ class TextReporterConfigOptions(ReporterOptionsBase):
     include_findings_table: Annotated[
         bool,
         Field(
-            description="When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold. Off by default because the table can be long."
+            description="When true, the report has a FINDINGS OVERVIEW table with one row per finding, including suppressed findings and findings below the severity threshold, and an INFORMATION table with one row per result that states no finding. Off by default because the tables can be long; with it off, the report lists no such result."
         ),
     ] = False
     include_detailed_findings: Annotated[
