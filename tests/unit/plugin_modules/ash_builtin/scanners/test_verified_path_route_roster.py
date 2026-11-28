@@ -65,7 +65,8 @@ pytestmark = pytest.mark.unit
 HONORING = (BanditScanner, CheckovScanner, CfnLintScanner, GuardDogScanner)
 
 #: The spellings of the fallback shape: a route re-pointed from the resolver's
-#: answer, or bandit's route-keeping wrapper around the same cold probe.
+#: answer, or bandit's ``_take_resolved_command``, which re-points it from the
+#: answer of the same cold probe.
 _FALLBACK_MARKS = ("uses_uv = is_uv_form(resolved)", "_take_resolved_command")
 
 _RESOLVER = "get_uv_tool_command"

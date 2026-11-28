@@ -2307,7 +2307,10 @@ def test_the_hit_limit_bootstrap_refuses_a_guarddog_without_per_rule_limits(
 # which refuses a uv run and starts nothing in its place. These tests run the real
 # dependency check, the real scan and the mixin's own gates over the window's answer.
 # Only the resolver, the verifier, the PATH lookup, uv's version read and the
-# subprocess are stood in for.
+# subprocess are stood in for. One test is the exception:
+# test_a_direct_route_keeps_its_copys_version_and_asks_uv_nothing uses ``fake``,
+# which replaces the dependency check, and has no uv answer, since it reads only the
+# version a scan on a direct route names.
 
 #: The failure the runner carries for a probe that timed out: the words of the answer
 #: the window gives.
@@ -2548,6 +2551,46 @@ def test_max_hits_inside_the_window_with_no_copy_on_path_runs_nothing(
     assert scanner.use_uv_tool is True
 
 
+#: The runner's own sentence for a uv run the scanner sandbox refused, in the shape
+#: ``UVToolRunner.unavailable_reason`` gives it: a refusal names the sandbox.
+_A_SANDBOX_REFUSAL = "The scanner sandbox refused to run uv (a stand-in refusal)"
+
+
+@pytest.mark.unit
+@pytest.mark.usefixtures("window")
+@pytest.mark.parametrize(
+    "refusal", [None, _A_SANDBOX_REFUSAL], ids=["probe-failed", "sandbox-refused"]
+)
+def test_max_hits_inside_the_window_names_the_check_that_did_not_pass(
+    tmp_path, routed, monkeypatch, refusal
+):
+    """``options.max_hits`` on the uv route inside the window: the target fails, and
+    the words say why uv cannot run it. A probe that timed out says nothing about
+    whether uv is installed, so the words name the availability check that did not
+    pass, with the probe's failure, and do not say uv is not available. A refusal the
+    runner recorded keeps its own sentence, which names the sandbox.
+
+    Without the fix: the words said uv was not available (the probe-failed case; the
+    sandbox-refused case passes at both commits)."""
+    if refusal is not None:
+        monkeypatch.setattr(UVToolRunner, "unavailable_reason", lambda runner: refusal)
+    _the_resolver_answers_uv(monkeypatch, tmp_path)
+    repo = _repo(tmp_path)
+    scanner = _scanner(repo, tmp_path, ecosystems=["go"], max_hits=0)
+
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=repo, target_type="source")
+
+    message = str(raised.value)
+    assert routed.raw_calls == []
+    if refusal is None:
+        assert f"uv's availability check did not pass ({_PROBE_TIMED_OUT})" in message
+        assert "uv cannot run it now: uv is not available" not in message
+    else:
+        assert refusal in message
+        assert "uv's availability check did not pass" not in message
+
+
 @pytest.mark.unit
 def test_a_scan_through_uv_after_the_window_names_uvs_version_in_its_sarif(
     tmp_path, routed, window, monkeypatch
@@ -2605,7 +2648,11 @@ def test_a_direct_route_keeps_its_copys_version_and_asks_uv_nothing(
     tmp_path, fake, monkeypatch
 ):
     """Control: a scan on a direct route names the version recorded for its copy. The
-    uv probe belongs to the uv route, which a direct route drops, so uv is not asked."""
+    uv probe belongs to the uv route, which a direct route drops, so uv is not asked:
+    the probe the scanner owes is dropped unasked, and the copy's version stays.
+
+    The probe is owed here on purpose. With none owed, the scan's resolve returns at
+    its first line whatever the route, and the drop this test names is not reached."""
 
     def _never(self, tool_name, package_name=None):
         pytest.fail("uv's version was asked on a direct route")
@@ -2615,8 +2662,9 @@ def test_a_direct_route_keeps_its_copys_version_and_asks_uv_nothing(
     scanner = _scanner(repo, tmp_path, ecosystems=["go"])
     scanner.use_uv_tool = False
     scanner.tool_version = "3.2.0 (on PATH)"
-    scanner._deferred_tool_version_probe = None
+    scanner._deferred_tool_version_probe = ("guarddog", scanner._uv_from_spec())
 
     report = scanner.scan(target=repo, target_type="source")
 
     assert report.runs[0].tool.driver.version == "3.2.0 (on PATH)"
+    assert scanner._deferred_tool_version_probe is None

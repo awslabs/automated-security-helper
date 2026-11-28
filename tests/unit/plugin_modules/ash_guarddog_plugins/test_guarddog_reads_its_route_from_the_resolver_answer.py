@@ -365,23 +365,36 @@ def test_a_uv_answer_with_uv_unavailable_keeps_the_uv_route(
 
 
 def test_no_answer_with_uv_unavailable_is_not_satisfied(tmp_path, monkeypatch):
-    """Neither uv nor a copy on PATH: the check says so, as it did before."""
+    """Neither uv nor a copy on PATH: the check is not satisfied, and its line names
+    the availability check that did not pass, not an absent uv, since the check also
+    fails with uv installed.
+
+    Without the fix: the line read "UV tool validation failed - UV is not available
+    but required"."""
     scanner = _scanner(tmp_path)
     _without_uv(monkeypatch, scanner, None)
 
     assert scanner.validate_plugin_dependencies() is False
 
     assert scanner.dependencies_satisfied is False
-    assert any("UV is not available but required" in line for line in scanner.errors)
+    assert any(
+        "uv's availability check did not pass, and no guarddog was found" in line
+        for line in scanner.errors
+    )
+    assert not any("UV is not available" in line for line in scanner.errors)
 
 
 @pytest.mark.parametrize(
-    ("uv_found", "summary"),
-    [(True, SHORT_OF_THE_CONSTRAINT), (False, PROBE_EXITED)],
-    ids=["uv-found", "no-uv"],
+    ("uv_found", "summary", "offers_a_constraint"),
+    [
+        (True, SHORT_OF_THE_CONSTRAINT, True),
+        (True, PROBE_EXITED, False),
+        (False, PROBE_EXITED, False),
+    ],
+    ids=["uv-found", "uv-found-probe-exited", "no-uv"],
 )
 def test_a_copy_that_falls_short_is_missing_with_the_reason(
-    tmp_path, monkeypatch, uv_found, summary
+    tmp_path, monkeypatch, uv_found, summary, offers_a_constraint
 ):
     """With uv unavailable, the copy on PATH is the scan's GuardDog, so it is
     verified against the scan's requirement (its extras and version constraint).
@@ -389,16 +402,17 @@ def test_a_copy_that_falls_short_is_missing_with_the_reason(
     logged.
 
     The reason names the shortfall in the verifier's own one-line summary, the
-    requirement, and a remedy that fits the host. With a uv found the check failed
-    rather than uv being absent, since a copy falls short of a constraint only
-    through uv's dry run: the remedy offers a copy that meets the requirement, a
-    constraint this copy meets, or a run once the check passes. With none, it offers
-    installing uv. The reason names no path and quotes no detail: the verifier's
-    detail holds the copy's own output and the constraint as stored, and the log line
-    keeps both.
+    requirement, and a remedy that fits the host and the shortfall. With a uv found
+    the check failed rather than uv being absent: the remedy offers a copy that
+    meets the requirement or a run once the check passes, and a constraint this
+    copy meets only when the version constraint is all it fails. The verifier
+    reports a ``--version`` probe that exits non-zero before it asks uv, uv found or
+    not, and no constraint fixes that copy. With no uv, the remedy offers installing
+    uv. The reason names no path and quotes no detail: the verifier's detail holds
+    the copy's own output and the constraint as stored, and the log line keeps both.
 
-    Without the fix: the reason named the copy's path and the detail, gave no
-    remedy, and said uv was unavailable where only its check had failed."""
+    Without the fix: with a uv found, the remedy offered a constraint for any
+    shortfall (the uv-found-probe-exited case; the other two pass at both commits)."""
     scanner = _scanner(tmp_path)
     detail = "guarddog 2.9.0 does not satisfy ==3.2.0"
     verifier = _Verifier(
@@ -422,16 +436,13 @@ def test_a_copy_that_falls_short_is_missing_with_the_reason(
     assert "uv is not available" not in reason
     assert summary in reason
     assert requirement in reason
-    if uv_found:
-        remedy = "once uv's availability check passes"
+    assert ("uv tool install" in reason) is uv_found
+    assert ("once uv's availability check passes" in reason) is uv_found
+    assert ("install uv" in reason) is not uv_found
+    assert ("options.tool_version" in reason) is offers_a_constraint
+    if offers_a_constraint:
         assert "scanners.guarddog.options.tool_version" in reason
-        assert "uv tool install" in reason
-        assert "install uv" not in reason
-    else:
-        remedy = "install uv"
-        assert "options.tool_version" not in reason
-        assert "once uv's availability check passes" not in reason
-    assert remedy in reason
+    remedy = "once uv's availability check passes" if uv_found else "install uv"
     # The log line keeps what the reason leaves out.
     assert any(
         COPY in line and detail in line and remedy in line for line in scanner.errors
@@ -910,6 +921,45 @@ def test_the_missing_reason_shows_no_spelling_of_an_env_read_constraint(
     )
     # Not an empty reason: both texts name the install command.
     assert "uv tool install" in reason
+
+
+@OFFLINE_MODES
+def test_the_missing_reason_with_a_values_hook_that_raises_names_only_the_failure(
+    tmp_path, monkeypatch, capture, offline
+):
+    """The reason for a GuardDog that could not be installed or found on PATH names
+    the ``uv tool install`` command, which holds the scan's requirement. With a
+    values hook that raises nothing can redact that command, so the reason does not
+    show it and names the hook's failure instead. Offline, it keeps the offline
+    guidance, which holds no value: install before going offline, use the container
+    image, or leave the scanner disabled.
+
+    Without the fix: offline, the reason dropped that guidance."""
+    scanner, pin = _with_an_env_read_constraint(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        GuardDogScanner, "_values_to_redact", _a_values_hook_that_raises
+    )
+    monkeypatch.setattr(GuardDogScanner, "_is_offline_mode", lambda self: offline)
+    _at_the_last_fallback(monkeypatch, scanner, None)
+
+    assert scanner.validate_plugin_dependencies() is False
+
+    reason = scanner.dependency_unavailable_reason
+    assert reason is not None
+    assert "values hook raised RuntimeError" in reason
+    assert "Fix the plugin's values hook" in reason
+    assert "uv tool install" not in reason
+    assert (
+        _spellings_shown(
+            pin,
+            reason=reason,
+            errors="\n".join(scanner.errors),
+            log=capture.text,
+        )
+        == []
+    )
+    assert ("does not install tools in offline mode" in reason) is offline
+    assert ("use the ASH container image" in reason) is offline
 
 
 def test_a_verified_copy_still_on_path_is_honored_without_asking_the_resolver(

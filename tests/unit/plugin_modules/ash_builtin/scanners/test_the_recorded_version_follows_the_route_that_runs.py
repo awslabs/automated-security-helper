@@ -9,8 +9,10 @@ the copy's version still recorded and no probe owed, so the SARIF step named a
 binary that did not run.
 
 The other direction is the PATH fallbacks: a copy that answered no version kept the
-version an earlier uv probe wrote, and the checkov, cfn-lint and guarddog resolver
-arms never touched the record at all.
+version an earlier uv probe wrote, the checkov and cfn-lint resolver arms and
+guarddog's last fallback never touched the record at all, and guarddog's uv-absent
+arm kept the version the uv probe recorded and read the version of whatever copy the
+PATH lookup found only when none was recorded.
 
 Every test states the route the scan takes and asserts the record that route owes:
 the copy's own version (or nothing when it answered none) on a direct route, and the
