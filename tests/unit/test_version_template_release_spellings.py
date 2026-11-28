@@ -31,11 +31,13 @@ fenced block of a page; which parts of a page a render reaches (the lines of a f
 block and the text of an inline span, never the prose, which the rows and the sentences
 below hold to fixed strings and not to a second pass of the rewrite); that every
 template rendered for 3.8.0 holds none of the newer spellings and renders for 3.9.0
-with nothing but its placeholders replaced; and that each committed page, which pins the
-current release, names no spelling that release lacks. The patterns that say what 3.8
-lacks, the release that introduced it and the results verbs are shared with every other
-test of the spellings (tests/utils/release_spellings.py); this file holds the threshold
-and the verbs to the manager's own.
+with nothing but its placeholders replaced; that each committed page, which pins the
+current release, names no spelling that release lacks; and that the page on scaling to
+large repositories, whose prose says what the scanner selection does, names neither
+scanner option 3.8 lacks, in prose or in code. The patterns that say what 3.8 lacks, the
+release that introduced it and the results verbs are shared with every other test of the
+spellings (tests/utils/release_spellings.py); this file holds the threshold, the verbs
+and the scanner options to the manager's own.
 
 A page that says what a pre-commit hook runs quotes the hook's ``entry:``. For a
 release before 3.9 the render writes the entry that release's manifest holds, whole
@@ -55,6 +57,7 @@ import pytest
 import yaml
 
 from tests.utils.release_spellings import (
+    NEWER_OPTION,
     NEWER_SCANNER_FLAG,
     NEWER_SPELLING,
     RESULTS_VERBS,
@@ -82,6 +85,7 @@ GITHUB_ACTIONS_PAGE = (
 GITHUB_ACTIONS_TEMPLATE = GITHUB_ACTIONS_PAGE.with_name(
     GITHUB_ACTIONS_PAGE.name + ".template"
 )
+SCALE_PAGE = REPO_ROOT / "docs" / "content" / "how-to" / "scale-large-repos.md"
 
 #: What the GitHub Actions page says the reusable workflow passes to ASH, written out
 #: here and not computed. It says "the directory to scan" and not how the workflow
@@ -834,6 +838,67 @@ def test_a_committed_page_names_only_the_spellings_of_the_release_it_pins(target
         f"{target} pins ASH {release}, which does not read these commands; render "
         "it with scripts/version_template_manager.py generate:\n  " + "\n  ".join(found)
     )
+
+
+def _newer_options(text: str) -> list[str]:
+    """Each scanner option 3.8 lacks that ``text`` names, in prose and in code alike,
+    with the line that names it."""
+    lines = text.split("\n")
+    found = []
+    for match in NEWER_OPTION.finditer(text):
+        number = text.count("\n", 0, match.start())
+        found.append(f"line {number + 1}: {lines[number].strip()}")
+    return found
+
+
+def test_the_committed_scale_page_names_no_scanner_option_its_release_lacks():
+    """The page on scaling to large repositories pins the current release, and its
+    commands give the scanners to run with the option of that release: a render for a
+    release before 3.9 writes ``--scanners`` in the code of the page. The render leaves
+    the prose as the template writes it, so a sentence of the page that named
+    ``--only-scanners`` sent a reader of the page pinned to 3.8 to an option that release
+    refuses with "No such option". The sentences say what the scanner selection does
+    without naming its option, which the page's commands name, so the page names
+    neither option 3.8 lacks, in prose or in code, while the release it pins is before
+    3.9."""
+    release = _packaged_release()
+    if release_tuple(release) >= SUBJECTS_RELEASE:
+        pytest.skip(f"the current release, {release}, reads both scanner options")
+    found = _newer_options(SCALE_PAGE.read_text(encoding="utf-8"))
+    assert not found, (
+        f"{SCALE_PAGE.name} pins ASH {release}, which has neither --only-scanners nor "
+        "--add-scanners; say what the selection does without the option's name in its "
+        "template, and render it with scripts/version_template_manager.py generate:\n  "
+        + "\n  ".join(found)
+    )
+
+
+@pytest.mark.parametrize(
+    ("text", "count"),
+    [
+        ("`--only-scanners` narrows what a shard runs", 1),
+        ("ash scan fs . --add-scanners bandit", 1),
+        ("`--add-scanners` adds to the set; `--only-scanners` replaces it", 2),
+        ("ash scan --scanners detect-secrets", 0),
+        ("or that `--exclude-scanners` cancels", 0),
+    ],
+    ids=[
+        "a-prose-span",
+        "a-command",
+        "two-on-one-line",
+        "the-option-3.8-has",
+        "the-exclusion",
+    ],
+)
+def test_the_option_reader_reads_prose_and_code(text, count):
+    assert len(_newer_options(text)) == count, text
+
+
+def test_the_scanner_options_are_the_ones_the_manager_respells():
+    """The options the checks read as 3.9's alone are the ones the manager writes back
+    as ``--scanners`` in an ``ash scan`` command, so an option the manager learns to
+    respell is one the check of the page reads, and the reverse."""
+    assert NEWER_OPTION.pattern == MODULE._SCANNER_SELECTION_FLAG.pattern
 
 
 def _manifest_entries() -> dict[str, str]:
