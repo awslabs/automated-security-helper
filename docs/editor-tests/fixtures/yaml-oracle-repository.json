@@ -140,7 +140,7 @@
         "suppressions:",
         "  - path: 'src/legacy/old_api.py'",
         "    rule_id: 'B501'",
-        "    reason: 'Legacy code - will be refactored in Q2 2026'",
+        "    reason: 'Legacy code - will be refactored in the second quarter of 2026'",
         "    expires: '2026-06-30'"
       ],
       "source": "docs/content/docs/genai-steering-guide.md:1011",
@@ -149,7 +149,7 @@
           {
             "expires": "2026-06-30",
             "path": "src/legacy/old_api.py",
-            "reason": "Legacy code - will be refactored in Q2 2026",
+            "reason": "Legacy code - will be refactored in the second quarter of 2026",
             "rule_id": "B501"
           }
         ]
@@ -638,5 +638,5 @@
     }
   ],
   "format": "yaml-oracle/1",
-  "notes": "Copies of the configuration blocks the documentation marks as ASH configuration, and the first 75 lines of the repository's own .ash.yaml, taken from the commit this corpus was written at. source names where each came from. The copies are frozen: a later change to the documentation does not change them."
+  "notes": "Copies of the configuration blocks the documentation marks as ASH configuration, and the first 75 lines of the repository's own .ash.yaml, taken from the commit this corpus was written at. source names where each came from. The copies are frozen: a later change to the documentation does not change them. They are verbatim except one reason text, where the short name of a quarter is spelled out."
 }
