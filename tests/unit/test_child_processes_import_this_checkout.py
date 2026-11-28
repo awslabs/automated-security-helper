@@ -610,6 +610,23 @@ ALLOWED: Dict[str, str] = {
         "probes import the standard library and the probed distribution only, "
         "never ASH"
     ),
+    "tests/unit/docs/test_illustrative_ratchet.py"
+    "::_run_script::isolated-script#1@run": (
+        "-I -B children of scripts/docs_checks.py, run as write-seeds (refused "
+        "where the seeds exist) or as a command it rejects, and of "
+        "check-illustrative-ratchet.py; docs_checks.py imports ASH only inside "
+        "check functions neither command calls, and the ratchet script and the "
+        "trailer script it loads by path import the standard library alone"
+    ),
+    "tests/unit/test_alpha_extra_sync_gate.py"
+    "::TestTheCommittedStateIsClean.test_the_command_line_exits_zero_on_the_real_files"
+    "::isolated-script#1@run": (
+        "scripts/sync_alpha_extra.py runs under -I on the standard library alone "
+        "(test_the_script_needs_only_the_standard_library holds its imports to "
+        "it) and loads automated_security_helper/base/plugin_provisioning.py by "
+        "file path, a module that imports the standard library only; nothing "
+        "from the package is imported"
+    ),
 }
 
 

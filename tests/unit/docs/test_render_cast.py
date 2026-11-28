@@ -51,6 +51,7 @@ from rich.table import Table
 from rich.text import Text
 
 from automated_security_helper.utils.ui_theme import COLORS
+from tests.utils.helpers import checkout_env
 
 pytestmark = pytest.mark.unit
 
@@ -2147,13 +2148,17 @@ def test_the_default_paths_are_the_ones_the_recording_is_committed_under(
 
 
 def run_cli(args: list[str], seed: str, cwd: Path) -> subprocess.CompletedProcess:
-    """The command line in a fresh interpreter, with the hash seed the test sets."""
+    """The command line in a fresh interpreter, with the hash seed the test sets.
+
+    The renderer reads its palette from ASH, so the child imports ASH from this
+    checkout (checkout_env), as this process does.
+    """
     env = {**os.environ, "PYTHONHASHSEED": seed, "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(
         [sys.executable, "-B", str(MODULE), *args],
         capture_output=True,
         text=True,
-        env=env,
+        env=checkout_env(env),
         cwd=cwd,
         timeout=300,
     )
@@ -2246,7 +2251,7 @@ def run_cli_under(
     args: list[str], unicode_version: str | None, cwd: Path
 ) -> subprocess.CompletedProcess:
     """The command line in a fresh interpreter whose environment holds the given
-    UNICODE_VERSION, or none."""
+    UNICODE_VERSION, or none. Like run_cli, it imports ASH from this checkout."""
     env = dict(os.environ)
     env.pop("UNICODE_VERSION", None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -2256,7 +2261,7 @@ def run_cli_under(
         [sys.executable, "-B", str(MODULE), *args],
         capture_output=True,
         text=True,
-        env=env,
+        env=checkout_env(env),
         cwd=cwd,
         timeout=300,
     )
