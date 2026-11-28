@@ -157,12 +157,27 @@ export function compilePatterns(table) {
   return compiled;
 }
 
+// The definition a reference such as "#/$defs/Name" or "#/$defs/Name/properties/x" is into,
+// or null for any other reference.
+function definitionOf(ref) {
+  const match = /^#\/\$defs\/([^/]+)/.exec(ref);
+  return match === null ? null : match[1].replace(/~1/g, '/').replace(/~0/g, '~');
+}
+
+// A failure. It names the definition its schema comes from when it comes from one, which
+// lets a caller tell the failures of one kind of object from another's.
+function failure(context, pointer, keyword, detail) {
+  return context.definition === null
+    ? { pointer, keyword, detail }
+    : { pointer, keyword, detail, definition: context.definition };
+}
+
 function check(context, schema, instance, pointer, out) {
   if (schema === true) {
     return;
   }
   if (schema === false) {
-    out.push({ pointer, keyword: 'false', detail: {} });
+    out.push(failure(context, pointer, 'false', {}));
     return;
   }
   if (!isObject(schema)) {
@@ -175,19 +190,23 @@ function check(context, schema, instance, pointer, out) {
     if (!ASSERTIONS.has(keyword)) {
       throw new UnsupportedKeyword(keyword);
     }
-    const fail = (detail = {}) => out.push({ pointer, keyword, detail });
+    const fail = (detail = {}) => out.push(failure(context, pointer, keyword, detail));
     switch (keyword) {
-      case '$ref':
+      case '$ref': {
         if (context.depth >= MAX_REFERENCE_DEPTH) {
           throw new UnsupportedKeyword('$ref', 'a reference that never reaches a keyword');
         }
+        const outer = context.definition;
+        context.definition = definitionOf(value) ?? outer;
         context.depth += 1;
         try {
           check(context, resolveRef(context.root, value), instance, pointer, out);
         } finally {
           context.depth -= 1;
+          context.definition = outer;
         }
         break;
+      }
       case 'type': {
         const types = Array.isArray(value) ? value : [value];
         if (!types.some((type) => isType(instance, type))) {
@@ -297,13 +316,17 @@ function check(context, schema, instance, pointer, out) {
         }
         break;
       case 'anyOf': {
+        // The failures of each branch ride on the one failure, as jsonschema's context
+        // does, so a caller can tell why a union refused an object.
+        const branches = [];
         const admitted = value.some((sub) => {
           const found = [];
           check(context, sub, instance, pointer, found);
+          branches.push(found);
           return found.length === 0;
         });
         if (!admitted) {
-          fail();
+          fail({ branches });
         }
         break;
       }
@@ -325,11 +348,13 @@ function check(context, schema, instance, pointer, out) {
  * The failures of `instance` against `schema`, which is `root` or a schema inside it.
  * Each failure is { pointer, keyword, detail }: the JSON pointer of the instance that
  * failed, the keyword, and the facts a sentence needs (the missing keys, the extra keys,
- * the allowed values, the limit). An empty list is a pass.
+ * the allowed values, the limit, and for an anyOf the failures of each branch). A failure
+ * whose schema sits under a `$defs` entry also has `definition`, that entry's name. An
+ * empty list is a pass.
  */
 export function validate(root, schema, instance, patterns = new Map()) {
   const out = [];
-  check({ root, patterns, depth: 0 }, schema, instance, '', out);
+  check({ root, patterns, depth: 0, definition: null }, schema, instance, '', out);
   return out;
 }
 

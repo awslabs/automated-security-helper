@@ -44,7 +44,7 @@ export const DEPARTURES = Object.freeze(
       schema: 'invalid',
       editor: 'warning',
       reason:
-        'ASH warns about an unknown key in a suppression or ignore-path entry, and the entry applies to nothing; it is an error when the file asks to fail on unknown keys.',
+        'ASH warns about an unknown key in a suppression, an exclusion, an ignore-path entry or a suppression scope, wherever it sits, and the entry applies to nothing; it is an error when the file asks to fail on unknown keys.',
     },
     {
       row: 'comma-separated-output-formats',
@@ -62,7 +62,8 @@ export const DEPARTURES = Object.freeze(
       row: 'internal-top-level-field',
       schema: 'valid',
       editor: 'warning',
-      reason: 'The field is internal, and ASH warns when a user configuration holds it.',
+      reason:
+        'The field is internal, and ASH warns when a user configuration holds it. The schema the editor checks leaves out what is inside it, so the editor does not check that.',
     },
     {
       row: 'plugin-section-spelling',
@@ -74,7 +75,22 @@ export const DEPARTURES = Object.freeze(
 );
 
 const SECTION_KINDS = ['converters', 'reporters', 'scanners'];
-const LIST_ENTRIES = { suppressions: 'a suppression', ignore_paths: 'an ignore-path entry' };
+const NOT_CHECKED = 'This editor does not check what is inside it.';
+
+/**
+ * The entry models: the definitions of the schema in which ASH warns about an unknown key and
+ * keeps the file, and the entry never applies, wherever in a file the entry sits (an error
+ * once the file asks to fail on unknown keys). `noun` is how a message calls an entry of the
+ * model, and `ignored` is what a scan does with an entry that holds an unknown key. A
+ * Python test reads this table out of this file and loads a document for each model through
+ * ASH's own file-load route.
+ */
+export const ENTRY_MODELS = Object.freeze({
+  AshExclusion: { noun: 'an exclusion', ignored: IGNORES_ENTRY },
+  AshSuppression: { noun: 'a suppression', ignored: IGNORES_ENTRY },
+  IgnorePathWithReason: { noun: 'an ignore-path entry', ignored: IGNORES_ENTRY },
+  SuppressionScope: { noun: 'a suppression scope', ignored: 'The suppression it belongs to matches nothing.' },
+});
 
 const TYPE_PHRASES = {
   object: 'a mapping',
@@ -86,6 +102,9 @@ const TYPE_PHRASES = {
   null: 'null',
 };
 
+// A name read from a file is looked up as an own property only, so a key such as
+// `constructor` or `__proto__` names nothing on the prototype.
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const escapeToken = (part) => String(part).replace(/~/g, '~0').replace(/\//g, '~1');
 const unescapeToken = (token) => token.replace(/~1/g, '/').replace(/~0/g, '~');
@@ -96,7 +115,7 @@ const quoted = (names) => names.map((name) => `'${name}'`).join(', ');
 function valueAt(instance, tokens) {
   let node = instance;
   for (const token of tokens) {
-    if (node === null || typeof node !== 'object') {
+    if (node === null || typeof node !== 'object' || !hasOwn(node, token)) {
       return undefined;
     }
     node = node[token];
@@ -190,7 +209,9 @@ export function describeFailure(failure, instance) {
   let sentence;
   switch (keyword) {
     case 'type': {
-      const expected = detail.expected.map((type) => TYPE_PHRASES[type] ?? type);
+      const expected = detail.expected.map((type) =>
+        hasOwn(TYPE_PHRASES, type) ? TYPE_PHRASES[type] : type,
+      );
       sentence = `Expected ${joinOr(expected)}, found ${describeType(instance)}.`;
       break;
     }
@@ -277,22 +298,43 @@ function topLevelKeys(block) {
   return Object.keys(schema.properties ?? {});
 }
 
-function entryKeys(block, listName) {
-  return Object.values(block.fields)
-    .filter((field) => field.parent === `global_settings.${listName}`)
-    .map((field) => field.key);
+// The keys the schema declares for the entry model `definition`, without the deprecated
+// spellings, which a correction must not point at.
+function entryKeys(block, definition) {
+  const defs = block.validationSchema.$defs ?? {};
+  const properties = hasOwn(defs, definition) ? (defs[definition].properties ?? {}) : {};
+  return Object.keys(properties).filter((name) => !hasOwn(block.constants.deprecatedKeys, name));
 }
 
-function unknownEntryKeyMessage(block, listName, key, severity) {
-  const renamed = block.constants.deprecatedKeys[key];
+function unknownEntryKeyMessage(block, definition, key, severity) {
+  const { deprecatedKeys } = block.constants;
   let lead;
-  if (renamed === undefined) {
-    const hint = didYouMean(key, entryKeys(block, listName));
-    lead = `Unknown key '${key}'${hint === null ? '' : ` (did you mean '${hint}'?)`}`;
+  if (hasOwn(deprecatedKeys, key)) {
+    lead = `'${key}' is the old name of '${deprecatedKeys[key]}'`;
   } else {
-    lead = `'${key}' is the old name of '${renamed}'`;
+    const hint = didYouMean(key, entryKeys(block, definition));
+    lead = `Unknown key '${key}'${hint === null ? '' : ` (did you mean '${hint}'?)`}`;
   }
-  return `${lead} in ${LIST_ENTRIES[listName]}. ${severity === 'error' ? REFUSES : IGNORES_ENTRY}`;
+  const model = ENTRY_MODELS[definition];
+  return `${lead} in ${model.noun}. ${severity === 'error' ? REFUSES : model.ignored}`;
+}
+
+const isEntryFailure = (failure) =>
+  failure.keyword === 'additionalProperties' &&
+  failure.definition !== undefined &&
+  hasOwn(ENTRY_MODELS, failure.definition);
+
+// The unknown-key failures of entry models that `failure` stands for, or null. The failure
+// is one itself, or a union (an optional scope is `anyOf` its model and null) in which a
+// branch fails with nothing but such failures: the entry was meant for that branch.
+function entryFailures(failure) {
+  if (isEntryFailure(failure)) {
+    return [failure];
+  }
+  if (failure.keyword === 'anyOf' && Array.isArray(failure.detail.branches)) {
+    return failure.detail.branches.find((branch) => branch.length > 0 && branch.every(isEntryFailure)) ?? null;
+  }
+  return null;
 }
 
 /**
@@ -309,7 +351,7 @@ function unknownEntryKeyMessage(block, listName, key, severity) {
 export function judge(block, path, instance, failures, options = {}) {
   const rows = [];
   const replaced = new Set();
-  const field = path === '' ? null : (block.fields[path] ?? null);
+  const field = path !== '' && hasOwn(block.fields, path) ? block.fields[path] : null;
 
   // The schema admits a reference where ASH's loader refuses one.
   if (
@@ -352,32 +394,26 @@ export function judge(block, path, instance, failures, options = {}) {
     }
   }
 
-  // An unknown key in a suppression or an ignore-path entry.
+  // An unknown key in an entry of a model ASH warns about instead of refusing, wherever the
+  // entry sits.
   failures.forEach((failure, index) => {
-    if (failure.keyword !== 'additionalProperties') {
-      return;
-    }
-    const tokens = [...(path === '' ? [] : path.split('.')), ...pointerTokens(failure.pointer)];
-    const listName = tokens[1];
-    const isEntry =
-      tokens.length === 3 &&
-      tokens[0] === 'global_settings' &&
-      Object.prototype.hasOwnProperty.call(LIST_ENTRIES, listName) &&
-      /^\d+$/.test(tokens[2]);
-    if (!isEntry) {
+    const entries = entryFailures(failure);
+    if (entries === null) {
       return;
     }
     replaced.add(index);
     const severity = options.failOnUnknownKeys ? 'error' : 'warning';
-    for (const key of failure.detail.extras) {
-      rows.push(
-        finding(
-          'unknown-key-in-list-entry',
-          severity,
-          failure.pointer,
-          unknownEntryKeyMessage(block, listName, key, severity),
-        ),
-      );
+    for (const entry of entries) {
+      for (const key of entry.detail.extras) {
+        rows.push(
+          finding(
+            'unknown-key-in-list-entry',
+            severity,
+            entry.pointer,
+            unknownEntryKeyMessage(block, entry.definition, key, severity),
+          ),
+        );
+      }
     }
   });
 
@@ -387,7 +423,12 @@ export function judge(block, path, instance, failures, options = {}) {
     for (const key of Object.keys(instance)) {
       const pointer = `/${escapeToken(key)}`;
       if (block.constants.invalidTopLevelFields.includes(key)) {
-        const message = block.constants.invalidTopLevelFieldWarning.replace('{field}', () => key);
+        const warning = block.constants.invalidTopLevelFieldWarning.replace('{field}', () => key);
+        // The schema the editor checks leaves an internal section out, so what is inside
+        // it goes unchecked, and ASH refuses a section with a key it does not define.
+        const inside = instance[key];
+        const message =
+          isObject(inside) && Object.keys(inside).length === 0 ? warning : `${warning} ${NOT_CHECKED}`;
         rows.push(finding('internal-top-level-field', 'warning', pointer, message));
       } else if (!known.has(key)) {
         const hint = didYouMean(key, [...known]);
