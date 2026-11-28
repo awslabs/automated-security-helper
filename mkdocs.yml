@@ -34,6 +34,7 @@ strict: true
 hooks:
   - docs/hooks/redirects.py
   - docs/hooks/install_refs.py
+  - docs/hooks/config_editor.py
 
 # Pages that are built but deliberately left out of the navigation, one gitignore-style
 # pattern per line, each with a comment saying why. A page that is in no .nav.yml and
