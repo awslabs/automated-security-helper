@@ -541,7 +541,9 @@ def _host_match_of(which: str) -> type:
 #: written without its comma is a string: ``in`` then becomes a substring test, so a
 #: row for ``ubuntu-core`` matched ubuntu 24.04, a row for ``opensuse-tumbleweed``
 #: matched opensuse, and ``versions="3.24"`` made every prefix one character long, so
-#: alpine 3.18 matched the prefix ``3``.
+#: alpine 3.18 matched the prefix ``3``. ``arches`` is recorded and never matched, but a
+#: string there reads as a run of one-character architectures, so it is held to the
+#: same shape.
 _REFUSED_HOST_MATCHES = {
     "ids as a string that holds another id": (
         {"ids": "ubuntu-core"},
@@ -573,12 +575,32 @@ _REFUSED_HOST_MATCHES = {
         {"ids": ("alpine",), "versions": ("3.24", " ")},
         "no blank version prefix",
     ),
+    "arches as a string": (
+        {"ids": ("debian",), "arches": "amd64"},
+        "tuple of strings",
+    ),
+    "arches as a list": (
+        {"ids": ("debian",), "arches": ["amd64"]},
+        "tuple of strings",
+    ),
+    "an arch that is not a string": (
+        {"ids": ("debian",), "arches": (64,)},
+        "tuple of strings",
+    ),
+    "a blank arch": (
+        {"ids": ("debian",), "arches": ("",)},
+        "no blank architecture",
+    ),
+    "a blank arch beside a real one": (
+        {"ids": ("debian",), "arches": ("amd64", " ")},
+        "no blank architecture",
+    ),
 }
 
 
 @pytest.mark.parametrize("which", _BOTH_HOST_MATCHES)
 @pytest.mark.parametrize("case", sorted(_REFUSED_HOST_MATCHES))
-def test_a_host_match_whose_ids_or_versions_are_not_a_tuple_of_strings_is_refused(
+def test_a_host_match_whose_ids_versions_or_arches_are_malformed_is_refused(
     which: str, case: str
 ) -> None:
     kwargs, words = _REFUSED_HOST_MATCHES[case]
@@ -596,13 +618,16 @@ def test_a_host_match_whose_ids_or_versions_are_not_a_tuple_of_strings_is_refuse
         {"ids": ("alpine",), "versions": ("3.24",)},
         {"ids": ("rhel", "rocky"), "versions": ("9", "10")},
         {"ids": ("debian",), "versions": ("12",), "arches": ("amd64",)},
+        {"ids": ("alpine",), "versions": ("3.24",), "arches": ("amd64", "arm64")},
     ],
 )
 def test_the_tuple_forms_of_those_host_matches_are_accepted(
     which: str, kwargs: dict
 ) -> None:
-    """The control for the refusals above: the same ids and versions, as tuples."""
+    """The control for the refusals above: the same ids, versions and arches, as
+    tuples."""
     match = _host_match_of(which)(**kwargs)
 
     assert match.ids == kwargs["ids"]
     assert match.versions == kwargs.get("versions", ())
+    assert match.arches == kwargs.get("arches", ())
