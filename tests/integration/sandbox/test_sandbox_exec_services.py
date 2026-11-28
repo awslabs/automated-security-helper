@@ -268,6 +268,9 @@ def _attempt(
         ).rstrip(os.pathsep),
         "ASH_SANDBOX_ESCAPE_SPEC": str(spec_file),
     }
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach this scan beside the scanner it names itself.
+    env.pop("ASH_SCANNERS", None)
     command = [
         _ash_executable(),
         "scan",

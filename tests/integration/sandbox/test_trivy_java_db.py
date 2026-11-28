@@ -181,6 +181,9 @@ def test_a_jar_and_a_stale_java_database_change_nothing_in_the_sandbox(
         "HOME": os.environ.get("HOME", str(tmp_path)),
     }
     env.pop("ASH_OFFLINE", None)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach both scans beside the scanner they name themselves.
+    env.pop("ASH_SCANNERS", None)
 
     # Sandboxed first: it is the run that has to get trivy's database prepared.
     boxed = _scan(repo, tmp_path / "out-boxed", backend, env)

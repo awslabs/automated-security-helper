@@ -98,10 +98,13 @@ def express_env():
     # inherited from the caller's shell or CI lane (a short idle timeout, say)
     # would retire the daemon between ``express start`` and the transparent
     # scan, and the scan would run cold. Each test sets only what it needs.
+    # ASH_SCANNERS is dropped as well: it is the environment variable of the
+    # deprecated --scanners, so a caller's value would add scanners to the one
+    # --add-scanners names.
     env = {
         name: value
         for name, value in os.environ.items()
-        if not name.startswith("ASH_EXPRESS")
+        if not name.startswith("ASH_EXPRESS") and name != "ASH_SCANNERS"
     }
     env["XDG_RUNTIME_DIR"] = base
     yield env

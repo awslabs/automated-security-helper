@@ -109,6 +109,10 @@ def git_repo(repo) -> Path:
 def _ash(
     *args: str, env: dict | None = None, cwd: Path | None = None
 ) -> subprocess.CompletedProcess:
+    child_env = checkout_env(env)
+    # A caller's ASH_SCANNERS, the environment variable of the deprecated
+    # --scanners, would reach the scan beside the scanner --add-scanners names.
+    child_env.pop("ASH_SCANNERS", None)
     return subprocess.run(  # nosec B603 - starts the real ash CLI under test, fixed argv
         [sys.executable, "-m", "automated_security_helper.cli.main", *args],
         capture_output=True,
@@ -116,7 +120,7 @@ def _ash(
         encoding="utf-8",
         errors="replace",
         timeout=600,
-        env=checkout_env(env),
+        env=child_env,
         cwd=cwd,
     )
 
