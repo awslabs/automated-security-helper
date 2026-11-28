@@ -12,8 +12,8 @@ every rule it holds is checked here on planted input:
   that its arithmetic overflows, caption copy rules counted by the loader's own
   counter, a read-only command allowlist limited to paths inside the project and to ls
   listings that print no owner or group, and the YAML that PyYAML would resolve
-  silently (anchors, aliases, merge keys and a key given twice in one mapping) refused
-  by file, line and name;
+  silently (anchors, aliases, every explicit tag, merge keys and a key given twice in
+  one mapping) refused by file, line and name;
 * the retimer: the same input gives the same events, the scene totals are the
   storyboard's whatever the machine speed, output is shortened and never stretched, and
   a scene that does not fit its duration is refused;
@@ -142,6 +142,38 @@ def test_the_module_imports_no_pty_termios_or_fcntl():
     # A scan that saw no imports at all would pass for any file.
     assert {"json", "re", "dataclasses"} <= roots
     assert roots & FORBIDDEN_MODULES == set()
+
+
+def _names_imported(node: ast.AST) -> set[str]:
+    """The top-level module names one import statement brings in."""
+    if isinstance(node, ast.Import):
+        return {alias.name.split(".")[0] for alias in node.names}
+    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        return {node.module.split(".")[0]}
+    return set()
+
+
+def test_the_module_reaches_pyyaml_in_one_function_through_the_strict_loader():
+    """The module imports, parses and retimes with the standard library alone. The one
+    import that reaches PyYAML is the strict loader's, inside ``_load_yaml``, the one
+    function that reads YAML, so no other function of the module has a YAML reader of
+    its own."""
+    source = MODULE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    holders = [
+        node
+        for node in ast.walk(tree)
+        if _names_imported(node) & {"yaml", "_strict_yaml"}
+    ]
+    assert len(holders) == 1, "PyYAML is reached from one import and no more"
+    (holder,) = holders
+    assert _names_imported(holder) == {"_strict_yaml"}
+    loader = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_load_yaml"
+    )
+    assert loader.lineno < holder.lineno <= loader.end_lineno
 
 
 def test_every_refusal_is_one_error_family(cast):
@@ -611,10 +643,14 @@ def test_a_storyboard_must_be_a_mapping(cast, bad):
         _parse(cast, bad)
 
 
-# PyYAML accepts anchors, aliases and merge keys, and keeps the last of a key given
-# twice. Schema 1 has no use for the first three, and the fourth would replace a caption
-# written twice in a scene without a word, so the loader refuses all four, by file, line
-# and name, before the schema sees the data.
+# PyYAML accepts anchors, aliases, tags and merge keys, and keeps the last of a key
+# given twice. Schema 1 uses none of the first four, and the fifth would replace a
+# caption written twice in a scene without a word. A tag can also hide the fifth:
+# PyYAML builds a key tagged ``!!value`` as the text of the key, so it repeats another
+# key, and a check that compares tags sees two different keys. So the loader refuses all
+# five, by file, line and name, before the schema sees the data. It refuses every
+# explicit tag, because the committed storyboard has none, which leaves a plain ``<<``
+# as the only way to write a merge key.
 
 BOARD_NAME = "board.cast.yaml"
 COMMITTED_STORYBOARD = (
@@ -686,38 +722,120 @@ def test_a_yaml_merge_key_is_refused_by_file_line_and_key(cast, tmp_path):
     assert "the YAML merge key '<<' is not part of storyboard schema 1" in message
 
 
-# Besides a plain ``<<``, PyYAML's resolver reads each of these keys as a merge key and
-# merges the mapping after it into the mapping that holds the key. It tests only the
-# key's tag, so a flow sequence or mapping with the merge tag merges as well. A key it
-# reads as a string is an ordinary key, however much it looks like ``<<``.
-MERGE_SPELLINGS = {
-    "the non-specific tag": "! <<",
-    "the non-specific tag on a quoted key": '! "<<"',
-    "the verbatim non-specific tag": "!<!> <<",
-    "the merge tag": "!!merge <<",
-    "the merge tag on another word": "!!merge extra",
-    "the verbatim merge tag": "!<tag:yaml.org,2002:merge> <<",
-    "the merge tag on a flow sequence": "!!merge [extra]",
-    "the merge tag on a flow mapping": "!!merge {extra: 1}",
+# Every explicit tag is refused where it is written, on a key and on a value, whatever
+# PyYAML would have made of the node. A tag can turn any word into a merge key, turn a
+# key into the text of another key, or turn a value into a set, an ordered mapping or a
+# date, and schema 1 uses none of them. The refusal names the tag as PyYAML resolves it,
+# so ``!m!value`` after a ``%TAG`` directive reads as ``!!value``.
+OTHER_WORDS = '"Other words"'
+READ_TWICE = '{caption: "Read it twice"}'
+SHOWN_SCREEN = 'expect_screen: ["awslabs/automated-security-helper v"]'
+VALUE_TAG_DIRECTIVE = ("schema: 1\n", "%TAG !m! tag:yaml.org,2002:\n---\nschema: 1\n")
+LOCAL_TAG_DIRECTIVE = (
+    "schema: 1\n",
+    "%TAG !e! tag:example.com,2000:app/\n---\nschema: 1\n",
+)
+
+
+def _extra_key(spelling, value):
+    """The edit that adds a key written as ``spelling`` after the version caption."""
+    return (VERSION_CAPTION, f"{VERSION_CAPTION}, {spelling}: {value}")
+
+
+def _with_value(value):
+    """The edit that gives the version scene's ``expect_screen`` the value ``value``."""
+    return (SHOWN_SCREEN, f"expect_screen: {value}")
+
+
+def _key_row(spelling, shown, value=READ_TWICE):
+    """A row of ``EXPLICIT_TAGS``: an extra key written as ``spelling``."""
+    return ((_extra_key(spelling, value),), spelling, shown)
+
+
+#: name -> (the edits that plant it, the text its line holds, the tag the refusal names)
+EXPLICIT_TAGS = {
+    "the merge tag": _key_row("!!merge <<", "!!merge"),
+    "the merge tag on another word": _key_row("!!merge extra", "!!merge"),
+    "the verbatim merge tag": _key_row("!<tag:yaml.org,2002:merge> <<", "!!merge"),
+    "the merge tag on a flow sequence": _key_row("!!merge [extra]", "!!merge"),
+    "the merge tag on a flow mapping": _key_row("!!merge {extra: 1}", "!!merge"),
+    "the non-specific tag": _key_row("! <<", "!"),
+    "the non-specific tag on a quoted key": _key_row('! "<<"', "!"),
+    "the verbatim non-specific tag": _key_row("!<!> <<", "!"),
+    "the string tag on a repeated key": _key_row("!!str caption", "!!str", OTHER_WORDS),
+    "a local tag on a key": _key_row("!local caption", "!local", OTHER_WORDS),
+    "the value tag behind a TAG directive": (
+        (VALUE_TAG_DIRECTIVE, _extra_key("!m!value caption", OTHER_WORDS)),
+        "!m!value",
+        "!!value",
+    ),
+    "a local tag behind a TAG directive": (
+        (LOCAL_TAG_DIRECTIVE, _extra_key("!e!thing caption", OTHER_WORDS)),
+        "!e!thing",
+        "tag:example.com,2000:app/thing",
+    ),
+    "the set tag on a value": (
+        (_with_value('!!set {"awslabs/automated-security-helper v"}'),),
+        "!!set",
+        "!!set",
+    ),
+    "the ordered mapping tag on a value": (
+        (_with_value("!!omap [{a: 1}]"),),
+        "!!omap",
+        "!!omap",
+    ),
+    "the timestamp tag on a caption": (
+        ((VERSION_CAPTION, "caption: !!timestamp 2001-12-14"),),
+        "!!timestamp",
+        "!!timestamp",
+    ),
 }
+# A key PyYAML reads as text is an ordinary key, however much it looks like ``<<``.
 NOT_MERGE_SPELLINGS = {
     "a quoted key": '"<<"',
     "a single-quoted key": "'<<'",
-    "a key given the string tag": "!!str <<",
 }
 
 
-@pytest.mark.parametrize("name", sorted(MERGE_SPELLINGS))
-def test_a_merge_key_is_refused_however_it_is_spelled(cast, tmp_path, name):
-    """The loader reads the tag PyYAML resolved and not the key's text, because a merge
-    under a spelling it missed drops the merged caption without a word."""
-    spelling = MERGE_SPELLINGS[name]
-    merged = VERSION_CAPTION + ", " + spelling + ': {caption: "Read it twice"}'
-    path, text = _board(tmp_path, (VERSION_CAPTION, merged))
+@pytest.mark.parametrize("name", sorted(EXPLICIT_TAGS))
+def test_every_explicit_tag_is_refused_by_file_line_and_tag(cast, tmp_path, name):
+    """A tag changes what a node is before the schema looks at it, so none is read."""
+    edits, needle, shown = EXPLICIT_TAGS[name]
+    path, text = _board(tmp_path, *edits)
     message = _refused(cast, path)
-    assert message.startswith(f"{path}: line {_lines(text, spelling)[0]}: ")
-    assert "the YAML merge key" in message
-    assert "is not part of storyboard schema 1" in message
+    assert message.startswith(f"{path}: line {_lines(text, needle)[0]}: ")
+    assert f"the YAML tag {shown} is not part of storyboard schema 1" in message
+
+
+def test_a_value_tagged_key_cannot_hide_a_repeated_caption(cast, tmp_path):
+    """The shape that got past the repeated-key check. PyYAML builds a key tagged
+    ``!!value`` as the text ``caption``, so the second caption replaces the first, and
+    a check that compared tags saw two different keys. The tag is refused as written."""
+    path, text = _board(tmp_path, _extra_key("!!value caption", OTHER_WORDS))
+    message = _refused(cast, path)
+    assert message.startswith(f"{path}: line {_lines(text, '!!value')[0]}: ")
+    assert "the YAML tag !!value is not part of storyboard schema 1" in message
+
+
+def test_pyyaml_keeps_the_later_caption_of_a_value_tagged_key(tmp_path):
+    """Control for the test above: the planted scene is the silent shape. PyYAML alone
+    loads it with no error and with the second caption in place of the first."""
+    _path, text = _board(tmp_path, _extra_key("!!value caption", OTHER_WORDS))
+    assert _scene(yaml.safe_load(text), "version")["caption"] == "Other words"
+
+
+def test_a_plain_equals_and_a_quoted_equals_are_one_key(cast, tmp_path):
+    """PyYAML resolves a plain ``=`` to the value tag and builds it as the text ``=``,
+    so it is the key ``"="``. The repeated-key check reads a key as PyYAML builds it."""
+    path, text = _board(
+        tmp_path, (VERSION_CAPTION, VERSION_CAPTION + ', =: 1,\n     "=": 2')
+    )
+    message = _refused(cast, path)
+    first, second = _lines(text, "=: 1")[0], _lines(text, '"=": 2')[0]
+    assert second == first + 1
+    assert message.startswith(f"{path}: line {second}: ")
+    assert "the key '=' is given twice in scenes[1]" in message
+    assert f"(first on line {first})" in message
 
 
 def test_a_merge_marker_given_as_a_value_is_refused(cast, tmp_path):
@@ -801,7 +919,8 @@ def test_text_that_only_looks_like_a_yaml_feature_is_data(cast, tmp_path):
 
 
 def test_the_committed_storyboard_loads_through_the_strict_loader(cast):
-    """Must-not-flag: the real file has no anchor, alias, merge key or repeated key."""
+    """Must-not-flag: the real file has no anchor, alias, tag, merge key or repeated
+    key, so refusing each takes nothing from it."""
     board = cast.load_storyboard(COMMITTED_STORYBOARD, JOURNEY_IDS)
     assert board.journey == "docs/journeys/getting-started-local.journey.yaml"
     assert board.scenes

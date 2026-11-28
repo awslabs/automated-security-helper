@@ -20,15 +20,18 @@ fail is worse. This file pins both halves for the journey generator:
 * on planted trees, the generator can fail: one edited byte in a template, a template
   that was never written, and every kind of journey the renderer refuses (a sample
   that contradicts a structured field, a fix for a function the project does not
-  define, an unknown key, an anchor, a marker key the docs runner does not read, a
-  render that does not parse back to the journey's blocks) is reported with an exit
-  status of 1 and the command that fixes it, and a refused journey writes nothing.
+  define, an unknown key, an anchor, a tag, a merge key, a key given twice, a marker
+  key the docs runner does not read, a render that does not parse back to the
+  journey's blocks) is reported with an exit status of 1 and the command that fixes
+  it, and a refused journey writes nothing.
 
 A block may carry an ``id:``, a kebab-case name that is unique in its journey and is
 never rendered, so that another file can name the block. The tests plant good and bad
 ids, compare the render with and without ids byte for byte, and read the storyboard
 beside the local journey (``getting-started-local.cast.yaml``), which names journey
 blocks by id: every id it names must exist, and a planted unknown id must be refused.
+Its install scene names a README line by an anchor, which must resolve, and every scene
+that types a line must have the time to type it.
 
 ``test_the_gate_check_can_fail`` is the non-vacuity proof for the docs freshness gate's
 ``Journey pages match their journey files`` check, which calls the same function.
@@ -153,6 +156,12 @@ body:
       Install `v{{VERSION}}` and you are done.
 """
 
+#: Three places of GOOD_JOURNEY that the rows for YAML features below tag, merge into or
+#: repeat a key of: the save block's text, the run block's body and its marker.
+SAVE_TEXT = "      lang: yaml\n      body: |\n        global_settings: {}\n"
+RUN_BODY = "        ash --scanners bandit\n"
+RUN_MARKER = '      marker: {mode: run, expect-exit: "2", env: "ASH_OFFLINE=YES"}\n'
+
 #: name -> (text to replace in GOOD_JOURNEY, its replacement, what the refusal says)
 REFUSED_JOURNEYS = {
     "a sample shows another exit code than twin.exit": (
@@ -235,7 +244,57 @@ REFUSED_JOURNEYS = {
     "a YAML anchor": (
         "schema: 1\n",
         "schema: 1\nx: &anchor 1\n",
-        "YAML anchors and aliases are not part of schema v1",
+        "line 2: the YAML anchor &anchor is not part of schema v1",
+    ),
+    "a YAML alias": (
+        "schema: 1\n",
+        "schema: 1\nx: *anchor\n",
+        "line 2: the YAML alias *anchor is not part of schema v1",
+    ),
+    "a YAML merge key": (
+        "schema: 1\n",
+        "schema: 1\nx: {<<: {a: 1}}\n",
+        "line 2: the YAML merge key '<<' is not part of schema v1",
+    ),
+    "a merge key spelled with the merge tag": (
+        SAVE_TEXT,
+        '      lang: yaml\n      !!merge extra: {body: "global_settings: {}\\n"}\n',
+        "the YAML tag !!merge is not part of schema v1",
+    ),
+    "a merge key spelled with the non-specific tag": (
+        SAVE_TEXT,
+        '      lang: yaml\n      ! "<<": {body: "global_settings: {}\\n"}\n',
+        "the YAML tag ! is not part of schema v1",
+    ),
+    "a tag on a value": (
+        "      twin: {kind: project}\n      lang: bash\n",
+        "      twin: {kind: project}\n      lang: !!str bash\n",
+        "the YAML tag !!str is not part of schema v1",
+    ),
+    "a repeated key behind the value tag": (
+        SAVE_TEXT,
+        SAVE_TEXT + "      !!value body: |\n        other: 1\n",
+        "the YAML tag !!value is not part of schema v1",
+    ),
+    "a block body given twice": (
+        RUN_BODY,
+        RUN_BODY + "      body: |\n        ash --scanners bandit,detect-secrets\n",
+        "the key 'body' is given twice in body[4].block",
+    ),
+    "a block marker given twice": (
+        RUN_MARKER,
+        RUN_MARKER + '      marker: {mode: run, expect-exit: "0"}\n',
+        "the key 'marker' is given twice in body[4].block",
+    ),
+    "a block id given twice": (
+        "      twin: {kind: project}\n",
+        "      id: make-project\n      id: make-it\n      twin: {kind: project}\n",
+        "the key 'id' is given twice in body[1].block",
+    ),
+    "a top-level key given twice with the same value": (
+        "schema: 1\n",
+        "schema: 1\nschema: 1\n",
+        "the key 'schema' is given twice at the top level",
     ),
     "a marker key the docs runner does not read": (
         'reason: "the scan needs the network for its scanners"',
@@ -785,6 +844,68 @@ def test_a_storyboard_naming_a_block_the_journey_lacks_is_refused(
         cast.StoryboardError, match="'no-such-block' is not a journey block id"
     ):
         cast.load_storyboard(planted, _committed_block_ids(generator))
+
+
+def _readme_line(comment_from: str) -> str:
+    """The line a scene's ``comment_from: <file>#<anchor>`` names.
+
+    Nothing else reads ``comment_from`` yet, so this test defines it, and the recorder
+    follows it: the anchor is the line ``<a id="<anchor>"></a>`` of the file, and the
+    named line is the first line of the first fenced code block after it, with nothing
+    but blank lines and a doctest marker between the anchor and the fence.
+    """
+    name, _, anchor = comment_from.partition("#")
+    lines = (REPO_ROOT / name).read_text(encoding="utf-8").splitlines()
+    tag = f'<a id="{anchor}"></a>'
+    assert lines.count(tag) == 1, f"{name} must hold {tag} exactly once"
+    after = lines[lines.index(tag) + 1 :]
+    fence = next((n for n, line in enumerate(after) if line.startswith("```")), None)
+    assert fence is not None, f"no fenced code block follows {tag} in {name}"
+    stray = [
+        line
+        for line in after[:fence]
+        if line.strip() and not line.startswith("<!-- doctest:")
+    ]
+    assert stray == [], f"{tag} must come right before its block, not above {stray}"
+    block = after[fence + 1 :]
+    assert block and block[0].strip(), f"the code block after {tag} has no first line"
+    return block[0]
+
+
+@pytest.mark.unit
+def test_every_scene_that_types_a_line_has_the_time_to_type_it() -> None:
+    """The install scene types a README line as a comment, named by an anchor that must
+    resolve, and each block scene types its journey block's command. For each, the
+    lead-in, the typing, the output window and the hold must fit the scene, the way the
+    loader requires it of a scene that types a command of its own."""
+    cast, board = _committed_storyboard()
+    generator = _module("_ash_journey_pages", SCRIPT)
+    commands = {
+        segment["block"]["id"]: segment["block"]["body"]
+        for segment in generator.load_journey(JOURNEY)["body"]
+        if "id" in segment.get("block", {})
+    }
+    install = board.scene("install")
+    line = _readme_line(install.comment_from)
+    assert "automated-security-helper.git@v" in line, "the install names a release tag"
+    typed = {install.scene_id: "# " + line}
+    for scene in board.scenes:
+        if scene.block:
+            typed[scene.scene_id] = commands[scene.block].removesuffix("\n")
+    assert sorted(typed) == ["install", "report", "scan", "version"]
+    for scene_id, text in typed.items():
+        assert "\n" not in text, f"scene {scene_id!r} types one line"
+        scene = board.scene(scene_id)
+        needed = (
+            board.typing.lead_in_ms
+            + cast.typing_ms(len(text), board.typing.chars_per_second)
+            + (scene.output_window_ms or 0)
+            + scene.hold_ms
+        )
+        assert needed <= scene.duration_ms, (
+            f"scene {scene_id!r} needs {needed} ms to type {len(text)} characters, "
+            f"show its output and hold, and lasts {scene.duration_ms} ms"
+        )
 
 
 @pytest.mark.unit
