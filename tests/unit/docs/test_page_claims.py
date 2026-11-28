@@ -482,7 +482,9 @@ def _shipped_plugin_options(attribute: str) -> Dict[str, Set[str]]:
 
 def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
     """The caller's environment with a private home directory under ``cwd``, no
-    network installs, no ``ASH_CONFIG``, and ``env`` on top.
+    network installs, no ``ASH_CONFIG`` or ``ASH_SCANNERS`` (``--add-scanners`` reads
+    no variable, so one the caller exported would add scanners to a run that asked
+    for its own), and ``env`` on top.
 
     uv's cache and tool directories point into the same home, replacing any the
     caller's environment carries (``_private_home`` points those at the fixture
@@ -500,7 +502,13 @@ def _ash_environment(cwd: Path, **env: str) -> Dict[str, str]:
         "PIP_NO_INDEX": "1",
         **_uv_dirs(home),
     }
-    for name in ("ASH_CONFIG", "XDG_BIN_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
+    for name in (
+        "ASH_CONFIG",
+        "ASH_SCANNERS",
+        "XDG_BIN_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+    ):
         environment.pop(name, None)
     return checkout_env({**environment, **env}, root=_IMPORTED_ROOT)
 
@@ -14998,7 +15006,7 @@ def test_ash_merge_records_every_shards_scanners_names_that_matched_nothing(
                 "--no-progress",
                 "--output-dir",
                 str(output),
-                "--scanners",
+                "--add-scanners",
                 f"detect-secrets,{unknown}",
                 "--shard-index",
                 str(index),
