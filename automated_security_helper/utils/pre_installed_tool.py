@@ -188,6 +188,30 @@ class PreInstalledToolVerdict:
     summary: str = ""
 
 
+#: The verifier's one-line summary for a copy whose version alone falls short of
+#: the constraint (``_judge``). Named once, so a caller that reads the summary to
+#: choose its remedy (``only_the_constraint_falls_short``) reads the words the
+#: verifier writes.
+CONSTRAINT_ONLY_SHORTFALL = (
+    "the installed package does not satisfy the version constraint"
+)
+
+
+def only_the_constraint_falls_short(verdict: object) -> bool:
+    """Whether ``verdict`` is UNSATISFIED for its version constraint alone.
+
+    True only when the summary is the constraint's part with no other part. A
+    missing extra, a ``--version`` probe that exited non-zero or a requirement that
+    does not resolve gives another summary, and a ``tool_version`` the copy meets
+    fixes none of those. A remedy that offers such a ``tool_version`` reads this.
+    Any object with ``status`` and ``summary`` is read, so a stand-in verdict is too.
+    """
+    return (
+        getattr(verdict, "status", None) == ToolInstallStatus.UNSATISFIED
+        and getattr(verdict, "summary", "") == CONSTRAINT_ONLY_SHORTFALL
+    )
+
+
 #: How long a memoized verdict answers for its copy. The key carries the
 #: executable's own mtime, which does not move when the ENVIRONMENT around it
 #: does (a package installed into the venv that provides it), and the memo is
@@ -1687,9 +1711,7 @@ def _judge(
         == ToolInstallStatus.UNSATISFIED
     ):
         reasons.append(f"installed {package} does not satisfy {version_constraint!r}")
-        summary_parts.append(
-            "the installed package does not satisfy the version constraint"
-        )
+        summary_parts.append(CONSTRAINT_ONLY_SHORTFALL)
     if not reasons:
         reasons.append(_first_cause(output, values, requirement, package))
         summary_parts.append("the requirement does not resolve in its environment")

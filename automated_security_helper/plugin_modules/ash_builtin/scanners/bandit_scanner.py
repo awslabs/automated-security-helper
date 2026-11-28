@@ -49,6 +49,7 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.base.uv_tool_mixin import (
     _record_direct_route_version,
     _restore_uv_route,
+    guarded_values_read,
     is_uv_form,
     tool_name,
 )
@@ -1281,6 +1282,10 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         (uv is absent, or its install of the tool failed). A verified binary runs
         directly: ``use_uv_tool`` is turned off, which the final fallback never
         did before.
+
+        The plugin's values hook is read once and guarded (``guarded_values_read``):
+        with no usable values the check's lines cannot be redacted, so the copy is
+        not run and the reason names only the hook's failure.
         """
         if is_uv_form(command):
             # uv bare, by its path, or as uv.exe is the uv route (is_uv_form).
@@ -1316,8 +1321,25 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         # redacts the same lines (shown_uv_output), since the verify detail can
         # respell an environment-read tool_version in uv's own words, which the
         # plain value match does not see. The reason reaches the reports through
-        # dependency_unavailable_reason.
-        values = self._values_to_redact()
+        # dependency_unavailable_reason. The hook is read once and guarded: with no
+        # usable values nothing can redact those lines, so the copy is not run.
+        read = guarded_values_read(self)
+        if read.values is None:
+            failure = read.failure()
+            self._plugin_log(
+                f"The {self.command} on PATH was not verified: the plugin's values "
+                f"hook {failure}, so its check could not be redacted. It does not "
+                "run unverified.",
+                level=logging.WARNING,
+            )
+            self.dependency_unavailable_reason = (
+                f"{self.command} cannot be used: the plugin's values hook {failure}, "
+                "so the copy on PATH could not be verified and its records could not "
+                "be redacted. Fix the plugin's values hook."
+            )
+            self.dependencies_satisfied = False
+            return False
+        values = read.values
         checked = verify_pre_installed_tool(
             executable,
             package,

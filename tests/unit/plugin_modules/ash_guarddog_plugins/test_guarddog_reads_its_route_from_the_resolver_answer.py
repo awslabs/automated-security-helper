@@ -36,15 +36,18 @@ uv-absent's, and let the mixin's own check, version probe and gates read it.
 
 A copy that falls short while the check says no is the only copy the scan could
 run, so GuardDog is MISSING, and the reason says how to provide one: the verifier's
-one-line summary of the shortfall and a remedy that fits the host (a uv was found,
-so the check failed rather than uv being absent, or no uv is installed), never the
-copy's path or the verifier's detail. Every line the check writes goes through the
-uv-aware redaction the other scanners' checks of a copy on PATH use, with the
-plugin's values read once and guarded. That matters for a ``tool_version`` read from
-the environment: the verifier quotes the requirement in the spelling the options
-validator stored, which is not the spelling the environment held and which the
-plain match the scan phase applies to the reason does not see. A values hook that
-raises leaves the copy unrun, with a reason that names only the failure.
+one-line summary of the shortfall and a remedy that fits the host and the shortfall
+(a uv was found, so the check failed rather than uv being absent, or no uv is
+installed; a constraint the copy meets is offered only when the version constraint
+is all it fails), never the copy's path or the verifier's detail. Every line the
+check writes goes through the uv-aware redaction that semgrep's, bandit's, checkov's
+and cfn-lint's checks of a copy on PATH use, with the plugin's values read once and
+guarded. That matters for a ``tool_version`` read from the environment: the verifier
+quotes the requirement in the spelling the options validator stored, which is not
+the spelling the environment held and which the plain match the scan phase applies
+to the reason does not see. A values hook that raises leaves the copy unrun, with a
+reason that names only the failure, and the reason for a GuardDog not installed at
+all then names only that failure too, keeping the offline guidance.
 """
 
 from __future__ import annotations

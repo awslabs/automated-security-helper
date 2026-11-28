@@ -135,6 +135,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginConfigBase,
 )
 from automated_security_helper.base.uv_tool_mixin import (
+    _UV_ABSENT,
     _record_direct_route_version,
     _restore_uv_route,
     _uv_available,
@@ -169,6 +170,7 @@ from automated_security_helper.utils.pre_installed_tool import (
     ToolInstallStatus,
     build_requirement,
     find_tool_interpreter,
+    only_the_constraint_falls_short,
     verify_pre_installed_tool,
 )
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -1198,11 +1200,15 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         if not self._validate_uv_tool_availability():
             # The runner's availability check is False for a probe that failed as
             # well as for a uv that is absent, and the resolver's own probe of
-            # GuardDog through uv can succeed in the same moment, so the route is
-            # read from its answer. It probes under this scanner's own spec and
-            # offline mode, as every uv call of the mixin does: without them it
-            # probed the bare tool name, an environment the scan never uses, and
-            # online for a scanner that is offline.
+            # GuardDog through uv can succeed in the same moment. Every run of the
+            # scan passes that check, which refuses a uv run while it says no, so
+            # the answer names the copy to check, not the route:
+            # _accept_binary_on_path checks the binary the answer names, or for a
+            # uv answer the guarddog the PATH lookup finds, and takes the direct
+            # route only for a copy that may run. It probes under this scanner's
+            # own spec and offline mode, as every uv call of the mixin does:
+            # without them it probed the bare tool name, an environment the scan
+            # never uses, and online for a scanner that is offline.
             resolved = get_uv_tool_command(
                 _COMMAND,
                 from_spec=self._uv_probe_from_spec(),
@@ -1210,8 +1216,11 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             )
             if resolved is not None:
                 return self._accept_binary_on_path(resolved)
+            # The check also fails with uv installed (a probe that failed, the
+            # window a timed-out probe opens), so the line names the check.
             self._plugin_log(
-                "UV tool validation failed - UV is not available but required",
+                "uv's availability check did not pass, and no guarddog was found to "
+                "run through uv or on PATH",
                 level=logging.ERROR,
             )
             return False
@@ -1376,6 +1385,7 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 return True
             remedy = self._unusable_copy_remedy(
                 build_requirement(_COMMAND, extras, constraint),
+                checked,
                 uv_found=uv is not None,
             )
             # The log gets the copy's path and the verdict's detail. The reason gets
@@ -1409,24 +1419,34 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         self.dependencies_satisfied = True
         return True
 
-    def _unusable_copy_remedy(self, requirement: str, *, uv_found: bool) -> str:
+    def _unusable_copy_remedy(
+        self, requirement: str, checked: Any, *, uv_found: bool
+    ) -> str:
         """How to provide a guarddog the scan can run, for the copy on PATH that falls
         short while uv's availability check does not pass.
 
-        With a uv found, the check failed rather than uv being absent: a copy falls
-        short of a constraint only through uv's dry run. Running the scan again once
-        the check passes lets uv run the scan's own requirement. Without a uv, a copy
-        falls short only through a ``--version`` probe that exits non-zero, and
-        installing uv lets ASH install and run guarddog itself.
+        With a uv found, the check failed rather than uv being absent, and running
+        the scan again once the check passes lets uv run the scan's own requirement.
+        A ``tool_version`` this copy meets is offered only when the version
+        constraint is all the copy fails (``only_the_constraint_falls_short``): the
+        verifier reports a ``--version`` probe that exits non-zero before it asks
+        uv, uv found or not, and no constraint fixes that copy. Without a uv the
+        verifier has no dry run, so a copy falls short only through such a probe,
+        and installing uv lets ASH install and run guarddog itself.
         """
         if uv_found:
+            constraint = (
+                "set scanners.guarddog.options.tool_version to a constraint this "
+                "copy meets, "
+                if only_the_constraint_falls_short(checked)
+                else ""
+            )
             return (
                 "It is the only copy ASH can run while uv's availability check does "
                 "not pass, so guarddog is missing. Install a copy that satisfies "
-                f"{requirement!r} (`{self._install_command(requirement)}`), set "
-                "scanners.guarddog.options.tool_version to a constraint this copy "
-                "meets, or run the scan again once uv's availability check passes, "
-                "so that uv runs guarddog."
+                f"{requirement!r} (`{self._install_command(requirement)}`), "
+                f"{constraint}or run the scan again once uv's availability check "
+                "passes, so that uv runs guarddog."
             )
         return (
             "It is the only copy ASH can run without uv, so guarddog is missing. "
@@ -1482,17 +1502,27 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         offline mode, where ASH does not install anything, and ``--mode nix``,
         which is offline and whose flake does not carry GuardDog (it is not in
         nixpkgs). Both need the same remedy: install it before going offline.
+
+        The install command holds the scan's requirement, so the reason goes
+        through the uv layer with the plugin's values. With no usable values it
+        cannot be redacted and is not shown: the reason names the hook's failure
+        instead, and offline it keeps the guidance, which holds no value.
         """
         requirement = f"guarddog{self._get_tool_version_constraint() or ''}"
         install = self._install_command(requirement)
-        if self._is_offline_mode():
-            reason = (
+        offline = self._is_offline_mode()
+
+        def _offline(install_part: str) -> str:
+            return (
                 "guarddog is not installed, and ASH does not install tools in "
                 "offline mode. It is not in nixpkgs, so `ash scan --mode nix` does "
-                f"not provide it either. Install it before going offline (`{install}`), "
+                f"not provide it either. Install it before going offline{install_part}, "
                 "use the ASH container image, which includes it, or leave the "
                 "guarddog scanner disabled."
             )
+
+        if offline:
+            reason = _offline(f" (`{install}`)")
         else:
             reason = (
                 f"guarddog could not be installed or found on PATH. Install it with "
@@ -1500,11 +1530,17 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
             )
         read = guarded_values_read(self)
         if read.values is None:
-            reason = (
-                "guarddog could not be installed or found on PATH, and the plugin's "
+            withheld = (
                 f"values hook {read.failure()}, so the install command, which holds "
                 "the scan's requirement, is not shown. Fix the plugin's values hook."
             )
+            if offline:
+                reason = f"{_offline('')} The plugin's {withheld}"
+            else:
+                reason = (
+                    "guarddog could not be installed or found on PATH, and the "
+                    f"plugin's {withheld}"
+                )
         else:
             reason = shown_uv_output(
                 reason,
@@ -1747,9 +1783,16 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                 # no and starts nothing in its place (plugin_base); the bootstrap is
                 # such a run. Falling through to the copy on PATH ran a copy no check
                 # had accepted, under a route and a version record that named uv.
+                why = _uv_unavailable(runner)
+                if why == _UV_ABSENT and failure:
+                    # A probe that failed says nothing about whether uv is
+                    # installed, so the words name the check that did not pass, as
+                    # the dependency check's own lines do. A refusal the runner
+                    # recorded keeps its own sentence.
+                    why = f"uv's availability check did not pass ({failure})"
                 return None, (
                     "options.max_hits runs GuardDog's CLI through uv on this route, "
-                    f"and uv cannot run it now: {_uv_unavailable(runner, failure)}; "
+                    f"and uv cannot run it now: {why}; "
                     "the guarddog on PATH is not run in its place"
                 )
             command = [runner.uv_executable, "tool", "run"]
