@@ -413,6 +413,27 @@ function* valuesAtFields(block, path, instance) {
   }
 }
 
+// The fields whose value is a list of strings: of text, of names, or of either.
+const LISTS_OF_TEXT = ['stringList', 'enumList', 'stringOrList'];
+
+// The strings that a value at `field` holds where ASH reads text, as { pointer, text, name }:
+// the value itself at a string field and at a field that takes one string or a list of them,
+// and each item of a list of strings. `pointer` is that of the value, and `name` is what a
+// message calls the string.
+function* stringPlaces(field, pointer, value) {
+  if (typeof value === 'string') {
+    if (field.kind === 'string' || field.kind === 'stringOrList') {
+      yield { pointer, text: value, name: field.key };
+    }
+  } else if (Array.isArray(value) && LISTS_OF_TEXT.includes(field.kind)) {
+    for (const [index, item] of value.entries()) {
+      if (typeof item === 'string') {
+        yield { pointer: `${pointer}/${index}`, text: item, name: `${field.key}[${index}]` };
+      }
+    }
+  }
+}
+
 // ASH folds the spellings of each plugin section onto the declared ones before it reads a
 // file, and merges a variant into the declared section key by key, so what ASH reads, and
 // refuses, is the folded value. Returns { instance, folded, written }: the value as ASH reads
@@ -475,7 +496,8 @@ function foldPluginSections(block, path, instance) {
  *
  * `options.failOnUnknownKeys` is true when the file asks to fail on unknown keys.
  * `options.unquotedDates` lists the pointers, relative to `instance`, of the values the file
- * wrote as unquoted dates: the reader that knows them passes each date's text in `instance`.
+ * wrote as unquoted dates, a string or an item of a list of strings: the reader that knows
+ * them passes each date's text in `instance`.
  */
 export function judge(block, path, instance, failures, options = {}) {
   const rows = [];
@@ -490,9 +512,10 @@ export function judge(block, path, instance, failures, options = {}) {
   // The rows that belong to one field apply to every value of the instance that sits at a
   // field, the instance itself or a value deep in a whole document.
   const dates = new Set(Array.isArray(options.unquotedDates) ? options.unquotedDates : []);
+  const failedAt = (target) => seen.some((failure) => failure.pointer === target);
   for (const { field, pointer, value } of valuesAtFields(block, path, read.instance)) {
     const at = read.written(pointer);
-    const failed = seen.some((failure) => failure.pointer === pointer);
+    const failed = failedAt(pointer);
 
     // The schema admits a reference where ASH's loader refuses one. It also admits text that
     // only looks like a reference to it: its pattern lets a carriage return through a default,
@@ -529,16 +552,21 @@ export function judge(block, path, instance, failures, options = {}) {
       }
     }
 
-    // A date written without quotes, which ASH reads as a date and refuses at a string.
-    if (field.kind === 'string' && typeof value === 'string' && !failed && dates.has(at)) {
-      rows.push(
-        finding(
-          'unquoted-date',
-          'error',
-          at,
-          `${field.key} must be quoted: an unquoted ${value} is read as a date, not text, so put it in quotes. ${REFUSES}`,
-        ),
-      );
+    // A date written without quotes, which ASH reads as a date and refuses wherever it reads
+    // text: at a string field, at a field that takes a string or a list of them, and in each
+    // item of a list of strings. A value the schema already refuses is left to the schema.
+    for (const place of stringPlaces(field, pointer, value)) {
+      const written = read.written(place.pointer);
+      if (!failed && !failedAt(place.pointer) && dates.has(written)) {
+        rows.push(
+          finding(
+            'unquoted-date',
+            'error',
+            written,
+            `${place.name} must be quoted: an unquoted ${place.text} is read as a date, not text, so put it in quotes. ${REFUSES}`,
+          ),
+        );
+      }
     }
   }
 
