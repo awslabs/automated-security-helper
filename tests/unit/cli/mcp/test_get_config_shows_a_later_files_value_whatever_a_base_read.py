@@ -8,7 +8,8 @@ the same place itself. The merged configuration holds the later file's value
 there, whatever the variable holds, so the answer shows that value as the file
 wrote it. The base's reference no longer describes the place, and the answer must
 not change with the variable's value: a later literal that contains the value,
-equals it, or anchors to the same path as it is shown as itself. The cells run
+equals it, or anchors to the same path as it is shown as itself, and so is a later
+literal under another spelling of an undeclared plugin section. The cells run
 both routes to an operator's chain (the call names the file, or ``ASH_CONFIG``
 does) and keep a control that never held the variable's value.
 """
@@ -168,5 +169,42 @@ def test_a_later_files_relative_path_is_shown_as_its_anchored_text_whatever_the_
     shown = result["scanners"]["bandit"]["options"]["config_file"]
     expected = os.path.join(os.path.realpath(tmp_path), "shared-4a7d", "bandit.yaml")
     assert shown == expected, shown
+    if hidden is not None:
+        assert hidden not in json.dumps(result, default=str)
+
+
+@_ROUTES
+@pytest.mark.parametrize(
+    "held, hidden",
+    [
+        pytest.param("prod", None, id="inside"),
+        pytest.param("team-prod", None, id="equal"),
+        pytest.param("other-4e1a", "other-4e1a", id="control"),
+    ],
+)
+def test_a_later_files_respelled_plugin_section_is_shown_as_written_whatever_the_base_read(
+    tmp_path, monkeypatch, answer, held, hidden
+):
+    """The base reads a scanner's ``ruleset`` option from the variable under
+    ``my-scanner``, and the file extending it writes ``team-prod`` under
+    ``MyScanner``, another spelling of the same undeclared section, which the
+    merge joins under the later file's. The variable's value is inside that text
+    (``inside``), is that text (``equal``) or is another (``control``): the answer
+    is the later file's text under its own spelling each time, and in the control
+    row it holds no trace of the value."""
+    monkeypatch.setenv("ASH_TEST_RULE", held)
+
+    result = answer(
+        tmp_path,
+        monkeypatch,
+        "scanners:\n  my-scanner:\n    options:\n      ruleset: ${ASH_TEST_RULE}\n",
+        "extends: base.yaml\n"
+        "scanners:\n"
+        "  MyScanner:\n"
+        "    options:\n"
+        "      ruleset: team-prod\n",
+    )
+
+    assert result["scanners"]["MyScanner"]["options"]["ruleset"] == "team-prod", result
     if hidden is not None:
         assert hidden not in json.dumps(result, default=str)

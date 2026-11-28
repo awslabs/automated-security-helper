@@ -4539,19 +4539,54 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     )
 
 
-def _writes_over(overlay: Any, path: Tuple[Any, ...]) -> bool:
+def _writes_over(
+    overlay: Any, path: Tuple[Any, ...], model: Optional[type[BaseModel]] = AshConfig
+) -> bool:
     """Whether merging ``overlay``, a mapping, over a document that holds a value
     at ``path`` replaces that value (deep_merge): ``overlay`` holds something at
     ``path``, or a list or a scalar at a place on the way, or a mapping where
-    ``path`` steps into a list. A key is matched as the merge matches it
-    (_resolve_dict_key)."""
+    ``path`` steps into a list.
+
+    A key is matched as the merge matches it: by ``_resolve_dict_key`` and,
+    directly under a plugin segment (``model`` walks beside the document, from the
+    whole configuration down), an undeclared section also by the plugin names the
+    merge joins it by (``plugin_key_lookup_names``: ``my-scanner`` and
+    ``MyScanner`` are one section, kept under the later document's spelling).
+    Never at any other depth, and never for a declared section, which the load
+    folds before the merge. A place the merge kept must stay unmarked, or its
+    reference would lose its rewrite and the record would hold the value.
+    """
     node = overlay
     for segment in path:
         if not isinstance(node, dict) or not isinstance(segment, str):
             return True
+        settings = _settings_of(model) if model is not None else {}
         key = _resolve_dict_key(node, segment)
+        if (
+            key not in node
+            and model is not None
+            and issubclass(model, _PluginConfigSegment)
+            and segment not in settings
+        ):
+            # deep_merge joins two spellings of a section the segment does not
+            # declare (my-scanner and MyScanner) under the later document's
+            # spelling: the first such key of the later document whose plugin
+            # names overlap the reference's.
+            names = plugin_key_lookup_names(segment)
+            key = next(
+                (
+                    other
+                    for other in node
+                    if isinstance(other, str)
+                    and other not in settings
+                    and plugin_key_lookup_names(other) & names
+                ),
+                key,
+            )
         if key not in node:
             return False
+        setting = settings.get(key)
+        model = setting.model if setting is not None else None
         node = node[key]
     return True
 

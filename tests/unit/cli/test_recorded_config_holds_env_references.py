@@ -1083,6 +1083,57 @@ def test_a_bases_reference_under_a_later_files_literal_is_not_recorded(
 @pytest.mark.parametrize(
     "held",
     [
+        pytest.param("prod", id="inside"),
+        pytest.param("team-prod", id="equal"),
+        pytest.param("other-4e1a", id="control"),
+    ],
+)
+@pytest.mark.parametrize(
+    "section, base_key, later_key, option",
+    [
+        pytest.param("scanners", "my-scanner", "MyScanner", "ruleset", id="scanner"),
+        pytest.param("reporters", "s3", "S3Reporter", "bucket_name", id="reporter"),
+    ],
+)
+def test_a_bases_reference_under_a_respelled_plugin_section_is_not_recorded(
+    tmp_path, probe_env, section, base_key, later_key, option, held
+):
+    """A base reads a plugin section's option from a variable, and the file
+    extending it writes ``team-prod`` under another spelling of the same
+    undeclared section (``my-scanner`` and ``MyScanner``, ``s3`` and
+    ``S3Reporter``), which the merge joins under the later file's spelling. The
+    scan runs with the later file's text, so the record and the payload hold it
+    as written and no reference of the base, whatever the variable holds
+    (``inside``: its value is part of the later text; ``equal``: it is that text;
+    ``control``: it is neither)."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_RULE", held)
+    _operator_config(
+        tmp_path,
+        f"{section}:\n  {base_key}:\n    options:\n"
+        f"      {option}: ${{ASH_PROBE_RULE}}\n",
+        "base.yaml",
+    )
+    path = _operator_config(
+        tmp_path,
+        f"extends: base.yaml\n{section}:\n  {later_key}:\n    options:\n"
+        f"      {option}: team-prod\n",
+    )
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    recorded = _recorded(config)
+    payload = AshAggregatedResults(ash_config=config).to_simple_dict()["ash_config"]
+    for dump in (recorded, payload):
+        assert dump[section][later_key]["options"][option] == "team-prod", dump
+        assert "${ASH_PROBE_RULE}" not in json.dumps(dump, default=str), dump
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
         pytest.param("prod-7c1e", id="inside"),
         pytest.param("other-7c1e", id="control"),
     ],
