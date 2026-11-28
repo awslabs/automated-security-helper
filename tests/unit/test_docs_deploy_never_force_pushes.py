@@ -935,6 +935,13 @@ FORCE_CASES = {
     "with its output redirected": (
         "git push --force origin gh-pages > push.log 2>&1 && echo done"
     ),
+    "with a redirection before its options": "git push 2>&1 --force origin gh-pages",
+    "to a remote with no branch, after a continued line": (
+        "git push \\\n  --force origin"
+    ),
+    "after an apostrophe that nothing closes": (
+        "echo don't\ngit push --force origin gh-pages"
+    ),
     "to a destination the text does not name": (
         'git push --force origin "HEAD:${TARGET}"'
     ),
