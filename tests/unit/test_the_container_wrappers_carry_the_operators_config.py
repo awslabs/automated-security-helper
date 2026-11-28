@@ -1486,6 +1486,7 @@ def test_another_subcommand_keeps_its_config_words_as_written(fake_runner, tmp_p
             "--no-build",
             "--output-dir",
             str(tmp_path / "out"),
+            "results",
             "report",
             "--config",
             str(config),
@@ -1512,7 +1513,7 @@ def test_another_subcommand_still_names_a_dropped_ash_config(fake_runner, tmp_pa
     rc, output_text, calls = _run_ash(
         fake_runner,
         source,
-        ["--no-build", "--output-dir", str(tmp_path / "out"), "report"],
+        ["--no-build", "--output-dir", str(tmp_path / "out"), "results", "report"],
         {"ASH_CONFIG": str(env_config)},
     )
 
@@ -1540,6 +1541,7 @@ def test_an_explicit_scan_subcommand_gets_the_same_handling(fake_runner, tmp_pat
             "--output-dir",
             str(tmp_path / "out"),
             "scan",
+            "fs",
             "--config",
             str(config),
         ],

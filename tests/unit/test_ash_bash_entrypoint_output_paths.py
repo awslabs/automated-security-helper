@@ -269,15 +269,22 @@ def test_a_default_output_that_resolves_to_the_source_names_the_option(
 
 
 def test_the_wrappers_status_lines_and_the_build_output_go_to_stderr(runner, tmp_path):
-    """`./ash report --format json > file` has to hold the report alone. At the base
-    the wrapper's status lines, and the image ID `build -q` prints, stood on stdout
-    ahead of the container's output."""
+    """`./ash results report --format json > file` has to hold the report alone. At
+    the base the wrapper's status lines, and the image ID `build -q` prints, stood on
+    stdout ahead of the container's output."""
     source = tmp_path / "src"
     source.mkdir()
 
     result, calls = _run(
         runner,
-        ["--source-dir", str(source), "--output-dir", str(tmp_path / "out"), "report"],
+        [
+            "--source-dir",
+            str(source),
+            "--output-dir",
+            str(tmp_path / "out"),
+            "results",
+            "report",
+        ],
         cwd=tmp_path,
         env={"BUILD_STDOUT_LINE": "FAKE-IMAGE-ID-ON-STDOUT"},
     )

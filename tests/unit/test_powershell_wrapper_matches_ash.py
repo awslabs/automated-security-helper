@@ -1812,7 +1812,7 @@ def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character
     """The ASH_CONFIG warning shows the value as a refusal shows one.
 
     A scan carries the file ASH_CONFIG names into the container, and refuses a file
-    that is not there. For another subcommand (``report`` here) both wrappers warn
+    that is not there. For another subcommand (``results report`` here) both wrappers warn
     that they do not pass ASH_CONFIG into the container, naming it. Printed as it is,
     an ESC in it would change the terminal and U+202E would reverse the text after
     it, so ./ash writes it as bash's %q, Invoke-ASH with \\xHH and \\uXXXX; each
@@ -1832,6 +1832,7 @@ def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character
             str(tmp_path / "src"),
             "--output-dir",
             str(tmp_path / "out"),
+            "results",
             "report",
         ],
         cwd=tmp_path,
@@ -1851,7 +1852,7 @@ def test_the_wrappers_show_ash_config_in_their_warning_alike(tmp_path, character
     (tmp_path / "invoke-ash").mkdir()
     result, _ = _run_script(
         tmp_path / "invoke-ash",
-        _wrapped(f"{_RUN} -AshArgs report"),
+        _wrapped(f"{_RUN} -AshArgs 'results report'"),
         ASH_CONFIG=value,
     )
 

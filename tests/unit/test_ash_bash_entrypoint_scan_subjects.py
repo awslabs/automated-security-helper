@@ -815,7 +815,7 @@ def test_show_completion_prints_a_function_and_exits_without_a_runner(tmp_path):
 
 @pytest.mark.integration
 def test_completion_offers_no_scan_option_after_another_subcommand(tmp_path):
-    assert _completions(tmp_path, ["ash", "report", "--shard-"], 2) == []
+    assert _completions(tmp_path, ["ash", "results", "report", "--shard-"], 3) == []
 
 
 @pytest.mark.integration
