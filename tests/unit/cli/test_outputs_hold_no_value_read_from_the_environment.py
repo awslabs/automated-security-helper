@@ -189,6 +189,9 @@ def run(tmp_path_factory):
     values = {name: "ashv" + secrets.token_hex(12) for name in VARIABLES}
     env = dict(os.environ)
     env.pop("ASH_CONFIG", None)
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    env.pop("ASH_SCANNERS", None)
     env.update(
         {VARIABLES[name]: value for name, value in values.items()},
         COLUMNS="300",

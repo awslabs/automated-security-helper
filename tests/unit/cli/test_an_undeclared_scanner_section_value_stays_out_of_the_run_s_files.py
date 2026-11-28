@@ -87,10 +87,13 @@ def test_the_value_read_at_an_undeclared_section_is_in_none_of_the_runs_files(
     # (ChildToolStarts sets them, offline, in the environment it gives). The
     # stand-ins go on last, so nothing ahead of them on PATH.
     started = ChildToolStarts(tmp_path)
+    # A caller's ASH_SCANNERS reaches the scan through the deprecated --scanners
+    # option, and --add-scanners does not override it.
+    inherited = {k: v for k, v in os.environ.items() if k != "ASH_SCANNERS"}
     env = checkout_env(
         started.child_env(
             {
-                **os.environ,
+                **inherited,
                 "HOME": str(home),
                 VARIABLE: CANARY,
             }
