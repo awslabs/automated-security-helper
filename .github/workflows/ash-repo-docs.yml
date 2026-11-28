@@ -48,7 +48,7 @@ jobs:
       contents: write
     # A push to main publishes the version main; a release tag vX.Y.Z publishes X.Y.Z
     # (scripts/docs_versions.py decides, and publishes nothing for any other tag, such
-    # as the retired floating v3). A tag push never reaches this job: the push trigger has no
+    # as the frozen v3 major tag). A tag push never reaches this job: the push trigger has no
     # tags filter, and this condition admits a push only on main, so a tag trigger
     # added later would still start no deploy. A release is published by running
     # this workflow with workflow_dispatch on the tag, or by a workflow_call that
