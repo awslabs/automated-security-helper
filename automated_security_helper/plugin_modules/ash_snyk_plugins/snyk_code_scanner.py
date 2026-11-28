@@ -63,6 +63,7 @@ from automated_security_helper.utils.scanned_tree import (
     relative_display,
 )
 from automated_security_helper.utils.taxonomy_ids import cwes_of_tags
+from automated_security_helper.config.tool_config_trust import empty_tool_directory
 from automated_security_helper.utils.subprocess_utils import (
     find_executable,
     in_tree_refusal,
@@ -993,14 +994,22 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             # Undone in the finally: the copy snyk tests for the source target, and
             # the sandbox's read grant for it.
             cleanup = ExitStack()
-            target_results_dir = self.results_dir.joinpath(target_type)
+            # Absolute, because snyk runs from a directory of its own (the
+            # _run_subprocess call below), where a relative path names something
+            # else.
+            target_results_dir = Path(
+                os.path.abspath(self.results_dir.joinpath(target_type))
+            )
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             target_results_dir.mkdir(exist_ok=True, parents=True)
             # A report left by an earlier run must not be read as this run's: snyk
             # writes none when it fails, and the read below takes whatever is here.
             results_file.unlink(missing_ok=True)
 
-            tested = target
+            # Absolute for the same reason: the converted target, tested in
+            # place, and the copy that stands in for the source target below,
+            # whose path mkdtemp gives relative on Python 3.11 when TMPDIR is.
+            tested = Path(os.path.abspath(target))
             if target_type == TargetType.SOURCE:
                 staged = self._stage_source(target, global_ignore_paths or [], cleanup)
                 if staged is None:
@@ -1018,7 +1027,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     excluding = tree_exclusion_files(staged)
                     if excluding:
                         raise ScannerError(self._exclusion_refusal(excluding, staged))
-                tested = staged
+                tested = Path(os.path.abspath(staged))
 
             final_args = self._resolve_arguments(
                 target=tested, results_file=results_file
@@ -1061,10 +1070,18 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
             # No environment modifications are currently needed for Snyk Code.
             effective_timeout = self._effective_scan_timeout()
+            # The CLI reads a snyk.<ext> configuration file from its working
+            # directory, so it starts in a new, empty, private directory of its own
+            # (utils/tool_config_dir.py). That directory is outside the scanned tree
+            # unless no private directory is outside it, then inside it with a
+            # warning, and when none is private nothing starts: this scan fails. The
+            # target and the SARIF output path in final_args are absolute (made so
+            # above), so they name the same files from there.
             response = self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
                 timeout=effective_timeout,
+                cwd=empty_tool_directory("snyk-code-cwd", context=self.context),
             )
             # The run is over: its end time is recorded here, before the invocation
             # below reads it, so the first target's record carries this run's end
