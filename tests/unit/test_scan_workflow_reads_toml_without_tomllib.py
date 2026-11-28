@@ -125,7 +125,8 @@ PYPROJECT_NAMES = ("pyproject.toml", "packages/api/pyproject.toml")
 CAPITAL_NAMES = ("ASH.TOML", "sub/PyProject.TOML")
 
 #: Names that are not TOML. `toml/ash.yaml` is a control for a match on the word.
-OTHER_NAMES = (".ash.yaml", "ash.yml", ".ash/ash.json", "toml/ash.yaml")
+#: `.config/ash.json` is the one JSON name, and its directory starts with a dot.
+OTHER_NAMES = (".ash.yaml", "ash.yml", ".config/ash.json", "toml/ash.yaml")
 
 ALL_NAMES = TOML_NAMES + PYPROJECT_NAMES + CAPITAL_NAMES + OTHER_NAMES
 
