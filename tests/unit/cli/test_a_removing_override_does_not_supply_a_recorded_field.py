@@ -139,7 +139,7 @@ def test_the_record_lists_the_field_as_unreadable(isolated):
 
 
 def test_the_key_report_reads_from_a_removal_names_no_field(isolated):
-    """Control for report.py's key read, which W1 leaves as it is: the key of a
+    """Control for report.py's key read, which takes the key as written: the key of a
     ``-=`` keeps its trailing ``-``, which names no field, so the override does not
     supply the field by its key, and the operator's configuration, which does not
     write it, does not supply it either."""
