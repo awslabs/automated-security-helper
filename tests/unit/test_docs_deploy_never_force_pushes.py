@@ -57,10 +57,20 @@ What it does not cover
 ----------------------
 * A publisher reached through a script, a Makefile target or a third-party action. A
   job that calls one is still caught by rule 3 when its token can write.
+* A ``uses: ./.github/actions/...`` step. Rules 1 and 2 read the action files directly,
+  but rule 3 does not follow the step, so a job with a read token that calls an action
+  which pushes gh-pages with a credential of its own breaks no rule.
 * A reusable workflow named by repository and ref instead of by local path.
+* A local action outside ``.github/actions/``.
+* Triggers other than ``push``, such as ``create`` and ``workflow_run``.
+* A job condition on an event field the probe context leaves out, such as
+  ``github.event.created``. It reads as null, so the job is judged not to run.
 * A deletion of gh-pages (``git push --delete``), which no rule here reads.
 * Tag names. Triggers are evaluated for a fixed set of names and for names built from
   the workflow's own tag filters, so an unusual filter may need a name added.
+* A script handed to ``eval``, ``xargs``, ``ssh`` or a pipe into a shell, a command
+  built at run time, and a command substitution inside quotes.
+* A shell string or here-document nested more than ``MAX_SHELL_DEPTH`` deep.
 * Anything outside the repository, such as a ruleset on gh-pages.
 """
 
