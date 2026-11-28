@@ -47,7 +47,16 @@ Known limitations
 * The probes read text: each instruction with its continuation lines joined and its
   comment lines dropped. A form reached through an ``ARG`` is not seen; ``FROM
   ${BASE_IMAGE}`` hides the platform and the operating system of the base image.
+* A Windows base image is told by its name: ``--platform=windows``, a reference that
+  starts with ``mcr.microsoft.com/windows`` or ``mcr.microsoft.com/dotnet/framework/``,
+  or a tag that holds ``nanoserver`` or ``servercore``. A mirror that keeps the
+  repository path and gives the image a bare release tag, such as
+  ``registry.example.com/windows/servercore:ltsc2022``, is not seen, and neither is a
+  reference by digest alone.
 * ``ADD`` tells an archive by its content and this check tells it by its name.
+* An ``ADD`` written as a JSON array of strings is read as one, and its last string is
+  the destination. Text that does not decode as an array of strings is read as the
+  shell form, a list of words.
 * A quoted string is one word, so a form inside quotes is not found, and a quote left
   open makes the rest of the instruction one word.
 * ``ONBUILD`` is not unwrapped, and a ``# escape=`` directive is not honored: a line
@@ -66,6 +75,7 @@ Known limitations
 from __future__ import annotations
 
 import codecs
+import json
 import re
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -207,10 +217,31 @@ def _is_remote(source: str) -> bool:
     return "://" in source or source.startswith("git@")
 
 
+# ADD and COPY may be written as a JSON array of strings. BuildKit reads the text after
+# the flags that way when it decodes as one, and as a list of words when it does not
+# decode as JSON. An array that holds anything but strings is an error there, and is
+# read as a list of words here. Read at v0.35.1 in parser.go (dispatch table, lines 209
+# and 212) and line_parsers.go (parseJSON, line 278; parseMaybeJSONToList, line 333),
+# both under https://github.com/moby/buildkit/tree/v0.35.1/frontend/dockerfile/parser
+def _exec_form(item: Instruction) -> list[str] | None:
+    """The strings of an instruction written as a JSON array, else None."""
+    if not item.words or not item.words[0].startswith("["):
+        return None
+    try:
+        strings = json.loads(" ".join(item.words))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(strings, list) and all(isinstance(s, str) for s in strings):
+        return strings
+    return None
+
+
 def _local_sources(item: Instruction) -> list[str]:
     """The local sources of an ADD or COPY: no URL, and not the destination."""
-    names = [word.strip("\"'") for word in item.words[:-1]]
-    return [name for name in names if not _is_remote(name)]
+    listed = _exec_form(item)
+    if listed is None:
+        listed = [word.strip("\"'") for word in item.words]
+    return [name for name in listed[:-1] if not _is_remote(name)]
 
 
 def _adds_a_local_xz_archive(item: Instruction) -> bool:
@@ -238,7 +269,24 @@ def _reads_a_platform_argument_in_from_or_global_arg(item: Instruction) -> bool:
     return where_it_is_empty and bool(_PLATFORM_ARGUMENT.search(item.text))
 
 
-_WINDOWS_IMAGES = "mcr.microsoft.com/windows"
+# Images that only run on Windows: those under the registry's windows path, and the
+# .NET Framework images. Nano Server and Server Core are the Windows Server container
+# bases, so a tag that holds either name is a Windows image on any registry
+# ("windowsservercore" holds the second). A repository name that holds one proves
+# nothing, so only the tag counts.
+_WINDOWS_IMAGES = ("mcr.microsoft.com/windows", "mcr.microsoft.com/dotnet/framework/")
+_WINDOWS_NAMES = ("nanoserver", "servercore")
+
+
+def _tag(image: str) -> str:
+    """The tag of an image reference, or an empty string when it names none.
+
+    A digest after ``@`` is dropped first, and a colon that a slash follows is a
+    registry port, not a tag.
+    """
+    reference = image.partition("@")[0]
+    tag = reference.rpartition(":")[2] if ":" in reference else ""
+    return "" if "/" in tag else tag
 
 
 def _builds_a_windows_container(item: Instruction) -> bool:
@@ -246,7 +294,16 @@ def _builds_a_windows_container(item: Instruction) -> bool:
         return False
     platform = item.flags.get("--platform", "").strip("\"'").lower()
     image = (item.words[0] if item.words else "").strip("\"'").lower()
-    return platform.startswith("windows") or image.startswith(_WINDOWS_IMAGES)
+    if platform.startswith("windows") or image.startswith(_WINDOWS_IMAGES):
+        return True
+    # Docker Hub's official images name their Windows variants this way: python
+    # 3.15-windowsservercore-ltsc2022 and golang 1.27-nanoserver-ltsc2022 are listed
+    # for windows-amd64 only. Read at docker-library/official-images commit
+    # 17883d23632b953bc523c6bed4c0b445f0f41a16, files library/python and library/golang:
+    # https://github.com/docker-library/official-images/blob/17883d23632b953bc523c6bed4c0b445f0f41a16/library/python#L84-L89
+    # https://github.com/docker-library/official-images/blob/17883d23632b953bc523c6bed4c0b445f0f41a16/library/golang#L54-L60
+    tag = _tag(image)
+    return any(name in tag for name in _WINDOWS_NAMES)
 
 
 # Each entry: the form, the probe that finds it, why it is refused and the pages it was
@@ -424,6 +481,9 @@ def _is_a_fork_page(url: str) -> bool:
     return url.startswith((f"{FIRST_FORK}/", f"{SECOND_FORK}/"))
 
 
+# A digest as a builder prints it: the algorithm, then 64 hex digits.
+_DIGEST = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
 # One planted case per form, as (where, text). ``top`` is before everything and
 # ``stage`` is inside the first stage; see plant(). The first line of the text is the
 # line the form has to be reported on.
@@ -452,9 +512,18 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
     "ADD of a local xz archive": [
         ("stage", "ADD vendor/tool.tar.xz /opt/"),
         ("stage", "ADD --chown=1:1 vendor/tool.txz /opt/"),
+        ("stage", 'ADD ["vendor/tool.tar.xz", "/opt/"]'),
+        ("stage", 'ADD [ "a.tar.xz", "/opt/" ]'),
+        ("stage", 'ADD --chown=1:1 ["vendor/tool.txz", "/opt/"]'),
+        ("stage", 'ADD ["a.txt", "b.tar.xz", "/opt/"]'),
+        ("stage", 'ADD ["my dir/tool.tar.xz", "/opt/"]'),
+        ("stage", 'ADD [ \\\n    "vendor/tool.tar.xz", \\\n    "/opt/" ]'),
     ],
     "ADD --chown of a local archive": [
         ("stage", "ADD --chown=1000:1000 vendor/tool.tar.gz /opt/"),
+        ("stage", 'ADD --chown=1:1 ["a.tar.gz", "/opt/"]'),
+        ("stage", 'ADD --chown=1:1 [ "a.tar.gz", "/opt/" ]'),
+        ("stage", 'ADD --chown=1:1 ["a.txt", "b.tgz", "/opt/"]'),
     ],
     "platform argument in FROM or a global ARG": [
         ("top", "ARG PLANTED_ARCH=${TARGETARCH}"),
@@ -463,6 +532,17 @@ POSITIVE: dict[str, list[tuple[str, str]]] = {
     "Windows container base": [
         ("stage", "FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS planted"),
         ("stage", "FROM --platform=windows/amd64 ${BASE_IMAGE} AS planted"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/framework/sdk:4.8"),
+        ("stage", "FROM mcr.microsoft.com/powershell:lts-nanoserver-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/runtime:8.0-nanoserver-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/sdk:8.0-windowsservercore-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/dotnet/sdk:8.0-servercore-ltsc2022"),
+        ("stage", "FROM mcr.microsoft.com/powershell:LTS-NanoServer-ltsc2022"),
+        ("stage", "FROM python:3.15-windowsservercore-ltsc2022"),
+        ("stage", "FROM docker.io/library/python:3.15-windowsservercore-ltsc2022"),
+        ("stage", "FROM golang:1.27-nanoserver-ltsc2022"),
+        ("stage", f"FROM python:3.15-windowsservercore-ltsc2022@{_DIGEST}"),
+        ("stage", "FROM localhost:5000/team/app:1.0-nanoserver-ltsc2022"),
     ],
 }
 
@@ -487,6 +567,25 @@ NEGATIVE = {
         "ADD https://example.com/a.tar.xz /opt/"
     ),
     "ADD of a gzip archive": "ADD a.tar.gz /opt/",
+    "ADD of a local file in the exec form": 'ADD ["app.py", "/opt/"]',
+    "ADD --chown of a local file in the exec form": (
+        'ADD --chown=1:1 ["app.py", "/opt/"]'
+    ),
+    "ADD of a URL to an xz archive in the exec form": (
+        'ADD ["https://example.com/a.tar.xz", "/opt/"]'
+    ),
+    "ADD --chown of a URL in the exec form": (
+        'ADD --chown=1:1 ["https://example.com/a.tar.gz", "/opt/"]'
+    ),
+    "an exec-form ADD whose destination is named like an xz archive": (
+        'ADD ["app.py", "/opt/app.tar.xz"]'
+    ),
+    "an exec-form ADD --chown whose destination is named like an archive": (
+        'ADD --chown=1:1 ["app.py", "/opt/app.tar.gz"]'
+    ),
+    "an array in single quotes, which is not JSON": "ADD ['a.tar.xz', '/opt/']",
+    "an array that is never closed": 'ADD ["a.tar.xz", "/opt/"',
+    "an array that holds a number": 'ADD ["a.tar.xz", 1]',
     "a here-document marker inside quotes": 'RUN echo "<<EOF"',
     "shell arithmetic with a space after <<": "RUN echo $((1 << 3))",
     "a here-string": 'RUN cat <<< "x"',
@@ -497,6 +596,25 @@ NEGATIVE = {
     "a global ARG with no platform argument": "ARG BASE=python:3.12\nFROM ${BASE}",
     "a Linux image from the registry that also holds Windows ones": (
         "FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/runtime:8.0 AS x"
+    ),
+    "a Linux tag of a dotnet image": (
+        "FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim AS x"
+    ),
+    "a Linux tag of an image that also has Windows tags": (
+        "FROM mcr.microsoft.com/powershell:lts-ubuntu-22.04 AS x"
+    ),
+    "a plain Linux tag on Docker Hub": "FROM python:3.15-slim AS x",
+    "an image whose repository name holds servercore, not its tag": (
+        "FROM registry.example.com/team/servercore-notes:1.0 AS x"
+    ),
+    "an image whose repository name holds nanoserver, not its tag": (
+        "FROM registry.example.com/team/nanoserver-docs:2.1 AS x"
+    ),
+    "a registry with a port and no tag, whose path holds servercore": (
+        "FROM localhost:5000/team/servercore-notes AS x"
+    ),
+    "a digest with no tag, on a repository whose name holds nanoserver": (
+        f"FROM registry.example.com/team/nanoserver-docs@{_DIGEST} AS x"
     ),
 }
 
@@ -628,6 +746,13 @@ class TestReadingAnInstruction:
 
     def test_a_syntax_line_after_other_lines_is_still_found(self):
         assert findings("FROM scratch\n# syntax=docker/dockerfile:1\n")
+
+    def test_text_that_is_not_a_json_array_is_read_as_the_shell_form(self):
+        """Brackets alone do not make the exec form. This is a list of words, and its
+        first word, ``[a.tar.xz``, is a file name that ends in the xz suffix."""
+        text = "ADD [a.tar.xz /opt/\n"
+
+        assert [f.form.name for f in findings(text)] == ["ADD of a local xz archive"]
 
     def test_a_byte_order_mark_does_not_hide_a_directive(self, tmp_path):
         copy = tmp_path / "Dockerfile"
