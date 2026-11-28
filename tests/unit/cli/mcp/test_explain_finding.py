@@ -118,18 +118,6 @@ class TestSeverityRationale:
         )
 
 
-def _descriptions_of(node, name):
-    """The description of every tool named *name* anywhere in *node*."""
-    if isinstance(node, dict):
-        if node.get("name") == name and isinstance(node.get("description"), str):
-            yield node["description"]
-        for value in node.values():
-            yield from _descriptions_of(value, name)
-    elif isinstance(node, list):
-        for value in node:
-            yield from _descriptions_of(value, name)
-
-
 class TestAResultThatStatesNoFinding:
     @pytest.mark.parametrize("kind", ["pass", "notApplicable", "informational"])
     def test_its_rationale_says_it_counts_at_no_threshold(self, tmp_path, kind):
@@ -168,10 +156,9 @@ class TestAResultThatStatesNoFinding:
                 / "tool_surface.golden.json"
             ).read_text(encoding="utf-8")
         )
-        descriptions = list(_descriptions_of(golden, "explain_finding"))
+        description = golden["tools"]["explain_finding"]["description"]
 
-        assert descriptions
-        assert all("result_kind" in description for description in descriptions)
+        assert "result_kind" in description
 
 
 class TestReferencesListParsed:
