@@ -38,6 +38,7 @@ SAFE_INTEGER = 2**53 - 1
 INPUT_TOKENS = {"<BSu>": "\\u", "<BSU>": "\\U", "<SOH>": chr(1)}
 REFUSAL_CODES = {
     "alias",
+    "anchor",
     "character",
     "complex-key",
     "constructor",
@@ -208,7 +209,15 @@ def test_the_loader_reads_each_case_as_the_corpus_says(case):
 
 
 def edit_value(raw):
-    """What an edit's value is once ASH's loader has read the text that holds it."""
+    """What an edit's value is once ASH's loader has read the text that holds it.
+
+    A value is written in the corpus's own projection, so a float is
+    ``{"$float": "2.0"}`` and a mapping with keys that are not plain strings is
+    ``{"$map": [[key, value], ...]}``; both are what ``project`` gives for what the
+    loader builds, so they stand for themselves here. A float written as a bare
+    JSON number would read as an integer in JavaScript, which is why the corpus
+    never does that.
+    """
     if isinstance(raw, dict) and "$ref" in raw:
         return ("!ENV " if raw.get("explicit") else "") + raw["$ref"]
     if isinstance(raw, list):
@@ -218,12 +227,42 @@ def edit_value(raw):
     return raw
 
 
+def is_typed_map(node):
+    """A mapping the projection writes as ``{"$map": [[key, value], ...]}``."""
+    return isinstance(node, dict) and set(node) == {"$map"}
+
+
+def pair_index(node, step):
+    """Where the pair whose key is the string ``step`` sits in a typed map, or None.
+
+    A path step is a string or a list position, so it never names a key that is
+    not a string: the key 1 and the key "1" are two pairs, and "1" reaches one.
+    """
+    for index, (key, _) in enumerate(node["$map"]):
+        if isinstance(key, str) and key == step:
+            return index
+    return None
+
+
+def typed_map_of(pairs):
+    """The projection of a mapping with these pairs, which is a plain object again
+    once every key is a string that does not start with a dollar sign."""
+    if all(isinstance(key, str) and not key.startswith("$") for key, _ in pairs):
+        return dict(pairs)
+    return {"$map": pairs}
+
+
 def get_at(node, path):
     for step in path:
         if isinstance(step, int):
             if not isinstance(node, list) or step >= len(node):
                 return None
             node = node[step]
+        elif is_typed_map(node):
+            index = pair_index(node, step)
+            if index is None:
+                return None
+            node = node["$map"][index][1]
         else:
             if not isinstance(node, dict) or step not in node:
                 return None
@@ -239,6 +278,14 @@ def set_at(node, path, new):
         items = list(node)
         items[head] = set_at(items[head], rest, new)
         return items
+    if is_typed_map(node):
+        pairs = [[key, item] for key, item in node["$map"]]
+        index = pair_index(node, head)
+        if index is None:
+            pairs.append([head, set_at(None, rest, new)])
+        else:
+            pairs[index][1] = set_at(pairs[index][1], rest, new)
+        return {"$map": pairs}
     mapping = dict(node) if isinstance(node, dict) else {}
     mapping[head] = set_at(mapping.get(head), rest, new)
     return mapping
@@ -255,6 +302,16 @@ def delete_at(node, path):
         else:
             del items[head]
         return items
+    if is_typed_map(node):
+        index = pair_index(node, head)
+        if index is None:
+            return node
+        pairs = [[key, item] for key, item in node["$map"]]
+        if rest:
+            pairs[index][1] = delete_at(pairs[index][1], rest)
+        else:
+            del pairs[index]
+        return typed_map_of(pairs)
     if not isinstance(node, dict) or head not in node:
         return node
     mapping = dict(node)
@@ -346,3 +403,38 @@ def test_a_planted_edit_that_means_something_else_is_reported():
     before = project(load(block_text(case["before"])))
     wrong = apply_edit(before, {**case["edit"], "value": "four"})
     assert difference(wrong, project(load(block_text(case["after"]))))
+
+
+def test_the_edit_helpers_reach_into_a_mapping_with_typed_keys():
+    document = project(load("m: {1: a, l: x}\n"))
+    assert document == {"m": {"$map": [[1, "a"], ["l", "x"]]}}
+    assert get_at(document, ["m", "l"]) == "x"
+    assert set_at(document, ["m", "l"], "y") == {"m": {"$map": [[1, "a"], ["l", "y"]]}}
+    assert set_at(document, ["m", "z"], 2) == {
+        "m": {"$map": [[1, "a"], ["l", "x"], ["z", 2]]}
+    }
+    assert delete_at(document, ["m", "l"]) == {"m": {"$map": [[1, "a"]]}}
+    assert delete_at(document, ["m", "nothing"]) == document
+
+
+def test_a_string_step_never_reaches_a_key_that_is_not_a_string():
+    document = project(load('m: {1: a, "1": b}\n'))
+    assert document == {"m": {"$map": [[1, "a"], ["1", "b"]]}}
+    assert get_at(document, ["m", "1"]) == "b"
+    assert set_at(document, ["m", "1"], "c") == {"m": {"$map": [[1, "a"], ["1", "c"]]}}
+    assert delete_at(document, ["m", "1"]) == {"m": {"$map": [[1, "a"]]}}
+    assert get_at({"m": {"$map": [[1, "a"]]}}, ["m", "1"]) is None
+
+
+def test_a_mapping_is_a_plain_object_again_once_no_key_starts_with_a_dollar_sign():
+    document = project(load("m: {$a: 1, b: 2}\n"))
+    assert document == {"m": {"$map": [["$a", 1], ["b", 2]]}}
+    assert delete_at(document, ["m", "$a"]) == {"m": {"b": 2}}
+
+
+def test_a_float_in_an_edit_is_written_in_the_projection_and_compares_as_a_float():
+    value = edit_value({"$float": "2.0"})
+    assert value == {"$float": "2.0"}
+    document = set_at(project(load("a: 1\n")), ["a"], value)
+    assert same(document, project(load("a: 2.0\n")))
+    assert not same(document, project(load("a: 2\n")))
