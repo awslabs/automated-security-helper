@@ -21,6 +21,7 @@ from automated_security_helper.base.plugin_config import (
 )
 from automated_security_helper.base.scanner_operational_facets import (
     CATEGORY_MAP_ANY,
+    ScannerOperationalFacets,
     category_map,
     category_mapped_fields,
     nearest_operational_facets,
@@ -777,6 +778,12 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         tool_type = self.tool_type or ScannerToolType.UNKNOWN
         return f"tool_type::{getattr(tool_type, 'value', tool_type)}"
 
+    def _nearest_operational_row(self) -> Optional[ScannerOperationalFacets]:
+        """The operational row of this scanner's class or of its nearest declaring
+        base, or None: the one read of it behind the class's declared categories and
+        its legacy type."""
+        return nearest_operational_facets(type(self))
+
     def declared_categories(self) -> tuple[ScanCategory, ...]:
         """The scan categories this scanner can serve, in canonical order.
 
@@ -784,7 +791,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         declares a row; otherwise the one category its ``tool_type`` stands for;
         ``()`` when neither says.
         """
-        row = nearest_operational_facets(type(self))
+        row = self._nearest_operational_row()
         if row is not None:
             return tuple(row.targets.categories)
         return categories_of_tool_type(self.tool_type)
@@ -802,7 +809,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         names.
         """
         options = getattr(self.config, "options", None)
-        mapped = category_mapped_fields(type(options)) if options is not None else ()
+        if options is None:
+            return frozenset(self.declared_categories())
+        mapped = category_mapped_fields(type(options))
         if not mapped:
             return frozenset(self.declared_categories())
         serves: set[ScanCategory] = set()
@@ -866,10 +875,9 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         Shares ``_CATEGORY_DERIVATION_WARNED`` with the class-creation warning, so
         a class warned there is not warned again.
         """
-        cls = type(self)
-        if cls in _CATEGORY_DERIVATION_WARNED:
+        if type(self) in _CATEGORY_DERIVATION_WARNED:
             return
-        _CATEGORY_DERIVATION_WARNED.add(cls)
+        _CATEGORY_DERIVATION_WARNED.add(type(self))
         name = getattr(self.config, "name", None)
         derived = self.declared_categories()
         if derived:
@@ -907,7 +915,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         # The operational row is the last writer of the legacy type: a plugin's own
         # model_post_init sets self.tool_type before it calls this one.
-        row = nearest_operational_facets(type(self))
+        row = self._nearest_operational_row()
         if row is not None:
             self.tool_type = row.targets.tool_type
         else:
