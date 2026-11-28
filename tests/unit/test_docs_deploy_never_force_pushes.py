@@ -923,6 +923,9 @@ FORCE_CASES = {
     "in a shell string run with combined options": (
         'bash -ec "cd site && git push --force origin gh-pages"'
     ),
+    "in a shell string run after an option with a value": (
+        'bash -o pipefail -c "cd site && git push --force origin gh-pages"'
+    ),
     "after a here-document with an apostrophe": (
         "cat <<EOF > note.txt\ndon't panic\nEOF\ngit push --force origin 'gh-pages'"
     ),
