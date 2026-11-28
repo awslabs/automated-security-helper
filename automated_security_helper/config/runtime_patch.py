@@ -83,6 +83,11 @@ from automated_security_helper.config.patch_ops import (
     NODE_EDITING_OPS,
     VALUE_WRITING_OPS,
 )
+from automated_security_helper.config.spellings import (
+    SpellingRefused,
+    canonical_segments,
+    refuse_removed_spellings,
+)
 from automated_security_helper.models.vocab import PluginKind
 from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
@@ -554,6 +559,46 @@ def _denial_spellings(
     return tuple(pairs)
 
 
+def _canonical_pointer(pointer: str) -> str:
+    """``pointer`` with each segment that is an old spelling of a renamed key
+    written as the canonical one (``spellings.canonical_segments``), or
+    ``pointer`` itself when no segment changes."""
+    segments = _path_segments(pointer)
+    canonical = canonical_segments(segments)
+    if canonical == segments:
+        return pointer
+    return "/" + "/".join(_escape_pointer_segment(segment) for segment in canonical)
+
+
+def _denial_match_spellings(
+    pattern: str, path: str, plugin_keys: PluginKeys
+) -> Tuple[Tuple[str, str], ...]:
+    """The (pattern, path) pairs a check that REFUSES is matched over.
+
+    ``_denial_spellings``'s pairs come first and are always kept. After them,
+    each of those pairs with every old spelling of a renamed key written as the
+    canonical one, on either side (``spellings.canonical_segments``), when that is
+    a pair not there yet. A runtime patch is applied to the configuration as
+    dumped by field name, so it always meets the canonical spelling, while an
+    operator's list may still hold the old one, and a denial written in either
+    spelling has to refuse a write in either. Pairs are only added, so a denial
+    refuses more than it did and never less: under a glob no model is known, and
+    ``canonical_segments`` then maps every row's old spelling.
+
+    Whether a row's old spelling is still read at this release is never asked
+    (``canonical_segments`` reads no status): a denial an operator wrote under the
+    old spelling keeps denying both after the release that removes it.
+    """
+    pairs = list(_denial_spellings(pattern, path, plugin_keys))
+    seen = set(pairs)
+    for left, right in tuple(pairs):
+        added = (_canonical_pointer(left), _canonical_pointer(right))
+        if added not in seen:
+            seen.add(added)
+            pairs.append(added)
+    return tuple(pairs)
+
+
 def _denied_path_reason(
     denied: str, path: str, plugin_keys: PluginKeys, shown: str | None = None
 ) -> str | None:
@@ -566,7 +611,7 @@ def _denied_path_reason(
     entry itself when None.
     """
     named = denied if shown is None else shown
-    for pattern, target in _denial_spellings(denied, path, plugin_keys):
+    for pattern, target in _denial_match_spellings(denied, path, plugin_keys):
         if not _policy_covers_op_path(pattern, target):
             continue
         if _path_matches(pattern, target):
@@ -699,7 +744,9 @@ def _check_value_pattern(
     for pattern_path, pattern in allowlist.denied_value_patterns.items():
         if not any(
             _policy_covers_op_path(bound, target)
-            for bound, target in _denial_spellings(pattern_path, path, plugin_keys)
+            for bound, target in _denial_match_spellings(
+                pattern_path, path, plugin_keys
+            )
         ):
             continue
         # Named by their place in the policy: either can be a value its file
@@ -934,13 +981,32 @@ def _model_reads_leaf_as(
         return False
 
 
-def _covered(patterns: Sequence[str], pointer: str, plugin_keys: PluginKeys) -> bool:
-    """Whether ``pointer`` is at or under one of ``patterns``, under every spelling."""
+def _covered(
+    patterns: Sequence[str],
+    pointer: str,
+    plugin_keys: PluginKeys,
+    *,
+    denying: bool = False,
+) -> bool:
+    """Whether ``pointer`` is at or under one of ``patterns``, under every spelling.
+
+    The spellings are ``_denial_spellings``'s. With ``denying`` they are
+    ``_denial_match_spellings``'s: the caller finds a denial (a value pattern
+    that refuses a key, the environment-read withholding), so an old spelling of
+    a renamed key is read as the canonical one on either side, and the check can
+    only refuse more.
+
+    The default is the narrower expansion on purpose. A caller that skips a check
+    (``inert``, ``exempt``, ``moved``) or grants an exemption reads ``patterns`` as
+    the places it skips or exempts, so widening them by a spelling the table adds
+    would skip or exempt more, and a wider skip is a weaker check.
+    """
+    spellings_of = _denial_match_spellings if denying else _denial_spellings
     return bool(pointer) and any(
         _path_matches(pattern, target)
         or _match_segments(_subtree_pattern(pattern), _path_segments(target))
         for each in patterns
-        for pattern, target in _denial_spellings(each, pointer, plugin_keys)
+        for pattern, target in spellings_of(each, pointer, plugin_keys)
     )
 
 
@@ -973,7 +1039,7 @@ def _key_pattern_reason(
     either can be a value the policy's file read from the environment.
     """
     for pattern_path, pattern in allowlist.denied_value_patterns.items():
-        if not _covered([pattern_path], pointer, plugin_keys):
+        if not _covered([pattern_path], pointer, plugin_keys, denying=True):
             continue
         shown_path = names.pattern_path(pattern_path)
         try:
@@ -1009,8 +1075,9 @@ def config_document_denials(
     """The fields ``document`` sets that ``allowlist``'s denials refuse.
 
     ``denied_paths`` and ``denied_value_patterns`` only, matched exactly as for a
-    runtime patch op (every '-'/'_' mix and every spelling the plugin lookup
-    reads, including through a glob). ``enabled`` and ``allowed_paths`` do not
+    runtime patch op (every '-'/'_' mix, every spelling the plugin lookup reads,
+    including through a glob, and both spellings of a renamed key:
+    ``_denial_match_spellings``). ``enabled`` and ``allowed_paths`` do not
     apply: a config file is not a runtime override, and those two decide which
     overrides a client may make at all.
 
@@ -1057,7 +1124,9 @@ def config_document_denials(
     scanner exclusion that resolution moves out of the options before any
     scanner runs (``client_scanner_exclusions.moved_exclusion_pointers``): the
     entries that cover a whole scanner section (``SECTION_FLOOR_ENTRIES``) do not
-    refuse it, and every other entry and value pattern still does.
+    refuse it, and every other entry and value pattern still does. Those three
+    skip or lift a check, so they are matched without the renamed-key spellings
+    (``_covered``): a skip never reaches further than the pointers it names.
     """
     plugin_keys = known_plugin_keys(config)
     # The policy's entries as each refusal names them (``_PolicyNames``): a
@@ -1124,7 +1193,7 @@ def config_document_denials(
             # the operator's own reference there, whose value the fill put in
             # and the document did not choose.
             environment_read = kind != "key" and _covered(
-                environment_pointers, path, plugin_keys
+                environment_pointers, path, plugin_keys, denying=True
             )
             withheld = environment_read and not (
                 repeats_trusted
@@ -1524,6 +1593,7 @@ def apply_runtime_patch(
     _refuse_a_malformed_op(patch_ops)
     _refuse_a_key_read_from_the_environment(base, patch_ops)
     check_runtime_ops(patch_ops, allowlist=allowlist, config=base)
+    _refuse_a_removed_spelling(patch_ops)
     patch_ops, _ = _without_turn_offs(patch_ops, base)
 
     # One op at a time, in order, as jsonpatch applies a patch, so a refusal can
@@ -1645,6 +1715,27 @@ def _refuse_a_malformed_op(patch_ops: List[Dict[str, Any]]) -> None:
             or ("path" in op and not isinstance(op["path"], str))
         ):
             raise RuntimePatchDeniedError(op, MALFORMED_OP_REFUSAL)
+
+
+def _refuse_a_removed_spelling(patch_ops: List[Dict[str, Any]]) -> None:
+    """Refuse an op that writes the old spelling of a key the running release no
+    longer reads, in its path, its ``from`` or its value.
+
+    A patch is applied to the configuration as dumped by field name, which holds
+    the canonical spelling only, and the models read a removed spelling at every
+    release, so this is what refuses it (``spellings.refuse_removed_spellings``).
+    The ops are only read: before the removal release nothing is refused here and
+    nothing changes, so a pointer in the old spelling still fails to apply and a
+    value in it is still read as the canonical key. The refusal names the op and
+    the keys, never a value.
+    """
+    from automated_security_helper.config.config_sources import PATCH_KEY
+
+    for op in patch_ops:
+        try:
+            refuse_removed_spellings({PATCH_KEY: [op]}, "runtime patch")
+        except SpellingRefused as refused:
+            raise RuntimePatchDeniedError(op, refused.detail) from None
 
 
 #: The refusal of an op whose path goes into a text setting's characters.

@@ -1498,6 +1498,7 @@ def _mark_client_supplied(
     ``test`` that passed there can fail here. Ending the walk at it would drop
     the operator's entries after it, and they would be marked as the client's.
     """
+    from automated_security_helper.config import spellings
     from automated_security_helper.config.mcp_sandbox import config_is_client_supplied
     from automated_security_helper.config.runtime_patch import _walk
     from automated_security_helper.models.core import (
@@ -1514,8 +1515,12 @@ def _mark_client_supplied(
         "exclusions": AshExclusion,
     }
     operators: Dict[str, List[Dict[str, Any]]] = {field: [] for field in models}
+    # Each file is recorded as it was written, so its own patch is applied to a
+    # copy with its old key spellings read as the canonical ones, as the loader
+    # applied it: a pointer that names an entry's expiry in the other spelling
+    # than the entry writes it reaches it there too.
     sources: List[Any] = [
-        _with_own_patch(document, base)
+        _with_own_patch(spellings.fold_written_spellings(document), base)
         for path, document in documents.items()
         if not delivered(path)
     ]

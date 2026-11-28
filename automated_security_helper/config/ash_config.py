@@ -57,6 +57,8 @@ from automated_security_helper.base.scanner_plugin import (
 )
 from automated_security_helper.base.extraction_limits import EXTRACTION_LIMIT_OPTIONS
 from automated_security_helper.config.plugin_sections import build_segment
+from automated_security_helper.config.spellings import check_spellings
+from automated_security_helper.config import command_names
 from automated_security_helper.config.wire_enum import (
     wire_enum_validator,
     wire_value,
@@ -2335,7 +2337,8 @@ class DefaultScannersConfig(RedactedSection):
     unknown_keys_note: ClassVar[str] = (
         "In a config file inside a git checkout or the scanned tree, or one an "
         "MCP client delivered, the whole section is ignored instead, an unknown "
-        "key included, and `ash config lint` warns about it."
+        "key included, and "
+        f"`{command_names.render_command(command_names.CONFIG_LINT)}` warns about it."
     )
 
     only: Annotated[
@@ -3095,6 +3098,19 @@ class AshConfig(RedactedSection):
             ),
         ),
     ] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_spelling_per_setting(cls, data: Any, info: ValidationInfo) -> Any:
+        """A top-level setting is written under one spelling.
+
+        The rule for a renamed key, applied to a configuration built from a
+        mapping directly (a results file's record, a dict validated in code); a
+        file the loader read was folded first (config/spellings.py). A no-op
+        until the spelling table holds a row for this model: no top-level key is
+        renamed yet.
+        """
+        return check_spellings(cls, data, info)
 
     @field_validator("output_formats", mode="before")
     @classmethod

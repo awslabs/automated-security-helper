@@ -29,12 +29,15 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    Union,
     cast,
 )
 
 import yaml
+from pydantic import BaseModel
 
-from automated_security_helper.config.ash_config import _NoAliasSafeLoader
+from automated_security_helper.config import spellings
+from automated_security_helper.config.ash_config import AshConfig, _NoAliasSafeLoader
 from automated_security_helper.config.config_sources import (
     is_config_parse_error,
     is_json_file,
@@ -63,12 +66,16 @@ from automated_security_helper.config.environment_record import (
     with_environment_values_shown,
     written_without_tag,
 )
+from automated_security_helper.config import command_names
 from automated_security_helper.core.exceptions import (
     ASHConfigSourceError,
     ASHConfigUnparsedError,
 )
+from automated_security_helper.models import spelling_table
 from automated_security_helper.models.core import (
     IGNORE_PATH_LISTS,
+    AshSuppression,
+    IgnorePathWithReason,
     expiration_has_passed,
 )
 from automated_security_helper.base.plugin_config import _options_class
@@ -125,8 +132,9 @@ class LintCategory(str, Enum):
     SUPPRESSION_UNUSED = "suppression-unused"
     SUPPRESSION_MULTILINE_REASON = "suppression-multiline-reason"
     SUPPRESSION_SYMBOL = "suppression-symbol"
-    # An entry written with the deprecated "expiration" spelling of "expires"
-    # (models/core.py); the alias still loads and is removed in ASH v4.
+    # An entry written with a deprecated spelling of a renamed field, a row of
+    # the table in models/spelling_table.py (``expiration`` for ``expires``); the
+    # alias still loads until the release the row names.
     DEPRECATED_SPELLING = "deprecated-spelling"
     IGNORE_PATH_ISSUE = "ignore-path-issue"
     LEGACY_NAME_VARIANT = "legacy-name-variant"
@@ -308,6 +316,32 @@ class UnusedSuppressionsNotEditable(ValueError):
     """
 
 
+@dataclass(frozen=True)
+class _SpellingSite:
+    """One mapping of a config file that the spelling table reads as ``model``.
+
+    ``parts`` is how the file reaches it: each key as the file wrote it, and the
+    index of each list entry on the way. ``shown`` is the same with a key the file
+    read from the environment written as its reference, which is how a message
+    names it, never by the value it resolved to.
+    """
+
+    mapping: Dict[Any, Any]
+    model: type[BaseModel]
+    parts: Tuple[Union[str, int], ...]
+    shown: Tuple[Union[str, int], ...]
+
+
+def _is_the_place_of(
+    reference_path: Sequence[Any], parts: Sequence[Union[str, int]]
+) -> bool:
+    """Whether a reference recorded at ``reference_path`` is at ``parts``: the
+    same keys and indices, compared as text."""
+    return len(reference_path) == len(parts) and all(
+        str(recorded) == str(part) for recorded, part in zip(reference_path, parts)
+    )
+
+
 class ConfigLinter:
     """Lints ASH configuration files for issues and can auto-fix them."""
 
@@ -409,6 +443,10 @@ class ConfigLinter:
 
         # Run suppression-specific lint checks
         cls._check_suppression_issues(config_data, result, shown_data)
+
+        # The deprecated spelling of a renamed key in each entry list the checks
+        # above do not read for its expiry (exclusions)
+        cls._check_other_deprecated_spellings(config_data, result)
 
         # Run ignore_path and suppression path checks
         cls._check_ignore_path_issues(
@@ -1880,27 +1918,38 @@ class ConfigLinter:
             return shown
         return dict.fromkeys(entry, ENVIRONMENT_VALUE_SHOWN)
 
+    #: Where the suppressions are in a configuration, by key.
+    _SUPPRESSION_KEYS: Tuple[str, ...] = ("global_settings", "suppressions")
+
     @classmethod
     def _check_suppression_issues(
         cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
     ) -> None:
         """Check for suppression-specific issues, and ignore-path expirations.
 
+        The suppressions are found where the file writes them: under the keys
+        the loader reads as ``global_settings`` and ``suppressions``
+        (``_as_the_file_spells``), and a message names each entry by those keys
+        (``_shown_keys``).
+
         ``shown_data`` is the copy of ``config_data`` a message quotes
         (``lint``); None quotes ``config_data``.
         """
         cls._check_ignore_path_expirations(config_data, result, shown_data)
 
-        global_settings = config_data.get("global_settings", {})
-        if not isinstance(global_settings, dict):
+        located = cls._as_the_file_spells(config_data, cls._SUPPRESSION_KEYS)
+        if not located:
             return
-
-        suppressions = global_settings.get("suppressions", [])
+        spelled = located[0]
+        suppressions: Any = config_data
+        for key in spelled:
+            suppressions = (
+                suppressions.get(key) if isinstance(suppressions, dict) else None
+            )
         if not isinstance(suppressions, list):
             return
-        shown_suppressions = cls._shown_entries(
-            suppressions, shown_data, ("global_settings", "suppressions")
-        )
+        shown_suppressions = cls._shown_entries(suppressions, shown_data, spelled)
+        shown_keys = cls._shown_keys(result.file_references, spelled)
 
         reported_missing_symbols_extra = False
         for i, (suppression, shown) in enumerate(zip(suppressions, shown_suppressions)):
@@ -1908,7 +1957,7 @@ class ConfigLinter:
                 continue
             shown = cls._shown_entry(suppression, shown)
 
-            path_prefix = f"global_settings.suppressions[{i}]"
+            path_prefix = cls._place((*shown_keys, i))
 
             if suppression.get("symbol") is not None:
                 reported_missing_symbols_extra = cls._check_suppression_symbol(
@@ -1996,24 +2045,26 @@ class ConfigLinter:
                     )
                 )
 
-            # Check: the deprecated "expiration" spelling (models/core.py). The
-            # alias still loads on 3.x and is removed in ASH v4; the message
-            # names only the key, never the file's value.
-            if "expiration" in suppression:
-                result.issues.append(
-                    cls._deprecated_spelling_issue(
-                        "Suppression",
-                        path_prefix,
-                        entry_id=cls._make_suppression_id(suppression),
-                    )
+            # Check: a deprecated spelling of a renamed key (the table in
+            # models/spelling_table.py: `expiration` for `expires`). The alias
+            # still loads until the release its row names; the message names only
+            # the key, never the file's value.
+            result.issues.extend(
+                cls._deprecated_spelling_issues(
+                    AshSuppression,
+                    "Suppression",
+                    suppression,
+                    path_prefix,
+                    entry_id=cls._make_suppression_id(suppression),
                 )
+            )
 
             # Check: expired suppressions. The file may write the canonical
             # "expires" or its deprecated alias "expiration" (models/core.py);
             # the canonical spelling wins when both are present, as the load's
             # equal-duplicate rule keeps it (a disagreement is a validation
             # error before the lint walks the entry).
-            spelling = "expires" if "expires" in suppression else "expiration"
+            spelling = cls._expiry_key(AshSuppression, suppression)
             cls._check_expiration(
                 suppression.get(spelling),
                 path_prefix,
@@ -2037,8 +2088,12 @@ class ConfigLinter:
         A scanner's section is found under any spelling the file gives it, as a
         scan finds it (``plugin_section_names``): an expired entry under
         ``Bandit:`` is applied as one under ``bandit:`` and is reported the same.
-        A message names the entry by the declared spelling, never by a key the
-        file may have read from the environment.
+        Any other key is found as the loader reads it, as the key itself or its
+        ``-``/``_`` twin (``_as_the_file_spells``), so an entry under
+        ``global-settings:`` is reported as one under ``global_settings:`` is. A
+        message names the entry by the keys the file writes (``_shown_keys``): a
+        key the file read from the environment is named by its written
+        reference, never by the value it resolved to.
 
         Two spellings of one section are merged by a scan key by key, the
         canonical spelling winning where both set a key, so when both hold the
@@ -2060,22 +2115,23 @@ class ConfigLinter:
                 ]
             for spelled, entries in lists:
                 shown_entries = cls._shown_entries(entries, shown_data, spelled)
+                shown_keys = cls._shown_keys(result.file_references, spelled)
                 for i, (entry, shown) in enumerate(zip(entries, shown_entries)):
                     if isinstance(entry, dict):
+                        entry_path = cls._place((*shown_keys, i))
                         # The deprecated spelling, as the suppression walk
                         # reports it.
-                        if "expiration" in entry:
-                            result.issues.append(
-                                cls._deprecated_spelling_issue(
-                                    subject, f"{'.'.join(keys)}[{i}]"
-                                )
+                        result.issues.extend(
+                            cls._deprecated_spelling_issues(
+                                IgnorePathWithReason, subject, entry, entry_path
                             )
+                        )
                         # Either spelling, canonical first, as the suppression
                         # walk above reads it.
-                        spelling = "expires" if "expires" in entry else "expiration"
+                        spelling = cls._expiry_key(IgnorePathWithReason, entry)
                         cls._check_expiration(
                             entry.get(spelling),
-                            f"{'.'.join(keys)}[{i}]",
+                            entry_path,
                             subject,
                             result,
                             shown=cls._shown_entry(entry, shown).get(
@@ -2087,11 +2143,32 @@ class ConfigLinter:
     def _as_the_file_spells(
         config_data: Any, keys: Tuple[str, ...]
     ) -> List[Tuple[str, ...]]:
-        """The key paths of ``config_data`` that ``keys`` names, with a known
-        plugin's section taken under every spelling the file gives it. Any other
-        path is ``keys`` as it is."""
+        """The key paths of ``config_data`` that ``keys`` names, as the file writes
+        them. A known plugin's section is taken under every spelling the file
+        gives it. Any other key is the one the loader reads as the declared one
+        (``spellings.key_in``: the key itself, or its ``-``/``_`` twin), followed
+        through the mappings it reaches; the keys after a list or a dict are the
+        declared ones, which ``_follow`` reads in turn. A path the file does not
+        hold gives none."""
         if len(keys) < 2 or keys[0] not in PLUGIN_SEGMENT_KEYS:
-            return [keys]
+            model: type[BaseModel] = AshConfig
+            node: Any = config_data
+            written: List[str] = []
+            for position, key in enumerate(keys):
+                shape = spellings.child_model(model, key)
+                found = (
+                    spellings.key_in(model, node, key)
+                    if isinstance(node, dict)
+                    else None
+                )
+                if shape is None or found is None:
+                    return []
+                written.append(found)
+                if shape.kind != "model":
+                    return [(*written, *keys[position + 1 :])]
+                node = node[found]
+                model = shape.model
+            return [tuple(written)]
         segment = config_data.get(keys[0]) if isinstance(config_data, dict) else None
         if not isinstance(segment, dict):
             return []
@@ -2102,31 +2179,113 @@ class ConfigLinter:
             if isinstance(name, str) and folded_section_name(name) == wanted
         ]
 
+    @staticmethod
+    def _expiry_key(model: type[BaseModel], entry: Dict[Any, Any]) -> str:
+        """The key ``entry``, an entry of ``model``, holds its expiry under: the
+        first spelling of ``expires`` it writes, the canonical one before an old
+        one. The load drops an old key that equals the canonical one and refuses
+        one that differs, so the canonical value is the one that applies."""
+        names = spellings.field_spellings(model, "expires")
+        return next((name for name in names if name in entry), names[0])
+
+    @classmethod
+    def _deprecated_spelling_issues(
+        cls,
+        model: type[BaseModel],
+        subject: str,
+        entry: Dict[Any, Any],
+        path: str,
+        entry_id: Optional[str] = None,
+    ) -> List[LintIssue]:
+        """One issue for each deprecated spelling ``entry`` writes, an entry of
+        ``model`` at ``path``: each old spelling of each row of the table whose
+        model is ``IgnorePathWithReason`` or a subclass of it, the entry family."""
+        return [
+            cls._deprecated_spelling_issue(subject, path, row, old, entry_id)
+            for row in spellings.rows_for(model)
+            if issubclass(spellings.row_model(row), IgnorePathWithReason)
+            for old in row.old
+            if old in entry
+        ]
+
     @classmethod
     def _deprecated_spelling_issue(
-        cls, subject: str, path: str, entry_id: Optional[str] = None
+        cls,
+        subject: str,
+        path: str,
+        row: spellings.SpellingRow,
+        old: str,
+        entry_id: Optional[str] = None,
     ) -> LintIssue:
-        """The issue for an entry written with the deprecated ``expiration`` key.
+        """The issue for an entry written with ``old``, a deprecated spelling of
+        the key ``row`` names.
 
-        INFO: the alias still loads (models/core.py warns about it too) and is
-        removed in ASH v4. Not fixable: renaming a key inside a list entry is
+        INFO: the alias still loads (the model warns about it too) until the
+        release the row names. Not fixable: renaming a key inside a list entry is
         not a fix the fixers make (the expired-suppression remover addresses
         the same entries by index and id, and a rename ahead of it would change
         what those were computed from), so the operator renames it by hand, as
         with LEGACY_NAME_CONFLICT. The message names the key only, never the
         entry's values, which can be read from the environment.
         """
+        fix = command_names.render_command(command_names.CONFIG_LINT, flags=("--fix",))
+        removal = ""
+        if row.removed_in is not None:
+            label = spellings.release_label(row.removed_in)
+            removal = f"The alias is removed in ASH {label}; "
         return LintIssue(
             severity=LintSeverity.INFO,
             category=LintCategory.DEPRECATED_SPELLING,
             message=(
-                f"{subject} is written with the deprecated 'expiration' "
-                "spelling; write 'expires'. The alias is removed in ASH v4; "
-                "`ash config lint --fix` does not rename it"
+                f"{subject} is written with the deprecated '{old}' spelling; "
+                f"write '{row.canonical}'. {removal}`{fix}` does not rename it"
             ),
             path=path,
             entry_id=entry_id,
         )
+
+    #: The entry lists whose deprecated spelling the expiry walks report
+    #: themselves, where they read each entry's expiry and among the entry's other
+    #: issues: the suppression walk, and ``_check_ignore_path_expirations`` over
+    #: ``IGNORE_PATH_LISTS``. ``_check_other_deprecated_spellings`` leaves them.
+    _EXPIRY_WALKS = frozenset(
+        {_SUPPRESSION_KEYS, *(keys for keys, _ in IGNORE_PATH_LISTS)}
+    )
+
+    @classmethod
+    def _check_other_deprecated_spellings(
+        cls, config_data: Dict[str, Any], result: LintResult
+    ) -> None:
+        """Report the deprecated spelling of a renamed key in each entry list the
+        expiry walks do not read.
+
+        The lists are the places the table gives an entry model
+        (``spellings.entry_paths``), so an exclusion is reported as a suppression
+        and an ignore path are, and a list added to the configuration later is
+        covered with no edit here. Each entry is named by the keys that reach it
+        (a key read from the environment by its reference), and its issue is the
+        walks' own: INFO, not fixable.
+        """
+        for row in spelling_table.ROWS:
+            model = spellings.row_model(row)
+            if not issubclass(model, IgnorePathWithReason):
+                continue
+            for site in cls._spelling_sites(
+                config_data,
+                model,
+                result.file_references,
+                leaving=cls._EXPIRY_WALKS,
+            ):
+                for old in row.old:
+                    if old in site.mapping:
+                        result.issues.append(
+                            cls._deprecated_spelling_issue(
+                                cls._subject_of(site.model),
+                                cls._place(site.shown),
+                                row,
+                                old,
+                            )
+                        )
 
     @classmethod
     def _check_expiration(
@@ -2808,6 +2967,280 @@ class ConfigLinter:
 
         return suppression_id(suppression)
 
+    @staticmethod
+    def _subject_of(model: type[BaseModel]) -> str:
+        """How a message names one entry of ``model``: its ``ENTRY_KIND``
+        (``an exclusion``) without the article and capitalized (``Exclusion``),
+        or the class name of a model that has none."""
+        kind = getattr(model, "ENTRY_KIND", None)
+        if not isinstance(kind, str) or not kind:
+            return model.__name__
+        for article in ("an ", "a "):
+            if kind.startswith(article):
+                kind = kind[len(article) :]
+                break
+        return kind[:1].upper() + kind[1:]
+
+    @staticmethod
+    def _place(parts: Sequence[Union[str, int]]) -> str:
+        """``parts`` as a message writes a place in the file: keys joined by ".",
+        and a list entry as ``[i]`` after its list's key."""
+        place = ""
+        for part in parts:
+            if isinstance(part, int):
+                place += f"[{part}]"
+            else:
+                place = f"{place}.{part}" if place else part
+        return place
+
+    @staticmethod
+    def _named_key(
+        references: Sequence[EnvironmentReference],
+        parts: Sequence[Union[str, int]],
+        key: str,
+    ) -> Tuple[str, bool]:
+        """``key`` of the mapping at ``parts`` as a message names it, and whether
+        the file read it from the environment. Such a key is named by its written
+        reference (``${VAR}``), as the section check names one, never by the value
+        it resolved to."""
+        for reference in references:
+            if (
+                reference.key
+                and reference.resolved == key
+                and _is_the_place_of(reference.path, parts)
+            ):
+                return written_without_tag(reference.written), True
+        return key, False
+
+    @classmethod
+    def _shown_keys(
+        cls, references: Sequence[EnvironmentReference], spelled: Sequence[str]
+    ) -> Tuple[str, ...]:
+        """``spelled``, the keys of the file that reach a list, as a message names
+        them: each as the file writes it, and a key the file read from the
+        environment by its written reference (``_named_key``), never by the value
+        it resolved to."""
+        return tuple(
+            cls._named_key(references, spelled[:position], key)[0]
+            for position, key in enumerate(spelled)
+        )
+
+    @classmethod
+    def _spelling_sites(
+        cls,
+        config_data: Any,
+        model: type[BaseModel],
+        references: Sequence[EnvironmentReference] = (),
+        leaving: Collection[Tuple[str, ...]] = (),
+    ) -> List[_SpellingSite]:
+        """Every mapping of ``config_data`` where the spelling table places
+        ``model`` or a subclass of it, with the keys that reach it as the file
+        writes them.
+
+        The places are those of ``spellings.entry_paths``, the root mapping
+        included. A known plugin's section is followed under every spelling the
+        file gives it, each element of a list and each value of a dict of one
+        model is a mapping of its own, and a value that is not a mapping holds
+        nothing and is skipped. ``leaving`` is declared key paths another check
+        reads, which are not walked. ``references`` is what the file read from the
+        environment, for naming a key.
+        """
+        sites: List[_SpellingSite] = []
+        for keys in spellings.entry_paths(model):
+            if keys in leaving:
+                continue
+            for spelled in cls._as_the_file_spells(config_data, keys):
+                cls._follow(
+                    config_data, AshConfig, keys, spelled, (), (), references, sites
+                )
+        return sites
+
+    @classmethod
+    def _follow(
+        cls,
+        value: Any,
+        model: type[BaseModel],
+        declared: Tuple[str, ...],
+        spelled: Tuple[str, ...],
+        parts: Tuple[Union[str, int], ...],
+        shown: Tuple[Union[str, int], ...],
+        references: Sequence[EnvironmentReference],
+        sites: List[_SpellingSite],
+    ) -> None:
+        """Follow the keys that remain from ``value``, a mapping read as
+        ``model``: ``declared`` as the models name them, ``spelled`` as the file
+        writes them. A mapping the keys end at is added to ``sites``.
+
+        A key the file writes as the loader reads the declared one (its ``-``/``_``
+        twin, another spelling of a plugin's section: ``spellings.key_in``) is
+        followed too, and named as the file writes it."""
+        if not isinstance(value, dict):
+            return
+        if not declared:
+            sites.append(_SpellingSite(value, model, parts, shown))
+            return
+        shape = spellings.child_model(model, declared[0])
+        written = spellings.key_in(model, value, spelled[0])
+        if shape is None or written is None:
+            return
+        named, _ = cls._named_key(references, parts, written)
+        here = (*parts, written)
+        shown_here = (*shown, named)
+        child = value[written]
+        if shape.kind == "model":
+            cls._follow(
+                child,
+                shape.model,
+                declared[1:],
+                spelled[1:],
+                here,
+                shown_here,
+                references,
+                sites,
+            )
+        elif shape.kind == "list":
+            if isinstance(child, list):
+                for index, item in enumerate(child):
+                    cls._follow(
+                        item,
+                        shape.model,
+                        declared[1:],
+                        spelled[1:],
+                        (*here, index),
+                        (*shown_here, index),
+                        references,
+                        sites,
+                    )
+        elif isinstance(child, dict):
+            for item_key, item in child.items():
+                name = str(item_key)
+                item_named, _ = cls._named_key(references, here, name)
+                cls._follow(
+                    item,
+                    shape.model,
+                    declared[1:],
+                    spelled[1:],
+                    (*here, name),
+                    (*shown_here, item_named),
+                    references,
+                    sites,
+                )
+
+    @classmethod
+    def _check_table_spellings(
+        cls, config_data: Dict[str, Any], result: LintResult
+    ) -> None:
+        """Report an old spelling of a renamed key wherever the table puts its
+        model.
+
+        For each row whose model is not the entry family (``IgnorePathWithReason``
+        and its subclasses, whose deprecated spelling the expiry walks and
+        ``_check_other_deprecated_spellings`` report), at each mapping of the file
+        the model sits at (``_spelling_sites``, the root mapping for a row of
+        ``AshConfig``): an old spelling the mapping writes is a
+        LEGACY_NAME_VARIANT, a WARNING, fixable unless the file read the key from
+        the environment. With the canonical key written too it is a
+        LEGACY_NAME_CONFLICT, a WARNING and not fixable, since a rename would leave
+        one of the two keys out. A message names the keys and never a value.
+        """
+        references = result.file_references
+        for row in spelling_table.ROWS:
+            model = spellings.row_model(row)
+            if issubclass(model, IgnorePathWithReason):
+                continue
+            for site in cls._spelling_sites(config_data, model, references):
+                for old in row.old:
+                    if old in site.mapping:
+                        result.issues.append(
+                            cls._old_key_issue(row, old, site, references)
+                        )
+
+    @classmethod
+    def _old_key_issue(
+        cls,
+        row: spellings.SpellingRow,
+        old: str,
+        site: _SpellingSite,
+        references: Sequence[EnvironmentReference],
+    ) -> LintIssue:
+        """The issue for ``old``, an old spelling of the key ``row`` names, that
+        ``site`` writes."""
+        named, env_read = cls._named_key(references, site.parts, old)
+        path = cls._place((*site.shown, named))
+        if row.canonical in site.mapping:
+            fix = command_names.render_command(
+                command_names.CONFIG_LINT, flags=("--fix",)
+            )
+            canonical_path = cls._place((*site.shown, row.canonical))
+            return LintIssue(
+                severity=LintSeverity.WARNING,
+                category=LintCategory.LEGACY_NAME_CONFLICT,
+                path=path,
+                message=(
+                    f"'{path}' (an old spelling of '{row.canonical}') and "
+                    f"'{canonical_path}' are both set. Remove one of them by "
+                    f"hand: `{fix}` does not rename it"
+                ),
+                fixable=False,
+            )
+        removal = ""
+        if row.removed_in is not None:
+            label = spellings.release_label(row.removed_in)
+            removal = f". The alias is removed in ASH {label}"
+        return LintIssue(
+            severity=LintSeverity.WARNING,
+            category=LintCategory.LEGACY_NAME_VARIANT,
+            path=path,
+            message=(
+                f"'{path}' is a deprecated spelling of '{row.canonical}'; "
+                f"write '{row.canonical}'{removal}"
+            ),
+            # Such a key is never auto-fixable: lint --fix refuses any file that
+            # reads the environment before it reaches a fixer, so an auto-fixable
+            # claim here would send the operator to a command that refuses.
+            fixable=not env_read,
+            fix_description=(
+                "" if env_read else f"Rename the key at '{path}' to '{row.canonical}'"
+            ),
+        )
+
+    @classmethod
+    def _rename_old_spelling(
+        cls, config_data: Dict[str, Any], issue: LintIssue
+    ) -> Optional[bool]:
+        """Rename the old spelling ``issue`` names, when it is a key of the table.
+
+        The walk that raised the issue is run again over ``config_data``, and the
+        old key of the mapping whose place is ``issue.path`` is renamed where it
+        stands, so the keys keep their order. The path is compared as the walk
+        writes it and never split on ".", because a plugin's name may hold one.
+
+        None when no key of the table is at that place (the issue is a section's
+        snake/kebab variant); False when the canonical key is written there too,
+        which the lint reports as a conflict, since a rename would drop one of
+        the two.
+        """
+        for row in spelling_table.ROWS:
+            model = spellings.row_model(row)
+            if issubclass(model, IgnorePathWithReason):
+                continue
+            for site in cls._spelling_sites(config_data, model):
+                for old in row.old:
+                    if old not in site.mapping:
+                        continue
+                    if cls._place((*site.parts, old)) != issue.path:
+                        continue
+                    if row.canonical in site.mapping:
+                        return False
+                    renamed = {
+                        (row.canonical if key == old else key): value
+                        for key, value in site.mapping.items()
+                    }
+                    site.mapping.clear()
+                    site.mapping.update(renamed)
+                    return True
+        return None
+
     @classmethod
     def _check_legacy_name_variants(
         cls, config_data: Dict[str, Any], result: LintResult, shown_data: Any = None
@@ -2835,20 +3268,30 @@ class ConfigLinter:
         ``config_data`` ``lint`` makes) holds it, so one the file read from the
         environment is ``<value>``. The canonical form it is compared with is
         the schema's own name, and is named as it is.
+
+        An old spelling of a renamed key (a row of the table in
+        ``models/spelling_table.py``) is reported too, at every place the table
+        puts its model, the root mapping included (``_check_table_spellings``).
         """
         # Lazy import to avoid pulling the full config-segment graph on
         # module import.
         from automated_security_helper.config.ash_config import (
-            AshConfig,
             ConverterConfigSegment,
             ReporterConfigSegment,
             ScannerConfigSegment,
             field_name_spellings,
         )
 
+        cls._check_table_spellings(config_data, result)
+
         # The same for a top-level key: the model reads a field's name as its
-        # alias. With both spellings present, ConfigValidator warns instead.
+        # alias. With both spellings present, ConfigValidator warns instead. A
+        # field the table renames is reported by the check above, whatever its
+        # alias is.
+        renamed = {row.canonical for row in spellings.rows_for(AshConfig)}
         for fname, finfo in AshConfig.model_fields.items():
+            if fname in renamed:
+                continue
             alias = finfo.alias
             if alias and alias != fname and fname in config_data:
                 if alias in config_data:
@@ -2930,11 +3373,8 @@ class ConfigLinter:
                             break
                 if key in canonical_input_forms:
                     continue  # already canonical; not a typo
-                if "-" in key:
-                    swapped = key.replace("-", "_")
-                elif "_" in key:
-                    swapped = key.replace("_", "-")
-                else:
+                swapped = spellings.section_variant(key)
+                if swapped is None:
                     continue  # no separator; not a snake/kebab variant
                 if swapped not in canonical_input_forms:
                     continue  # not a built-in variant; let it pass
@@ -2947,6 +3387,9 @@ class ConfigLinter:
                 # `enabled: false`, still applies. This is a warning; --fix
                 # does not rename the key, since that would drop one of the two.
                 if swapped in segment_data:
+                    fix = command_names.render_command(
+                        command_names.CONFIG_LINT, flags=("--fix",)
+                    )
                     result.issues.append(
                         LintIssue(
                             severity=LintSeverity.WARNING,
@@ -2960,8 +3403,8 @@ class ConfigLinter:
                                 f"scan merges them key by key, and where both "
                                 f"set a key '{swapped}' wins, so a key only "
                                 f"'{shown_key}' sets still applies. Remove or "
-                                f"merge one of them by hand: `ash config lint "
-                                f"--fix` does not rename it"
+                                f"merge one of them by hand: `{fix}` does not "
+                                f"rename it"
                             ),
                             fixable=False,
                         )
@@ -3013,25 +3456,31 @@ class ConfigLinter:
     def _fix_legacy_name_variant(
         cls, config_data: Dict[str, Any], issue: LintIssue
     ) -> bool:
-        """Rename a legacy snake/kebab variant to its canonical form.
+        """Rename a legacy name to its canonical form.
 
-        ``issue.path`` is ``"<segment>.<legacy-key>"``. The corresponding
-        canonical form is the kebab↔snake swap of ``<legacy-key>``. An
-        env-read key never reaches here: its issue is not fixable, and lint
+        An issue about an old spelling of a renamed key (a row of the table in
+        ``models/spelling_table.py``) is found by the walk that raised it, at any
+        place the table puts the key's model, the root mapping included
+        (``_rename_old_spelling``). Any other issue is a section's snake/kebab
+        variant: ``issue.path`` is ``"<segment>.<legacy-key>"``, and the
+        corresponding canonical form is the kebab↔snake swap of
+        ``<legacy-key>``.
+
+        An env-read key never reaches here: its issue is not fixable, and lint
         --fix refuses any file that reads the environment before any fixer
         runs, so the path's key is always a key of the data.
         """
+        renamed = cls._rename_old_spelling(config_data, issue)
+        if renamed is not None:
+            return renamed
         if not issue.path or "." not in issue.path:
             return False
         segment_name, legacy_key = issue.path.split(".", 1)
         segment_data = config_data.get(segment_name)
         if not isinstance(segment_data, dict) or legacy_key not in segment_data:
             return False
-        if "-" in legacy_key:
-            canonical_key = legacy_key.replace("-", "_")
-        elif "_" in legacy_key:
-            canonical_key = legacy_key.replace("_", "-")
-        else:
+        canonical_key = spellings.section_variant(legacy_key)
+        if canonical_key is None:
             return False
         # Defense in depth, per an earlier review: refuse to fix if the canonical key
         # already exists. The lint phase emits a LEGACY_NAME_CONFLICT

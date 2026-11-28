@@ -35,6 +35,7 @@ from typing import (
     cast,
 )
 
+from automated_security_helper.config import command_names
 from automated_security_helper.core.constants import ASH_EXIT_USAGE_ERROR
 from automated_security_helper.models.vocab import Severity
 from automated_security_helper.core.resource_management.scan_registry import (
@@ -1502,13 +1503,14 @@ def _load_error_response(
             McpErrorType.CONFIG_POLICY_UNREADABLE.value,
         ):
             return denial
+    lint_command = command_names.render_command(command_names.CONFIG_LINT)
     return with_exit_code(
         create_error_response(
             error=checked.load_error,
             operation="scan_directory",
             suggestions=[
                 "Fix the error the message names; a syntax error names its line",
-                "Run 'ash config lint' on the file to check it",
+                f"Run '{lint_command}' on the file to check it",
             ],
         ),
         REFUSED_CONFIG_EXIT_CODE,
@@ -2054,6 +2056,7 @@ async def mcp_scan_directory(
         if not_discovered is not None:
             # A config the scan cannot use, as a named file that does not parse
             # is: the same code (3) whichever way the file reached the scan.
+            lint_command = command_names.render_command(command_names.CONFIG_LINT)
             return with_exit_code(
                 create_error_response(
                     error=not_discovered,
@@ -2063,7 +2066,7 @@ async def mcp_scan_directory(
                             "Fix the error the message names; a syntax error names "
                             "its line"
                         ),
-                        "Run 'ash config lint' on the file to check it",
+                        f"Run '{lint_command}' on the file to check it",
                     ],
                 ),
                 REFUSED_CONFIG_EXIT_CODE,
@@ -6813,6 +6816,7 @@ def _select_profile(
     session_id: Optional[str],
 ) -> Dict[str, Any]:
     """:func:`mcp_select_profile`, once the session is held against the sweep."""
+    from automated_security_helper.config import spellings
     from automated_security_helper.config.session_profiles import (
         bind_session_config,
         client_values_present,
@@ -6945,10 +6949,11 @@ def _select_profile(
         # Strict-extra gate: AshConfig.model_config has extra='ignore' for
         # back-compat with end-user configs, but profiles are operator-
         # controlled deployment artifacts and should fail on typos.
-        allowed = set(AshConfig.model_fields.keys())
-        for finfo in AshConfig.model_fields.values():
-            if finfo.alias:
-                allowed.add(finfo.alias)
+        allowed = {
+            spelling
+            for field_name in AshConfig.model_fields
+            for spelling in spellings.field_spellings(AshConfig, field_name)
+        }
         unknown = sorted(set(raw or {}) - allowed)
         if unknown:
             return {
@@ -6956,6 +6961,18 @@ def _select_profile(
                 "error": raw_controls_on_one_line(
                     f"override_yaml validation error: unknown top-level "
                     f"field(s): {', '.join(unknown)}"
+                ),
+            }
+        try:
+            # The models read a removed spelling of a key at every release, so
+            # the client's document is checked for one here. Places and keys
+            # only: the response goes to the client.
+            spellings.refuse_removed_spellings(raw or {}, "override_yaml")
+        except spellings.SpellingRefused as refused:
+            return {
+                "success": False,
+                "error": raw_controls_on_one_line(
+                    f"override_yaml validation error: {refused.located}"
                 ),
             }
         try:
