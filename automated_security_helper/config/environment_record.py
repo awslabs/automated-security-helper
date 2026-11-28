@@ -90,6 +90,7 @@ from automated_security_helper.config.ash_config import (
     ENV_REFERENCE_PATTERN,
     EXPLICIT_ENV_TAG,
     config_env_var_is_interpolatable,
+    list_made_of,
     reduced_plugin_name,
     resolve_env_references,
 )
@@ -162,6 +163,12 @@ class EnvironmentReference:
     #: directory and the reference. None when the anchoring left the value as it
     #: was. Not compared.
     anchored: Optional[Tuple[str, str]] = dataclass_field(default=None, compare=False)
+    #: Set where a document of the chain merged after this reference's file
+    #: writes its place (config_sources._mark_written_over): the configuration
+    #: holds that document's value there, whatever it is, so no view, record or
+    #: session copy describes the place by this reference. It stays one of the
+    #: chain's reads, so redaction still masks its value. Not compared.
+    written_over: bool = dataclass_field(default=False, compare=False)
 
     def moved_to_unknown_list(
         self, path: Tuple[PathSegment, ...]
@@ -729,16 +736,22 @@ class _Index:
         mark: Optional[Callable[[str], Any]] = None,
         whole_only: bool = False,
         exact_indices: bool = False,
+        list_as_reference: bool = False,
     ) -> None:
         self.values: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.mark = mark
         self.whole_only = whole_only
         self.exact_indices = exact_indices
+        self.list_as_reference = list_as_reference
         #: The data's strings by exact position, and its lists' lengths (``scan``).
         self.strings: Dict[Tuple[PathSegment, ...], str] = {}
         self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
         for reference in references:
+            if whole_only and reference.written_over:
+                # A session copy writes what the configuration holds: a later
+                # document's value is written as that document wrote it.
+                continue
             target = self.keys if reference.key else self.values
             target.setdefault(_normal_path(reference.path, exact_indices), []).append(
                 reference
@@ -840,23 +853,28 @@ class _Index:
 
     def _list_made_from(
         self,
+        item: Any,
         path: Tuple[PathSegment, ...],
         exact: Tuple[PathSegment, ...],
         pinned: Tuple[Tuple[int, str], ...],
-    ) -> Optional[EnvironmentReference]:
-        """In a view (``mark``, not ``whole_only``), the reference a file wrote at
-        the place of a list itself, which resolved to one string: the load made
-        the list of that string. None in a record, and for a list the file wrote
-        as a list (its references sit at its entries)."""
+    ) -> Optional[Tuple[EnvironmentReference, int]]:
+        """The reference a file wrote at the place of a list itself, which resolved
+        to one string, and how many of the list's first entries the field made of
+        that string (``ash_config.list_made_of``). None in an unmarked record, for
+        a list the file wrote as a list (its references sit at its entries), and
+        for a list that does not start with those entries (a later file's list, a
+        replacing override's), which is walked as written."""
         if self.mark is None or self.whole_only:
             return None
+        entries = list(item)
         for reference in self._references_at(self.values, path, pinned):
-            if (
-                not reference.key
-                and isinstance(reference.resolved, str)
-                and _exact_path(reference.path) == exact
-            ):
-                return reference
+            if reference.key or not isinstance(reference.resolved, str):
+                continue
+            if _exact_path(reference.path) != exact:
+                continue
+            count = list_made_of(reference.resolved, entries)
+            if count:
+                return reference, count
         return None
 
     def record(
@@ -892,13 +910,34 @@ class _Index:
                 result[key] = recorded
             return result
         if isinstance(item, (list, tuple)):
-            whole = self._list_made_from(path, exact, pinned)
-            if whole is not None:
+            made = self._list_made_from(item, path, exact, pinned)
+            if made is not None:
+                whole, count = made
+                if self.list_as_reference:
+                    # Written to be loaded again (`ash config get`): the
+                    # reference once, which loads back as the entries it made,
+                    # with each entry a later step appended after it.
+                    tail = "".join(f",{entry}" for entry in list(item)[count:])
+                    return self._whole(replace(whole, written=whole.written + tail))
                 # A view of a list the load made of one reference's text
-                # (``output_formats`` splits "sarif,html" into names): every entry
-                # is part of the value, so each is shown as the reference, and no
-                # entry is shown in clear. A record walks the entries as before.
-                return type(item)(self._whole(whole) for _ in item)
+                # (``output_formats`` splits "sarif,html" into names): each entry
+                # the text made is part of the value and is shown as the
+                # reference, and no such entry is shown in clear. An entry a
+                # later step appended (an appending ``--config-overrides``) is
+                # walked as any entry is.
+                return type(item)(
+                    [self._whole(whole) for _ in range(count)]
+                    + [
+                        self.record(
+                            value,
+                            (*path, index if self.exact_indices else _ANY_INDEX),
+                            (*exact, index),
+                            pinned,
+                        )
+                        for index, value in enumerate(item)
+                        if index >= count
+                    ]
+                )
             return type(item)(
                 self.record(
                     value,
@@ -1080,6 +1119,7 @@ def record_environment_references(
     whole_only: bool = False,
     *,
     exact_indices: bool = False,
+    list_as_reference: bool = False,
 ) -> Any:
     """``data``, a dump of a configuration, with what ``references`` read written
     as the file wrote it; see "Where".
@@ -1094,8 +1134,11 @@ def record_environment_references(
     and at no other entry of that list, for a view of a configuration as its
     files hold it (the MCP get_config tool): an entry beside it with the same
     text is shown as it is. Without it, a reference matches every entry of its
-    list, so it follows an entry a patch moves. A copy: ``data`` itself is not
-    changed.
+    list, so it follows an entry a patch moves. ``list_as_reference``, for a view
+    written to be loaded again (``ash config get``): a list the load made of one
+    reference's text is written as that reference once, with each entry a later
+    step appended after it, so the text loads back as the list. A copy: ``data``
+    itself is not changed.
 
     A set or frozenset is walked too, and keeps its type: a set has no
     positions, so each member is an entry whose position is unknown and is read
@@ -1115,7 +1158,7 @@ def record_environment_references(
     """
     if not references and mark is None:
         return data
-    index = _Index(references, mark, whole_only, exact_indices)
+    index = _Index(references, mark, whole_only, exact_indices, list_as_reference)
     index.scan(data, _exact_path(at))
     return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
 

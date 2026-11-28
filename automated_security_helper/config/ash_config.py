@@ -32,6 +32,7 @@ from typing import (
     Literal,
     NamedTuple,
     Optional,
+    Sequence,
     Set,
     Tuple,
     cast,
@@ -2513,6 +2514,23 @@ def _output_formats_schema(schema: Dict[str, Any]) -> None:
     schema["anyOf"] = [array, array.get("items", {}), {"type": "null"}]
 
 
+def output_format_names(text: str) -> List[str]:
+    """The names ``output_formats`` reads from one string: split at its commas,
+    each stripped, empty ones left out (the spelling --output-formats takes)."""
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def list_made_of(text: str, entries: Sequence[Any]) -> int:
+    """How many of ``entries``, from the first, the field that makes a list of one
+    string (``output_formats``) made of ``text``: the length of that split when
+    ``entries`` starts with it, else 0. Entries after it came from a later step,
+    such as an appending ``--config-overrides``."""
+    names = output_format_names(text)
+    if names and list(entries[: len(names)]) == names:
+        return len(names)
+    return 0
+
+
 #: The variables a builtin reporter's options read when the config leaves the
 #: option unset: s3's bucket_name, cloudwatch-logs' log_group_name and
 #: bedrock-summary-reporter's model_id. A value read this way never goes through
@@ -2674,6 +2692,15 @@ class AshConfig(RedactedSection):
     # after attaching the file's references, to drop every reference of a list
     # the file no longer describes. Once set it stays set.
     _plugin_modules_replaced: bool = PrivateAttr(default=False)
+
+    # The key paths a REPLACING ``--config-overrides`` entry landed on, as
+    # apply_config_overrides resolved them (an appending override is not here),
+    # stamped the way ``_plugin_modules_replaced`` is. The load path reads it
+    # after attaching the file's references, to leave out of the displayed
+    # view and the record each reference and rewrite at or under such a place:
+    # the override's value is there (resolve_config.drop_references_under).
+    # Kept through later applications.
+    _override_replaced_places: Tuple[Tuple[str, ...], ...] = PrivateAttr(default=())
 
     # The dotted field paths this configuration's operator supplied, stamped by
     # apply_config_overrides: the paths the input model was written with (its
@@ -3108,7 +3135,7 @@ class AshConfig(RedactedSection):
         if isinstance(v, ExportFormat):
             return [v]
         if isinstance(v, str):
-            return [part.strip() for part in v.split(",") if part.strip()]
+            return output_format_names(v)
         return v
 
     @field_serializer("output_formats")

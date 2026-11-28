@@ -1336,6 +1336,10 @@ def get(
                     # reload as a reference) while a string that only looks
                     # like one is quoted back, as every config writer does.
                     mark=_as_reference,
+                    # A list the load made of one reference's text is written
+                    # as the reference once: it loads back as that list, where
+                    # one reference per entry loads the whole text into each.
+                    list_as_reference=True,
                 ),
                 Dumper=_AsWrittenYamlDumper,
                 default_flow_style=False,

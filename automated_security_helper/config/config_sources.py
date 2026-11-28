@@ -2992,9 +2992,11 @@ class ResolvedConfigDocument:
     #: The references of ``environment_references`` the merged ``data`` still
     #: shows at their places (``_still_describes``): the ones a view of the
     #: merged configuration writes back as the file wrote them (`ash config
-    #: get`, the MCP get_config tool). A base's reference under an overlay's
-    #: literal describes a file of the chain, not the configuration, and is
-    #: left out here; every other consumer reads ``environment_references``.
+    #: get`, the MCP get_config tool). A base's reference under a later
+    #: document's value describes a file of the chain, not the configuration:
+    #: the merge marks it (``EnvironmentReference.written_over``,
+    #: ``_mark_written_over``), whatever that value holds, and it is left out
+    #: here; every other consumer reads ``environment_references``.
     displayed_environment_references: List[EnvironmentReference] = field(
         default_factory=list
     )
@@ -3011,9 +3013,10 @@ class ResolvedConfigDocument:
     #: ``EnvironmentReference.place_key`` (the file, the path it holds in the
     #: file's own document, value or key, its text): the places of
     #: ``environment_references`` it is now at, none for one a ``patch`` wrote
-    #: over or that sets no value. For the record of the configuration
-    #: (config_validator.environment_record_read), which reads each file's
-    #: references in the file's own terms.
+    #: over or that sets no value, and none for one a later document of the
+    #: chain wrote over (``EnvironmentReference.written_over``). For the record
+    #: of the configuration (config_validator.environment_record_read), which
+    #: reads each file's references in the file's own terms.
     reference_places: Dict[Tuple[Any, ...], List[Tuple[Any, ...]]] = field(
         default_factory=dict
     )
@@ -4466,11 +4469,17 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
     its value, is left out of the displayed view
     (``ResolvedConfigDocument.displayed_environment_references``); it stays an
     environment read (``environment_references``), so redaction still masks
-    its value. A value that still contains the environment's part is kept,
-    erring toward keeping. A relative path the load anchored still describes the
-    place when it holds the text recorded at the anchoring, or where a patch
-    operation's value landed (``EnvironmentReference.anchored``).
+    its value. So is a reference a later document of the chain wrote over
+    (``EnvironmentReference.written_over``, marked at each merge by
+    ``_mark_written_over``), whatever that document's value holds: the place
+    shows that document's value, which no variable's value can change. Any
+    other reference is kept only where its place holds exactly the text it
+    resolved to or the text its anchoring recorded (a relative path the load
+    anchored, or where a patch operation's value landed:
+    ``EnvironmentReference.anchored``).
     """
+    if reference.written_over:
+        return False
     node = document
     for segment in reference.path:
         if not isinstance(node, (dict, list)):
@@ -4498,12 +4507,48 @@ def _still_describes(document: Any, reference: EnvironmentReference) -> bool:
                 return False
     if reference.key:
         return isinstance(node, dict) and reference.resolved in node
-    text = node if isinstance(node, str) else str(node)
-    return (
-        text == reference.resolved
-        or (reference.anchored is not None and text == reference.anchored[0])
-        or (bool(reference.value) and reference.value in text)
+    if not isinstance(node, str):
+        return False
+    return node == reference.resolved or (
+        reference.anchored is not None and node == reference.anchored[0]
     )
+
+
+def _writes_over(overlay: Any, path: Tuple[Any, ...]) -> bool:
+    """Whether merging ``overlay``, a mapping, over a document that holds a value
+    at ``path`` replaces that value (deep_merge): ``overlay`` holds something at
+    ``path``, or a list or a scalar at a place on the way, or a mapping where
+    ``path`` steps into a list. A key is matched as the merge matches it
+    (_resolve_dict_key)."""
+    node = overlay
+    for segment in path:
+        if not isinstance(node, dict) or not isinstance(segment, str):
+            return True
+        key = _resolve_dict_key(node, segment)
+        if key not in node:
+            return False
+        node = node[key]
+    return True
+
+
+def _mark_written_over(
+    references: List[EnvironmentReference],
+    layers: Sequence[Tuple[int, int, Any]],
+    own: Any,
+) -> None:
+    """Mark, in place, each value reference of a file's bases that a document
+    merged after its base writes over. ``layers`` holds, for each base in merge
+    order, the slice of ``references`` its subtree read and the document it was
+    merged as; ``own``, the file's own document, is merged last."""
+    for index, (start, end, _document) in enumerate(layers):
+        later = [document for _start, _end, document in layers[index + 1 :]]
+        later.append(own)
+        for position in range(start, end):
+            reference = references[position]
+            if reference.key or reference.written_over:
+                continue
+            if any(_writes_over(document, tuple(reference.path)) for document in later):
+                references[position] = replace(reference, written_over=True)
 
 
 def _split_references(
@@ -5137,6 +5182,10 @@ def _resolve(
 
             ops = anchor_patch_operations(ops, real.parent)
         merged: Any = {}
+        # For each base, in merge order: the slice of ``state.references`` its
+        # subtree read and the document the merge layered
+        # (``_mark_written_over``).
+        layers: List[Tuple[int, int, Any]] = []
         # Followed only where a confine hook can leave something out.
         unconfined: Any = None if state.confine is None else {}
         for base_ref in refs:
@@ -5158,6 +5207,7 @@ def _resolve(
             # The base as its entry spells it, before any symlink is followed:
             # relative to the resolved file that extends it, as base_path is.
             base_named = _base_named(base_ref, real)
+            start = len(state.references)
             base_document, base_unconfined, base_owned = _resolve(
                 base_path,
                 stack + (real,),
@@ -5186,9 +5236,9 @@ def _resolve(
             # file's own sections are left for the model to fold, so its patch
             # still names them in the spelling it wrote. The unconfined view
             # mirrors a document that was folded and logged just above.
-            merged = deep_merge(
-                merged, fold_document_scanner_aliases(base_document), AshConfig
-            )
+            folded = fold_document_scanner_aliases(base_document)
+            merged = deep_merge(merged, folded, AshConfig)
+            layers.append((start, len(state.references), folded))
             if unconfined is not None:
                 unconfined = deep_merge(
                     unconfined,
@@ -5201,6 +5251,13 @@ def _resolve(
         merged = deep_merge(merged, own, AshConfig)
         if unconfined is not None:
             unconfined = deep_merge(unconfined, own, AshConfig)
+        # Each base reference a document merged after its base writes over is
+        # marked here, at the merge, against the documents the merge layers: a
+        # patch acts between merges, so a rule taken at the end of the chain
+        # from the files' own documents would misjudge a place a later file's
+        # patch moves a base's value over, or a base's own patch removes what a
+        # deeper base wrote.
+        _mark_written_over(state.references, layers, own)
         if owned is not None and operator_file:
             _owned_plugin_keys(own, owned)
         if ops is not None:
@@ -5451,6 +5508,10 @@ def resolve_config_document(
         reference.place_key: [] for reference in state.read
     }
     for reference in state.references:
+        if reference.written_over:
+            # A later document of the chain wrote this place: the configuration
+            # holds that document's value, which the record keeps as it is.
+            continue
         places.setdefault(reference.place_key, []).append(tuple(reference.path))
     return ResolvedConfigDocument(
         data=data,

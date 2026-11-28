@@ -1039,3 +1039,104 @@ def test_a_patched_copy_of_a_profile_with_a_set_member_holds_its_reference(
     assert patched.project_name == "patched"
     assert SET_MEMBER not in text, text
     assert SET_REFERENCE in text, text
+
+
+# ---------------------------------------------------------------------------
+# A later document of the chain writes a place a base read from the environment
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("prod-7c1e", id="inside"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_bases_reference_under_a_later_files_literal_is_not_recorded(
+    tmp_path, probe_env, held
+):
+    """A base reads ``project_name`` from a variable and the file extending it
+    writes ``acme-prod-7c1e``. The scan runs with the later file's text, so its
+    record holds that text and no reference of the base: whatever the variable
+    holds (``inside``: its value is part of the later text; ``control``: it is
+    not), the record is the same."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_PN", held)
+    _operator_config(tmp_path, "project_name: ${ASH_PROBE_PN}\n", "base.yaml")
+    path = _operator_config(
+        tmp_path, "extends: base.yaml\nproject_name: acme-prod-7c1e\n"
+    )
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the scan holds the later file's text.
+    assert config.project_name == "acme-prod-7c1e"
+    assert _recorded(config)["project_name"] == "acme-prod-7c1e"
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("prod-7c1e", id="inside"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_replacing_override_of_a_value_read_from_the_environment_is_recorded_as_the_override(
+    tmp_path, probe_env, held
+):
+    """A replacing ``--config-overrides`` sets ``project_name`` over a file that
+    reads it from a variable. The scan runs with the override's text, so the
+    record holds it and no reference of the file, whatever the variable holds."""
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_PN", held)
+    path = _operator_config(tmp_path, "project_name: ${ASH_PROBE_PN}\n")
+
+    config = resolve_config(
+        config_path=path,
+        source_dir=tmp_path / "tree",
+        config_overrides=["project_name=acme-prod-7c1e"],
+    )
+
+    # The control: the scan holds the override's text.
+    assert config.project_name == "acme-prod-7c1e"
+    assert _recorded(config)["project_name"] == "acme-prod-7c1e"
+
+
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("acme-prod-7c1e", id="equal"),
+        pytest.param("other-7c1e", id="control"),
+    ],
+)
+def test_a_profiles_literal_over_its_bases_reference_is_written_to_a_session_as_the_literal(
+    tmp_path, probe_env, held
+):
+    """A registered profile extends a base that reads ``project_name`` from a
+    variable and writes ``acme-prod-7c1e`` itself. The session copy writes that
+    text as the profile wrote it, and not as the base's reference, even where the
+    variable holds that very text (``equal``)."""
+    from automated_security_helper.cli.mcp import profile_registry
+
+    probe_env.setenv("ASH_PROBE_PN", held)
+    probe_env.setenv("ASH_MCP_WORKSPACE_ROOT", str(tmp_path / "mcp-workspaces"))
+    probe_env.setenv("ASH_MCP_TRANSPORT", "stdio")
+    _operator_config(tmp_path, "project_name: ${ASH_PROBE_PN}\n", "base.yaml")
+    profile = _operator_config(
+        tmp_path,
+        "extends: base.yaml\nproject_name: acme-prod-7c1e\n",
+        "profile.ash.yaml",
+    )
+    registry = profile_registry.register_profiles([f"probe={profile}"])
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-literal", registry["probe"].config, client_patched=False
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert _as_written(text)["project_name"] == "acme-prod-7c1e", text

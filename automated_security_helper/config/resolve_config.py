@@ -139,6 +139,7 @@ from automated_security_helper.config.environment_record import (
     ENVIRONMENT_VALUE_SHOWN,
     UNKNOWN_INDEX,
     WrittenKeyMapping,
+    _normal,
     mappings_with_written_reference_keys,
 )
 from automated_security_helper.config.default_config import get_default_config
@@ -917,6 +918,16 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
     )
     if replaced:
         rebuilt._plugin_modules_replaced = True
+    # A replacing override of any key leaves the references and rewrites at or
+    # under that place describing a value the override replaced: the key paths
+    # it landed on are stamped for the load path, which attaches its references
+    # after this application, and the model that already carries references (a
+    # second application) drops them now.
+    rebuilt._override_replaced_places = (
+        *rebuilt._override_replaced_places,
+        *(tuple(keys) for keys, _value, appended in applied if not appended),
+    )
+    drop_references_under(rebuilt, rebuilt._override_replaced_places)
     drop_plugin_module_references_past_the_list(rebuilt, replaced=replaced)
     rebuilt._reporters_before_overrides = reporters_before_overrides
     rebuilt._scanners_before_overrides = scanners_before_overrides
@@ -928,6 +939,32 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
         rebuilt, written_before_overrides, applied
     )
     return rebuilt
+
+
+def drop_references_under(config: Any, places: Sequence[Tuple[str, ...]]) -> None:
+    """Leave out of the displayed view, and out of the record's rewrites, each
+    reference and rewrite at or under a key path a replacing --config-overrides
+    landed on: the override's value is there, so no view or record describes
+    the place by what a file read. The reads stay (_environment_references,
+    _environment_values), so redaction still masks the values."""
+    if not places:
+        return
+    normal = [tuple(_normal(str(segment)) for segment in place) for place in places]
+
+    def under(path: Sequence[Any]) -> bool:
+        spelled = tuple(_normal(s) if isinstance(s, str) else s for s in path)
+        return any(spelled[: len(place)] == place for place in normal)
+
+    config._displayed_environment_references = tuple(
+        reference
+        for reference in config._displayed_environment_references
+        if not under(reference.path)
+    )
+    config._written_references = [
+        rewrite
+        for rewrite in (config._written_references or [])
+        if not under(rewrite.path)
+    ]
 
 
 def resolve_config_source(
@@ -1322,6 +1359,11 @@ def load_config_file_for_run(
     drop_plugin_module_references_past_the_list(
         config, replaced=config._plugin_modules_replaced
     )
+    # The same for every place a replacing override landed on, stamped by the
+    # same application: the references were attached after the overrides were
+    # applied, so each one at or under such a place describes a value the
+    # override replaced and is left out of the displayed view and the record.
+    drop_references_under(config, config._override_replaced_places)
     # The loader's own record (``document.environment_references``) pairs
     # mappings and lists, so a set member any file of the chain read from the
     # environment has no reference, no displayed reference and no rewrite yet.
