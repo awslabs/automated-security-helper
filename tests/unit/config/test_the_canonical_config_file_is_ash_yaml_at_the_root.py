@@ -14,6 +14,7 @@ reads its file and warns nothing. The legacy locations are removed in ASH 4.0.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,7 @@ LEGACY_LOCATIONS = [
 
 # The legacy locations by the language their name says. The canonical file is
 # read as YAML, so a TOML file cannot be moved there, and a JSON file can only
-# once each tab and each value YAML reads another way is rewritten.
+# once each tab and each value or key YAML reads another way is rewritten.
 TOML_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".toml")]
 JSON_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".json")]
 YAML_LEGACY = [
@@ -87,9 +88,13 @@ JSON_CAVEAT = (
     "U+009F), U+2028, U+2029, U+FFFE or U+FFFF in a string as its four-digit "
     "Unicode escape and each character above U+FFFF that is written as two "
     "escapes as the character itself, give each number that has an exponent a "
-    "decimal point and a sign after the e, such as 1.0e+3 for 1e3, write Infinity "
-    "as .inf, and keep each key on the same line as its colon: otherwise YAML "
-    "reads another value or refuses the file."
+    "decimal point and a sign after the e, such as 1.0e+3 for 1e3, and keep each "
+    "key on the same line as its colon: otherwise YAML reads another value or "
+    "refuses the file. In the moved file, write Infinity, -Infinity and NaN as "
+    ".inf, -.inf and .nan, and put a question mark and a space before each key "
+    "whose colon is more than 1,024 characters after its opening quote mark: YAML "
+    "reads the JSON spelling of each number as text and refuses such a key "
+    "without the question mark."
 )
 ENV_CAVEAT = (
     "In the YAML, put !ENV and a space before the opening quote of each string "
@@ -100,7 +105,8 @@ ENV_CAVEAT = (
     "TOML reads: leave out a line break that directly follows the opening marks "
     "and, from three double quote marks, an unescaped backslash that ends a line "
     "(only spaces or tabs after it on that line), with the spaces, tabs and line "
-    "breaks after it; write each other line feed as \\n; from three single quote "
+    "breaks after it; write each other line break (a line feed, or a carriage "
+    "return and a line feed) as \\n; from three single quote "
     'marks, also write each backslash as \\\\ and each double quote as \\"; from '
     "three double quote marks, keep each escape and write each unescaped double "
     'quote as \\". A string whose text holds a C1 control (U+0080 to U+009F), '
@@ -109,9 +115,14 @@ ENV_CAVEAT = (
     "escaped, with each such character written as its four-digit Unicode escape: "
     "YAML reads U+0085, U+2028 and U+2029 inside quotes as line breaks and "
     "refuses a file that holds one of the others. Give each number that has an "
-    "exponent a decimal point and a sign after the e, with no underscore after "
-    "it, such as 1.0e+3 for 1e3, write each octal number, such as 0o17, in "
-    "decimal, and write inf as .inf: YAML reads another spelling of each as text."
+    "exponent a decimal point and, after the e, a sign and no underscore, such "
+    "as 1.0e+3 for 1e3, write each octal number, such as 0o17, in decimal, and "
+    "write inf, +inf and -inf as .inf, +.inf and -.inf, and nan, +nan and -nan "
+    "as .nan: YAML reads the TOML spelling of each as text. Write each key whose "
+    "colon would be more than 1,024 characters after the key's first character "
+    "after a question mark and a space, and put its colon, a space and its value "
+    "on the next line, the colon under the question mark: without the question "
+    "mark YAML refuses such a key."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -179,6 +190,19 @@ def _json_and_yaml_roots(
 def _json_object(project_name: str) -> str:
     """A JSON object that sets only `project_name`, as written, and a line feed."""
     return '{"project_name": "' + project_name + '"}\n'
+
+
+def _probe_section(root: Path) -> dict:
+    """The section of a scanner named probe, which ASH has no model for and keeps as
+    it was read, so it shows what the file's loader made of each value."""
+    section = resolve_config(source_dir=root).scanners.model_extra["probe"]
+    assert isinstance(section, dict), section
+    return section
+
+
+def _json_probe(key_text: str, before_colon: str = "") -> str:
+    """A JSON object whose probe section maps the key, as written, to "x"."""
+    return '{"scanners": {"probe": {"' + key_text + '"' + before_colon + ': "x"}}}\n'
 
 
 @pytest.fixture
@@ -607,6 +631,221 @@ class TestAMovedJsonStringOrKeyIsReadAnotherWay:
         )
         assert resolve_config(source_dir=json_root).project_name == "x"
         assert resolve_config(source_dir=yaml_root).project_name == "x"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '{"workspace": {"project_timeout": .inf}}\n',
+            '{"scanners": {"probe": {? "k": "x"}}}\n',
+        ],
+        ids=["dot_inf", "question_mark_key"],
+    )
+    def test_a_yaml_spelling_in_a_json_file_is_refused_as_json(self, tmp_path, text):
+        """So the advice writes .inf, -.inf, .nan and a question mark before a long
+        key in the moved file: JSON refuses each of them before the move."""
+        (tmp_path / ".ash.json").write_text(text, encoding="utf-8")
+        with pytest.raises(ASHConfigValidationError):
+            resolve_config(source_dir=tmp_path)
+
+
+class TestALongKeyIsReadByYamlOnlyAsAnExplicitKey:
+    """Why the JSON and TOML advice says to put a question mark and a space before a
+    key whose colon is more than 1,024 characters after the key's first character:
+    JSON and TOML read a key of any length, while YAML reads such a key only as an
+    explicit key and refuses it otherwise, counting each character as written, an
+    escape and each space before the colon included."""
+
+    #: With its two quote marks, its colon is 1,025 characters after the opening one.
+    LONG_KEY = "a" * 1023
+
+    def test_a_json_key_whose_colon_is_1025_characters_after_its_opening_quote_is_refused_as_yaml(
+        self, tmp_path
+    ):
+        """JSON reads the key. YAML drops a key whose colon is that far from its first
+        character, reads the colon with no key before it and refuses the file, and the
+        refusal is the kind a scan reports with exit 3."""
+        text = _json_probe(self.LONG_KEY)
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert _probe_section(json_root) == {self.LONG_KEY: "x"}
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_json_key_whose_colon_is_1024_characters_after_its_opening_quote_reads_what_json_reads(
+        self, tmp_path
+    ):
+        """One character less and YAML reads the key as JSON does."""
+        key = "a" * 1022
+        text = _json_probe(key)
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert _probe_section(json_root) == {key: "x"}
+        assert _probe_section(yaml_root) == {key: "x"}
+
+    def test_a_space_before_the_colon_counts_toward_the_limit(self, tmp_path):
+        """A key whose colon would be 1,024 characters after its opening quote mark is
+        read by both. A space before the colon makes it 1,025, and YAML refuses the
+        key that JSON still reads."""
+        key = "a" * 1022
+        text = _json_probe(key, " ")
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert _probe_section(json_root) == {key: "x"}
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_an_escape_counts_toward_the_limit_as_written(self, tmp_path):
+        """An escape counts as the characters it is written with, not as the one
+        character it stands for: this key reads 1,018 characters long, and its colon
+        is still 1,025 characters after its opening quote mark."""
+        escape = f"{BACKSLASH}u{0x62:04X}"
+        text = _json_probe("a" * 1017 + escape)
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert _probe_section(json_root) == {"a" * 1017 + "b": "x"}
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_long_json_key_after_a_question_mark_and_a_space_reads_what_json_reads(
+        self, tmp_path
+    ):
+        """YAML reads a key after a question mark and a space as an explicit key, and
+        an explicit key has no limit on its length."""
+        json_root, yaml_root = _json_and_yaml_roots(
+            tmp_path,
+            _json_probe(self.LONG_KEY),
+            '{"scanners": {"probe": {? "' + self.LONG_KEY + '": "x"}}}\n',
+        )
+        assert _probe_section(json_root) == {self.LONG_KEY: "x"}
+        assert _probe_section(yaml_root) == {self.LONG_KEY: "x"}
+
+    def test_a_long_toml_key_written_in_yaml_as_usual_is_refused(self, tmp_path):
+        """TOML reads a bare key of any length. YAML, in a block mapping, drops a key
+        whose colon is more than 1,024 characters after its first character and
+        refuses the colon that follows, with the refusal a scan reports with exit 3."""
+        key = "a" * 1025
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[scanners.probe]", f'{key} = "x"'],
+            ["scanners:", "  probe:", f"    {key}: x"],
+        )
+        assert _probe_section(toml_root) == {key: "x"}
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ScannerError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_long_toml_key_written_as_an_explicit_key_reads_what_toml_reads(
+        self, tmp_path
+    ):
+        """After a question mark and a space, with the colon and the value on the next
+        line and the colon under the question mark, YAML reads the key as TOML does."""
+        key = "a" * 1025
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[scanners.probe]", f'{key} = "x"'],
+            ["scanners:", "  probe:", f"    ? {key}", "    : x"],
+        )
+        assert _probe_section(toml_root) == {key: "x"}
+        assert _probe_section(yaml_root) == {key: "x"}
+
+
+#: Spellings of a float that TOML or JSON reads and YAML reads as text, each as the
+#: language that writes it, the spelling as that language writes it, the spelling YAML
+#: reads as the same number and the number. YAML's infinity takes a sign and its NaN
+#: takes none.
+SPECIAL_FLOATS = {
+    "toml_plus_inf": ("toml", "+inf", "+.inf", float("inf")),
+    "toml_minus_inf": ("toml", "-inf", "-.inf", -float("inf")),
+    "json_minus_infinity": ("json", "-Infinity", "-.inf", -float("inf")),
+    "toml_nan": ("toml", "nan", ".nan", float("nan")),
+    "toml_plus_nan": ("toml", "+nan", ".nan", float("nan")),
+    "toml_minus_nan": ("toml", "-nan", ".nan", float("nan")),
+    "json_nan": ("json", "NaN", ".nan", float("nan")),
+}
+
+
+def _special_float_roots(
+    tmp_path: Path, language: str, written: str, yaml_written: str
+) -> tuple[Path, Path]:
+    """A root with the value written as `language` writes it, and one with it written
+    as `yaml_written`, each in a section of a scanner named probe."""
+    if language == "toml":
+        return _toml_and_yaml_roots(
+            tmp_path,
+            ["[scanners.probe]", f"value = {written}"],
+            ["scanners:", "  probe:", f"    value: {yaml_written}"],
+        )
+    prefix = '{"scanners": {"probe": {"value": '
+    return _json_and_yaml_roots(
+        tmp_path, prefix + written + "}}}\n", prefix + yaml_written + "}}}\n"
+    )
+
+
+def _is_the_number(value, number: float) -> bool:
+    """Whether `value` is the float `number`, a NaN being the same as a NaN."""
+    return isinstance(value, float) and (
+        math.isnan(value) if math.isnan(number) else value == number
+    )
+
+
+class TestAnInfinityOrNanNeedsItsYamlSpelling:
+    """Why the advice says to write inf, +inf, -inf, Infinity and -Infinity as .inf
+    with the sign kept, and nan, +nan, -nan and NaN as .nan: TOML and JSON read each
+    as a float, YAML reads each as text, and YAML's .inf takes a sign while its .nan
+    takes none. The values sit in a section ASH has no model for, which keeps them as
+    read."""
+
+    @pytest.mark.parametrize("spelling", list(SPECIAL_FLOATS))
+    def test_toml_and_json_read_it_as_a_float_and_yaml_reads_the_spelling_as_text(
+        self, tmp_path, spelling
+    ):
+        """TOML and JSON read the value as a float. YAML reads the same text as the
+        text it is, which a setting that takes a number refuses."""
+        language, written, _, number = SPECIAL_FLOATS[spelling]
+        source_root, yaml_root = _special_float_roots(
+            tmp_path, language, written, written
+        )
+        assert _is_the_number(_probe_section(source_root)["value"], number)
+        assert _probe_section(yaml_root)["value"] == written
+
+    @pytest.mark.parametrize("spelling", list(SPECIAL_FLOATS))
+    def test_written_in_its_yaml_spelling_it_reads_what_toml_or_json_reads(
+        self, tmp_path, spelling
+    ):
+        """Written as YAML spells it, the value is the float TOML or JSON reads."""
+        language, written, yaml_written, number = SPECIAL_FLOATS[spelling]
+        source_root, yaml_root = _special_float_roots(
+            tmp_path, language, written, yaml_written
+        )
+        assert _is_the_number(_probe_section(source_root)["value"], number)
+        assert _is_the_number(_probe_section(yaml_root)["value"], number)
+
+
+#: A NaN timeout as each language writes it, each as the name of the file and its
+#: text. TOML and JSON read the NaN as a float, and YAML reads `.nan` as one.
+NAN_TIMEOUTS = {
+    "toml": (".ashrc.toml", "[workspace]\nproject_timeout = nan\n"),
+    "json": (".ash.json", '{"workspace": {"project_timeout": NaN}}\n'),
+    "yaml": (".ash.yaml", "workspace:\n  project_timeout: .nan\n"),
+}
+
+
+class TestANanIsRefusedByASettingThatTakesSeconds:
+    """A NaN is no number of seconds. workspace.project_timeout refuses it, written as
+    TOML, JSON or YAML, so writing nan or NaN as .nan in the moved file changes nothing
+    for it."""
+
+    @pytest.mark.parametrize("written", list(NAN_TIMEOUTS))
+    def test_a_nan_project_timeout_is_refused(self, tmp_path, written):
+        name, text = NAN_TIMEOUTS[written]
+        (tmp_path / name).write_text(text, encoding="utf-8", newline="\n")
+        with pytest.raises(
+            ASHConfigValidationError, match="Configuration validation failed for"
+        ):
+            resolve_config(source_dir=tmp_path)
 
 
 class TestAMovedFileKeepsItsRelativeBasesOnlyIfTheyAreRewritten:
@@ -1257,21 +1496,28 @@ NUMBER_SPELLINGS = {
     "no_sign": ("2.5e2", "2.5e+2", 250.0),
     "negative_exponent_no_point": ("25e-1", "25.0e-1", 2.5),
 }
+#: The same, with a spelling only TOML writes: an underscore between the digits after
+#: the `e`, which TOML reads and YAML does not.
+TOML_NUMBER_SPELLINGS = {
+    **NUMBER_SPELLINGS,
+    "underscore_after_the_e": ("1.5e+1_0", "1.5e+10", 15000000000.0),
+}
 
 
 class TestANumberInYamlNeedsAPointAndASignInItsExponent:
     """Why the TOML and JSON advice says to give a number with an exponent a decimal
-    point and a sign after the e, to write a TOML octal number in decimal, and to
-    write an infinity as .inf: TOML and JSON read each such spelling as a number, YAML
-    reads it as text, and a setting that takes a number refuses text."""
+    point and, after the e, a sign and no underscore, to write a TOML octal number in
+    decimal, and to write an infinity as .inf: TOML and JSON read each such spelling
+    as a number, YAML reads it as text, and a setting that takes a number refuses
+    text."""
 
-    @pytest.mark.parametrize("spelling", list(NUMBER_SPELLINGS))
+    @pytest.mark.parametrize("spelling", list(TOML_NUMBER_SPELLINGS))
     def test_a_toml_number_with_an_exponent_and_no_point_or_sign_is_refused_as_yaml(
         self, tmp_path, spelling
     ):
         """TOML reads the number. YAML reads the same text as text, which the setting
         refuses, and the refusal is the kind a scan reports with exit 3."""
-        written, _, number = NUMBER_SPELLINGS[spelling]
+        written, _, number = TOML_NUMBER_SPELLINGS[spelling]
         toml_root, yaml_root = _toml_and_yaml_roots(
             tmp_path,
             ["[workspace]", f"project_timeout = {written}"],
@@ -1297,11 +1543,11 @@ class TestANumberInYamlNeedsAPointAndASignInItsExponent:
         ):
             resolve_config(source_dir=yaml_root)
 
-    @pytest.mark.parametrize("spelling", list(NUMBER_SPELLINGS))
+    @pytest.mark.parametrize("spelling", list(TOML_NUMBER_SPELLINGS))
     def test_a_toml_number_rewritten_with_a_point_and_a_sign_reads_what_toml_reads(
         self, tmp_path, spelling
     ):
-        written, rewritten, number = NUMBER_SPELLINGS[spelling]
+        written, rewritten, number = TOML_NUMBER_SPELLINGS[spelling]
         toml_root, yaml_root = _toml_and_yaml_roots(
             tmp_path,
             ["[workspace]", f"project_timeout = {written}"],

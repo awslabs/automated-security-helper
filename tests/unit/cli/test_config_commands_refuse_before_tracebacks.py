@@ -141,9 +141,13 @@ TAB_AFTER_PATH = (
     "U+2029, U+FFFE or U+FFFF in a string as its four-digit Unicode escape and "
     "each character above U+FFFF that is written as two escapes as the "
     "character itself, give each number that has an exponent a decimal point "
-    "and a sign after the e, such as 1.0e+3 for 1e3, write Infinity as .inf, "
-    "and keep each key on the same line as its colon: otherwise YAML reads "
-    "another value or refuses the file"
+    "and a sign after the e, such as 1.0e+3 for 1e3, and keep each key on the "
+    "same line as its colon: otherwise YAML reads another value or refuses the "
+    "file. In the moved file, write Infinity, -Infinity and NaN as .inf, -.inf "
+    "and .nan, and put a question mark and a space before each key whose colon "
+    "is more than 1,024 characters after its opening quote mark: YAML reads the "
+    "JSON spelling of each number as text and refuses such a key without the "
+    "question mark"
 )
 ENV_BEFORE_PATH = (
     "In the YAML, put !ENV and a space before the opening quote of each string "
@@ -157,7 +161,8 @@ ENV_AFTER_PATH = (
     "break that directly follows the opening marks and, from three double quote "
     "marks, an unescaped backslash that ends a line (only spaces or tabs after it "
     "on that line), with the spaces, tabs and line breaks after it; write each "
-    "other line feed as \\n; from three single quote marks, also write each "
+    "other line break (a line feed, or a carriage return and a line feed) as "
+    "\\n; from three single quote marks, also write each "
     'backslash as \\\\ and each double quote as \\"; from three double quote '
     "marks, keep each escape and write each unescaped double quote as "
     '\\". A string whose text holds a C1 control (U+0080 to U+009F), '
@@ -166,9 +171,14 @@ ENV_AFTER_PATH = (
     "escaped, with each such character written as its four-digit Unicode escape: "
     "YAML reads U+0085, U+2028 and U+2029 inside quotes as line breaks and "
     "refuses a file that holds one of the others. Give each number that has an "
-    "exponent a decimal point and a sign after the e, with no underscore after "
-    "it, such as 1.0e+3 for 1e3, write each octal number, such as 0o17, in "
-    "decimal, and write inf as .inf: YAML reads another spelling of each as text"
+    "exponent a decimal point and, after the e, a sign and no underscore, such "
+    "as 1.0e+3 for 1e3, write each octal number, such as 0o17, in decimal, and "
+    "write inf, +inf and -inf as .inf, +.inf and -.inf, and nan, +nan and -nan "
+    "as .nan: YAML reads the TOML spelling of each as text. Write each key whose "
+    "colon would be more than 1,024 characters after the key's first character "
+    "after a question mark and a space, and put its colon, a space and its value "
+    "on the next line, the colon under the question mark: without the question "
+    "mark YAML refuses such a key"
 )
 
 
@@ -198,9 +208,9 @@ def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
     # A TOML string value that starts with `${` is read from the environment. In YAML
     # a quoted value is one only when `!ENV` is in front of it, without its quotes the
     # value is cut short at a space and a hash, or refused, three quote marks cannot
-    # be kept, a character YAML reads as a line break or refuses needs its escape, and
-    # a number with an exponent, an octal number or inf needs another spelling: the
-    # advice gives the form for each.
+    # be kept, a character YAML reads as a line break or refuses needs its escape, a
+    # number with an exponent, an octal number, inf or nan needs another spelling, and
+    # so does a key too long for YAML: the advice gives the form for each.
     assert ENV_BEFORE_PATH in result.output, result.output
     assert ENV_AFTER_PATH in result.output, result.output
     assert EXTENDS_BEFORE_PATH not in result.output, result.output
