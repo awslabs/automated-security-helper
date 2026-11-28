@@ -59,6 +59,7 @@ from automated_security_helper.config.config_sources import (
     RefuseEnv,
     ResolvedConfigDocument,
     _resolve_dict_key,
+    _writes_over,
     by_every_name,
     check_search_directory,
     deep_merge,
@@ -1299,10 +1300,40 @@ def load_config_file_for_run(
     document, config = load_config_file(
         config_path, reader=read_once, texts=texts, filled_out=filled, **kwargs
     )
+    # The operator's file a workspace layers over the project's own
+    # (_layered_over) writes over some of the project's places: the
+    # configuration holds the operator's value there, which the record and every
+    # view keep as the operator wrote it, as they do for a later file of the
+    # project's own chain (config_sources._mark_written_over). The project's
+    # reads stay among the references, so redaction still masks their values. So
+    # does a key's reference: the overlay's keys join the project's mapping and
+    # leave the project's own key where it is.
+    overlay = kwargs.get("overlay")
+    places = document.reference_places
+    displayed = list(document.displayed_environment_references)
+    if overlay is not None and isinstance(overlay.data, dict):
+        keys = {
+            reference.place_key
+            for reference in document.environment_references
+            if reference.key
+        }
+        places = {
+            place: [
+                (at, anchored)
+                for at, anchored in entries
+                if place in keys or not _writes_over(overlay.data, tuple(at))
+            ]
+            for place, entries in places.items()
+        }
+        displayed = [
+            reference
+            for reference in displayed
+            if reference.key or not _writes_over(overlay.data, tuple(reference.path))
+        ]
     # Each rewrite at the place the load followed its reference to, through
     # every patch of the chain (document.reference_places).
     values, rewrites = environment_record_read(
-        document.chain, reads, texts, places=document.reference_places
+        document.chain, reads, texts, places=places
     )
     # The client's copy holds those references as text, so reading its file
     # pairs none of them: they are recorded as the operator's copy read them,
@@ -1334,11 +1365,7 @@ def load_config_file_for_run(
     # The ones the merged document still shows at their places: what a view of
     # the config writes back as the file wrote it (`ash config get`, the MCP
     # get_config tool). The filled ones stand at the places the fill put them.
-    config._displayed_environment_references = (
-        *filled,
-        *document.displayed_environment_references,
-    )
-    overlay = kwargs.get("overlay")
+    config._displayed_environment_references = (*filled, *displayed)
     if overlay is not None:
         # The overlay's files were merged over the document before the model
         # was built (load_config_file), so what they read from the environment
