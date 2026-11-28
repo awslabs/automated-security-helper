@@ -676,17 +676,46 @@ def _node_at(document: Any, path: Sequence[PathSegment]) -> Any:
     return node
 
 
-def _recorded_string(text: str, candidates: Sequence[EnvironmentReference]) -> str:
+def _a_respelling_of(
+    reference: EnvironmentReference,
+    text: str,
+    respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]],
+) -> bool:
+    """Whether ``text`` is what the configuration's own model makes of
+    ``reference``'s text at its place (``respelled``, built by
+    ``config_validator.respelled_from``): a field that respells what it reads.
+
+    Never for a display-only literal, a reference whose position is unknown, or
+    the text the anchoring made of a relative path, which no validator writes and
+    the anchored searches show."""
+    return (
+        respelled is not None
+        and not reference.literal
+        and not reference.position_unknown
+        and not (reference.anchored is not None and text == reference.anchored[0])
+        and respelled(tuple(reference.path), reference.resolved, text)
+    )
+
+
+def _recorded_string(
+    text: str,
+    candidates: Sequence[EnvironmentReference],
+    respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]] = None,
+) -> str:
     """``text`` as the file wrote it, where ``candidates`` are the references that
     apply at its position (``_Index.pending``).
 
-    A string equal to what a candidate resolved to is the reference; one that ends
-    with it has the reference in its place; any other string has the value of each
-    candidate replaced by it. A neighboring entry's reference is not a candidate,
-    since it does not write this entry.
+    A string equal to what a candidate resolved to is the reference, and so is one
+    the configuration's own model makes of a candidate's text (``respelled``); one
+    that ends with it has the reference in its place; any other string has the
+    value of each candidate replaced by it. A neighboring entry's reference is not
+    a candidate, since it does not write this entry.
     """
     for reference in candidates:
         if text == reference.resolved:
+            return reference.written
+    for reference in candidates:
+        if _a_respelling_of(reference, text, respelled):
             return reference.written
     for reference in candidates:
         if _ends_with_resolved(text, reference.resolved):
@@ -866,6 +895,7 @@ class _Index:
         whole_only: bool = False,
         exact_indices: bool = False,
         list_as_reference: bool = False,
+        respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]] = None,
     ) -> None:
         self.values: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
         self.keys: Dict[Tuple[PathSegment, ...], List[EnvironmentReference]] = {}
@@ -873,6 +903,11 @@ class _Index:
         self.whole_only = whole_only
         self.exact_indices = exact_indices
         self.list_as_reference = list_as_reference
+        #: Whether a string is what the configuration's own model makes of a
+        #: reference's text at its place (``config_validator.respelled_from``),
+        #: for a field that respells what it reads; None where the walk is not
+        #: given the configuration.
+        self.respelled = respelled
         #: The data's strings by exact position, and its lists' lengths (``scan``).
         self.strings: Dict[Tuple[PathSegment, ...], str] = {}
         self.lengths: Dict[Tuple[PathSegment, ...], int] = {}
@@ -1224,7 +1259,7 @@ class _Index:
         exact: Tuple[PathSegment, ...] = (),
     ) -> Any:
         if self.mark is None:
-            return _recorded_string(text, candidates)
+            return _recorded_string(text, candidates, self.respelled)
         for reference in candidates:
             if (
                 reference.literal
@@ -1241,6 +1276,13 @@ class _Index:
         candidates = [reference for reference in candidates if not reference.literal]
         for reference in candidates:
             if text == reference.resolved:
+                return self._whole(reference)
+        for reference in candidates:
+            if _a_respelling_of(reference, text, self.respelled):
+                # What the configuration's own model makes of the reference's
+                # text is the reference, as an exact match is. Before the
+                # whole-only branch: a session copy writes the reference, and
+                # never the respelled text.
                 return self._whole(reference)
         if self.whole_only:
             for reference in candidates:
@@ -1280,6 +1322,7 @@ def record_environment_references(
     *,
     exact_indices: bool = False,
     list_as_reference: bool = False,
+    respelled: Optional[Callable[[Tuple[PathSegment, ...], Any, str], bool]] = None,
 ) -> Any:
     """``data``, a dump of a configuration, with what ``references`` read written
     as the file wrote it; see "Where".
@@ -1297,8 +1340,12 @@ def record_environment_references(
     list, so it follows an entry a patch moves. ``list_as_reference``, for a view
     written to be loaded again (``ash config get``): a list the load made of one
     reference's text is written as that reference once, with each entry a later
-    step appended after it, so the text loads back as the list. A copy: ``data``
-    itself is not changed.
+    step appended after it, so the text loads back as the list. ``respelled``, a
+    test ``config_validator.respelled_from`` builds for the configuration the data
+    was dumped from, also describes by its reference a place whose text that
+    configuration's model makes of the reference's text (a field that respells
+    what it reads, as unused-suppressions' ``output_format`` lowercases it), as on
+    an exact match. A copy: ``data`` itself is not changed.
 
     A set or frozenset is walked too, and keeps its type: a set has no
     positions, so each member is an entry whose position is unknown and is read
@@ -1318,7 +1365,14 @@ def record_environment_references(
     """
     if not references and mark is None:
         return data
-    index = _Index(references, mark, whole_only, exact_indices, list_as_reference)
+    index = _Index(
+        references,
+        mark,
+        whole_only,
+        exact_indices,
+        list_as_reference,
+        respelled=respelled,
+    )
     index.scan(data, _exact_path(at))
     return index.record(data, _normal_path(at, exact_indices), _exact_path(at))
 

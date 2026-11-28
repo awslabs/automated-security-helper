@@ -3138,6 +3138,51 @@ def reads_back_as(
     return bool(rebuilt == current)
 
 
+def respelled_from(config: Any) -> Callable[[Tuple[Any, ...], Any, str], bool]:
+    """A test for a place a reference names in ``config``: whether ``text``, the
+    string the place holds, is what ``config``'s own model makes of ``resolved``,
+    the reference's text, at ``path`` (a validator that respells what it reads:
+    unused-suppressions' ``output_format`` lowercases it, and ``tool_version``
+    takes the canonical form of a specifier set, or the option's default for one
+    it refuses).
+
+    Always against ``config``'s own dump, never a caller's document: a dump keyed
+    by field names is one the rebuilt model cannot be followed through, and a
+    runtime patch's document is the client's, which a client could make invalid to
+    turn the test off. The dump is made at the first question, and each answer is
+    kept for the life of the test. A question the test cannot answer is answered
+    False, which leaves the place as it is."""
+    canonical: List[Any] = []
+    answers: Dict[Tuple[Any, ...], bool] = {}
+
+    def test(path: Tuple[Any, ...], resolved: Any, text: str) -> bool:
+        if (
+            not path
+            or not isinstance(text, str)
+            or not isinstance(resolved, str)
+            or text == resolved
+            or any(segment is UNKNOWN_INDEX for segment in path)
+        ):
+            return False
+        key = (tuple(path), resolved, text)
+        if key not in answers:
+            try:
+                if not canonical:
+                    canonical.append(config.model_dump(mode="json", by_alias=True))
+                answers[key] = canonical[0] is not None and reads_back_as(
+                    config, canonical[0], tuple(path), resolved, text
+                )
+            except Exception:
+                # A view, a repr, a session copy or a results file must be
+                # written whatever this test can answer.
+                if not canonical:
+                    canonical.append(None)
+                answers[key] = False
+        return answers[key]
+
+    return test
+
+
 def _resolves_back_to(written: str, current: str) -> bool:
     """Whether the loader reads ``written`` from the environment as ``current``,
     by the loader's own rule (resolve_env_references)."""
@@ -3254,9 +3299,14 @@ def record_of_config(
     whole, only the part the variable gave is replaced. Without ``mark``, a
     number there that a model typed from the value ("067" read as 67) is
     replaced as the value is: a scanner's dump of its own config
-    (ScannerPluginBase._config_as_written). A rewrite whose last path segment
-    is the unknown index (``environment_record.UNKNOWN_INDEX``) names a set's
-    members, or the entries of a list at an unknown position
+    (ScannerPluginBase._config_as_written). So is a string there that
+    ``config``'s own model makes of the value, with or without ``mark``: a field
+    whose validator respells what it reads (a reporter's ``output_format``
+    lowercases it, a ``tool_version`` takes the canonical form of a specifier
+    set, or the option's default for one it refuses) holds a text that is
+    neither the value nor contains it (``respelled_from``). A rewrite whose last
+    path segment is the unknown index (``environment_record.UNKNOWN_INDEX``)
+    names a set's members, or the entries of a list at an unknown position
     (``_record_unknown_position``): each one that is the resolved value as a
     whole is written as the reference, and no part of one is replaced. A config
     loaded any other way (AshConfig.from_file, a results file) has no rewrites,
@@ -3326,6 +3376,7 @@ def record_of_config(
     if not rewrites:
         return _loader_marked_shown(dumped, marked)
     record = copy.deepcopy(dumped)
+    respelled = respelled_from(config)
     for rewrite in rewrites:
         if rewrite.kind != "value" or not rewrite.path:
             continue
@@ -3362,6 +3413,17 @@ def record_of_config(
             # again, whose reference has to read back as the same value.
             mark is None and typed_from(current, rewrite.resolved)
         ):
+            container[key] = marked(rewrite.written)
+        elif (
+            isinstance(current, str)
+            and not rewrite.literal
+            and not (rewrite.anchored is not None and current == rewrite.anchored[0])
+            and respelled(rewrite.path, rewrite.resolved, current)
+        ):
+            # A value its field's own validation respelled (unused-suppressions'
+            # output_format lowercases what it reads): the configuration's model
+            # makes this string of the reference's text, so the place is the
+            # reference, as on an exact match.
             container[key] = marked(rewrite.written)
         elif (
             isinstance(current, str)

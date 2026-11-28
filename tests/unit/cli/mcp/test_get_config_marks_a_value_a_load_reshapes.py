@@ -35,6 +35,12 @@ itself, in the settings or in a ``patch`` operation, and in a list the root's ow
 ``patch`` moves. A base the file's own text names keeps its directory in the
 answer, and a later document's value over the base's path is shown as it was
 written.
+
+A field whose own validation respells what it reads holds a text that is neither
+the variable's nor holds it: a reporter's ``output_format`` lowercases it, and a
+``tool_version`` takes the canonical form of a specifier set, or the option's
+default for one it refuses. The answer shows the reference there as well, whatever
+spelling the variable holds.
 """
 
 import json
@@ -328,6 +334,22 @@ def test_a_text_field_from_a_variable_shows_the_reference(
 
     assert result["project_name"] == "<from ${ASH_TEST_PN}>", result
     assert "probe-name-3e1c" not in json.dumps(result, default=str)
+
+
+@_ROUTES
+def test_a_mixed_case_text_field_from_a_variable_shows_the_reference(
+    tmp_path, monkeypatch, answer
+):
+    """The control: a field the load leaves as text shows the reference whatever
+    case the variable's value is in, and none of the text the variable held is in
+    the answer. Only a field that respells what it reads is described another way
+    (the cells at the end of this file)."""
+    monkeypatch.setenv("ASH_TEST_PN", "Probe-Name-3E1C")
+
+    result = answer(tmp_path, monkeypatch, "project_name: ${ASH_TEST_PN}\n")
+
+    assert result["project_name"] == "<from ${ASH_TEST_PN}>", result
+    assert "Probe-Name-3E1C" not in json.dumps(result, default=str)
 
 
 @_CONFINED_ROUTES
@@ -702,3 +724,112 @@ def test_a_roots_literal_over_a_chosen_bases_literal_is_shown_as_the_root_wrote_
 
     shown = result["scanners"]["bandit"]["options"]["config_file"]
     assert shown == written, shown
+
+
+# ---------------------------------------------------------------------------
+# A value the field's own validation respells
+# ---------------------------------------------------------------------------
+
+
+def _unused_options(result: Dict[str, Any]) -> Dict[str, Any]:
+    """The options of the unused-suppressions reporter in an answer, under the
+    spelling of the section the answer keys it by."""
+    reporters = result["reporters"]
+    section = reporters.get("unused_suppressions") or reporters["unused-suppressions"]
+    return section["options"]
+
+
+_UNUSED_FORMAT_FROM_A_VARIABLE = (
+    "reporters:\n"
+    "  unused-suppressions:\n"
+    "    options:\n"
+    "      output_format: ${ASH_TEST_UNUSED_FORMAT}\n"
+)
+
+
+@_ROUTES
+@pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("Markdown", id="respelled"),
+        pytest.param("markdown", id="as-held-control"),
+    ],
+)
+def test_a_value_its_field_respells_shows_the_reference(
+    tmp_path, monkeypatch, answer, held
+):
+    """The unused-suppressions reporter's ``output_format`` lowercases the text it
+    reads, so ``Markdown`` is held as ``markdown``, which is neither the variable's
+    text nor holds it. The answer shows the reference there, as it does where the
+    field holds the text as it was (``as-held-control``), so it does not change
+    with how the variable spells its value. The exact value is the assertion: the
+    ``markdown`` reporter's own key is in every answer, so no ``markdown`` absent
+    from it could stand for the text."""
+    monkeypatch.setenv("ASH_TEST_UNUSED_FORMAT", held)
+
+    result = answer(tmp_path, monkeypatch, _UNUSED_FORMAT_FROM_A_VARIABLE)
+
+    shown = _unused_options(result)["output_format"]
+    assert shown == "<from ${ASH_TEST_UNUSED_FORMAT}>", shown
+
+
+@_ROUTES
+def test_a_respelled_literal_is_shown_as_the_field_holds_it(
+    tmp_path, monkeypatch, answer
+):
+    """The control: a text the file writes itself reads from no variable, so the
+    answer shows what the field holds, the lowercase text, and no reference. A
+    rule that marked a place by the text it holds would mark this one too."""
+    body = (
+        "reporters:\n"
+        "  unused-suppressions:\n"
+        "    options:\n"
+        "      output_format: Markdown\n"
+    )
+
+    result = answer(tmp_path, monkeypatch, body)
+
+    assert _unused_options(result)["output_format"] == "markdown", result
+
+
+@_ROUTES
+def test_a_tool_version_the_field_canonicalizes_shows_the_reference(
+    tmp_path, monkeypatch, answer
+):
+    """A ``tool_version`` takes the canonical form of a specifier set, so the
+    text the variable gave (``>= 1.7.8, <1.7.97``) is held as ``>=1.7.8,<1.7.97``,
+    which is neither the text nor holds it. The answer shows the reference, and
+    none of the specifier set."""
+    monkeypatch.setenv("ASH_TEST_TOOL_RANGE", ">= 1.7.8, <1.7.97")
+
+    result = answer(
+        tmp_path,
+        monkeypatch,
+        _operators_tool_version("bandit", "${ASH_TEST_TOOL_RANGE}"),
+    )
+
+    shown = result["scanners"]["bandit"]["options"]["tool_version"]
+    assert shown == "<from ${ASH_TEST_TOOL_RANGE}>", shown
+    assert "1.7.97" not in json.dumps(result, default=str)
+
+
+@_ROUTES
+def test_a_tool_version_the_field_refuses_shows_the_reference_not_the_default(
+    tmp_path, monkeypatch, answer
+):
+    """A text the field refuses (``not-a-constraint``) is replaced by the option's
+    default, which is what the field makes of it. The answer shows the reference
+    there, as it does for a text the field accepts: showing the default for one and
+    the reference for the other would change the answer with the variable's value.
+    The text the variable held is not in the answer either."""
+    monkeypatch.setenv("ASH_TEST_TOOL_RANGE", "not-a-constraint")
+
+    result = answer(
+        tmp_path,
+        monkeypatch,
+        _operators_tool_version("bandit", "${ASH_TEST_TOOL_RANGE}"),
+    )
+
+    shown = result["scanners"]["bandit"]["options"]["tool_version"]
+    assert shown == "<from ${ASH_TEST_TOOL_RANGE}>", shown
+    assert "not-a-constraint" not in json.dumps(result, default=str)

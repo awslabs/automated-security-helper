@@ -24,7 +24,9 @@ field alone; a relative path the load anchored has only its environment part
 replaced, and one it folded a ``..`` or ``./`` out of is recorded as its
 directory and the reference, the directory being ``<value>`` where the file's
 own path came from a variable; a list the load made of one reference's text is
-recorded as that reference; a ``patch`` value, a base's value and a TOML value
+recorded as that reference, and so is a value its field's own validation respells
+(a reporter's ``output_format``, lowercased), whatever spelling the variable
+holds; a ``patch`` value, a base's value and a TOML value
 are recorded as written; and the other writers of a resolved config (MCP
 ``get_config``, ``ash config get``, and the profile file the MCP server writes
 for a session) hold the reference, while the config they load back still reads
@@ -1786,3 +1788,169 @@ def test_a_relative_path_from_a_variable_in_a_base_a_variable_chose_is_recorded_
     for dumped in (json.dumps(recorded), json.dumps(body, default=str)):
         assert "teams-4c7e" not in dumped
         assert "cfg-7a3d" not in dumped
+
+
+# ---------------------------------------------------------------------------
+# A value the field's own validation respells
+# ---------------------------------------------------------------------------
+
+#: The unused-suppressions reporter's ``output_format`` lowercases the text it
+#: reads, so a value of ``Markdown`` (``respelled``) is held as ``markdown``,
+#: which is neither the variable's text nor holds it. ``markdown``
+#: (``as-held-control``) is held as it was written.
+FORMAT_CONFIG = (
+    "reporters:\n"
+    "  unused-suppressions:\n"
+    "    options:\n"
+    "      output_format: ${ASH_PROBE_FORMAT}\n"
+)
+
+_RESPELLED = pytest.mark.parametrize(
+    "held",
+    [
+        pytest.param("Markdown", id="respelled"),
+        pytest.param("markdown", id="as-held-control"),
+    ],
+)
+
+
+def _unused_options(document: dict) -> dict:
+    reporters = document["reporters"]
+    section = reporters.get("unused-suppressions") or reporters["unused_suppressions"]
+    return section["options"]
+
+
+@_RESPELLED
+def test_a_value_its_field_respells_is_recorded_as_written(tmp_path, probe_env, held):
+    """The field lowercases the text the variable gave, so the configuration holds
+    ``markdown`` whatever spelling the variable has. The record in the results file
+    and the body an off-host reporter sends hold the reference there, as they do
+    where the field holds the text as it was (``as-held-control``), so neither
+    changes with how the variable spells its value."""
+    from automated_security_helper.config.resolve_config import resolve_config
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    path = _operator_config(tmp_path, FORMAT_CONFIG)
+
+    config = resolve_config(config_path=path, source_dir=tmp_path / "tree")
+
+    # The control: the field holds the lowercase text for both spellings.
+    assert config.reporters.unused_suppressions.options.output_format == "markdown"
+    assert _unused_options(_recorded(config))["output_format"] == (
+        "${ASH_PROBE_FORMAT}"
+    )
+    body = AshAggregatedResults(ash_config=config).to_simple_dict()["ash_config"]
+    assert _unused_options(body)["output_format"] == "${ASH_PROBE_FORMAT}"
+
+
+@_RESPELLED
+def test_ash_config_get_shows_a_respelled_value_by_its_reference(
+    tmp_path, probe_env, held
+):
+    """``ash config get`` prints the reference where the field holds the text the
+    variable gave in another spelling, as it does where it holds it as it was
+    (``as-held-control``), and it loads back as the same setting."""
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    path = _operator_config(tmp_path, FORMAT_CONFIG)
+
+    result = CliRunner().invoke(
+        app, ["config", "get", str(path)], env={"COLUMNS": "300"}
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "output_format: ${ASH_PROBE_FORMAT}" in " ".join(result.output.split())
+
+
+@_RESPELLED
+def test_a_profile_copy_writes_a_respelled_value_by_its_reference_and_loads_back(
+    tmp_path, probe_env, held
+):
+    """A registered profile reads ``output_format`` from a variable, and the field
+    lowercases it. The operator's session copy holds the reference tagged ``!ENV``
+    where the configuration holds the lowercase text, as it does where the field
+    holds the text as it was (``as-held-control``), and a scan that loads the copy
+    reads the variable again and gets the same setting."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.config.resolve_config import _load_single_config_file
+
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    _in_a_session_workspace(tmp_path, probe_env)
+    profile = _operator_config(tmp_path, FORMAT_CONFIG, "profile.ash.yaml")
+    registry = profile_registry.register_profiles([f"fmt={profile}"])
+
+    written = Path(
+        profile_registry.materialize_session_config(
+            "session-format", registry["fmt"].config
+        )
+    )
+
+    text = written.read_text(encoding="utf-8")
+    assert _unused_options(_as_written(text))["output_format"] == (
+        "!ENV ${ASH_PROBE_FORMAT}"
+    )
+    # The scan still uses the value: the copy reads it when it is loaded.
+    loaded = _load_single_config_file(written)
+    assert loaded.reporters.unused_suppressions.options.output_format == "markdown"
+
+
+@_RESPELLED
+def test_a_patched_profile_copy_writes_a_respelled_value_by_its_reference(
+    tmp_path, probe_env, held
+):
+    """The copy a client patched goes in client-config/, where !ENV is not
+    resolved. It holds the reference as text where the field lowercased the text
+    the variable gave, as it does where the field holds the text as it was
+    (``as-held-control``), and the scan fills the value from the operator's copy."""
+    from automated_security_helper.cli.mcp import profile_registry
+    from automated_security_helper.cli.mcp_tools import mcp_select_profile
+    from automated_security_helper.config.resolve_config import resolve_config
+
+    probe_env.setenv("ASH_PROBE_FORMAT", held)
+    _in_a_session_workspace(tmp_path, probe_env)
+    probe_env.setenv("ASH_MCP_ALLOWED_ROOTS", str(tmp_path))
+    probe_env.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)
+    profile_registry.clear_profile_registry()
+    profile_registry.clear_all_session_state()
+    try:
+        profile = _operator_config(
+            tmp_path,
+            PATCHABLE_PROFILE
+            + "  unused-suppressions:\n"
+            + "    options:\n"
+            + "      output_format: ${ASH_PROBE_FORMAT}\n",
+            "patch.ash.yaml",
+        )
+        profile_registry.set_profile_registry(
+            profile_registry.register_profiles([f"patchable={profile}"])
+        )
+
+        result = mcp_select_profile(
+            "patchable",
+            patch_ops=[{"op": "replace", "path": "/project_name", "value": "patched"}],
+            session_id="session-format",
+        )
+
+        assert result["success"] is True, result
+        client_copy = Path(
+            profile_registry.resolve_session_config_path("session-format")
+        )
+        trusted = Path(
+            profile_registry.resolve_session_trusted_config_path("session-format")
+        )
+        client_text = client_copy.read_text(encoding="utf-8")
+        assert _unused_options(_as_written(client_text))["output_format"] == (
+            "${ASH_PROBE_FORMAT}"
+        )
+        config = resolve_config(
+            config_path=client_copy,
+            source_dir=tmp_path / "tree",
+            trusted_config_path=trusted,
+            untrusted_config=True,
+        )
+        # The scan uses the value, and the client's own change.
+        assert config.project_name == "patched"
+        assert config.reporters.unused_suppressions.options.output_format == "markdown"
+    finally:
+        profile_registry.clear_profile_registry()
+        profile_registry.clear_all_session_state()

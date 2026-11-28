@@ -28,13 +28,20 @@ itself: the load anchors it at the base's directory, which holds what the
 variable gave, and a ``test`` op reads that directory as ``<value>``, so a right
 and a wrong guess of the absolute path are answered alike. The control is a base
 the profile's own text names, where a right guess binds the profile.
+
+The same holds for a list a field makes of one reference's text
+(``output_formats: ${VAR}``), at the list and at its entries, and for a value its
+field's own validation respells (a reporter's ``output_format`` lowercases it): the
+op reads the reference, so no guess of the names or of the respelled text binds
+the profile. A client's own earlier op that leaves the patched document invalid
+does not change what the op reads.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 import pytest
 
@@ -610,3 +617,95 @@ def test_a_test_op_at_a_list_made_of_one_reference_answers_the_same_for_any_gues
         assert select(ops_for(wrong))["success"] is False, (
             "the control: the wrong guess was not refused"
         )
+
+
+#: The unused-suppressions reporter's ``output_format``, as a patch names it: the
+#: document a ``test`` op reads is dumped by field name.
+FORMAT = "/reporters/unused_suppressions/options/output_format"
+
+
+def _format_profile(written: str, also: Sequence[str] = ()) -> str:
+    """A profile whose unused-suppressions reporter writes its ``output_format`` as
+    *written*, and that lets a client aim ops at it and at each path of *also*."""
+    return (
+        "reporters:\n"
+        "  unused-suppressions:\n"
+        "    options:\n"
+        f"      output_format: {written}\n" + _runtime_overrides_block(FORMAT, *also)
+    )
+
+
+@pytest.mark.parametrize(
+    "written, from_the_environment",
+    [
+        pytest.param("${ASH_PROBE_FORMAT}", True, id="respelled-from-the-environment"),
+        pytest.param("Markdown", False, id="literal-control"),
+    ],
+)
+def test_a_test_op_at_a_respelled_value_answers_the_same_for_any_guess(
+    select_for, monkeypatch, written, from_the_environment
+):
+    """A profile reads the reporter's ``output_format`` from a variable that holds
+    ``Markdown``, which the field lowercases. A ``test`` op reads the configuration
+    as its file wrote it, which is the reference, so it names the setting the same
+    way for the text the configuration holds (the right guess) and for another
+    (the wrong one), and the two answers are alike. The control is the profile that
+    writes ``Markdown`` itself: a right guess binds it and a wrong one is refused."""
+    monkeypatch.setenv("ASH_PROBE_FORMAT", "Markdown")
+    select = select_for(_format_profile(written))
+
+    def ops_for(guess: str) -> List[Dict[str, Any]]:
+        return [{"op": "test", "path": FORMAT, "value": guess}]
+
+    # A boolean, so a failure does not print the value.
+    same = _answers_the_same(select, ops_for, "markdown", OTHER)
+    if from_the_environment:
+        assert same, "the response tells a right guess from a wrong one"
+        # The uniform answer is the pipeline's own: the patch's refusal, for
+        # both, and not a refusal made before the op is read.
+        assert _is_a_patch_answer(select(ops_for("markdown"))), (
+            "the right guess got no patch answer"
+        )
+        assert _is_a_patch_answer(select(ops_for(OTHER))), (
+            "the wrong guess got no patch answer"
+        )
+        assert select(ops_for("markdown"))["success"] is False
+    else:
+        assert not same, "the control: the answer does not depend on the guess"
+        assert select(ops_for("markdown"))["success"] is True, (
+            "the control: the right guess did not bind the profile"
+        )
+        assert select(ops_for(OTHER))["success"] is False, (
+            "the control: the wrong guess was not refused"
+        )
+
+
+def test_a_test_op_after_an_op_that_breaks_the_document_answers_the_same_for_any_guess(
+    select_for, monkeypatch
+):
+    """An earlier op of the patch writes a value the model refuses, so the patched
+    document is invalid when the ``test`` op reads it. The ``test`` op reads the
+    configuration as its file wrote it, the base the operator registered, and never
+    the client's document, so the invalid document does not change what it reads:
+    the right guess and the wrong one are answered alike. A rule that validated the
+    client's document to decide whether a place reads as a reference would turn
+    itself off here, and the right guess would pass the op and fail the final
+    validation where the wrong one fails the op."""
+    monkeypatch.setenv("ASH_PROBE_FORMAT", "Markdown")
+    enabled = "/reporters/unused_suppressions/enabled"
+    select = select_for(_format_profile("${ASH_PROBE_FORMAT}", also=(enabled,)))
+
+    def ops_for(guess: str) -> List[Dict[str, Any]]:
+        return [
+            {"op": "replace", "path": enabled, "value": "not-a-bool"},
+            {"op": "test", "path": FORMAT, "value": guess},
+        ]
+
+    # The precondition: the breaking op alone is applied and refused for the
+    # patched configuration's validation, so it reaches the apply loop.
+    breaking = select([ops_for(OTHER)[0]])
+    assert breaking["success"] is False
+    assert "patched config failed validation" in breaking["error"], breaking
+    # A boolean, so a failure does not print the value.
+    same = _answers_the_same(select, ops_for, "markdown", OTHER)
+    assert same, "the response tells a right guess from a wrong one"

@@ -5265,6 +5265,7 @@ def _answer_get_config(
         ConfigFileChangedError,
         default_confinement_root,
     )
+    from automated_security_helper.config.config_validator import respelled_from
     from automated_security_helper.config.environment_record import (
         environment_marker,
         record_environment_references,
@@ -5304,7 +5305,11 @@ def _answer_get_config(
     # value. A list entry is the one at the index the file wrote the reference
     # at: in a session config, the index the profile's patch moved it to. Any
     # other entry of that list, one a client added say, is shown as written
-    # whatever it holds.
+    # whatever it holds. A string a field's own validation respelled (a
+    # reporter's output_format lowercases what it reads) is shown as the reference
+    # too, where ``config``'s own model makes that string of the reference's text:
+    # the test is of ``config``, not of ``data``, which is a dump keyed by field
+    # names.
     # Run it on a dump BEFORE mark_operator_only_options writes its markers, never
     # on a marked one: it replaces a reference's value inside any string at the
     # reference's place, a marker included (the two call sites say why).
@@ -5314,6 +5319,7 @@ def _answer_get_config(
             tuple(getattr(config, "_displayed_environment_references", ()) or ()),
             mark=environment_marker,
             exact_indices=True,
+            respelled=respelled_from(config),
         )
 
     # The file the path leads to before it is checked: the read below must open

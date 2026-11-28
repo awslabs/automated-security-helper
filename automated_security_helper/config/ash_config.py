@@ -3306,6 +3306,10 @@ class AshConfig(RedactedSection):
             else:
                 data = self.model_dump(by_alias=True, exclude_unset=exclude_unset)
                 if writes_references:
+                    # Imported here: config_validator imports this module.
+                    from automated_security_helper.config.config_validator import (
+                        respelled_from,
+                    )
                     from automated_security_helper.config.environment_record import (
                         record_environment_references,
                         refuse_a_literal_path_held,
@@ -3317,6 +3321,9 @@ class AshConfig(RedactedSection):
                         self._environment_references,
                         mark=TaggedReference if env_tags else written_without_tag,
                         whole_only=True,
+                        # A value the field's own validation respelled is
+                        # written as its reference, never as the respelled text.
+                        respelled=respelled_from(self),
                     )
                     refuse_a_literal_path_held(
                         data, literals, self._environment_references
@@ -3357,12 +3364,16 @@ class AshConfig(RedactedSection):
         if not self._environment_references:
             yield from super().__repr_args__()
             return
+        # Imported here: config_validator imports this module.
+        from automated_security_helper.config.config_validator import respelled_from
         from automated_security_helper.config.environment_record import (
             record_environment_references,
         )
 
         recorded = record_environment_references(
-            self.model_dump(by_alias=True), self._environment_references
+            self.model_dump(by_alias=True),
+            self._environment_references,
+            respelled=respelled_from(self),
         )
         yield from recorded.items()
 
