@@ -73,10 +73,12 @@ def _scanner(name, tmp_path, monkeypatch, **options):
     for variable in CACHE_ENV.values():
         monkeypatch.delenv(variable, raising=False)
     scanner_class, config_class, options_class = SCANNERS[name]
+    # Enabled by name: both configs default to disabled on Windows.
     scanner = scanner_class(
         context=_context(tmp_path),
-        config=config_class(options=options_class(**options)),
+        config=config_class(enabled=True, options=options_class(**options)),
     )
+    assert scanner.config.enabled
     scanner.results_dir = tmp_path / "ash-output" / "scanners" / name
     return scanner
 

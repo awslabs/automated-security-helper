@@ -622,9 +622,10 @@ def _opengrep_patterns_refused(tmp_path, monkeypatch):
         lambda: OpengrepScanner(
             context=context,
             config=OpengrepScannerConfig(
+                enabled=True,
                 options=OpengrepScannerConfigOptions(
                     offline=True, patterns=["eval($X)"]
-                )
+                ),
             ),
         )
     )
@@ -640,7 +641,11 @@ def _grep_scanner(name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     source.mkdir(exist_ok=True)
     for file_name in ("a.py", "b.py"):
         (source / file_name).write_text("x = 1\n", encoding="utf-8")
-    scanner = scanner_class(context=_plain_context(tmp_path), config=config_class())
+    # Enabled by name: both configs default to disabled on Windows.
+    scanner = scanner_class(
+        context=_plain_context(tmp_path), config=config_class(enabled=True)
+    )
+    assert scanner.config.enabled
     scanner.dependencies_satisfied = True
     scanner.results_dir = tmp_path / "ash-output" / "scanners" / name
     return scanner, source

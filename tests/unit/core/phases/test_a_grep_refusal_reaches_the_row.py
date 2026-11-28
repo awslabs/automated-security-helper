@@ -66,8 +66,12 @@ def _scanner(name, tmp_path, monkeypatch, **options):
         monkeypatch.delenv(variable, raising=False)
     scanner_class, config_class, options_class = SCANNERS[name]
     context = _context(tmp_path)
+    # Both configs default to disabled on Windows, and the executor files a
+    # disabled scanner's row SKIPPED without running it. Enabled by name, so the
+    # system under the test does not pick the row these cases read.
     scanner = scanner_class(
-        context=context, config=config_class(options=options_class(**options))
+        context=context,
+        config=config_class(enabled=True, options=options_class(**options)),
     )
     scanner.results_dir = tmp_path / "ash-output" / "scanners" / name
     # The refusal was recorded by construction; the scan phase dispatches the
@@ -78,6 +82,7 @@ def _scanner(name, tmp_path, monkeypatch, **options):
 
 def _row(name, scanner):
     context = scanner.context
+    assert scanner.config.enabled, f"{name} is disabled, so its row would be SKIPPED"
     executor = ScannerExecutor(
         plugin_context=context, progress_display=MagicMock(), scanner_tasks=[]
     )
