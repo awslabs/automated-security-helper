@@ -5,9 +5,9 @@
 what they check before calling AWS, and what the S3 upload holds.
 
 Each test failed at the base: a failed CloudWatch Logs publish came back as the
-error text, which the report phase wrote as a report; `ash report`, which never
-calls validate_plugin_dependencies, reached the AWS call with an unset log
-group or bucket; the S3 dependency check refused the documented write-only
+error text, which the report phase wrote as a report; `ash report`, which did
+not yet call validate_plugin_dependencies, reached the AWS call with an unset
+log group or bucket; the S3 dependency check refused the documented write-only
 policy; the uploaded object carried no findings and its YAML form held a
 Python-only tag; a failed local copy discarded the receipt of a finished
 upload; and the region pattern refused published region names.
@@ -128,8 +128,9 @@ def test_a_failed_publish_produces_no_report(mock_boto3, context):
 
 @patch(f"{CW}.boto3")
 def test_report_names_an_unset_log_group_and_makes_no_call(mock_boto3, context, caplog):
-    """`ash report` skips the dependency check, so report() checks the setting
-    itself and names it as the check would."""
+    """report() checks the setting itself and names it as the dependency check
+    would, so a caller that reaches report() without the check (this test calls
+    it directly) never reaches AWS with the setting unset."""
     reporter = _cloudwatch(context, log_group_name=None)
 
     with caplog.at_level("ERROR"):
