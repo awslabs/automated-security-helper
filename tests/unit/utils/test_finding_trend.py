@@ -180,6 +180,7 @@ def _passed(rule="R-PASS"):
 
 def _without_kinds(run):
     """*run* as a record written before ASH stored each row's result kind."""
+    run.record.pop("result_kind_recorded", None)
     for row in run.record["findings"]:
         row.pop("result_kind", None)
         row.pop("is_finding", None)
@@ -190,6 +191,12 @@ def _run(second, *, kinds=True):
     run = run_from_results(
         results(finding("B602"), _passed(), second=second), f"run{second}.json"
     )
+    return run if kinds else _without_kinds(run)
+
+
+def _empty_run(second, *, kinds=True):
+    """A run whose record holds no rows: its scan reported nothing."""
+    run = run_from_results(results(second=second), f"run{second}.json")
     return run if kinds else _without_kinds(run)
 
 
@@ -214,6 +221,37 @@ def test_a_boundary_between_two_records_without_kinds_stays_like_for_like():
     assert boundary["coverage_warnings"] == []
 
 
+def test_a_boundary_into_a_record_with_no_rows_after_one_without_kinds_warns():
+    """The older record counts its passed check; the newer one holds no row."""
+    boundary = build_trend([_run(1, kinds=False), _empty_run(2)]).boundaries[0]
+
+    assert boundary["like_for_like"] is False
+    assert finding_trend.RESULT_KIND_BOUNDARY_WARNING in boundary["coverage_warnings"]
+
+
+def test_a_boundary_from_a_record_with_no_rows_back_to_one_without_kinds_warns():
+    boundary = build_trend([_empty_run(1), _run(2, kinds=False)]).boundaries[0]
+
+    assert boundary["like_for_like"] is False
+    assert finding_trend.RESULT_KIND_BOUNDARY_WARNING in boundary["coverage_warnings"]
+
+
+def test_a_record_with_no_rows_still_says_that_it_names_result_kinds():
+    record = scan_history.run_record_body(results(second=1))
+
+    assert record["findings"] == []
+    assert record.get("result_kind_recorded") is True
+
+
+def test_a_boundary_from_an_older_record_with_no_rows_stays_like_for_like():
+    """Control, green before and after: an older record with no rows counts
+    nothing, so nothing at the boundary can read as fixed or new."""
+    boundary = build_trend([_empty_run(1, kinds=False), _run(2)]).boundaries[0]
+
+    assert boundary["like_for_like"] is True
+    assert boundary["coverage_warnings"] == []
+
+
 def test_the_trend_page_says_such_a_boundary_is_not_like_for_like(request):
     page = (
         request.path.resolve().parents[3]
@@ -227,6 +265,22 @@ def test_the_trend_page_says_such_a_boundary_is_not_like_for_like(request):
     assert (
         "the boundary carries a warning that says so, and its `like_for_like` is false"
         in text
+    )
+
+
+def test_the_trend_page_says_an_older_record_with_no_rows_gets_no_such_warning(request):
+    page = (
+        request.path.resolve().parents[3]
+        / "docs"
+        / "content"
+        / "how-to"
+        / "track-findings-over-time.md"
+    )
+    text = " ".join(page.read_text(encoding="utf-8").split())
+
+    assert (
+        "Such a record with no rows counts nothing, so a boundary beside it carries "
+        "no such warning." in text
     )
 
 
