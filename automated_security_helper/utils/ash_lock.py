@@ -718,18 +718,15 @@ def _dict_unless_repeated(pairs: List[Tuple[str, Any]]) -> Dict[str, Any]:
     return result
 
 
-def _shown_key(text: str) -> str:
-    """``text`` as a message shows a key: as written when it is printable and
-    holds no quote or backslash, otherwise with its escapes spelled out, so a
-    message never carries a control character."""
-    if text.isprintable() and not any(c in text for c in ("'", '"', "\\")):
-        return text
-    return repr(text)[1:-1]
-
-
 def _pointer_segment(key: str) -> str:
-    """``key`` as one RFC 6901 pointer segment, shown as ``_shown_key`` shows a key."""
-    return _shown_key(key.replace("~", "~0").replace("/", "~1"))
+    """``key`` as one RFC 6901 pointer segment, as written.
+
+    A message quotes a lock's key as written, as ``refusal_text`` quotes a
+    path: the sink that prints it escapes a control character
+    (``utils/terminal_text``), and an escape written here would be escaped
+    again there, so one ESC would read with its backslash doubled.
+    """
+    return key.replace("~", "~0").replace("/", "~1")
 
 
 def _first_repeated_key(document: Any) -> Optional[Tuple[str, str]]:
@@ -784,9 +781,7 @@ def _loads_refusing_repeated_keys(text: str) -> Any:
         raise _RepeatedKey("an object writes a key more than once") from None
     key, pointer = found
     where = "at the top level" if not pointer else f"in the object at {pointer}"
-    raise _RepeatedKey(
-        f"key '{_shown_key(key)}' appears more than once {where}"
-    ) from None
+    raise _RepeatedKey(f"key '{key}' appears more than once {where}") from None
 
 
 @dataclass
@@ -1312,8 +1307,10 @@ def _undefined(key: str, symbol: str) -> str:
 def _unknown_keys(where: str, what: str, value: Dict[str, Any], allowed: set) -> None:
     unknown = sorted(set(value) - allowed)
     if unknown:
+        # Quoted as written; _pointer_segment says why.
+        keys = ", ".join(f"'{key}'" for key in unknown)
         raise AshLockError(
-            f"{where} has an unknown key {', '.join(repr(k) for k in unknown)} in "
+            f"{where} has an unknown key {keys} in "
             f"{what}; a lock with a key this ASH does not know was written by a "
             "newer ASH, so it is not read"
         )
