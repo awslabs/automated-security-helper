@@ -2238,11 +2238,16 @@ jobs:
           # name it are taken out or spelled as that subject spells them, what they
           # name is in routed_operands in the order it was written, and
           # routed_subject is that subject. routed_mixed is set when the caller names
-          # things of two subjects, which no scan has.
+          # things of two subjects, which no scan has. routed_names holds the options
+          # that name the thing to scan, as opposed to qualifying it, and
+          # routed_twice is set when a workspace or a clone is named by the same
+          # option twice.
           routed_args=()
           routed_operands=()
           routed_subject=""
           routed_mixed=""
+          routed_names=""
+          routed_twice=""
           # Notes that an option names a subject, and whether it is the one an earlier
           # option named.
           note_subject() {
@@ -2251,6 +2256,17 @@ jobs:
             elif [ "${routed_subject}" != "$1" ]; then
               routed_mixed=yes
             fi
+          }
+          # Notes an option that names the thing to scan. $1 is the option, and $2 is
+          # "one" for a subject that takes a single thing, a workspace file or a clone
+          # URL: a second option of that name names a second one, which the subject
+          # cannot take, where click keeps the last value on the other spellings, so
+          # routed_twice is set. An image option may come more than once, as ASH's may.
+          note_name() {
+            if [ "$2" = one ] && [[ " ${routed_names} " == *" $1 "* ]]; then
+              routed_twice=yes
+            fi
+            routed_names="${routed_names:+${routed_names} }$1"
           }
           # Files an option that names what to scan, or qualifies it, for the subject
           # that scans it. $1 is the option and $2 its value. What names the thing
@@ -2261,12 +2277,17 @@ jobs:
           # dash: as an operand of the subject it would be read as an option, where
           # as the value of the option it is a word, so the option stays as written
           # and ASH refuses the value. A workspace file that starts with a dash is
-          # given as ./NAME, as a directory is, so it is not read as an option.
+          # given as ./NAME, as a directory is, so it is not read as an option. The
+          # options that name the thing are --workspace, --image, the options that
+          # give an image as an archive or a layout, and --source-git. The ones that
+          # only qualify it (--workspace-config, --git-ref, --git-depth) name
+          # nothing, so they alone route nothing.
           route_option() {
             [ -n "$2" ] || return 1
             case "$1" in
               --workspace)
                 note_subject workspace
+                note_name "$1" one
                 case "$2" in
                   -*) routed_operands+=("./$2") ;;
                   *) routed_operands+=("$2") ;;
@@ -2279,19 +2300,23 @@ jobs:
               --image)
                 case "$2" in -*) return 1 ;; esac
                 note_subject image
+                note_name "$1" many
                 routed_operands+=("$2")
                 ;;
               --image-archive)
                 note_subject image
+                note_name "$1" many
                 routed_args+=(--archive "$2")
                 ;;
               --image-layout)
                 note_subject image
+                note_name "$1" many
                 routed_args+=(--layout "$2")
                 ;;
               --source-git)
                 case "$2" in -*) return 1 ;; esac
                 note_subject git
+                note_name "$1" one
                 routed_operands+=("$2")
                 ;;
               --git-ref | --git-depth)
@@ -2427,19 +2452,23 @@ jobs:
           # --source-git, and the options that qualify them. An ASH that has the
           # subject of that thing takes them on a command line of its own, with the
           # workflow's options and the rest of ash-args: `ash scan workspace FILE`,
-          # `ash scan image REF` and `ash scan git URL`. So when ash-args names
-          # things of one subject, and no directory with --source-dir, this ASH is
-          # asked about that subject as it was asked about `fs`, and only an answer
-          # sends the options there: a help that names the subject does, and one that
-          # does not, or the usage error that refuses the subject, leaves ash-args
-          # on `ash scan fs` as it was written, where `fs` refuses what it has no
-          # option for and names it. A probe that fails any other way ends the step
-          # with status 70, as the first one does. An ASH that has no `fs` has none of
-          # these subjects either and is not asked. Things of two subjects are not
-          # routed: no scan has two, and the options stay as written for ASH to
-          # refuse. route_option above holds the words each subject reads. An ASH
-          # may have `fs` and `workspace` and not `image` or `git`; the probe says
-          # so, and --image stays on `ash scan fs` as written.
+          # `ash scan image REF` and `ash scan git URL`. So when ash-args has one
+          # named thing to scan, of one subject, and no directory with --source-dir,
+          # this ASH is asked about that subject as it was asked about `fs`, and only
+          # an answer sends the options there: a help that names the subject does,
+          # and one that does not, or the usage error that refuses the subject,
+          # leaves ash-args on `ash scan fs` as it was written, where `fs` refuses
+          # what it has no option for and names it. A probe that fails any other way
+          # ends the step with status 70, as the first one does. An ASH that has no
+          # `fs` has none of these subjects either and is not asked. Nothing is
+          # routed when no option names a thing (--workspace-config, --git-ref and
+          # --git-depth only qualify one, so they alone name nothing to scan), when
+          # a workspace or a clone is named twice, which its subject takes once, or
+          # when things of two subjects are named: no scan has two, and the options
+          # stay as written for ASH to refuse. route_option above holds the words
+          # each subject reads. An ASH may have `fs` and `workspace` and not `image`
+          # or `git`; the probe says so, and --image stays on `ash scan fs` as
+          # written.
           #
           # The config the probes name. A probe starts in RUNNER_TEMP, and the scan
           # in the checkout, so a config written relative to the checkout (`config:
@@ -2477,7 +2506,7 @@ jobs:
               exit 70
               ;;
           esac
-          if [ "${scan_form}" = fs ] && [ -n "${routed_subject}" ] && [ -z "${routed_mixed}" ] && [ -z "${source_dir_named}" ]; then
+          if [ "${scan_form}" = fs ] && [ -n "${routed_names}" ] && [ -z "${routed_twice}" ] && [ -z "${routed_mixed}" ] && [ -z "${source_dir_named}" ]; then
             subject_help_status=0
             subject_help="$(cd "${RUNNER_TEMP}" && NO_COLOR=1 ${probe_config:+env ASH_CONFIG="${probe_config}"} uvx --no-config --from "${ASH_UVX_SOURCE}" ash scan "${routed_subject}" ${probe_config:+--config "${probe_config}"} --help 2>&1)" || subject_help_status=$?
             case "${subject_help_status}:${subject_help}" in
