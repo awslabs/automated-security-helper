@@ -382,7 +382,7 @@
           "global_settings:",
           "  suppressions:",
           "    # group A",
-          "    - rule_id: X1",
+          "    - rule_id: rule-a",
           "      path: a.py",
           "    # group B",
           "    - path: b.py"
@@ -393,10 +393,10 @@
           "global_settings:",
           "  suppressions:",
           "    # group A",
-          "    - rule_id: X1",
+          "    - rule_id: rule-a",
           "      path: a.py",
           "    # group B",
-          "    - rule_id: X2",
+          "    - rule_id: rule-b",
           "      path: b.py"
         ]
       },

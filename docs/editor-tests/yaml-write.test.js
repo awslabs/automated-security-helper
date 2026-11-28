@@ -504,9 +504,9 @@ test('the first key of a compact list item is taken out where it is, and the nex
     ],
     [
       'comment lines before the item and before the next item stay',
-      'g:\n  s:\n    # group A\n    - r: X1\n      p: a.py\n    # group B\n    - r: X2\n      p: b.py\n',
+      'g:\n  s:\n    # group A\n    - r: rule-a\n      p: a.py\n    # group B\n    - r: rule-b\n      p: b.py\n',
       { op: 'delete', path: ['g', 's', 1, 'r'] },
-      'g:\n  s:\n    # group A\n    - r: X1\n      p: a.py\n    # group B\n    - p: b.py\n',
+      'g:\n  s:\n    # group A\n    - r: rule-a\n      p: a.py\n    # group B\n    - p: b.py\n',
       0,
     ],
   ];
