@@ -283,12 +283,8 @@ and on each release tag whose commit carries the current workflow, in any order:
 whichever release is newest takes `latest`. That run cannot publish a tag that carries
 the old workflow, such as v3.7.1, because the old file starts no job on a manual run.
 Publish that version with the deploy script instead, from a checkout of a commit that
-has `scripts/docs_versions.py`:
-
-<!-- doctest: illustrative reason="runs in a checkout of this repository and pushes the published site" -->
-```bash
-uv run python scripts/docs_versions.py deploy --ref refs/tags/v3.7.1 --push
-```
+has `scripts/docs_versions.py`, by running
+`uv run python scripts/docs_versions.py deploy --ref refs/tags/v3.7.1 --push`.
 
 The ref only names the version, so the pages are those of the checkout: the version
 shows the docs of the commit checked out, which for an old release is not the tagged
