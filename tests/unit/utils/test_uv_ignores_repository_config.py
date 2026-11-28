@@ -2623,6 +2623,13 @@ def test_a_runners_run_started_at_the_filesystem_root_keeps_the_operators_uv_pat
             "/proc/self/cwd/../../{src}/uv.toml",
             id="proc-self-with-a-dotdot-component",
         ),
+        # A ``..`` before the link reaches it from another directory: as written the
+        # path does not start with /proc, and with its ``..`` taken out it names
+        # /proc/self/cwd/uv.toml.
+        pytest.param(
+            "/opt/../proc/self/cwd/uv.toml",
+            id="dotdot-that-reaches-proc-self",
+        ),
     ],
 )
 @pytest.mark.unit
