@@ -1947,13 +1947,18 @@ def candidate_values(field: Mapping[str, Any]) -> list[Any]:
     return []
 
 
+def probe_excluded(path: str) -> bool:
+    """Whether the probe leaves a setting, or a setting inside it, to the table."""
+    return any(path == name or path.startswith(name + ".") for name in PROBE_EXCLUDED)
+
+
 def probe_leaves(fields: Mapping[str, Mapping[str, Any]]) -> dict[str, list[Any]]:
     """Every setting the probe plants, with the values it plants."""
     leaves: dict[str, list[Any]] = {}
     for path, field in fields.items():
         if "[]" in path or "{}" in path or field["hidden"]:
             continue
-        if any(path == name or path.startswith(name + ".") for name in PROBE_EXCLUDED):
+        if probe_excluded(path):
             continue
         values = candidate_values(field)
         if values:
@@ -1962,6 +1967,28 @@ def probe_leaves(fields: Mapping[str, Mapping[str, Any]]) -> dict[str, list[Any]
         if path in fields:
             leaves[path] = values
     return leaves
+
+
+def unplanted_settings(
+    fields: Mapping[str, Mapping[str, Any]],
+    planted: Mapping[str, Any] | None = None,
+) -> list[str]:
+    """The published settings the probe plants no value for and does not leave to the
+    table: a list of objects, a raw mapping, a list that holds its own default, a string
+    that ASH checks against a vocabulary the probe does not know. The probe cannot say
+    what a load does with them, so the report lists them, and a setting that joins the
+    list is a setting someone decides about."""
+    planted = probe_leaves(fields) if planted is None else planted
+    return sorted(
+        path
+        for path, field in fields.items()
+        if "[]" not in path
+        and "{}" not in path
+        and not field["hidden"]
+        and field["kind"] not in ("object", "section")
+        and path not in planted
+        and not probe_excluded(path)
+    )
 
 
 def load_repository_file(
@@ -2249,6 +2276,7 @@ def probe_trust(
             path: [outcome for _, outcome in seen] for path, seen in seen.items()
         },
         "unprobed": unprobed,
+        "unplanted": unplanted_settings(fields, leaves),
         "rounds": loads,
         "seconds": time.monotonic() - started,
     }
@@ -2264,6 +2292,11 @@ class Row(NamedTuple):
     ``function`` is the qualified name of the function in ``file`` that applies the
     rule, and ``needle`` a literal that must be inside it: a rename or a move stops
     the build, naming the row, and so does a literal that is gone.
+
+    ``paths`` is empty for a rule about something no published setting names, such as
+    the content of a baseline file or what a plugin module declares. The data block
+    carries no rule for such a row, since the editor has no field to show it on, but
+    the tests pin its function and its literal like any other row's.
     """
 
     ident: str
@@ -2338,6 +2371,34 @@ def trust_table() -> list[Row]:
             "sandbox.network_limit = ",
         ),
         Row(
+            "detect-secrets-scan-settings",
+            ("scanners.detect-secrets.options.scan_settings",),
+            "limited",
+            ("plugins and filters named by a module, not the verification filter",),
+            (
+                "the verification filter and each plugin or filter that names a file "
+                "are left out, unless the operator's own settings name them"
+            ),
+            "load",
+            "automated_security_helper/config/secret_verification_trust.py",
+            "confine_detect_secrets_settings",
+            "drop_untrusted_entries(",
+        ),
+        Row(
+            "detect-secrets-baseline-settings",
+            (),
+            "limited",
+            ("plugins and filters named by a module, not the verification filter",),
+            (
+                "a baseline file that is not the operator's loses its verification "
+                "filter and each plugin or filter that names a file"
+            ),
+            "scanner",
+            _SCANNERS + "detect_secrets_scanner.py",
+            "DetectSecretsScanner._apply_settings_trust",
+            "keep_verification=False",
+        ),
+        Row(
             "off-host-reporters",
             tuple(f"reporters.{name}" for name in sorted(REPORTER_ENABLED_DEFAULTS)),
             "operatorSection",
@@ -2347,6 +2408,20 @@ def trust_table() -> list[Row]:
             "automated_security_helper/config/operator_only_options.py",
             "reporter_section",
             "_operator_reporters",
+        ),
+        Row(
+            "plugin-reporter-destinations",
+            (),
+            "ignored",
+            (),
+            (
+                "a reporter that a plugin module adds has the options it declares as "
+                "destinations, and its enabled switch, set from the operator's settings"
+            ),
+            "plugin",
+            "automated_security_helper/config/reporter_trust.py",
+            "confine_declared_reporter_destinations",
+            "declared_destination_options(",
         ),
         Row(
             "zizmor-online-audits",
