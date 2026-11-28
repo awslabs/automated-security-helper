@@ -814,7 +814,8 @@ def _say_once_per_run(kind: str, logged_path: str, text: str) -> None:
 
 
 #: The selection lists whose empty value is no selection, by resolved key, each
-#: with the set its empty value runs and the key that adds scanners to that set.
+#: with the set its empty value runs and the key that adds scanners to that set in
+#: precommit mode (outside it, ``SelectionLayers.fold`` drops that key).
 #: Empty, ``default_scanners.only`` runs the mode's default set, which outside
 #: precommit mode is every enabled scanner, and ``precommit.only_scanners`` the
 #: selection below it (``SelectionLayers.fold``, core/scanner_selection.py). The
@@ -900,10 +901,11 @@ def _refuse_an_edit_of_a_scanner_selection(
     refusals: Optional[List[str]] = None,
 ) -> None:
     """Refuse a ``+=`` or ``-=`` on an empty list of
-    ``_EMPTY_MEANS_THE_DEFAULT_SELECTION``, naming the replace form, the key that
-    adds to the default set and the flag that leaves scanners out of it, and a
-    ``-=`` whose *result* would leave such a list empty. The refusal names the key,
-    never an item.
+    ``_EMPTY_MEANS_THE_DEFAULT_SELECTION``, naming the replace form, the flag that
+    leaves scanners out of the default set and, for precommit mode only, the key
+    that adds to it (outside that mode ``SelectionLayers.fold`` drops the key), and
+    a ``-=`` whose *result* would leave such a list empty. The refusal names the
+    key, never an item.
 
     With *refusals*, a refusal of an edit of ``_CONFINED_SELECTION`` is appended to
     it instead of raised (``apply_config_overrides``'s ``selection_refusals``). The
@@ -918,9 +920,9 @@ def _refuse_an_edit_of_a_scanner_selection(
         text = (
             f"Invalid config override: '{logged_path}{operator}'. {logged_path} is "
             f"empty, which runs {runs}, so there is no list to {verb}. Write "
-            f"'{logged_path}=[...]' to run exactly the scanners you list, "
-            f"'{add_key}=[...]' to add scanners to that set, or --exclude-scanners "
-            "to leave scanners out of it."
+            f"'{logged_path}=[...]' to run exactly the scanners you list, or "
+            "--exclude-scanners to leave scanners out of it; in precommit mode, "
+            f"'{add_key}=[...]' adds scanners to that set."
         )
     elif operator == REMOVE and not result:
         text = (
