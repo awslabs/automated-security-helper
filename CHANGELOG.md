@@ -515,6 +515,56 @@
   subscript, `snapshot_environ` or `cache_dir_env_var`), not when the name is any string
   in its module. `tests/unit/base/test_plugin_provisioning_pypi_pins.py` and
   `tests/unit/base/test_register_bindings.py` cover them.
+- The results model can carry support notices. `SupportNotice` and `UpgradePathNotice` in
+  `automated_security_helper/models/asharp_model.py` record a configuration that a run
+  met and that ASH supports only through a stand-in, with a loss, or not at all, built
+  from a row of the support register and the facts the run matched, with the upgrade
+  paths on offer. `metadata.support_notices` of the results holds them, one record for
+  each register row, and is left out while there are none, so the results of a run on a
+  fully supported configuration are written as they were. Nothing in a scan writes a
+  notice yet. A notice holds tokens, ids and public sentences: its fact names are closed
+  to the register's, and a notice or an upgrade path that holds a path on the machine
+  that wrote it (a home or absolute path, a drive path, a network share or a file URI, in
+  any spelling of the separators) is refused when it is built, because results are
+  shared. `ash merge` and the unified results file of a workspace scan record every
+  run's notices by id. A notice that more than one run met is recorded once, holding only
+  what every one of those runs recorded: the facts they read alike, the `found` text when
+  it is the same, and the upgrade paths each was offered, and a warning names the notice,
+  the runs and what the record leaves out. The results schema
+  `automated_security_helper/schemas/AshAggregatedResults.json` describes the field, and
+  the snapshot suite has a `support-notices` variant that records its shape for every
+  reporter. `tests/unit/models/test_combined_support_notices.py`,
+  `tests/unit/models/test_support_notice_binds_to_the_register.py`,
+  `tests/unit/models/test_support_notice_fact_names_are_the_registers.py`,
+  `tests/unit/models/test_support_notice_holds_no_local_path.py`,
+  `tests/unit/models/test_support_notices_are_a_declared_field.py`,
+  `tests/unit/cli/test_merge_unions_support_notices.py`,
+  `tests/unit/workspace/test_workspace_root_unions_support_notices.py`,
+  `tests/unit/workspace/test_workspace_scan_carries_each_projects_support_notices.py` and
+  `tests/snapshot/reporters/test_snapshot_reporters_support_notices.py` cover it.
+- Added `tests/unit/test_docs_deploy_never_force_pushes.py`, which fails when a workflow
+  or a composite action can force-push `gh-pages`. For every file under
+  `.github/workflows/` it checks three rules: no step runs `mkdocs gh-deploy` or
+  `ghp-import`; no step pushes `gh-pages` with `--force`, `-f`, `--force-with-lease`,
+  `--mirror` or a `+` refspec (a push whose branch the text does not name, such as a push
+  of `HEAD` or a wildcard refspec, is read as one that could be `gh-pages`); and no job
+  that can write `gh-pages` is reachable from a push of a tag. It reads a step's script
+  as a shell does, quotes, comments, continuations, redirections and here-documents
+  included, and it shows each rule failing on the workflow file as it was at the v3.7.1
+  release commit and on planted workflows. A tag push runs the workflow files of the
+  commit the tag points at, not the files on `main`, so the release guide now lists the
+  37 release tags from v3.1.1 through v3.7.1 whose commits carry a docs workflow that
+  force-pushes the whole site, says that a ruleset on `gh-pages` that refuses
+  non-fast-forward updates is the repository setting that catches such a push, and gives
+  the command that publishes a version again from a checkout. The comment in
+  `.github/workflows/ash-repo-docs.yml` now calls the `v3` major tag frozen.
+- The install scene's check in `tests/unit/docs/test_journey_pages.py` now reads the
+  README's install line with the pattern `automated-security-helper\.git@v\d` in place of
+  a substring test. `tests/unit/test_agent_plugin_ash_version.py` reads every file in the
+  repository for an install reference, and it took the bare reference in that line for an
+  install command cut off in the middle of its tag, so it failed on this branch. It
+  passes now, and the journey test still fails when the README's install line names no
+  release tag.
 
 ### Deprecations
 
