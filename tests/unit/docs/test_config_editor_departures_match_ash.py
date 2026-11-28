@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -61,13 +62,61 @@ def parse_departures(source: str) -> dict[str, dict[str, str]]:
 
 DEPARTURES = parse_departures(MESSAGES.read_text(encoding="utf-8"))
 
+#: A value of each kind a typed field takes, to set a variable to.
+FITTING = {"boolean": "true", "integer": "5", "number": "1.5"}
 
-def _document(path: str, instance):
-    """The configuration document that holds `instance` at the field `path`."""
-    document = instance
+
+def _date(text: str):
+    """The value YAML reads an unquoted date or datetime as."""
+    return datetime.fromisoformat(text) if len(text) > 10 else date.fromisoformat(text)
+
+
+def _with_dates(instance, pointers):
+    """`instance` with a date where the file wrote an unquoted one, at each pointer."""
+    result = json.loads(json.dumps(instance))
+    for pointer in pointers:
+        tokens = [
+            token.replace("~1", "/").replace("~0", "~")
+            for token in pointer.split("/")[1:]
+        ]
+        if not tokens:
+            return _date(result)
+        node = result
+        for token in tokens[:-1]:
+            node = node[int(token)] if isinstance(node, list) else node[token]
+        last = int(tokens[-1]) if isinstance(node, list) else tokens[-1]
+        node[last] = _date(node[last])
+    return result
+
+
+def _document(path: str, instance, options=None):
+    """The configuration document that holds `instance` at the field `path`.
+
+    A case's options name the pointers of the values the file writes as unquoted dates.
+    """
+    document = _with_dates(instance, (options or {}).get("unquotedDates", []))
     for key in reversed(path.split(".") if path else []):
         document = {key: document}
     return document
+
+
+def _references(path: str, instance) -> list[tuple[str, list[str]]]:
+    """(field path, variables) of each field that holds a reference in `instance`."""
+    found: list[tuple[str, list[str]]] = []
+
+    def walk(prefix: str, node) -> None:
+        if isinstance(node, str):
+            if node.startswith(("${", "!ENV ")):
+                found.append((prefix, re.findall(r"\$\{(\w+)", node)))
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                walk(f"{prefix}.{key}" if prefix else key, value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(f"{prefix}[]", item)
+
+    walk(path, instance)
+    return found
 
 
 def _variables(instance) -> list[str]:
@@ -128,13 +177,21 @@ def _facts(
         # A variable that is unset has the loader refuse the file before the field
         # is read. Set to a value that fits the field, the reference is still
         # refused at the field, and the refusal names it.
-        kind = BLOCK["fields"][case["path"]]["kind"]
-        value = {"boolean": "true", "integer": "5", "number": "1.5"}[kind]
-        for variable in _variables(instance):
-            monkeypatch.setenv(variable, value)
+        typed = [
+            (field_path, variables)
+            for field_path, variables in _references(case["path"], instance)
+            if not BLOCK["fields"][field_path]["envAccepted"]
+        ]
+        assert typed, "the case holds no reference at a field that refuses one"
+        for field_path, variables in typed:
+            value = FITTING[BLOCK["fields"][field_path]["kind"]]
+            for variable in variables:
+                monkeypatch.setenv(variable, value)
         _, resolved = _load(document, tmp_path, "set.yaml")
-        field = case["path"].split(".")[-1]
-        assert resolved is not None and field in resolved, resolved
+        assert resolved is not None, "ASH loaded the file with its variables set"
+        for field_path, _ in typed:
+            leaf = field_path.rsplit(".", 1)[-1]
+            assert leaf in resolved, (leaf, resolved)
     elif row == "ambiguous-plugin-spellings":
         assert "ambiguous, keep one" in error, error
     elif row == "unknown-key-in-list-entry":
@@ -144,8 +201,15 @@ def _facts(
         _, fatal = _load({**document, "fail_on_unknown_keys": True}, tmp_path, "f.yaml")
         assert fatal is not None and "ruleId" in fatal, fatal
     elif row == "comma-separated-output-formats":
+        text = instance if isinstance(instance, str) else instance["output_formats"]
         formats = [getattr(item, "value", item) for item in config.output_formats]
-        assert formats == [piece.strip() for piece in instance.split(",")]
+        # ASH splits on commas, strips each piece and drops the empty ones.
+        assert formats == [piece.strip() for piece in text.split(",") if piece.strip()]
+    elif row == "unquoted-date":
+        # ASH reads the date as a date and refuses it where text belongs.
+        for pointer in case["options"]["unquotedDates"]:
+            field = pointer.rsplit("/", 1)[-1]
+            assert field in error or "put it in quotes" in error, (field, error)
     elif row == "unknown-top-level-key":
         check = _check(document, tmp_path)
         unknown = [key for key in instance if key not in AshConfig.model_fields]
@@ -179,7 +243,7 @@ def test_ash_does_what_the_rows_of_the_case_say(case, tmp_path, monkeypatch):
     monkeypatch.delenv("ASH_CONFIG", raising=False)
     for variable in _variables(case["instance"]):
         monkeypatch.delenv(variable, raising=False)
-    document = _document(case["path"], case["instance"])
+    document = _document(case["path"], case["instance"], case.get("options"))
     config, error = _load(document, tmp_path)
     # The editor refuses a file exactly when ASH does.
     assert case["editor"]["valid"] == (error is None), (case["id"], error)
@@ -193,8 +257,8 @@ def test_ash_does_what_the_rows_of_the_case_say(case, tmp_path, monkeypatch):
 
 def test_the_table_is_read_whole_and_each_row_is_met_by_a_case():
     met = {finding["row"] for case in NOTED for finding in case["editor"]["findings"]}
+    assert DEPARTURES, "messages.js holds no table of departures"
     assert set(DEPARTURES) == met
-    assert len(DEPARTURES) == 7
 
 
 def test_the_reader_of_the_table_takes_a_row_and_leaves_what_is_not_one():
@@ -215,6 +279,31 @@ def test_a_row_that_claims_a_refusal_ash_does_not_give_is_caught(tmp_path, monke
     assert error is None
     with pytest.raises(AssertionError):
         _assert_claim("plugin-section-spelling", "error", document, error)
+
+
+VECTORS = json.loads(
+    (FIXTURES / "output-format-vectors.json").read_text(encoding="utf-8")
+)
+READINGS = [
+    pytest.param(group, code, id=f"{group['id']}-{code:x}")
+    for group in VECTORS["groups"]
+    for code in group["codePoints"]
+]
+
+
+@pytest.mark.parametrize(("group", "code"), READINGS)
+def test_ash_reads_a_string_of_output_formats_as_the_vectors_say(
+    group, code, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("ASH_CONFIG", raising=False)
+    text = group["template"].replace("{c}", chr(code))
+    config, error = _load({"output_formats": text}, tmp_path)
+    if group["formats"] is None:
+        assert error is not None, f"ASH loaded {text!r}"
+    else:
+        assert error is None, error
+        formats = [getattr(item, "value", item) for item in config.output_formats]
+        assert formats == group["formats"]
 
 
 ENTRY_TABLE = re.compile(

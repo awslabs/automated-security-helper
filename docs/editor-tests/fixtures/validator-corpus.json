@@ -270,6 +270,211 @@
       "valid": false
     },
     {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-trailing-comma-bad",
+      "instance": "sarif,html,",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-empty-piece-bad",
+      "instance": "sarif,,html",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-empty-string-bad",
+      "instance": "",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "output-formats-leading-space-bad",
+      "instance": " sarif",
+      "keyword": "anyOf",
+      "path": "output_formats",
+      "pointer": "",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "comma-separated-output-formats",
+            "severity": "warning"
+          }
+        ],
+        "valid": true
+      },
+      "id": "document-comma-output-formats-bad",
+      "instance": {
+        "output_formats": "sarif,html"
+      },
+      "keyword": "anyOf",
+      "path": "",
+      "pointer": "/output_formats",
+      "valid": false
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "document-reference-in-typed-field-ok",
+      "instance": {
+        "fail_on_findings": "${CI_STRICT}"
+      },
+      "keyword": null,
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "reference-in-typed-field",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "section-options-reference-ok",
+      "instance": {
+        "online_audits": "${ASH_ONLINE}"
+      },
+      "keyword": null,
+      "path": "scanners.zizmor.options",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "expires-unquoted-date-ok",
+      "instance": {
+        "global_settings": {
+          "suppressions": [
+            {
+              "expires": "2030-01-01",
+              "path": "a",
+              "reason": "b"
+            }
+          ]
+        }
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/global_settings/suppressions/0/expires"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "project-name-unquoted-date-ok",
+      "instance": {
+        "project_name": "2030-01-01"
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/project_name"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
+      "editor": {
+        "findings": [
+          {
+            "row": "unquoted-date",
+            "severity": "error"
+          }
+        ],
+        "valid": false
+      },
+      "id": "project-name-unquoted-datetime-ok",
+      "instance": {
+        "project_name": "2030-01-01 10:00:00"
+      },
+      "keyword": null,
+      "options": {
+        "unquotedDates": [
+          "/project_name"
+        ]
+      },
+      "path": "",
+      "pointer": null,
+      "valid": true
+    },
+    {
       "id": "output-formats-comma-string-unknown-bad",
       "instance": "sarif,pdf",
       "keyword": "anyOf",

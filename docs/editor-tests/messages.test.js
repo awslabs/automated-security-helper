@@ -41,7 +41,7 @@ const projected = (result) => result.findings.map(({ row, severity }) => ({ row,
 
 for (const item of corpus.cases) {
   test(`editor verdict: ${item.id}`, () => {
-    const result = judgeField(item.path, item.instance);
+    const result = judgeField(item.path, item.instance, item.options);
     if (item.editor) {
       assert.equal(result.valid, item.editor.valid);
       assert.deepEqual(projected(result), item.editor.findings);
@@ -348,6 +348,108 @@ test('a scope with an unknown key and a wrong value is refused, not downgraded',
   assert.deepEqual(shown(result), [
     { row: null, severity: 'error', pointer: '/global_settings/suppressions/0/scope' },
   ]);
+});
+
+test('a reference in a typed field is judged wherever the value sits, a whole document included', () => {
+  const document = judgeField('', { fail_on_findings: '${CI_STRICT}' });
+  assert.equal(document.valid, false);
+  assert.deepEqual(projected(document), [{ row: 'reference-in-typed-field', severity: 'error' }]);
+  assert.equal(document.findings[0].pointer, '/fail_on_findings');
+  assert.match(document.findings[0].message, /\$\{CI_STRICT\} is not accepted in this boolean field/);
+
+  const options = judgeField('scanners.zizmor.options', { online_audits: '${ASH_ONLINE}' });
+  assert.deepEqual(projected(options), [{ row: 'reference-in-typed-field', severity: 'error' }]);
+  assert.equal(options.findings[0].pointer, '/online_audits');
+
+  const nested = { scanners: { zizmor: { options: { online_audits: '${ASH_ONLINE}' } } } };
+  assert.equal(judgeField('', nested).findings[0].pointer, '/scanners/zizmor/options/online_audits');
+
+  // A string field and an enum field take a reference, so nothing is said of them.
+  const accepted = { project_name: '${PROJECT}', global_settings: { severity_threshold: '${LEVEL}' } };
+  assert.deepEqual(judgeField('', accepted).findings, []);
+});
+
+test('keys that come from the file never read the data block through its prototype', () => {
+  const instance = { constructor: '${A}', toString: 1, scanners: { constructor: {} } };
+  const result = judgeField('', instance);
+  assert.equal(result.valid, true);
+  assert.deepEqual(
+    result.findings.map((found) => [found.row, found.pointer]),
+    [
+      ['unknown-top-level-key', '/constructor'],
+      ['unknown-top-level-key', '/toString'],
+    ],
+  );
+});
+
+test('ASH reads a string of output formats as the names between its commas', () => {
+  const read = messagesModule.readOutputFormats;
+  assert.deepEqual(read('sarif,html'), ['sarif', 'html']);
+  assert.deepEqual(read('sarif,html,'), ['sarif', 'html']);
+  assert.deepEqual(read('sarif,,html'), ['sarif', 'html']);
+  assert.deepEqual(read(''), []);
+  assert.deepEqual(read(' sarif'), ['sarif']);
+  assert.deepEqual(read('  ,  '), []);
+});
+
+test('the strings of the output format vectors read as ASH reads them', () => {
+  const read = messagesModule.readOutputFormats;
+  const allowed = block.fields.output_formats.enum;
+  const vectors = fixture('output-format-vectors.json');
+  for (const group of vectors.groups) {
+    for (const code of group.codePoints) {
+      const text = group.template.replaceAll('{c}', String.fromCodePoint(code));
+      const pieces = read(text);
+      const label = `${group.id} ${code.toString(16)}`;
+      if (group.formats === null) {
+        assert.ok(pieces.some((piece) => !allowed.includes(piece)), label);
+      } else {
+        assert.deepEqual(pieces, group.formats, label);
+      }
+    }
+  }
+});
+
+test('a string of output formats that ASH reads as a list is a warning, however it is written', () => {
+  for (const text of ['sarif,html,', 'sarif,,html', '', ' sarif', 'sarif , html']) {
+    const result = judgeField('output_formats', text);
+    assert.equal(result.valid, true, JSON.stringify(text));
+    assert.deepEqual(projected(result), [{ row: 'comma-separated-output-formats', severity: 'warning' }]);
+    assert.match(result.findings[0].message, /Write as a list: output_formats: \[/);
+  }
+  const document = judgeField('', { output_formats: 'sarif,html' });
+  assert.equal(document.valid, true);
+  assert.equal(document.findings[0].pointer, '/output_formats');
+  assert.match(document.findings[0].message, /Write as a list: output_formats: \[sarif, html\]/);
+  // A piece that is not a format is still refused, whatever the commas.
+  assert.equal(judgeField('output_formats', 'sarif,pdf').valid, false);
+  assert.equal(judgeField('output_formats', `${String.fromCodePoint(0xfeff)}sarif`).valid, false);
+});
+
+test('an unquoted date where a string belongs is an error that says to quote it', () => {
+  const entry = { path: 'a', reason: 'b', expires: '2030-01-01' };
+  const document = { global_settings: { suppressions: [entry] } };
+  const pointer = '/global_settings/suppressions/0/expires';
+  const result = judgeField('', document, { unquotedDates: [pointer] });
+  assert.equal(result.valid, false);
+  assert.deepEqual(projected(result), [{ row: 'unquoted-date', severity: 'error' }]);
+  assert.equal(result.findings[0].pointer, pointer);
+  assert.equal(
+    result.findings[0].message,
+    `expires must be quoted: an unquoted 2030-01-01 is read as a date, not text, so put it in quotes. ${REFUSES}`,
+  );
+  // The same value written in quotes is fine, and so is a date the options do not name.
+  assert.equal(judgeField('', document).valid, true);
+  assert.equal(judgeField('', document, { unquotedDates: [] }).valid, true);
+});
+
+test('an unquoted date is left alone where ASH does not read the field as a string', () => {
+  // A boolean field refuses the text on its own, and the date row adds nothing to it.
+  const typed = judgeField('', { fail_on_findings: '2030-01-01' }, { unquotedDates: ['/fail_on_findings'] });
+  assert.deepEqual(projected(typed), [{ row: null, severity: 'error' }]);
+  // A key ASH does not know is ignored, so a date in it does no harm.
+  const unknown = judgeField('', { mystery: '2030-01-01' }, { unquotedDates: ['/mystery'] });
+  assert.deepEqual(projected(unknown), [{ row: 'unknown-top-level-key', severity: 'warning' }]);
 });
 
 test('the table of entry models names each model, how its entry is called and what a scan does', () => {

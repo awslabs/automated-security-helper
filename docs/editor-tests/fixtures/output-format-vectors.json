@@ -1,0 +1,47 @@
+{
+  "about": "How ASH reads a string at output_formats: it splits the string on commas, strips each piece the way Python's str.strip does, and drops the pieces that are empty. Each group names code points; the string is the group's template with {c} replaced by the character. formats is the list ASH reads, or null when ASH refuses the file because a piece is not a format. A Python test loads each string through ASH's file-load route, and a node test reads each one with the editor's reading.",
+  "groups": [
+    {
+      "codePoints": [
+        9,
+        10,
+        11,
+        12,
+        13,
+        28,
+        29,
+        30,
+        31,
+        32,
+        133,
+        160,
+        5760,
+        8192,
+        8195,
+        8202,
+        8232,
+        8233,
+        8239,
+        8287,
+        12288
+      ],
+      "formats": [
+        "sarif",
+        "html"
+      ],
+      "id": "separators",
+      "template": "{c}sarif{c},html"
+    },
+    {
+      "codePoints": [
+        173,
+        6158,
+        8203,
+        65279
+      ],
+      "formats": null,
+      "id": "not-separators",
+      "template": "{c}sarif"
+    }
+  ]
+}
