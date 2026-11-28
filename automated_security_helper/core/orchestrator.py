@@ -1852,9 +1852,12 @@ class ASHScanOrchestrator(BaseModel):
 
             discard_run_record(self._output_path, report_id)
         except Exception as exc:  # noqa: BLE001 - runs while a cancel propagates
+            # Rendered with error_text: a plain f-string calls the error's
+            # __str__, which can raise, and a raise from this arm would replace
+            # the cancel that is propagating.
             ASH_LOGGER.debug(
                 f"Could not discard the taken-back run's record in "
-                f"{self.output_dir}: {exc}"
+                f"{self.output_dir}: {error_text(exc)}"
             )
 
     def settle_previous_results(self, restore: bool) -> None:

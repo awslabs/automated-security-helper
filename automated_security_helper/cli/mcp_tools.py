@@ -2754,8 +2754,9 @@ def _an_unnamed_gap() -> Dict[str, Any]:
 def _gap_named_by_the_exit(ended: BaseException) -> Dict[str, Any]:
     """The coverage gap an exit for incomplete coverage names, from its own fields.
 
-    For a scan that exited with ``ScanIncompleteExit`` when its close could not be
-    worked out in full (``to_payload()`` raised). The registry refuses to close a scan
+    For a scan that exited with ``ScanIncompleteExit`` whose payload could not be
+    built (``to_payload()`` raised), or whose close could not be worked out at all
+    (``_close_for``). The registry refuses to close a scan
     as incomplete with no gap attached, so the close needs one, and the exit's fields
     are what its exit code was decided on. Any one of them makes the exit
     (``ScanIncompleteness.__bool__``), so the gap is read from all of them: an exit for
@@ -3102,15 +3103,31 @@ async def _run_scan(
         anything else a test double returns). The coverage of an incomplete scan
         is the facts assessed from its results when they name a gap, and the
         exit's own reasons otherwise; the coverage of a completed one is the
-        assessed facts, whatever the gate says. The judged threshold is read on its
-        own (``_threshold_or_none``); the exit's payload is read without a guard of
-        its own, so this can raise: call ``_close_for``, which cannot.
+        assessed facts, whatever the gate says. The exit's payload and the judged
+        threshold are each read on their own, so one that cannot be read costs the
+        close only itself: a payload that cannot be built is replaced by the gap the
+        exit's own fields name (``_gap_named_by_the_exit``, which never raises), and a
+        threshold that cannot be read is left out (``_threshold_or_none``). Every
+        caller still goes through ``_close_for``, which guards what nothing here
+        foresaw.
         """
         if isinstance(ended, ScanIncompleteExit):
             # The gap reported is the facts whatever the gate says, as for a
             # completed scan. The exception's own reasons are the fallback: they
             # are what the exit code was decided on, so they are never empty.
-            coverage: Optional[Dict[str, Any]] = ended.incompleteness.to_payload()
+            coverage: Optional[Dict[str, Any]]
+            try:
+                coverage = ended.incompleteness.to_payload()
+            except Exception as payload_error:  # noqa: BLE001
+                # Read on its own, as the threshold is: a payload that cannot be
+                # built costs the close only the payload, so the facts assessed
+                # below and the judged threshold are still recorded.
+                _logger.warning(
+                    f"Scan {scan_id}: could not build its exit's coverage payload; "
+                    "the gap the exit's own fields name stands in for it: "
+                    f"{error_text(payload_error, environment_values)}"
+                )
+                coverage = _gap_named_by_the_exit(ended)
             try:
                 _, facts = assess_coverage(ended.results)
                 if coverage_has_gap(facts):
@@ -3148,9 +3165,9 @@ async def _run_scan(
         runner calls this from its return arm and from its incomplete-coverage arm
         for a scan whose thread recorded no close (its cancel event was set), where
         an error would leave the task, which nothing awaits, with the entry still
-        running, or close a scan that ended normally as failed. A threshold that
-        cannot be read costs only itself (``_threshold_or_none``), so what reaches the
-        guard here is an exit payload that could not be built, or an error nothing
+        running, or close a scan that ended normally as failed. An exit payload that
+        cannot be built and a threshold that cannot be read each cost only themselves
+        (``_work_out_the_close``), so what reaches the guard here is an error nothing
         foresaw. The scan has results, so on an error it is closed as what it ended
         as, with no threshold: ``COMPLETED`` with no coverage, or, for the exit for
         incomplete coverage, ``INCOMPLETE`` with the gap the exit's own fields name
@@ -3303,9 +3320,11 @@ async def _run_scan(
                 # cancelled run as a completed one. The results carry the
                 # record's id; ``ScanIncompleteExit`` carries them on the exit,
                 # and an ending with neither names no record, so nothing is
-                # removed. The removal is best effort and guarded on its own: a
-                # record left behind costs a point in ``ash trend``, and a raise
-                # here would skip putting the previous results back below.
+                # removed. The removal is best effort. The helper logs a removal
+                # that fails rather than raise, and the call is guarded here too,
+                # as a backstop: a record left behind costs a point in
+                # ``ash trend``, and a raise here would skip putting the previous
+                # results back below.
                 # history/ is not among the entries the restore moves
                 # (core/previous_results.RESULT_ENTRIES), so the order of the two
                 # matters to neither.
@@ -3349,12 +3368,14 @@ async def _run_scan(
         result: the entry is closed with what the thread worked out for it
         (``settled_close``): the status, coverage and severity threshold the
         runner's own close would have recorded. When that close raises too (the
-        runner's own close failed on the same values), it is made again without the
-        severity threshold, keeping the coverage, when there was a threshold; and when
-        that raises as well, with the status alone, or for an incomplete scan with the
-        status and the gap that names nothing (``_an_unnamed_gap``), since the
-        registry refuses an incomplete scan with no gap. The line says what was left
-        out. Any other failure closes it FAILED with ``reason``, and with
+        runner's own close failed on the same values), it is made again with the
+        status alone, or for an incomplete scan with the status and the gap that
+        names nothing (``_an_unnamed_gap``), since the registry refuses an incomplete
+        scan with no gap. ``ScanRegistry.finish_scan`` refuses a close only for its
+        coverage, before it writes anything, and stores the threshold with a plain
+        assignment, so a close made again without the threshold alone would fail the
+        same way. The line says what was left out. Any other failure closes it FAILED
+        with ``reason``, and with
         ``stop_the_scan`` sets the cancel event under the same lock, so the thread's
         decision reads the entry closed and the event set, or has been made first
         and the entry is closed after it.
@@ -3370,17 +3391,14 @@ async def _run_scan(
                     None,
                     None,
                 )
-                # The close through the mark, then lighter ones in turn. When the
-                # runner's own close failed, it carried these same values, and a
-                # failure that comes from them comes again; an exception out of this
-                # arm leaves the entry running, which this arm exists to prevent. So a
-                # close that raises is made again without the threshold, when it had
-                # one (without one, that close is the one that just failed), keeping
-                # the coverage, which for an incomplete scan is the gap a client
-                # needs. Then with the status alone, or for an incomplete scan with
-                # the gap that names nothing (``_an_unnamed_gap``), since the registry
-                # refuses one with no gap attached. Neither of those values can be
-                # what failed, so that last close is not guarded.
+                # The close through the mark, then a lighter one. When the runner's
+                # own close failed, it carried these same values, and a failure that
+                # comes from them comes again; an exception out of this arm leaves the
+                # entry running, which this arm exists to prevent. So a close that
+                # raises is made again with the status alone, or for an incomplete
+                # scan with the gap that names nothing (``_an_unnamed_gap``), since the
+                # registry refuses one with no gap attached. Neither of those values
+                # can be what failed, so that last close is not guarded.
                 recorded: Optional[bool] = None
                 dropped: Optional[Exception] = None
                 left_out = ""
@@ -3393,17 +3411,6 @@ async def _run_scan(
                     )
                 except Exception as close_error:  # noqa: BLE001
                     dropped = close_error
-                if recorded is None and threshold is not None:
-                    try:
-                        recorded = registry.finish_scan(
-                            scan_id, status, coverage=coverage
-                        )
-                        left_out = (
-                            " without its severity threshold, which could not be "
-                            "recorded"
-                        )
-                    except Exception as close_error:  # noqa: BLE001
-                        dropped = close_error
                 if recorded is None:
                     left_out = (
                         " without its coverage and severity threshold, which "

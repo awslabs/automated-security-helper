@@ -17,13 +17,15 @@ ones. The window is held open deterministically: the previous results' drop
 waits on an event the test releases after the arm has run.
 
 A scan that exited for incomplete coverage keeps its results the same way, with one
-difference the last two cells pin. The registry refuses to close an incomplete scan
-with no gap attached, so a close that cannot carry the scan's own gap is made again
-with the gap that names nothing (one ``unknown`` incomplete scanner), not with the
-status alone, and a close that raises in the runner's incomplete-coverage arm reaches
-the failure arm instead of escaping the task. A close that fails because of its
-severity threshold, not its coverage, keeps the coverage: it is made again without the
-threshold before the gap that names nothing, or the status alone, is used.
+difference its cells pin. The registry refuses to close an incomplete scan with no
+gap attached, so a close that cannot carry the scan's own gap is made again with the
+gap that names nothing (one ``unknown`` incomplete scanner), not with the status
+alone, and a close that raises in the runner's incomplete-coverage arm reaches the
+failure arm instead of escaping the task. A close that fails while it carries the
+judged severity threshold is made again the same way, with no threshold: the registry
+refuses a close only for its coverage, before it writes anything, so a close made
+again with the same coverage and no threshold would fail as the one before it did.
+The last two cells pin that with a stand-in that refuses the threshold itself.
 
 Every cell is DISARMED: the scan is a stand-in that writes a results file into
 the cell's own tmp_path, no real scanner or network is involved, and the drop

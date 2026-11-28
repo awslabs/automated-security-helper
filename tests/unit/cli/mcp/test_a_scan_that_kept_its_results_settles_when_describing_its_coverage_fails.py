@@ -9,7 +9,7 @@ When ``run_ash_scan`` ends with results in hand (a return, an exit 0, or
 ``ScanIncompleteExit``), the scan's thread works out how the entry will be closed
 (``_close_for``: status, coverage payload, severity threshold) before it takes
 the settle decision, and then drops the previous scan's results. ``_close_for`` is
-documented never to raise, but it reads the exit's ``to_payload()`` and the
+documented never to raise, but it read the exit's ``to_payload()`` and the
 judged threshold without a guard of their own.
 
 Before the guard, an error from either left the thread's settle step half done:
@@ -35,9 +35,12 @@ incomplete scanner when nothing it read names a gap.
 
 The judged severity threshold is read on its own, so a threshold that cannot be read
 costs the close only the threshold: the entry keeps the coverage the close worked out,
-a stale content database's full row included. And the history record of a scan taken
-back is discarded under its own guard, so a discard that raises no longer keeps the
-previous results set aside.
+a stale content database's full row included. So is the exit's payload: one that
+cannot be built is replaced by the gap the exit's own fields name, and the entry keeps
+the coverage assessed from the results when it names a gap, and the judged threshold.
+And the history record of a scan taken back is discarded under its own guard, so a
+discard that raises no longer keeps the previous results set aside; the history
+helper itself renders a failed removal's error instead of raising on it.
 
 The same function is called a second time, from the runner's arms, for a scan whose
 thread did not settle it as one with results: its cancel event was set before the

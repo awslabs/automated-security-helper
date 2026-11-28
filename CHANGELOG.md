@@ -253,13 +253,17 @@
   The fallback now reads every field of the exit and reports every coverage key, with a
   stale content database's full row; a row it cannot read is reported as `unknown`, and
   an exit with nothing readable as one incomplete scanner named `unknown`. A severity
-  threshold that cannot be read or recorded now costs the scan only the threshold, not
-  its coverage: a failed close of an incomplete scan is retried with its own gap and no
-  threshold, then with the `unknown` gap instead of with no coverage, and a close that
-  fails on the incomplete-coverage path is recorded the way one on the completed path
-  is, instead of ending the scan's task with the entry still running. A history record
-  that cannot be removed when a scan is taken back no longer keeps the previous scan's
-  results set aside.
+  threshold that cannot be read now costs the scan only the threshold, not its
+  coverage. An exit's coverage payload that cannot be built costs it only the payload:
+  the scan keeps its judged threshold and the coverage assessed from its results, and
+  reports the gap the exit's own fields name when the assessed coverage names none or
+  cannot be worked out. A failed close of an incomplete scan is retried with the
+  `unknown` gap instead of with no coverage, and a close that fails on the
+  incomplete-coverage path is recorded the way one on the completed path is, instead
+  of ending the scan's task with the entry still running. A history record that cannot
+  be removed when a scan is taken back no longer keeps the previous scan's results set
+  aside, and a removal that fails with an error whose message cannot be rendered is
+  logged instead of raising in place of the cancel.
 
 ### Features
 

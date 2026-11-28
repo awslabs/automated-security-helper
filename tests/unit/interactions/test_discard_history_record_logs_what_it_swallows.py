@@ -10,7 +10,9 @@ raise; its except arm was a bare ``pass``, so a failed unlink left the stale
 record with no trace of why. The arm now logs the swallowed failure at debug,
 which is the trace a reader follows when a cancelled run still shows in
 ``ash trend``. The helper is public: the MCP runner's settle discards from its
-restore path too (cli/mcp_tools.py).
+restore path too (cli/mcp_tools.py). The arm renders the error with ``error_text``,
+as the orchestrator's own discard does (core/orchestrator.py): a plain f-string of an
+error whose own message cannot be made raised in the arm itself.
 
 Each test states the assertion that fails at the base.
 """
