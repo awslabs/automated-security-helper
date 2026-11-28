@@ -38,7 +38,7 @@ test('a number is written so that ASH reads the same number back', () => {
     [1e21, '1.0e+21'],
     [1e20, '1.0e+20'],
     [9007199254740991, '9007199254740991'],
-    [9007199254740992, '9.007199254740992e+15'],
+    [2 ** 53, '9.007199254740992e+15'],
     [NaN, '.nan'],
     [Infinity, '.inf'],
     [-Infinity, '-.inf'],

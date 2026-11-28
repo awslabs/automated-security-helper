@@ -202,7 +202,7 @@ function same(expected, actual) {
 }
 
 function short(value) {
-  const text = JSON.stringify(value, (key, item) => {
+  const text = JSON.stringify(value, (_key, item) => {
     if (typeof item === 'bigint') {
       return item.toString();
     }
