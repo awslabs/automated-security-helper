@@ -7,10 +7,14 @@ import re
 import sys
 import threading
 from pathlib import Path, PurePath
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from automated_security_helper.core.enums import AshExitCode, ExportFormat
 from automated_security_helper.models.vocab import SEVERITY_VALUES, SeverityThreshold
+
+# Defined with the other path helpers, where the config and plugin layers import it;
+# named here too for the modules that import it from this one.
+from automated_security_helper.utils.path_stat import is_anchored
 from automated_security_helper.utils.severity_ladder import (
     SEVERITY_THRESHOLDS,
     normalize_threshold,
@@ -150,20 +154,6 @@ PYTHON_ONLY_SKIPPED_REASON = "not a Python-only scanner, and --python-only is se
 #: tell a scanner the split left out from one no shard was asked to run, so a
 #: reword here that the merge did not follow would reopen that hole silently.
 SHARD_SPLIT_REASON_PREFIX = "assigned to another shard (this run is shard "
-
-
-def is_anchored(path: str, pathmod: Any = os.path) -> bool:
-    """Whether ``path`` names a location without reference to the cwd.
-
-    ``isabs`` alone is not enough on Windows: before Python 3.13 ``\\tools`` counts
-    as absolute there, but it is rooted on whichever drive is current. A drive
-    letter or UNC share is required as well.
-    """
-    if not pathmod.isabs(path):
-        return False
-    if pathmod.__name__ == "ntpath":
-        return bool(pathmod.splitdrive(path)[0])
-    return True
 
 
 #: The (variable, value) pairs from the environment already warned about in this

@@ -4000,6 +4000,16 @@ class TestBuiltinPluginEnvironmentReadsAreAudited:
                 " not installed through uv, so it is never a uv install input"
             ),
         ),
+        ("scanners/gitleaks_scanner.py", 'os.environ.get("GITLEAKS_CONFIG_TOML")'): (
+            1,
+            (
+                "GITLEAKS_CONFIG_TOML is the operator's config text, checked for"
+                " a relative [extend] path, written to ASH's own file outside the"
+                " scanned tree and passed to the gitleaks binary as --config;"
+                " gitleaks is not installed through uv, so it is never a uv"
+                " install input"
+            ),
+        ),
     }
 
     @staticmethod

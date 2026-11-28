@@ -114,8 +114,10 @@ from automated_security_helper.config.untrusted_source import (
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
     ASHRespelledOverrideError,
+    ScannerError,
 )
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
+from automated_security_helper.utils.path_stat import is_anchored
 from automated_security_helper.utils.terminal_text import shown_on_one_line
 
 if TYPE_CHECKING:
@@ -1156,3 +1158,258 @@ def empty_tool_directory(name: str, *, context: Any) -> Path:
     )
 
     return make_tool_config_directory(name, context=context)
+
+
+#: How many ``[extend]`` files gitleaks and betterleaks follow from the config they
+#: are given (``maxExtendDepth`` in each tool's ``config/config.go``).
+EXTEND_DEPTH_LIMIT = 2
+
+#: The most bytes ASH reads from one config file when it checks that file's
+#: ``[extend]`` path. ASH reads the file itself, in its own process before the tool
+#: runs and outside the scan timeout, and an ``[extend]`` path can name any file the
+#: operator's account can open, so a longer file is refused instead of being read
+#: into memory whole.
+TOOL_CONFIG_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _read_tool_config(tool: str, source: str, path: Path) -> str:
+    """The text of the config file at ``path``, for the ``[extend]`` check.
+
+    Opened the way ``config/config_sources.read_config_bytes`` opens a config:
+    ``O_NONBLOCK``, so opening a FIFO does not wait for a writer, and ``O_NOCTTY``,
+    so a terminal swapped in at the name cannot become the process's controlling
+    terminal. Symbolic links are followed, as the tools follow them. What was
+    opened is checked with ``fstat`` on the descriptor, so anything but a regular
+    file (a FIFO, a device, a directory) is refused, and at most
+    ``TOOL_CONFIG_MAX_BYTES`` are read.
+
+    Args:
+        tool: The tool's name, for the message.
+        source: Where the config came from, for the message.
+        path: The config file.
+
+    Returns:
+        The file's text.
+
+    Raises:
+        ScannerError: The file could not be opened or read, is not a regular file,
+            is longer than ``TOOL_CONFIG_MAX_BYTES``, or is not UTF-8. The message
+            names the file and quotes none of it.
+    """
+    import errno
+    import os
+    import stat
+
+    limit = TOOL_CONFIG_MAX_BYTES
+    named = str(path)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
+    flags = (
+        os.O_RDONLY | nonblock | getattr(os, "O_NOCTTY", 0) | getattr(os, "O_BINARY", 0)
+    )
+    chunks: List[bytes] = []
+    remaining = limit + 1
+    try:
+        fd = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise OSError(errno.EINVAL, "not a regular file")
+            if nonblock:
+                # O_NONBLOCK was for the open. A regular file is then read normally.
+                os.set_blocking(fd, True)
+            while remaining > 0:
+                chunk = os.read(fd, min(remaining, 1 << 20))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError) as error:
+        # A ValueError is an embedded NUL in the path, which has no strerror.
+        reason = getattr(error, "strerror", None) or type(error).__name__
+        raise ScannerError(
+            f"{source}: {named!r} could not be read ({reason}), so ASH cannot "
+            f"check its [extend] path; {tool} is not run."
+        ) from None
+    if remaining <= 0:
+        raise ScannerError(
+            f"{source}: {named!r} is larger than {limit} bytes, the most ASH reads "
+            f"from one config file, so ASH cannot check its [extend] path; {tool} "
+            "is not run."
+        ) from None
+    try:
+        return b"".join(chunks).decode("utf-8")
+    except UnicodeDecodeError:
+        raise ScannerError(
+            f"{source}: {named!r} is not UTF-8, so ASH cannot check its [extend] "
+            f"path; {tool} is not run."
+        ) from None
+
+
+def _extend_path_values(tool: str, source: str, data: Dict[str, Any]) -> List[Any]:
+    """Every value ``data`` sets as ``extend.path``, reading keys the way the tools do.
+
+    gitleaks reads its config through viper, which lower-cases every key and splits
+    a key on ``.``, so ``[Extend] Path``, ``[extend] PATH``, ``"extend.path"`` and
+    ``"Extend.Path"`` all set ``extend.path``. betterleaks' TOML decoder matches
+    field names in any case. One reading covers both: each key is folded with
+    ``key.lower().split(".")``.
+
+    Args:
+        tool: The tool's name, for the message.
+        source: Where the config came from, for the message.
+        data: The parsed document.
+
+    Returns:
+        The values in document order. A key with more parts than ``path``
+        (``"extend.path.x"``) is recorded as a value that is not a string.
+
+    Raises:
+        ScannerError: ``extend`` is not a table, or ``[extend]`` or its path is set
+            more than once under keys the tools read as one.
+    """
+    not_a_string = object()
+    values: List[Any] = []
+    tables = 0
+    for key, value in data.items():
+        parts = key.lower().split(".")
+        if parts[0] != "extend":
+            continue
+        if len(parts) == 1:
+            if not isinstance(value, dict):
+                raise ScannerError(
+                    f"{source} sets [extend] to something that is not a table. "
+                    f"ASH cannot tell what {tool} reads from it, and it may open a "
+                    "file from the scanned tree. Make [extend] a table with an "
+                    f"absolute path; {tool} is not run."
+                )
+            tables += 1
+            for inner_key, inner_value in value.items():
+                inner = inner_key.lower().split(".")
+                if inner[0] == "path":
+                    values.append(inner_value if len(inner) == 1 else not_a_string)
+        elif parts[1] == "path":
+            values.append(value if len(parts) == 2 else not_a_string)
+    if tables > 1 or len(values) > 1:
+        raise ScannerError(
+            f"{source} sets [extend] or its path more than once when the keys are "
+            f"read as {tool} reads them (in any case, a dotted key split into a "
+            f"table and a key). ASH cannot tell which one {tool} uses. Set each "
+            f"once, with an absolute path; {tool} is not run."
+        )
+    return values
+
+
+def refuse_relative_extend_path(
+    tool: str,
+    source: str,
+    *,
+    text: Optional[str] = None,
+    path: Optional[Path] = None,
+    read_by_tool: bool = True,
+    _depth: int = 0,
+) -> None:
+    """Refuse a gitleaks-style config whose ``[extend] path`` is not absolute.
+
+    gitleaks and betterleaks run with the scanned tree as their working
+    directory and open a relative ``extend.path`` from it, then append that
+    file's allowlists, so the scanned repository would supply a file the
+    operator's config names. The config is read the way the tools read it: TOML,
+    with each key folded to lower case and split on ``.`` (gitleaks reads its
+    config through viper, and betterleaks' decoder matches names in any case), so
+    ``[Extend] Path``, ``[extend] PATH`` and ``"extend.path"`` are all
+    ``extend.path``. A path is absolute when it is anchored
+    (``utils.path_stat.is_anchored``): on Windows one with a root and no drive names
+    a file on the drive of the scanned tree, where ASH would read it on its own.
+    An empty path is skipped, as both tools skip it. Each file is read as a
+    regular file of at most ``TOOL_CONFIG_MAX_BYTES``, and each absolute extended
+    file is followed to the tool's own depth limit. A UTF-8 byte order mark at the
+    start of the text, which some editors save, is refused in a config the tool
+    reads, naming the file or the variable: gitleaks and Betterleaks each stop at it.
+    In a config the tool does not read (``read_by_tool`` false), and in the files
+    it extends, the mark is skipped and the rest is checked.
+
+    A file or text ASH cannot read or parse (missing, not a regular file, too
+    large, not UTF-8, not TOML) is refused, not left to the tool, because ASH could
+    not check its ``[extend]`` path. So is an ``[extend]`` ASH cannot read the way
+    the tools do: not a table, a path that is not a string, or either set more
+    than once under keys the tools read as one.
+
+    Args:
+        tool: The tool's name, for the message.
+        source: Where the config came from (an option or variable name, or the
+            path of the extended file), for the message.
+        text: The config's text, when the operator gave text.
+        path: The config file, when the operator gave a file.
+        read_by_tool: Whether the tool reads this config. False for a config that
+            another one the operator set takes precedence over, which the tool
+            never opens; its byte order mark is not refused.
+
+    Raises:
+        ScannerError: ``extend.path`` in the config, or in a file it extends, is
+            not absolute; the config or a file it extends cannot be read or
+            parsed, or one the tool reads starts with a byte order mark; or its
+            ``[extend]`` cannot be read the way the tools read it.
+    """
+    import tomllib
+
+    if text is None:
+        if path is None:
+            return
+        text = _read_tool_config(tool, source, path)
+        where = repr(str(path))
+    else:
+        where = f"the config text in {source}"
+    # chr(0xFEFF) is the byte order mark. gitleaks 8.30.1 and Betterleaks 1.10.1 each
+    # stop at one at the start of a config they read ("invalid character at start of
+    # key") and exit 1: a file passed with --config and a file a config extends, and
+    # for Betterleaks the file or the text a config variable gives it. So a config the
+    # tool reads is refused here, naming it, before the tool is given text it would
+    # fail on. Betterleaks parses no variable it does not read, nor a file that
+    # variable's config extends, so there only ASH's parse skips the mark.
+    if text.startswith(chr(0xFEFF)):
+        if read_by_tool:
+            raise ScannerError(
+                f"{source}: {where} starts with a UTF-8 byte order mark, which "
+                f"{tool} cannot read; remove the mark. {tool} is not run."
+            )
+        text = text[1:]
+    try:
+        data = tomllib.loads(text)
+    except (ValueError, RecursionError):
+        # A TOMLDecodeError is a ValueError, and so is the interpreter's integer
+        # digit limit; deeply nested arrays raise RecursionError. Neither the text
+        # nor the parser's message is quoted: both can hold what the config holds.
+        raise ScannerError(
+            f"{source}: {where} could not be parsed as TOML, so ASH cannot check "
+            f"its [extend] path; {tool} is not run."
+        ) from None
+    values = _extend_path_values(tool, source, data)
+    if not values:
+        return
+    extended = values[0]
+    if not isinstance(extended, str):
+        raise ScannerError(
+            f"{source} sets [extend] path to something that is not a string. "
+            f"{tool} may read it as text, a file name in the scanned tree, and "
+            "ASH cannot tell which file it would open. Use a string holding an "
+            f"absolute path to the file; {tool} is not run."
+        )
+    if not extended:
+        return
+    if not is_anchored(extended):
+        raise ScannerError(
+            f"{source} sets [extend] path = {extended!r}, which is not an "
+            f"absolute path. {tool} opens a relative extend path from its working "
+            "directory, the scanned tree, so the scanned repository would supply "
+            f"that file. Use an absolute path to the file; {tool} is not run."
+        )
+    if _depth < EXTEND_DEPTH_LIMIT:
+        # The tool opens the file a config extends only when it reads the config.
+        refuse_relative_extend_path(
+            tool,
+            extended,
+            path=Path(extended),
+            read_by_tool=read_by_tool,
+            _depth=_depth + 1,
+        )

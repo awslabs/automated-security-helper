@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A relative GITLEAKS_CONFIG is resolved where the operator set it, not in the tree.
+"""A relative GITLEAKS_CONFIG is resolved where ASH runs, not where gitleaks runs.
 
 With GITLEAKS_CONFIG in the environment and no sandbox, the scanner passed no
 ``--config`` and left the resolution to gitleaks. gitleaks resolves a relative
@@ -10,9 +10,12 @@ directory, so a relative value the operator set in ASH's own working directory
 was read from the scanned tree: the repository supplied the config file.
 
 The relative value is now anchored to the directory ASH runs in and passed as
-``--config``, which gitleaks reads before the variable. An absolute path, and
-GITLEAKS_CONFIG_TOML (the config's text, not a path), are left to gitleaks as
-before.
+``--config``, which gitleaks reads before the variable. An absolute path is passed
+as ``--config`` as given, and GITLEAKS_CONFIG_TOML (the config's text, not a path)
+is written to a file outside the tree and passed as ``--config`` too. By default ASH
+scans the directory it runs in, so in the default run the anchor is the scanned tree
+itself and the tree can supply the file; an absolute path is the form that keeps
+the tree from supplying it. These tests run ASH from a directory outside the tree.
 
 The test is on the value AS GIVEN. A first shape tested ``os.path.isabs`` on the
 value after ``expanduser``, so ``~/rules.toml`` read as absolute and was left to
@@ -31,6 +34,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.core.exceptions import ScannerError
 from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import _scanner
 
 pytestmark = pytest.mark.unit
@@ -62,10 +66,10 @@ def test_a_relative_config_env_the_operator_lacks_is_never_read_from_the_tree(
     tmp_path, monkeypatch
 ):
     """The operator's directory has no ``rules.toml`` and the scanned tree does.
-    The value is still anchored where the operator set it and passed as
-    ``--config``: gitleaks is handed a path that does not exist and fails on
-    it, which is the right outcome, where leaving the value to gitleaks would
-    have it read the tree's copy and run the repository's rules."""
+    The value is still anchored where the operator set it. ASH reads that file to
+    check its ``[extend]`` path, finds none, and refuses the run naming the path
+    it anchored; leaving the value to gitleaks would have had it read the tree's
+    copy and run the repository's rules."""
     operator_dir = tmp_path / "operator"
     operator_dir.mkdir()
     monkeypatch.chdir(operator_dir)
@@ -74,15 +78,16 @@ def test_a_relative_config_env_the_operator_lacks_is_never_read_from_the_tree(
     scanner = _scanner(tmp_path)
     source = scanner.context.source_dir
     (source / "rules.toml").write_text('title = "repo"\n')
+    anchored = Path(os.path.abspath("rules.toml"))
 
-    chosen = scanner._resolve_config_file()
+    with pytest.raises(ScannerError, match="could not be read") as refused:
+        scanner._resolve_config_file()
 
-    assert chosen == Path(os.path.abspath("rules.toml"))
-    assert not chosen.exists()
-    args = scanner._build_arguments(source, tmp_path / "o.sarif")
-    configs = [a for a in args if a.startswith("--config")]
-    assert configs == [f"--config={chosen.as_posix()}"]
-    assert not any((source / "rules.toml").as_posix() in a for a in args)
+    message = str(refused.value)
+    assert repr(str(anchored)) in message or str(anchored) in message, message
+    assert str(source / "rules.toml") not in message
+    assert (source / "rules.toml").as_posix() not in message
+    assert not anchored.exists()
 
 
 def _operator_home(tmp_path, monkeypatch) -> Path:
@@ -147,16 +152,21 @@ def test_the_rescan_anchors_the_variable_where_the_first_run_did(tmp_path, monke
     assert scanner._rescan_env(["--report-format=sarif"]) is None
 
 
-def test_an_absolute_config_env_is_left_to_gitleaks(tmp_path, monkeypatch):
-    """Control: the shape the existing test pins, unchanged."""
+def test_an_absolute_config_env_is_passed_as_it_is(tmp_path, monkeypatch):
+    """Control: an absolute path is passed unchanged, now as ``--config``."""
+    (tmp_path / "operator.toml").write_text('title = "operator"\n')
     monkeypatch.delenv("GITLEAKS_CONFIG_TOML", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG", str(tmp_path / "operator.toml"))
     scanner = _scanner(tmp_path)
-    assert scanner._resolve_config_file() is None
+    assert scanner._resolve_config_file() == tmp_path / "operator.toml"
 
 
-def test_config_toml_text_in_the_environment_is_left_to_gitleaks(tmp_path, monkeypatch):
+def test_config_toml_text_in_the_environment_is_passed_as_a_file(tmp_path, monkeypatch):
+    """The text is written to a file outside the scanned tree and passed as
+    ``--config``, so gitleaks does not set its config path inside the tree."""
     monkeypatch.delenv("GITLEAKS_CONFIG", raising=False)
     monkeypatch.setenv("GITLEAKS_CONFIG_TOML", 'title = "inline"\n')
     scanner = _scanner(tmp_path)
-    assert scanner._resolve_config_file() is None
+    chosen = scanner._resolve_config_file()
+    assert chosen is not None and chosen.read_text() == 'title = "inline"\n'
+    assert not chosen.resolve().is_relative_to(scanner.context.source_dir.resolve())

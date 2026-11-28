@@ -49,13 +49,17 @@ which are both, so the scanned tree does not configure gitleaks:
   scanned directory, ``utils/config_trust.py``), else ``GITLEAKS_CONFIG`` or ``GITLEAKS_CONFIG_TOML``
   from the operator's environment (outside the scanner sandbox, which does not
   pass them in), else a config ASH writes that extends gitleaks' default rules and
-  adds nothing. It is passed as ``--config`` in every case but one, so gitleaks
-  never falls through to ``<target>/.gitleaks.toml``: an absolute
-  ``GITLEAKS_CONFIG``, or ``GITLEAKS_CONFIG_TOML``, is left to gitleaks, which
-  reads the variable itself; a ``GITLEAKS_CONFIG`` that is not absolute as given
-  (``rules.toml``, ``~/rules.toml``) is anchored to the directory ASH runs in and
-  passed as ``--config``, because gitleaks would resolve it against its working
-  directory, the scanned tree. A
+  adds nothing. It is always passed as ``--config``, so gitleaks never falls
+  through to ``<target>/.gitleaks.toml``: ``GITLEAKS_CONFIG_TOML`` is written to a
+  file outside the tree; a ``GITLEAKS_CONFIG`` that is not absolute as given is
+  anchored where the operator set it (``~/rules.toml`` under the operator's home,
+  ``rules.toml`` in the directory ASH runs in), because gitleaks would resolve it
+  against its working directory, the scanned tree. By default ASH scans the
+  directory it runs in, so in the default run that anchor is the scanned tree
+  itself and the tree can supply the file: an absolute ``GITLEAKS_CONFIG`` is the
+  form that keeps the tree from supplying the config. A config whose
+  ``[extend] path`` is not absolute is refused, for the same reason
+  (``config/tool_config_trust.refuse_relative_extend_path``). A
   ``config_file`` or ``baseline_path`` set by a config inside a git checkout or the
   scanned directory is ignored with a warning, and a ``.gitleaks.toml`` or ``.ash/.gitleaks.toml`` in
   the tree with a note. An operator's file that does not exist fails the scan
@@ -177,6 +181,7 @@ from automated_security_helper.config.confinement_remedy import SET_BY_THE_OPERA
 from automated_security_helper.config.tool_config_trust import (
     empty_tool_config,
     empty_tool_directory,
+    refuse_relative_extend_path,
 )
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -202,6 +207,7 @@ from automated_security_helper.utils.config_trust import (
     refusal_warning,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.path_stat import is_anchored
 from automated_security_helper.utils.process_env import snapshot_environ
 from automated_security_helper.utils.subprocess_utils import OutputPreference
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -226,10 +232,15 @@ _monotonic = time.monotonic
 #: scanned tree; they are named only in the note logged when one is present.
 TREE_CONFIG_NAMES = (".gitleaks.toml", ".ash/.gitleaks.toml")
 
-#: Environment variables gitleaks reads a config from. When either is set, outside
-#: the scanner sandbox, ASH passes no ``gitleaks --config`` and gitleaks reads the
-#: variable; a non-absolute ``GITLEAKS_CONFIG`` is anchored to the directory ASH
-#: runs in and passed as ``gitleaks --config``, so the scanned tree cannot supply it.
+#: Environment variables gitleaks reads a config from. When one is set, outside the
+#: scanner sandbox and with no ``options.config_file``, ASH passes the config to
+#: gitleaks as ``--config``: ``GITLEAKS_CONFIG`` when it is set, and otherwise
+#: ``GITLEAKS_CONFIG_TOML``, written to a file outside the scanned tree. An absolute
+#: ``GITLEAKS_CONFIG`` is passed as given, a ``~`` value under the home directory it
+#: names, and any other resolved against the directory ASH runs in. By default ASH
+#: scans the directory it runs in, so in the default run a relative value names a
+#: file in the scanned tree, which can then supply the config; an absolute path is
+#: the form that keeps the tree from supplying it.
 CONFIG_ENV_VARS = ("GITLEAKS_CONFIG", "GITLEAKS_CONFIG_TOML")
 
 #: The ignore file gitleaks always reads at the root of its scan path.
@@ -908,6 +919,11 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         """
         operator_config = self._operator_option_path("config_file")
         if operator_config is not None:
+            refuse_relative_extend_path(
+                "gitleaks",
+                "scanners.gitleaks.options.config_file",
+                path=operator_config,
+            )
             return operator_config
         set_vars = [name for name in CONFIG_ENV_VARS if os.environ.get(name)]
         if set_vars and active_scope() is not None:
@@ -925,25 +941,48 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
             # relative value the operator set in ASH's own working directory
             # would be read from the scanned tree: the repository would supply
             # the config file. Anchor it where the operator typed it and pass
-            # it as --config, which gitleaks reads before the variable. The
-            # test is on the value AS GIVEN: a leading ``~`` is not absolute
+            # it as --config, which gitleaks reads before the variable. By
+            # default ASH scans the directory it runs in, and then this anchor
+            # is the scanned tree itself: only an absolute value keeps the tree
+            # from supplying the config.
+            #
+            # The test is on the value AS GIVEN: a leading ``~`` is not absolute
             # either (a shell expands it only in some positions, and CI
             # ``env:`` blocks, ``.env`` files and ``--env-file`` never do), and
             # gitleaks does not expand it, so ``~/rules.toml`` as given would
-            # name a ``~`` directory inside the scanned tree. Only a path that
-            # is absolute as typed, or GITLEAKS_CONFIG_TOML (the config's text,
-            # not a path), is left to gitleaks as before.
+            # name a ``~`` directory inside the scanned tree.
+            #
+            # An absolute path and GITLEAKS_CONFIG_TOML (the config's text,
+            # written to a file outside the tree) are passed as --config too.
+            # With none, gitleaks sets its config path to
+            # ``<source>/.gitleaks.toml`` and skips that one file. "Absolute"
+            # means anchored (``utils.path_stat.is_anchored``): on Windows a path
+            # with a root and no drive (``\rules.toml``) is on whichever drive is
+            # current, so it is anchored where ASH runs and gitleaks is given the
+            # file ASH checked.
             given = self._config_env_value()
-            if given and not os.path.isabs(given):
-                anchored = self._anchored_config_env(given)
-                ASH_LOGGER.debug(
-                    "GITLEAKS_CONFIG is not an absolute path; passing it to "
-                    "gitleaks resolved against the working directory ASH runs in"
+            if given:
+                chosen = (
+                    Path(given)
+                    if is_anchored(given)
+                    else self._anchored_config_env(given)
                 )
-                return anchored
-            ASH_LOGGER.debug(
-                f"{', '.join(set_vars)} set; leaving gitleaks config resolution to gitleaks"
-            )
+                refuse_relative_extend_path("gitleaks", "GITLEAKS_CONFIG", path=chosen)
+                ASH_LOGGER.debug(
+                    "GITLEAKS_CONFIG set; passing it to gitleaks as --config, "
+                    "resolved against the working directory ASH runs in"
+                )
+                return chosen
+            toml_text = os.environ.get("GITLEAKS_CONFIG_TOML")
+            if toml_text:
+                refuse_relative_extend_path(
+                    "gitleaks", "GITLEAKS_CONFIG_TOML", text=toml_text
+                )
+                return empty_tool_config(
+                    "ash-gitleaks-env-config.toml",
+                    toml_text,
+                    context=self.context,
+                ).resolve()
             return None
         present = [n for n in TREE_CONFIG_NAMES if (self._source_dir() / n).is_file()]
         if present:
@@ -983,12 +1022,13 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
     def _anchored_config_env(given: str) -> Path:
         """The absolute path a non-absolute ``GITLEAKS_CONFIG`` names, as ASH sees it.
 
-        ``~`` and ``~user`` are expanded first (the operator's home, never a
-        directory of that name in the scanned tree), then the result is
-        resolved against the working directory ASH runs in. Never against the
-        scanned source directory: that is where gitleaks would have read it,
-        and the point of anchoring is that the repository does not pick the
-        config.
+        ``~`` and ``~user`` are expanded first (to the home directory each names; a
+        ``~user`` naming no user stays as written), then the result is resolved
+        against the working directory ASH runs in, not against the scanned source
+        directory, where gitleaks would have resolved it. By default ASH scans the
+        directory it runs in, so in the default run the two are the same directory
+        and the anchored file is in the scanned tree: only an absolute value keeps
+        the tree from supplying the config.
         """
         return Path(os.path.abspath(os.path.expanduser(given)))
 
@@ -1805,9 +1845,9 @@ class GitleaksScanner(ScannerPluginBase[GitleaksScannerConfig]):
         that reaches gitleaks with the variable alone, where the re-scan from the
         copies must still read the same file as the first run. The anchor is
         the same one (``_anchored_config_env``): the directory ASH runs in, with
-        ``~`` expanded, never the scanned source directory, which an earlier
-        shape used here and which would have let the scanned repository supply
-        the re-scan's config.
+        ``~`` expanded, not the scanned source directory an earlier shape used
+        here. In the default run ASH runs in the scanned tree, so that anchor is
+        the tree itself, as it is for the first run.
         """
         if any(arg.startswith("--config=") for arg in final_args):
             return None

@@ -178,6 +178,23 @@
   available at all, for example under a directory other accounts can write, the
   scan fails before the CLI starts. The error names each directory it passed over
   and says to set `TMPDIR` to a directory only this account can write.
+- **gitleaks and betterleaks read no configuration from the scanned tree through
+  `[extend]`, and the ferret-scan version check reads none from the working
+  directory.** A gitleaks or betterleaks config whose `[extend] path` is relative
+  (from `config_file`, `GITLEAKS_CONFIG`, `BETTERLEAKS_CONFIG` or a `*_CONFIG_TOML`
+  variable) is refused with an error naming `extend` and the file, because the tools
+  open a relative path from the scanned tree; use an absolute path. The keys are read
+  as the tools read them (any case, a dotted key split into its parts). A config is
+  also refused when its extend path is not a string or is set twice, or has a root
+  but no drive on Windows, and when ASH cannot read the file (missing, not a regular
+  file, larger than 4 MiB, not UTF-8 or not valid TOML). A config that starts with a
+  UTF-8 byte order mark is refused, naming the file or the variable, because neither
+  gitleaks nor betterleaks can read past the mark; a betterleaks config variable that
+  another takes precedence over, and that betterleaks never opens, is checked with the
+  mark skipped. A config from the environment is now passed to gitleaks as `--config`,
+  so gitleaks no longer looks for `.gitleaks.toml` in the tree. ferret-scan's
+  `--version` check now runs outside the tree with an empty config.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a
