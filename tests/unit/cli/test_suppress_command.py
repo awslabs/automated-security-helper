@@ -20,7 +20,10 @@ from typer.testing import CliRunner
 
 from automated_security_helper.cli.main import app
 from automated_security_helper.utils import symbol_spans
-from automated_security_helper.utils.ash_lock import LOCK_RELATIVE_PATH
+from automated_security_helper.utils.ash_lock import (
+    LOCK_RELATIVE_PATH,
+    MAX_LOCKED_FILE_BYTES,
+)
 from tests.utils.optional_extras import require_symbols_extra
 
 pytestmark = pytest.mark.unit
@@ -101,6 +104,16 @@ def _lock(repo) -> dict:
 def _suppressions(repo) -> list[dict]:
     text = (repo / ".ash.yaml").read_text(encoding="utf-8")
     return yaml.safe_load(text)["global_settings"]["suppressions"]
+
+
+def _link_out_of_the_root(repo, tmp_path_factory) -> None:
+    """Replace src/app.py with a link to a copy of the same source in a
+    directory outside the source directory."""
+    outside = tmp_path_factory.mktemp("outside") / "app.py"
+    outside.write_text(SOURCE, encoding="utf-8")
+    app = repo / "src" / "app.py"
+    app.unlink()
+    app.symlink_to(outside)
 
 
 class TestAdd:
@@ -349,6 +362,12 @@ class TestRoundTrip:
                 lambda app: (app.unlink(), app.mkdir()),
                 id="not-a-regular-file",
             ),
+            # One byte over the cap. os.truncate lengthens the file: a hole on
+            # Linux and macOS, written zero bytes on Windows.
+            pytest.param(
+                lambda app: os.truncate(app, MAX_LOCKED_FILE_BYTES + 1),
+                id="over-limit",
+            ),
         ],
     )
     def test_drop_missing_keeps_the_entry_of_a_file_that_is_still_there(
@@ -375,6 +394,61 @@ class TestRoundTrip:
         assert checked.exit_code == 1, checked.output
         assert "exists but cannot be hashed" in checked.output
         assert "--drop-missing" not in checked.output
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    def test_drop_missing_keeps_the_entry_of_a_file_linked_out_of_the_root(
+        self, repo, tmp_path_factory
+    ):
+        # A link that leads out of the source directory still exists, so it is
+        # not gone either. Its target holds the same source, so leading out is
+        # the only reason it cannot be hashed. A refresh that names it refuses
+        # the path before it reviews the entry (the path is not inside the
+        # source directory), so this one refreshes every entry. What verify
+        # says of the config's suppression is the next test's.
+        assert _add(repo).exit_code == 0
+        _link_out_of_the_root(repo, tmp_path_factory)
+        kept = _run("refresh", "--drop-missing", "--all")
+        checked = _run("verify")
+        assert kept.crash is None, repr(kept.crash)
+        assert kept.exit_code == 1, kept.output
+        assert "dropped:" not in kept.output
+        assert "exists but cannot be hashed" in kept.output
+        assert "src/app.py" in _lock(repo)["files"]
+        assert checked.crash is None, repr(checked.crash)
+        assert checked.exit_code == 1, checked.output
+        assert "exists but cannot be hashed" in checked.output
+        assert "--drop-missing" not in checked.output
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="symlink creation needs privileges on Windows",
+    )
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason=(
+            "verify looks the config's suppression up with its links followed, "
+            "finds no entry for a file linked out of the source directory, and "
+            "advises an `ash suppress add` that refuses the path"
+        ),
+    )
+    def test_verify_gives_no_add_advice_for_a_kept_file_linked_out_of_the_root(
+        self, repo, tmp_path_factory
+    ):
+        # The entry is kept (the test above), so the suppression is recorded.
+        # Only the assertion is the expected failure: a failed setup or a crash
+        # fails the test.
+        added = _add(repo)
+        if added.exit_code != 0:
+            pytest.fail(added.output)
+        _link_out_of_the_root(repo, tmp_path_factory)
+        checked = _run("verify")
+        if checked.crash is not None:
+            pytest.fail(repr(checked.crash))
+        assert "ash suppress add" not in checked.output, checked.output
 
     def test_verify_tells_a_suppression_whose_file_is_gone_to_be_removed(self, repo):
         # After the drop the suppression is unrecorded; the `add` command it
