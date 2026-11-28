@@ -95,8 +95,9 @@ variable "min_severity" {
     what you want.
 
     The comparison is made by ASH, never in the handler. `ash scan` routes its exit
-    code through _compute_exit_code, the same function `ash merge` uses, so this
-    gate's verdict cannot disagree with a scan's over identical findings.
+    code through _compute_exit_code, the same function `ash results merge`
+    (`ash merge` before ASH 3.9) uses, so this gate's verdict cannot disagree with
+    a scan's over identical findings.
   EOT
   type        = string
   default     = "low"
