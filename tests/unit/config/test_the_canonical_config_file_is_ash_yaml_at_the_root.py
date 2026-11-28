@@ -52,7 +52,7 @@ LEGACY_LOCATIONS = [
 
 # The legacy locations by the language their name says. The canonical file is
 # read as YAML, so a TOML file cannot be moved there, and a JSON file can only
-# when it holds no tab character.
+# once each tab and each value YAML reads another way is rewritten.
 TOML_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".toml")]
 JSON_LEGACY = [location for location in LEGACY_LOCATIONS if location.endswith(".json")]
 YAML_LEGACY = [
@@ -82,16 +82,25 @@ TAB_CAVEAT = (
     ".ash.yaml is read as YAML, which refuses a tab (the parse error gives the "
     "tab's line and column)."
 )
+JSON_CAVEAT = (
+    "Before you move it, also write each DEL (U+007F), C1 control (U+0080 to "
+    "U+009F), U+2028, U+2029, U+FFFE or U+FFFF in a string as its four-digit "
+    "Unicode escape and each character above U+FFFF that is written as two "
+    "escapes as the character itself, give each number that has an exponent a "
+    "decimal point and a sign after the e, such as 1.0e+3 for 1e3, write Infinity "
+    "as .inf, and keep each key on the same line as its colon: otherwise YAML "
+    "reads another value or refuses the file."
+)
 ENV_CAVEAT = (
     "In the YAML, put !ENV and a space before the opening quote of each string "
     "value from this file whose text starts with ${, and keep its quotes if it "
     "has one quote mark on each side: a quoted value without the tag is read as "
-    "literal text, not from the environment. Write such a string that has three "
+    "literal text, not from the environment. Write a string that has three "
     "quote marks on each side as a one-line double-quoted string with the text "
     "TOML reads: leave out a line break that directly follows the opening marks "
     "and, from three double quote marks, an unescaped backslash that ends a line "
     "(only spaces or tabs after it on that line), with the spaces, tabs and line "
-    "breaks after it; write each other line break as \\n; from three single quote "
+    "breaks after it; write each other line feed as \\n; from three single quote "
     'marks, also write each backslash as \\\\ and each double quote as \\"; from '
     "three double quote marks, keep each escape and write each unescaped double "
     'quote as \\". A string whose text holds a C1 control (U+0080 to U+009F), '
@@ -99,7 +108,10 @@ ENV_CAVEAT = (
     "double-quoted string, a literal string's backslashes and double quotes "
     "escaped, with each such character written as its four-digit Unicode escape: "
     "YAML reads U+0085, U+2028 and U+2029 inside quotes as line breaks and "
-    "refuses a file that holds one of the others."
+    "refuses a file that holds one of the others. Give each number that has an "
+    "exponent a decimal point and a sign after the e, with no underscore after "
+    "it, such as 1.0e+3 for 1e3, write each octal number, such as 0o17, in "
+    "decimal, and write inf as .inf: YAML reads another spelling of each as text."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -145,6 +157,28 @@ def _toml_and_yaml_roots(
     _write_lines(toml_root / ".ashrc.toml", toml_lines, ending)
     _write_lines(yaml_root / ".ash.yaml", yaml_lines, ending)
     return toml_root, yaml_root
+
+
+def _json_and_yaml_roots(
+    tmp_path: Path, json_text: str, yaml_text: str
+) -> tuple[Path, Path]:
+    """The same setting in a JSON file and in a YAML file, each in a root of its own,
+    so that one read of each root compares what JSON and YAML read. Both files are
+    written with LF line endings on every platform."""
+    json_root = tmp_path / "json"
+    yaml_root = tmp_path / "yaml"
+    for root, name, text in (
+        (json_root, ".ash.json", json_text),
+        (yaml_root, ".ash.yaml", yaml_text),
+    ):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(text, encoding="utf-8", newline="\n")
+    return json_root, yaml_root
+
+
+def _json_object(project_name: str) -> str:
+    """A JSON object that sets only `project_name`, as written, and a line feed."""
+    return '{"project_name": "' + project_name + '"}\n'
 
 
 @pytest.fixture
@@ -352,7 +386,9 @@ class TestWarnings:
         _write(tmp_path, legacy, "legacy")
         [warning] = discovery_warnings(discover_config_source(tmp_path))
         canonical = (tmp_path / ".ash.yaml").as_posix()
-        assert warning.endswith(f"move this file to {canonical}. {TAB_CAVEAT}"), warning
+        assert warning.endswith(
+            f"move this file to {canonical}. {TAB_CAVEAT} {JSON_CAVEAT}"
+        ), warning
         assert EXTENDS_CAVEAT not in warning, warning
 
     @pytest.mark.parametrize("legacy", ASH_DIR_JSON)
@@ -361,7 +397,8 @@ class TestWarnings:
         [warning] = discovery_warnings(discover_config_source(tmp_path))
         canonical = (tmp_path / ".ash.yaml").as_posix()
         assert warning.endswith(
-            f"move this file to {canonical}. {EXTENDS_CAVEAT} {TAB_CAVEAT}"
+            f"move this file to {canonical}. "
+            f"{EXTENDS_CAVEAT} {TAB_CAVEAT} {JSON_CAVEAT}"
         ), warning
 
     @pytest.mark.parametrize("legacy", ROOT_LEGACY)
@@ -437,6 +474,139 @@ class TestAMovedJsonFileIsRefusedWhenItHoldsATab:
         )
         with pytest.raises(ASHConfigValidationError):
             resolve_config(source_dir=tmp_path)
+
+
+#: Characters a JSON string holds as written and YAML refuses, each as its code point:
+#: DEL, a C1 control other than U+0085, and the noncharacters U+FFFE and U+FFFF.
+JSON_REFUSED_CHARACTERS = {
+    "delete": 0x7F,
+    "c1_control": 0x92,
+    "noncharacter_fffe": 0xFFFE,
+    "noncharacter_ffff": 0xFFFF,
+}
+#: Characters a JSON string holds as written and YAML reads as a line break inside
+#: quotes, each as the text before the character, its code point, the text after it
+#: and what YAML reads in place of the three: U+0085 becomes a space, and U+2028 and
+#: U+2029 are kept while the space beside them is dropped.
+JSON_LINE_BREAKS = {
+    "next_line": ("", 0x85, "", " "),
+    "line_separator_after_space": (" ", 0x2028, "", chr(0x2028)),
+    "paragraph_separator_before_space": ("", 0x2029, " ", chr(0x2029)),
+}
+
+
+class TestAMovedJsonStringOrKeyIsReadAnotherWay:
+    """Why the JSON advice says to write some characters in a string as escapes, a
+    character above U+FFFF as itself, and each key on the line of its colon: JSON
+    reads each of them, while YAML refuses a file that holds DEL, a C1 control other
+    than U+0085, U+FFFE or U+FFFF, reads U+0085, U+2028 and U+2029 inside quotes as
+    line breaks, reads the two escapes of a surrogate pair as two characters, and
+    refuses a key whose colon is on another line."""
+
+    @pytest.mark.parametrize("character", list(JSON_REFUSED_CHARACTERS))
+    def test_a_json_string_with_a_character_yaml_refuses_is_refused_as_yaml(
+        self, tmp_path, character
+    ):
+        """JSON holds each of them in a string as written. The YAML loader refuses a
+        file that holds one, and the refusal is the kind a scan reports with exit 3."""
+        value = f"x{chr(JSON_REFUSED_CHARACTERS[character])}y"
+        text = _json_object(value)
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert resolve_config(source_dir=json_root).project_name == value
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ReaderError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    @pytest.mark.parametrize("character", list(JSON_LINE_BREAKS))
+    def test_a_json_string_with_a_character_yaml_reads_as_a_line_break_is_read_another_way(
+        self, tmp_path, ash_warnings, character
+    ):
+        """JSON holds the text as written. Inside quotes YAML takes U+0085, U+2028 and
+        U+2029 for line breaks: U+0085 becomes a space, and U+2028 and U+2029 are
+        kept while the space beside them is dropped, with nothing said."""
+        before, code_point, after, yaml_piece = JSON_LINE_BREAKS[character]
+        value = f"x{before}{chr(code_point)}{after}y"
+        text = _json_object(value)
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        # The YAML read comes first: reading `.ash.json` logs its deprecation
+        # warning into the same list.
+        assert resolve_config(source_dir=yaml_root).project_name == f"x{yaml_piece}y"
+        assert ash_warnings() == []
+        assert resolve_config(source_dir=json_root).project_name == value
+
+    def test_a_json_surrogate_pair_is_not_read_as_one_character_by_yaml(self, tmp_path):
+        """JSON joins the two escapes of a surrogate pair into one character. YAML
+        reads each escape alone, so the file either is refused or is read as two lone
+        surrogates, which is not the character JSON reads."""
+        pair = f"{BACKSLASH}u{0xD83D:04X}{BACKSLASH}u{0xDE00:04X}"
+        text = _json_object(f"x{pair}y")
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        character = f"x{chr(0x1F600)}y"
+        assert resolve_config(source_dir=json_root).project_name == character
+
+        def read_as_yaml():
+            """The value YAML reads, or the class of the refusal."""
+            try:
+                return resolve_config(source_dir=yaml_root).project_name
+            except ASHConfigValidationError as refusal:
+                return type(refusal)
+
+        assert read_as_yaml() != character
+
+    @pytest.mark.parametrize("character", [*JSON_REFUSED_CHARACTERS, *JSON_LINE_BREAKS])
+    def test_each_written_as_its_escape_reads_what_json_reads(
+        self, tmp_path, character
+    ):
+        """YAML takes the escape for the character, with the spaces beside it kept,
+        so it reads the string as JSON reads the character written as itself."""
+        if character in JSON_REFUSED_CHARACTERS:
+            before, code_point, after = "", JSON_REFUSED_CHARACTERS[character], ""
+        else:
+            before, code_point, after, _ = JSON_LINE_BREAKS[character]
+        escape = f"{BACKSLASH}u{code_point:04X}"
+        expected = f"x{before}{chr(code_point)}{after}y"
+        json_root, yaml_root = _json_and_yaml_roots(
+            tmp_path,
+            _json_object(expected),
+            _json_object(f"x{before}{escape}{after}y"),
+        )
+        assert resolve_config(source_dir=json_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
+
+    def test_a_character_above_u_ffff_written_as_itself_reads_what_its_surrogate_pair_reads(
+        self, tmp_path
+    ):
+        """JSON reads the two escapes as one character. Written as itself, the
+        character is read by YAML as the same one."""
+        pair = f"{BACKSLASH}u{0xD83D:04X}{BACKSLASH}u{0xDE00:04X}"
+        expected = f"x{chr(0x1F600)}y"
+        json_root, yaml_root = _json_and_yaml_roots(
+            tmp_path, _json_object(f"x{pair}y"), _json_object(expected)
+        )
+        assert resolve_config(source_dir=json_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
+
+    def test_a_key_whose_colon_is_on_the_next_line_is_refused_as_yaml(self, tmp_path):
+        """JSON skips a line break between a key and its colon. YAML reads a key as
+        one only when its colon is on the same line, so it reads the key with an
+        empty value and refuses the colon after it, and the refusal is the kind a
+        scan reports with exit 3."""
+        text = '{"project_name"\n: "x"}\n'
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert resolve_config(source_dir=json_root).project_name == "x"
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_key_on_the_line_of_its_colon_reads_what_json_reads(self, tmp_path):
+        """The same object with its key on the line of its colon is read by both."""
+        json_root, yaml_root = _json_and_yaml_roots(
+            tmp_path, '{"project_name"\n: "x"}\n', '{"project_name": "x"}\n'
+        )
+        assert resolve_config(source_dir=json_root).project_name == "x"
+        assert resolve_config(source_dir=yaml_root).project_name == "x"
 
 
 class TestAMovedFileKeepsItsRelativeBasesOnlyIfTheyAreRewritten:
@@ -575,11 +745,9 @@ class TestATomlReferenceToTheEnvironmentInYaml:
     string value that starts with a reference; YAML resolves a quoted value only when
     it is tagged `!ENV`; without quotes it cuts the value short at a space and a hash,
     and refuses one that holds a colon and a space or sits inside brackets or braces;
-    and with three quote marks kept, it reads three single ones as literal text, or
-    ends the value at a lone single quote mark in the text and refuses the file or
-    cuts the value short, and refuses three double ones. Rewritten as the advice
-    says, the string reads as TOML reads it; with one of the rules skipped, it does
-    not."""
+    and with three quote marks kept, it reads another value from three single ones
+    or refuses the file, and refuses three double ones. Rewritten as the advice says,
+    the string reads as TOML reads it; with one of the rules skipped, it does not."""
 
     REFERENCE = "${ASH_SERVICE_NAME:payments-api}"
 
@@ -728,6 +896,50 @@ class TestATomlReferenceToTheEnvironmentInYaml:
         assert ash_warnings() == []
         assert resolve_config(source_dir=toml_root).project_name == "from-env"
 
+    def test_three_single_quotes_kept_around_a_text_that_ends_with_a_single_quote_are_refused(
+        self, tmp_path
+    ):
+        """TOML ends a string in three single quote marks at the first three and
+        takes the marks after them as text, so a text that ends with a single quote
+        mark has four at its end. YAML reads each pair of single quote marks inside
+        single quotes as one text mark, so the last four are two text marks, the
+        value runs on past the line and the file is refused at its end, which a
+        scan reports with exit 3."""
+        value = "'''${ASH_SERVICE_NAME:it}''''"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f"project_name = {value}"], [f"project_name: !ENV {value}"]
+        )
+        assert resolve_config(source_dir=toml_root).project_name == "from-env'"
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ScannerError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_three_single_quotes_kept_around_a_text_that_ends_with_a_single_quote_run_on_into_the_next_lines(
+        self, tmp_path, ash_warnings
+    ):
+        """When a later line ends with a single quote mark, YAML closes the value
+        there and folds the lines between into it, each line break as a space: with
+        no refusal and no warning, a setting on a line after the string is never
+        set."""
+        value = "'''${ASH_SERVICE_NAME:it}''''"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f"project_name = {value}", "fail_on_findings = false", "# note'"],
+            [f"project_name: !ENV {value}", "fail_on_findings: false", "# note'"],
+        )
+        # The YAML read comes first: reading `.ashrc.toml` logs its deprecation
+        # warning into the same list.
+        yaml_config = resolve_config(source_dir=yaml_root)
+        assert yaml_config.project_name == (
+            "'${ASH_SERVICE_NAME:it}'' fail_on_findings: false # note"
+        )
+        assert yaml_config.fail_on_findings is True
+        assert ash_warnings() == []
+        toml_config = resolve_config(source_dir=toml_root)
+        assert toml_config.project_name == "from-env'"
+        assert toml_config.fail_on_findings is False
+
     @pytest.mark.parametrize(("case", "ending", "state"), THREE_QUOTE_PAIRS)
     def test_a_three_quote_string_rewritten_as_advised_reads_what_toml_reads(
         self, tmp_path, monkeypatch, case, ending, state
@@ -749,10 +961,10 @@ class TestATomlReferenceToTheEnvironmentInYaml:
 
     @pytest.mark.parametrize("skip", list(THREE_QUOTE_SKIPS))
     def test_a_three_quote_rewrite_that_skips_a_rule_reads_something_else(
-        self, tmp_path, skip
+        self, tmp_path, ash_warnings, skip
     ):
-        """Each copy is read without a refusal, and what it reads is not what TOML
-        reads, so the advice has to give every one of these rules."""
+        """Each copy is read without a refusal and with no warning, and what it reads
+        is not what TOML reads, so the advice has to give every one of these rules."""
         case, copy_lines = THREE_QUOTE_SKIPS[skip]
         lines, _, _, rest = THREE_QUOTE_SPELLINGS[case]
         toml_root, yaml_root = _toml_and_yaml_roots(
@@ -760,8 +972,11 @@ class TestATomlReferenceToTheEnvironmentInYaml:
             [f"project_name = {lines[0]}", *lines[1:]],
             [f"project_name: !ENV {copy_lines[0]}", *copy_lines[1:]],
         )
-        toml_read = resolve_config(source_dir=toml_root).project_name
+        # The YAML read comes first: reading `.ashrc.toml` logs its deprecation
+        # warning into the same list.
         yaml_read = resolve_config(source_dir=yaml_root).project_name
+        assert ash_warnings() == []
+        toml_read = resolve_config(source_dir=toml_root).project_name
         assert toml_read == "from-env" + rest
         assert yaml_read != toml_read
 
@@ -844,16 +1059,61 @@ class TestATomlReferenceToTheEnvironmentInYaml:
         assert value == expected
 
 
+class TestAThreeQuoteStringWithoutAReference:
+    """Why the three-quote rules are given for every string, not only for a reference:
+    kept in its marks, YAML reads another value, and rewritten as the advice says, it
+    reads what TOML reads."""
+
+    def test_three_single_quotes_kept_around_a_plain_text_read_it_with_a_quote_mark_at_each_end(
+        self, tmp_path, ash_warnings
+    ):
+        """TOML reads the text between three single quote marks as the text. YAML
+        reads the same marks as a single-quoted value with a quote mark at each end,
+        and says nothing."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, ["project_name = '''abc'''"], ["project_name: '''abc'''"]
+        )
+        # The YAML read comes first: reading `.ashrc.toml` logs its deprecation
+        # warning into the same list.
+        assert resolve_config(source_dir=yaml_root).project_name == "'abc'"
+        assert ash_warnings() == []
+        assert resolve_config(source_dir=toml_root).project_name == "abc"
+
+    @pytest.mark.parametrize(
+        "case", ["literal_line_separator", "basic_unescaped_quotes"]
+    )
+    def test_a_three_quote_string_without_a_reference_rewritten_as_advised_reads_what_toml_reads(
+        self, tmp_path, case
+    ):
+        """The one-line double-quoted copy the advice gives reads what TOML reads: a
+        literal string that holds a U+2028, and a basic string with unescaped double
+        quotes."""
+        if case == "literal_line_separator":
+            separator = chr(0x2028)
+            toml_lines = ["project_name = '''", f"x {separator}y", "z'''"]
+            yaml_lines = [f'project_name: "x {BACKSLASH}u2028y{BACKSLASH}nz"']
+            expected = f"x {separator}y\nz"
+        else:
+            toml_lines = ['project_name = """', 'say "hi"', 'there"""']
+            yaml_lines = ['project_name: "say \\"hi\\"\\nthere"']
+            expected = 'say "hi"\nthere'
+        toml_root, yaml_root = _toml_and_yaml_roots(tmp_path, toml_lines, yaml_lines)
+        assert resolve_config(source_dir=toml_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
+
+
 #: Characters that TOML reads as written and that YAML does not keep as written inside
 #: quotes, each as the text before the character (a space or nothing) and its code
-#: point: U+0085 is read as a line break, which becomes a space; U+2028 is read as a
-#: line break that drops the space before it; a C1 control other than U+0085 and the
-#: noncharacter U+FFFF make YAML refuse the file.
+#: point: U+0085 is read as a line break, which becomes a space; U+2028 and U+2029 are
+#: read as line breaks that drop the spaces and tabs beside them; a C1 control other
+#: than U+0085 and the noncharacters U+FFFE and U+FFFF make YAML refuse the file.
 ESCAPED_CHARACTERS = {
     "next_line": ("", 0x85),
     "line_separator_after_space": (" ", 0x2028),
     "c1_control": ("", 0x86),
     "noncharacter": ("", 0xFFFF),
+    "paragraph_separator": ("", 0x2029),
+    "noncharacter_fffe": ("", 0xFFFE),
 }
 ESCAPE_PAIRS = [
     pytest.param(character, form, id=f"{character}-{form}")
@@ -861,6 +1121,15 @@ ESCAPE_PAIRS = [
     for form in ("basic", "literal")
 ]
 BACKSLASH = chr(92)
+
+#: A raw U+2028 or U+2029 with a space or a tab beside it, each as the text TOML reads
+#: and the text YAML reads inside quotes, which keeps the character and drops the
+#: spaces and tabs beside it.
+RAW_SEPARATORS = {
+    "line_separator_after_space": (f"x {chr(0x2028)}y", f"x{chr(0x2028)}y"),
+    "line_separator_before_tab": (f"x{chr(0x2028)}\ty", f"x{chr(0x2028)}y"),
+    "paragraph_separator_after_space": (f"x {chr(0x2029)}y", f"x{chr(0x2029)}y"),
+}
 
 
 class TestACharacterYamlReadsAsALineBreakOrRefuses:
@@ -915,6 +1184,225 @@ class TestACharacterYamlReadsAsALineBreakOrRefuses:
         )
         assert resolve_config(source_dir=toml_root).project_name == expected
         assert resolve_config(source_dir=yaml_root).project_name == expected
+
+    @pytest.mark.parametrize("case", list(RAW_SEPARATORS))
+    def test_a_raw_line_or_paragraph_separator_drops_the_whitespace_beside_it(
+        self, tmp_path, case
+    ):
+        """TOML reads the text as written. Inside quotes YAML takes U+2028 and U+2029
+        for line breaks: it keeps the character and drops the spaces and tabs beside
+        it, with nothing said."""
+        toml_text, yaml_text = RAW_SEPARATORS[case]
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f'project_name = "{toml_text}"'],
+            [f'project_name: "{toml_text}"'],
+        )
+        assert resolve_config(source_dir=toml_root).project_name == toml_text
+        assert resolve_config(source_dir=yaml_root).project_name == yaml_text
+
+    @pytest.mark.parametrize("code_point", [0xFFFE, 0xFFFF], ids=["fffe", "ffff"])
+    def test_a_raw_noncharacter_makes_yaml_refuse_the_file(self, tmp_path, code_point):
+        """TOML reads U+FFFE and U+FFFF as written. YAML refuses a file that holds
+        one, and the refusal is the kind a scan reports with exit 3."""
+        value = f"x{chr(code_point)}y"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f'project_name = "{value}"'], [f'project_name: "{value}"']
+        )
+        assert resolve_config(source_dir=toml_root).project_name == value
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ReaderError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_one_quote_reference_holding_a_line_separator_kept_in_single_quotes_reads_another_default(
+        self, tmp_path, monkeypatch
+    ):
+        """TOML reads the default of the reference as written. Inside quotes YAML takes
+        U+2028 for a line break and drops the space before it, so the reference that
+        keeps its single quotes has another default."""
+        monkeypatch.delenv("ASH_SERVICE_NAME", raising=False)
+        separator = chr(0x2028)
+        reference = "${ASH_SERVICE_NAME:a " + separator + "b}"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f"project_name = '{reference}'"],
+            [f"project_name: !ENV '{reference}'"],
+        )
+        assert resolve_config(source_dir=toml_root).project_name == f"a {separator}b"
+        assert resolve_config(source_dir=yaml_root).project_name == f"a{separator}b"
+
+    def test_the_same_reference_written_double_quoted_with_its_escape_reads_what_toml_reads(
+        self, tmp_path, monkeypatch
+    ):
+        """Written as a double-quoted string with the escape for U+2028, the default
+        keeps its space and its character, as TOML reads it."""
+        monkeypatch.delenv("ASH_SERVICE_NAME", raising=False)
+        separator = chr(0x2028)
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["project_name = '${ASH_SERVICE_NAME:a " + separator + "b}'"],
+            ['project_name: !ENV "${ASH_SERVICE_NAME:a ' + BACKSLASH + 'u2028b}"'],
+        )
+        expected = f"a {separator}b"
+        assert resolve_config(source_dir=toml_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
+
+
+#: Spellings of one number as TOML and JSON write it, each with the spelling YAML reads
+#: as that number and the number itself. YAML reads a number with an exponent as one
+#: only with a decimal point and, after the `e`, a sign: it reads the first as text.
+NUMBER_SPELLINGS = {
+    "no_point": ("1e3", "1.0e+3", 1000.0),
+    "no_sign": ("2.5e2", "2.5e+2", 250.0),
+    "negative_exponent_no_point": ("25e-1", "25.0e-1", 2.5),
+}
+
+
+class TestANumberInYamlNeedsAPointAndASignInItsExponent:
+    """Why the TOML and JSON advice says to give a number with an exponent a decimal
+    point and a sign after the e, to write a TOML octal number in decimal, and to
+    write an infinity as .inf: TOML and JSON read each such spelling as a number, YAML
+    reads it as text, and a setting that takes a number refuses text."""
+
+    @pytest.mark.parametrize("spelling", list(NUMBER_SPELLINGS))
+    def test_a_toml_number_with_an_exponent_and_no_point_or_sign_is_refused_as_yaml(
+        self, tmp_path, spelling
+    ):
+        """TOML reads the number. YAML reads the same text as text, which the setting
+        refuses, and the refusal is the kind a scan reports with exit 3."""
+        written, _, number = NUMBER_SPELLINGS[spelling]
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[workspace]", f"project_timeout = {written}"],
+            ["workspace:", f"  project_timeout: {written}"],
+        )
+        assert resolve_config(source_dir=toml_root).workspace.project_timeout == number
+        with pytest.raises(
+            ASHConfigValidationError, match="Configuration validation failed for"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    @pytest.mark.parametrize("spelling", list(NUMBER_SPELLINGS))
+    def test_a_json_number_with_an_exponent_and_no_point_or_sign_is_refused_as_yaml(
+        self, tmp_path, spelling
+    ):
+        """JSON reads the number. The same text as YAML is refused the same way."""
+        written, _, number = NUMBER_SPELLINGS[spelling]
+        text = '{"workspace": {"project_timeout": ' + written + "}}\n"
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        assert resolve_config(source_dir=json_root).workspace.project_timeout == number
+        with pytest.raises(
+            ASHConfigValidationError, match="Configuration validation failed for"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    @pytest.mark.parametrize("spelling", list(NUMBER_SPELLINGS))
+    def test_a_toml_number_rewritten_with_a_point_and_a_sign_reads_what_toml_reads(
+        self, tmp_path, spelling
+    ):
+        written, rewritten, number = NUMBER_SPELLINGS[spelling]
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[workspace]", f"project_timeout = {written}"],
+            ["workspace:", f"  project_timeout: {rewritten}"],
+        )
+        assert resolve_config(source_dir=toml_root).workspace.project_timeout == number
+        assert resolve_config(source_dir=yaml_root).workspace.project_timeout == number
+
+    @pytest.mark.parametrize("spelling", list(NUMBER_SPELLINGS))
+    def test_a_json_number_rewritten_with_a_point_and_a_sign_reads_what_json_reads(
+        self, tmp_path, spelling
+    ):
+        written, rewritten, number = NUMBER_SPELLINGS[spelling]
+        prefix = '{"workspace": {"project_timeout": '
+        json_root, yaml_root = _json_and_yaml_roots(
+            tmp_path, prefix + written + "}}\n", prefix + rewritten + "}}\n"
+        )
+        assert resolve_config(source_dir=json_root).workspace.project_timeout == number
+        assert resolve_config(source_dir=yaml_root).workspace.project_timeout == number
+
+    def test_a_toml_octal_number_is_refused_as_yaml(self, tmp_path):
+        """TOML reads `0o17` as 15. YAML has no octal spelling with the letter o, so it
+        reads the same text as text, which the setting refuses."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[global_settings.history]", "keep_runs = 0o17"],
+            ["global_settings:", "  history:", "    keep_runs: 0o17"],
+        )
+        toml_config = resolve_config(source_dir=toml_root)
+        assert toml_config.global_settings.history.keep_runs == 15
+        with pytest.raises(
+            ASHConfigValidationError, match="Configuration validation failed for"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_toml_octal_number_written_in_decimal_reads_what_toml_reads(
+        self, tmp_path
+    ):
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[global_settings.history]", "keep_runs = 0o17"],
+            ["global_settings:", "  history:", "    keep_runs: 15"],
+        )
+        toml_config = resolve_config(source_dir=toml_root)
+        yaml_config = resolve_config(source_dir=yaml_root)
+        assert toml_config.global_settings.history.keep_runs == 15
+        assert yaml_config.global_settings.history.keep_runs == 15
+
+    def test_a_toml_infinity_is_refused_as_yaml(self, tmp_path):
+        """TOML reads `inf` as an infinite float. YAML reads `inf` as text, which the
+        setting refuses."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[workspace]", "project_timeout = inf"],
+            ["workspace:", "  project_timeout: inf"],
+        )
+        toml_config = resolve_config(source_dir=toml_root)
+        assert toml_config.workspace.project_timeout == float("inf")
+        with pytest.raises(
+            ASHConfigValidationError, match="Configuration validation failed for"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_toml_infinity_written_as_dot_inf_reads_what_toml_reads(self, tmp_path):
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[workspace]", "project_timeout = inf"],
+            ["workspace:", "  project_timeout: .inf"],
+        )
+        toml_config = resolve_config(source_dir=toml_root)
+        yaml_config = resolve_config(source_dir=yaml_root)
+        assert toml_config.workspace.project_timeout == float("inf")
+        assert yaml_config.workspace.project_timeout == float("inf")
+
+    def test_a_json_infinity_is_refused_as_yaml(self, tmp_path):
+        """JSON reads `Infinity` as an infinite float, though it is outside the JSON
+        specification. YAML reads it as text, which the setting refuses."""
+        text = '{"workspace": {"project_timeout": Infinity}}\n'
+        json_root, yaml_root = _json_and_yaml_roots(tmp_path, text, text)
+        json_config = resolve_config(source_dir=json_root)
+        assert json_config.workspace.project_timeout == float("inf")
+        with pytest.raises(
+            ASHConfigValidationError, match="Configuration validation failed for"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_a_json_infinity_written_as_dot_inf_reads_what_json_reads(self, tmp_path):
+        json_root, yaml_root = _json_and_yaml_roots(
+            tmp_path,
+            '{"workspace": {"project_timeout": Infinity}}\n',
+            '{"workspace": {"project_timeout": .inf}}\n',
+        )
+        json_config = resolve_config(source_dir=json_root)
+        yaml_config = resolve_config(source_dir=yaml_root)
+        assert json_config.workspace.project_timeout == float("inf")
+        assert yaml_config.workspace.project_timeout == float("inf")
+
+    def test_yaml_reads_a_number_with_an_exponent_and_no_point_as_text(self, tmp_path):
+        """The premise of the refusals above: YAML reads `1e3` as the text it is."""
+        (tmp_path / ".ash.yaml").write_text("project_name: 1e3\n", encoding="utf-8")
+        assert resolve_config(source_dir=tmp_path).project_name == "1e3"
 
 
 class TestAMovedTomlFileIsRefused:
