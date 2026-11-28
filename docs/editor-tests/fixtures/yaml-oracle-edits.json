@@ -1492,6 +1492,125 @@
       "id": "delete-the-first-item-of-a-list-in-a-list-keeps-the-comment-above-the-next-item"
     },
     {
+      "after": {
+        "lines": [
+          "!!map",
+          "# about a",
+          "{} # note"
+        ]
+      },
+      "before": {
+        "lines": [
+          "!!map",
+          "# about a",
+          "a: 1 # note"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-entry-of-a-tagged-file-keeps-the-tag-and-the-comment-above-it"
+    },
+    {
+      "after": {
+        "lines": [
+          "!!map # about the file",
+          "{}"
+        ]
+      },
+      "before": {
+        "lines": [
+          "!!map # about the file",
+          "a: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-entry-of-a-tagged-file-keeps-the-comment-on-the-tag-line"
+    },
+    {
+      "after": {
+        "lines": [
+          "&cfg # shared settings",
+          "{}"
+        ]
+      },
+      "before": {
+        "lines": [
+          "&cfg # shared settings",
+          "a: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-entry-of-an-anchored-file-keeps-the-anchor-and-its-comment"
+    },
+    {
+      "after": {
+        "lines": [
+          "--- !!map # c",
+          "{}"
+        ]
+      },
+      "before": {
+        "lines": [
+          "--- !!map # c",
+          "a: 1"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          "a"
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-entry-of-a-file-keeps-the-document-start-line"
+    },
+    {
+      "after": {
+        "lines": [
+          "!!seq",
+          "# about the list",
+          "[]"
+        ]
+      },
+      "before": {
+        "lines": [
+          "!!seq",
+          "# about the list",
+          "- a"
+        ]
+      },
+      "droppedComments": 0,
+      "edit": {
+        "op": "delete",
+        "path": [
+          0
+        ]
+      },
+      "how": "patch",
+      "id": "delete-the-only-item-of-a-tagged-list-keeps-the-tag-and-the-comment-above-it"
+    },
+    {
       "before": {
         "lines": [
           "a: 1"

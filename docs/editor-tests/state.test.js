@@ -276,6 +276,71 @@ test('a delete that no line patch can make without losing a comment is written a
   assert.equal(result.message, 'Comments inside a were not kept.');
 });
 
+// The only entry of a file has no key or dash above it to hold an empty collection, so a patch
+// replaces the entry's own text with `{}` or `[]`. A patch that also takes the tag or anchor the
+// file starts with, the line that starts the document or a comment line above the entry loses
+// text that is not the entry's. No smaller block holds the entry at the top level, so such an
+// edit is refused, and the text stays as it was.
+const ONLY_ENTRY_OF_A_FILE = [
+  [
+    'the tag and the comment line above the entry',
+    '!!map\n# about a\na: 1 # note\n',
+    ['a'],
+    '{} # note\n',
+    '!!map\n# about a\n{} # note\n',
+  ],
+  [
+    'the tag',
+    '!!map\n# about a\na: 1 # note\n',
+    ['a'],
+    '# about a\n{} # note\n',
+    '!!map\n# about a\n{} # note\n',
+  ],
+  [
+    'the comment line above the entry',
+    '!!map\n# about a\na: 1 # note\n',
+    ['a'],
+    '!!map\n{} # note\n',
+    '!!map\n# about a\n{} # note\n',
+  ],
+  [
+    'the anchor and the comment on its line',
+    '&cfg # shared settings\na: 1\n',
+    ['a'],
+    '{}\n',
+    '&cfg # shared settings\n{}\n',
+  ],
+  [
+    'the tag on the line that starts the document',
+    '--- !!map # c\na: 1\n',
+    ['a'],
+    '--- {}\n',
+    '--- !!map # c\n{}\n',
+  ],
+  [
+    'the tag of a list and the comment line above the item',
+    '!!seq\n# about the list\n- a\n',
+    [0],
+    '[]\n',
+    '!!seq\n# about the list\n[]\n',
+  ],
+];
+
+for (const [name, text, path, lost, kept] of ONLY_ENTRY_OF_A_FILE) {
+  test(`the gate refuses a delete of the only entry of a file that also takes ${name}`, () => {
+    const edit = { op: 'delete', path };
+    const result = applyEdit(text, edit, { patch: writes(lost) });
+    assert.equal(result.ok, false);
+    assert.equal(result.how, 'refused');
+    assert.equal(result.reason, 'gate');
+    assert.equal('text' in result, false);
+    const real = applyEdit(text, edit);
+    assert.equal(real.how, 'patch');
+    assert.equal(real.text, kept);
+    assert.equal(real.droppedComments, 0);
+  });
+}
+
 test('a file with a line break the writer does not see is refused for every edit, before any planner runs', () => {
   const breaks = [
     ['a lone carriage return', '\r'],

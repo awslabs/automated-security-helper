@@ -664,6 +664,85 @@ test('the only child of a parent leaves an empty collection after the parent key
   }
 });
 
+// The only entry of a whole file has no key or dash above it to hold an empty collection, so
+// its own text becomes `{}` or `[]`. What stands before it stays: the tag or anchor the file
+// starts with, the line that starts the document and every comment line. A comment after the
+// entry, on its line, stays too.
+const ONLY_ENTRY_OF_A_FILE = [
+  ['a comment on the line of the entry stays after it', 'a: 1 # note\n', ['a'], '{} # note\n', 0],
+  [
+    'a tag, and a comment line above the entry',
+    '!!map\n# about a\na: 1 # note\n',
+    ['a'],
+    '!!map\n# about a\n{} # note\n',
+    0,
+  ],
+  [
+    'a comment on the line of the tag',
+    '!!map # about the file\na: 1\n',
+    ['a'],
+    '!!map # about the file\n{}\n',
+    0,
+  ],
+  [
+    'an anchor, and a comment on its line',
+    '&cfg # shared settings\na: 1\n',
+    ['a'],
+    '&cfg # shared settings\n{}\n',
+    0,
+  ],
+  ['an anchor and a tag', '&cfg !!map\na: 1\n', ['a'], '&cfg !!map\n{}\n', 0],
+  [
+    'the line that starts the document, with a tag and a comment',
+    '--- !!map # c\na: 1\n',
+    ['a'],
+    '--- !!map # c\n{}\n',
+    0,
+  ],
+  [
+    'the line that starts the document, and a comment line',
+    '---\n# about a\na: 1\n',
+    ['a'],
+    '---\n# about a\n{}\n',
+    0,
+  ],
+  [
+    'a tagged list',
+    '!!seq\n# about the list\n- a\n',
+    [0],
+    '!!seq\n# about the list\n[]\n',
+    0,
+  ],
+  ['a comment on the line of the only item stays after it', '- a # note\n', [0], '[] # note\n', 0],
+  [
+    'line breaks of two characters',
+    '!!map\r\n# about a\r\na: 1 # note\r\n',
+    ['a'],
+    '!!map\r\n# about a\r\n{} # note\r\n',
+    0,
+  ],
+  [
+    'a comment inside the entry goes with it',
+    '!!map\na: # inside\n  b: 1\n',
+    ['a'],
+    '!!map\n{}\n',
+    1,
+  ],
+  ['a last line with no break after it', '!!map\na: 1', ['a'], '!!map\n{}', 0],
+];
+
+for (const [name, text, path, after, dropped] of ONLY_ENTRY_OF_A_FILE) {
+  test(`deleting the only entry of a file leaves an empty collection in its place: ${name}`, () => {
+    const result = patch(text, { op: 'delete', path });
+    assert.equal(result.how, 'patch');
+    assert.equal(result.text, after);
+    assert.equal(result.droppedComments, dropped);
+    const reread = readYaml(result.text);
+    assert.equal(reread.ok, true);
+    assert.deepEqual(reread.value, typeof path[0] === 'number' ? [] : {});
+  });
+}
+
 test('a plain string with a question mark is quoted inside a flow list, where PyYAML ends a plain scalar at it', () => {
   const result = patch('paths: [a, b] # note\n', { op: 'set', path: ['paths', 1], value: 'src/a?.py' });
   assert.equal(result.how, 'patch');
@@ -766,6 +845,28 @@ test('a line patch may reach the deleted entry and the one line it pulls up, and
   const flow = 'list: [a, b]\nz: 1\n';
   const delFlow = { op: 'delete', path: ['list', 0] };
   assert.deepEqual(bound(flow, delFlow), [editBound(readYaml(flow), delFlow)]);
+});
+
+test('a delete of the only entry of a file may reach that entry and no further', () => {
+  // Not the tag or the anchor the file starts with, the line that starts the document or a
+  // comment line: the spans below are the entry's own text.
+  const cases = [
+    ['a tag and a comment line', '!!map\n# about a\na: 1 # note\n', ['a'], 'a: 1'],
+    ['an anchor and a comment', '&cfg # shared settings\na: 1\n', ['a'], 'a: 1'],
+    ['an anchor and a tag', '&cfg !!map\na: 1\n', ['a'], 'a: 1'],
+    ['the line that starts the document', '--- !!map # c\na: 1\n', ['a'], 'a: 1'],
+    ['a tagged list', '!!seq\n# about the list\n- a\n', [0], '- a'],
+    ['an entry on several lines', '!!map\n# about a\na:\n  b: 1\n', ['a'], 'a:\n  b: 1'],
+    ['line breaks of two characters', '!!map\r\n# about a\r\na: 1\r\n', ['a'], 'a: 1'],
+    ['no tag and no anchor', '# header\na: 1\n', ['a'], 'a: 1'],
+  ];
+  for (const [name, text, path, entry] of cases) {
+    const edit = { op: 'delete', path };
+    const at = text.indexOf(entry);
+    assert.deepEqual(patchBound(readYaml(text), edit), [[at, at + entry.length]], name);
+    // What the patch writes keeps every byte before the entry.
+    assert.ok(patch(text, edit).text.startsWith(text.slice(0, at)), name);
+  }
 });
 
 test('a flow document is written again as a whole', () => {
