@@ -216,6 +216,24 @@ def _cell(value) -> str:
     return _text(value).replace("\r", "").replace("\n", "<br>")
 
 
+def _information_table(rows) -> list[str]:
+    """The header, the divider and one row per result of the Information table.
+
+    The rows are ``ReportContentEmitter.get_information_overview``'s: the
+    scanner, rule, message, file and kind, and no severity, which rates no
+    finding. Each value is one shown line, as all of them come from the scan.
+    """
+    keys = ("scanner", "rule_id", "message", "file_path", "result_kind")
+    return [
+        "| Scanner | Rule ID | Message | File | Result kind |",
+        "| --- | --- | --- | --- | --- |",
+        *(
+            "| " + " | ".join(_cell(shown_on_one_line(row[key])) for key in keys) + " |"
+            for row in rows
+        ),
+    ]
+
+
 def _findings_table(findings) -> list[str]:
     """The header, the divider and one row per finding of a findings table.
 
@@ -652,7 +670,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             if information:
                 parts.append("## Information\n")
                 parts.append(f"{INFORMATION_NOTE}\n")
-                parts.extend(_findings_table(information))
+                parts.extend(_information_table(information))
                 parts.append("")
 
         if options.include_detailed_findings:

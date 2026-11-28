@@ -74,6 +74,29 @@ def _findings_table(findings) -> list[str]:
     return lines
 
 
+def _information_table(rows) -> list[str]:
+    """The header, the divider and one row per result of the INFORMATION table.
+
+    The rows are ``ReportContentEmitter.get_information_overview``'s: the
+    scanner, rule, message, file and kind, and no severity, which rates no
+    finding. Each value is shown on one line before it is cut to its column.
+    """
+    lines = [
+        f"{'Scanner':<15} {'Rule ID':<15} {'Message':<60} {'File':<30} {'Result kind':<15}",
+        f"{'-' * 15} {'-' * 15} {'-' * 60} {'-' * 30} {'-' * 15}",
+    ]
+    for row in rows:
+        scanner = str(shown_on_one_line(row["scanner"]))[:15]
+        rule_id = str(shown_on_one_line(row["rule_id"]))[:15]
+        message = str(shown_on_one_line(row["message"]))[:60]
+        file_path = str(shown_on_one_line(row["file_path"]))[:30]
+        kind = str(shown_on_one_line(row["result_kind"]))[:15]
+        lines.append(
+            f"{scanner:<15} {rule_id:<15} {message:<60} {file_path:<30} {kind:<15}"
+        )
+    return lines
+
+
 class TextReporterConfigOptions(ReporterOptionsBase):
     """Configuration options for the Text reporter."""
 
@@ -427,7 +450,7 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 text_parts.append("INFORMATION")
                 text_parts.append("-----------")
                 text_parts.append(INFORMATION_NOTE)
-                text_parts.extend(_findings_table(information))
+                text_parts.extend(_information_table(information))
                 text_parts.append("")
 
         # Add detailed findings if enabled

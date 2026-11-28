@@ -694,10 +694,10 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         body = "".join(
             "<tr>"
             + "".join(
-                # The scanner, rule, title and path come from the scan: each is
-                # one shown line.
+                # The scanner, rule, message, path and kind come from the scan:
+                # each is one shown line.
                 f"<td>{html.escape(str(shown_on_one_line(str(row[key]))))}</td>"
-                for key in ("scanner", "rule_id", "title", "file_path")
+                for key in ("scanner", "rule_id", "message", "file_path", "result_kind")
             )
             + "</tr>"
             for row in rows
@@ -711,7 +711,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             '<div class="table-scroll" role="region" '
             f'aria-label="{html.escape(label, quote=True)}" tabindex="0">'
             '<table><tr><th scope="col">Scanner</th><th scope="col">Rule ID</th>'
-            '<th scope="col">Title</th><th scope="col">File</th></tr>'
+            '<th scope="col">Message</th><th scope="col">File</th>'
+            '<th scope="col">Result kind</th></tr>'
             f"{body}</table></div></section>"
         )
 

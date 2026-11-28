@@ -74,6 +74,7 @@ from automated_security_helper.utils.scanned_tree import (
 )
 from automated_security_helper.utils.secret_masking import source_snippet_masker
 from automated_security_helper.utils.severity_ladder import (
+    result_kind,
     result_severity,
     result_states_no_finding,
 )
@@ -1044,10 +1045,18 @@ def _finding_cells(finding: dict, fields: list) -> List[Text]:
 
 
 def _metadata_table(finding: dict) -> Table:
-    """The detail view's finding-context metadata, each value a text cell."""
+    """The detail view's finding-context metadata, each value a text cell.
+
+    A result that states no finding shows its SARIF kind where a finding shows
+    its severity: its severity rates no finding.
+    """
     table = Table("Key", "Value", show_lines=True, expand=True)
+    if _states_no_finding(finding):
+        first = ("Result kind", result_kind(finding))
+    else:
+        first = ("Severity", finding["severity"])
     for key, value in (
-        ("Severity", finding["severity"]),
+        first,
         ("Scanner", finding["scanner"]),
         ("File", _display_value(finding.get("file"))),
         ("Line", _display_value(finding.get("line"))),

@@ -149,6 +149,9 @@ SUMMARY_SUPPRESSED = Disposition.SUPPRESSED.summary_key
 SUMMARY_BELOW_THRESHOLD = Disposition.BELOW_THRESHOLD.summary_key
 SUMMARY_POLICY_NOT_GATING = Disposition.POLICY_NOT_GATING.summary_key
 
+#: The most characters of a result's message that an Information row holds.
+INFORMATION_MESSAGE_CHARS = 200
+
 #: The sentence under the heading of the Information listing, in the Markdown,
 #: text and HTML reports: what the rows are, and that no total counts them.
 INFORMATION_NOTE = (
@@ -1057,11 +1060,23 @@ class ReportContentEmitter:
         ]
 
     def get_information_overview(self) -> List[Dict[str, Any]]:
-        """The overview row of each result that states no finding, in list order.
+        """The row of each result that states no finding, in list order.
 
-        Never folded: the duplicate fold groups findings.
+        Its scanner, rule, message, file and SARIF kind, and no severity: the
+        severity of such a result rates no finding. The message is the result's
+        own text, cut to ``INFORMATION_MESSAGE_CHARS`` characters; each report
+        shows it on one line. Never folded: the duplicate fold groups findings.
         """
-        return [self._overview_row(vuln) for vuln in self.information_rows()]
+        return [
+            {
+                "scanner": vuln.scanner or "Unknown",
+                "rule_id": vuln.rule_id or "N/A",
+                "message": (vuln.description or "")[:INFORMATION_MESSAGE_CHARS],
+                "file_path": vuln.file_path or "N/A",
+                "result_kind": vuln.result_kind,
+            }
+            for vuln in self.information_rows()
+        ]
 
     @staticmethod
     def _with_note(
