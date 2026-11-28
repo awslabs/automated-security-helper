@@ -43,7 +43,7 @@ def _roundtrips(error):
     return {
         "copy": copy.copy(error),
         "deepcopy": copy.deepcopy(error),
-        "pickle": pickle.loads(pickle.dumps(error)),
+        "pickle": pickle.loads(pickle.dumps(error)),  # nosec B301
     }
 
 
@@ -389,7 +389,7 @@ class TestAFailureReasonNeverRaises:
     def test_a_reason_survives_a_round_trip_through_pickle(self):
         reason = FailureReason(ReasonCode.TIMED_OUT, "it timed out after 300 s")
 
-        assert pickle.loads(pickle.dumps(reason)) == reason
+        assert pickle.loads(pickle.dumps(reason)) == reason  # nosec B301
         assert copy.deepcopy(reason) == reason
 
 
