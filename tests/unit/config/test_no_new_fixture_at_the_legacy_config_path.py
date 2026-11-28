@@ -38,6 +38,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 pytestmark = pytest.mark.unit
 
 TESTS = Path(__file__).resolve().parents[2]
@@ -95,8 +97,14 @@ LEGACY_SUBJECT = {
 
 
 def _files_with_legacy_spelling(root: Path, skip: Path) -> set[str]:
+    """The ``.py`` files under ``root`` that name a legacy location.
+
+    Walked with ``iter_repo_files``, which prunes the tests' scratch tree as it
+    descends: ``root`` is tests/, where other xdist workers create and remove
+    tests/pytest-temp while this walks (tests/unit/test_repo_walkers_skip_scratch.py).
+    """
     found = set()
-    for path in sorted(root.rglob("*.py")):
+    for path in sorted(p for p in iter_repo_files(root) if p.suffix == ".py"):
         if path == skip or "test_data" in path.parts:
             continue
         if LEGACY_SPELLING.search(path.read_text(encoding="utf-8", errors="replace")):
@@ -133,8 +141,12 @@ def test_every_listed_file_still_names_a_legacy_location() -> None:
 
 
 def test_the_scanner_flags_a_planted_fixture_and_passes_the_canonical_one(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
+    # The walk leaves the tests' scratch tree out, and tmp_path is inside that tree
+    # when pytest runs with a --basetemp there. This tree is the test's own, so the
+    # scratch root is pointed at a directory that does not hold it.
+    monkeypatch.setattr("tests.utils.helpers.ASH_TEST_TEMP_ROOT", tmp_path / "scratch")
     legacy = ".ash" + "/" + ".ash.yaml"
     (tmp_path / "test_planted_string.py").write_text(f'CONFIG = "{legacy}"\n')
     (tmp_path / "test_planted_join.py").write_text(
@@ -162,3 +174,84 @@ def test_the_scanner_flags_a_planted_fixture_and_passes_the_canonical_one(
         "test_planted_args.py",
         "test_planted_json.py",
     }
+
+
+# The guards above read every .py file under tests/, and the suite's own scratch tree
+# is inside tests/: ``tests/pytest-temp/<worker>/<directory>``, where the
+# ``ash_temp_path`` fixture makes a test's directory and removes it on teardown. Under
+# pytest-xdist another worker does that while a guard is walking. The cases below plant
+# that shape in a tree of their own and make a file vanish where the race does.
+
+_LEGACY_PATH = ".ash" + "/" + ".ash.yaml"
+_NAMES_THE_LEGACY_PATH = f'CONFIG = "{_LEGACY_PATH}"\n'
+
+
+def _tree_with_a_scratch_directory(tmp_path, monkeypatch):
+    """A tests/-shaped tree with a scratch tree of its own, as the repository's has.
+
+    Returns the root to walk, an ordinary test file and a file in the scratch tree,
+    each naming the legacy path. The suite's scratch root is pointed at the planted
+    one, so a walk that leaves ``tests/pytest-temp`` out leaves this one out too.
+    """
+    root = tmp_path / "tests"
+    scratch = root / "pytest-temp"
+    ordinary = root / "unit" / "test_names_the_legacy_path.py"
+    in_scratch = (
+        scratch / "gw1" / "one_tests_own_directory" / "test_in_the_scratch_tree.py"
+    )
+    for path in (ordinary, in_scratch):
+        path.parent.mkdir(parents=True)
+        path.write_text(_NAMES_THE_LEGACY_PATH, encoding="utf-8")
+    monkeypatch.setattr("tests.utils.helpers.ASH_TEST_TEMP_ROOT", scratch)
+    return root, ordinary, in_scratch
+
+
+def _vanish_before_read(monkeypatch, victim: Path) -> None:
+    """Delete ``victim`` at the moment a ``read_text`` reaches it.
+
+    What another worker's teardown does between the walk's listing and the read: the
+    walk saw the file, and it is gone when the read opens it.
+    """
+    real_read_text = Path.read_text
+
+    def read_text_once_the_file_is_gone(self, *args, **kwargs):
+        if self == victim:
+            victim.unlink()
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text_once_the_file_is_gone)
+
+
+def test_a_scratch_file_that_vanishes_after_the_walk_listed_it_is_never_read(
+    tmp_path, monkeypatch
+) -> None:
+    """The walk leaves the scratch tree out, so a file that goes from it costs nothing.
+
+    Red at the base: the walk listed every ``.py`` file under the root, the scratch
+    tree's too, and read each one, so a file another worker had just removed made the
+    read raise FileNotFoundError. The scratch tree holds no committed file; the walk
+    never lists it, and the ordinary file is the only one it finds.
+    """
+    root, ordinary, in_scratch = _tree_with_a_scratch_directory(tmp_path, monkeypatch)
+    _vanish_before_read(monkeypatch, in_scratch)
+
+    found = _files_with_legacy_spelling(root, tmp_path / "none.py")
+
+    assert found == {ordinary.relative_to(root).as_posix()}
+    assert in_scratch.exists(), "the walk went to read a file in the scratch tree"
+
+
+def test_a_file_outside_the_scratch_tree_that_vanishes_still_fails_the_walk(
+    tmp_path, monkeypatch
+) -> None:
+    """The control: a file that goes missing anywhere else is not swallowed.
+
+    The read raises FileNotFoundError and the test fails, as it did before the
+    scratch tree was left out. A walk that read nothing has to mean that nothing was
+    there, not that it could not see.
+    """
+    root, ordinary, _ = _tree_with_a_scratch_directory(tmp_path, monkeypatch)
+    _vanish_before_read(monkeypatch, ordinary)
+
+    with pytest.raises(FileNotFoundError):
+        _files_with_legacy_spelling(root, tmp_path / "none.py")

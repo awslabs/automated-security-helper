@@ -1,3702 +1,3702 @@
 {
- "apply.apply_added_suppression_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
+  "apply.apply_added_suppression_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
   },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_additional_report_rows_are_neither_matched_nor_counted": {
-  "additional_reports_untouched": true,
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
+  "apply.apply_additional_report_rows_are_neither_matched_nor_counted": {
+    "additional_reports_untouched": true,
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
   },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_baseline_finding_of_unrecorded_scanner_is_ignored": {
-  "kept": [
-   [
-    0,
-    "m",
-    10
-   ]
+  "apply.apply_baseline_finding_of_unrecorded_scanner_is_ignored": {
+    "kept": [
+      [
+        0,
+        "m",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan has incomplete scanner coverage.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_baseline_scanner_excluded_keeps_findings": {
+    "kept": [
+      [
+        0,
+        "m",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_baseline_scanner_failed_still_counts_as_evaluated": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_baseline_scanner_not_completed_keeps_findings": {
+    "kept": [
+      [
+        0,
+        "m",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_baseline_scope_matrix": {
+    "absolute_current_only": {
+      "warnings": [
+        "The scan directories cannot be compared reliably."
+      ]
+    },
+    "absolute_sources": {
+      "warnings": [
+        "The scan directories cannot be compared reliably."
+      ]
+    },
+    "baseline_source_missing": {
+      "warnings": [
+        "The scan directories cannot be compared reliably."
+      ]
+    },
+    "current_source_missing": {
+      "warnings": [
+        "The scan directories cannot be compared reliably."
+      ]
+    },
+    "different_project": {
+      "refused": "the baseline belongs to a different project"
+    },
+    "different_relative_source": {
+      "refused": "the baseline scanned a different directory"
+    },
+    "project_checked_before_source": {
+      "refused": "the baseline belongs to a different project"
+    },
+    "same_nested_relative_source": {
+      "warnings": []
+    },
+    "same_relative_source": {
+      "warnings": []
+    }
+  },
+  "apply.apply_changed_message_is_kept": {
+    "kept": [
+      [
+        0,
+        "new",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_critical_to_high_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_duplicate_current_rows_each_judged": {
+    "kept": [],
+    "marker": {
+      "matched": 2,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 2,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_empty_baseline_and_empty_results": {
+    "kept": [],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_empty_baseline_keeps_everything": {
+    "kept": [
+      [
+        0,
+        "old",
+        10
+      ],
+      [
+        0,
+        "other",
+        20
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_empty_results_matches_nothing": {
+    "kept": [],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_exact_match_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_group_growth_matches_nothing": {
+    "kept": [
+      [
+        0,
+        "old",
+        3
+      ],
+      [
+        0,
+        "old",
+        4
+      ],
+      [
+        0,
+        "old",
+        5
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_group_shrink_drops_the_ordered_prefix": {
+    "kept": [],
+    "marker": {
+      "matched": 2,
+      "matched_without_lines": 2,
+      "sha256": "abc123"
+    },
+    "matched": 2,
+    "matched_without_lines": 2,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_info_to_info_is_dropped_and_unknown_severity_is_kept": {
+    "kept": [],
+    "marker": {
+      "matched": 2,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 2,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_lapsed_suppression_is_kept": {
+    "kept": [
+      [
+        0,
+        "m",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_large_n_fingerprinted_with_rises": {
+    "kept": [
+      [
+        0,
+        "m5",
+        5
+      ],
+      [
+        0,
+        "m10",
+        10
+      ],
+      [
+        0,
+        "m15",
+        15
+      ],
+      [
+        0,
+        "m20",
+        20
+      ],
+      [
+        0,
+        "m25",
+        25
+      ],
+      [
+        0,
+        "m30",
+        30
+      ],
+      [
+        0,
+        "m35",
+        35
+      ],
+      [
+        0,
+        "m40",
+        40
+      ],
+      [
+        0,
+        "m45",
+        45
+      ],
+      [
+        0,
+        "m50",
+        50
+      ],
+      [
+        0,
+        "m55",
+        55
+      ],
+      [
+        0,
+        "m60",
+        60
+      ]
+    ],
+    "marker": {
+      "matched": 48,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 48,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_large_n_half_shifted": {
+    "kept": [
+      [
+        0,
+        "brand-new",
+        500
+      ]
+    ],
+    "marker": {
+      "matched": 100,
+      "matched_without_lines": 50,
+      "sha256": "abc123"
+    },
+    "matched": 100,
+    "matched_without_lines": 50,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_low_to_medium_rise_on_exact_pair_is_kept": {
+    "kept": [
+      [
+        0,
+        "m",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_moved_match_is_dropped_without_lines": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 1,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 1,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_moved_with_lapsed_suppression_is_kept": {
+    "kept": [
+      [
+        0,
+        "m",
+        40
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_new_finding_beside_old_is_kept": {
+    "kept": [
+      [
+        0,
+        "new",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 1,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 1,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_no_sarif_at_all": {
+    "kept": [],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_only_the_completed_scanners_findings_match": {
+    "kept": [
+      [
+        0,
+        "b",
+        20
+      ]
+    ],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_refuses_results_already_filtered_by_a_baseline": {
+    "kept": [
+      [
+        0,
+        "old",
+        10
+      ]
+    ],
+    "marker": {
+      "sha256": "x"
+    },
+    "refused": "existing results were filtered by --baseline"
+  },
+  "apply.apply_same_finding_in_two_runs_is_judged_per_row": {
+    "kept": [],
+    "marker": {
+      "matched": 2,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 2,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_same_severity_high_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_secret_beside_ordinary_finding_each_judged_alone": {
+    "kept": [
+      [
+        0,
+        "key",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_secret_exact_with_fingerprint_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_secret_exact_without_fingerprint_is_kept": {
+    "kept": [
+      [
+        0,
+        "key",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_secret_moved_with_fingerprint_is_matched_exactly": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_secret_moved_without_fingerprint_is_kept": {
+    "kept": [
+      [
+        0,
+        "key",
+        30
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_severity_drop_on_exact_pair_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_severity_rise_on_exact_pair_is_kept": {
+    "kept": [
+      [
+        0,
+        "m",
+        10
+      ]
+    ],
+    "marker": {
+      "matched": 0,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 0,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_still_suppressed_is_dropped": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_twice_is_refused_the_second_time": {
+    "first": [
+      1,
+      0
+    ],
+    "kept": [
+      [
+        0,
+        "x",
+        20
+      ]
+    ],
+    "second_refused": "existing results were filtered by --baseline"
+  },
+  "apply.apply_two_runs_remove_by_run_and_result_index": {
+    "kept": [
+      [
+        0,
+        "r0-new",
+        2
+      ],
+      [
+        1,
+        "r1-new",
+        9
+      ]
+    ],
+    "marker": {
+      "matched": 3,
+      "matched_without_lines": 1,
+      "sha256": "abc123"
+    },
+    "matched": 3,
+    "matched_without_lines": 1,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_unicode_findings": {
+    "kept": [],
+    "marker": {
+      "matched": 2,
+      "matched_without_lines": 1,
+      "sha256": "abc123"
+    },
+    "matched": 2,
+    "matched_without_lines": 1,
+    "warnings": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "apply.apply_warnings_pass_through_from_coverage": {
+    "kept": [],
+    "marker": {
+      "matched": 1,
+      "matched_without_lines": 0,
+      "sha256": "abc123"
+    },
+    "matched": 1,
+    "matched_without_lines": 0,
+    "warnings": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan has incomplete scanner coverage.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "compare.check_comparable_matrix": {
+    "baseline_filtered": {
+      "refused": "cannot use results filtered by --baseline"
+    },
+    "changed_files_false": {
+      "ok": null
+    },
+    "changed_files_none": {
+      "ok": null
+    },
+    "changed_files_string": {
+      "refused": "invalid changed-files-only marker"
+    },
+    "changed_files_true": {
+      "refused": "cannot compare results filtered by --changed-files-only"
+    },
+    "changed_files_zero": {
+      "refused": "invalid changed-files-only marker"
+    },
+    "clean": {
+      "ok": null
+    },
+    "project_blank": {
+      "refused": "invalid workspace project marker"
+    },
+    "project_empty": {
+      "refused": "invalid workspace project marker"
+    },
+    "project_not_text": {
+      "refused": "invalid workspace project marker"
+    },
+    "project_ok": {
+      "ok": null
+    },
+    "sharded": {
+      "refused": "use ash merge before comparing sharded results"
+    },
+    "sharded_and_filtered": {
+      "refused": "use ash merge before comparing sharded results"
+    },
+    "workspace_aggregate": {
+      "refused": "use the per-project results instead of a workspace aggregate"
+    },
+    "workspace_and_sharded": {
+      "refused": "use the per-project results instead of a workspace aggregate"
+    }
+  },
+  "compare.check_same_project_matrix": {
+    "both_standalone_different_name": {
+      "refused": "the results name different projects"
+    },
+    "both_standalone_same_name": {
+      "ok": null
+    },
+    "both_standalone_unnamed": {
+      "ok": null
+    },
+    "one_side_unnamed": {
+      "ok": null
+    },
+    "other_side_unnamed": {
+      "ok": null
+    },
+    "standalone_vs_workspace": {
+      "refused": "cannot mix standalone and workspace project results"
+    },
+    "workspace_different": {
+      "refused": "the results name different projects"
+    },
+    "workspace_same": {
+      "ok": null
+    },
+    "workspace_same_project_names_differ": {
+      "refused": "the results name different projects"
+    },
+    "workspace_vs_standalone": {
+      "refused": "cannot mix standalone and workspace project results"
+    }
+  },
+  "compare.comparable_findings_checks_in_order": {
+    "baseline_sharded": {
+      "refused": "use ash merge before comparing sharded results"
+    },
+    "both_sharded_names_baseline_first": {
+      "refused": "use ash merge before comparing sharded results"
+    },
+    "clean_pair": {
+      "ok": [
+        1,
+        1
+      ]
+    },
+    "current_sharded": {
+      "refused": "use ash merge before comparing sharded results"
+    },
+    "duplicate_baseline_ids": {
+      "refused": "Baseline scan contains duplicate finding IDs"
+    },
+    "duplicate_current_ids": {
+      "refused": "Current scan contains duplicate finding IDs"
+    },
+    "empty_pair": {
+      "ok": [
+        0,
+        0
+      ]
+    },
+    "project_names_differ": {
+      "refused": "the results name different projects"
+    },
+    "sharded_wins_over_duplicates": {
+      "refused": "use ash merge before comparing sharded results"
+    }
+  },
+  "compare.coverage_warnings_matrix": {
+    "baseline_scanner_missing": [
+      "Scanner coverage differs between scans.",
+      "Baseline scan has incomplete scanner coverage."
+    ],
+    "current_scanner_excluded": [
+      "Scanner coverage differs between scans.",
+      "Current scan has incomplete scanner coverage."
+    ],
+    "current_scanner_skipped": [
+      "Scanner coverage differs between scans.",
+      "Current scan has incomplete scanner coverage."
+    ],
+    "empty_pair": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ],
+    "evaluated_set_differs": [],
+    "expected_set_differs": [
+      "Scanner coverage differs between scans."
+    ],
+    "expected_without_rows": [
+      "Baseline scan has incomplete scanner coverage.",
+      "Current scan has incomplete scanner coverage."
+    ],
+    "failed_counts_as_evaluated": [],
+    "identical_complete": [],
+    "ignore_file_exclusions_differ": [
+      "Recorded ignore-file exclusions differ between scans."
+    ],
+    "inputs_not_scanned_on_both": [
+      "Baseline scan records inputs that were not scanned.",
+      "Current scan records inputs that were not scanned."
+    ],
+    "inputs_not_scanned_on_current": [
+      "Current scan records inputs that were not scanned."
+    ],
+    "rows_without_expected_scanners": [
+      "Baseline scan does not record enough scanner coverage to establish comparability.",
+      "Current scan does not record enough scanner coverage to establish comparability."
+    ]
+  },
+  "compare.unique_findings_refusal_and_pass_through": {
+    "clean_count": {
+      "ok": 2
+    },
+    "duplicate_plugin_ids_label_baseline": {
+      "refused": "Baseline scan contains duplicate finding IDs"
+    },
+    "duplicate_plugin_ids_label_custom": {
+      "refused": "Some other scan contains duplicate finding IDs"
+    },
+    "empty": {
+      "ok": []
+    },
+    "exact_twins_get_distinct_ids": {
+      "ok": 2
+    }
+  },
+  "diff.additional_report_with_different_plugin_ids_is_new_and_absent": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.additional_report_with_same_plugin_id_is_exact": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.additional_report_without_id_moved_does_not_fallback_pair": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.additional_report_without_id_pairs_exact_by_location_identity": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.both_sides_without_lines_are_exact": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.duplicate_ids_on_both_sides": {
+    "diff": {
+      "absent_after": [
+        "b0",
+        "b1"
+      ],
+      "moved": [],
+      "new": [
+        "a0",
+        "a1",
+        "a2"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0",
+        "b1"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0",
+        "a1",
+        "a2"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.duplicate_ids_on_the_baseline_side": {
+    "diff": {
+      "absent_after": [
+        "b1"
+      ],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b1"
+      ],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.duplicate_ids_on_the_current_side": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0",
+        "a1"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0",
+        "a1"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.empty_both": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.exact_duplicates_get_ordinals_and_pair": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b1",
+          "a1"
+        ],
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_changed_is_new_and_absent": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_exact_pair_with_severity_rise": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_exact_pair_with_suppression_added": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": [
+        [
+          "b0",
+          "a0"
+        ]
+      ]
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_exact_pair_with_suppression_lapse": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": [
+        [
+          "b0",
+          "a0"
+        ]
+      ]
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_pairs_exact_across_message_and_line": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_shared_by_two_locations_falls_back_to_lines": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b1",
+          "a1"
+        ],
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.fingerprint_shared_message_change_at_same_line": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.group_grows_pairs_nothing": {
+    "diff": {
+      "absent_after": [
+        "b1",
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0",
+        "a2",
+        "a1"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b1",
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0",
+        "a2",
+        "a1"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.group_same_size_pairs_in_line_order_not_input_order": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b1",
+          "a2"
+        ],
+        [
+          "b2",
+          "a0"
+        ],
+        [
+          "b0",
+          "a1"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b1",
+          "a2"
+        ],
+        [
+          "b2",
+          "a0"
+        ],
+        [
+          "b0",
+          "a1"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.group_shrinks_pairs_in_line_order": {
+    "diff": {
+      "absent_after": [
+        "b2"
+      ],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ],
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b2"
+      ],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ],
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.large_n_fingerprinted": {
+    "diff": {
+      "absent_after": [
+        "b5",
+        "b3",
+        "b2",
+        "b0",
+        "b8",
+        "b7",
+        "b4",
+        "b1",
+        "b6"
+      ],
+      "moved": [],
+      "new": [
+        "a29",
+        "a27",
+        "a24",
+        "a30",
+        "a23",
+        "a25",
+        "a26",
+        "a22",
+        "a28",
+        "a21"
+      ],
+      "severity_changed": [
+        [
+          "b27",
+          "a18"
+        ],
+        [
+          "b18",
+          "a9"
+        ],
+        [
+          "b15",
+          "a6"
+        ],
+        [
+          "b22",
+          "a13"
+        ],
+        [
+          "b28",
+          "a19"
+        ],
+        [
+          "b29",
+          "a20"
+        ],
+        [
+          "b24",
+          "a15"
+        ],
+        [
+          "b25",
+          "a16"
+        ],
+        [
+          "b23",
+          "a14"
+        ],
+        [
+          "b26",
+          "a17"
+        ],
+        [
+          "b19",
+          "a10"
+        ],
+        [
+          "b13",
+          "a4"
+        ],
+        [
+          "b17",
+          "a8"
+        ],
+        [
+          "b9",
+          "a0"
+        ],
+        [
+          "b12",
+          "a3"
+        ],
+        [
+          "b10",
+          "a1"
+        ],
+        [
+          "b21",
+          "a12"
+        ],
+        [
+          "b16",
+          "a7"
+        ],
+        [
+          "b20",
+          "a11"
+        ],
+        [
+          "b11",
+          "a2"
+        ],
+        [
+          "b14",
+          "a5"
+        ]
+      ],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b5",
+        "b3",
+        "b2",
+        "b0",
+        "b8",
+        "b7",
+        "b4",
+        "b1",
+        "b6"
+      ],
+      "exact": [
+        [
+          "b27",
+          "a18"
+        ],
+        [
+          "b18",
+          "a9"
+        ],
+        [
+          "b15",
+          "a6"
+        ],
+        [
+          "b22",
+          "a13"
+        ],
+        [
+          "b28",
+          "a19"
+        ],
+        [
+          "b29",
+          "a20"
+        ],
+        [
+          "b24",
+          "a15"
+        ],
+        [
+          "b25",
+          "a16"
+        ],
+        [
+          "b23",
+          "a14"
+        ],
+        [
+          "b26",
+          "a17"
+        ],
+        [
+          "b19",
+          "a10"
+        ],
+        [
+          "b13",
+          "a4"
+        ],
+        [
+          "b17",
+          "a8"
+        ],
+        [
+          "b9",
+          "a0"
+        ],
+        [
+          "b12",
+          "a3"
+        ],
+        [
+          "b10",
+          "a1"
+        ],
+        [
+          "b21",
+          "a12"
+        ],
+        [
+          "b16",
+          "a7"
+        ],
+        [
+          "b20",
+          "a11"
+        ],
+        [
+          "b11",
+          "a2"
+        ],
+        [
+          "b14",
+          "a5"
+        ]
+      ],
+      "moved": [],
+      "new": [
+        "a29",
+        "a27",
+        "a24",
+        "a30",
+        "a23",
+        "a25",
+        "a26",
+        "a22",
+        "a28",
+        "a21"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.large_n_mixed_exact_moved_new_absent": {
+    "diff": {
+      "absent_after": [
+        "b0",
+        "b1",
+        "b17",
+        "b47",
+        "b3"
+      ],
+      "moved": [
+        [
+          "b44",
+          "a40"
+        ],
+        [
+          "b29",
+          "a25"
+        ],
+        [
+          "b14",
+          "a10"
+        ],
+        [
+          "b59",
+          "a55"
+        ],
+        [
+          "b35",
+          "a31"
+        ],
+        [
+          "b20",
+          "a16"
+        ],
+        [
+          "b5",
+          "a1"
+        ],
+        [
+          "b50",
+          "a46"
+        ],
+        [
+          "b26",
+          "a22"
+        ],
+        [
+          "b11",
+          "a7"
+        ],
+        [
+          "b56",
+          "a52"
+        ],
+        [
+          "b41",
+          "a37"
+        ],
+        [
+          "b2",
+          "a43"
+        ],
+        [
+          "b32",
+          "a28"
+        ],
+        [
+          "b8",
+          "a4"
+        ],
+        [
+          "b53",
+          "a49"
+        ],
+        [
+          "b38",
+          "a34"
+        ],
+        [
+          "b23",
+          "a19"
+        ]
+      ],
+      "new": [
+        "a60",
+        "a56",
+        "a57",
+        "a58",
+        "a13",
+        "a59"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0",
+        "b1",
+        "b17",
+        "b47",
+        "b3"
+      ],
+      "exact": [
+        [
+          "b9",
+          "a5"
+        ],
+        [
+          "b24",
+          "a20"
+        ],
+        [
+          "b39",
+          "a35"
+        ],
+        [
+          "b19",
+          "a15"
+        ],
+        [
+          "b49",
+          "a45"
+        ],
+        [
+          "b4",
+          "a0"
+        ],
+        [
+          "b54",
+          "a50"
+        ],
+        [
+          "b34",
+          "a30"
+        ],
+        [
+          "b10",
+          "a6"
+        ],
+        [
+          "b15",
+          "a11"
+        ],
+        [
+          "b30",
+          "a26"
+        ],
+        [
+          "b45",
+          "a41"
+        ],
+        [
+          "b40",
+          "a36"
+        ],
+        [
+          "b25",
+          "a21"
+        ],
+        [
+          "b55",
+          "a51"
+        ],
+        [
+          "b21",
+          "a17"
+        ],
+        [
+          "b36",
+          "a32"
+        ],
+        [
+          "b6",
+          "a2"
+        ],
+        [
+          "b31",
+          "a27"
+        ],
+        [
+          "b16",
+          "a12"
+        ],
+        [
+          "b51",
+          "a47"
+        ],
+        [
+          "b46",
+          "a42"
+        ],
+        [
+          "b42",
+          "a38"
+        ],
+        [
+          "b7",
+          "a3"
+        ],
+        [
+          "b22",
+          "a18"
+        ],
+        [
+          "b12",
+          "a8"
+        ],
+        [
+          "b52",
+          "a48"
+        ],
+        [
+          "b27",
+          "a23"
+        ],
+        [
+          "b57",
+          "a53"
+        ],
+        [
+          "b37",
+          "a33"
+        ],
+        [
+          "b43",
+          "a39"
+        ],
+        [
+          "b33",
+          "a29"
+        ],
+        [
+          "b13",
+          "a9"
+        ],
+        [
+          "b48",
+          "a44"
+        ],
+        [
+          "b18",
+          "a14"
+        ],
+        [
+          "b58",
+          "a54"
+        ],
+        [
+          "b28",
+          "a24"
+        ]
+      ],
+      "moved": [
+        [
+          "b44",
+          "a40"
+        ],
+        [
+          "b29",
+          "a25"
+        ],
+        [
+          "b14",
+          "a10"
+        ],
+        [
+          "b59",
+          "a55"
+        ],
+        [
+          "b35",
+          "a31"
+        ],
+        [
+          "b20",
+          "a16"
+        ],
+        [
+          "b5",
+          "a1"
+        ],
+        [
+          "b50",
+          "a46"
+        ],
+        [
+          "b26",
+          "a22"
+        ],
+        [
+          "b11",
+          "a7"
+        ],
+        [
+          "b56",
+          "a52"
+        ],
+        [
+          "b41",
+          "a37"
+        ],
+        [
+          "b2",
+          "a43"
+        ],
+        [
+          "b32",
+          "a28"
+        ],
+        [
+          "b8",
+          "a4"
+        ],
+        [
+          "b53",
+          "a49"
+        ],
+        [
+          "b38",
+          "a34"
+        ],
+        [
+          "b23",
+          "a19"
+        ]
+      ],
+      "new": [
+        "a60",
+        "a56",
+        "a57",
+        "a58",
+        "a13",
+        "a59"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.large_n_shuffled_input_order": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a49"
+        ],
+        [
+          "b36",
+          "a13"
+        ],
+        [
+          "b12",
+          "a37"
+        ],
+        [
+          "b48",
+          "a1"
+        ],
+        [
+          "b24",
+          "a25"
+        ],
+        [
+          "b44",
+          "a5"
+        ],
+        [
+          "b20",
+          "a29"
+        ],
+        [
+          "b32",
+          "a17"
+        ],
+        [
+          "b8",
+          "a41"
+        ],
+        [
+          "b28",
+          "a21"
+        ],
+        [
+          "b4",
+          "a45"
+        ],
+        [
+          "b40",
+          "a9"
+        ],
+        [
+          "b16",
+          "a33"
+        ],
+        [
+          "b25",
+          "a24"
+        ],
+        [
+          "b1",
+          "a48"
+        ],
+        [
+          "b37",
+          "a12"
+        ],
+        [
+          "b13",
+          "a36"
+        ],
+        [
+          "b49",
+          "a0"
+        ],
+        [
+          "b33",
+          "a16"
+        ],
+        [
+          "b9",
+          "a40"
+        ],
+        [
+          "b45",
+          "a4"
+        ],
+        [
+          "b21",
+          "a28"
+        ],
+        [
+          "b41",
+          "a8"
+        ],
+        [
+          "b17",
+          "a32"
+        ],
+        [
+          "b29",
+          "a20"
+        ],
+        [
+          "b5",
+          "a44"
+        ],
+        [
+          "b6",
+          "a43"
+        ],
+        [
+          "b42",
+          "a7"
+        ],
+        [
+          "b18",
+          "a31"
+        ],
+        [
+          "b30",
+          "a19"
+        ],
+        [
+          "b14",
+          "a35"
+        ],
+        [
+          "b26",
+          "a23"
+        ],
+        [
+          "b2",
+          "a47"
+        ],
+        [
+          "b38",
+          "a11"
+        ],
+        [
+          "b22",
+          "a27"
+        ],
+        [
+          "b34",
+          "a15"
+        ],
+        [
+          "b10",
+          "a39"
+        ],
+        [
+          "b46",
+          "a3"
+        ],
+        [
+          "b31",
+          "a18"
+        ],
+        [
+          "b7",
+          "a42"
+        ],
+        [
+          "b43",
+          "a6"
+        ],
+        [
+          "b19",
+          "a30"
+        ],
+        [
+          "b3",
+          "a46"
+        ],
+        [
+          "b39",
+          "a10"
+        ],
+        [
+          "b15",
+          "a34"
+        ],
+        [
+          "b27",
+          "a22"
+        ],
+        [
+          "b11",
+          "a38"
+        ],
+        [
+          "b47",
+          "a2"
+        ],
+        [
+          "b23",
+          "a26"
+        ],
+        [
+          "b35",
+          "a14"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a49"
+        ],
+        [
+          "b36",
+          "a13"
+        ],
+        [
+          "b12",
+          "a37"
+        ],
+        [
+          "b48",
+          "a1"
+        ],
+        [
+          "b24",
+          "a25"
+        ],
+        [
+          "b44",
+          "a5"
+        ],
+        [
+          "b20",
+          "a29"
+        ],
+        [
+          "b32",
+          "a17"
+        ],
+        [
+          "b8",
+          "a41"
+        ],
+        [
+          "b28",
+          "a21"
+        ],
+        [
+          "b4",
+          "a45"
+        ],
+        [
+          "b40",
+          "a9"
+        ],
+        [
+          "b16",
+          "a33"
+        ],
+        [
+          "b25",
+          "a24"
+        ],
+        [
+          "b1",
+          "a48"
+        ],
+        [
+          "b37",
+          "a12"
+        ],
+        [
+          "b13",
+          "a36"
+        ],
+        [
+          "b49",
+          "a0"
+        ],
+        [
+          "b33",
+          "a16"
+        ],
+        [
+          "b9",
+          "a40"
+        ],
+        [
+          "b45",
+          "a4"
+        ],
+        [
+          "b21",
+          "a28"
+        ],
+        [
+          "b41",
+          "a8"
+        ],
+        [
+          "b17",
+          "a32"
+        ],
+        [
+          "b29",
+          "a20"
+        ],
+        [
+          "b5",
+          "a44"
+        ],
+        [
+          "b6",
+          "a43"
+        ],
+        [
+          "b42",
+          "a7"
+        ],
+        [
+          "b18",
+          "a31"
+        ],
+        [
+          "b30",
+          "a19"
+        ],
+        [
+          "b14",
+          "a35"
+        ],
+        [
+          "b26",
+          "a23"
+        ],
+        [
+          "b2",
+          "a47"
+        ],
+        [
+          "b38",
+          "a11"
+        ],
+        [
+          "b22",
+          "a27"
+        ],
+        [
+          "b34",
+          "a15"
+        ],
+        [
+          "b10",
+          "a39"
+        ],
+        [
+          "b46",
+          "a3"
+        ],
+        [
+          "b31",
+          "a18"
+        ],
+        [
+          "b7",
+          "a42"
+        ],
+        [
+          "b43",
+          "a6"
+        ],
+        [
+          "b19",
+          "a30"
+        ],
+        [
+          "b3",
+          "a46"
+        ],
+        [
+          "b39",
+          "a10"
+        ],
+        [
+          "b15",
+          "a34"
+        ],
+        [
+          "b27",
+          "a22"
+        ],
+        [
+          "b11",
+          "a38"
+        ],
+        [
+          "b47",
+          "a2"
+        ],
+        [
+          "b23",
+          "a26"
+        ],
+        [
+          "b35",
+          "a14"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.large_n_whole_group_shifted": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ],
+        [
+          "b1",
+          "a1"
+        ],
+        [
+          "b2",
+          "a2"
+        ],
+        [
+          "b3",
+          "a3"
+        ],
+        [
+          "b4",
+          "a4"
+        ],
+        [
+          "b5",
+          "a5"
+        ],
+        [
+          "b6",
+          "a6"
+        ],
+        [
+          "b7",
+          "a7"
+        ],
+        [
+          "b8",
+          "a8"
+        ],
+        [
+          "b9",
+          "a9"
+        ],
+        [
+          "b10",
+          "a10"
+        ],
+        [
+          "b11",
+          "a11"
+        ],
+        [
+          "b12",
+          "a12"
+        ],
+        [
+          "b13",
+          "a13"
+        ],
+        [
+          "b14",
+          "a14"
+        ],
+        [
+          "b15",
+          "a15"
+        ],
+        [
+          "b16",
+          "a16"
+        ],
+        [
+          "b17",
+          "a17"
+        ],
+        [
+          "b18",
+          "a18"
+        ],
+        [
+          "b19",
+          "a19"
+        ],
+        [
+          "b20",
+          "a20"
+        ],
+        [
+          "b21",
+          "a21"
+        ],
+        [
+          "b22",
+          "a22"
+        ],
+        [
+          "b23",
+          "a23"
+        ],
+        [
+          "b24",
+          "a24"
+        ],
+        [
+          "b25",
+          "a25"
+        ],
+        [
+          "b26",
+          "a26"
+        ],
+        [
+          "b27",
+          "a27"
+        ],
+        [
+          "b28",
+          "a28"
+        ],
+        [
+          "b29",
+          "a29"
+        ],
+        [
+          "b30",
+          "a30"
+        ],
+        [
+          "b31",
+          "a31"
+        ],
+        [
+          "b32",
+          "a32"
+        ],
+        [
+          "b33",
+          "a33"
+        ],
+        [
+          "b34",
+          "a34"
+        ],
+        [
+          "b35",
+          "a35"
+        ],
+        [
+          "b36",
+          "a36"
+        ],
+        [
+          "b37",
+          "a37"
+        ],
+        [
+          "b38",
+          "a38"
+        ],
+        [
+          "b39",
+          "a39"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ],
+        [
+          "b1",
+          "a1"
+        ],
+        [
+          "b2",
+          "a2"
+        ],
+        [
+          "b3",
+          "a3"
+        ],
+        [
+          "b4",
+          "a4"
+        ],
+        [
+          "b5",
+          "a5"
+        ],
+        [
+          "b6",
+          "a6"
+        ],
+        [
+          "b7",
+          "a7"
+        ],
+        [
+          "b8",
+          "a8"
+        ],
+        [
+          "b9",
+          "a9"
+        ],
+        [
+          "b10",
+          "a10"
+        ],
+        [
+          "b11",
+          "a11"
+        ],
+        [
+          "b12",
+          "a12"
+        ],
+        [
+          "b13",
+          "a13"
+        ],
+        [
+          "b14",
+          "a14"
+        ],
+        [
+          "b15",
+          "a15"
+        ],
+        [
+          "b16",
+          "a16"
+        ],
+        [
+          "b17",
+          "a17"
+        ],
+        [
+          "b18",
+          "a18"
+        ],
+        [
+          "b19",
+          "a19"
+        ],
+        [
+          "b20",
+          "a20"
+        ],
+        [
+          "b21",
+          "a21"
+        ],
+        [
+          "b22",
+          "a22"
+        ],
+        [
+          "b23",
+          "a23"
+        ],
+        [
+          "b24",
+          "a24"
+        ],
+        [
+          "b25",
+          "a25"
+        ],
+        [
+          "b26",
+          "a26"
+        ],
+        [
+          "b27",
+          "a27"
+        ],
+        [
+          "b28",
+          "a28"
+        ],
+        [
+          "b29",
+          "a29"
+        ],
+        [
+          "b30",
+          "a30"
+        ],
+        [
+          "b31",
+          "a31"
+        ],
+        [
+          "b32",
+          "a32"
+        ],
+        [
+          "b33",
+          "a33"
+        ],
+        [
+          "b34",
+          "a34"
+        ],
+        [
+          "b35",
+          "a35"
+        ],
+        [
+          "b36",
+          "a36"
+        ],
+        [
+          "b37",
+          "a37"
+        ],
+        [
+          "b38",
+          "a38"
+        ],
+        [
+          "b39",
+          "a39"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.line_end_breaks_start_line_ties": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b2",
+          "a1"
+        ],
+        [
+          "b1",
+          "a0"
+        ],
+        [
+          "b0",
+          "a2"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b2",
+          "a1"
+        ],
+        [
+          "b1",
+          "a0"
+        ],
+        [
+          "b0",
+          "a2"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.location_id_with_message_change_is_not_exact": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.moved_finding_with_added_suppression_remains_paired": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": [
+        [
+          "b0",
+          "a0"
+        ]
+      ]
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.moved_finding_with_lapsed_suppression_remains_paired": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": [
+        [
+          "b0",
+          "a0"
+        ]
+      ]
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.moved_group_all_suppressed_on_both_sides_pairs": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ],
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ],
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.moved_group_with_mixed_baseline_suppression_pairs_nothing": {
+    "diff": {
+      "absent_after": [
+        "b1",
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0",
+        "a1"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b1",
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0",
+        "a1"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.new_and_absent_are_sorted_by_id_then_position": {
+    "diff": {
+      "absent_after": [
+        "b2",
+        "b0",
+        "b3",
+        "b1"
+      ],
+      "moved": [],
+      "new": [
+        "a0",
+        "a3",
+        "a2",
+        "a1"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b2",
+        "b0",
+        "b3",
+        "b1"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0",
+        "a3",
+        "a2",
+        "a1"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.new_finding_on_old_line_with_other_message": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [
+        "a1"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [
+        "a1"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.none_lines_sort_before_numbered_lines": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b2",
+          "a2"
+        ],
+        [
+          "b0",
+          "a1"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b1",
+          "a0"
+        ]
+      ],
+      "moved": [
+        [
+          "b2",
+          "a2"
+        ],
+        [
+          "b0",
+          "a1"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.numeric_not_lexical_line_order": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a2"
+        ],
+        [
+          "b1",
+          "a0"
+        ],
+        [
+          "b2",
+          "a1"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a2"
+        ],
+        [
+          "b1",
+          "a0"
+        ],
+        [
+          "b2",
+          "a1"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.only_baseline_side": {
+    "diff": {
+      "absent_after": [
+        "b1",
+        "b0"
+      ],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b1",
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.only_current_side": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [
+        "a1",
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a1",
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.rerated_finding_does_not_vouch_for_changed_mixed_group": {
+    "diff": {
+      "absent_after": [
+        "b2",
+        "b1",
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a1",
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b2",
+        "b1",
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a1",
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.rerated_suppressed_finding_keeps_unchanged_group_paired": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b1",
+          "a1"
+        ],
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.sarif_and_additional_report_rows_mixed": {
+    "diff": {
+      "absent_after": [
+        "b2"
+      ],
+      "moved": [
+        [
+          "b0",
+          "a1"
+        ]
+      ],
+      "new": [
+        "a2"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b2"
+      ],
+      "exact": [
+        [
+          "b1",
+          "a0"
+        ]
+      ],
+      "moved": [
+        [
+          "b0",
+          "a1"
+        ]
+      ],
+      "new": [
+        "a2"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.secret_with_fingerprint_moved_is_exact": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.secret_without_fingerprint_moved_is_still_moved_for_display": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.severity_is_part_of_the_fallback_key": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.single_identical_is_exact": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.single_line_shift_is_moved": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.single_other_file_is_new_and_absent": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.single_other_rule_is_new_and_absent": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.single_other_scanner_is_new_and_absent": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.suppression_swap_with_one_line_collision_stays_new": {
+    "diff": {
+      "absent_after": [
+        "b1",
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a1",
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b1",
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a1",
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.unchanged_mixed_suppression_group_stays_paired": {
+    "diff": {
+      "absent_after": [],
+      "moved": [],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b1",
+          "a1"
+        ],
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "moved": [],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.unicode_message_and_path": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [
+        [
+          "b1",
+          "a1"
+        ]
+      ],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "diff.workspace_project_differs_between_runs": {
+    "diff": {
+      "absent_after": [
+        "b0"
+      ],
+      "moved": [],
+      "new": [
+        "a0"
+      ],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [
+        "b0"
+      ],
+      "exact": [],
+      "moved": [],
+      "new": [
+        "a0"
+      ]
+    },
+    "reversed_input_equal": true
+  },
+  "diff.workspace_project_same_between_runs": {
+    "diff": {
+      "absent_after": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": [],
+      "severity_changed": [],
+      "suppression_changed": []
+    },
+    "iterators_equal_lists": true,
+    "match": {
+      "absent": [],
+      "exact": [],
+      "moved": [
+        [
+          "b0",
+          "a0"
+        ]
+      ],
+      "new": []
+    },
+    "reversed_input_equal": true
+  },
+  "key.key_additional_report_with_id_has_none": null,
+  "key.key_additional_report_without_id_has_none_because_of_source": null,
+  "key.key_fingerprinted_finding_has_none": null,
+  "key.key_plain_location_finding": [
+    "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
+    "text",
+    "LOW"
   ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan has incomplete scanner coverage.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_baseline_scanner_excluded_keeps_findings": {
-  "kept": [
-   [
-    0,
-    "m",
-    10
-   ]
+  "key.key_project_is_part_of_the_base": [
+    [
+      "{\"file\":\"a.py\",\"package\":[null,null],\"project\":\"alpha\",\"rule\":\"R1\",\"scanner\":\"scanner\"}",
+      "t",
+      "LOW"
+    ],
+    [
+      "{\"file\":\"a.py\",\"package\":[null,null],\"project\":\"beta\",\"rule\":\"R1\",\"scanner\":\"scanner\"}",
+      "t",
+      "LOW"
+    ]
   ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
+  "key.key_severity_upper_cased_and_message_kept": [
+    [
+      "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
+      "Text",
+      "LOW"
+    ],
+    [
+      "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
+      "Text",
+      "LOW"
+    ],
+    [
+      "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
+      "Text",
+      "HIGH"
+    ]
   ]
- },
- "apply.apply_baseline_scanner_failed_still_counts_as_evaluated": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_baseline_scanner_not_completed_keeps_findings": {
-  "kept": [
-   [
-    0,
-    "m",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_baseline_scope_matrix": {
-  "absolute_current_only": {
-   "warnings": [
-    "The scan directories cannot be compared reliably."
-   ]
-  },
-  "absolute_sources": {
-   "warnings": [
-    "The scan directories cannot be compared reliably."
-   ]
-  },
-  "baseline_source_missing": {
-   "warnings": [
-    "The scan directories cannot be compared reliably."
-   ]
-  },
-  "current_source_missing": {
-   "warnings": [
-    "The scan directories cannot be compared reliably."
-   ]
-  },
-  "different_project": {
-   "refused": "the baseline belongs to a different project"
-  },
-  "different_relative_source": {
-   "refused": "the baseline scanned a different directory"
-  },
-  "project_checked_before_source": {
-   "refused": "the baseline belongs to a different project"
-  },
-  "same_nested_relative_source": {
-   "warnings": []
-  },
-  "same_relative_source": {
-   "warnings": []
-  }
- },
- "apply.apply_changed_message_is_kept": {
-  "kept": [
-   [
-    0,
-    "new",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_critical_to_high_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_duplicate_current_rows_each_judged": {
-  "kept": [],
-  "marker": {
-   "matched": 2,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 2,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_empty_baseline_and_empty_results": {
-  "kept": [],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_empty_baseline_keeps_everything": {
-  "kept": [
-   [
-    0,
-    "old",
-    10
-   ],
-   [
-    0,
-    "other",
-    20
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_empty_results_matches_nothing": {
-  "kept": [],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_exact_match_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_group_growth_matches_nothing": {
-  "kept": [
-   [
-    0,
-    "old",
-    3
-   ],
-   [
-    0,
-    "old",
-    4
-   ],
-   [
-    0,
-    "old",
-    5
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_group_shrink_drops_the_ordered_prefix": {
-  "kept": [],
-  "marker": {
-   "matched": 2,
-   "matched_without_lines": 2,
-   "sha256": "abc123"
-  },
-  "matched": 2,
-  "matched_without_lines": 2,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_info_to_info_is_dropped_and_unknown_severity_is_kept": {
-  "kept": [],
-  "marker": {
-   "matched": 2,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 2,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_lapsed_suppression_is_kept": {
-  "kept": [
-   [
-    0,
-    "m",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_large_n_fingerprinted_with_rises": {
-  "kept": [
-   [
-    0,
-    "m5",
-    5
-   ],
-   [
-    0,
-    "m10",
-    10
-   ],
-   [
-    0,
-    "m15",
-    15
-   ],
-   [
-    0,
-    "m20",
-    20
-   ],
-   [
-    0,
-    "m25",
-    25
-   ],
-   [
-    0,
-    "m30",
-    30
-   ],
-   [
-    0,
-    "m35",
-    35
-   ],
-   [
-    0,
-    "m40",
-    40
-   ],
-   [
-    0,
-    "m45",
-    45
-   ],
-   [
-    0,
-    "m50",
-    50
-   ],
-   [
-    0,
-    "m55",
-    55
-   ],
-   [
-    0,
-    "m60",
-    60
-   ]
-  ],
-  "marker": {
-   "matched": 48,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 48,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_large_n_half_shifted": {
-  "kept": [
-   [
-    0,
-    "brand-new",
-    500
-   ]
-  ],
-  "marker": {
-   "matched": 100,
-   "matched_without_lines": 50,
-   "sha256": "abc123"
-  },
-  "matched": 100,
-  "matched_without_lines": 50,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_moved_match_is_dropped_without_lines": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 1,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 1,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_moved_with_lapsed_suppression_is_kept": {
-  "kept": [
-   [
-    0,
-    "m",
-    40
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_new_finding_beside_old_is_kept": {
-  "kept": [
-   [
-    0,
-    "new",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 1,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 1,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_no_sarif_at_all": {
-  "kept": [],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_only_the_completed_scanners_findings_match": {
-  "kept": [
-   [
-    0,
-    "b",
-    20
-   ]
-  ],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_refuses_results_already_filtered_by_a_baseline": {
-  "kept": [
-   [
-    0,
-    "old",
-    10
-   ]
-  ],
-  "marker": {
-   "sha256": "x"
-  },
-  "refused": "existing results were filtered by --baseline"
- },
- "apply.apply_same_finding_in_two_runs_is_judged_per_row": {
-  "kept": [],
-  "marker": {
-   "matched": 2,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 2,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_same_severity_high_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_secret_beside_ordinary_finding_each_judged_alone": {
-  "kept": [
-   [
-    0,
-    "key",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_secret_exact_with_fingerprint_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_secret_exact_without_fingerprint_is_kept": {
-  "kept": [
-   [
-    0,
-    "key",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_secret_moved_with_fingerprint_is_matched_exactly": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_secret_moved_without_fingerprint_is_kept": {
-  "kept": [
-   [
-    0,
-    "key",
-    30
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_severity_drop_on_exact_pair_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_low_to_medium_rise_on_exact_pair_is_kept": {
-  "kept": [
-   [
-    0,
-    "m",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_severity_rise_on_exact_pair_is_kept": {
-  "kept": [
-   [
-    0,
-    "m",
-    10
-   ]
-  ],
-  "marker": {
-   "matched": 0,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 0,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_still_suppressed_is_dropped": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_twice_is_refused_the_second_time": {
-  "first": [
-   1,
-   0
-  ],
-  "kept": [
-   [
-    0,
-    "x",
-    20
-   ]
-  ],
-  "second_refused": "existing results were filtered by --baseline"
- },
- "apply.apply_two_runs_remove_by_run_and_result_index": {
-  "kept": [
-   [
-    0,
-    "r0-new",
-    2
-   ],
-   [
-    1,
-    "r1-new",
-    9
-   ]
-  ],
-  "marker": {
-   "matched": 3,
-   "matched_without_lines": 1,
-   "sha256": "abc123"
-  },
-  "matched": 3,
-  "matched_without_lines": 1,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_unicode_findings": {
-  "kept": [],
-  "marker": {
-   "matched": 2,
-   "matched_without_lines": 1,
-   "sha256": "abc123"
-  },
-  "matched": 2,
-  "matched_without_lines": 1,
-  "warnings": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "apply.apply_warnings_pass_through_from_coverage": {
-  "kept": [],
-  "marker": {
-   "matched": 1,
-   "matched_without_lines": 0,
-   "sha256": "abc123"
-  },
-  "matched": 1,
-  "matched_without_lines": 0,
-  "warnings": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan has incomplete scanner coverage.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "compare.check_comparable_matrix": {
-  "baseline_filtered": {
-   "refused": "cannot use results filtered by --baseline"
-  },
-  "changed_files_false": {
-   "ok": null
-  },
-  "changed_files_none": {
-   "ok": null
-  },
-  "changed_files_string": {
-   "refused": "invalid changed-files-only marker"
-  },
-  "changed_files_true": {
-   "refused": "cannot compare results filtered by --changed-files-only"
-  },
-  "changed_files_zero": {
-   "refused": "invalid changed-files-only marker"
-  },
-  "clean": {
-   "ok": null
-  },
-  "project_blank": {
-   "refused": "invalid workspace project marker"
-  },
-  "project_empty": {
-   "refused": "invalid workspace project marker"
-  },
-  "project_not_text": {
-   "refused": "invalid workspace project marker"
-  },
-  "project_ok": {
-   "ok": null
-  },
-  "sharded": {
-   "refused": "use ash merge before comparing sharded results"
-  },
-  "sharded_and_filtered": {
-   "refused": "use ash merge before comparing sharded results"
-  },
-  "workspace_aggregate": {
-   "refused": "use the per-project results instead of a workspace aggregate"
-  },
-  "workspace_and_sharded": {
-   "refused": "use the per-project results instead of a workspace aggregate"
-  }
- },
- "compare.check_same_project_matrix": {
-  "both_standalone_different_name": {
-   "refused": "the results name different projects"
-  },
-  "both_standalone_same_name": {
-   "ok": null
-  },
-  "both_standalone_unnamed": {
-   "ok": null
-  },
-  "one_side_unnamed": {
-   "ok": null
-  },
-  "other_side_unnamed": {
-   "ok": null
-  },
-  "standalone_vs_workspace": {
-   "refused": "cannot mix standalone and workspace project results"
-  },
-  "workspace_different": {
-   "refused": "the results name different projects"
-  },
-  "workspace_same": {
-   "ok": null
-  },
-  "workspace_same_project_names_differ": {
-   "refused": "the results name different projects"
-  },
-  "workspace_vs_standalone": {
-   "refused": "cannot mix standalone and workspace project results"
-  }
- },
- "compare.comparable_findings_checks_in_order": {
-  "baseline_sharded": {
-   "refused": "use ash merge before comparing sharded results"
-  },
-  "both_sharded_names_baseline_first": {
-   "refused": "use ash merge before comparing sharded results"
-  },
-  "clean_pair": {
-   "ok": [
-    1,
-    1
-   ]
-  },
-  "current_sharded": {
-   "refused": "use ash merge before comparing sharded results"
-  },
-  "duplicate_baseline_ids": {
-   "refused": "Baseline scan contains duplicate finding IDs"
-  },
-  "duplicate_current_ids": {
-   "refused": "Current scan contains duplicate finding IDs"
-  },
-  "empty_pair": {
-   "ok": [
-    0,
-    0
-   ]
-  },
-  "project_names_differ": {
-   "refused": "the results name different projects"
-  },
-  "sharded_wins_over_duplicates": {
-   "refused": "use ash merge before comparing sharded results"
-  }
- },
- "compare.coverage_warnings_matrix": {
-  "baseline_scanner_missing": [
-   "Scanner coverage differs between scans.",
-   "Baseline scan has incomplete scanner coverage."
-  ],
-  "current_scanner_excluded": [
-   "Scanner coverage differs between scans.",
-   "Current scan has incomplete scanner coverage."
-  ],
-  "current_scanner_skipped": [
-   "Scanner coverage differs between scans.",
-   "Current scan has incomplete scanner coverage."
-  ],
-  "empty_pair": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ],
-  "evaluated_set_differs": [],
-  "expected_set_differs": [
-   "Scanner coverage differs between scans."
-  ],
-  "expected_without_rows": [
-   "Baseline scan has incomplete scanner coverage.",
-   "Current scan has incomplete scanner coverage."
-  ],
-  "failed_counts_as_evaluated": [],
-  "identical_complete": [],
-  "ignore_file_exclusions_differ": [
-   "Recorded ignore-file exclusions differ between scans."
-  ],
-  "inputs_not_scanned_on_both": [
-   "Baseline scan records inputs that were not scanned.",
-   "Current scan records inputs that were not scanned."
-  ],
-  "inputs_not_scanned_on_current": [
-   "Current scan records inputs that were not scanned."
-  ],
-  "rows_without_expected_scanners": [
-   "Baseline scan does not record enough scanner coverage to establish comparability.",
-   "Current scan does not record enough scanner coverage to establish comparability."
-  ]
- },
- "compare.unique_findings_refusal_and_pass_through": {
-  "clean_count": {
-   "ok": 2
-  },
-  "duplicate_plugin_ids_label_baseline": {
-   "refused": "Baseline scan contains duplicate finding IDs"
-  },
-  "duplicate_plugin_ids_label_custom": {
-   "refused": "Some other scan contains duplicate finding IDs"
-  },
-  "empty": {
-   "ok": []
-  },
-  "exact_twins_get_distinct_ids": {
-   "ok": 2
-  }
- },
- "diff.additional_report_with_different_plugin_ids_is_new_and_absent": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.additional_report_with_same_plugin_id_is_exact": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.additional_report_without_id_moved_does_not_fallback_pair": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.additional_report_without_id_pairs_exact_by_location_identity": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.both_sides_without_lines_are_exact": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.duplicate_ids_on_both_sides": {
-  "diff": {
-   "absent_after": [
-    "b0",
-    "b1"
-   ],
-   "moved": [],
-   "new": [
-    "a0",
-    "a1",
-    "a2"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0",
-    "b1"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0",
-    "a1",
-    "a2"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.duplicate_ids_on_the_baseline_side": {
-  "diff": {
-   "absent_after": [
-    "b1"
-   ],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b1"
-   ],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.duplicate_ids_on_the_current_side": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0",
-    "a1"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0",
-    "a1"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.empty_both": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.exact_duplicates_get_ordinals_and_pair": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b1",
-     "a1"
-    ],
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_changed_is_new_and_absent": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_exact_pair_with_severity_rise": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_exact_pair_with_suppression_added": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": [
-    [
-     "b0",
-     "a0"
-    ]
-   ]
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_exact_pair_with_suppression_lapse": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": [
-    [
-     "b0",
-     "a0"
-    ]
-   ]
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_pairs_exact_across_message_and_line": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_shared_by_two_locations_falls_back_to_lines": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b1",
-     "a1"
-    ],
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.fingerprint_shared_message_change_at_same_line": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.group_grows_pairs_nothing": {
-  "diff": {
-   "absent_after": [
-    "b1",
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0",
-    "a2",
-    "a1"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b1",
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0",
-    "a2",
-    "a1"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.group_same_size_pairs_in_line_order_not_input_order": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b1",
-     "a2"
-    ],
-    [
-     "b2",
-     "a0"
-    ],
-    [
-     "b0",
-     "a1"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b1",
-     "a2"
-    ],
-    [
-     "b2",
-     "a0"
-    ],
-    [
-     "b0",
-     "a1"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.group_shrinks_pairs_in_line_order": {
-  "diff": {
-   "absent_after": [
-    "b2"
-   ],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ],
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b2"
-   ],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ],
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.large_n_fingerprinted": {
-  "diff": {
-   "absent_after": [
-    "b5",
-    "b3",
-    "b2",
-    "b0",
-    "b8",
-    "b7",
-    "b4",
-    "b1",
-    "b6"
-   ],
-   "moved": [],
-   "new": [
-    "a29",
-    "a27",
-    "a24",
-    "a30",
-    "a23",
-    "a25",
-    "a26",
-    "a22",
-    "a28",
-    "a21"
-   ],
-   "severity_changed": [
-    [
-     "b27",
-     "a18"
-    ],
-    [
-     "b18",
-     "a9"
-    ],
-    [
-     "b15",
-     "a6"
-    ],
-    [
-     "b22",
-     "a13"
-    ],
-    [
-     "b28",
-     "a19"
-    ],
-    [
-     "b29",
-     "a20"
-    ],
-    [
-     "b24",
-     "a15"
-    ],
-    [
-     "b25",
-     "a16"
-    ],
-    [
-     "b23",
-     "a14"
-    ],
-    [
-     "b26",
-     "a17"
-    ],
-    [
-     "b19",
-     "a10"
-    ],
-    [
-     "b13",
-     "a4"
-    ],
-    [
-     "b17",
-     "a8"
-    ],
-    [
-     "b9",
-     "a0"
-    ],
-    [
-     "b12",
-     "a3"
-    ],
-    [
-     "b10",
-     "a1"
-    ],
-    [
-     "b21",
-     "a12"
-    ],
-    [
-     "b16",
-     "a7"
-    ],
-    [
-     "b20",
-     "a11"
-    ],
-    [
-     "b11",
-     "a2"
-    ],
-    [
-     "b14",
-     "a5"
-    ]
-   ],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b5",
-    "b3",
-    "b2",
-    "b0",
-    "b8",
-    "b7",
-    "b4",
-    "b1",
-    "b6"
-   ],
-   "exact": [
-    [
-     "b27",
-     "a18"
-    ],
-    [
-     "b18",
-     "a9"
-    ],
-    [
-     "b15",
-     "a6"
-    ],
-    [
-     "b22",
-     "a13"
-    ],
-    [
-     "b28",
-     "a19"
-    ],
-    [
-     "b29",
-     "a20"
-    ],
-    [
-     "b24",
-     "a15"
-    ],
-    [
-     "b25",
-     "a16"
-    ],
-    [
-     "b23",
-     "a14"
-    ],
-    [
-     "b26",
-     "a17"
-    ],
-    [
-     "b19",
-     "a10"
-    ],
-    [
-     "b13",
-     "a4"
-    ],
-    [
-     "b17",
-     "a8"
-    ],
-    [
-     "b9",
-     "a0"
-    ],
-    [
-     "b12",
-     "a3"
-    ],
-    [
-     "b10",
-     "a1"
-    ],
-    [
-     "b21",
-     "a12"
-    ],
-    [
-     "b16",
-     "a7"
-    ],
-    [
-     "b20",
-     "a11"
-    ],
-    [
-     "b11",
-     "a2"
-    ],
-    [
-     "b14",
-     "a5"
-    ]
-   ],
-   "moved": [],
-   "new": [
-    "a29",
-    "a27",
-    "a24",
-    "a30",
-    "a23",
-    "a25",
-    "a26",
-    "a22",
-    "a28",
-    "a21"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.large_n_mixed_exact_moved_new_absent": {
-  "diff": {
-   "absent_after": [
-    "b0",
-    "b1",
-    "b17",
-    "b47",
-    "b3"
-   ],
-   "moved": [
-    [
-     "b44",
-     "a40"
-    ],
-    [
-     "b29",
-     "a25"
-    ],
-    [
-     "b14",
-     "a10"
-    ],
-    [
-     "b59",
-     "a55"
-    ],
-    [
-     "b35",
-     "a31"
-    ],
-    [
-     "b20",
-     "a16"
-    ],
-    [
-     "b5",
-     "a1"
-    ],
-    [
-     "b50",
-     "a46"
-    ],
-    [
-     "b26",
-     "a22"
-    ],
-    [
-     "b11",
-     "a7"
-    ],
-    [
-     "b56",
-     "a52"
-    ],
-    [
-     "b41",
-     "a37"
-    ],
-    [
-     "b2",
-     "a43"
-    ],
-    [
-     "b32",
-     "a28"
-    ],
-    [
-     "b8",
-     "a4"
-    ],
-    [
-     "b53",
-     "a49"
-    ],
-    [
-     "b38",
-     "a34"
-    ],
-    [
-     "b23",
-     "a19"
-    ]
-   ],
-   "new": [
-    "a60",
-    "a56",
-    "a57",
-    "a58",
-    "a13",
-    "a59"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0",
-    "b1",
-    "b17",
-    "b47",
-    "b3"
-   ],
-   "exact": [
-    [
-     "b9",
-     "a5"
-    ],
-    [
-     "b24",
-     "a20"
-    ],
-    [
-     "b39",
-     "a35"
-    ],
-    [
-     "b19",
-     "a15"
-    ],
-    [
-     "b49",
-     "a45"
-    ],
-    [
-     "b4",
-     "a0"
-    ],
-    [
-     "b54",
-     "a50"
-    ],
-    [
-     "b34",
-     "a30"
-    ],
-    [
-     "b10",
-     "a6"
-    ],
-    [
-     "b15",
-     "a11"
-    ],
-    [
-     "b30",
-     "a26"
-    ],
-    [
-     "b45",
-     "a41"
-    ],
-    [
-     "b40",
-     "a36"
-    ],
-    [
-     "b25",
-     "a21"
-    ],
-    [
-     "b55",
-     "a51"
-    ],
-    [
-     "b21",
-     "a17"
-    ],
-    [
-     "b36",
-     "a32"
-    ],
-    [
-     "b6",
-     "a2"
-    ],
-    [
-     "b31",
-     "a27"
-    ],
-    [
-     "b16",
-     "a12"
-    ],
-    [
-     "b51",
-     "a47"
-    ],
-    [
-     "b46",
-     "a42"
-    ],
-    [
-     "b42",
-     "a38"
-    ],
-    [
-     "b7",
-     "a3"
-    ],
-    [
-     "b22",
-     "a18"
-    ],
-    [
-     "b12",
-     "a8"
-    ],
-    [
-     "b52",
-     "a48"
-    ],
-    [
-     "b27",
-     "a23"
-    ],
-    [
-     "b57",
-     "a53"
-    ],
-    [
-     "b37",
-     "a33"
-    ],
-    [
-     "b43",
-     "a39"
-    ],
-    [
-     "b33",
-     "a29"
-    ],
-    [
-     "b13",
-     "a9"
-    ],
-    [
-     "b48",
-     "a44"
-    ],
-    [
-     "b18",
-     "a14"
-    ],
-    [
-     "b58",
-     "a54"
-    ],
-    [
-     "b28",
-     "a24"
-    ]
-   ],
-   "moved": [
-    [
-     "b44",
-     "a40"
-    ],
-    [
-     "b29",
-     "a25"
-    ],
-    [
-     "b14",
-     "a10"
-    ],
-    [
-     "b59",
-     "a55"
-    ],
-    [
-     "b35",
-     "a31"
-    ],
-    [
-     "b20",
-     "a16"
-    ],
-    [
-     "b5",
-     "a1"
-    ],
-    [
-     "b50",
-     "a46"
-    ],
-    [
-     "b26",
-     "a22"
-    ],
-    [
-     "b11",
-     "a7"
-    ],
-    [
-     "b56",
-     "a52"
-    ],
-    [
-     "b41",
-     "a37"
-    ],
-    [
-     "b2",
-     "a43"
-    ],
-    [
-     "b32",
-     "a28"
-    ],
-    [
-     "b8",
-     "a4"
-    ],
-    [
-     "b53",
-     "a49"
-    ],
-    [
-     "b38",
-     "a34"
-    ],
-    [
-     "b23",
-     "a19"
-    ]
-   ],
-   "new": [
-    "a60",
-    "a56",
-    "a57",
-    "a58",
-    "a13",
-    "a59"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.large_n_shuffled_input_order": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a49"
-    ],
-    [
-     "b36",
-     "a13"
-    ],
-    [
-     "b12",
-     "a37"
-    ],
-    [
-     "b48",
-     "a1"
-    ],
-    [
-     "b24",
-     "a25"
-    ],
-    [
-     "b44",
-     "a5"
-    ],
-    [
-     "b20",
-     "a29"
-    ],
-    [
-     "b32",
-     "a17"
-    ],
-    [
-     "b8",
-     "a41"
-    ],
-    [
-     "b28",
-     "a21"
-    ],
-    [
-     "b4",
-     "a45"
-    ],
-    [
-     "b40",
-     "a9"
-    ],
-    [
-     "b16",
-     "a33"
-    ],
-    [
-     "b25",
-     "a24"
-    ],
-    [
-     "b1",
-     "a48"
-    ],
-    [
-     "b37",
-     "a12"
-    ],
-    [
-     "b13",
-     "a36"
-    ],
-    [
-     "b49",
-     "a0"
-    ],
-    [
-     "b33",
-     "a16"
-    ],
-    [
-     "b9",
-     "a40"
-    ],
-    [
-     "b45",
-     "a4"
-    ],
-    [
-     "b21",
-     "a28"
-    ],
-    [
-     "b41",
-     "a8"
-    ],
-    [
-     "b17",
-     "a32"
-    ],
-    [
-     "b29",
-     "a20"
-    ],
-    [
-     "b5",
-     "a44"
-    ],
-    [
-     "b6",
-     "a43"
-    ],
-    [
-     "b42",
-     "a7"
-    ],
-    [
-     "b18",
-     "a31"
-    ],
-    [
-     "b30",
-     "a19"
-    ],
-    [
-     "b14",
-     "a35"
-    ],
-    [
-     "b26",
-     "a23"
-    ],
-    [
-     "b2",
-     "a47"
-    ],
-    [
-     "b38",
-     "a11"
-    ],
-    [
-     "b22",
-     "a27"
-    ],
-    [
-     "b34",
-     "a15"
-    ],
-    [
-     "b10",
-     "a39"
-    ],
-    [
-     "b46",
-     "a3"
-    ],
-    [
-     "b31",
-     "a18"
-    ],
-    [
-     "b7",
-     "a42"
-    ],
-    [
-     "b43",
-     "a6"
-    ],
-    [
-     "b19",
-     "a30"
-    ],
-    [
-     "b3",
-     "a46"
-    ],
-    [
-     "b39",
-     "a10"
-    ],
-    [
-     "b15",
-     "a34"
-    ],
-    [
-     "b27",
-     "a22"
-    ],
-    [
-     "b11",
-     "a38"
-    ],
-    [
-     "b47",
-     "a2"
-    ],
-    [
-     "b23",
-     "a26"
-    ],
-    [
-     "b35",
-     "a14"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a49"
-    ],
-    [
-     "b36",
-     "a13"
-    ],
-    [
-     "b12",
-     "a37"
-    ],
-    [
-     "b48",
-     "a1"
-    ],
-    [
-     "b24",
-     "a25"
-    ],
-    [
-     "b44",
-     "a5"
-    ],
-    [
-     "b20",
-     "a29"
-    ],
-    [
-     "b32",
-     "a17"
-    ],
-    [
-     "b8",
-     "a41"
-    ],
-    [
-     "b28",
-     "a21"
-    ],
-    [
-     "b4",
-     "a45"
-    ],
-    [
-     "b40",
-     "a9"
-    ],
-    [
-     "b16",
-     "a33"
-    ],
-    [
-     "b25",
-     "a24"
-    ],
-    [
-     "b1",
-     "a48"
-    ],
-    [
-     "b37",
-     "a12"
-    ],
-    [
-     "b13",
-     "a36"
-    ],
-    [
-     "b49",
-     "a0"
-    ],
-    [
-     "b33",
-     "a16"
-    ],
-    [
-     "b9",
-     "a40"
-    ],
-    [
-     "b45",
-     "a4"
-    ],
-    [
-     "b21",
-     "a28"
-    ],
-    [
-     "b41",
-     "a8"
-    ],
-    [
-     "b17",
-     "a32"
-    ],
-    [
-     "b29",
-     "a20"
-    ],
-    [
-     "b5",
-     "a44"
-    ],
-    [
-     "b6",
-     "a43"
-    ],
-    [
-     "b42",
-     "a7"
-    ],
-    [
-     "b18",
-     "a31"
-    ],
-    [
-     "b30",
-     "a19"
-    ],
-    [
-     "b14",
-     "a35"
-    ],
-    [
-     "b26",
-     "a23"
-    ],
-    [
-     "b2",
-     "a47"
-    ],
-    [
-     "b38",
-     "a11"
-    ],
-    [
-     "b22",
-     "a27"
-    ],
-    [
-     "b34",
-     "a15"
-    ],
-    [
-     "b10",
-     "a39"
-    ],
-    [
-     "b46",
-     "a3"
-    ],
-    [
-     "b31",
-     "a18"
-    ],
-    [
-     "b7",
-     "a42"
-    ],
-    [
-     "b43",
-     "a6"
-    ],
-    [
-     "b19",
-     "a30"
-    ],
-    [
-     "b3",
-     "a46"
-    ],
-    [
-     "b39",
-     "a10"
-    ],
-    [
-     "b15",
-     "a34"
-    ],
-    [
-     "b27",
-     "a22"
-    ],
-    [
-     "b11",
-     "a38"
-    ],
-    [
-     "b47",
-     "a2"
-    ],
-    [
-     "b23",
-     "a26"
-    ],
-    [
-     "b35",
-     "a14"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.large_n_whole_group_shifted": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ],
-    [
-     "b1",
-     "a1"
-    ],
-    [
-     "b2",
-     "a2"
-    ],
-    [
-     "b3",
-     "a3"
-    ],
-    [
-     "b4",
-     "a4"
-    ],
-    [
-     "b5",
-     "a5"
-    ],
-    [
-     "b6",
-     "a6"
-    ],
-    [
-     "b7",
-     "a7"
-    ],
-    [
-     "b8",
-     "a8"
-    ],
-    [
-     "b9",
-     "a9"
-    ],
-    [
-     "b10",
-     "a10"
-    ],
-    [
-     "b11",
-     "a11"
-    ],
-    [
-     "b12",
-     "a12"
-    ],
-    [
-     "b13",
-     "a13"
-    ],
-    [
-     "b14",
-     "a14"
-    ],
-    [
-     "b15",
-     "a15"
-    ],
-    [
-     "b16",
-     "a16"
-    ],
-    [
-     "b17",
-     "a17"
-    ],
-    [
-     "b18",
-     "a18"
-    ],
-    [
-     "b19",
-     "a19"
-    ],
-    [
-     "b20",
-     "a20"
-    ],
-    [
-     "b21",
-     "a21"
-    ],
-    [
-     "b22",
-     "a22"
-    ],
-    [
-     "b23",
-     "a23"
-    ],
-    [
-     "b24",
-     "a24"
-    ],
-    [
-     "b25",
-     "a25"
-    ],
-    [
-     "b26",
-     "a26"
-    ],
-    [
-     "b27",
-     "a27"
-    ],
-    [
-     "b28",
-     "a28"
-    ],
-    [
-     "b29",
-     "a29"
-    ],
-    [
-     "b30",
-     "a30"
-    ],
-    [
-     "b31",
-     "a31"
-    ],
-    [
-     "b32",
-     "a32"
-    ],
-    [
-     "b33",
-     "a33"
-    ],
-    [
-     "b34",
-     "a34"
-    ],
-    [
-     "b35",
-     "a35"
-    ],
-    [
-     "b36",
-     "a36"
-    ],
-    [
-     "b37",
-     "a37"
-    ],
-    [
-     "b38",
-     "a38"
-    ],
-    [
-     "b39",
-     "a39"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ],
-    [
-     "b1",
-     "a1"
-    ],
-    [
-     "b2",
-     "a2"
-    ],
-    [
-     "b3",
-     "a3"
-    ],
-    [
-     "b4",
-     "a4"
-    ],
-    [
-     "b5",
-     "a5"
-    ],
-    [
-     "b6",
-     "a6"
-    ],
-    [
-     "b7",
-     "a7"
-    ],
-    [
-     "b8",
-     "a8"
-    ],
-    [
-     "b9",
-     "a9"
-    ],
-    [
-     "b10",
-     "a10"
-    ],
-    [
-     "b11",
-     "a11"
-    ],
-    [
-     "b12",
-     "a12"
-    ],
-    [
-     "b13",
-     "a13"
-    ],
-    [
-     "b14",
-     "a14"
-    ],
-    [
-     "b15",
-     "a15"
-    ],
-    [
-     "b16",
-     "a16"
-    ],
-    [
-     "b17",
-     "a17"
-    ],
-    [
-     "b18",
-     "a18"
-    ],
-    [
-     "b19",
-     "a19"
-    ],
-    [
-     "b20",
-     "a20"
-    ],
-    [
-     "b21",
-     "a21"
-    ],
-    [
-     "b22",
-     "a22"
-    ],
-    [
-     "b23",
-     "a23"
-    ],
-    [
-     "b24",
-     "a24"
-    ],
-    [
-     "b25",
-     "a25"
-    ],
-    [
-     "b26",
-     "a26"
-    ],
-    [
-     "b27",
-     "a27"
-    ],
-    [
-     "b28",
-     "a28"
-    ],
-    [
-     "b29",
-     "a29"
-    ],
-    [
-     "b30",
-     "a30"
-    ],
-    [
-     "b31",
-     "a31"
-    ],
-    [
-     "b32",
-     "a32"
-    ],
-    [
-     "b33",
-     "a33"
-    ],
-    [
-     "b34",
-     "a34"
-    ],
-    [
-     "b35",
-     "a35"
-    ],
-    [
-     "b36",
-     "a36"
-    ],
-    [
-     "b37",
-     "a37"
-    ],
-    [
-     "b38",
-     "a38"
-    ],
-    [
-     "b39",
-     "a39"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.line_end_breaks_start_line_ties": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b2",
-     "a1"
-    ],
-    [
-     "b1",
-     "a0"
-    ],
-    [
-     "b0",
-     "a2"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b2",
-     "a1"
-    ],
-    [
-     "b1",
-     "a0"
-    ],
-    [
-     "b0",
-     "a2"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.location_id_with_message_change_is_not_exact": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.moved_finding_with_added_suppression_remains_paired": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": [
-    [
-     "b0",
-     "a0"
-    ]
-   ]
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.moved_finding_with_lapsed_suppression_remains_paired": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": [
-    [
-     "b0",
-     "a0"
-    ]
-   ]
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.moved_group_all_suppressed_on_both_sides_pairs": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ],
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ],
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.moved_group_with_mixed_baseline_suppression_pairs_nothing": {
-  "diff": {
-   "absent_after": [
-    "b1",
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0",
-    "a1"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b1",
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0",
-    "a1"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.new_and_absent_are_sorted_by_id_then_position": {
-  "diff": {
-   "absent_after": [
-    "b2",
-    "b0",
-    "b3",
-    "b1"
-   ],
-   "moved": [],
-   "new": [
-    "a0",
-    "a3",
-    "a2",
-    "a1"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b2",
-    "b0",
-    "b3",
-    "b1"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0",
-    "a3",
-    "a2",
-    "a1"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.new_finding_on_old_line_with_other_message": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [
-    "a1"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [
-    "a1"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.none_lines_sort_before_numbered_lines": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b2",
-     "a2"
-    ],
-    [
-     "b0",
-     "a1"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b1",
-     "a0"
-    ]
-   ],
-   "moved": [
-    [
-     "b2",
-     "a2"
-    ],
-    [
-     "b0",
-     "a1"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.numeric_not_lexical_line_order": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a2"
-    ],
-    [
-     "b1",
-     "a0"
-    ],
-    [
-     "b2",
-     "a1"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a2"
-    ],
-    [
-     "b1",
-     "a0"
-    ],
-    [
-     "b2",
-     "a1"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.only_baseline_side": {
-  "diff": {
-   "absent_after": [
-    "b1",
-    "b0"
-   ],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b1",
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.only_current_side": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [
-    "a1",
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a1",
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.rerated_finding_does_not_vouch_for_changed_mixed_group": {
-  "diff": {
-   "absent_after": [
-    "b2",
-    "b1",
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a1",
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b2",
-    "b1",
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a1",
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.rerated_suppressed_finding_keeps_unchanged_group_paired": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b1",
-     "a1"
-    ],
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.sarif_and_additional_report_rows_mixed": {
-  "diff": {
-   "absent_after": [
-    "b2"
-   ],
-   "moved": [
-    [
-     "b0",
-     "a1"
-    ]
-   ],
-   "new": [
-    "a2"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b2"
-   ],
-   "exact": [
-    [
-     "b1",
-     "a0"
-    ]
-   ],
-   "moved": [
-    [
-     "b0",
-     "a1"
-    ]
-   ],
-   "new": [
-    "a2"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.secret_with_fingerprint_moved_is_exact": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.secret_without_fingerprint_moved_is_still_moved_for_display": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.severity_is_part_of_the_fallback_key": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.single_identical_is_exact": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.single_line_shift_is_moved": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.single_other_file_is_new_and_absent": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.single_other_rule_is_new_and_absent": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.single_other_scanner_is_new_and_absent": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.suppression_swap_with_one_line_collision_stays_new": {
-  "diff": {
-   "absent_after": [
-    "b1",
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a1",
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b1",
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a1",
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.unchanged_mixed_suppression_group_stays_paired": {
-  "diff": {
-   "absent_after": [],
-   "moved": [],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b1",
-     "a1"
-    ],
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "moved": [],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.unicode_message_and_path": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [
-    [
-     "b1",
-     "a1"
-    ]
-   ],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "diff.workspace_project_differs_between_runs": {
-  "diff": {
-   "absent_after": [
-    "b0"
-   ],
-   "moved": [],
-   "new": [
-    "a0"
-   ],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [
-    "b0"
-   ],
-   "exact": [],
-   "moved": [],
-   "new": [
-    "a0"
-   ]
-  },
-  "reversed_input_equal": true
- },
- "diff.workspace_project_same_between_runs": {
-  "diff": {
-   "absent_after": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": [],
-   "severity_changed": [],
-   "suppression_changed": []
-  },
-  "iterators_equal_lists": true,
-  "match": {
-   "absent": [],
-   "exact": [],
-   "moved": [
-    [
-     "b0",
-     "a0"
-    ]
-   ],
-   "new": []
-  },
-  "reversed_input_equal": true
- },
- "key.key_additional_report_with_id_has_none": null,
- "key.key_additional_report_without_id_has_none_because_of_source": null,
- "key.key_fingerprinted_finding_has_none": null,
- "key.key_plain_location_finding": [
-  "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
-  "text",
-  "LOW"
- ],
- "key.key_project_is_part_of_the_base": [
-  [
-   "{\"file\":\"a.py\",\"package\":[null,null],\"project\":\"alpha\",\"rule\":\"R1\",\"scanner\":\"scanner\"}",
-   "t",
-   "LOW"
-  ],
-  [
-   "{\"file\":\"a.py\",\"package\":[null,null],\"project\":\"beta\",\"rule\":\"R1\",\"scanner\":\"scanner\"}",
-   "t",
-   "LOW"
-  ]
- ],
- "key.key_severity_upper_cased_and_message_kept": [
-  [
-   "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
-   "Text",
-   "LOW"
-  ],
-  [
-   "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
-   "Text",
-   "LOW"
-  ],
-  [
-   "{\"file\":\"a.py\",\"package\":[null,null],\"project\":null,\"rule\":\"R1\",\"scanner\":\"scanner\"}",
-   "Text",
-   "HIGH"
-  ]
- ]
 }
