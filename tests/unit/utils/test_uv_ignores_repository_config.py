@@ -2522,7 +2522,8 @@ def test_ash_dependencies_install_judges_its_tool_listing_against_its_directory(
 # Every absolute path lies inside that root, so a start directory that is a
 # filesystem root adds no root to judge a uv path against. The operator's own file
 # outside the tree reaches uv, and a path inside the tree's own directories is still
-# left out.
+# left out. A bare UV_PYTHON is still looked up in the directory uv starts in, the
+# filesystem root included, since uv reads it as the entry of that name there.
 
 
 @pytest.mark.unit
@@ -2597,6 +2598,75 @@ def test_a_runners_run_started_at_the_filesystem_root_keeps_the_operators_uv_pat
     assert seen["inside"] == {None}, seen
     # The operator's own file outside the tree reaches uv.
     assert seen["operator"] == {str(operator)}, seen
+
+
+def _an_entry_of_the_filesystem_root(tmp_path: Path) -> str:
+    """The name of an entry the filesystem root holds on every platform: the first
+    directory on the way down to the test's own directory."""
+    return tmp_path.relative_to(tmp_path.anchor).parts[0]
+
+
+@pytest.mark.unit
+def test_a_scanners_own_run_started_at_the_filesystem_root_drops_a_bare_uv_python_naming_an_entry_there(
+    tree, tmp_path, spawns, monkeypatch
+):
+    # After the filter, python_child.uv_child_overrides names ASH's own interpreter
+    # for a ``uv pip`` command that names none, so what is pinned is that the bare
+    # name does not reach uv, not that the variable is absent.
+    start = Path(tmp_path.anchor)
+    entry = _an_entry_of_the_filesystem_root(tmp_path)
+    # ASH's own working directory is judged for a bare name too, so ASH works from
+    # an empty one; the tree and the output directory hold no entry of that name.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("UV_SYSTEM_PYTHON", raising=False)
+    scanner = _bandit(tree, tmp_path)
+    seen = {}
+    for value in (entry, "cpython@3.12"):
+        monkeypatch.setenv("UV_PYTHON", value)
+        runs = _direct_runs_of_one_run(scanner, spawns, tmp_path, start)
+        assert [run["cwd"] for run in runs] == [start], [
+            run["command"] for run in spawns.runs
+        ]
+        seen[value] = {_effective(run["env"]).get("UV_PYTHON") for run in runs}
+    # Control: a version request reaches uv on the same route.
+    assert seen["cpython@3.12"] == {"cpython@3.12"}, seen
+    assert entry not in seen[entry], seen
+
+
+@pytest.mark.unit
+def test_a_runners_run_started_at_the_filesystem_root_drops_a_bare_uv_python_naming_an_entry_there(
+    tree, tmp_path, spawns, monkeypatch
+):
+    start = Path(tmp_path.anchor)
+    entry = _an_entry_of_the_filesystem_root(tmp_path)
+    # ASH's own working directory is judged for a bare name too, so ASH works from
+    # an empty one; the tree and the results directory hold no entry of that name.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    runner = UVToolRunner(uv_executable="/opt/uv")
+    seen = {}
+    for value in (entry, "cpython@3.12"):
+        monkeypatch.setenv("UV_PYTHON", value)
+        before = len(spawns.runs)
+        runner.run_tool(
+            "bandit",
+            cwd=start,
+            results_dir=tmp_path / "results",
+            stdout_preference="return",
+            stderr_preference="return",
+            tree_roots=(tree,),
+        )
+        runs = [run for run in spawns.runs[before:] if _a_tool_run(run["command"])]
+        assert [run["cwd"] for run in runs] == [start], [
+            run["command"] for run in spawns.runs
+        ]
+        seen[value] = {_effective(run["env"]).get("UV_PYTHON") for run in runs}
+    # Control: a version request reaches uv on the same route.
+    assert seen["cpython@3.12"] == {"cpython@3.12"}, seen
+    assert entry not in seen[entry], seen
 
 
 # Spellings of a path that name the tree without lying under a root as written.
