@@ -178,7 +178,9 @@ ENV_AFTER_PATH = (
     "colon would be more than 1,024 characters after the key's first character "
     "after a question mark and a space, and put its colon, a space and its value "
     "on the next line, the colon under the question mark: without the question "
-    "mark YAML refuses such a key"
+    "mark YAML refuses such a key. A value that takes more than one line starts "
+    "on the line after the colon, indented past it, or is written in flow style "
+    "on the colon's line"
 )
 
 

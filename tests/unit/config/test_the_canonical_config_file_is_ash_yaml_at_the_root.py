@@ -122,7 +122,9 @@ ENV_CAVEAT = (
     "colon would be more than 1,024 characters after the key's first character "
     "after a question mark and a space, and put its colon, a space and its value "
     "on the next line, the colon under the question mark: without the question "
-    "mark YAML refuses such a key."
+    "mark YAML refuses such a key. A value that takes more than one line starts "
+    "on the line after the colon, indented past it, or is written in flow style "
+    "on the colon's line."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -658,6 +660,9 @@ class TestALongKeyIsReadByYamlOnlyAsAnExplicitKey:
     #: With its two quote marks, its colon is 1,025 characters after the opening one.
     LONG_KEY = "a" * 1023
 
+    #: A bare TOML key whose colon would be 1,025 characters after its first character.
+    TOML_LONG_KEY = "a" * 1025
+
     def test_a_json_key_whose_colon_is_1025_characters_after_its_opening_quote_is_refused_as_yaml(
         self, tmp_path
     ):
@@ -750,6 +755,81 @@ class TestALongKeyIsReadByYamlOnlyAsAnExplicitKey:
         )
         assert _probe_section(toml_root) == {key: "x"}
         assert _probe_section(yaml_root) == {key: "x"}
+
+    @pytest.mark.parametrize(
+        "yaml_value_lines",
+        [
+            pytest.param(["    :", "      first: x", "      second: y"], id="block"),
+            pytest.param(["    : {first: x, second: y}"], id="flow"),
+        ],
+    )
+    def test_a_table_under_a_long_toml_key_reads_what_toml_reads(
+        self, tmp_path, yaml_value_lines
+    ):
+        """A table under such a key reads as TOML reads it when its settings start on
+        the line after the colon, indented past it, or are written in flow style on
+        the colon's line."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f"[scanners.probe.{self.TOML_LONG_KEY}]", 'first = "x"', 'second = "y"'],
+            ["scanners:", "  probe:", f"    ? {self.TOML_LONG_KEY}", *yaml_value_lines],
+        )
+        table = {self.TOML_LONG_KEY: {"first": "x", "second": "y"}}
+        assert _probe_section(toml_root) == table
+        assert _probe_section(yaml_root) == table
+
+    @pytest.mark.parametrize(
+        "yaml_value_lines",
+        [
+            pytest.param(["    :", "      - x", "      - y"], id="block"),
+            pytest.param(["    : [x, y]"], id="flow"),
+        ],
+    )
+    def test_an_array_under_a_long_toml_key_reads_what_toml_reads(
+        self, tmp_path, yaml_value_lines
+    ):
+        """An array under such a key reads as TOML reads it when its items start on
+        the line after the colon, indented past it, or are written in flow style on
+        the colon's line."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["[scanners.probe]", f'{self.TOML_LONG_KEY} = ["x", "y"]'],
+            ["scanners:", "  probe:", f"    ? {self.TOML_LONG_KEY}", *yaml_value_lines],
+        )
+        array = {self.TOML_LONG_KEY: ["x", "y"]}
+        assert _probe_section(toml_root) == array
+        assert _probe_section(yaml_root) == array
+
+    @pytest.mark.parametrize(
+        ("yaml_value_lines", "yaml_reads"),
+        [
+            pytest.param(
+                ["    : first: x", "    second: y"],
+                {TOML_LONG_KEY: {"first": "x"}, "second": "y"},
+                id="second-setting-under-the-colon",
+            ),
+            pytest.param(
+                ["    :", "    first: x", "    second: y"],
+                {TOML_LONG_KEY: None, "first": "x", "second": "y"},
+                id="both-settings-under-the-colon",
+            ),
+        ],
+    )
+    def test_a_table_under_a_long_toml_key_laid_out_under_the_colon_is_read_another_way(
+        self, tmp_path, yaml_value_lines, yaml_reads
+    ):
+        """Why the advice says where such a value goes: a setting laid out in the
+        colon's column is read beside the key, not under it, with no error, and with
+        the colon alone on its line the key is read with no value."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f"[scanners.probe.{self.TOML_LONG_KEY}]", 'first = "x"', 'second = "y"'],
+            ["scanners:", "  probe:", f"    ? {self.TOML_LONG_KEY}", *yaml_value_lines],
+        )
+        assert _probe_section(toml_root) == {
+            self.TOML_LONG_KEY: {"first": "x", "second": "y"}
+        }
+        assert _probe_section(yaml_root) == yaml_reads
 
 
 #: Spellings of a float that TOML or JSON reads and YAML reads as text, each as the
