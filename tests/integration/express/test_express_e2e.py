@@ -405,7 +405,7 @@ class TestWindowsRefusal:
         """--express is accepted everywhere; off unix it simply means a cold run.
         A help parse proves the flag exists without paying for a scan."""
         result = subprocess.run(
-            [*ASH, "scan", "--help"], capture_output=True, text=True, timeout=600
+            [*ASH, "scan", "fs", "--help"], capture_output=True, text=True, timeout=600
         )
         assert result.returncode == 0
         assert "--express" in result.stdout
