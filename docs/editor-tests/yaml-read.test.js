@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { MAX_BYTES, mappingPairs, readYaml } from '../content/assets/javascripts/config-editor/yaml-read.js';
-import { Reference, Timestamp } from '../content/assets/javascripts/config-editor/yaml-scalars.js';
+import { Float, Reference, Timestamp, TypedMap } from '../content/assets/javascripts/config-editor/yaml-scalars.js';
 
 function read(text) {
   const doc = readYaml(text);
@@ -181,10 +181,66 @@ test('a key called __proto__ is data and changes nothing else', () => {
   assert.equal(doc.value.polluted, undefined);
 });
 
+test('the value tree names a key by what it resolves to, not by how it is written', () => {
+  const quoted = read('"1": a\n1: b\n');
+  assert.ok(quoted.value instanceof TypedMap);
+  assert.deepStrictEqual(quoted.value.pairs, [['1', 'a'], [1, 'b']]);
+  assert.deepStrictEqual(quoted.typed.pairs, [['1', 'a'], [1, 'b']]);
+  assert.equal(quoted.warnings.length, 0);
+
+  const words = read('yes: a\ntrue: b\nOn: c\n');
+  assert.deepStrictEqual(words.value.pairs, [[true, 'c']]);
+  assert.equal(words.warnings.filter((warning) => warning.code === 'duplicate-key').length, 2);
+  assert.deepStrictEqual(read('1: a\nx: b\ntrue: c\n').value.pairs, [[1, 'c'], ['x', 'b']]);
+
+  const mixed = read('m: {null: a, on: b, 7: c, 1.5: d, x: e}\n');
+  assert.deepStrictEqual(mixed.value.m.pairs, [[null, 'a'], [true, 'b'], [7, 'c'], [1.5, 'd'], ['x', 'e']]);
+  assert.deepStrictEqual(mixed.typed.m.pairs[3], [new Float(1.5), 'd']);
+
+  const date = read('2026-12-31: a\n');
+  assert.ok(date.value instanceof TypedMap);
+  assert.ok(date.value.pairs[0][0] instanceof Timestamp);
+  assert.equal(date.value.pairs[0][0].iso, '2026-12-31');
+
+  const reference = read('${KEY}: a\n"${KEY}": b\n');
+  assert.equal(reference.value.pairs.length, 2);
+  assert.ok(reference.value.pairs[0][0] instanceof Reference);
+  assert.equal(reference.value.pairs[1][0], '${KEY}');
+  assert.equal(reference.warnings.length, 0);
+
+  // A mapping whose keys are all strings stays a plain object, with a text key such as
+  // a dollar sign or an equals sign among them.
+  assert.deepStrictEqual(read('$a: 1\n"2": 2\n=: 3\n').value, { $a: 1, 2: 2, '=': 3 });
+});
+
+test('the typed tree keeps a float apart from an integer, and the value tree reads both as numbers', () => {
+  const doc = read('a: 1.0\nb: 1\nc: [2.5, 3]\nd: !!float 7\ne: .inf\nf: 12345678901234567890123\n');
+  assert.ok(doc.typed.a instanceof Float);
+  assert.equal(doc.typed.a.value, 1);
+  assert.equal(doc.typed.b, 1);
+  assert.ok(doc.typed.c[0] instanceof Float);
+  assert.equal(doc.typed.c[1], 3);
+  assert.ok(doc.typed.d instanceof Float);
+  assert.ok(doc.typed.e instanceof Float);
+  assert.equal(doc.typed.f, 12345678901234567890123n);
+  assert.deepStrictEqual(doc.value, {
+    a: 1,
+    b: 1,
+    c: [2.5, 3],
+    d: 7,
+    e: Infinity,
+    f: 12345678901234567890123n,
+  });
+  const keyed = read('1.5: a\n2: b\n');
+  assert.deepStrictEqual(keyed.typed.pairs, [[new Float(1.5), 'a'], [2, 'b']]);
+  assert.deepStrictEqual(keyed.value.pairs, [[1.5, 'a'], [2, 'b']]);
+});
+
 test('the empty and comment-only documents have no root', () => {
   for (const text of ['', '# only a comment\n', '\n\n  \n', '---\n']) {
     const doc = read(text);
     assert.equal(doc.root, null, JSON.stringify(text));
+    assert.equal(doc.typed, null, JSON.stringify(text));
     assert.equal(doc.value, null, JSON.stringify(text));
   }
 });
@@ -246,5 +302,6 @@ test('a column counts characters, not UTF-16 units', () => {
 test('a refusal leaves no nodes behind', () => {
   const doc = readYaml('a: &x 1\nb: *x\n');
   assert.equal(doc.root, null);
+  assert.equal(doc.typed, undefined);
   assert.equal(doc.value, undefined);
 });

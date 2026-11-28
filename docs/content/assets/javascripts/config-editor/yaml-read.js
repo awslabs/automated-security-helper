@@ -10,14 +10,26 @@
 // What ASH's loader accepts and the editor does not: aliases (ASH refuses them
 // too), a second document, tags other than the environment tag and the core tags,
 // explicit `?` keys, directives, and input over 2 MiB. They are refused with the
-// line and column, never guessed.
+// line and column, never guessed. An anchor written twice is refused the way the
+// loader refuses it.
+//
+// A reading holds the values twice. `typed` is the tree as ASH's loader builds it,
+// type for type: a float is a Float, an integer a number or a BigInt, a mapping with
+// a key that is not a plain string a TypedMap whose keys are the keys as they
+// resolve (the key 1 and the key "1" are two keys, `yes` and `true` are one). `value`
+// is the same tree with each Float turned into a plain number, which is what the page
+// reads. Both are built from the nodes in one pass.
 //
 // DOM-free. Imports only its sibling module.
 
 import {
+  Float,
   Reference,
   ScalarError,
+  TypedMap,
   constructTagged,
+  keyIdentity,
+  makeMap,
   resolvePlain,
   utf8Length,
 } from "./yaml-scalars.js";
@@ -1064,6 +1076,7 @@ function emptyScalar(mark) {
 class Composer {
   constructor(scanner) {
     this.scanner = scanner;
+    this.anchors = new Map();
   }
 
   tokenName(token) {
@@ -1165,18 +1178,25 @@ class Composer {
     const properties = { anchor, tag, startMark };
     let node;
     if (indentlessSequence && scanner.checkToken("BlockEntry")) {
+      this.claimAnchor(properties);
       node = this.parseIndentlessSequence(properties);
     } else if (scanner.checkToken("Scalar")) {
+      this.claimAnchor(properties);
       node = this.scalarNode(scanner.getToken(), properties);
     } else if (scanner.checkToken("FlowSequenceStart")) {
+      this.claimAnchor(properties);
       node = this.parseFlowSequence(properties);
     } else if (scanner.checkToken("FlowMappingStart")) {
+      this.claimAnchor(properties);
       node = this.parseFlowMapping(properties);
     } else if (block && scanner.checkToken("BlockSequenceStart")) {
+      this.claimAnchor(properties);
       node = this.parseBlockSequence(properties);
     } else if (block && scanner.checkToken("BlockMappingStart")) {
+      this.claimAnchor(properties);
       node = this.parseBlockMapping(properties);
     } else if (anchor !== null || tag !== null) {
+      this.claimAnchor(properties);
       node = this.scalarNode(
         { type: "Scalar", value: "", plain: true, style: null, start: endMark, end: endMark },
         properties,
@@ -1191,6 +1211,25 @@ class Composer {
     }
     this.checkTag(node);
     return node;
+  }
+
+  // PyYAML's composer refuses an anchor that an earlier node of the document holds
+  // already ("found duplicate anchor"), at the first property of the second node, once
+  // the scanner has read what the node starts with.
+  claimAnchor(properties) {
+    const { anchor, startMark } = properties;
+    if (anchor === null) {
+      return;
+    }
+    const first = this.anchors.get(anchor);
+    if (first !== undefined) {
+      this.scanner.fail(
+        "anchor",
+        `found duplicate anchor '${anchor}'; first occurrence at line ${first.line + 1}, column ${first.column + 1}`,
+        startMark,
+      );
+    }
+    this.anchors.set(anchor, startMark);
   }
 
   checkTag(node) {
@@ -1590,20 +1629,49 @@ function markFor(node) {
   return markOf(node);
 }
 
-function keyIdentity(key) {
-  if (key.type === "bool") {
-    return `n:${key.value ? 1 : 0}`;
+// The key a mapping key node stands for, as ASH's loader builds it: a string for a
+// plain or quoted scalar that is text, and the resolved value for one that is not
+// (the integer 1, true for `yes`, null for `~`, a date, a reference).
+function keyValue(key) {
+  switch (key.type) {
+    case "float":
+      return new Float(key.value);
+    case "env":
+      return key.ref;
+    case "int":
+    case "bool":
+    case "null":
+    case "timestamp":
+      return key.value;
+    default:
+      return key.text;
   }
-  if (key.type === "int" || key.type === "float") {
-    return `n:${key.value}`;
+}
+
+// The tree the page reads: the typed tree with each Float turned into a plain number.
+function plainView(value) {
+  if (value instanceof Float) {
+    return value.value;
   }
-  if (key.type === "timestamp") {
-    return `t:${key.value.iso}`;
+  if (Array.isArray(value)) {
+    return value.map(plainView);
   }
-  if (key.type === "null") {
-    return "null";
+  if (value instanceof TypedMap) {
+    return new TypedMap(value.pairs.map(([key, item]) => [plainView(key), plainView(item)]));
   }
-  return `s:${key.text}`;
+  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const copy = {};
+    for (const name of Object.keys(value)) {
+      Object.defineProperty(copy, name, {
+        value: plainView(value[name]),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return copy;
+  }
+  return value;
 }
 
 /** The pairs of a mapping node with merge keys applied, as the loader orders them. */
@@ -1651,12 +1719,11 @@ function buildValue(node, context) {
         markFor(node),
       );
     }
-    return node.value;
+    return node.type === "float" ? new Float(node.value) : node.value;
   }
   if (node.kind === "seq") {
     return node.items.map((item) => buildValue(item, context));
   }
-  const result = {};
   // A mapping with a merge key is locked as a whole; a key written twice locks
   // both of its entries, so the editor never has to say which one it changed.
   const first = new Map();
@@ -1669,7 +1736,7 @@ function buildValue(node, context) {
       node.locked = "merge-key";
       continue;
     }
-    const identity = keyIdentity(key);
+    const identity = keyIdentity(keyValue(key));
     const earlier = first.get(identity);
     if (earlier === undefined) {
       first.set(identity, entry);
@@ -1702,19 +1769,14 @@ function buildValue(node, context) {
       column: at.column + 1,
     });
   }
+  const pairs = [];
   for (const [key, value] of mappingPairs(node, context.fail)) {
     if (key.kind !== "scalar") {
       context.fail("constructor", "found unhashable key", markFor(key));
     }
-    const name = key.text;
-    Object.defineProperty(result, name, {
-      value: buildValue(value, context),
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
+    pairs.push([keyValue(key), buildValue(value, context)]);
   }
-  return result;
+  return makeMap(pairs);
 }
 
 // Document.
@@ -1829,17 +1891,21 @@ function collectStyle(root) {
 
 /**
  * Reads YAML text the way ASH's loader does and returns the document:
- * `{ok, text, root, value, refusal, warnings, comments, lineStarts, newline, style}`.
- * `root` is the node tree (null for an empty document), `value` the loaded value
- * (mappings are plain objects, references are Reference objects, dates are
- * Timestamp objects). When the text cannot be read, ok is false and `refusal`
- * holds `{code, message, line, column, offset}` with 1-based line and column.
+ * `{ok, text, root, typed, value, refusal, warnings, comments, lineStarts, newline,
+ * style}`. `root` is the node tree (null for an empty document). `typed` is the
+ * loaded value, type for type: a mapping is a plain object when its keys are all
+ * strings and a TypedMap otherwise, a float is a Float, an integer beyond 2**53 a
+ * BigInt, a reference a Reference and a date a Timestamp. `value` is that tree with
+ * each Float turned into a plain number, which is what the page reads. When the text
+ * cannot be read, ok is false and `refusal` holds `{code, message, line, column,
+ * offset}` with 1-based line and column.
  */
 export function readYaml(text) {
   const doc = {
     ok: false,
     text,
     root: null,
+    typed: undefined,
     value: undefined,
     refusal: null,
     warnings: [],
@@ -1852,6 +1918,7 @@ export function readYaml(text) {
   const refuse = (code, message, mark) => {
     // A text that is refused leaves nothing half-read behind.
     doc.root = null;
+    doc.typed = undefined;
     doc.value = undefined;
     doc.warnings = [];
     doc.comments = [];
@@ -1887,7 +1954,8 @@ export function readYaml(text) {
       warnings: doc.warnings,
       fail: (code, message, mark) => scanner.fail(code, message, mark),
     };
-    doc.value = doc.root === null ? null : buildValue(doc.root, context);
+    doc.typed = doc.root === null ? null : buildValue(doc.root, context);
+    doc.value = plainView(doc.typed);
   } catch (error) {
     if (error instanceof YamlError) {
       return refuse(error.code, error.message, error.mark);
