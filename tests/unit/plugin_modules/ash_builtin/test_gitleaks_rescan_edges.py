@@ -37,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
@@ -52,6 +53,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.gitleaks_scan
     gitleaksignore_files,
 )
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
+from automated_security_helper.schemas.scanner_output_ingest import (
+    IngestRecord,
+    ingest_sarif,
+)
 from automated_security_helper.utils.config_trust import record_provenance
 from tests.unit.plugin_modules.ash_builtin.test_gitleaks_scanner import (
     _add_back,
@@ -794,3 +799,124 @@ def test_a_re_scan_report_without_a_run_fails_the_scan(tmp_path, monkeypatch):
     scanner, source = _rescan_writing(tmp_path, monkeypatch, '{"version": "2.1.0"}')
     with pytest.raises(ScannerError, match="no SARIF run"):
         _add_back(scanner, source, _report(), tmp_path)
+
+
+# --------------------------------------------------------------------------- #
+# A result the re-scan cannot compare is left to the reading step
+# --------------------------------------------------------------------------- #
+
+
+def _a_result_with_a_uri_that_is_a_list() -> dict:
+    result = _result("app/x.py", "github-pat", 9)
+    result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = ["app/x.py"]
+    return result
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        pytest.param("not an object", id="a_string"),
+        pytest.param(["not", "an", "object"], id="a_list"),
+        pytest.param(_a_result_with_a_uri_that_is_a_list(), id="a_uri_that_is_a_list"),
+        pytest.param(
+            {"ruleId": ["github-pat"], "locations": "app/x.py"}, id="locations_a_string"
+        ),
+    ],
+)
+def test_one_malformed_result_does_not_stop_the_re_scan(
+    tmp_path, monkeypatch, malformed
+):
+    """The re-scan keys every result of the first run's raw document, before the
+    reading step reads it. A result with no readable key raised there (an
+    AttributeError for one that is not an object, a TypeError for an unhashable
+    value), so the scan failed on a Python error. The result is passed on as it
+    is: the re-scan still adds what the ignore file hid, and the reading step
+    refuses the report as it does without a ``.gitleaksignore``."""
+    hidden = _result("app/x.py", "github-pat", 4)
+    kept = _result("app/x.py", "aws-access-token", 5)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {"app/x.py": [hidden]})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:4\n")
+    raw = _report(kept, malformed)
+
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+
+    assert len(calls) == 1
+    rules = [r.get("ruleId") for r in raw["runs"][0]["results"] if isinstance(r, dict)]
+    assert "github-pat" in rules and "aws-access-token" in rules
+    with pytest.raises(ValidationError):
+        ingest_sarif(raw, IngestRecord())
+
+
+def _a_result_with_a_region(region) -> dict:
+    result = _result("app/y.py", "slack-token", 9)
+    result["locations"][0]["physicalLocation"]["region"] = region
+    return result
+
+
+@pytest.mark.parametrize(
+    "repairable",
+    [
+        pytest.param(
+            _a_result_with_a_region([{"startLine": 3}]), id="a_region_that_is_a_list"
+        ),
+        pytest.param(
+            _a_result_with_a_region({"startLine": [1]}),
+            id="a_start_line_that_is_a_list",
+        ),
+    ],
+)
+def test_one_result_the_reading_step_repairs_does_not_stop_the_re_scan(
+    tmp_path, monkeypatch, repairable
+):
+    """A region that is not an object, or a startLine that cannot be hashed, leaves
+    a result with no key to compare either, and raised the same way. The result is
+    passed on as it is, the re-scan adds what the ignore file hid, and the reading
+    step drops the region it cannot read and keeps every result."""
+    hidden = _result("app/x.py", "github-pat", 4)
+    kept = _result("app/x.py", "aws-access-token", 5)
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {"app/x.py": [hidden]})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:4\n")
+    raw = _report(kept, repairable)
+
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    scanner._add_back_gitleaksignore_drops(
+        raw, source, scanner._build_arguments(source, results_file), results_file
+    )
+
+    assert len(calls) == 1
+    record = IngestRecord()
+    report = ingest_sarif(raw, record)
+    assert sorted(r.ruleId for r in report.runs[0].results) == [
+        "aws-access-token",
+        "github-pat",
+        "slack-token",
+    ]
+    assert (record.repaired, record.left_out, record.results_read) == (1, 0, 3)
+
+
+def test_a_report_that_is_not_an_object_with_runs_is_left_to_the_reading_step(
+    tmp_path, monkeypatch
+):
+    """A document of another shape has nothing to add the re-scan's results to:
+    the add-back returns, and the reading step that follows refuses it."""
+    scanner, calls = _rescan_harness(tmp_path, monkeypatch, {})
+    source = Path(scanner.context.source_dir)
+    _write(source, "app/x.py")
+    (source / ".gitleaksignore").write_text("app/x.py:github-pat:4\n")
+    results_file = tmp_path / "res" / "gitleaks.sarif"
+    results_file.parent.mkdir()
+    args = scanner._build_arguments(source, results_file)
+
+    for raw in (["a list"], {"runs": "x"}, {"runs": ["x"]}, {"runs": [{"results": 5}]}):
+        scanner._add_back_gitleaksignore_drops(raw, source, args, results_file)
+
+    assert calls == []

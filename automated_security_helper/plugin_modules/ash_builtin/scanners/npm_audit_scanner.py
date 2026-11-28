@@ -2027,7 +2027,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             pkg_name = record["package"]
             severity = str(record["severity"])
             level = _SEVERITY_LEVEL.get(severity, Level.warning.value)
-            title = record["title"] or f"Vulnerability in {pkg_name}"
+            # A truthy title that is not text (a number, a list) is the advisory's
+            # id, as the npm path reads it, and noted.
+            title = self._ingest_record.text_or(
+                record["title"] or f"Vulnerability in {pkg_name}",
+                vuln_id,
+                ("advisories", "*", "title"),
+                code="title_not_text",
+                rule_id=vuln_id,
+            )
             score = _usable_cvss_score(record["cvss"])
             grade = {} if score is not None else _grade_properties(severity)
             if vuln_id not in rules_dict:
@@ -2050,7 +2058,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     fullDescription=MultiformatMessageString(
                         text=f"Vulnerability in {pkg_name}: {title}"
                     ),
-                    helpUri=record["url"] or None,
+                    helpUri=self._ingest_record.url_or_none(
+                        record["url"] or None,
+                        ("advisories", "*", "url"),
+                        rule_id=vuln_id,
+                    ),
                     properties=PropertyBag(**rule_props),
                 )
             patched = record["patched_versions"]
@@ -2654,10 +2666,16 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 for entry in self._report_advisory_entries(audit_results)
             ]
         )
-        for lock_file, audit_results in per_lock_results:
-            part = self._convert_npm_audit_to_sarif(
-                audit_results, target_path, lock_file=lock_file, advisory_titles=titles
-            )
+        for number, (lock_file, audit_results) in enumerate(per_lock_results, 1):
+            # A place in an audit is named by its lockfile's number, never its
+            # name: "lockfile 2: vulnerabilities/*/via/0/title".
+            with self._ingest_record.scoped(f"lockfile {number}"):
+                part = self._convert_npm_audit_to_sarif(
+                    audit_results,
+                    target_path,
+                    lock_file=lock_file,
+                    advisory_titles=titles,
+                )
             if report is None:
                 report = part
                 continue
@@ -2680,7 +2698,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         kept.properties = PropertyBag()
                     setattr(kept.properties, "security_severity", score)  # noqa: B010
         if report is None:
-            return self._convert_npm_audit_to_sarif(merged_results, target_path)
+            return self._noting_the_ingest_in(
+                self._convert_npm_audit_to_sarif(merged_results, target_path)
+            )
         # A v1 report can carry the metadata KEY with a null value, so the
         # value's type decides, not the key's presence: .get's default fires
         # only when the key is absent, and a null here crashed the conversion
@@ -2691,6 +2711,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             if isinstance(metadata, dict)
             else {}
         )
+        return self._noting_the_ingest_in(report)
+
+    def _noting_the_ingest_in(self, report: SarifReport) -> SarifReport:
+        """*report* with the warning for what converting the audits repaired added
+        to its run's invocation, once, when the whole report is made: the record
+        of a report built from several lockfiles is complete only then."""
+        for run in report.runs:
+            for invocation in run.invocations or []:
+                self._noting_the_ingest(invocation)
         return report
 
     @staticmethod
@@ -2758,8 +2787,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
             config=NpmAuditScannerConfig(),
         )
         scanner.exit_code = 0
-        return scanner._convert_npm_audit_to_sarif(
-            npm_audit_results, target_path, lock_file
+        return scanner._noting_the_ingest_in(
+            scanner._convert_npm_audit_to_sarif(
+                npm_audit_results, target_path, lock_file
+            )
         )
 
     def _convert_npm_audit_to_sarif(
@@ -2872,7 +2903,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 )
                 entry_nodes = self._entry_nodes(pkg_name, vuln_info)
                 advisory_ids = self._entry_advisory_ids(pkg_name, via_items, titles)
-                for via in via_items:
+                for via_index, via in enumerate(via_items):
                     # Skip if it's just a string reference to another package
                     if isinstance(via, str):
                         continue
@@ -2893,7 +2924,21 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                     # Extract vulnerability details
                     vuln_id = advisory_ids[id(via)]
-                    title = via.get("title", f"Vulnerability in {pkg_name}")
+                    # A title that is not text (null, a number, a list) was refused
+                    # by the rule below and lost every lockfile's findings: the
+                    # advisory is named by its id instead, and the repair is noted.
+                    via_place = ("vulnerabilities", "*", "via", via_index)
+                    title = (
+                        self._ingest_record.text_or(
+                            via["title"],
+                            vuln_id,
+                            (*via_place, "title"),
+                            code="title_not_text",
+                            rule_id=vuln_id,
+                        )
+                        if "title" in via
+                        else f"Vulnerability in {pkg_name}"
+                    )
                     description = f"Vulnerability in {pkg_name}: {title}"
                     # The advisory's own severity and range where it gives
                     # them. The package entry carries the highest severity of
@@ -2937,8 +2982,14 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             shortDescription=MultiformatMessageString(text=title),
                             fullDescription=MultiformatMessageString(text=description),
                             # Unset for an advisory without a URL: the model
-                            # types helpUri as a URL and refused "".
-                            helpUri=via.get("url") or None,
+                            # types helpUri as a URL and refused "". And for one
+                            # whose URL is not a link ("N/A", a relative path),
+                            # which refused the whole report, noted.
+                            helpUri=self._ingest_record.url_or_none(
+                                via.get("url") or None,
+                                (*via_place, "url"),
+                                rule_id=vuln_id,
+                            ),
                             properties=PropertyBag(**rule_props),
                         )
                         rules_dict[vuln_id] = rule
@@ -4004,6 +4055,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 sarif_report = self._convert_per_lockfile(
                     per_lock_results, all_results, target
                 )
+                self._say_what_the_ingest_repaired(target_type)
 
                 # Save SARIF report
                 sarif_file = target_results_dir.joinpath("results_sarif.sarif")

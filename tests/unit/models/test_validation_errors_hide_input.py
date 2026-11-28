@@ -36,6 +36,10 @@ from automated_security_helper.config.ash_workspace_config import (
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
+from automated_security_helper.schemas.sarif_schema_model import (
+    Notification,
+    PhysicalLocation2,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -80,6 +84,14 @@ def _assert_hidden(error: ValidationError) -> None:
             {"path": {"k": CANARY}, "reason": "r"}
         ),
         lambda: AshSuppression.model_validate({"path": {"k": CANARY}, "reason": "r"}),
+        # The two SARIF models a scanner's reader validates on their own: a
+        # notification the ingest step writes, and a location a converter builds.
+        lambda: Notification.model_validate(
+            {"message": {"text": "x"}, "level": CANARY}
+        ),
+        lambda: PhysicalLocation2.model_validate(
+            {"artifactLocation": {"uri": "x"}, "region": CANARY}
+        ),
     ],
     ids=[
         "AshConfig",
@@ -89,6 +101,8 @@ def _assert_hidden(error: ValidationError) -> None:
         "AshAggregatedResults",
         "IgnorePathWithReason",
         "AshSuppression",
+        "Notification",
+        "PhysicalLocation2",
     ],
 )
 def test_a_model_validated_on_its_own(validate):

@@ -564,21 +564,21 @@ def test_scan_starts_each_target_with_exit_code_zero(scanner, snyk_on_path):
 
 
 @pytest.mark.unit
-def test_malformed_results_file_logs_an_error_and_returns_none(
-    scanner, snyk_on_path, populated_source, subprocess_double, caplog
+def test_a_results_file_that_is_json_but_not_sarif_is_refused_with_the_reason(
+    scanner, snyk_on_path, populated_source, subprocess_double
 ):
-    """A results file that is JSON but not SARIF is reported, not raised."""
+    """A results file that is JSON but not SARIF is refused, so the row says why.
+
+    It used to be logged and returned as None, which the executor graded as
+    "returned no result" with the cause only in the scanner's own log.
+    """
     subprocess_double.side_effect = writes_sarif(json.dumps({"not": "sarif"}))
 
-    with caplog.at_level(logging.ERROR):
-        result = scanner.scan(target=populated_source, target_type="source")
+    with pytest.raises(ScannerError) as raised:
+        scanner.scan(target=populated_source, target_type="source")
 
-    assert result is None
-    assert any(
-        "Failed to parse SnykCodeScanner results as SARIF" in record.message
-        for record in caplog.records
-    ), f"expected a parse error; got {[r.message for r in caplog.records]}"
-    assert any("Failed to parse" in err for err in scanner.errors)
+    assert "Snyk Code scan failed" in str(raised.value)
+    assert "not SARIF ASH can read" in str(raised.value)
 
 
 @pytest.mark.unit
@@ -626,20 +626,26 @@ def test_exit_code_one_without_a_results_file_is_not_a_clean_scan(
 def test_unreadable_results_file_is_wrapped_in_scanner_error(
     scanner, snyk_on_path, populated_source, subprocess_double
 ):
-    """An error outside the SARIF try block surfaces as ScannerError."""
+    """A file that is not JSON is read before the try block that refuses a document
+    that is not SARIF, so it surfaces as the scan failing with the decoder's own
+    text, not as "not SARIF ASH can read"."""
 
     def _write_invalid_json(self, command, **kwargs):
         destination = next(
             arg.split("=", 1)[1] for arg in command if arg.startswith(SARIF_OUTPUT_FLAG)
         )
-        # json.load() happens before the try block that catches parse errors.
+        # read_json_tolerant() happens before the try block that refuses a document.
         Path(destination).write_text("{not valid json at all", encoding="utf-8")
         return {"stdout": "", "stderr": "", "returncode": 0}
 
     subprocess_double.side_effect = _write_invalid_json
 
-    with pytest.raises(ScannerError, match="Snyk Code scan failed"):
+    with pytest.raises(
+        ScannerError, match="Snyk Code scan failed: Expecting property name"
+    ) as raised:
         scanner.scan(target=populated_source, target_type="source")
+
+    assert "not SARIF ASH can read" not in str(raised.value)
 
 
 # ---------------------------------------------------------------------------

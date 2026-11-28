@@ -133,6 +133,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.core.constants import KNOWN_IGNORE_PATHS
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
@@ -349,9 +350,45 @@ def _split_location(location: Any) -> Tuple[str | None, int | None]:
 
 
 def _fingerprint(*parts: Any) -> str:
+    # ``surrogatepass``: a file name GuardDog could not decode is written by its
+    # Python as the escape of a lone surrogate, which ``json.loads`` reads back as
+    # one, and the strict encoding raised on it. The fingerprint is a hash of the
+    # text, so any fixed encoding of it will do, and every other name still
+    # encodes exactly as it did.
     return hashlib.sha256(
-        "\x1f".join(str(p) for p in parts).encode("utf-8")
+        "\x1f".join(str(p) for p in parts).encode("utf-8", errors="surrogatepass")
     ).hexdigest()
+
+
+#: A lone surrogate, which strict UTF-8 cannot encode. Built from code points, so
+#: the source holds no escape that an editor or a tool could turn into the character.
+_LONE_SURROGATE = re.compile(f"[{chr(0xD800)}-{chr(0xDFFF)}]")
+
+
+def _holds_a_surrogate(*parts: Any) -> bool:
+    """Whether any of *parts*, read as text, holds a lone surrogate."""
+    return any(_LONE_SURROGATE.search(str(part)) for part in parts)
+
+
+def _text_field(
+    record: IngestRecord,
+    value: Any,
+    fallback: str | None,
+    pointer: Tuple[str | int, ...],
+    rule_id: str | None = None,
+    *,
+    integers: bool = True,
+) -> str | None:
+    """GuardDog's *value* as the text SARIF wants, or *fallback*.
+
+    Text is itself. With *integers* an integer is its decimal text; anything else
+    (a list, an object, a fraction, a boolean) is *fallback*. Each repair is noted
+    on *record* at *pointer*. An absent or empty value is *fallback* and is no
+    repair.
+    """
+    if not value:
+        return fallback
+    return record.text_or(value, fallback, pointer, rule_id=rule_id, integers=integers)
 
 
 class GuardDogScannerConfigOptions(ScannerOptionsBase):
@@ -558,8 +595,18 @@ def _make_result(
     snippet: str | None,
     extra_properties: Dict[str, Any],
     fingerprint_parts: Iterable[Any],
+    record: IngestRecord | None = None,
+    pointer: Tuple[str | int, ...] = (),
 ) -> Tuple[Result, Tuple[Any, ...], str]:
-    """A SARIF result, its de-duplication key and its ASH severity."""
+    """A SARIF result, its de-duplication key and its ASH severity.
+
+    A finding whose text holds a lone surrogate (a file name GuardDog could not
+    decode) is kept, its fingerprint taken over the text as it is, and noted on
+    *record* at *pointer*, the finding's place in GuardDog's JSON.
+    """
+    parts = tuple(fingerprint_parts)
+    if record is not None and _holds_a_surrogate(*parts):
+        record.note("rewritten", "text_not_unicode", pointer, rule_id=rule_id)
     physical: Dict[str, Any] = {"artifactLocation": {"uri": uri}}
     if line is not None and line > 0:
         region: Dict[str, Any] = {"startLine": line}
@@ -572,7 +619,7 @@ def _make_result(
             "level": _SEVERITY_LEVELS[severity],
             "message": {"text": message},
             "locations": [{"physicalLocation": physical}],
-            "partialFingerprints": {"guarddog/v1": _fingerprint(*fingerprint_parts)},
+            "partialFingerprints": {"guarddog/v1": _fingerprint(*parts)},
             "properties": {"issue_severity": severity, **extra_properties},
         }
     )
@@ -596,6 +643,7 @@ def convert_guarddog_scan_result(
     dependency: Tuple[str, str | None] | None = None,
     manifest_uri: str | None = None,
     manifest_line: int | None = None,
+    record: IngestRecord | None = None,
 ) -> _Converted:
     """Convert one GuardDog ``scan`` JSON document into SARIF results.
 
@@ -621,11 +669,36 @@ def convert_guarddog_scan_result(
     4. Every ``capability-*`` match is INFO, and only reported when
        ``include_capabilities`` is set, including one a risk also used: GuardDog's
        JSON names the capability rule a risk used, not which match.
+
+    One field of a finding that SARIF cannot hold does not cost the finding, or
+    the package's other findings: a message, description or code that is not text
+    is written as text (an integer) or replaced (the rule id for a message, nothing
+    for a code), a ``file_path`` that is not text is left out and the finding keeps
+    the place ``threat_location`` gives, and a file name that is not valid Unicode
+    is fingerprinted as it is. Each is noted on *record*, when one is given, with
+    the path of the field in GuardDog's JSON.
     """
     out = _Converted()
+    # A caller that wants no record gets one that is thrown away.
+    ingest = record if record is not None else IngestRecord()
     results_by_rule = document.get("results") or {}
     if not isinstance(results_by_rule, dict):
         results_by_rule = {}
+    raw_risks = document.get("risks")
+    if raw_risks and not isinstance(raw_risks, list):
+        ingest.note("dropped", "risks_unreadable", ("risks",))
+    risks = raw_risks if isinstance(raw_risks, list) else []
+
+    def consumed_key(rule_id: str, location: Any, code: Any) -> Tuple[Any, ...]:
+        """What says a risk used a match: the rule and where and what it matched,
+        each as text when it is not a plain value, so a list does not stop the
+        set holding it."""
+        return tuple(
+            part
+            if part is None or isinstance(part, (str, int, float, bool))
+            else repr(part)
+            for part in (rule_id, location, code)
+        )
 
     def place(rel: str | None) -> str:
         rel = (rel or "").replace("\\", "/").lstrip("/")
@@ -650,21 +723,48 @@ def convert_guarddog_scan_result(
             return ""
         return f" (in the package's {file_rel}{f':{line}' if line else ''})"
 
-    consumed: set[tuple[Any, Any, Any]] = set()
+    consumed: set[Tuple[Any, ...]] = set()
 
     # 1. Risks: correlated threat (+ capability) pairs, with GuardDog's severity.
-    for risk in document.get("risks") or []:
+    for risk_index, risk in enumerate(risks):
         if not isinstance(risk, dict):
             continue
         rule_id = str(risk.get("threat_rule") or risk.get("name") or "guarddog-risk")
+        risk_place: Tuple[str | int, ...] = ("risks", risk_index)
         file_rel, line = _split_location(risk.get("threat_location"))
         if file_rel is None:
-            file_rel = risk.get("file_path")
+            # A number is no file name: left out, not written as text.
+            file_rel = _text_field(
+                ingest,
+                risk.get("file_path"),
+                None,
+                (*risk_place, "file_path"),
+                rule_id,
+                integers=False,
+            )
         severity = _risk_severity(risk.get("severity"))
-        description = risk.get("threat_description") or None
+        description = _text_field(
+            ingest,
+            risk.get("threat_description"),
+            None,
+            (*risk_place, "threat_description"),
+            rule_id,
+        )
         out.rules.setdefault(rule_id, _rule_descriptor(rule_id, description))
         capability = risk.get("capability_rule")
-        tactics = [t for t in risk.get("mitre_tactics") or [] if isinstance(t, str)]
+        raw_tactics = risk.get("mitre_tactics")
+        if raw_tactics and not isinstance(raw_tactics, list):
+            ingest.note(
+                "dropped",
+                "mitre_tactics_unreadable",
+                (*risk_place, "mitre_tactics"),
+                rule_id=rule_id,
+            )
+        tactics = [
+            t
+            for t in (raw_tactics if isinstance(raw_tactics, list) else [])
+            if isinstance(t, str)
+        ]
         text = f"{dep_text}{description or rule_id}{where(file_rel, line)}"
         if capability:
             text += f"; correlated with capability {capability}"
@@ -678,7 +778,13 @@ def convert_guarddog_scan_result(
                 message=text,
                 uri=uri,
                 line=out_line,
-                snippet=risk.get("threat_code") or None,
+                snippet=_text_field(
+                    ingest,
+                    risk.get("threat_code"),
+                    None,
+                    (*risk_place, "threat_code"),
+                    rule_id,
+                ),
                 extra_properties={
                     **dep_props,
                     "guarddog_risk": risk.get("name"),
@@ -695,9 +801,13 @@ def convert_guarddog_scan_result(
                     line,
                     risk.get("threat_match"),
                 ),
+                record=ingest,
+                pointer=risk_place,
             )
         )
-        consumed.add((rule_id, risk.get("threat_location"), risk.get("threat_code")))
+        consumed.add(
+            consumed_key(rule_id, risk.get("threat_location"), risk.get("threat_code"))
+        )
 
     # 2-4. Matches GuardDog's risk engine did not use, and metadata rules.
     for rule_id, hits in sorted(results_by_rule.items()):
@@ -719,6 +829,8 @@ def convert_guarddog_scan_result(
                     snippet=None,
                     extra_properties=dep_props,
                     fingerprint_parts=(rule_id, uri, out_line, hits),
+                    record=ingest,
+                    pointer=("results", "*"),
                 )
             )
             continue
@@ -729,19 +841,32 @@ def convert_guarddog_scan_result(
         if not isinstance(hits, list):
             continue
         is_capability = rule_id.startswith("capability-")
-        for hit in hits:
+        for hit_index, hit in enumerate(hits):
             if not isinstance(hit, dict):
                 continue
+            hit_place: Tuple[str | int, ...] = ("results", "*", hit_index)
             file_rel, line = _split_location(hit.get("location"))
             if is_capability:
                 if not include_capabilities:
                     continue
                 severity = Severity.INFO.value
             else:
-                if (rule_id, hit.get("location"), hit.get("code")) in consumed:
+                if (
+                    consumed_key(rule_id, hit.get("location"), hit.get("code"))
+                    in consumed
+                ):
                     continue
                 severity = Severity.LOW.value
-            message = hit.get("message") or rule_id
+            message = (
+                _text_field(
+                    ingest,
+                    hit.get("message"),
+                    rule_id,
+                    (*hit_place, "message"),
+                    rule_id,
+                )
+                or rule_id
+            )
             out.rules.setdefault(rule_id, _rule_descriptor(rule_id, message))
             qualifier = (
                 " (capability)"
@@ -756,7 +881,13 @@ def convert_guarddog_scan_result(
                     message=f"{dep_text}{message}{where(file_rel, line)}{qualifier}",
                     uri=uri,
                     line=out_line,
-                    snippet=hit.get("code") or None,
+                    snippet=_text_field(
+                        ingest,
+                        hit.get("code"),
+                        None,
+                        (*hit_place, "code"),
+                        rule_id,
+                    ),
                     extra_properties={**dep_props, "guarddog_match": hit.get("match")},
                     fingerprint_parts=(
                         rule_id,
@@ -766,6 +897,8 @@ def convert_guarddog_scan_result(
                         line,
                         hit.get("match"),
                     ),
+                    record=ingest,
+                    pointer=hit_place,
                 )
             )
     return out
@@ -1957,14 +2090,18 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                     results_dir / "invocations" / f"scan-{index:04d}",
                 )
                 if document is not None:
-                    add(
-                        convert_guarddog_scan_result(
-                            document,
-                            uri_prefix=label,
-                            ecosystem=ecosystem,
-                            include_capabilities=self._opts.include_capabilities,
+                    # A place in a package's document is named by the package's
+                    # number, never its name: "package 2: risks/0/threat_code".
+                    with self._ingest_record.scoped(f"package {index + 1}"):
+                        add(
+                            convert_guarddog_scan_result(
+                                document,
+                                uri_prefix=label,
+                                ecosystem=ecosystem,
+                                include_capabilities=self._opts.include_capabilities,
+                                record=self._ingest_record,
+                            )
                         )
-                    )
                 if reason is not None:
                     self.targets_failed += 1
                     failures.append(f"{ecosystem} scan of {label or '.'}: {reason}")
@@ -1993,24 +2130,29 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                     )
                 except OSError:
                     manifest_text = ""
-                for entry in entries:
+                for entry_index, entry in enumerate(entries):
                     if not isinstance(entry, dict) or not isinstance(
                         entry.get("result"), dict
                     ):
                         continue
                     name = str(entry.get("dependency") or "")
                     version = entry.get("version")
-                    add(
-                        convert_guarddog_scan_result(
-                            entry["result"],
-                            uri_prefix="",
-                            ecosystem=vtarget.ecosystem,
-                            include_capabilities=self._opts.include_capabilities,
-                            dependency=(name, str(version) if version else None),
-                            manifest_uri=vtarget.label,
-                            manifest_line=manifest_line_for(manifest_text, name),
+                    # "manifest 2.3": the third dependency of the second manifest.
+                    with self._ingest_record.scoped(
+                        f"manifest {index + 1}.{entry_index + 1}"
+                    ):
+                        add(
+                            convert_guarddog_scan_result(
+                                entry["result"],
+                                uri_prefix="",
+                                ecosystem=vtarget.ecosystem,
+                                include_capabilities=self._opts.include_capabilities,
+                                dependency=(name, str(version) if version else None),
+                                manifest_uri=vtarget.label,
+                                manifest_line=manifest_line_for(manifest_text, name),
+                                record=self._ingest_record,
+                            )
                         )
-                    )
             if reason is not None:
                 self.targets_failed += 1
                 failures.append(
@@ -2021,6 +2163,8 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
         for failure in failures:
             self.errors.append(failure)
             self._plugin_log(failure, target_type=target_type, level=logging.ERROR)
+        self._ingest_record.results_read = len(results)
+        self._say_what_the_ingest_repaired(target_type)
 
         report = SarifReport(
             version="2.1.0",
@@ -2038,16 +2182,18 @@ class GuardDogScanner(ScannerPluginBase[GuardDogScannerConfig]):
                     ),
                     results=results,
                     invocations=[
-                        Invocation(
-                            commandLine=f"guarddog <ecosystem> scan|verify ({self.targets_attempted} invocation(s))",
-                            startTimeUtc=self.start_time,
-                            endTimeUtc=self.end_time,
-                            executionSuccessful=not failures,
-                            exitCode=self.exit_code,
-                            exitCodeDescription="\n".join(failures),
-                            workingDirectory=ArtifactLocation(
-                                uri=get_shortest_name(input=target)
-                            ),
+                        self._noting_the_ingest(
+                            Invocation(
+                                commandLine=f"guarddog <ecosystem> scan|verify ({self.targets_attempted} invocation(s))",
+                                startTimeUtc=self.start_time,
+                                endTimeUtc=self.end_time,
+                                executionSuccessful=not failures,
+                                exitCode=self.exit_code,
+                                exitCodeDescription="\n".join(failures),
+                                workingDirectory=ArtifactLocation(
+                                    uri=get_shortest_name(input=target)
+                                ),
+                            )
                         )
                     ],
                 )

@@ -219,6 +219,7 @@ from automated_security_helper.models.core import (
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import Level, SarifReport
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
@@ -875,16 +876,58 @@ def project_root_above(path: Path) -> Optional[Path]:
     return None
 
 
+#: A line written as text: the digits of an integer, as many as a line number has.
+_LINE_DIGITS = re.compile(r"[0-9]{1,9}")
+
+
+def _line_number(value: Any) -> Optional[int]:
+    """The line of an actionlint error as an integer, or None when it is not one.
+
+    The template writes an integer. The digits of one, written as text, are read
+    as that integer (a report that went through a tool that quotes every value);
+    any other value (a boolean, null, a fraction, a word) is the output format
+    having changed, and is None.
+    """
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and _LINE_DIGITS.fullmatch(value):
+        return int(value)
+    return None
+
+
+def _credential_key(error: Dict[str, Any]) -> Tuple[Any, Any]:
+    """The place a finding is on, as the credential check keys it: the file's
+    name when it is text, and the line as an integer when it reads as one.
+
+    Whatever compared equal before still does (``True`` is 1, ``3.0`` is 3, the
+    digits ``"3"`` are now 3 too), and a file or line the check cannot read is
+    None, which matches only another one it cannot read. So a snippet that was
+    dropped for sitting on a credentials finding's line is still dropped, and one
+    that cannot be placed is dropped beside a finding that cannot be placed,
+    never kept: this is the check that keeps a hard-coded password out of the
+    output directory.
+    """
+    filepath = error.get("filepath")
+    line = error.get("line")
+    number = _line_number(line)
+    if number is None and isinstance(line, (bool, float)):
+        if isinstance(line, bool) or line.is_integer():
+            number = int(line)
+    return (filepath if isinstance(filepath, str) else None, number)
+
+
 def _credential_lines(errors: Any) -> Set[Tuple[Any, Any]]:
     """The ``(filepath, line)`` of every ``credentials`` finding in *errors*.
 
     The password is the text of that line, and actionlint quotes the line in
-    the snippet of every finding on it, not only the credentials finding's.
+    the snippet of every finding on it, not only the credentials finding's. A
+    line written as digits in text and the same line as an integer are the one
+    line (:func:`_credential_key`).
     """
     if not isinstance(errors, list):
         return set()
     return {
-        (error.get("filepath"), error.get("line"))
+        _credential_key(error)
         for error in errors
         if isinstance(error, dict) and error.get("kind") == "credentials"
     }
@@ -902,10 +945,8 @@ def redact_credentials(payload: Any) -> Any:
     lines = _credential_lines(payload["errors"])
     errors = []
     for error in payload["errors"]:
-        if isinstance(error, dict):
-            where = (error.get("filepath"), error.get("line"))
-            if where in lines:
-                error = {k: v for k, v in error.items() if k != "snippet"}
+        if isinstance(error, dict) and _credential_key(error) in lines:
+            error = {k: v for k, v in error.items() if k != "snippet"}
         errors.append(error)
     return {**payload, "errors": errors}
 
@@ -991,15 +1032,21 @@ def _command_word(path: str) -> str:
 
 
 def build_sarif(
-    payload: Any, exit_code: Optional[int], uri_base: Optional[Path] = None
+    payload: Any,
+    exit_code: Optional[int],
+    uri_base: Optional[Path] = None,
+    record: Optional[IngestRecord] = None,
 ) -> Dict[str, Any]:
     """Convert actionlint's ``ACTIONLINT_FORMAT`` output into a SARIF 2.1.0 dict.
 
     An error whose ``line`` is 0 (actionlint writes 0 for an error with no
     position) is kept as a result with no region, so one such workflow never
     drops the findings of every other workflow in the run. The template always
-    writes an integer, so any other value that is not a positive integer is the
-    output format having changed, and raises (decision 5).
+    writes an integer, so a value that is neither an integer nor the digits of
+    one is the output format having changed, and raises (decision 5). The digits
+    of one, written as text (``"3"``), are that line, and a negative line is no
+    position, as line 0 is: each keeps its finding and is noted on *record*, when
+    given, with the path of the line in actionlint's output.
 
     ``uri_base``, when given, is joined in front of every ``filepath``: actionlint
     writes paths relative to its working directory, and the scan reads a relative
@@ -1009,8 +1056,8 @@ def build_sarif(
 
     Raises:
         ScannerError: if the payload is not the shape the template produces (a
-            ``line`` that is not an integer, or a negative one, included), or if
-            the exit code contradicts the findings (1 with none, 0 with some).
+            ``line`` that is not an integer or its digits, included), or if the
+            exit code contradicts the findings (1 with none, 0 with some).
     """
     if not isinstance(payload, dict) or "errors" not in payload:
         raise ScannerError(
@@ -1050,9 +1097,20 @@ def build_sarif(
             and isinstance(filepath, str)
             and filepath
         ):
+            # Names the fields, not their values: the error holds the finding's
+            # message and the workflow's own text.
+            unreadable = [
+                name
+                for name, readable in (
+                    ("kind", isinstance(kind, str) and bool(kind)),
+                    ("message", isinstance(message, str)),
+                    ("filepath", isinstance(filepath, str) and bool(filepath)),
+                )
+                if not readable
+            ]
             raise ScannerError(
                 f"actionlint error #{index} is missing kind, message or filepath: "
-                f"{error!r}"
+                f"no text for {', '.join(unreadable)}"
             )
         if kind not in KIND_SEVERITY and kind not in kinds_seen:
             ASH_LOGGER.warning(
@@ -1095,22 +1153,36 @@ def build_sarif(
         # file, invalid UTF-8, a YAML error raised before the first line. That is
         # still a finding on the file, so it is kept without a region rather than
         # failing the whole run and dropping every other workflow's findings.
-        # Only that 0 goes region-less: the template writes an integer line for
-        # every error, so a bool, None, a string or a missing key means the
-        # output format changed, and reading it as "no position" would silently
-        # drop every region (line-scoped suppressions, line-keyed masking).
-        if type(line) is not int:
+        # The template writes an integer line for every error, so a bool, None, a
+        # word or a missing key means the output format changed, and reading it as
+        # "no position" would silently drop every region (line-scoped
+        # suppressions, line-keyed masking): that refuses the run. The digits of
+        # an integer written as text are that integer (the finding keeps its
+        # line), and a negative integer is no position, as 0 is, but not one
+        # actionlint writes, so it is noted.
+        number = _line_number(line)
+        if number is None:
+            # The kind of value, never the value: it is whatever the tool wrote.
             raise ScannerError(
-                f"actionlint error #{index} has no integer line: {line!r}"
+                f"actionlint error #{index} has no integer line ({type(line).__name__})"
             )
-        if line < 0:
-            # Not a position actionlint writes; silently giving it the line-0
-            # treatment would drop the region.
-            raise ScannerError(
-                f"actionlint error #{index} has a negative line: {line!r}"
-            )
-        if line >= 1:
-            region: Dict[str, Any] = {"startLine": line, "endLine": line}
+        if record is not None:
+            if isinstance(line, str):
+                record.note(
+                    "rewritten",
+                    "text_as_number",
+                    ("errors", index, "line"),
+                    rule_id=kind,
+                )
+            if number < 0:
+                record.note(
+                    "dropped",
+                    "region_line_unreadable",
+                    ("errors", index, "line"),
+                    rule_id=kind,
+                )
+        if number >= 1:
+            region: Dict[str, Any] = {"startLine": number, "endLine": number}
             if isinstance(column, int) and not isinstance(column, bool) and column >= 1:
                 region["startColumn"] = column
                 end_column = error.get("end_column")
@@ -1129,7 +1201,7 @@ def build_sarif(
             if (
                 isinstance(snippet, str)
                 and snippet
-                and (filepath, line) not in credential_lines
+                and _credential_key(error) not in credential_lines
             ):
                 region["snippet"] = {"text": snippet}
             physical_location["region"] = region
@@ -2452,7 +2524,15 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     ) from exc
                 # Validated per run: a run that exited 1 with no findings, or 0
                 # with some, is a broken run whatever the other runs reported.
-                sarif_dicts.append(build_sarif(payload, self.exit_code, uri_base))
+                # Each batch's own errors list is what a pointer indexes, so the
+                # batch is the scope: "batch 2: errors/0/line".
+                with self._ingest_record.scoped(f"batch {index + 1}"):
+                    sarif_dicts.append(
+                        build_sarif(
+                            payload, self.exit_code, uri_base, self._ingest_record
+                        )
+                    )
+                self._ingest_record.results_read += len(payload.get("errors") or [])
                 payloads.append(payload)
                 if self.exit_code is not None:
                     worst_exit_code = worse_exit_code(worst_exit_code, self.exit_code)
@@ -2507,6 +2587,7 @@ class ActionlintScanner(ScannerPluginBase[ActionlintScannerConfig]):
                     level=logging.WARNING,
                 )
             sarif_report = SarifReport.model_validate(sarif_dict)
+            self._say_what_the_ingest_repaired(target_type)
             self._inject_invocation(sarif_report, final_args, target)
             with open_for_write(results_dir / "actionlint.sarif") as handle:
                 handle.write(

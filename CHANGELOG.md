@@ -168,6 +168,38 @@
 
 ### Fixes
 
+- **One value in a scanner's report that SARIF does not allow no longer costs ASH the
+  whole report.** A `.p12` or `.pfx` file used to make gitleaks lose every finding of
+  the scan. gitleaks' `pkcs12-file` rule reports such a file by its path, with no line,
+  and gitleaks writes that finding's region as line 0. SARIF requires a line of 1 or
+  more, so ASH refused the whole report and gitleaks ended in ERROR: a test certificate
+  anywhere in the tree hid every secret gitleaks found, and the scan exited 1. Every
+  scanner whose report ASH reads through a model had the same weakness for any one
+  value the model refuses. ASH now drops or rewrites the smallest part that is out of
+  spec, on a copy, and keeps every finding. A region with no readable line is dropped,
+  so the finding names its file, and a suppression by `rule_id` and `path` matches it.
+  A key the spec does not define, a link that is not a URL, a date that does not parse,
+  a property or related location the model cannot hold, and a number where the spec
+  wants text are dropped or written as text. A byte-order mark, bytes that are not UTF-8
+  and a control character inside a string are read as the tool meant them. The standard
+  `status` field of a suppression is read too, where only ASH's own `state` was.
+
+  This covers every scanner that reads SARIF (bandit, checkov, gitleaks, betterleaks,
+  grype, semgrep, opengrep, trivy, zizmor, cfn-guard, cfn-lint, cfn-nag, ferret-scan,
+  hadolint, snyk-code and trivy-repo) and syft's CycloneDX SBOM. The scanners that turn
+  their tool's JSON into SARIF themselves (npm-audit, GuardDog, detect-secrets,
+  cdk-nag and actionlint, and checkov's JSON side report) keep a finding whose
+  advisory title is not text, whose link is not absolute, whose line is below 1 or
+  whose file name is not valid Unicode. Each repair is counted by kind and by where it
+  was (field names and list positions, never a value, a path or a name), said once per
+  target in a warning in the log, and carried as a warning notification on the
+  scanner's run in the SARIF ASH writes, which fails no scan. An SBOM has no run, so
+  syft's repairs are in the log and on the scanner's record. A part that would change
+  what a finding says or how severe it is (a level, a kind, a suppression, a message, a
+  component's type or name) is not guessed at: the report is refused as before, and
+  cfn-guard, cfn-lint, cfn-nag and hadolint keep the findings of the templates and
+  chunks they could read.
+
 - **`ash report` honors every `--config-overrides` spelling of the deduplication
   settings.** An override that sets `global_settings.deduplication.annotate` or
   `fold` through an object value at the section or at `global_settings`, with a

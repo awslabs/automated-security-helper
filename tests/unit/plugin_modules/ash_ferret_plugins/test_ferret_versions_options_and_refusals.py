@@ -861,6 +861,38 @@ def test_a_location_with_an_undeclared_base_is_left_as_written_and_the_table_kep
     assert run["originalUriBaseIds"] == {"%SRCROOT%": {"uri": base}}
 
 
+@pytest.mark.parametrize(
+    ("code_point", "encoded"),
+    [(0xDC80, "a%80.txt"), (0xDCFF, "a%FF.txt"), (0xD800, "a%5Cud800.txt")],
+    ids=["escaped-byte-80", "escaped-byte-ff", "surrogate-that-is-no-byte"],
+)
+def test_a_name_with_a_byte_that_is_not_utf8_is_resolved_and_the_report_kept(
+    code_point, encoded
+):
+    """The report is read tolerantly, so a byte that is not UTF-8 reaches this step as
+    a lone surrogate. Joined to the base it keeps the byte it was, as ASH reads a
+    ``file://`` URI back; a surrogate that is no byte is written in its record form.
+    Neither stops the scan the way ``quote`` refusing to encode it did."""
+    base = "file:///work/src/"
+    document = {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {"driver": {"name": "ferret-scan"}},
+                "originalUriBaseIds": {"%SRCROOT%": {"uri": base}},
+                "artifacts": [{"location": _at("a" + chr(code_point) + ".txt")}],
+                "results": [],
+            }
+        ],
+    }
+
+    _resolve_sarif_uri_base_ids(document)
+
+    run = document["runs"][0]
+    assert run["artifacts"][0]["location"] == {"uri": base + encoded}
+    assert "originalUriBaseIds" not in run
+
+
 # --- dependencies ---------------------------------------------------------------------
 
 

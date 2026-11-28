@@ -34,6 +34,7 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBas
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
@@ -2002,6 +2003,16 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
                         continue
 
+                    # What reading this template's validation report repaired: the
+                    # wrapper made the record in its own process, and each template
+                    # is named by its number, never its name. A response without one
+                    # (a worker that repaired nothing) adds nothing.
+                    repaired = getattr(nag_result_dict, "ingest", None)
+                    if isinstance(repaired, IngestRecord):
+                        self._ingest_record.absorb(
+                            repaired, scope=f"template {self.targets_attempted}"
+                        )
+
                     if nag_result_dict.failure is not None:
                         # The wrapper ran but this template was not evaluated as requested: no
                         # validation report, an unreadable one, a requested pack with no entry,
@@ -2479,6 +2490,12 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 )
             ],
         )
+        # What reading the templates' reports repaired, said once for the target and
+        # carried on the invocation like the unevaluated rules above.
+        self._say_what_the_ingest_repaired(target_type)
+        for run in report.runs:
+            for invocation in run.invocations or []:
+                self._noting_the_ingest(invocation)
         out_path = outdir.joinpath("ash-cdk-nag.sarif")
         outdir.mkdir(parents=True, exist_ok=True)
         # UTF-8, as ASH reads every scanner's SARIF back. The locale's encoding, which

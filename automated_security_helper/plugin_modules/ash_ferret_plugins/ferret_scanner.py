@@ -86,6 +86,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Invocation,
     SarifReport,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    ingest_sarif,
+    read_json_tolerant,
+)
 from automated_security_helper.base.uv_tool_mixin import (
     guarded_values_read,
     tool_name,
@@ -100,6 +104,7 @@ from automated_security_helper.utils.subprocess_utils import (
     spawn_run,
 )
 from automated_security_helper.utils.process_env import snapshot_environ
+from automated_security_helper.utils.undecodable_text import text_of_undecodable
 
 # Path to the default ferret-scan config bundled with this plugin
 DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
@@ -586,6 +591,22 @@ def is_version_compatible(version: str, min_version: str, max_version: str) -> b
     )
 
 
+def _percent_encoded_path(path: str) -> str:
+    """*path* percent-encoded for the join with a base URI, whatever bytes it holds.
+
+    The report is read tolerantly, so a byte that is not UTF-8 reaches this step as
+    the lone surrogate ``surrogateescape`` makes of it, and ``quote`` refuses to
+    encode that. It is encoded as the byte it was, which is how ASH reads a
+    ``file://`` URI back (``unquote(..., errors="surrogateescape")``). A lone
+    surrogate that is no escaped byte is encoded in its record form, the six
+    characters of its escape, so the one file's URI is odd and the report is kept.
+    """
+    try:
+        return quote(path, safe="/", errors="surrogateescape")
+    except UnicodeEncodeError:
+        return quote(text_of_undecodable(path), safe="/")
+
+
 def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
     """Rewrite base-relative artifact URIs in ferret-scan SARIF to absolute ones, in place.
 
@@ -619,7 +640,8 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
     """
     if not isinstance(sarif, dict):
         return
-    for run in sarif.get("runs") or []:
+    runs = sarif.get("runs")
+    for run in runs if isinstance(runs, list) else []:
         if not isinstance(run, dict):
             continue
         bases = run.get("originalUriBaseIds")
@@ -638,15 +660,31 @@ def _resolve_sarif_uri_base_ids(sarif: Any) -> None:
             base_id = artifact.get("uriBaseId")
             if base_id is None:
                 continue
-            base = bases.get(base_id)
+            # This runs on the tool's raw document, before the reading step: a
+            # base id that is not text (a list or an object cannot even be looked
+            # up) or a base whose uri is not text is left as written, for that
+            # step to read as it reads any other part of the report, not raised
+            # here with every result lost.
+            base = bases.get(base_id) if isinstance(base_id, str) else None
             base_uri = base.get("uri") if isinstance(base, dict) else None
             uri = artifact.get("uri")
-            if not base_uri or not isinstance(uri, str):
+            if (
+                not isinstance(base_uri, str)
+                or not base_uri
+                or not isinstance(uri, str)
+            ):
                 unresolved = True
                 continue
             if not base_uri.endswith("/"):
                 base_uri += "/"
-            artifact["uri"] = urljoin(base_uri, quote(uri, safe="/"))
+            try:
+                joined = urljoin(base_uri, _percent_encoded_path(uri))
+            except ValueError:
+                # A base that is not a URI at all (an unclosed bracket in the
+                # host, say): the same as a base that cannot be used.
+                unresolved = True
+                continue
+            artifact["uri"] = joined
             del artifact["uriBaseId"]
 
         if not unresolved:
@@ -2371,8 +2409,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
             scanner_results = None
             try:
-                with open(results_file, "r", encoding="utf-8") as f:
-                    scanner_results = json.load(f)
+                # Read as bytes and parsed tolerantly: a byte-order mark, a byte
+                # that is not UTF-8 and a control character inside a string are
+                # read as the tool meant them and noted on the scanner's record.
+                with open(results_file, "rb") as f:
+                    scanner_results = read_json_tolerant(f.read(), self._ingest_record)
             except json.JSONDecodeError as e:
                 self._plugin_log(
                     f"Failed to parse Ferret output as JSON: {e}",
@@ -2380,7 +2421,17 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     level=logging.ERROR,
                     append_to_stream="stderr",
                 )
-                return
+                # Refused, not returned as no result: the row would then read only
+                # "returned no result", with the cause left in the log line above.
+                raise ScannerError(
+                    "ferret-scan's results file is not SARIF ASH can read "
+                    "(it is not valid JSON), so its findings could not be graded"
+                )
+
+            if scanner_results is None:
+                raise ScannerError(
+                    "ferret-scan's results file is empty, so there is nothing to grade"
+                )
 
             _resolve_sarif_uri_base_ids(scanner_results)
 
@@ -2389,7 +2440,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             # invocation) is ASH's own and is reported as what it is by the outer
             # handler, not as a results file that is not SARIF.
             try:
-                sarif_report: SarifReport = SarifReport.model_validate(scanner_results)
+                # The smallest out-of-spec part is dropped or rewritten and the
+                # other findings are kept (schemas.scanner_output_ingest); what
+                # cannot be repaired is refused below.
+                sarif_report: SarifReport = ingest_sarif(
+                    scanner_results, self._ingest_record
+                )
             except ValidationError as e:
                 # Not returned as it is: the executor would store the raw document
                 # in additional_reports, outside the masking that keeps matched
@@ -2401,6 +2457,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     f"({e.error_count()} validation error(s)), so its findings "
                     "could not be graded"
                 )
+            self._say_what_the_ingest_repaired(target_type)
+            self._refuse_a_repaired_report_with_no_run(sarif_report)
 
             # Attach scanner details
             sarif_report = attach_scanner_details(
@@ -2431,20 +2489,25 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                     for notification in invocation.toolExecutionNotifications or []
                 ]
                 sarif_report.runs[0].invocations = [
-                    Invocation(
-                        commandLine=recorded_command_line,
-                        arguments=recorded_arguments,
-                        startTimeUtc=self.start_time,
-                        endTimeUtc=self.end_time,
-                        executionSuccessful=self.exit_code == 0,
-                        exitCode=self.exit_code,
-                        exitCodeDescription="\n".join(self.errors)
-                        if self.errors
-                        else None,
-                        workingDirectory=ArtifactLocation(
-                            uri=get_shortest_name(input=target),
-                        ),
-                        toolExecutionNotifications=notifications or None,
+                    # What reading the file repaired is said in the report as a
+                    # warning, which the not-evaluated gate does not read as a
+                    # failure.
+                    self._noting_the_ingest(
+                        Invocation(
+                            commandLine=recorded_command_line,
+                            arguments=recorded_arguments,
+                            startTimeUtc=self.start_time,
+                            endTimeUtc=self.end_time,
+                            executionSuccessful=self.exit_code == 0,
+                            exitCode=self.exit_code,
+                            exitCodeDescription="\n".join(self.errors)
+                            if self.errors
+                            else None,
+                            workingDirectory=ArtifactLocation(
+                                uri=get_shortest_name(input=target),
+                            ),
+                            toolExecutionNotifications=notifications or None,
+                        )
                     )
                 ]
 

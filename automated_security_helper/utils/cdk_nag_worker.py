@@ -215,6 +215,9 @@ def _answer_for_response(
     return {
         "status": "response",
         "failure": response.failure,
+        # What reading the report repaired, as the record's own JSON: no value
+        # from the report, no path (see schemas.scanner_output_ingest).
+        "ingest": response.ingest.summary() if response.ingest is not None else None,
         "outdir": response.outdir.as_posix() if response.outdir else None,
         "results": None
         if response.results is None
@@ -438,6 +441,7 @@ def _replay_logs(answer: Dict[str, Any]) -> None:
 
 def _response_from(answer: Dict[str, Any]) -> "CdkNagWrapperResponse":
     from automated_security_helper.schemas.sarif_schema_model import Result
+    from automated_security_helper.schemas.scanner_output_ingest import IngestRecord
     from automated_security_helper.utils.cdk_nag_wrapper import CdkNagWrapperResponse
 
     raw_results = answer.get("results")
@@ -450,10 +454,14 @@ def _response_from(answer: Dict[str, Any]) -> "CdkNagWrapperResponse":
         }
     )
     outdir = answer.get("outdir")
+    ingest = answer.get("ingest")
     return CdkNagWrapperResponse(
         results=results,
         outdir=Path(outdir) if outdir else None,
         failure=answer.get("failure"),
+        # Absent from an answer that repaired nothing; a part that is not of the
+        # record's own shape is not read (IngestRecord.from_summary).
+        ingest=IngestRecord.from_summary(ingest) if ingest is not None else None,
     )
 
 

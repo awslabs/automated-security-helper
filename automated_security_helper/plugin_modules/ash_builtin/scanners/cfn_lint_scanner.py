@@ -141,6 +141,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    ingest_sarif,
+    read_json_tolerant,
+)
 from automated_security_helper.utils.cfn_template_discovery import (
     cloudformation_templates_nothing_to_scan_reason,
     discover_templates,
@@ -1896,7 +1900,13 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                     continue
                 batch_file = results_dir.joinpath(f"cfn-lint.{index}.sarif")
                 failure, batch_report, response = self._lint_once(
-                    arguments, batch_file, option_args, results_dir, cwd, child_env
+                    arguments,
+                    batch_file,
+                    option_args,
+                    results_dir,
+                    cwd,
+                    child_env,
+                    label=f"batch {index + 1}",
                 )
                 exit_codes.append(response.get("returncode"))
                 timed_out = timed_out or bool(response.get("timed_out"))
@@ -1948,6 +1958,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                             results_dir,
                             cwd,
                             child_env,
+                            label=f"batch {batch_index + 1}.{position + 1}",
                         )
 
                     remaining = list(enumerate(arguments))
@@ -2004,22 +2015,27 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             if exit_codes:
                 self.exit_code = _combined_exit_code(exit_codes)
             self._post_scan(target=target, target_type=target_type)
+            self._say_what_the_ingest_repaired(target_type)
             report.runs[0].invocations = [
-                Invocation(
-                    commandLine="cfn-lint",
-                    arguments=[
-                        "--format",
-                        "sarif",
-                        *self._recorded_args(option_args, source_dir),
-                    ],
-                    startTimeUtc=self.start_time,
-                    endTimeUtc=self.end_time,
-                    executionSuccessful=self.targets_failed == 0,
-                    exitCode=self.exit_code,
-                    exitCodeDescription="\n".join(self.errors),
-                    workingDirectory=ArtifactLocation(
-                        uri=get_shortest_name(input=target)
-                    ),
+                # What was repaired in the batches' SARIF is said in the report as
+                # a warning, which fails no run.
+                self._noting_the_ingest(
+                    Invocation(
+                        commandLine="cfn-lint",
+                        arguments=[
+                            "--format",
+                            "sarif",
+                            *self._recorded_args(option_args, source_dir),
+                        ],
+                        startTimeUtc=self.start_time,
+                        endTimeUtc=self.end_time,
+                        executionSuccessful=self.targets_failed == 0,
+                        exitCode=self.exit_code,
+                        exitCodeDescription="\n".join(self.errors),
+                        workingDirectory=ArtifactLocation(
+                            uri=get_shortest_name(input=target)
+                        ),
+                    )
                 )
             ]
             with open_for_write(results_dir.joinpath("cfn-lint.sarif")) as handle:
@@ -2042,11 +2058,18 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         results_dir: Path,
         cwd: Path,
         child_env: Dict[str, str],
+        label: str = "input",
     ) -> Tuple[Optional[str], Optional[SarifReport], Dict[str, Any]]:
         """One cfn-lint invocation over ``arguments``, written to ``batch_file``.
 
         Returns the failure reason or None, the parsed report or None, and the
         subprocess response (``{}`` when the runner returned none).
+
+        The file is read through the shared ingest step: the smallest out-of-spec
+        part is dropped or rewritten, and the batch's other findings are kept.
+        What was repaired is noted on the scan's record under ``label`` (the
+        batch's ordinal, never a template's name); a batch that is then refused
+        keeps none of its repairs, since it reaches no report.
         """
         command = [
             _COMMAND,
@@ -2068,11 +2091,16 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         )
         failure = self._batch_failure(response, batch_file, values=guarded_values(self))
         batch_report = None
+        checkpoint = self._ingest_record.checkpoint()
         if failure is None:
             try:
-                batch_report = SarifReport.model_validate(
-                    json.loads(batch_file.read_text(encoding="utf-8"))
-                )
+                with self._ingest_record.scoped(label):
+                    batch_report = ingest_sarif(
+                        read_json_tolerant(
+                            batch_file.read_bytes(), self._ingest_record
+                        ),
+                        self._ingest_record,
+                    )
             except Exception as exc:  # unreadable output is a failed batch
                 failure = f"cfn-lint output was not valid SARIF ({exc})"
             else:
@@ -2104,6 +2132,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
                 cwd,
                 child_env,
             )
+        if failure is not None:
+            self._ingest_record.rollback(checkpoint)
         return failure, batch_report, response if isinstance(response, dict) else {}
 
     def _attach_resources(
@@ -2256,6 +2286,8 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
         probe = results_dir.joinpath(f"cfn-lint.{index}.probe.yaml")
         with open_for_write(probe) as handle:
             handle.write(_PROBE_TEMPLATE)
+        # The probe is not a target: nothing its SARIF needed repaired is counted.
+        checkpoint = self._ingest_record.checkpoint()
         failure, _report, response = self._lint_once(
             [probe.as_posix()],
             results_dir.joinpath(f"cfn-lint.{index}.probe.sarif"),
@@ -2264,6 +2296,7 @@ class CfnLintScanner(ScannerPluginBase[CfnLintScannerConfig]):
             cwd,
             child_env,
         )
+        self._ingest_record.rollback(checkpoint)
         return failure, response
 
     @staticmethod

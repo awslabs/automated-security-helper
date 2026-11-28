@@ -322,8 +322,10 @@ class TestTrivyRepoScannerScanning:
                 scanner, "_run_subprocess", return_value={"returncode": 0}
             ) as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
+            # The results file is read as bytes, as the tolerant JSON reader takes it.
             patch(
-                "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))
+                "builtins.open",
+                mock_open(read_data=json.dumps(mock_sarif_response).encode("utf-8")),
             ),
             patch("pathlib.Path.exists", return_value=True),
         ):

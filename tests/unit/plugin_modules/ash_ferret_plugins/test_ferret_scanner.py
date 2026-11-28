@@ -709,8 +709,10 @@ class TestFerretScanScannerScanning:
             patch.object(scanner, "_post_scan"),
             patch.object(scanner, "_run_subprocess") as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
+            # The results file is read as bytes, as the tolerant JSON reader takes it.
             patch(
-                "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))
+                "builtins.open",
+                mock_open(read_data=json.dumps(mock_sarif_response).encode("utf-8")),
             ),
             patch("pathlib.Path.exists", return_value=True),
         ):
@@ -749,8 +751,10 @@ class TestFerretScanScannerScanning:
             patch.object(scanner, "_post_scan"),
             patch.object(scanner, "_run_subprocess", return_value={"returncode": 0}),
             patch.object(scanner, "_plugin_log"),
+            # The results file is read as bytes, as the tolerant JSON reader takes it.
             patch(
-                "builtins.open", mock_open(read_data=json.dumps(mock_sarif_response))
+                "builtins.open",
+                mock_open(read_data=json.dumps(mock_sarif_response).encode("utf-8")),
             ),
             patch("pathlib.Path.exists", return_value=True),
         ):
@@ -874,7 +878,9 @@ class TestFerretScanScannerErrorHandling:
     ):
         """Test handling of JSON parse errors from ferret-scan output.
 
-        Convention: returns None (implicit) so scan_phase marks container as failed.
+        A results file that is not JSON is refused with the reason, so the row
+        says why. It used to be logged and returned as None, which the executor
+        graded as "returned no result" with the cause only in the scanner's log.
         """
         mock_find_executable.return_value = "/usr/local/bin/ferret-scan"
         results_dir, source_dir = mock_results_directory
@@ -888,15 +894,16 @@ class TestFerretScanScannerErrorHandling:
             patch.object(scanner, "_post_scan"),
             patch.object(scanner, "_run_subprocess") as mock_subprocess,
             patch.object(scanner, "_plugin_log"),
-            patch("builtins.open", mock_open(read_data="not valid json")),
+            patch("builtins.open", mock_open(read_data=b"not valid json")),
             patch("pathlib.Path.exists", return_value=True),
         ):
             mock_subprocess.return_value = {"returncode": 0, "stdout": "", "stderr": ""}
 
-            result = scanner.scan(target=mock_target_directory, target_type="source")
+            with pytest.raises(ScannerError) as raised:
+                scanner.scan(target=mock_target_directory, target_type="source")
 
-            # Convention: return None so scan_phase correctly marks as failed
-            assert result is None
+        assert "not SARIF ASH can read" in str(raised.value)
+        assert "not valid JSON" in str(raised.value)
 
     @patch(
         "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner.find_executable"

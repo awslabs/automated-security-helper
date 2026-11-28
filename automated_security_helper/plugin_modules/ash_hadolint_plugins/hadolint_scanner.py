@@ -168,10 +168,16 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.schemas.scanner_output_ingest import (
+    IngestRecord,
+    ingest_sarif,
+    read_json_text_tolerant,
+)
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.config_trust import operator_path
+from automated_security_helper.utils.error_text import error_text
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.output_excerpt import tool_output_excerpt
 from automated_security_helper.utils.sandbox.fs_guard import open_for_write
@@ -722,9 +728,11 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             global_ignore_paths = []
 
         # Reset at the top, above every early return, so a second target never
-        # inherits the first target's counts.
+        # inherits the first target's counts. The record of what reading hadolint's
+        # reports repairs, and the targets it never evaluated, are per target too.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.clear_unevaluated_targets()
 
         if not target.exists() or not any(target.iterdir()):
             self._plugin_log(
@@ -791,10 +799,44 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
 
             reports: List[SarifReport] = []
-            for response, exit_code in zip(responses, exit_codes):
+            # The chunks whose report could not be read, with why. A chunk's
+            # inputs are not recorded as unevaluated until one other chunk has
+            # been read: with none read the scan fails, as it did when any one
+            # chunk's report was refused.
+            unreadable: List[Tuple[int, Exception]] = []
+            for index, (response, exit_code) in enumerate(zip(responses, exit_codes)):
                 self.exit_code = exit_code
                 self._check_sarif_response(response, timeout, config_file)
-                reports.append(self._parse_sarif(response))
+                # What reading this chunk's report repairs is counted under the
+                # chunk's ordinal, never its file names, and is forgotten when the
+                # chunk is then refused: it changed nothing the report keeps.
+                checkpoint = self._ingest_record.checkpoint()
+                try:
+                    with self._ingest_record.scoped(f"chunk {index + 1}"):
+                        reports.append(self._parse_sarif(response, self._ingest_record))
+                except (ScannerError, ValueError) as refusal:
+                    self._ingest_record.rollback(checkpoint)
+                    unreadable.append((index, refusal))
+
+            if unreadable and not reports:
+                raise unreadable[0][1]
+            for index, cause in unreadable:
+                # The other chunks' findings are kept; this chunk's Dockerfiles
+                # were not evaluated, and are named so the run is not a clean one.
+                inputs = chunks[index]
+                self.targets_failed += len(inputs)
+                for path in inputs:
+                    self.record_unevaluated_target(path)
+                self._plugin_log(
+                    f"hadolint did not evaluate {len(inputs)} "
+                    f"{'Dockerfile' if len(inputs) == 1 else 'Dockerfiles'} (chunk "
+                    f"{index + 1} of {len(chunks)}): its report could not be read "
+                    f"({error_text(cause)}).",
+                    target_type=target_type,
+                    level=logging.ERROR,
+                    append_to_stream="stderr",
+                )
+            self._say_what_the_ingest_repaired(target_type)
 
             sarif_report = reports[0]
             for extra in reports[1:]:
@@ -899,11 +941,22 @@ class HadolintScanner(ScannerPluginBase[HadolintScannerConfig]):
             )
 
     @staticmethod
-    def _parse_sarif(response: Dict[str, Any]) -> SarifReport:
+    def _parse_sarif(
+        response: Dict[str, Any], record: Optional[IngestRecord] = None
+    ) -> SarifReport:
+        """One run's report, read from its stdout.
+
+        ``record`` takes what reading it repaired (see
+        ``schemas.scanner_output_ingest``): the smallest out-of-spec part is
+        dropped or rewritten and the other findings are kept. Without one the
+        repairs are made and not kept. A report that cannot be read raises.
+        """
+        if record is None:
+            record = IngestRecord()
         stdout = response.get("stdout") or ""
         if not stdout.strip():
             raise ScannerError("hadolint exited 0 but wrote no report")
-        report = SarifReport.model_validate(json.loads(stdout))
+        report = ingest_sarif(read_json_text_tolerant(stdout, record), record)
         if not report.runs:
             raise ScannerError("hadolint wrote a SARIF report with no runs")
         return report
