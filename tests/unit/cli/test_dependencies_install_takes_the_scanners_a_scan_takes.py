@@ -2,12 +2,12 @@
 
 Reading a config's section of a scanner ASH ships whose manifest gives no typed
 section (guarddog's) imports that scanner's plugin module, and the import
-registers the scanner for the whole process. A scan still takes only ASH's
+registers the scanner for the whole process. A scan takes only ASH's
 built-in plugins and those of the modules its config's ``ash_plugin_modules``
-names (``plugins.loader.scan_plugin_filter``). The installer took every
-registered plugin instead, so a config that holds ``scanners.guarddog`` and does
-not name guarddog's module had guarddog built, installed and its section
-option-checked, where a scan of the same file never loads it.
+names (``plugins.loader.scan_plugin_filter``). The installer asks that filter
+for a scanner of such a module, so a config that holds ``scanners.guarddog``
+and does not name guarddog's module has guarddog neither built, installed nor
+option-checked, as a scan of the same file never loads it.
 
 The command is driven for real through the install tests' runner
 (``dependencies_install_support.run_install``), with the plugin registry left as
