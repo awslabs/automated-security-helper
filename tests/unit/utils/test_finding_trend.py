@@ -3,7 +3,6 @@
 
 import json
 import random
-from pathlib import Path
 
 import pytest
 
@@ -215,9 +214,9 @@ def test_a_boundary_between_two_records_without_kinds_stays_like_for_like():
     assert boundary["coverage_warnings"] == []
 
 
-def test_the_trend_page_says_such_a_boundary_is_not_like_for_like():
+def test_the_trend_page_says_such_a_boundary_is_not_like_for_like(request):
     page = (
-        Path(__file__).resolve().parents[3]
+        request.path.resolve().parents[3]
         / "docs"
         / "content"
         / "how-to"
