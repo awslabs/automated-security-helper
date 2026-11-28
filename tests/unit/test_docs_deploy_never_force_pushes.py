@@ -25,8 +25,8 @@ For every file under ``.github/workflows/``, read with ``tests/utils/github_acti
 2. No step pushes gh-pages with a force spelling: ``--force``, ``-f``,
    ``--force-with-lease``, ``--mirror`` or a ``+`` refspec. A push that names another
    branch is not a push of gh-pages. A push whose branch the text does not name, such
-   as a push of ``HEAD`` or ``@``, or names with a variable or a wildcard, is read as
-   one that could be.
+   as a push of ``HEAD``, ``@`` or the matching refspec ``:``, or names with a
+   variable or a wildcard, is read as one that could be.
 3. No job that can write gh-pages is reachable from a ``push`` trigger on tags. A job
    can when its token can write repository contents (``contents: write``, or no
    permissions declared, so the repository default applies) or when one of its steps
@@ -256,6 +256,10 @@ _SHELL_OPTION_WITH_A_VALUE = re.compile(r"[-+][A-Za-z]*[oO]")
 _GIT_OPTIONS_WITH_A_VALUE = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 )
+
+#: What can stand before a branch in a destination: ``refs/heads/``, or ``heads/``,
+#: which git resolves to the same ref.
+_BRANCH_PREFIX = re.compile(r"^(?:refs/)?heads/")
 
 #: ``gh-deploy`` is mkdocs' command, and ``gh_deploy`` its module; ``ghp-import`` is the
 #: package it wraps, and ``ghp_import`` the module. Both build one site and replace
@@ -545,12 +549,13 @@ def _may_name_gh_pages(refspec: str) -> bool:
     """Whether a refspec's destination is gh-pages, or cannot be told from its text.
 
     A destination with a variable or a wildcard in it could be any branch. So could
-    ``HEAD`` and ``@``, which stand for the checked-out branch without naming it.
+    ``HEAD`` and ``@``, which stand for the checked-out branch without naming it, and
+    the matching refspec ``:``, which pushes every branch that both sides have.
     """
     refspec = refspec.lstrip("+")
-    if refspec in ("HEAD", "@"):
+    if refspec in ("HEAD", "@", ":"):
         return True
-    destination = refspec.rpartition(":")[2].removeprefix("refs/heads/")
+    destination = _BRANCH_PREFIX.sub("", refspec.rpartition(":")[2])
     return destination == "gh-pages" or any(char in destination for char in "$*?[")
 
 
