@@ -314,7 +314,7 @@
       "id": "control-character",
       "refuse": {
         "code": "character",
-        "column": 6,
+        "column": 5,
         "line": 1
       },
       "text": "a: x<SOH>y\n"
