@@ -58,6 +58,7 @@ nav:
       - Environment variables: reference/environment-variables.md
       - Scanners: reference/scanners.md
       - Scanner facets: reference/scanner-facets.md
+      - Support matrix: reference/support-matrix.md
       - Reporters: reference/reporters.md
       - Converters: reference/converters.md
       - MCP tools: reference/mcp-tools.md

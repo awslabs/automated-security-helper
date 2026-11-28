@@ -1344,7 +1344,8 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
 
     Where ``root`` has the seeds, the illustrative blocks are those the illustrative seed
     lists, and so are the blocks that show a command in a language nothing runs; see
-    the section below.
+    the section below. The markers of a block a generator writes into a page a person
+    writes are checked too, for every generator (generated_block_problems).
     """
     findings: list[Finding] = []
     pages = load_pages(files, root)
@@ -1360,6 +1361,7 @@ def check_markers(files: Iterable[Path], root: Path = REPO_ROOT) -> list[Finding
         findings += ci_event_problems(page)
     findings += illustrative_seed_problems(pages, root)
     findings += unexecuted_command_problems(pages, root)
+    findings += generated_block_problems(pages, root)
     return findings
 
 
@@ -1708,14 +1710,21 @@ def unexecuted_command_blocks(
     person wrote in a command's help text among them. The generator fences them as
     ``text``, so they never reach the runs, and nothing but this count would track them.
     A page that only opens with a banner is read in full: a journey page does.
+
+    A block a generator writes between the markers of a hand-written page
+    (generated_block_rows) is left out whole, whatever it shows, because the freshness
+    test holds it to its generator's output.
     """
     if is_historical_doc(page.rel):
         return []
     samples = output_samples(page)
     generated_page = is_generated_page(page, generated)
+    written = generated_block_rows(page)
     found: list[tuple[Block, str]] = []
     for block in page.blocks:
         if block.family != "other" or block.lang == "groovy" or id(block) in samples:
+            continue
+        if block.fence_line in written:
             continue
         command = _first_command(block)
         if command is None:
@@ -4289,6 +4298,203 @@ def plugin_written_rows(page: Page) -> set[int]:
     return rows
 
 
+# ---------------------------------------------------------------------------
+# Blocks a generator writes into a page a person writes
+# ---------------------------------------------------------------------------
+#
+# A table that restates what ASH supports sits in a hand-written page between two marker
+# lines, and a generator rewrites what is between them (scripts/_generated_blocks.py
+# holds the marker rules, and scripts/generate_support_matrices.py is the generator
+# today). Three things follow for these checks.
+#
+# The rows between the markers are not the page author's words, so a finding on one of
+# them says which generator to change (generated_block_rows, used by check_cli).
+#
+# A pair of markers that is not well formed is an error whoever owns the block: a typo
+# turns a block into text nobody regenerates. generated_block_problems reads every page
+# for it, with the library's own parser, so the checks and the generator agree on what a
+# marker is.
+#
+# And the support-matrix generator's blocks are a registry: scripts/_matrix_destinations.py
+# lists every block it fills (BLOCKS), read here as data and never imported, as the list
+# of generated reference pages is. A block that names that generator and is not listed
+# would keep its last body for good, and a listed block that is missing from its file
+# would never be written.
+
+#: The generator whose blocks the registry lists, and the file that lists them.
+MATRIX_GENERATOR = "scripts/generate_support_matrices.py"
+MATRIX_DESTINATIONS = "scripts/_matrix_destinations.py"
+#: The library that finds, rewrites and checks the marker pairs.
+GENERATED_BLOCKS_LIBRARY = "scripts/_generated_blocks.py"
+_TEMPLATE_SUFFIX = ".template"
+_LINE_IN_REASON = re.compile(r"\blines? (\d+)")
+_generated_blocks_module = None
+
+
+def _blocks_library():
+    """scripts/_generated_blocks.py, loaded by path once, from this module's own tree."""
+    global _generated_blocks_module
+    if _generated_blocks_module is None:
+        name = "_ash_generated_blocks"
+        module = sys.modules.get(name)
+        if module is None:
+            module = _load_by_path(
+                name, Path(__file__).resolve().parent / "_generated_blocks.py"
+            )
+        _generated_blocks_module = module
+    return _generated_blocks_module
+
+
+def generated_block_rows(page: Page) -> dict[int, str]:
+    """The lines of ``page`` a generator writes between a pair of markers.
+
+    Each is the 1-based line number of a line strictly between a begin and an end marker
+    that sit outside a code fence, with the script the begin marker names. A page whose
+    markers are not well formed has none: generated_block_problems reports that, and a
+    page that cannot be read as blocks is read like any other.
+    """
+    library = _blocks_library()
+    try:
+        blocks = library.parse_blocks(page.text, page.rel)
+    except library.MarkerError:
+        return {}
+    return {
+        number: block.generator
+        for block in blocks
+        for number in range(block.begin + 2, block.end + 1)
+    }
+
+
+def _canonical_page(file: str) -> str:
+    """``file`` as the page of a template and its page, which are one unit."""
+    return file.removesuffix(_TEMPLATE_SUFFIX)
+
+
+def read_matrix_blocks(root: Path) -> tuple[dict[str, set[str]] | None, list[Finding]]:
+    """The blocks the support-matrix registry lists, by page, and what is wrong with it.
+
+    The answer maps a page's path (a template's name read as its page's) to the names of
+    the blocks the registry says the page holds. A root with no registry has none (the
+    first value is None and there is nothing to report). A registry that cannot be read
+    (it does not parse, it does not assign BLOCKS once, BLOCKS is not a literal tuple of
+    entries that name a file and a block) answers None with one finding: until it can
+    be read, no block is held to it.
+    """
+    path = root / MATRIX_DESTINATIONS
+    if not path.is_file():
+        return None, []
+
+    def unreadable(line: int, why: str) -> tuple[None, list[Finding]]:
+        return None, [
+            Finding(
+                "markers",
+                MATRIX_DESTINATIONS,
+                line,
+                f"the list of generated blocks, BLOCKS, cannot be read: {why}. Until it "
+                "can, no block is held to it",
+            )
+        ]
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), MATRIX_DESTINATIONS)
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+        return unreadable(1, f"the file cannot be parsed: {exc}")
+    values = _assigned_values(tree, "BLOCKS")
+    if len(values) != 1:
+        why = f"the file assigns it {len(values)} times at its top level, not once"
+        return unreadable(values[1].lineno if values else 1, why)
+    try:
+        listed = ast.literal_eval(values[0])
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return unreadable(values[0].lineno, "its value is not a literal")
+    if not isinstance(listed, (tuple, list)) or not all(
+        isinstance(entry, dict)
+        and isinstance(entry.get("file"), str)
+        and isinstance(entry.get("block"), str)
+        for entry in listed
+    ):
+        return unreadable(
+            values[0].lineno,
+            "its value is not a tuple of entries that each name a file and a block",
+        )
+    registry: dict[str, set[str]] = {}
+    for entry in listed:
+        registry.setdefault(_canonical_page(entry["file"]), set()).add(entry["block"])
+    return registry, []
+
+
+def _marker_line(reason: str) -> int:
+    """The first line number a MarkerError's reason names, else 1."""
+    match = _LINE_IN_REASON.search(reason)
+    return int(match.group(1)) if match else 1
+
+
+def generated_block_problems(pages: Iterable[Page], root: Path) -> list[Finding]:
+    """Generated-block markers are well formed, and the registry and the pages agree.
+
+    Every page is read, whichever generator a block names: a pair the library refuses
+    (a begin with no end, a repeated or nested begin, an end before its begin, a
+    misspelled marker) is a finding at the line its message names. Then, for the blocks
+    that name MATRIX_GENERATOR and a registry that can be read: a block the registry
+    does not list for its page is an orphan, a listed block a page lacks is missing, and
+    a listed page that does not exist is reported once, at the registry. A template and
+    the page it renders to hold the same blocks and are listed as one file.
+    """
+    library = _blocks_library()
+    registry, findings = read_matrix_blocks(root)
+    for page in pages:
+        try:
+            blocks = library.parse_blocks(page.text, page.rel)
+        except library.MarkerError as error:
+            findings.append(
+                Finding("markers", page.rel, _marker_line(error.reason), str(error))
+            )
+            continue
+        if registry is None:
+            continue
+        listed = registry.get(_canonical_page(page.rel), set())
+        present = {block.name for block in blocks}
+        for block in blocks:
+            if block.generator == MATRIX_GENERATOR and block.name not in listed:
+                findings.append(
+                    Finding(
+                        "markers",
+                        page.rel,
+                        block.begin + 1,
+                        f"block `{block.name}` names {MATRIX_GENERATOR} as its generator "
+                        f"but is not registered in {MATRIX_DESTINATIONS}, so nothing "
+                        "would write it: register it there, or delete its markers",
+                    )
+                )
+        for name in sorted(listed - present):
+            findings.append(
+                Finding(
+                    "markers",
+                    page.rel,
+                    1,
+                    f"block `{name}` is registered in {MATRIX_DESTINATIONS} for this "
+                    "file but its markers are missing, so the generator has nowhere to "
+                    "write it: put its markers in, or delete the registry entry",
+                )
+            )
+    if registry is not None:
+        for file in sorted(registry):
+            if not any(
+                (root / candidate).exists()
+                for candidate in (file, file + _TEMPLATE_SUFFIX)
+            ):
+                findings.append(
+                    Finding(
+                        "markers",
+                        MATRIX_DESTINATIONS,
+                        1,
+                        f"{MATRIX_DESTINATIONS} registers blocks for {file}, which does "
+                        "not exist",
+                    )
+                )
+    return findings
+
+
 def check_cli(
     files: Iterable[Path],
     root: Path = REPO_ROOT,
@@ -4307,7 +4513,9 @@ def check_cli(
     A bare option span in prose must be an option of some ash command. In a row a
     plugin's code wrote (plugin_written_rows) it must name its program even then: there
     a bare `--config` could be ASH's or the plugin's tool's, so ASH's own is written
-    `ash --config`.
+    `ash --config`. The same holds in a line a generator writes between the markers of a
+    hand-written page (generated_block_rows), and the finding names that generator,
+    because the text there is changed in the generator and not in the page.
     """
     cli = cli or load_cli()
     code = code or code_root(root)
@@ -4317,6 +4525,7 @@ def check_cli(
         if is_historical_doc(page.rel):
             continue
         plugin_rows = plugin_written_rows(page)
+        block_rows = generated_block_rows(page)
         samples = output_samples(page)
         for block in page.blocks:
             findings += _block_cli_findings(
@@ -4360,6 +4569,20 @@ def check_cli(
                             "could be ASH's or the plugin's tool's: put the program in the "
                             f"span (`<program> {span}`), or write `ash {span}` for ASH's own "
                             "option. The page is generated, so change the text in the code",
+                        )
+                    )
+                    continue
+                if number in block_rows and _BARE_OPTION.match(span):
+                    findings.append(
+                        Finding(
+                            "cli",
+                            page.rel,
+                            number,
+                            f"`{span}`: {block_rows[number]} wrote this row, where a bare "
+                            "option could be ASH's or a tool's: put the program in the "
+                            f"span (`<program> {span}`), or write `ash {span}` for ASH's "
+                            "own option. The row sits between generated-block markers, "
+                            "so change the text in the generator",
                         )
                     )
                     continue
