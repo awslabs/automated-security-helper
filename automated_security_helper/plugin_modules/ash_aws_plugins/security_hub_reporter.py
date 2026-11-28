@@ -626,8 +626,9 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             ) from e
         # Every check that needs AWS but changes nothing, before anything is
         # read from or written to Security Hub. Here rather than in
-        # validate_plugin_dependencies so that it also holds for `ash report`,
-        # which skips that check.
+        # validate_plugin_dependencies so that it holds whatever ran before
+        # report(), `ash results report` (`ash report` before ASH 3.9)
+        # included: that command runs the dependency check first.
         caller_account = self._caller_account(session, region)
         if options.account_id and options.account_id != caller_account:
             raise SecurityHubImportError(
