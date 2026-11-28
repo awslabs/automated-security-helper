@@ -139,19 +139,26 @@ TAB_AFTER_PATH = (
     "a tab (the parse error gives the tab's line and column)"
 )
 ENV_BEFORE_PATH = (
-    "In the YAML, put !ENV and a space before the opening quote of each string from "
+    "In the YAML, put !ENV and a space before the opening quote of each string "
+    "value from "
 )
 ENV_AFTER_PATH = (
     " whose text starts with ${, and keep its quotes if it has one quote mark on "
     "each side: a quoted value without the tag is read as literal text, not from "
     "the environment. Write such a string that has three quote marks on each side "
     "as a one-line double-quoted string with the text TOML reads: leave out a line "
-    "break that directly follows the opening marks and write each other line "
-    "break as \\n; from three single quote marks, also write each backslash as "
-    '\\\\ and each double quote as \\"; from three double quote marks, keep each '
-    "escape, write each unescaped double quote as "
-    '\\", and leave out a backslash that ends a line, with the spaces, tabs and '
-    "line breaks after it"
+    "break that directly follows the opening marks and, from three double quote "
+    "marks, an unescaped backslash that ends a line (only spaces or tabs after it "
+    "on that line), with the spaces, tabs and line breaks after it; write each "
+    "other line break as \\n; from three single quote marks, also write each "
+    'backslash as \\\\ and each double quote as \\"; from three double quote '
+    "marks, keep each escape and write each unescaped double quote as "
+    '\\". A string whose text holds a C1 control (U+0080 to U+009F), '
+    "U+2028, U+2029, U+FFFE or U+FFFF, whatever its quote marks, becomes a "
+    "double-quoted string, a literal string's backslashes and double quotes "
+    "escaped, with each such character written as its four-digit Unicode escape: "
+    "YAML reads U+0085, U+2028 and U+2029 inside quotes as line breaks and "
+    "refuses a file that holds one of the others"
 )
 
 
@@ -178,10 +185,11 @@ def test_init_beside_a_toml_source_says_to_rewrite_it_as_yaml(
     assert "renaming the TOML file is not enough" in result.output, result.output
     assert "Move " not in result.output, result.output
     assert not (tmp_path / ".ash.yaml").exists()
-    # A TOML string that starts with `${` is read from the environment. In YAML a
-    # quoted value is one only when `!ENV` is in front of it, without its quotes the
-    # value is cut short at a space and a hash, or refused, and three quote marks
-    # cannot be kept: the advice gives the form for each.
+    # A TOML string value that starts with `${` is read from the environment. In YAML
+    # a quoted value is one only when `!ENV` is in front of it, without its quotes the
+    # value is cut short at a space and a hash, or refused, three quote marks cannot
+    # be kept, and a character YAML reads as a line break or refuses needs its escape:
+    # the advice gives the form for each.
     assert ENV_BEFORE_PATH in result.output, result.output
     assert ENV_AFTER_PATH in result.output, result.output
     assert EXTENDS_BEFORE_PATH not in result.output, result.output

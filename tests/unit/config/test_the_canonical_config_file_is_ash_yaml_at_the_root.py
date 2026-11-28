@@ -84,16 +84,22 @@ TAB_CAVEAT = (
 )
 ENV_CAVEAT = (
     "In the YAML, put !ENV and a space before the opening quote of each string "
-    "from this file whose text starts with ${, and keep its quotes if it has one "
-    "quote mark on each side: a quoted value without the tag is read as literal "
-    "text, not from the environment. Write such a string that has three quote "
-    "marks on each side as a one-line double-quoted string with the text TOML "
-    "reads: leave out a line break that directly follows the opening marks and "
-    "write each other line break as \\n; from three single quote marks, also "
-    'write each backslash as \\\\ and each double quote as \\"; from three '
-    "double quote marks, keep each escape, write each unescaped double quote "
-    'as \\", and leave out a backslash that ends a line, with the spaces, tabs '
-    "and line breaks after it."
+    "value from this file whose text starts with ${, and keep its quotes if it "
+    "has one quote mark on each side: a quoted value without the tag is read as "
+    "literal text, not from the environment. Write such a string that has three "
+    "quote marks on each side as a one-line double-quoted string with the text "
+    "TOML reads: leave out a line break that directly follows the opening marks "
+    "and, from three double quote marks, an unescaped backslash that ends a line "
+    "(only spaces or tabs after it on that line), with the spaces, tabs and line "
+    "breaks after it; write each other line break as \\n; from three single quote "
+    'marks, also write each backslash as \\\\ and each double quote as \\"; from '
+    "three double quote marks, keep each escape and write each unescaped double "
+    'quote as \\". A string whose text holds a C1 control (U+0080 to U+009F), '
+    "U+2028, U+2029, U+FFFE or U+FFFF, whatever its quote marks, becomes a "
+    "double-quoted string, a literal string's backslashes and double quotes "
+    "escaped, with each such character written as its four-digit Unicode escape: "
+    "YAML reads U+0085, U+2028 and U+2029 inside quotes as line breaks and "
+    "refuses a file that holds one of the others."
 )
 
 # The ashrc names include TOML and JSON files, so each location is written in
@@ -113,6 +119,32 @@ def _write(root: Path, location: str, project_name: str) -> Path:
         text = f"project_name: {project_name}\n"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _write_lines(path: Path, lines: list[str], ending: str = "\n") -> Path:
+    """Write ``lines``, each followed by ``ending``, on every platform.
+
+    ``write_text`` turns a line feed into the platform's own line ending unless it
+    is given ``newline``, so a file meant to hold LF would hold CRLF on Windows.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline=ending)
+    return path
+
+
+def _toml_and_yaml_roots(
+    tmp_path: Path,
+    toml_lines: list[str],
+    yaml_lines: list[str],
+    ending: str = "\n",
+) -> tuple[Path, Path]:
+    """The same setting in a TOML file and in a YAML file, each in a root of its own,
+    so that one read of each root compares what the two languages read."""
+    toml_root = tmp_path / "toml"
+    yaml_root = tmp_path / "yaml"
+    _write_lines(toml_root / ".ashrc.toml", toml_lines, ending)
+    _write_lines(yaml_root / ".ash.yaml", yaml_lines, ending)
+    return toml_root, yaml_root
 
 
 @pytest.fixture
@@ -461,16 +493,93 @@ ENV_PAIRS = [
     for state in ("set", "unset")
 ]
 
+#: TOML strings with three quote marks on each side, as the advice rewrites them. A
+#: case holds the lines of the TOML string (the first opens it and the last closes
+#: it), the one-line double-quoted YAML copy the advice gives for it, the default of
+#: the reference the string starts with, and the text after the reference once TOML
+#: has read the string. The first case is a literal string, where each character is
+#: itself; the others are basic strings: one with an escape and unescaped double
+#: quotes, one with a backslash that ends a line before an indented line, and one with
+#: an escaped backslash at the end of a line, whose line break is kept.
+THREE_QUOTE_SPELLINGS = {
+    "literal_backslash_quote": (
+        ["'''", '${ASH_SERVICE_NAME:pay"ments} a\\tb "c"', "d'''"],
+        '"${ASH_SERVICE_NAME:pay\\"ments} a\\\\tb \\"c\\"\\nd"',
+        'pay"ments',
+        ' a\\tb "c"\nd',
+    ),
+    "basic_escape_quote": (
+        ['"""', '${ASH_SERVICE_NAME:pay\\"ments} a\\tb "c"', 'd"""'],
+        '"${ASH_SERVICE_NAME:pay\\"ments} a\\tb \\"c\\"\\nd"',
+        'pay"ments',
+        ' a\tb "c"\nd',
+    ),
+    "basic_line_ending_backslash": (
+        ['"""', "${ASH_SERVICE_NAME:payments-api} first \\ \t", "", '    second"""'],
+        '"${ASH_SERVICE_NAME:payments-api} first second"',
+        "payments-api",
+        " first second",
+    ),
+    "basic_escaped_backslash_line_end": (
+        ['"""', "${ASH_SERVICE_NAME:payments-api} first\\\\", '  tail"""'],
+        '"${ASH_SERVICE_NAME:payments-api} first\\\\\\n  tail"',
+        "payments-api",
+        " first\\\n  tail",
+    ),
+}
+THREE_QUOTE_PAIRS = [
+    pytest.param(case, ending, state, id=f"{case}-{name}-{state}")
+    for case in THREE_QUOTE_SPELLINGS
+    for name, ending in (("lf", "\n"), ("crlf", "\r\n"))
+    for state in ("set", "unset")
+]
+
+#: Copies that skip one rule of the advice, each as the case it copies and the lines of
+#: the YAML value (the first line follows `!ENV `): the line break after the opening
+#: marks kept; a line break written as a real one; a literal string's backslash
+#: written once; the escape of a basic string with its backslash written twice; the
+#: backslash that ends a line kept, with the whitespace after it; and an escaped
+#: backslash at the end of a line dropped as if it ended the line.
+THREE_QUOTE_SKIPS = {
+    "first_line_break_kept": (
+        "literal_backslash_quote",
+        ['"\\n${ASH_SERVICE_NAME:pay\\"ments} a\\\\tb \\"c\\"\\nd"'],
+    ),
+    "line_break_written_raw": (
+        "literal_backslash_quote",
+        ['"${ASH_SERVICE_NAME:pay\\"ments} a\\\\tb \\"c\\"', 'd"'],
+    ),
+    "literal_backslash_single": (
+        "literal_backslash_quote",
+        ['"${ASH_SERVICE_NAME:pay\\"ments} a\\tb \\"c\\"\\nd"'],
+    ),
+    "escape_backslash_doubled": (
+        "basic_escape_quote",
+        ['"${ASH_SERVICE_NAME:pay\\"ments} a\\\\tb \\"c\\"\\nd"'],
+    ),
+    "line_ending_backslash_kept": (
+        "basic_line_ending_backslash",
+        ['"${ASH_SERVICE_NAME:payments-api} first \\ \t\\n\\n    second"'],
+    ),
+    "escaped_backslash_dropped": (
+        "basic_escaped_backslash_line_end",
+        ['"${ASH_SERVICE_NAME:payments-api} first\\tail"'],
+    ),
+}
+
 
 class TestATomlReferenceToTheEnvironmentInYaml:
     """Why the TOML advice says to put `!ENV` before the opening quote of a `${...}`
     value, to keep its quotes when it has one quote mark on each side, and to rewrite
     it as a one-line double-quoted string when it has three: TOML resolves every
-    string that starts with a reference; YAML resolves a quoted value only when it is
-    tagged `!ENV`; without quotes it cuts the value short at a space and a hash, and
-    refuses one that holds a colon and a space or sits inside brackets or braces; and
-    with three quote marks kept, it reads three single ones as literal text and
-    refuses three double ones."""
+    string value that starts with a reference; YAML resolves a quoted value only when
+    it is tagged `!ENV`; without quotes it cuts the value short at a space and a hash,
+    and refuses one that holds a colon and a space or sits inside brackets or braces;
+    and with three quote marks kept, it reads three single ones as literal text, or
+    ends the value at a lone single quote mark in the text and refuses the file or
+    cuts the value short, and refuses three double ones. Rewritten as the advice
+    says, the string reads as TOML reads it; with one of the rules skipped, it does
+    not."""
 
     REFERENCE = "${ASH_SERVICE_NAME:payments-api}"
 
@@ -549,6 +658,113 @@ class TestATomlReferenceToTheEnvironmentInYaml:
         ):
             resolve_config(source_dir=yaml_root)
 
+    def test_the_rewrite_that_keeps_three_single_quotes_over_several_lines_reads_literal_text(
+        self, tmp_path, ash_warnings
+    ):
+        """Over several lines YAML reads each line break inside the single-quoted
+        value as a space, so the value is a quote mark, a space, the reference, a
+        space and a quote mark: still no reference, and still nothing said."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ["project_name = '''", self.REFERENCE, "'''"],
+            ["project_name: !ENV '''", self.REFERENCE, "'''"],
+        )
+        literal = f"' {self.REFERENCE} '"
+        # The YAML read comes first: reading `.ashrc.toml` logs its deprecation
+        # warning into the same list.
+        assert resolve_config(source_dir=yaml_root).project_name == literal
+        assert ash_warnings() == []
+        assert resolve_config(source_dir=toml_root).project_name == "from-env"
+
+    def test_the_rewrite_that_keeps_three_double_quotes_over_several_lines_does_not_parse(
+        self, tmp_path
+    ):
+        """Over several lines the three double quote marks are refused as they are on
+        one line: the first two are an empty value, the third starts a second value
+        that the mapping refuses, and the refusal is the kind a scan reports with
+        exit 3."""
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            ['project_name = """', self.REFERENCE, '"""'],
+            ['project_name: !ENV """', self.REFERENCE, '"""'],
+        )
+        assert resolve_config(source_dir=toml_root).project_name == "from-env"
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_three_single_quotes_kept_around_a_lone_single_quote_are_refused(
+        self, tmp_path
+    ):
+        """TOML ends a string in three single quote marks only at three single quote
+        marks, so a lone one belongs to the text. YAML ends the single-quoted value at
+        the lone one, and the text after it is a second value that the mapping
+        refuses, which a scan reports with exit 3."""
+        triple = "'''${ASH_SERVICE_NAME:it's}'''"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f"project_name = {triple}"], [f"project_name: !ENV {triple}"]
+        )
+        assert resolve_config(source_dir=toml_root).project_name == "from-env"
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ParserError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    def test_three_single_quotes_kept_around_a_lone_single_quote_and_a_hash_cut_it_short(
+        self, tmp_path, ash_warnings
+    ):
+        """When a space and a hash follow the lone single quote mark, YAML reads the
+        hash as the start of a comment: the value ends at the mark, with no refusal
+        and no warning, as a quote mark and the text before the mark."""
+        triple = "'''${ASH_SERVICE_NAME:it' #x}'''"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f"project_name = {triple}"], [f"project_name: !ENV {triple}"]
+        )
+        cut_short = "'${ASH_SERVICE_NAME:it"
+        # The YAML read comes first: reading `.ashrc.toml` logs its deprecation
+        # warning into the same list.
+        assert resolve_config(source_dir=yaml_root).project_name == cut_short
+        assert ash_warnings() == []
+        assert resolve_config(source_dir=toml_root).project_name == "from-env"
+
+    @pytest.mark.parametrize(("case", "ending", "state"), THREE_QUOTE_PAIRS)
+    def test_a_three_quote_string_rewritten_as_advised_reads_what_toml_reads(
+        self, tmp_path, monkeypatch, case, ending, state
+    ):
+        """The one-line double-quoted copy the advice gives reads what TOML reads, with
+        the variable set and unset and with either line ending."""
+        lines, copy, default, rest = THREE_QUOTE_SPELLINGS[case]
+        if state == "unset":
+            monkeypatch.delenv("ASH_SERVICE_NAME")
+        expected = ("from-env" if state == "set" else default) + rest
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f"project_name = {lines[0]}", *lines[1:]],
+            [f"project_name: !ENV {copy}"],
+            ending,
+        )
+        assert resolve_config(source_dir=toml_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
+
+    @pytest.mark.parametrize("skip", list(THREE_QUOTE_SKIPS))
+    def test_a_three_quote_rewrite_that_skips_a_rule_reads_something_else(
+        self, tmp_path, skip
+    ):
+        """Each copy is read without a refusal, and what it reads is not what TOML
+        reads, so the advice has to give every one of these rules."""
+        case, copy_lines = THREE_QUOTE_SKIPS[skip]
+        lines, _, _, rest = THREE_QUOTE_SPELLINGS[case]
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path,
+            [f"project_name = {lines[0]}", *lines[1:]],
+            [f"project_name: !ENV {copy_lines[0]}", *copy_lines[1:]],
+        )
+        toml_read = resolve_config(source_dir=toml_root).project_name
+        yaml_read = resolve_config(source_dir=yaml_root).project_name
+        assert toml_read == "from-env" + rest
+        assert yaml_read != toml_read
+
     @pytest.mark.parametrize(("value", "state"), ENV_PAIRS)
     def test_the_rewrite_with_env_in_front_and_its_toml_quotes_reads_what_toml_reads(
         self, tmp_path, monkeypatch, value, state
@@ -626,6 +842,79 @@ class TestATomlReferenceToTheEnvironmentInYaml:
         else:
             value = str(value)
         assert value == expected
+
+
+#: Characters that TOML reads as written and that YAML does not keep as written inside
+#: quotes, each as the text before the character (a space or nothing) and its code
+#: point: U+0085 is read as a line break, which becomes a space; U+2028 is read as a
+#: line break that drops the space before it; a C1 control other than U+0085 and the
+#: noncharacter U+FFFF make YAML refuse the file.
+ESCAPED_CHARACTERS = {
+    "next_line": ("", 0x85),
+    "line_separator_after_space": (" ", 0x2028),
+    "c1_control": ("", 0x86),
+    "noncharacter": ("", 0xFFFF),
+}
+ESCAPE_PAIRS = [
+    pytest.param(character, form, id=f"{character}-{form}")
+    for character in ESCAPED_CHARACTERS
+    for form in ("basic", "literal")
+]
+BACKSLASH = chr(92)
+
+
+class TestACharacterYamlReadsAsALineBreakOrRefuses:
+    """Why the TOML advice says to write a string that holds a C1 control, U+2028,
+    U+2029, U+FFFE or U+FFFF as a double-quoted string with each such character as its
+    escape: TOML reads each of them as written, while inside quotes YAML reads U+0085,
+    U+2028 and U+2029 as line breaks, and refuses a file that holds one of the
+    others."""
+
+    def test_a_raw_next_line_character_in_quotes_reads_as_a_space(self, tmp_path):
+        """TOML reads U+0085 inside a string as written. YAML takes it for a line
+        break inside quotes, and a line break there is read as a space."""
+        value = f"x{chr(0x85)}y"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f'project_name = "{value}"'], [f'project_name: "{value}"']
+        )
+        assert resolve_config(source_dir=toml_root).project_name == value
+        assert resolve_config(source_dir=yaml_root).project_name == "x y"
+
+    def test_a_raw_c1_control_makes_yaml_refuse_the_file(self, tmp_path):
+        """TOML reads a C1 control other than U+0085 as written. YAML refuses a file
+        that holds one, and the refusal is the kind a scan reports with exit 3."""
+        value = f"x{chr(0x86)}y"
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f'project_name = "{value}"'], [f'project_name: "{value}"']
+        )
+        assert resolve_config(source_dir=toml_root).project_name == value
+        with pytest.raises(
+            ASHConfigSourceError, match=r"could not be parsed \(ReaderError"
+        ):
+            resolve_config(source_dir=yaml_root)
+
+    @pytest.mark.parametrize(("character", "form"), ESCAPE_PAIRS)
+    def test_each_written_as_its_escape_in_double_quotes_reads_what_toml_reads(
+        self, tmp_path, character, form
+    ):
+        """A basic string keeps its tab escape; a literal string's backslash and
+        double quote are escaped, as the advice says for three quote marks."""
+        space, code_point = ESCAPED_CHARACTERS[character]
+        piece = space + chr(code_point)
+        escape = f"{BACKSLASH}u{code_point:04X}"
+        if form == "basic":
+            toml_value = f'"a\\tb{piece}c"'
+            yaml_value = f'"a\\tb{space}{escape}c"'
+            expected = f"a\tb{piece}c"
+        else:
+            toml_value = f"'a\\b{piece}\"c'"
+            yaml_value = f'"a\\\\b{space}{escape}\\"c"'
+            expected = f'a\\b{piece}"c'
+        toml_root, yaml_root = _toml_and_yaml_roots(
+            tmp_path, [f"project_name = {toml_value}"], [f"project_name: {yaml_value}"]
+        )
+        assert resolve_config(source_dir=toml_root).project_name == expected
+        assert resolve_config(source_dir=yaml_root).project_name == expected
 
 
 class TestAMovedTomlFileIsRefused:
