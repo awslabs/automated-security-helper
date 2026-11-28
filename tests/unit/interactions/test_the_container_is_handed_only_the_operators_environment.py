@@ -1046,7 +1046,7 @@ def test_a_repository_file_extending_outside_the_checkout_is_refused(layout):
 
 
 def _debug_scan_output(layout, monkeypatch, config: Path) -> str:
-    """Run ``ash scan --mode container --no-build --debug`` with the runner
+    """Run ``ash scan fs --mode container --no-build --debug`` with the runner
     stubbed, and return everything the CLI printed plus ash.log's text."""
     from typer.testing import CliRunner
 
@@ -1067,6 +1067,8 @@ def _debug_scan_output(layout, monkeypatch, config: Path) -> str:
         app,
         [
             "scan",
+            "fs",
+            str(layout["source"]),
             "--mode",
             "container",
             "--no-build",
@@ -1074,8 +1076,6 @@ def _debug_scan_output(layout, monkeypatch, config: Path) -> str:
             "--debug",
             "--config",
             str(config),
-            "--source-dir",
-            str(layout["source"]),
             "--output-dir",
             str(layout["out"]),
         ],
@@ -1183,14 +1183,14 @@ def test_one_base_reached_by_a_link_and_by_its_path_is_mounted_at_both_places(
         app,
         [
             "scan",
+            "fs",
+            str(layout["source"]),
             "--mode",
             "container",
             "--no-build",
             "--no-progress",
             "--config",
             str(config),
-            "--source-dir",
-            str(layout["source"]),
             "--output-dir",
             str(layout["out"]),
         ],
@@ -1228,14 +1228,14 @@ def test_a_container_path_through_an_env_entry_is_refused_without_the_value(
         app,
         [
             "scan",
+            "fs",
+            str(layout["source"]),
             "--mode",
             "container",
             "--no-build",
             "--no-progress",
             "--config",
             str(config),
-            "--source-dir",
-            str(layout["source"]),
             "--output-dir",
             str(layout["out"]),
         ],
