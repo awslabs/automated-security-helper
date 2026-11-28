@@ -4,9 +4,10 @@
 """The configuration editor's node tests, run as one integration test.
 
 The editor's DOM-free modules and the coverage census's ``node-test`` kind are tested
-with ``node --test`` in docs/editor-tests, a package with no dependencies. The docs
-examples job provides node through setup-node and runs this directory, so a red node
-test fails the same required check as a red docs example.
+with ``node --test`` in docs/editor-tests, a package with no dependencies. The
+integration tier collects this test in every operating system leg and runs it with the
+node that leg has on PATH. The docs examples job sets node up with setup-node, and the
+other legs use the one their runner image carries. A red node test fails the leg.
 
 A node that is not on PATH fails this test instead of skipping it. A skip would let the
 job pass with none of the editor's node tests having run. The same goes for a run that
@@ -42,12 +43,19 @@ def _count(report: str, name: str) -> int:
 
 
 def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    """The finished run of ``command`` in ``cwd``, with its output as text."""
+    """The finished run of ``command`` in ``cwd``, with its output as text.
+
+    The output is read as UTF-8, which is what node writes, and not with the host's
+    code page: on Windows that is cp1252, which cannot read the non-ASCII test names
+    and then leaves ``stdout`` as None. A byte that is not UTF-8 reads as the
+    replacement character instead of failing the run.
+    """
     return subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         check=False,
     )
@@ -78,18 +86,19 @@ def test_the_editor_node_tests_pass(docs_root):
     node = shutil.which("node")
     assert node, (
         "node is not on PATH, so the editor's node tests cannot run. This test fails "
-        "rather than skips: the docs examples job installs node with setup-node, and a "
-        "missing node there is a broken job, not a reason to pass without the tests."
+        "rather than skips: a leg with no node is a broken leg, not a reason to pass "
+        "without the tests."
     )
     package = docs_root / "docs" / "editor-tests"
     assert (package / "package.json").is_file(), f"{package} holds no package.json"
 
     result = _run([node, "--test", "--test-reporter=tap"], package)
 
-    report = result.stdout
+    report = result.stdout or ""
+    errors = result.stderr or ""
     tail = (
         f"\n--- stdout (tail) ---\n{report[-6000:]}"
-        f"\n--- stderr (tail) ---\n{result.stderr[-3000:]}"
+        f"\n--- stderr (tail) ---\n{errors[-3000:]}"
     )
     assert result.returncode == 0, f"node --test exited {result.returncode}{tail}"
     assert _count(report, "tests") > 0, f"node --test ran no test{tail}"
