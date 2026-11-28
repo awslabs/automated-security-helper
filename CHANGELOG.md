@@ -256,15 +256,27 @@
   when ASH applies the overrides to the configuration a command runs with (in
   `ash merge`, the lowest-indexed shard's record), where a list that the config file
   already sets is extended with no warning, and by `ash config update --set` for the
-  file it writes. ASH logs the same warning when it builds a reporter that sends
-  findings off the host from such a list, if the run has not named the key yet, which
-  is the case where the configuration the command runs with sets that list. A scan
-  builds that reporter from the operator's configuration and the overrides, not from
-  a config file the scanned repository could write. In `ash report` and `ash merge`,
-  ASH's defaults and the overrides give the whole section of such a reporter that
-  declares no destination options, and the destination options and `enabled` of one
-  that does; a config file the command reads sets none of them. The warning says
-  where the part of the reporter's section that holds the list came from.
+  file it writes. ASH logs a warning that names the key when it builds a reporter that
+  sends findings off the host from such a list, if the run has not named the key yet (a
+  run names each key once), which is the case where the configuration the command runs
+  with sets that list. A scan builds that reporter from the operator's configuration and
+  the overrides, not from a config file the scanned repository could write, and so does
+  `ash report` when it is not given a config file. When `ash report` or `ash merge` is
+  given a config file, with `--config` or `ASH_CONFIG`, ASH's defaults and the overrides
+  give the whole section of such a reporter that declares no destination options, and
+  the destination options and `enabled` of one that does; a config file the command
+  reads sets none of them. The warning says where the part of the reporter's section
+  that holds the list came from.
+- **`ash merge` given a config file inside the working directory or a git checkout, or
+  one that extends such a file, now applies `--config-overrides` to the reporters that
+  send findings off the host.** It took such a reporter's settings, other than its
+  destination options and `enabled`, from the operator's configuration without the
+  overrides, so an override that turned on a reporter that declares no destination
+  options left it off, and an override of an option a reporter does not declare as a
+  destination did not reach it. The overrides are now applied there once, as
+  `ash report` and a scan apply them. Such a reporter's destination options and
+  `enabled`, and the whole section of one that declares none, still come from ASH's
+  defaults and the overrides alone.
 - **`./ash` keeps the container's stdin open for the commands that read it, not for
   whole command groups.** `./ash results inspect findings` now gets its keyboard
   input, as `./ash inspect findings` does. `config wizard`, `inspect findings`,

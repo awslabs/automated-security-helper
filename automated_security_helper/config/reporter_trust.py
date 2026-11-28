@@ -390,9 +390,12 @@ def confine_off_host_reporters_to_overrides(
 
     ``reporter_section`` gives an off-host reporter the operator view
     ``resolve_config`` recorded (``AshConfig._operator_reporters``), and a file
-    outside every tree that extends one inside is in it. The same rule is applied
-    to that view, on a copy, so the section a reporter is built from is already
-    the confined one and needs no second read. ``config`` is marked so that
+    outside every tree that extends one inside is in it. That view holds the
+    overrides already: ``resolve_config`` replays them onto it for a command that
+    passes them, and ``ash merge``, which reads its ``--config`` without them,
+    replays them onto it before this step. The same rule is applied to that view,
+    on a copy, so the section a reporter is built from is already the confined one
+    and needs no second read. ``config`` is marked so that
     ``confine_declared_reporter_destinations`` does the same for the reporters a
     plugin module adds, and gives one that declares no destination options the
     trusted base's whole section.
